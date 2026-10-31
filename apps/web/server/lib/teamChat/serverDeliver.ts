@@ -72,6 +72,7 @@ import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
 import { createRunCostTally } from '../runtimes/runCostTally'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
+import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { buildServerTeamContext } from './contextPreamble'
@@ -841,6 +842,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'
           let homeDir: string | null = null
+          // The team's shared working folder (coding runtimes only; null otherwise).
+          let workdir: string | null = null
           // The resume handle THIS run was started with (ctx.resume) — drives the
           // drain's stale-pointer self-heal on a failed resumed run.
           let resumeHandle: string | null = null
@@ -941,7 +944,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               const codingModel =
                 runtime !== NATIVE_RUNTIME ? parseCodingModelConfig(row?.execConfig ?? null) : null
               resumeHandle = teamResumeId
+              // Claude Code / Codex / Hermes / Native start in the team's own
+              // folder, not the server's working directory (clawboo's state dir).
+              // For Native the folder is also what turns on its file tools.
+              workdir = teamWorkdirFor(runtime, teamId)
               const ctx: RuntimeRunContext = {
+                ...(workdir ? { cwd: workdir } : {}),
                 model: codingModel?.model ?? null,
                 ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
                 resume: teamResumeId,
@@ -965,6 +973,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           }
           // const so TS narrows them cleanly inside the closures below.
           const capturedHomeDir = homeDir
+          const capturedWorkdir = workdir
           // The native leader session-resume pointer to update on the terminal (the
           // amnesia fix) — non-null ONLY for an eligible native leader / user-facing team
           // turn (a delegated child keeps its own executor-handoff continuity). Threaded
@@ -996,6 +1005,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (before) {
               settleRefused(before)
               return
+            }
+            if (capturedWorkdir) {
+              try {
+                await ensureTeamWorkdir(capturedWorkdir)
+              } catch (e) {
+                // Never fall back to the server's working directory.
+                failStart(
+                  new Error(
+                    `could not create the team's working folder ${capturedWorkdir}: ${e instanceof Error ? e.message : String(e)}`,
+                  ),
+                )
+                return
+              }
             }
             let run: RunHandle
             try {

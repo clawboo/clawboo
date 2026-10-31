@@ -479,7 +479,7 @@ export function InlineEditor({
             : activeTab === 'permissions'
               ? `${agentName} · Permissions`
               : activeTab === 'workspace'
-                ? `${agentName} · Workspace · the task worktree, read-only`
+                ? `${agentName} · Workspace · read-only`
                 : activeTab === 'brief'
                   ? `${agentName} · Brief — display name + global brief`
                   : AGENT_FILE_META[activeTab].hint}

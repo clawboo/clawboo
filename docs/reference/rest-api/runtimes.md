@@ -521,7 +521,7 @@ This route is one of the two ways work runs through Clawboo's task runner (the o
 }
 ```
 
-A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A worktree keeps file changes apart; it is not a sandbox (see [What agents can do](/concepts/permissions)).
+A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A `research` or `review` task gets no worktree and starts in its team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`workspaces/_no-team` for a task with no team); if that folder cannot be created, the run is refused with `workspace_unavailable` too. A worktree keeps file changes apart; neither it nor the team's folder is a sandbox (see [What agents can do](/concepts/permissions)).
 
 ### Responses
 
@@ -579,12 +579,12 @@ How each runtime's cost is reported or estimated is in [Budgets and spend](/usin
 { ok: false, reason: 'too_deep' | 'connected_substrate' | 'budget_paused' | 'workspace_unavailable' }
 ```
 
-| `reason`                | Meaning                                                                                                            |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `too_deep`              | The task sits deeper in its delegation tree than the depth limit allows.                                           |
-| `connected_substrate`   | The runtime runs work over its own live connection (OpenClaw), so this route cannot run it.                        |
-| `budget_paused`         | A hard-cap budget covering this agent, this delegation tree or this team is paused. Warn-only budgets never block. |
-| `workspace_unavailable` | The task needs a worktree and none could be prepared (no `repoPath`, or the worktree failed).                      |
+| `reason`                | Meaning                                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `too_deep`              | The task sits deeper in its delegation tree than the depth limit allows.                                                                                      |
+| `connected_substrate`   | The runtime runs work over its own live connection (OpenClaw), so this route cannot run it.                                                                   |
+| `budget_paused`         | A hard-cap budget covering this agent, this delegation tree or this team is paused. Warn-only budgets never block.                                            |
+| `workspace_unavailable` | The task needs a worktree and none could be prepared (no `repoPath`, or the worktree failed), or the team's folder for a read-only task could not be created. |
 
 **`500 Internal Server Error`**: an unexpected error inside the run:
 

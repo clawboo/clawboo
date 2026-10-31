@@ -18,7 +18,7 @@ The executor runner, `runTaskOnRuntime` in `apps/web/server/lib/executorRunner.t
 It is one of two execution paths, and not the default one:
 
 - **The executor runner** serves `POST /api/runtimes/:id/run` and agent Routine fires on Clawboo Native, Claude Code, Codex and Hermes. With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, Routine fires on `clawboo-mock` use it too; the run route accepts only the four real runtimes.
-- **The team engine** (`serverDeliver`, driven by the team orchestrator) runs every team-chat turn, every delegation, and every board task a person starts. It provisions no worktree, passes no working directory, and has no verification, memory auto-injection or circuit breakers. See [How a team works](/intro/how-it-works).
+- **The team engine** (`serverDeliver`, driven by the team orchestrator) runs every team-chat turn, every delegation, and every board task a person starts. It provisions no worktree, passes the team's folder (`<CLAWBOO_HOME>/workspaces/<teamId>`, from `teamWorkdirFor`) as the working directory for Claude Code, Codex, Hermes and Clawboo Native, and has no verification, memory auto-injection or circuit breakers. See [How a team works](/intro/how-it-works).
 
 Use this page when you change how a task runs on a spawned runtime, or need to know what a run through the runtime run API does.
 
@@ -83,14 +83,14 @@ Right after the claim the runner opens an `execution_processes` row and emits `e
 
 - **Reuse.** The task already has a worktree, which is the cross-runtime continuation path. If garbage collection reaped it (the row is `stale`, the directory is missing, or git does not list it as a worktree), the runner rebuilds it from the retained branch with `resumeTaskWorkspace`.
 - **Provision.** A file-changing task with a `repoPath` gets a fresh checkout on a `clawboo/task-<id>` branch from `provisionTaskWorkspace`, with the handoff scaffold files.
-- **None.** A `research` or `review` task runs with `cwd: null`.
+- **None.** A `research` or `review` task gets no worktree. Its run starts in the team's folder from `taskRunWorkdirFor` (`apps/web/server/lib/runtimes/teamWorkdir.ts`): `<CLAWBOO_HOME>/workspaces/<teamId>`, or `workspaces/_no-team` for a task with no team, created owner-only (`0700`) first. If the folder cannot be created, the run is refused as below, with `Could not create the working folder <path> for this run: <error>` as the reason.
 - **Refused.** A file-changing task with no `repoPath`, or one whose worktree cannot be provisioned, does not run. The runner adds a `[blocked: no isolation] <reason>` system comment, closes the execution as `failed` with `workspace_unavailable: <reason>`, releases the task to `todo`, and returns `workspace_unavailable`.
 
 The refusal happens after the claim, so a refused task shows one failed execution on its ledger. Two callers set the kind: `POST /api/runtimes/:id/run` defaults it to `code`, so a request without `repoPath` is refused; the Routines wake bridge runs an agent Routine that has no `repoPath` as `research`, so it runs without a worktree instead.
 
 <Warning>
 
-The refusal exists because of how the drivers run. Claude Code runs with `permissionMode: 'bypassPermissions'`, Codex with `--dangerously-bypass-approvals-and-sandbox` (app-server: approval policy `never`, sandbox `danger-full-access`), and Hermes with `--yolo` and `--accept-hooks`. A run with no working directory would start in the server's own working directory, which for an npm install is the Clawboo state directory holding the database and the secrets vault. The worktree keeps a task's file changes on its own branch; it is not a sandbox, and the process still has every permission of the user who started Clawboo. Team-engine runs get no working directory at all. See [What agents can do](/concepts/permissions).
+The refusal exists because of how the drivers run. Claude Code runs with `permissionMode: 'bypassPermissions'`, Codex with `--dangerously-bypass-approvals-and-sandbox` (app-server: approval policy `never`, sandbox `danger-full-access`), and Hermes with `--yolo` and `--accept-hooks`. A run with no working directory would start in the server's own working directory, which for an npm install is the Clawboo state directory holding the database and the secrets vault. The worktree keeps a task's file changes on its own branch, and the team's folder only sets where a read-only run starts; neither is a sandbox, and the process still has every permission of the user who started Clawboo. Team-engine runs start in the team's folder too. See [What agents can do](/concepts/permissions).
 
 </Warning>
 
@@ -110,7 +110,7 @@ The inbox digest packs up to 20 undelivered mailbox rows for the assignee into a
 
 **Memory auto-injection** (`buildMemoryInjection`) seeds the most relevant team facts for the task into the volatile tier, so the runtime starts with the team's knowledge without calling the Memory MCP tools (it still can). It searches the same memory store the `/api/memory` routes use, keeps the top 5 facts within 1,500 characters, drops any candidate the injection scanner flags, scrubs secrets, and injects nothing when memory is empty. It runs once per task and is reused across rotations. `disableMemoryAutoInject` turns it off (eval runs set it). See [Memory](/concepts/memory).
 
-A persistent-home runtime also gets `homeDir`, `<Clawboo state dir>/runtimes/<runtime>/<agent>`, created owner-only (`0700`) before the driver touches it; the critic's own run gets none, so the reviewer never shares the builder's memory. The run context (`RuntimeRunContext`) carries the `cwd`, the model, the native resume id (only when the last runtime on this worktree was the same one), the MCP base URL, the memory scope (team, agent, the attach secret, and provenance stamps), the home directory and any provider keys. The run starts with session key `runtime:<runtime>:task:<taskId>`, the task title as its message, and `childToolBlocklist: ['sessions_send']`.
+A persistent-home runtime also gets `homeDir`, `<Clawboo state dir>/runtimes/<runtime>/<agent>`, created owner-only (`0700`) before the driver touches it; the critic's own run gets none, so the reviewer never shares the builder's memory. The run context (`RuntimeRunContext`) carries the `cwd` (the worktree, else the team's folder), the model, the native resume id (only when the last runtime on this worktree was the same one), the MCP base URL, the memory scope (team, agent, the attach secret, and provenance stamps), the home directory and any provider keys. The run starts with session key `runtime:<runtime>:task:<taskId>`, the task title as its message, and `childToolBlocklist: ['sessions_send']`.
 
 ## The event drain
 

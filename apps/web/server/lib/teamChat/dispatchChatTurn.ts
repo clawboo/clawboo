@@ -49,6 +49,7 @@ import { usdToFractionalCents } from '@clawboo/governance'
 import { formatPeerPost } from '@clawboo/mcp'
 
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
+import { ensureTeamWorkdir } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import type { ChatTurnOutcome } from './exchange'
 import { loadChatLeaderState, saveChatLeaderState } from './leaderState'
@@ -71,6 +72,9 @@ export interface DispatchChatTurnDeps {
    *  from `runtimeIdentityHomePath`). null/omitted ⇒ the driver provisions its own
    *  throwaway home (the silent-degradation hazard for Hermes/native peers). */
   homeDir?: string | null
+  /** The team's working folder (set by runTeamExchange from
+   *  `teamWorkdirFor`). null/omitted ⇒ the run gets no cwd. */
+  cwd?: string | null
   /** Aborts the in-flight turn (client disconnect). */
   signal?: AbortSignal
   /** Best-effort obs hook fired for the room post this turn produced. */
@@ -191,8 +195,12 @@ export async function dispatchChatTurn(
   // its native memory/sessions compound across turns, not degrade to a throwaway.
   if (deps.homeDir)
     await mkdir(deps.homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
+  // The team folder must exist before the runtime starts in it. A failure throws:
+  // the turn never falls back to the server's working directory.
+  if (deps.cwd) await ensureTeamWorkdir(deps.cwd)
 
   const ctx: RuntimeRunContext = {
+    ...(deps.cwd ? { cwd: deps.cwd } : {}),
     model: null,
     resume,
     mcpBaseUrl: deps.mcpBaseUrl ?? null,

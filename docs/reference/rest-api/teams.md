@@ -21,7 +21,7 @@ Teams are stored in the SQLite `teams` table. An agent's team is the nullable `a
 
 <Note>
 
-`DELETE /api/teams/:id` keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, intro flags, General clear time and resume pointers. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
+`DELETE /api/teams/:id` keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
 
 </Note>
 
@@ -293,7 +293,7 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id> \
 
 ## `DELETE /api/teams/:id`
 
-Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` on every agent in the team, (2) deletes these team-scoped `settings` rows: `team-rules:<teamId>`, `team-onboarding:<teamId>`, General's clear time `team-chat-cleared:<teamId>`, and every member's native resume pointer for the team and for each of its rooms, and (3) deletes the team row. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves. The team's board tasks, chat messages and peer-chat posts are not deleted, and neither are the `team-server-orchestrated:<teamId>` setting and each room's clear time.
+Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` on every agent in the team, (2) deletes these team-scoped `settings` rows: `team-rules:<teamId>`, `team-onboarding:<teamId>`, General's clear time `team-chat-cleared:<teamId>`, and every member's native resume pointer for the team and for each of its rooms, (3) deletes the team row, and (4) when a team row was deleted, removes the team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>`, with every file in it. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves. The team's board tasks, chat messages and peer-chat posts are not deleted, and neither are the `team-server-orchestrated:<teamId>` setting and each room's clear time.
 
 - **Path params**: `id` (team id).
 - **Request body**: none.
@@ -306,10 +306,10 @@ Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` o
 { "error": "team id required" }
 ```
 
-**`200 OK`**: the team was deleted and its agents orphaned:
+**`200 OK`**: the team was deleted and its agents orphaned. `folderRemoved` is `false` when the folder could not be removed, or when no team had that id:
 
 ```json
-{ "ok": true }
+{ "ok": true, "folderRemoved": true }
 ```
 
 **`500 Internal Server Error`**: a DB failure:
@@ -320,7 +320,7 @@ Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` o
 
 <Note>
 
-The route does not answer 404 for an unknown team id: the updates and the delete match nothing, so it still returns `{ ok: true }`.
+The route does not answer 404 for an unknown team id: the updates and the delete match nothing, so it still returns `{ ok: true, folderRemoved: false }` and touches no folder.
 
 </Note>
 

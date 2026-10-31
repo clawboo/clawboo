@@ -161,11 +161,27 @@ function TeamIcon({
 /** The confirm copy for Delete with agents. Only an OpenClaw agent lives in a
  *  Gateway, so only a team with one is told about removing it from there
  *  (`runtime` null is a legacy OpenClaw row). */
+/** Every agent but an OpenClaw one works in the team's folder on disk, which
+ *  deleting the team removes along with its files. */
+const TEAM_FOLDER_RUNTIMES = new Set(['claude-code', 'codex', 'hermes', 'clawboo-native'])
+const TEAM_FOLDER_NOTE = "The team's folder and the files its agents saved there are deleted too."
+
+function usesTeamFolder(agents: readonly AgentState[]): boolean {
+  return agents.some((a) => a.runtime != null && TEAM_FOLDER_RUNTIMES.has(a.runtime))
+}
+
+function deleteTeamMessage(agents: readonly AgentState[]): string {
+  const base = 'Agents will be kept but unassigned from this team.'
+  return usesTeamFolder(agents) ? `${base} ${TEAM_FOLDER_NOTE}` : base
+}
+
 function deleteWithAgentsMessage(agents: readonly AgentState[]): string {
   const onGateway = agents.some((a) => a.runtime == null || a.runtime === 'openclaw')
-  return onGateway
-    ? 'This deletes the agents and their chats, and removes the OpenClaw agents from the Gateway. It cannot be undone.'
-    : 'This deletes the agents and their chats. It cannot be undone.'
+  const what = onGateway
+    ? 'This deletes the agents and their chats, and removes the OpenClaw agents from the Gateway.'
+    : 'This deletes the agents and their chats.'
+  const folder = usesTeamFolder(agents) ? ` ${TEAM_FOLDER_NOTE}` : ''
+  return `${what}${folder} It cannot be undone.`
 }
 
 /** The sidebar toggle normally sits in the agent column's top row. The rail shows
@@ -229,13 +245,14 @@ export function TeamSidebar({
   const handleDeleteTeam = useCallback(async () => {
     if (!contextMenu) return
     const { team } = contextMenu
+    const teamAgents = useFleetStore.getState().agents.filter((a) => a.teamId === team.id)
 
     setContextMenu(null)
 
     if (
       !(await confirm({
         title: `Delete "${team.name}"?`,
-        message: 'Agents will be kept but unassigned from this team.',
+        message: deleteTeamMessage(teamAgents),
         confirmLabel: 'Delete team',
         tone: 'danger',
       }))

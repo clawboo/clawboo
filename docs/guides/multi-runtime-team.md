@@ -86,7 +86,7 @@ Boo Zero splits the request into tasks. Each task runs on its teammate's own run
 
 <Warning>
 
-In team chat, Claude Code, Codex and Hermes run with their own approval prompts turned off. They start in Clawboo's data folder (`~/.clawboo`) and can read and change any file your user account can. There is no isolated checkout on this path. Point them only at work you have committed or backed up, and read [What agents can do](/concepts/permissions). For a separate git checkout per task, see [Hand a task from one runtime to another](/guides/cross-runtime-handoff).
+In team chat, Claude Code, Codex and Hermes run with their own approval prompts turned off. They start in the team's folder (`~/.clawboo/workspaces/<team id>`), and can still read and change any file your user account can. There is no isolated checkout on this path. Point them only at work you have committed or backed up, and read [What agents can do](/concepts/permissions). For a separate git checkout per task, see [Hand a task from one runtime to another](/guides/cross-runtime-handoff).
 
 </Warning>
 

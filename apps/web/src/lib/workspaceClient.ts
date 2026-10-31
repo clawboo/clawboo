@@ -17,15 +17,34 @@ export interface AgentWorkspace {
   updatedAt: number
 }
 
+/** The folder an agent starts in when it has no worktree (team chat, read-only
+ *  tasks). No git, so no change badges. */
+export interface AgentTeamFolder {
+  /** null for an agent with no team (the shared `_no-team` folder). */
+  teamId: string | null
+  path: string
+  /** False until the first run creates it. */
+  onDisk: boolean
+}
+
+export interface AgentWorkspaceList {
+  workspaces: AgentWorkspace[]
+  /** null for a runtime that gets no folder (OpenClaw). */
+  teamFolder: AgentTeamFolder | null
+}
+
 /** `null` means the request FAILED, which is not the same as "this agent has no
  *  workspaces". Collapsing the two let one failed poll wipe the panel and show
  *  the empty state over a live worktree. */
-export async function getAgentWorkspaces(agentId: string): Promise<AgentWorkspace[] | null> {
+export async function getAgentWorkspaces(agentId: string): Promise<AgentWorkspaceList | null> {
   try {
     const r = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/workspaces`)
     if (!r.ok) return null
-    const body = (await r.json()) as { workspaces?: AgentWorkspace[] }
-    return body.workspaces ?? []
+    const body = (await r.json()) as {
+      workspaces?: AgentWorkspace[]
+      teamFolder?: AgentTeamFolder | null
+    }
+    return { workspaces: body.workspaces ?? [], teamFolder: body.teamFolder ?? null }
   } catch {
     return null
   }
@@ -69,6 +88,37 @@ export async function getWorkspaceFile(
   try {
     const r = await apiFetch(
       `/api/board/${encodeURIComponent(taskId)}/workspace/file?path=${encodeURIComponent(path)}`,
+    )
+    if (!r.ok) return null
+    return (await r.json()) as WorkspaceFileContent
+  } catch {
+    return null
+  }
+}
+
+/** One directory level of the agent's team folder. */
+export async function getTeamFolderTree(
+  agentId: string,
+  dir: string,
+): Promise<WorkspaceTreeListing | null> {
+  try {
+    const r = await apiFetch(
+      `/api/agents/${encodeURIComponent(agentId)}/team-folder/tree?dir=${encodeURIComponent(dir)}`,
+    )
+    if (!r.ok) return null
+    return (await r.json()) as WorkspaceTreeListing
+  } catch {
+    return null
+  }
+}
+
+export async function getTeamFolderFile(
+  agentId: string,
+  path: string,
+): Promise<WorkspaceFileContent | null> {
+  try {
+    const r = await apiFetch(
+      `/api/agents/${encodeURIComponent(agentId)}/team-folder/file?path=${encodeURIComponent(path)}`,
     )
     if (!r.ok) return null
     return (await r.json()) as WorkspaceFileContent

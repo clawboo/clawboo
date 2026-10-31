@@ -12,7 +12,7 @@
  *     `in_progress` with no runner behind it until the stale sweep.
  */
 
-import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -30,6 +30,7 @@ import type {
 
 import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
+import type { RuntimeRunContext } from '../runtimes/types'
 
 const CAPS: Capabilities = {
   streaming: true,
@@ -139,6 +140,76 @@ describe('executor runner — isolation + claim safety', () => {
 
     expect(result.ok).toBe(true)
     expect(fake.startCount).toBe(1)
+  })
+
+  /** Run read-only work and return the cwd the driver was handed. */
+  async function readOnlyRunCwd(
+    runtime: string,
+    teamId: string | null,
+  ): Promise<{ ok: boolean; cwd: string | null | undefined; fake: ProbeAdapter }> {
+    const taskId = createTask(getDb(), {
+      title: 'Research something',
+      status: 'todo',
+      ...(teamId ? { teamId } : {}),
+    }).id
+    const fake = new ProbeAdapter(runtime)
+    let cwd: string | null | undefined
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: (ctx: RuntimeRunContext) => {
+        if (ctx.memoryScope) cwd = ctx.cwd
+        return fake
+      },
+      taskId,
+      assigneeAgentId: 'agent-1',
+      disableMemoryAutoInject: true,
+      kind: 'research',
+    })
+    return { ok: result.ok, cwd, fake }
+  }
+
+  for (const runtime of ['claude-code', 'codex', 'hermes']) {
+    it(`starts read-only ${runtime} work in its team's folder, not the server cwd`, async () => {
+      const { ok, cwd } = await readOnlyRunCwd(runtime, 'team-1')
+
+      expect(ok).toBe(true)
+      const folder = path.join(home, '.clawboo', 'workspaces', 'team-1')
+      expect(cwd).toBe(folder)
+      expect((await stat(folder)).isDirectory()).toBe(true)
+      if (process.platform !== 'win32') expect((await stat(folder)).mode & 0o777).toBe(0o700)
+    })
+  }
+
+  it('starts read-only work with no team in the shared _no-team folder', async () => {
+    const { ok, cwd } = await readOnlyRunCwd('codex', null)
+
+    expect(ok).toBe(true)
+    expect(cwd).toBe(path.join(home, '.clawboo', 'workspaces', '_no-team'))
+  })
+
+  it("starts read-only Clawboo Native work in its team's folder too", async () => {
+    const { ok, cwd } = await readOnlyRunCwd('clawboo-native', 'team-1')
+
+    expect(ok).toBe(true)
+    expect(cwd).toBe(path.join(home, '.clawboo', 'workspaces', 'team-1'))
+  })
+
+  it('gives a runtime with no folder (the mock harness) no cwd', async () => {
+    const { ok, cwd } = await readOnlyRunCwd('clawboo-mock', 'team-1')
+
+    expect(ok).toBe(true)
+    expect(cwd ?? null).toBeNull()
+  })
+
+  it('refuses read-only work, rather than running in the server cwd, when its folder cannot be created', async () => {
+    // getDb() creates the clawboo home; a file where workspaces/ should be.
+    getDb()
+    await writeFile(path.join(home, '.clawboo', 'workspaces'), 'not a folder')
+
+    const { ok, fake } = await readOnlyRunCwd('claude-code', 'team-1')
+
+    expect(ok).toBe(false)
+    expect(fake.startCount).toBe(0)
   })
 
   it('releases the claim when the driver throws unexpectedly', async () => {

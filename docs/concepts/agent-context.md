@@ -70,7 +70,7 @@ The message is the task's title. The task runner adds no team rules, teammate li
 - **The global brief.** The brief under **Details** > **Brief** on Boo Zero's page is saved but not sent to any agent.
 - **Memory, on team-chat turns.** Nothing is added for them; agents look facts up with their memory tools. Only task-runner runs get facts added.
 - **The time of day.** Clawboo Native's setup carries today's date (in UTC), not the time.
-- **Tools a run cannot use.** A tool that is off is left out rather than refused. A Clawboo Native agent in team chat, for example, sees no file or shell tools at all.
+- **Tools a run cannot use.** A tool that is off is left out rather than refused. A Clawboo Native agent in a one-to-one chat, for example, sees no file or shell tools at all.
 
 ## Conversation history
 

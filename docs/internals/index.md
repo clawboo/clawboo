@@ -112,13 +112,14 @@ Most work reaches a runtime along one of two server paths. They share the board 
 | Code                  | `apps/web/server/lib/teamChat/` over `@clawboo/team-orchestration`                                       | `runTaskOnRuntime` in `apps/web/server/lib/executorRunner.ts`                                               |
 | Runtimes              | All five; OpenClaw over the server's Gateway connection                                                  | All except OpenClaw, which it refuses                                                                       |
 | Git worktree          | Never                                                                                                    | For a task that changes files in a named repo; such a task with no repo is refused                          |
+| Working folder        | The team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`runtimes/teamWorkdir.ts`)                      | The worktree, or for a `research` or `review` task the team's folder (`_no-team` when it has no team)       |
 | Verification          | No                                                                                                       | Only for a worktree run that changed files                                                                  |
 | Circuit breakers      | No                                                                                                       | Yes                                                                                                         |
 | Memory auto-injection | No                                                                                                       | Yes                                                                                                         |
 
 Two smaller paths sit beside these. A Routine fire aimed at one OpenClaw agent goes through a dispatcher on the server's Gateway connection (`apps/web/server/lib/routines/openclawDispatch.ts`), with no worktree and no verification. A 1:1 chat with a Clawboo Native agent runs one conversational turn in `apps/web/server/lib/agentChat/`, with no board task.
 
-Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off on both paths. A worktree keeps a task's file changes apart, but it is not a sandbox, and a team-engine run starts in the server's working directory. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
+Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off on both paths. A worktree keeps a task's file changes apart, but it is not a sandbox, and neither is the team's folder that a run without a worktree starts in. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
 
 ## Where to start reading
 

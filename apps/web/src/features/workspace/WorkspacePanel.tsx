@@ -1,5 +1,7 @@
 // The agent-detail Workspace tab: a read-only view of the agent's task
-// worktree. Three parts and nothing else: the file tree with change badges,
+// worktree, or of its team folder (where the agent starts when it has no
+// worktree). Three parts and nothing else: the file tree
+// with change badges (worktrees only; the team folder is not a git checkout),
 // the now line (the file and command the agent most recently touched, from the
 // obs tail), and a right pane showing the selected file's diff or content.
 //
@@ -18,12 +20,16 @@ import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { Spinner } from '@/features/shared/Spinner'
 import {
   getAgentWorkspaces,
+  getTeamFolderFile,
+  getTeamFolderTree,
   getWorkspaceFile,
   getWorkspaceFileDiff,
   getWorkspaceStatus,
   getWorkspaceTree,
   statusBadge,
+  type AgentTeamFolder,
   type AgentWorkspace,
+  type AgentWorkspaceList,
   type WorkspaceStatusEntry,
   type WorkspaceTreeEntry,
 } from '@/lib/workspaceClient'
@@ -35,6 +41,17 @@ const WORKSPACES_POLL_MS = 15_000
 const EVENT_INVALIDATE_MS = 1500
 /** Ancestors of at most this many changed files are auto-expanded on load. */
 const AUTO_EXPAND_PATHS = 8
+
+/** What the panel shows: one task's worktree, or the agent's team folder. */
+type Source =
+  | { kind: 'task'; key: string; ws: AgentWorkspace }
+  | { kind: 'folder'; key: string; folder: AgentTeamFolder }
+
+/** The team folder's selection key. Task ids are UUIDs, so it cannot collide. */
+const FOLDER_KEY = 'team-folder'
+
+const folderLabel = (folder: AgentTeamFolder): string =>
+  folder.teamId ? 'Team folder' : 'Shared folder (no team)'
 
 /** Deleted paths whose parent directory is `dir`. They are absent from the
  *  listing by definition, so the tree has to synthesize their rows. */
@@ -61,7 +78,6 @@ interface TreeDirState {
 }
 
 function TreeLevel({
-  taskId,
   dir,
   depth,
   dirs,
@@ -72,7 +88,6 @@ function TreeLevel({
   onSelectFile,
   onRetryDir,
 }: {
-  taskId: string
   dir: string
   depth: number
   dirs: Map<string, TreeDirState>
@@ -130,7 +145,6 @@ function TreeLevel({
               </button>
               {isOpen && (
                 <TreeLevel
-                  taskId={taskId}
                   dir={rel}
                   depth={depth + 1}
                   dirs={dirs}
@@ -235,13 +249,16 @@ function diffLineStyle(line: string): CSSProperties {
 }
 
 function FilePane({
+  agentId,
   taskId,
   path,
   changed,
   refreshKey,
   onViewKind,
 }: {
-  taskId: string
+  agentId: string
+  /** The task worktree to read from; null reads the agent's team folder. */
+  taskId: string | null
   path: string
   changed: boolean
   /** Reports which view actually rendered, so the header label cannot claim
@@ -273,7 +290,7 @@ function FilePane({
     void (async () => {
       // A changed file shows its diff; an unchanged or untracked one (empty
       // diff) falls back to content.
-      if (changed) {
+      if (changed && taskId) {
         const d = await getWorkspaceFileDiff(taskId, path)
         if (cancelled) return
         if (d && d.diff.trim()) {
@@ -284,7 +301,9 @@ function FilePane({
           return
         }
       }
-      const f = await getWorkspaceFile(taskId, path)
+      const f = taskId
+        ? await getWorkspaceFile(taskId, path)
+        : await getTeamFolderFile(agentId, path)
       if (cancelled) return
       if (!f) setView({ kind: 'error' })
       else if (f.binary) setView({ kind: 'binary', size: f.size })
@@ -298,12 +317,12 @@ function FilePane({
     }
     // `onViewKind` is intentionally NOT a dependency: it is a reporting
     // callback, and including it would refetch whenever the parent re-renders.
-  }, [taskId, path, changed, refreshKey])
+  }, [agentId, taskId, path, changed, refreshKey])
 
   // A DIFFERENT file is a fresh open, not a refresh.
   useEffect(() => {
     first.current = true
-  }, [taskId, path])
+  }, [agentId, taskId, path])
 
   if (loading) {
     return (
@@ -360,8 +379,8 @@ export function WorkspacePanel({
    *  agent-wide list would let the user navigate away from the task they opened. */
   pinnedTaskId?: string
 }) {
-  const [workspaces, setWorkspaces] = useState<AgentWorkspace[] | null>(null)
-  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(pinnedTaskId ?? null)
+  const [list, setList] = useState<AgentWorkspaceList | null>(null)
+  const [selectedKey, setSelectedKey] = useState<string | null>(pinnedTaskId ?? null)
   const [dirs, setDirs] = useState<Map<string, TreeDirState>>(new Map())
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [status, setStatus] = useState<WorkspaceStatusEntry[]>([])
@@ -371,76 +390,99 @@ export function WorkspacePanel({
   const agent = useFleetStore((s) => s.agents.find((a) => a.id === agentId) ?? null)
   const running = agent?.status === 'running'
 
-  // The selection is PINNED to a task id, never positional. The list arrives
-  // ordered by updatedAt DESC, so resolving `active` as workspaces[0] meant any
+  // Task worktrees first (newest first), then the team folder. A pinned host
+  // scopes the view to one task, so it never offers the folder.
+  const sources = useMemo<Source[] | null>(() => {
+    if (!list) return null
+    const out: Source[] = list.workspaces.map((ws) => ({ kind: 'task', key: ws.taskId, ws }))
+    if (list.teamFolder && !pinnedTaskId) {
+      out.push({ kind: 'folder', key: FOLDER_KEY, folder: list.teamFolder })
+    }
+    return out
+  }, [list, pinnedTaskId])
+
+  // The selection is PINNED to a key, never positional. The list arrives
+  // ordered by updatedAt DESC, so resolving `active` as sources[0] meant any
   // other task touching the board reordered the list and swapped the user's
   // tree and open file out from under them on the next poll.
   const active = useMemo(() => {
-    if (!workspaces || workspaces.length === 0) return null
-    return workspaces.find((w) => w.taskId === selectedTaskId) ?? null
-  }, [workspaces, selectedTaskId])
-  const taskId = active?.taskId ?? null
-  const onDisk = active?.onDisk ?? false
+    if (!sources || sources.length === 0) return null
+    return sources.find((src) => src.key === selectedKey) ?? null
+  }, [sources, selectedKey])
+  const activeKey = active?.key ?? null
+  /** The task whose git status and diffs apply; null for the team folder. */
+  const taskId = active?.kind === 'task' ? active.ws.taskId : null
+  const onDisk = active ? (active.kind === 'task' ? active.ws.onDisk : active.folder.onDisk) : false
+  const rootPath = active
+    ? active.kind === 'task'
+      ? active.ws.worktreePath
+      : active.folder.path
+    : null
 
   // ── Workspace list: load + slow poll (tasks claim/complete over minutes) ──
   const loadWorkspaces = useCallback(() => {
-    void getAgentWorkspaces(agentId).then((ws) => {
+    void getAgentWorkspaces(agentId).then((next) => {
       // `null` is a FAILED request. Keeping the previous list is what stops one
       // dropped poll from emptying the panel over a live worktree.
-      if (ws) setWorkspaces(ws)
+      if (next) setList(next)
     })
   }, [agentId])
   useEffect(() => {
-    setWorkspaces(null)
-    setSelectedTaskId(pinnedTaskId ?? null)
+    setList(null)
+    setSelectedKey(pinnedTaskId ?? null)
     loadWorkspaces()
   }, [loadWorkspaces, pinnedTaskId])
   useVisiblePolling(loadWorkspaces, WORKSPACES_POLL_MS)
 
   // Pin the default once, and re-pin only when the pinned task leaves the list.
   useEffect(() => {
-    if (!workspaces || workspaces.length === 0) return
-    // A pinned host owns the selection outright. Falling back to workspaces[0]
+    if (!sources || sources.length === 0) return
+    // A pinned host owns the selection outright. Falling back to sources[0]
     // here would silently show a DIFFERENT task's tree under the drawer's
     // header the moment the pinned task is missing from the list.
     if (pinnedTaskId) return
-    const stillThere = selectedTaskId && workspaces.some((w) => w.taskId === selectedTaskId)
-    if (!stillThere) setSelectedTaskId(workspaces[0]?.taskId ?? null)
-  }, [workspaces, selectedTaskId, pinnedTaskId])
+    const stillThere = selectedKey && sources.some((src) => src.key === selectedKey)
+    if (!stillThere) setSelectedKey(sources[0]?.key ?? null)
+  }, [sources, selectedKey, pinnedTaskId])
 
   // ── Tree + status per selected workspace ──────────────────────────────────
   // Every response is stamped with the workspace it was requested for. Without
   // this, a slow listing for the PREVIOUS workspace lands after a switch and
   // paints the wrong tree and badges under the new workspace's header.
-  const activeTaskRef = useRef<string | null>(null)
-  activeTaskRef.current = taskId
+  const activeKeyRef = useRef<string | null>(null)
+  activeKeyRef.current = activeKey
 
-  const loadDir = useCallback((tid: string, dir: string) => {
-    void getWorkspaceTree(tid, dir).then((listing) => {
-      if (activeTaskRef.current !== tid) return // stale: workspace switched
-      setDirs((prev) => {
-        const next = new Map(prev)
-        next.set(
-          dir,
-          listing
-            ? { entries: listing.entries, truncated: listing.truncated }
-            : { entries: [], truncated: false, failed: true },
-        )
-        return next
+  const loadDir = useCallback(
+    (key: string, dir: string) => {
+      const listingFor =
+        key === FOLDER_KEY ? getTeamFolderTree(agentId, dir) : getWorkspaceTree(key, dir)
+      void listingFor.then((listing) => {
+        if (activeKeyRef.current !== key) return // stale: workspace switched
+        setDirs((prev) => {
+          const next = new Map(prev)
+          next.set(
+            dir,
+            listing
+              ? { entries: listing.entries, truncated: listing.truncated }
+              : { entries: [], truncated: false, failed: true },
+          )
+          return next
+        })
       })
-    })
-  }, [])
+    },
+    [agentId],
+  )
 
   const [statusUnreadable, setStatusUnreadable] = useState(false)
-  // Bumped on every applied status refresh, so the open file re-reads its diff
-  // as the agent keeps editing it.
+  // Bumped on every applied status refresh (and, for the team folder, on every
+  // tool call), so the open file re-reads as the agent keeps editing it.
   const [statusGen, setStatusGen] = useState(0)
 
   const refreshStatus = useCallback(() => {
     const tid = taskId
     if (!tid || !onDisk) return
     void getWorkspaceStatus(tid).then((res) => {
-      if (activeTaskRef.current !== tid) return // stale
+      if (activeKeyRef.current !== tid) return // stale
       if (res.ok) {
         setStatus(res.status.entries)
         setStatusUnreadable(false)
@@ -458,10 +500,10 @@ export function WorkspacePanel({
     setStatus([])
     setStatusUnreadable(false)
     setSelectedPath(null)
-    if (!taskId || !onDisk) return
-    loadDir(taskId, '')
+    if (!activeKey || !onDisk) return
+    loadDir(activeKey, '')
     refreshStatus()
-  }, [taskId, onDisk, loadDir, refreshStatus])
+  }, [activeKey, onDisk, loadDir, refreshStatus])
 
   // The level-triggered backstop behind the event-driven refresh below.
   useVisiblePolling(refreshStatus, STATUS_POLL_MS, { enabled: Boolean(taskId && onDisk) })
@@ -498,21 +540,20 @@ export function WorkspacePanel({
         else next.delete(dir)
         return next
       })
-      if (willOpen && taskId && !dirs.has(dir)) loadDir(taskId, dir)
+      if (willOpen && activeKey && !dirs.has(dir)) loadDir(activeKey, dir)
     },
-    [taskId, dirs, expanded, loadDir],
+    [activeKey, dirs, expanded, loadDir],
   )
 
   // ── Now line + event invalidation off the obs tail ────────────────────────
   const { events } = useObsStream({ agentId }, { limit: 80 })
   const now = useMemo(() => deriveNowActivity(events), [events])
-  const worktreePath = active?.worktreePath ?? null
-  const nowFileRel = now.file ? toWorkspaceRelPath(now.file.path, worktreePath) : null
+  const nowFileRel = now.file ? toWorkspaceRelPath(now.file.path, rootPath) : null
 
   const invalidateTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSeenSeq = useRef(0)
   useEffect(() => {
-    if (!taskId || !onDisk || events.length === 0) return
+    if (!activeKey || !onDisk || events.length === 0) return
     // Scan the whole ARRIVED SLICE, not just the tail. Events land in batches,
     // and a tool_call is almost always followed by its tool_result, so
     // inspecting only the last event meant the qualifying call was never seen
@@ -528,24 +569,26 @@ export function WorkspacePanel({
     if (invalidateTimer.current) clearTimeout(invalidateTimer.current)
     invalidateTimer.current = setTimeout(() => {
       refreshStatus()
+      // The team folder has no git status to bump the open file's re-read.
+      if (!taskId) setStatusGen((g) => g + 1)
       // Reload the listing of the touched path's directory when it is loaded
       // already (a new file must appear without a full tree reload).
-      const rel = touched.file ? toWorkspaceRelPath(touched.file.path, worktreePath) : null
+      const rel = touched.file ? toWorkspaceRelPath(touched.file.path, rootPath) : null
       if (rel && rel.includes('/')) {
         const parent = rel.slice(0, rel.lastIndexOf('/'))
-        if (dirs.has(parent)) loadDir(taskId, parent)
+        if (dirs.has(parent)) loadDir(activeKey, parent)
       } else if (rel) {
-        loadDir(taskId, '')
+        loadDir(activeKey, '')
       }
     }, EVENT_INVALIDATE_MS)
-  }, [events, taskId, onDisk, worktreePath, dirs, loadDir, refreshStatus])
+  }, [events, activeKey, taskId, onDisk, rootPath, dirs, loadDir, refreshStatus])
 
   // Unmount / workspace-switch cleanup for the pending invalidation timer.
   useEffect(() => {
     return () => {
       if (invalidateTimer.current) clearTimeout(invalidateTimer.current)
     }
-  }, [taskId])
+  }, [activeKey])
 
   // The obs cursor is per-AGENT: switching agents re-subscribes the stream and
   // restarts the tail, so a stale high-water mark would suppress every new
@@ -564,7 +607,7 @@ export function WorkspacePanel({
   const selectedChanged = selectedPath ? statusByPath.has(selectedPath) : false
 
   // ── Empty states ──────────────────────────────────────────────────────────
-  if (workspaces === null) {
+  if (sources === null) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-[12px] text-foreground/40">
         <Spinner size={12} />
@@ -637,16 +680,16 @@ export function WorkspacePanel({
               {changedCount} changed
             </span>
           )}
-          {!pinnedTaskId && workspaces.length > 1 && (
+          {!pinnedTaskId && sources.length > 1 && (
             <select
-              value={active.taskId}
-              onChange={(e) => setSelectedTaskId(e.target.value)}
+              value={active.key}
+              onChange={(e) => setSelectedKey(e.target.value)}
               className="max-w-[200px] cursor-pointer rounded-md border border-border bg-input px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
               aria-label="Workspace task"
             >
-              {workspaces.map((w) => (
-                <option key={w.taskId} value={w.taskId}>
-                  {w.title}
+              {sources.map((src) => (
+                <option key={src.key} value={src.key}>
+                  {src.kind === 'task' ? src.ws.title : folderLabel(src.folder)}
                 </option>
               ))}
             </select>
@@ -661,13 +704,21 @@ export function WorkspacePanel({
         </div>
       )}
 
-      {!onDisk ? (
+      {!onDisk && active.kind === 'folder' ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <div className="text-[12px] leading-relaxed text-muted-foreground">
+            No files yet. This folder is created the first time the agent runs without a task
+            worktree, in team chat or on a task that only reads.
+          </div>
+          <div className="font-mono text-[11px] text-foreground/40">{active.folder.path}</div>
+        </div>
+      ) : !onDisk && active.kind === 'task' ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
           <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber">Paused</div>
           <div className="text-[12px] leading-relaxed text-muted-foreground">
             This workspace's checkout was paused or cleaned up. The branch
-            {active.branch ? ` (${active.branch})` : ''} keeps the work; resuming the task restores
-            the files.
+            {active.ws.branch ? ` (${active.ws.branch})` : ''} keeps the work; resuming the task
+            restores the files.
           </div>
         </div>
       ) : (
@@ -676,12 +727,13 @@ export function WorkspacePanel({
           <div className="w-[228px] shrink-0 overflow-y-auto border-r border-border py-1.5">
             <div
               className="truncate px-3 pb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-foreground/40"
-              title={active.repoPath}
+              title={active.kind === 'task' ? active.ws.repoPath : active.folder.path}
             >
-              {active.branch ?? active.title}
+              {active.kind === 'task'
+                ? (active.ws.branch ?? active.ws.title)
+                : folderLabel(active.folder)}
             </div>
             <TreeLevel
-              taskId={active.taskId}
               dir=""
               depth={0}
               dirs={dirs}
@@ -690,7 +742,7 @@ export function WorkspacePanel({
               selectedPath={selectedPath}
               onToggleDir={onToggleDir}
               onSelectFile={setSelectedPath}
-              onRetryDir={(d) => loadDir(active.taskId, d)}
+              onRetryDir={(d) => loadDir(active.key, d)}
             />
           </div>
           {/* Right pane */}
@@ -713,8 +765,9 @@ export function WorkspacePanel({
                     // sets it, and the pane kept the previous file's view under
                     // the new file's name. `refreshKey` is deliberately absent:
                     // a background status refresh should not flash a spinner.
-                    key={`${active.taskId}:${selectedPath}`}
-                    taskId={active.taskId}
+                    key={`${active.key}:${selectedPath}`}
+                    agentId={agentId}
+                    taskId={taskId}
                     path={selectedPath}
                     changed={selectedChanged}
                     refreshKey={statusGen}

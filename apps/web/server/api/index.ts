@@ -105,6 +105,8 @@ import {
   boardWorkspaceFileGET,
   boardWorkspaceFileDiffGET,
   boardWorkspaceStatusGET,
+  agentTeamFolderFileGET,
+  agentTeamFolderTreeGET,
   agentWorkspacesGET,
 } from './board'
 import {
@@ -358,6 +360,9 @@ router.get('/api/agents/:agentId/sessions', agentSessionsGET)
 router.get('/api/agents/:agentId/screenshot', agentScreenshotGET)
 router.post('/api/agents/:agentId/screenshot/capture', agentScreenshotCapturePOST)
 router.get('/api/agents/:agentId/workspaces', agentWorkspacesGET)
+// The agent's team folder (where its runs start with no worktree), read-only.
+router.get('/api/agents/:agentId/team-folder/tree', agentTeamFolderTreeGET)
+router.get('/api/agents/:agentId/team-folder/file', agentTeamFolderFileGET)
 
 // A clawboo-native agent's 1:1 PERSONAL chat (the Boo-Zero personal chat). The
 // native equivalent of the Gateway 1:1 chat path — ingest drives ONE conversational

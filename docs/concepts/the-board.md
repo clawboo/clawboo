@@ -105,7 +105,7 @@ When the board changes through Clawboo's board API, which includes your moves an
 
 ## Where the work happens
 
-Most tasks run through team chat. An agent Routine that names no repository runs on a separate path (see [Two ways Clawboo runs agents](/intro/how-it-works#two-ways-clawboo-runs-agents)). Neither gets a git worktree of its own or an automatic check. Coding runtimes start in the Clawboo server's own folder (`~/.clawboo` for an npm install), with their own approval prompts turned off. They can read and change any file your user account can. A task lands in Done when its agent reports back.
+Most tasks run through team chat. An agent Routine that names no repository runs on a separate path (see [Two ways Clawboo runs agents](/intro/how-it-works#two-ways-clawboo-runs-agents)). Neither gets a git worktree of its own or an automatic check. Coding runtimes start in the team's folder (`~/.clawboo/workspaces/<team id>`), with their own approval prompts turned off. They can still read and change any file your user account can. A task lands in Done when its agent reports back.
 
 Runs that name a repository, started through the runtime run API or by an agent Routine (the repository is set through the API), get an isolated worktree for work that changes files. If the agent changed files there, the change is checked before the task can be Done. A worktree keeps file changes apart; it is not a sandbox. See [What agents can do](/concepts/permissions), [When work is checked](/concepts/verification) and [Worktrees and handoff](/concepts/worktrees-and-handoff).
 

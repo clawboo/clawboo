@@ -62,7 +62,7 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 
 - **It runs in the foreground** and logs to the terminal. `NODE_ENV=production` gives plain JSON log lines, as with the launcher.
 - **Ctrl+C stops it cleanly.** It stops the agent processes it started, waits up to 5 seconds for them, and closes the database.
-- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes start in the server's working directory whenever a run has no worktree: every team-chat turn, research and review tasks, and Routines you make in the dashboard.
+- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `~/.clawboo/workspaces`.
 - **The dashboard files** come from the `ui` folder next to `server.js`. `CLAWBOO_UI_DIR` points somewhere else. If Clawboo cannot read `index.html` there, page loads answer `503` with "The Clawboo dashboard could not be read from disk. Check CLAWBOO_UI_DIR."
 - **MCP attach snippets.** To make the stdio snippets from `GET /api/mcp/config` name the bundled MCP programs, also set `CLAWBOO_MCP_BIN_DIR="$(npm root -g)/clawboo/dist/bin"`, as the launcher does.
 
@@ -131,7 +131,7 @@ The server writes the port it chose to `~/.clawboo/api-port.txt`, and removes th
 
 ## Where the server keeps its files
 
-Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault, logs and task worktrees. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
+Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault, logs, task worktrees and each team's folder. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
 
 ## Logs
 
