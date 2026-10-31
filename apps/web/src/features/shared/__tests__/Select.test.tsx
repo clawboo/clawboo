@@ -74,19 +74,18 @@ describe('Select menu width', () => {
   }: {
     left?: number
     trigger: number
-    natural: number
+    /** The menu's width at max-content, or a function of the laid-out menu. */
+    natural: number | ((menu: HTMLElement) => number)
   }) {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
       this: HTMLElement,
     ) {
       if (this.getAttribute('role') === 'listbox') {
         const { width, minWidth, maxWidth } = this.style
+        const fit = typeof natural === 'function' ? natural(this) : natural
         const w =
           width === 'max-content'
-            ? Math.min(
-                Math.max(natural, parseFloat(minWidth) || 0),
-                parseFloat(maxWidth) || Infinity,
-              )
+            ? Math.min(Math.max(fit, parseFloat(minWidth) || 0), parseFloat(maxWidth) || Infinity)
             : parseFloat(width)
         return new DOMRect(0, 0, w, 120)
       }
@@ -117,5 +116,36 @@ describe('Select menu width', () => {
     const menu = openMenu()
     expect(menu.style.width).toBe('320px')
     expect(menu.style.left).toBe(`${window.innerWidth - 8 - 320}px`)
+  })
+
+  it('keeps a menuWidth wider than the viewport inside it', () => {
+    const innerWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 180 })
+    try {
+      layout({ trigger: 120, natural: 150 })
+      render(
+        <Select aria-label="pick" value="b" onChange={vi.fn()} options={OPTIONS} menuWidth={200} />,
+      )
+      fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+      const menu = screen.getByRole('listbox')
+      expect(menu.style.width).toBe('164px')
+      expect(menu.style.left).toBe('8px')
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: innerWidth })
+    }
+  })
+
+  it('keeps its width while a search filters the list', () => {
+    // Narrower with fewer rows, so a menu measured again after filtering would shrink.
+    layout({ trigger: 96, natural: (menu) => menu.querySelectorAll('[role="option"]').length * 60 })
+    render(<Select aria-label="pick" value="b" onChange={vi.fn()} options={OPTIONS} searchable />)
+    fireEvent.click(screen.getByRole('button', { name: 'pick' }))
+    const menu = screen.getByRole('listbox')
+    expect(menu.style.width).toBe('180px')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search pick' }), {
+      target: { value: 'Alp' },
+    })
+    expect(screen.getAllByRole('option')).toHaveLength(1)
+    expect(screen.getByRole('listbox').style.width).toBe('180px')
   })
 })

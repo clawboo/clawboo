@@ -188,10 +188,12 @@ export function Select({
     )
     // The menu fits its widest option, so a long label, or the checked row's bold
     // and check mark, never clips to a compact trigger: at least the trigger (or
-    // menuWidth), at most MENU_MAX_WIDTH unless the trigger is wider. It stays
-    // left-anchored to the trigger, clamped so it never overflows the viewport.
-    const minWidth = Math.max(r.width, menuWidth ?? 0)
-    const maxWidth = Math.max(minWidth, Math.min(MENU_MAX_WIDTH, window.innerWidth - 16))
+    // menuWidth), at most MENU_MAX_WIDTH unless the trigger is wider. The viewport
+    // outranks every minimum, so a menuWidth wider than the window still fits it.
+    // It stays left-anchored to the trigger, clamped so it never overflows.
+    const viewport = window.innerWidth - 16
+    const minWidth = Math.min(Math.max(r.width, menuWidth ?? 0), viewport)
+    const maxWidth = Math.max(minWidth, Math.min(MENU_MAX_WIDTH, viewport))
     const fit = fitWidthRef.current
     const width = fit == null ? null : Math.min(Math.max(fit, minWidth), maxWidth)
     const left = Math.max(8, Math.min(r.left, window.innerWidth - 8 - (width ?? minWidth)))
