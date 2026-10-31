@@ -261,7 +261,7 @@ The tool-call audit log: one row before and one after each brokered call, newest
     toolName: string
     agentId: string | null
     phase: 'before' | 'after'
-    decision: string | null // before rows: allow | deny | require_approval | rewrite
+    decision: string | null // before rows: allow | deny | require_approval | rewrite | observe (allowed, but an inspector flagged it)
     argsSummary: string | null // scrubbed JSON, masked again here
     resultSummary: string | null // after rows: scrubbed, shortened, masked again here
     isError: number // 0 | 1

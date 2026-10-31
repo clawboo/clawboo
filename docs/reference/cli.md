@@ -80,7 +80,7 @@ The server runs detached: it keeps running after `clawboo` exits or you close th
 
 - **Normal install.** The CLI starts the bundled server with `~/.clawboo` as its working directory (created with owner-only permissions if missing) and `NODE_ENV=production`.
 - **Source checkout.** With no bundled server, it runs `npx tsx apps/web/server/index.ts` from the repository root, found by walking up to a `package.json` named `clawboo` (`CLAWBOO_SERVER_PATH` overrides the search). With neither, it prints "Could not find the Clawboo server. Install with: npm install -g clawboo" and exits 1.
-- **Log.** The server's output goes to `~/.clawboo/server.log`, with a header line `--- clawboo v<version> · pid <pid> ---` for each launch. A log over 5 MB is renamed to `server.log.1` at the next launch. If the log cannot be opened, the output is discarded.
+- **Log.** The server's output goes to `~/.clawboo/server.log`, with a header line `--- clawboo v<version> · pid <pid> ---` for each launch. A log over 5 MiB is renamed to `server.log.1` at the next launch. If the log cannot be opened, the output is discarded.
 - **Slow start.** The CLI checks for the dashboard every 500 ms, 90 times (about 45 seconds). If it never answers, the CLI prints "Dashboard is taking too long to start.", the last 12 lines of the log and the log's path, then exits 1. It never starts a second server.
 - **After an in-app update.** A server that the dashboard's update restarted writes nothing to this log. Run `clawboo restart` to get logging back.
 

@@ -74,7 +74,7 @@ Saves the values. An `agentId` with no agent row gets a placeholder row (named a
 ```ts
 {
   agentId: string // required
-  values: Record<string, number> // required, for example { "bite": 60, "spine": 50 }
+  values: Record<string, number> // required; any truthy value is stored as sent, its shape is not checked. For example { "bite": 60, "spine": 50 }
   customText?: string | null // trimmed; blank is stored as null
 }
 ```

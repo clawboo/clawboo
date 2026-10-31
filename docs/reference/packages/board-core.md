@@ -103,7 +103,7 @@ The result carries the reason, the number of trailing failed runs, and a `detail
 
 `summarizeRunCost(runs, taskCostUsd)` adds up what a task's runs cost, for the card and the drawer:
 
-- A run counts only when its `costUsd` is a number, so a run stopped before it priced itself adds nothing.
+- A run counts only when its `costUsd` is a finite number, so a run stopped before it priced itself adds nothing.
 - The total is marked as an estimate unless every counted run's `costSource` is `reported`; a missing or unknown
   source counts as an estimate.
 - With no counted run, a positive cost stored on the task row itself is returned as an estimate; otherwise the

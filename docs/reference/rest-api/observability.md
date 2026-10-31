@@ -387,7 +387,7 @@ In those two kinds, `detail` is masked for secrets and cut to 200 characters, an
     taskId?: string | null
     agentId?: string | null
     runtime?: string | null   // defaults to 'openclaw' when omitted
-    data?: Record<string, unknown>  // anything but an object is stored as {}
+    data?: Record<string, unknown>  // a non-object is stored as {}; for tool_call, tool_result and error an array is stored as sent
   }>
 }
 ```

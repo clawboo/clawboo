@@ -25,7 +25,7 @@ Clawboo spreads its configuration over a few places. Use this page to find where
 | `~/.clawboo/secrets/`                           | Provider keys and connector secrets, encrypted                    | **Settings > Providers**, **Settings > Runtimes**, Connectors                                |
 | `~/.openclaw/`                                  | OpenClaw's own configuration, part of which Clawboo writes        | OpenClaw, or the dashboard                                                                   |
 
-`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path on this page moves with them.
+`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
 
 ## settings.json
 
