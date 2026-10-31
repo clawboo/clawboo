@@ -104,7 +104,7 @@ A runtime is the program that runs an agent: Clawboo Native (built in), Claude C
 
 A provider is the service whose AI models do the thinking, such as Anthropic, OpenAI, OpenRouter or a local Ollama.
 
-- **Like:** a utility. You connect your account once, and it bills you for what your agents use. A local model through Ollama has no bill, though Clawboo's spend numbers still show an estimate for it.
+- **Like:** a utility. You connect your account once, and it bills you for what your agents use. A local model through Ollama has no bill, and Clawboo's spend numbers record it as free.
 - **Why it exists:** Clawboo is free and brings no models of its own, so you choose who answers, and who bills you.
 - **Where you see it:** **Settings** > **Providers**. Setup connects your first one.
 - **More:** [Providers and runtimes](/using/providers-and-runtimes)

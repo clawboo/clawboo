@@ -340,7 +340,7 @@ One row per run of a task, on any runtime: its status, git checkpoints, and toke
 | `cache_read`         | `INTEGER`                            |                                                                                                                 |
 | `cache_write`        | `INTEGER`                            |                                                                                                                 |
 | `cost_usd`           | `REAL`                               |                                                                                                                 |
-| `cost_source`        | `TEXT`                               | How `cost_usd` was obtained: `reported`, `token-estimate` or `char-estimate`; null when no cost was recorded    |
+| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost    |
 | `summary`            | `TEXT`                               | The run's result summary                                                                                        |
 | `run_reason`         | `TEXT`                               | Why the run started                                                                                             |
 | `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                |
@@ -720,7 +720,7 @@ Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
 
 ### cost_records
 
-Per-agent token and spend records, which the **Tokens Used** panel reads. Rows come from `POST /api/cost-records` and from the server watching OpenClaw sessions.
+Per-agent token and spend records, which the **Tokens Used** panel reads. Rows come from `POST /api/cost-records`, from the server watching OpenClaw sessions, and from each Clawboo Native, Claude Code, Codex or Hermes run when the server settles its cost (task-runner and team-chat runs).
 
 | Column          | Type                             | Notes                                                                      |
 | --------------- | -------------------------------- | -------------------------------------------------------------------------- |

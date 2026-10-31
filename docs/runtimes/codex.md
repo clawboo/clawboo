@@ -108,7 +108,7 @@ For work you do not trust, run Clawboo under a separate user account or in a vir
 
 ## Costs
 
-Codex reports the tokens a run used but no dollar figure, and Clawboo has no price list for Codex models. Clawboo prices the tokens at its default estimate rate ($3 per million input tokens, $15 per million output tokens), records the result as an estimate, and counts it toward your budgets.
+Codex reports the tokens a run used but no dollar figure, and Clawboo has no price list for Codex models. Clawboo prices the tokens at its default estimate rate ($3 per million input tokens, $15 per million output tokens), records the result as an estimate, and counts it toward your budgets. Codex reports once, as the run ends, so a hard cap that report crosses keeps the finished result and refuses the next run.
 
 On a ChatGPT plan you are not billed per token: the estimate is a guide for your budgets, not your bill. See [Budgets and spend](/using/budgets-and-spend) for how each runtime's cost reaches your budgets.
 

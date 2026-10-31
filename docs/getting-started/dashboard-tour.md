@@ -59,7 +59,7 @@ There is no separate approvals page. Requests that wait for your OK appear in **
 | Workspace | **Capabilities**  | The tools, skills and connectors your agents can use                                                                                                              |
 | Workspace | **Routines**      | Work that runs on a schedule, for a team or for one agent                                                                                                         |
 | Insights  | **Fleet**         | All agents at a glance: 24-hour task and verify pass rates, spend, health per runtime, recent issues                                                              |
-| Insights  | **Tokens Used**   | Token counts by team and agent, for OpenClaw agents only                                                                                                          |
+| Insights  | **Tokens Used**   | Token counts by team and agent, for every runtime                                                                                                                 |
 | Insights  | **Observability** | Traces, errors and health views from Clawboo's event log                                                                                                          |
 | Insights  | **Governance**    | Budgets, limits and the audit log                                                                                                                                 |
 | System    | **System**        | OpenClaw's default command approval (while a Gateway is connected), OpenClaw and Node.js versions, and **Check for Updates**, which updates OpenClaw, not Clawboo |

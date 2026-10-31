@@ -164,7 +164,7 @@ Clawboo Native reports the cost of every turn:
 
 - **Six models have an exact price:** `claude-haiku-4-5`, `claude-sonnet-4-6`, `gpt-4o`, `gpt-4o-mini`, `openai/gpt-4o-mini` and `anthropic/claude-haiku-4.5`. Clawboo records their cost at list price.
 - **Every other model is estimated**, including the default leader models `claude-sonnet-5` and `gpt-5.4`. Clawboo prices the turn's token counts from its rate table and records the result as an estimate. A model missing from the table is priced at USD 3 per million input tokens and USD 15 per million output tokens.
-- **Local Ollama models are estimated too**, so Ollama runs show spend even though they cost you nothing.
+- **Local Ollama models are free.** A turn your own Ollama serves is recorded at $0, charges no budget, and its tasks read **free** on the Board. Ollama's cloud models (a `-cloud` tag) run on ollama.com and are estimated like any other unpriced model.
 
 Estimates count toward your budgets. Budgets only warn you unless you set a hard cap. Turns with an exact price are charged as they happen, so a hard cap can stop a native run partway through. Estimated turns are charged when the run ends, in team chat and in 1:1 chat alike. See [Budgets and spend](/using/budgets-and-spend).
 

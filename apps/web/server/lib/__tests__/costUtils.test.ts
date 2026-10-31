@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { describe, expect, it } from 'vitest'
 
-import { calculateCostUsd } from '../costUtils'
+import { calculateCostUsd, isLocalModel } from '../costUtils'
 import { NATIVE_PRICED_MODELS, priceTurn } from '../runtimes/native/pricing'
 
 const M = 1_000_000
@@ -73,6 +73,39 @@ describe('calculateCostUsd rate table', () => {
     expect(calculateCostUsd('claude-opus-4-5-20251101', M, M)).toBe(30)
     expect(calculateCostUsd('claude-opus-5-5', M, M)).toBe(24)
     expect(calculateCostUsd('CLAUDE-HAIKU-4.5', M, M)).toBe(6)
+  })
+})
+
+describe('local models cost nothing', () => {
+  it('reads an Ollama ref or a model with Ollama named as its provider as local', () => {
+    expect(isLocalModel('ollama/llama3.2')).toBe(true)
+    expect(isLocalModel('Ollama/qwen2.5-coder:7b')).toBe(true)
+    expect(isLocalModel('llama3.2', 'ollama')).toBe(true)
+    expect(isLocalModel('llama3.2')).toBe(false)
+    expect(isLocalModel('anthropic/claude-haiku-4-5', 'anthropic')).toBe(false)
+    expect(isLocalModel(null)).toBe(false)
+  })
+
+  it("keeps Ollama's cloud models priced: they do not run on the user's machine", () => {
+    expect(isLocalModel('ollama/gpt-oss:120b-cloud')).toBe(false)
+    expect(isLocalModel('glm-4.6:cloud', 'ollama')).toBe(false)
+    expect(calculateCostUsd('ollama/gpt-oss:120b-cloud', M, 0)).toBeCloseTo(3, 9)
+  })
+
+  it('prices a local model at $0 instead of the default rate', () => {
+    expect(calculateCostUsd('ollama/llama3.2', M, M)).toBe(0)
+    expect(calculateCostUsd('llama3.2', M, M, 'ollama')).toBe(0)
+    expect(calculateCostUsd('llama3.2', M, M)).toBe(18)
+  })
+
+  it('prices a native turn on Ollama at an exact $0, flagged local', () => {
+    const usage = { inputTokens: M, outputTokens: M }
+    expect(priceTurn('llama3.2', usage, 'ollama')).toEqual({
+      costUsd: 0,
+      estimated: false,
+      local: true,
+    })
+    expect(priceTurn('llama3.2', usage, 'openrouter')).toEqual({ costUsd: null, estimated: true })
   })
 })
 

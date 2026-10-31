@@ -5,7 +5,7 @@
 // kill-switch (cost events crossing a cap budget) aborts mid-run exactly like
 // any executor run.
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -138,12 +138,20 @@ const chatFrame = (
   payload: { runId: 'run-1', sessionKey, state, ...extra },
 })
 
+let prevStateDir: string | undefined
+
 beforeEach(() => {
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-ocdispatch-'))
   db = createDb(path.join(dir, 'test.db'))
+  // The run is priced at the agent's model from openclaw.json; point that read at
+  // the fixture dir so this machine's own OpenClaw config never leaks in.
+  prevStateDir = process.env['OPENCLAW_STATE_DIR']
+  process.env['OPENCLAW_STATE_DIR'] = dir
 })
 
 afterEach(() => {
+  if (prevStateDir === undefined) delete process.env['OPENCLAW_STATE_DIR']
+  else process.env['OPENCLAW_STATE_DIR'] = prevStateDir
   // This suite OWNS its connection (createDb at a fixture path), so resetDb()
   // cannot reach it: that only evicts the getDb() memo. Windows refuses to
   // remove a directory that still holds an open file, so close it before the
@@ -506,11 +514,11 @@ describe('dispatchConnectedSubstrate', () => {
     expect(listExecutions(db, taskId)[0]).toMatchObject({ costUsd: 2.5, costSource: 'reported' })
   })
 
-  it('a usage-but-NULL-cost incremental `cost` event does NOT suppress the terminal estimate', async () => {
+  it('a usage-but-NULL-cost incremental `cost` event is priced from its tokens, so the cap engages', async () => {
     // A future Gateway that streams usage-but-null-cost `cost` events (the Codex/Hermes
-    // shape) must NOT flip
-    // `recordedAnyCost` and zero out the run's spend — the terminal text-estimate must
-    // still fire so the cap engages. The injected adapter models that future frame.
+    // shape) records $0 as the event lands; the run must still be charged when it
+    // settles, priced from those exact tokens (as team chat prices them), so the cap
+    // engages. The injected adapter models that future frame.
     const agentRow = seedAgent()
     const run = seedRoutine(agentRow.id)
     const taskId = seedTask()
@@ -528,7 +536,7 @@ describe('dispatchConnectedSubstrate', () => {
       makeAdapter: () => ({
         start: async () => {
           // A usage-but-NULL-cost incremental event (records $0), then a done with NO
-          // costUsd → the dispatcher must STILL estimate spend from the produced text.
+          // costUsd → the dispatcher must STILL charge the run, from those tokens.
           queue.push({
             kind: 'cost',
             runId: 'r',
@@ -536,7 +544,7 @@ describe('dispatchConnectedSubstrate', () => {
             ts: 1,
             seq: 1,
             costUsd: null,
-            usage: { inputTokens: 10, outputTokens: 10 },
+            usage: { inputTokens: 100_000, outputTokens: 100_000 },
             model: 'gw',
           } as RuntimeEvent)
           queue.push({
@@ -557,8 +565,107 @@ describe('dispatchConnectedSubstrate', () => {
 
     expect(outcome.ok).toBe(true)
     const budget = getBudget(db, 'agent', agentRow.id)
-    expect(budget?.spentUsdCents).toBeGreaterThan(0) // the estimate was NOT suppressed by the null-cost event
-    expect(budget?.status).toBe('paused') // the 1¢ cap engaged on the estimate
+    // 100k tokens each way at the default $3/$15 per million: $1.80.
+    expect(budget?.spentUsdCents).toBe(180)
+    expect(budget?.status).toBe('paused') // the 1¢ cap engaged on the token estimate
+    const [row] = listExecutions(db, taskId)
+    expect(row?.costSource).toBe('token-estimate')
+    expect(row?.inputTokens).toBe(100_000)
+  })
+
+  it('charges a FAILED run its estimate, so a failing routine still counts against the budget', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1, mode: 'cap' })
+    const sessionKey = `agent:gw-${agentRow.id}:clawboo-routine-${run.id}`
+
+    const dispatchPromise = dispatchConnectedSubstrate({
+      db,
+      run,
+      template: { ...TEMPLATE, description: 'y'.repeat(40_000) },
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    client.emit(chatFrame(sessionKey, 'error', { errorMessage: 'agent blew up' }))
+    const outcome = await dispatchPromise
+
+    expect(outcome.ok).toBe(false)
+    const [row] = listExecutions(db, taskId)
+    expect(row?.status).toBe('failed')
+    expect(row?.costSource).toBe('char-estimate')
+    expect(row?.costUsd ?? 0).toBeGreaterThan(0)
+    const budget = getBudget(db, 'agent', agentRow.id)
+    expect(budget?.spentUsdCents ?? 0).toBeGreaterThan(0)
+    expect(budget?.status).toBe('paused') // the next fire is refused at pre-flight
+    expect(
+      getComments(db, taskId).some((c) => c.body.startsWith('Budget cap reached (agent)')),
+    ).toBe(true)
+  })
+
+  it('charges a run the watchdog timed out', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+
+    await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+      watchdogMs: 25,
+    })
+
+    const [row] = listExecutions(db, taskId)
+    expect(row?.status).toBe('timed_out')
+    expect(row?.costSource).toBe('char-estimate')
+    expect(row?.costUsd ?? 0).toBeGreaterThan(0)
+  })
+
+  it('charges nothing for an agent whose openclaw.json model is a local Ollama one', async () => {
+    const agentRow = seedAgent()
+    writeFileSync(
+      path.join(dir, 'openclaw.json'),
+      JSON.stringify({
+        agents: {
+          defaults: { model: { primary: 'anthropic/claude-sonnet-4-6' } },
+          list: [{ id: `gw-${agentRow.id}`, model: 'ollama/llama3.2' }],
+        },
+      }),
+    )
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1, mode: 'cap' })
+    const sessionKey = `agent:gw-${agentRow.id}:clawboo-routine-${run.id}`
+
+    const dispatchPromise = dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    client.emit(
+      chatFrame(sessionKey, 'final', {
+        message: { role: 'assistant', content: [{ type: 'text', text: 'z'.repeat(40_000) }] },
+      }),
+    )
+    const outcome = await dispatchPromise
+
+    expect(outcome.ok).toBe(true)
+    expect(listExecutions(db, taskId)[0]).toMatchObject({ costUsd: 0, costSource: 'local' })
+    const budget = getBudget(db, 'agent', agentRow.id)
+    expect(budget?.spentUsdCents ?? 0).toBe(0)
+    expect(budget?.status).not.toBe('paused')
   })
 
   it('surfaces an UNVERIFIED connected-substrate completion (comment + audit), not a silent done', async () => {

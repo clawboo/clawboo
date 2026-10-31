@@ -75,7 +75,7 @@ The Routines dialog sets who a routine goes to, its schedule, its name and its i
 A routine whose fire fails stops itself. Its dialog shows **Stopped after a failed run.** with the error, and it does not run again until you press **Resume**. Common causes:
 
 - an agent routine's run is refused before it starts, because a hard-cap budget for the agent, the team or the task's delegation tree is already paused (team routines are not checked);
-- a circuit breaker or a hard cap stopped an agent routine's run (a Claude Code or Codex run that crosses a hard cap as it ends counts too);
+- a circuit breaker or a hard cap stopped an agent routine's run while it was still working (a Claude Code or Codex run whose last cost report crosses a hard cap keeps its result, and the paused budget refuses the routine's next run instead);
 - the run itself failed or timed out;
 - the OpenClaw Gateway was not connected (OpenClaw agents only);
 - the agent was removed, or the team was deleted or archived.

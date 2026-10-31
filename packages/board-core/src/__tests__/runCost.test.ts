@@ -59,7 +59,37 @@ describe('summarizeRunCost: a task costs the sum of its runs', () => {
     expect(summarizeRunCost([], null)).toEqual({ usd: null, estimated: false })
   })
 
-  it('names the three sources, most trustworthy first', () => {
-    expect(RUN_COST_SOURCES).toEqual(['reported', 'token-estimate', 'char-estimate'])
+  it('vouches for a run on a local model and marks a task that only ran locally as free', () => {
+    expect(summarizeRunCost([{ costUsd: 0, costSource: 'local' }])).toEqual({
+      usd: 0,
+      estimated: false,
+      local: true,
+    })
+  })
+
+  it('is not free when any counted run was paid for', () => {
+    expect(
+      summarizeRunCost([
+        { costUsd: 0, costSource: 'local' },
+        { costUsd: 0.25, costSource: 'reported' },
+      ]),
+    ).toEqual({ usd: 0.25, estimated: false })
+    expect(
+      summarizeRunCost([
+        { costUsd: 0, costSource: 'local' },
+        { costUsd: 0.1, costSource: 'char-estimate' },
+      ]),
+    ).toEqual({ usd: 0.1, estimated: true })
+  })
+
+  it('never shows a nonzero cost as free, whatever its source says', () => {
+    expect(summarizeRunCost([{ costUsd: 1, costSource: 'local' }])).toEqual({
+      usd: 1,
+      estimated: false,
+    })
+  })
+
+  it('names the four sources, most trustworthy first', () => {
+    expect(RUN_COST_SOURCES).toEqual(['reported', 'local', 'token-estimate', 'char-estimate'])
   })
 })

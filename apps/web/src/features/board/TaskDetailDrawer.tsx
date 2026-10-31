@@ -653,7 +653,10 @@ export function TaskDetailDrawer({
                   <PropRow label="Cost">
                     <span className="tabular-nums">
                       {runCost?.usd != null
-                        ? formatRunCost(runCost.usd, runCost.estimated, { precise: true })
+                        ? formatRunCost(runCost.usd, runCost.estimated, {
+                            precise: true,
+                            local: runCost.local,
+                          })
                         : 'None recorded'}
                     </span>
                   </PropRow>
@@ -834,9 +837,11 @@ export function TaskDetailDrawer({
                             <span className="tabular-nums text-muted-foreground">
                               {' '}
                               ·{' '}
-                              {formatRunCost(ex.costUsd, ex.costSource !== 'reported', {
-                                precise: true,
-                              })}
+                              {formatRunCost(
+                                ex.costUsd,
+                                ex.costSource !== 'reported' && ex.costSource !== 'local',
+                                { precise: true, local: ex.costSource === 'local' },
+                              )}
                             </span>
                           )}
                           {(ex.inputTokens != null || ex.outputTokens != null) && (

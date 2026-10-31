@@ -65,12 +65,15 @@ import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
+import { openclawAgentModel } from '../openclawAgentModel'
 import { connectedAgentKey, connectedAgentMutex } from '../routines/openclawDispatch'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
+import { estimateTokensFromChars } from '../runtimes/estimateCost'
 import { createRunCostTally } from '../runtimes/runCostTally'
+import { recordRunTokens } from '../runTokenLog'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
@@ -207,6 +210,18 @@ export function parseCodingModelConfig(
 
 /** The "mission" budget scope = the root of the delegation tree (a top-level task
  *  is its own mission). Mirrors executorRunner's private helper. */
+/** The model a Native turn is priced at when it reported no cost: its configured
+ *  model, written `ollama/<model>` for the Ollama provider so a local run stays
+ *  free (`isLocalModel`). Null when the agent has no stored config. */
+export function nativeCostModel(
+  cfg: { primaryProvider: string; primaryModel: string } | null,
+): string | null {
+  if (!cfg?.primaryModel) return null
+  return cfg.primaryProvider.trim().toLowerCase() === 'ollama'
+    ? `ollama/${cfg.primaryModel}`
+    : cfg.primaryModel
+}
+
 function missionRootId(db: ClawbooDb, taskId: string): string {
   const ancestors = getAncestors(db, taskId)
   if (ancestors.length === 0) return taskId
@@ -403,14 +418,27 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       if (costSettled) return
       costSettled = true
       try {
+        const inputChars = obs.contextChars + obs.message.length
         const cost = costTally.settle({
           model: obs.model,
-          inputChars: obs.contextChars + obs.message.length,
+          inputChars,
           outputChars: outputText.length,
         })
         // Only the part no cost event already charged. The run is at its end, so a
         // cap this crosses has no run left to stop.
         if (cost.unbilledUsd > 0) recordSpendForRun(sessionKey, agentId, cost.unbilledUsd)
+        // Listed in Tokens Used (an OpenClaw run is listed from its own transcript
+        // instead), with tokens guessed from the text when the run reported none.
+        recordRunTokens(db, {
+          agentId,
+          runtime: obs.runtime,
+          model: costTally.model() ?? obs.model,
+          inputTokens: cost.inputTokens ?? estimateTokensFromChars(inputChars),
+          outputTokens: cost.outputTokens ?? estimateTokensFromChars(outputText.length),
+          costUsd: cost.costUsd,
+          runId: obs.execId,
+          sessionKey,
+        })
         if (obs.execId) {
           recordExecutionUsage(db, obs.execId, {
             costUsd: cost.costUsd,
@@ -833,13 +861,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             | undefined
           const resolvedRuntime = row?.runtime ?? null
           // The model a cost estimate is priced at when the run's cost events name
-          // none. Native names its real model on every cost event, and an OpenClaw
-          // agent's model lives in the Gateway, so only a coding runtime's configured
-          // model is read. Computed here so the test seam gets it too.
+          // none. Native names its real model on every cost event, but a turn that
+          // fails before one is priced at its configured model (an Ollama one as
+          // `ollama/…`, so it stays free); an OpenClaw agent's model is read from
+          // openclaw.json (its Gateway reports no usage, and an `ollama/…` model must
+          // price at $0); a coding runtime's comes from its own config. Computed here
+          // so the test seam gets it too.
           const configuredModel =
-            resolvedRuntime && resolvedRuntime !== NATIVE_RUNTIME && resolvedRuntime !== 'openclaw'
-              ? (parseCodingModelConfig(row?.execConfig ?? null)?.model ?? null)
-              : null
+            resolvedRuntime === 'openclaw'
+              ? openclawAgentModel(row?.gatewayId ?? row?.sourceAgentId ?? null)
+              : resolvedRuntime === NATIVE_RUNTIME
+                ? nativeCostModel(loadAgentConfig(db, targetAgentId))
+                : resolvedRuntime
+                  ? (parseCodingModelConfig(row?.execConfig ?? null)?.model ?? null)
+                  : null
 
           let adapter: RuntimeAdapter
           let homeKind = 'ephemeral'

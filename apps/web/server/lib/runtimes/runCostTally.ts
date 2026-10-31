@@ -4,12 +4,14 @@
 //
 // Order of preference: USD the runtime reported, then exact usage tokens priced
 // at the model the events name (or the agent's configured model), then a guess
-// from character counts. `unbilledUsd` is the part no cost event already charged
-// to the budgets, so the caller charges only that much at the terminal.
+// from character counts. A run on a local Ollama model is free, never guessed.
+// `unbilledUsd` is the part no cost event already charged to the budgets, so the
+// caller charges only that much at the terminal.
 
 import type { RunCostSource } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
+import { isLocalModel } from '../costUtils'
 import { estimateRunCostUsd, estimateRunCostUsdFromUsage } from './estimateCost'
 
 export interface SettledRunCost {
@@ -32,6 +34,8 @@ export interface RunCostFallback {
 export interface RunCostTally {
   observe(ev: RuntimeEvent): void
   settle(fallback: RunCostFallback): SettledRunCost
+  /** The model the run's cost events named last, or null when none did. */
+  model(): string | null
 }
 
 export function createRunCostTally(): RunCostTally {
@@ -39,6 +43,8 @@ export function createRunCostTally(): RunCostTally {
   let doneUsd = 0
   let sawReported = false
   let sawCostEvent = false
+  // Every cost event so far came from a local model (vacuously true before any).
+  let allLocal = true
   let flaggedEstimate = false
   let unpricedIn = 0
   let unpricedOut = 0
@@ -51,6 +57,7 @@ export function createRunCostTally(): RunCostTally {
     observe(ev) {
       if (ev.kind === 'cost') {
         sawCostEvent = true
+        if (!ev.local) allLocal = false
         if (ev.model) model = ev.model
         const usage = ev.usage
         if (usage && usage.inputTokens + usage.outputTokens > 0) {
@@ -81,6 +88,11 @@ export function createRunCostTally(): RunCostTally {
       const tokens = sawTokens
         ? { inputTokens: tokensIn, outputTokens: tokensOut }
         : { inputTokens: null, outputTokens: null }
+      // Free when every cost event said it ran locally, or when nothing priced the
+      // run and the model it ran on is a local one (OpenClaw on Ollama).
+      if ((sawCostEvent && allLocal) || (!sawReported && isLocalModel(model ?? fb.model))) {
+        return { costUsd: 0, costSource: 'local', ...tokens, unbilledUsd: 0 }
+      }
       if (unpricedIn + unpricedOut > 0) {
         const est = estimateRunCostUsdFromUsage({
           model: model ?? fb.model,
@@ -115,5 +127,7 @@ export function createRunCostTally(): RunCostTally {
         unbilledUsd: usd,
       }
     },
+
+    model: () => model,
   }
 }

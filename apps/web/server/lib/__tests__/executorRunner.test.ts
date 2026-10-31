@@ -1198,7 +1198,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     }).id
   }
 
-  it('estimates a CODEX run from reported usage so the cap engages (real adapter), then blocks the next dispatch', async () => {
+  it('estimates a CODEX run from reported usage so the cap engages (real adapter), keeps its finished result, then blocks the next dispatch', async () => {
     // A 1-cent team cap; Codex reports usage but NO USD → the executor must estimate.
     setBudgetLimit(getDb(), {
       scope: 'team',
@@ -1230,10 +1230,23 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     })
     expect(r1.ok).toBe(true)
     if (!r1.ok) return
-    expect(r1.doneReason).toBe('aborted') // the kill-switch fired on the estimated spend
-    expect(r1.status).toBe('todo')
+    // Codex's one cost report came with its done: the run had finished, so the cap
+    // it crossed does not throw the paid-for result away.
+    expect(r1.doneReason).toBe('success')
+    expect(r1.summary).toBe('did it')
     const db = getDb()
-    expect(getTask(db, taskId)?.status).toBe('todo') // released, retryable
+    expect(getTask(db, taskId)?.status).not.toBe('todo') // not released for a paid retry
+    const [exec] = listExecutions(db, taskId)
+    expect(exec?.status).toBe('succeeded')
+    expect(exec?.costSource).toBe('token-estimate')
+    const comments = getComments(db, taskId).map((c) => c.body)
+    expect(comments).toContain('did it')
+    expect(
+      comments.some((c) =>
+        c.startsWith("Budget cap reached (team) by this run's final cost report"),
+      ),
+    ).toBe(true)
+    expect(listGovernanceAudit(db, { eventType: 'budget' })).toHaveLength(1)
     const b = getBudget(db, 'team', 'team-1')
     expect(b?.status).toBe('paused') // the cap engaged from estimated usage
     expect(b?.spentUsdCents ?? 0).toBeGreaterThan(0) // spend is no longer invisible
@@ -1266,7 +1279,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     expect(getTask(getDb(), taskId2)?.status).toBe('todo') // never claimed
   })
 
-  it('estimates a HERMES run from reported usage so the cap engages (real adapter)', async () => {
+  it('estimates a HERMES run from reported usage so the cap engages (real adapter), keeping its result', async () => {
     setBudgetLimit(getDb(), {
       scope: 'team',
       scopeId: 'team-1',
@@ -1297,9 +1310,9 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.doneReason).toBe('aborted')
+    expect(r.doneReason).toBe('success')
     const db = getDb()
-    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]?.status).toBe('succeeded')
     expect(getBudget(db, 'team', 'team-1')?.status).toBe('paused')
   })
 

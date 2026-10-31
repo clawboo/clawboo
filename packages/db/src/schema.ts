@@ -474,8 +474,8 @@ export const executionProcesses = sqliteTable(
     cacheRead: integer('cache_read'),
     cacheWrite: integer('cache_write'),
     costUsd: real('cost_usd'),
-    // How cost_usd was obtained: 'reported' | 'token-estimate' | 'char-estimate' (see
-    // RUN_COST_SOURCES). Null when no cost is recorded, or when it predates this column.
+    // How cost_usd was obtained: 'reported' | 'local' | 'token-estimate' | 'char-estimate'
+    // (see RUN_COST_SOURCES). Null when no cost is recorded, or when it predates this column.
     costSource: text('cost_source'),
     summary: text('summary'),
     runReason: text('run_reason'),

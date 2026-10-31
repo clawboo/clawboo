@@ -52,6 +52,7 @@ import {
   type Capabilities,
   type RunHandle,
   type RuntimeAdapter,
+  type RuntimeEvent,
 } from '@clawboo/executor'
 import { assembleTiers } from '@clawboo/executor/tiers'
 import {
@@ -97,9 +98,16 @@ import {
   type SpanCtx,
 } from './obs'
 import { markToolCallLogged } from './agentSource/loggedToolCalls'
+import { isLocalModel } from './costUtils'
+import { recordRunTokens } from './runTokenLog'
 import type { RuntimeRunContext } from './runtimes'
-import { estimateRunCostUsdFromUsage } from './runtimes/estimateCost'
+import {
+  estimateRunCostUsd,
+  estimateRunCostUsdFromUsage,
+  estimateTokensFromChars,
+} from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
+import { loadAgentConfig } from './runtimes/native/agentConfigStore'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
 import {
@@ -139,6 +147,31 @@ export const homeDispatchMutex = new KeyedMutex()
  *  can't acquire within this window is stuck behind a wedged holder — reject with
  *  a typed error (surfaced as a run-start failure → the delegator is told)
  *  instead of freezing this agent's chat/1:1/routines forever. */
+/** How long a run whose cost report just crossed a hard cap has to reach its
+ *  terminal. Claude Code and Codex send their one cost report right beside their
+ *  `done`, so a run that has finished lands inside this window and keeps its
+ *  result; one that keeps working is stopped at its next event, and one that goes
+ *  quiet is aborted when the window closes. */
+export const BUDGET_STOP_GRACE_MS = 5_000
+
+/** The budget a run can be stopped by: a budget scope, or its own per-node ceiling. */
+type BudgetStopScope = 'agent' | 'mission' | 'team' | 'node'
+
+/** Whether an event means the run is still working rather than ending. A fatal
+ *  error is a run ending; a non-fatal one (a policy denial) is a run carrying on. */
+function isMoreWork(ev: RuntimeEvent): boolean {
+  switch (ev.kind) {
+    case 'done':
+      return false
+    case 'error':
+      return !ev.fatal
+    case 'status':
+      return ev.phase === 'thinking' || ev.phase === 'running'
+    default:
+      return true
+  }
+}
+
 export const HOME_MUTEX_ACQUIRE_MS =
   Number(process.env['CLAWBOO_HOME_MUTEX_ACQUIRE_MS']) || 10 * 60_000
 
@@ -164,6 +197,8 @@ export interface RunTaskInput {
   /** Per-node (this run's) cost ceiling in cents — a hard cap independent of any
    *  budget row. Enforced inside the cost loop. */
   maxNodeCents?: number
+  /** Override BUDGET_STOP_GRACE_MS (tests). */
+  budgetStopGraceMs?: number
   /** Tool-loop circuit-breaker overrides. Falls back to
    *  BREAKER_DEFAULTS. The cross-runtime backstop that halts a no-progress /
    *  thrashing loop, composing with — never double-aborting — the budget
@@ -820,8 +855,12 @@ async function runTaskInner(
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
   }
   const adapter = input.makeAdapter(ctx)
-  const startRun = (sessionKey: string, context: string): Promise<RunHandle> =>
-    adapter.start(
+  // What the current pass was sent: the input side of its spend estimate when the
+  // runtime reports no cost.
+  let passPromptChars = 0
+  const startRun = (sessionKey: string, context: string): Promise<RunHandle> => {
+    passPromptChars = task.title.length + context.length
+    return adapter.start(
       { taskId, teamId: task.teamId },
       {
         agentId: assigneeAgentId,
@@ -832,6 +871,7 @@ async function runTaskInner(
         childToolBlocklist: ['sessions_send'], // children never fan out further
       },
     )
+  }
   let run = await startRun(baseSessionKey, assemblePrompt(''))
   pointSteerAt(claimState, taskId, adapter, run)
   // The run started with the digest in its context — mark the RENDERED rows
@@ -875,6 +915,15 @@ async function runTaskInner(
   let runInputTokens = 0
   let runOutputTokens = 0
   let runSawUsage = false
+  // True once any part of `costUsd` was estimated from characters (a pass that
+  // reported no spend), and once any part was a paid model rather than a local one.
+  let runCharEstimated = false
+  let runPaid = false
+  // Tokens guessed from characters for passes that reported none (Tokens Used only).
+  let runGuessedInputTokens = 0
+  let runGuessedOutputTokens = 0
+  // The model the run's cost events named last, for Tokens Used.
+  let runModel: string | null = null
   let doneReason: 'success' | 'max_turns' | 'aborted' | 'error' = 'error'
 
   // Budget kill-switch: on every cost event, atomically record spend against the
@@ -885,7 +934,19 @@ async function runTaskInner(
   // its 80% / 100% crossings (below) but never auto-pauses.
   const missionId = missionRootId(db, taskId)
   let nodeSpentCents = 0
-  let stopForBudget: 'agent' | 'mission' | 'team' | 'node' | null = null
+  let stopForBudget: BudgetStopScope | null = null
+  // A cap a cost report just crossed. The run stops at its next sign of more work;
+  // if what comes next is its terminal, that report was its last (see
+  // BUDGET_STOP_GRACE_MS) and the finished result is kept.
+  let pendingBudgetStop: BudgetStopScope | null = null
+  let budgetGrace: ReturnType<typeof setTimeout> | null = null
+  const clearBudgetGrace = (): void => {
+    if (budgetGrace) clearTimeout(budgetGrace)
+    budgetGrace = null
+  }
+  // A cap a FINISHED run crossed with its final cost report: the result stands,
+  // and the paused budget refuses the next run at pre-flight.
+  let capReachedAtEnd: BudgetStopScope | null = null
 
   // Emit one governance warning the moment a budget crosses a threshold (fires once
   // per crossing — `crossed` is non-'none' only on the tipping delta). Applies to
@@ -916,6 +977,35 @@ async function runTaskInner(
         limitUsdCents: r.limitUsdCents,
       },
     })
+  }
+
+  /** Charge `usd` to the agent, mission and team budgets (and the per-node
+   *  ceiling); returns the cap it tipped into pause, if any. */
+  const chargeBudgets = (usd: number): BudgetStopScope | null => {
+    // The per-node cap accumulates integer cents (rounded); the budget ledger
+    // takes FRACTIONAL cents so sub-cent events are carried, not lost.
+    nodeSpentCents += usdToCents(usd)
+    const ledgerCents = usdToFractionalCents(usd)
+    const a = recordSpend(db, 'agent', assigneeAgentId, ledgerCents)
+    const m = missionId ? recordSpend(db, 'mission', missionId, ledgerCents) : null
+    const t = task.teamId ? recordSpend(db, 'team', task.teamId, ledgerCents) : null
+    // Track-and-warn: warn on any crossing first (cap + warn budgets alike). A
+    // warn budget never reads 'paused', so the kill-switch below skips it.
+    emitBudgetWarning('agent', a)
+    if (missionId) emitBudgetWarning('mission', m)
+    if (task.teamId) emitBudgetWarning('team', t)
+    // Only a CAP budget auto-pauses. A warn budget is clamped to never read
+    // 'paused' at the DB layer; the explicit `mode === 'cap'` here is belt-and-
+    // suspenders so a warn budget can never pause even if that clamp regressed.
+    if (a?.status === 'paused' && a.mode === 'cap') return 'agent'
+    if (m?.status === 'paused' && m.mode === 'cap') return 'mission'
+    if (t?.status === 'paused' && t.mode === 'cap') return 'team'
+    if (
+      input.maxNodeCents != null &&
+      !checkCostCap({ nodeCents: nodeSpentCents, max: input.maxNodeCents }).ok
+    )
+      return 'node'
+    return null
   }
 
   // Tool-loop circuit breakers: a deterministic backstop that halts a run making
@@ -983,15 +1073,27 @@ async function runTaskInner(
         }
       },
     })) {
+      // A cap was crossed by the last cost report. More work means more spend, so
+      // the run stops here; its terminal instead means that report was its last.
+      if (pendingBudgetStop && isMoreWork(ev)) {
+        stopForBudget = pendingBudgetStop
+        pendingBudgetStop = null
+        clearBudgetGrace()
+        await adapter.abort(run)
+        break
+      }
       if (ev.kind === 'text-delta') {
         if (ev.channel !== 'reasoning') lastText += ev.text
       } else if (ev.kind === 'cost') {
         // A runtime that reports usage but no USD (Codex / Hermes / unpinned-native)
         // emits costUsd:null + estimated. Estimate spend from the EXACT token usage ×
         // the model rate so the budget cap still engages; a real costUsd is used as-is
-        // (Claude Code / pinned-native — no regression). No usage at all ⇒ 0.
-        const usd =
-          ev.costUsd != null
+        // (Claude Code / pinned-native, no regression). No usage at all ⇒ 0. A model
+        // a local Ollama served costs nothing, and that $0 is exact.
+        const local = ev.local === true || (ev.costUsd == null && isLocalModel(ev.model))
+        const usd = local
+          ? 0
+          : ev.costUsd != null
             ? ev.costUsd
             : ev.usage
               ? estimateRunCostUsdFromUsage({
@@ -1000,7 +1102,9 @@ async function runTaskInner(
                   outputTokens: ev.usage.outputTokens,
                 })
               : 0
-        const costEstimated = ev.costUsd == null
+        const costEstimated = ev.costUsd == null && !local
+        if (!local) runPaid = true
+        if (ev.model) runModel = ev.model
         sawSpend = true
         // Summed, not replaced: native reports a per-turn delta, and a rotated run
         // pays for every pass.
@@ -1028,38 +1132,21 @@ async function runTaskInner(
             outputTokens,
             model: ev.model,
             estimated: costEstimated,
+            ...(local ? { local: true } : {}),
           },
         })
-        {
-          // The per-node cap accumulates integer cents (rounded); the budget
-          // ledger takes FRACTIONAL cents so sub-cent events are carried, not lost.
-          nodeSpentCents += usdToCents(usd)
-          const ledgerCents = usdToFractionalCents(usd)
-          const a = recordSpend(db, 'agent', assigneeAgentId, ledgerCents)
-          const m = missionId ? recordSpend(db, 'mission', missionId, ledgerCents) : null
-          const t = task.teamId ? recordSpend(db, 'team', task.teamId, ledgerCents) : null
-          // Track-and-warn: warn on any crossing first (cap + warn budgets alike). A
-          // warn budget never reads 'paused', so the kill-switch below skips it.
-          emitBudgetWarning('agent', a)
-          if (missionId) emitBudgetWarning('mission', m)
-          if (task.teamId) emitBudgetWarning('team', t)
-          // Only a CAP budget auto-pauses. A warn budget is clamped to never read
-          // 'paused' at the DB layer; the explicit `mode === 'cap'` here is belt-and-
-          // suspenders so a warn budget can never pause even if that clamp regressed.
-          if (a?.status === 'paused' && a.mode === 'cap') stopForBudget = 'agent'
-          else if (m?.status === 'paused' && m.mode === 'cap') stopForBudget = 'mission'
-          else if (t?.status === 'paused' && t.mode === 'cap') stopForBudget = 'team'
-          else if (
-            input.maxNodeCents != null &&
-            !checkCostCap({ nodeCents: nodeSpentCents, max: input.maxNodeCents }).ok
-          )
-            stopForBudget = 'node'
-          if (stopForBudget) {
-            await adapter.abort(run)
-            break
-          }
+        // The kill-switch: a cap this crosses stops the run at its next sign of
+        // more work (see the top of this loop), or lets a run that has finished
+        // keep its result when this was its final report.
+        const crossed = chargeBudgets(usd)
+        if (crossed && !pendingBudgetStop) {
+          pendingBudgetStop = crossed
+          budgetGrace = setTimeout(() => {
+            void adapter.abort(run).catch(() => undefined)
+          }, input.budgetStopGraceMs ?? BUDGET_STOP_GRACE_MS)
+          budgetGrace.unref?.()
         }
-        if (breaker && !stopForBudget) {
+        if (breaker && !stopForBudget && !pendingBudgetStop) {
           const t = stepBreaker(breaker, {
             kind: 'cost',
             ts: ev.ts,
@@ -1172,7 +1259,7 @@ async function runTaskInner(
         // Repeat policy-denial — keyed on the TYPED error code only (never the
         // message prose). Reachable when a runtime surfaces a broker denial as a
         // non-fatal `policy_denied` error event (the native harness does).
-        if (breaker && !stopForBudget && denial) {
+        if (breaker && !stopForBudget && !pendingBudgetStop && denial) {
           const t = stepBreaker(breaker, {
             kind: 'policy-denied',
             ts: ev.ts,
@@ -1188,11 +1275,23 @@ async function runTaskInner(
         sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
+        // A cap the final cost report crossed. An abort here is the grace window's
+        // (or the runtime giving up), so it is the stop; any other terminal means
+        // the run finished, and its result is kept.
+        if (pendingBudgetStop) {
+          clearBudgetGrace()
+          if (ev.reason === 'aborted') stopForBudget = pendingBudgetStop
+          else capReachedAtEnd = pendingBudgetStop
+          pendingBudgetStop = null
+        }
         // A done's cost repeats (Claude Code) or totals (native) the pass's cost
-        // events, so it counts only for a pass that had none.
+        // events, so it counts only for a pass that had none, and is charged then.
         if (ev.costUsd != null && !passSawCost) {
           sawSpend = true
           costUsd = (costUsd ?? 0) + ev.costUsd
+          runPaid = true
+          const crossed = chargeBudgets(ev.costUsd)
+          if (crossed && ev.reason !== 'aborted' && !stopForBudget) capReachedAtEnd ??= crossed
         }
         if (ev.usage) {
           inputTokens = ev.usage.inputTokens
@@ -1201,12 +1300,54 @@ async function runTaskInner(
         break
       }
     }
+    // The stream ended with a cap stop still pending and no terminal: it stopped.
+    if (pendingBudgetStop) {
+      stopForBudget = pendingBudgetStop
+      pendingBudgetStop = null
+    }
+    clearBudgetGrace()
 
-    // A pass that finished its stream without reporting spend means the budget
-    // ledger under-counts this run. Codex and Hermes emit a cost event only
-    // `if (ev.usage)`, so a change in a CLI's output format stops spend reaching
-    // the ledger without failing anything. An aborted pass is excluded: it may
-    // legitimately not have billed.
+    // A pass that reported no spend still cost something, so it is priced the way
+    // team chat prices such a run: from the text it was sent and produced, at the
+    // agent's configured model (a local Ollama model is free). Codex and Hermes
+    // emit a cost event only `if (ev.usage)`, so a change in a CLI's output format
+    // lands here too, and the warning below keeps that visible. An aborted pass is
+    // charged but not warned about: it may legitimately not have reported.
+    if (!sawSpend) {
+      const outputChars = (summary || lastText).length
+      // A Native run started with no model runs on the agent's configured one, so
+      // a Native agent on Ollama that failed before reporting stays free.
+      const nativeConfig =
+        input.model == null && runtimeId === 'clawboo-native'
+          ? loadAgentConfig(db, assigneeAgentId)
+          : null
+      const pricedModel = input.model ?? nativeConfig?.primaryModel ?? null
+      const local = isLocalModel(pricedModel, nativeConfig?.primaryProvider)
+      const usd = local
+        ? 0
+        : estimateRunCostUsd({
+            model: pricedModel,
+            inputChars: passPromptChars,
+            outputChars,
+          })
+      costUsd = (costUsd ?? 0) + usd
+      runGuessedInputTokens += estimateTokensFromChars(passPromptChars)
+      runGuessedOutputTokens += estimateTokensFromChars(outputChars)
+      if (!local) {
+        runCharEstimated = true
+        runPaid = true
+      }
+      const crossed = usd > 0 ? chargeBudgets(usd) : null
+      // A pass that ended on its own crossed the cap with its last spend: keep it.
+      if (
+        crossed &&
+        !stopForBudget &&
+        !stopForBreaker &&
+        !stopForCancel &&
+        doneReason !== 'aborted'
+      )
+        capReachedAtEnd ??= crossed
+    }
     if (!sawSpend && doneReason !== 'aborted') {
       logStructured({
         level: 'warn',
@@ -1219,8 +1360,8 @@ async function runTaskInner(
         agentId: assigneeAgentId,
         runtime: runtimeId,
         error:
-          'Run finished without reporting any usage or cost, so no spend was recorded. ' +
-          'Budgets and caps under-count for this run; suspect a runtime output-format change.',
+          'Run finished without reporting any usage or cost, so its spend was estimated from text. ' +
+          'Budgets and caps are approximate for this run; suspect a runtime output-format change.',
         output: { doneReason },
       })
     }
@@ -1246,8 +1387,9 @@ async function runTaskInner(
     // the runtime's own error rather than an empty summary.
     if (!sawTerminal && !summary && lastFatalError) summary = lastFatalError
 
-    // A budget / breaker / cancel trip ends the task here — never rotate over a stop.
-    if (stopForBudget || stopForBreaker || stopForCancel) break
+    // A budget / breaker / cancel trip ends the task here: never rotate over a stop,
+    // nor past a cap the last pass crossed.
+    if (stopForBudget || stopForBreaker || stopForCancel || capReachedAtEnd) break
 
     // Did the run exhaust its room before finishing? `max_turns` is the unambiguous
     // signal; otherwise a non-success done that crossed the token watermark. A clean
@@ -1338,13 +1480,36 @@ async function runTaskInner(
     // doneReason — `max_turns` falls into the non-success terminal → released.)
   }
 
-  // Where the run's cost came from, recorded beside it on every close below.
+  // Where the run's cost came from, recorded beside it on every close below. The
+  // least trustworthy part decides; a run with no paid part ran on a local model.
   const costSource: RunCostSource | null =
-    costUsd == null ? null : runCostEstimated ? 'token-estimate' : 'reported'
+    costUsd == null
+      ? null
+      : runCharEstimated
+        ? 'char-estimate'
+        : runCostEstimated
+          ? 'token-estimate'
+          : runPaid
+            ? 'reported'
+            : 'local'
   // The tokens recorded beside it: the run's summed totals, or, when no cost
   // event carried usage, whatever the last terminal reported.
   const ledgerInputTokens = runSawUsage ? runInputTokens : inputTokens
   const ledgerOutputTokens = runSawUsage ? runOutputTokens : outputTokens
+  // Tokens Used lists every runtime's runs, so this one goes there too, with the
+  // tokens guessed from text for any pass that reported none.
+  if (costUsd != null) {
+    recordRunTokens(db, {
+      agentId: assigneeAgentId,
+      runtime: runtimeId,
+      model: runModel ?? input.model ?? null,
+      inputTokens: (runSawUsage ? runInputTokens : 0) + runGuessedInputTokens,
+      outputTokens: (runSawUsage ? runOutputTokens : 0) + runGuessedOutputTokens,
+      costUsd,
+      runId: exec.id,
+      sessionKey: baseSessionKey,
+    })
+  }
 
   // Auto-pause: a budget (or per-node cap) tripped mid-run. Record the forensic
   // event, complete the execution as cancelled, and release the task to `todo`
@@ -1474,6 +1639,27 @@ async function runTaskInner(
       usedWorktree: cwd != null,
       degradations: degrNotes,
     }
+  }
+
+  // A cap the run's final cost report crossed. The run had already finished, so
+  // its result stands and is recorded below like any other; the cap's enforcement
+  // is the pre-flight gate refusing the next run.
+  if (capReachedAtEnd) {
+    appendAudit(db, {
+      eventType: 'budget',
+      agentId: assigneeAgentId,
+      taskId,
+      teamId: task.teamId,
+      summary: { reason: 'cap_reached_at_end', scope: capReachedAtEnd, costUsd, nodeSpentCents },
+    })
+    addComment(
+      db,
+      taskId,
+      capReachedAtEnd === 'node'
+        ? "This run's cost ceiling was reached by its final cost report. The run had already ended, so what it produced is kept."
+        : `Budget cap reached (${capReachedAtEnd}) by this run's final cost report. The run had already ended, so what it produced is kept; the next run is refused until you raise the cap or resume.`,
+      'system',
+    )
   }
 
   // Scrub the model/CLI summary BEFORE it lands in a durable board comment, the

@@ -240,8 +240,8 @@ A comment you leave on a task an OpenClaw agent is working on joins its running 
 
 OpenClaw's Gateway reports no cost to Clawboo, so every OpenClaw figure you see is Clawboo's estimate:
 
-- **Budgets** are charged an estimate for each OpenClaw turn in team chat, and for each OpenClaw Routine run that succeeds (a failed or timed-out run records nothing). It is worked out from the length of the prompt and the reply, at about four characters per token.
-- **Tokens Used** shows the token counts OpenClaw records for each turn, priced from Clawboo's rate table.
+- **Budgets** are charged an estimate for each OpenClaw turn in team chat, and for each OpenClaw Routine run, whether it succeeds, fails, times out or is stopped. It is worked out from the length of the prompt and the reply, at about four characters per token, priced at the agent's model in `openclaw.json`. An agent whose model is an `ollama/` one runs on your own Ollama, so it is charged nothing and its tasks read **free**.
+- **Tokens Used** shows the token counts OpenClaw records for each turn, priced from Clawboo's rate table. A turn your own Ollama served is priced at $0.
 - **A 1:1 chat** with an OpenClaw agent shows in **Tokens Used**, but is not charged to budgets.
 
 On a ChatGPT plan you pay a flat fee, so these figures are a budget guide, not your bill. Budgets only warn you unless you set a hard cap. See [Budgets and spend](/using/budgets-and-spend).

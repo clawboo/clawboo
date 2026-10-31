@@ -127,6 +127,7 @@ Cleanup commits a worktree's changes before removing it and keeps its branch.
 | Age at which a forgotten pending approval is expired      | 24 hours                                | `CLAWBOO_APPROVAL_TTL_MS`             | `apps/web/server/lib/approvalReaper.ts:26`                  |
 | How often that cleanup runs                               | Every hour, and once at startup         | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` | `apps/web/server/lib/approvalReaper.ts:30`                  |
 | Budget warning threshold                                  | 80% of the limit                        | No                                    | `packages/governance/src/budget/math.ts:9`                  |
+| Time a task-runner run gets to end once a hard cap trips  | 5 seconds; more work stops it sooner    | No                                    | `apps/web/server/lib/executorRunner.ts:154`                 |
 
 A budget set to hard cap pauses work at 100% of its limit; the default mode only warns. Which runs a cap can stop, and how quickly, depends on the runtime; [Budgets and spend](/using/budgets-and-spend) explains.
 

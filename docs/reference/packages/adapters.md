@@ -93,16 +93,23 @@ The adapter reports what the runtime gives it; the host fills the gaps with esti
 | ---------------------------- | ---------------------------------------------- | ------------------------------------------- | --------------------------- |
 | Claude Code                  | a `cost` event with the SDK's `total_cost_usd` | the reported USD                            | the reported USD            |
 | Codex                        | token usage with `costUsd: null`               | an estimate from the tokens                 | an estimate from the tokens |
-| Hermes                       | nothing                                        | no spend, with a `spend_unreported` warning | an estimate from characters |
+| Hermes                       | nothing                                        | an estimate from characters, plus a warning | an estimate from characters |
 | Clawboo Native, priced model | per-turn USD from Clawboo's price list         | the reported USD                            | the reported USD            |
 | Clawboo Native, other model  | token usage with `costUsd: null`               | an estimate from the tokens                 | an estimate from the tokens |
+| Clawboo Native, local Ollama | per-turn `costUsd: 0` with `local: true`       | $0, recorded as `local`                     | $0, recorded as `local`     |
 | OpenClaw                     | nothing                                        | not run (the task runner refuses OpenClaw)  | an estimate from characters |
 
-An OpenClaw routine fire skips the task runner, and a successful one records an estimate from characters.
+On both paths, a run that ends without a cost report (a Claude Code run that fails first, say) is estimated from
+characters; on the task runner it also logs a `spend_unreported` warning unless it was aborted. An OpenClaw
+routine fire skips the task runner. Every fire that runs records an estimate from characters, whether it
+succeeded, failed, timed out or was stopped, priced at the routine's model or else the agent's model in
+`openclaw.json`.
 
-A token estimate prices the tokens at the model's rate. A model Clawboo has no price for, a local Ollama model
-included, gets the shared default rate of $3 per million input tokens and $15 per million output tokens. The run
-ledger records each figure as `reported`, `token-estimate` or `char-estimate`. What users see is described in
+A token estimate prices the tokens at the model's rate. A model Clawboo has no price for gets the shared default
+rate of $3 per million input tokens and $15 per million output tokens. A model the user's own Ollama serves is
+free: a Clawboo Native turn on the Ollama provider, or an `ollama/` model id, is recorded at $0, unless its tag
+marks one of Ollama's cloud models (`-cloud` or `:cloud`). The run ledger records each figure as `reported`,
+`local`, `token-estimate` or `char-estimate`. What users see is described in
 [Budgets and spend](/using/budgets-and-spend).
 
 ## Claude Code
@@ -163,7 +170,8 @@ corrupt value falls back to `DEFAULT_AGENT_CONFIG` instead of crashing a run.
   first connected provider in `KNOWN_PROVIDERS` order. `DEFAULT_AGENT_CONFIG` (Anthropic, `claude-haiku-4-5`,
   read-only Tasks, no shell) only fills in for an agent with no stored config.
 - **Cost.** Each provider response produces a `turn` frame with that response's token delta. Clawboo prices it
-  from a short list of pinned model ids; any other model gets `costUsd: null` and is estimated by the host.
+  from a short list of pinned model ids. A turn the Ollama provider served costs an exact $0 and is flagged
+  `local` (Ollama's cloud models excepted); any other model gets `costUsd: null` and is estimated by the host.
 - **Context window.** `contextWindowTokens` is a deliberate over-estimate, because one number cannot fit every
   provider. A run that overflows a smaller window ends with a typed error instead.
 

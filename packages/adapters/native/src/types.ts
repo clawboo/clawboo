@@ -31,6 +31,8 @@ export type NativeEvent =
       usage: Usage
       costUsd: number | null
       estimated?: boolean
+      /** The turn ran on a local Ollama: `costUsd` is an exact 0, not unknown. */
+      local?: boolean
       model: string
     }
   | {

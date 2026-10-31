@@ -15,13 +15,15 @@ export function formatCostUsd(c: number): string {
 }
 
 /** A recorded run cost as the board shows it. An estimate (the runtime reported no
- *  charge, so Clawboo priced the run itself) reads `~$0.02 est.`. `precise` always
- *  shows four decimals, for the drawer. */
+ *  charge, so Clawboo priced the run itself) reads `~$0.02 est.`; work that only
+ *  ran on a local model (`local`) reads `free`. `precise` always shows four
+ *  decimals, for the drawer. */
 export function formatRunCost(
   usd: number,
   estimated: boolean,
-  opts?: { precise?: boolean },
+  opts?: { precise?: boolean; local?: boolean | undefined },
 ): string {
+  if (opts?.local) return 'free'
   const money = opts?.precise ? `$${usd.toFixed(4)}` : formatCostUsd(usd)
   return estimated ? `~${money} est.` : money
 }

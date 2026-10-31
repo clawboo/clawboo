@@ -12,6 +12,7 @@ function cost(
   usage: { inputTokens: number; outputTokens: number },
   model: string | null = null,
   estimated?: boolean,
+  local?: boolean,
 ): RuntimeEvent {
   return {
     ...base(),
@@ -20,6 +21,7 @@ function cost(
     usage,
     model,
     ...(estimated === undefined ? {} : { estimated }),
+    ...(local ? { local } : {}),
   }
 }
 
@@ -44,6 +46,62 @@ function run(events: RuntimeEvent[], fallback: RunCostFallback = NO_FALLBACK) {
   for (const ev of events) tally.observe(ev)
   return tally.settle(fallback)
 }
+
+describe('createRunCostTally: local models', () => {
+  it('settles a run whose cost events all ran on a local Ollama as free', () => {
+    const settled = run([
+      cost(0, { inputTokens: 2_000, outputTokens: 300 }, 'llama3.2', undefined, true),
+      cost(0, { inputTokens: 2_500, outputTokens: 200 }, 'llama3.2', undefined, true),
+      done(0),
+    ])
+    expect(settled).toEqual({
+      costUsd: 0,
+      costSource: 'local',
+      inputTokens: 4_500,
+      outputTokens: 500,
+      unbilledUsd: 0,
+    })
+  })
+
+  it('prices nothing for an OpenClaw run on an Ollama model that reported no usage', () => {
+    const settled = run([done()], {
+      model: 'ollama/llama3.2',
+      inputChars: 40_000,
+      outputChars: 4_000,
+    })
+    expect(settled).toEqual({
+      costUsd: 0,
+      costSource: 'local',
+      inputTokens: null,
+      outputTokens: null,
+      unbilledUsd: 0,
+    })
+  })
+
+  it('still estimates a run on an Ollama cloud model', () => {
+    const fb = { model: 'ollama/gpt-oss:120b-cloud', inputChars: 4_000, outputChars: 400 }
+    const settled = run([done()], fb)
+    expect(settled.costSource).toBe('char-estimate')
+    expect(settled.costUsd).toBeGreaterThan(0)
+  })
+
+  it('is not free when a local turn sits beside a paid one', () => {
+    const settled = run([
+      cost(0, { inputTokens: 100, outputTokens: 10 }, 'llama3.2', undefined, true),
+      cost(0.05, { inputTokens: 100, outputTokens: 10 }, 'claude-haiku-4-5'),
+      done(),
+    ])
+    expect(settled.costSource).toBe('reported')
+    expect(settled.costUsd).toBeCloseTo(0.05, 12)
+  })
+
+  it('names the model the cost events reported last', () => {
+    const tally = createRunCostTally()
+    expect(tally.model()).toBeNull()
+    tally.observe(cost(0.01, { inputTokens: 1, outputTokens: 1 }, 'claude-haiku-4-5'))
+    expect(tally.model()).toBe('claude-haiku-4-5')
+  })
+})
 
 describe('createRunCostTally', () => {
   it('prices Codex-shaped usage with no USD as a token estimate', () => {

@@ -29,7 +29,19 @@ vi.mock('../../obs/emit', () => ({
     emitted.push(input)
   },
 }))
-vi.mock('../../db', () => ({ getDb: () => ({}) }))
+// Rows the watcher writes (only its token spend reaches `insert` in these tests).
+const inserted = vi.hoisted(() => [] as Record<string, unknown>[])
+vi.mock('../../db', () => ({
+  getDb: () => ({
+    insert: () => ({
+      values: (v: Record<string, unknown>) => ({
+        run: () => {
+          inserted.push(v)
+        },
+      }),
+    }),
+  }),
+}))
 
 const { startSessionActivityWatcher } = await import('../sessionActivityWatcher')
 
@@ -79,8 +91,21 @@ function messageFrame(sessionKey: string, toolCallId: string) {
   }
 }
 
+/** A committed row carrying only the session's token snapshot. */
+function spendFrame(
+  sessionKey: string,
+  messageId: string,
+  snapshot: { model: string; modelProvider?: string; inputTokens: number; outputTokens: number },
+) {
+  return {
+    event: 'session.message',
+    payload: { sessionKey, messageId, message: { role: 'assistant', content: [] }, ...snapshot },
+  }
+}
+
 beforeEach(() => {
   emitted.length = 0
+  inserted.length = 0
   resetLoggedToolCalls()
 })
 
@@ -172,6 +197,34 @@ describe('startSessionActivityWatcher', () => {
     h.connect()
     h.frame(messageFrame('agent:doc-writer-boo:main', 'call-5'))
     expect(emitted[0]?.agentId).toBe('clawboo-row-99')
+  })
+
+  it('records a turn a local Ollama served at $0, and a paid turn at its rate', () => {
+    // OpenClaw names the provider beside a bare model id. Without it, `llama3.2`
+    // read as an unknown model and was charged the $3/$15 default.
+    const h = makeSource()
+    startSessionActivityWatcher(h.source, () => 'a1')
+    h.connect()
+    h.frame(
+      spendFrame('agent:doc-writer-boo:main', 'm-1', {
+        model: 'llama3.2',
+        modelProvider: 'ollama',
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      }),
+    )
+    h.frame(
+      spendFrame('agent:doc-writer-boo:main', 'm-2', {
+        model: 'claude-sonnet-4-6',
+        modelProvider: 'anthropic',
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      }),
+    )
+    expect(inserted.map((r) => [r['model'], r['costUsd']])).toEqual([
+      ['llama3.2', 0],
+      ['claude-sonnet-4-6', 3],
+    ])
   })
 
   it('stops listening after stop()', () => {

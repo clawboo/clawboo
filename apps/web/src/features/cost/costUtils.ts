@@ -32,6 +32,22 @@ const MODEL_PRICING: Record<string, { inputPerM: number; outputPerM: number }> =
   default: { inputPerM: 3, outputPerM: 15 },
 }
 
+// A model Ollama serves runs on hardware the user owns, so its tokens cost
+// nothing. It is named two ways: an OpenClaw ref (`ollama/llama3.2`), or a bare
+// id with the provider beside it (a native agent, an OpenClaw session snapshot).
+// Ollama's cloud models (a `-cloud` or `:cloud` tag) run on ollama.com, so they
+// are not free and keep the default rate.
+const OLLAMA_REF_PREFIX = 'ollama/'
+const OLLAMA_CLOUD_TAG = /[:-]cloud$/i
+
+export function isLocalModel(model: string | null | undefined, provider?: string | null): boolean {
+  const id = (model ?? '').trim()
+  const viaRef = id.toLowerCase().startsWith(OLLAMA_REF_PREFIX)
+  const viaProvider = provider?.trim().toLowerCase() === 'ollama'
+  if (!viaRef && !viaProvider) return false
+  return !OLLAMA_CLOUD_TAG.test(viaRef ? id.slice(OLLAMA_REF_PREFIX.length) : id)
+}
+
 function getPricing(model: string): { inputPerM: number; outputPerM: number } {
   if (MODEL_PRICING[model]) return MODEL_PRICING[model]!
   // Dotted ids (OpenRouter's anthropic/claude-haiku-4.5) match the hyphenated keys.
@@ -42,7 +58,13 @@ function getPricing(model: string): { inputPerM: number; outputPerM: number } {
   return MODEL_PRICING['default']!
 }
 
-export function calculateCostUsd(model: string, inputTokens: number, outputTokens: number): number {
+export function calculateCostUsd(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  provider?: string | null,
+): number {
+  if (isLocalModel(model, provider)) return 0
   const pricing = getPricing(model)
   const inputCost = (inputTokens / 1_000_000) * pricing.inputPerM
   const outputCost = (outputTokens / 1_000_000) * pricing.outputPerM

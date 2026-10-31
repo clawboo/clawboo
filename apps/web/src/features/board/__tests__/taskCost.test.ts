@@ -27,6 +27,11 @@ describe('formatRunCost', () => {
     expect(formatRunCost(0.0042, true, { precise: true })).toBe('~$0.0042 est.')
     expect(formatRunCost(0.12, false, { precise: true })).toBe('$0.1200')
   })
+
+  it('shows work that only ran on a local model as free, never as an estimate', () => {
+    expect(formatRunCost(0, false, { local: true })).toBe('free')
+    expect(formatRunCost(0, false, { local: true, precise: true })).toBe('free')
+  })
 })
 
 describe('runCostOf', () => {

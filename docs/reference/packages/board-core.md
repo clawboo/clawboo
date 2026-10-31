@@ -104,12 +104,15 @@ The result carries the reason, the number of trailing failed runs, and a `detail
 `summarizeRunCost(runs, taskCostUsd)` adds up what a task's runs cost, for the card and the drawer:
 
 - A run counts only when its `costUsd` is a finite number, so a run stopped before it priced itself adds nothing.
-- The total is marked as an estimate unless every counted run's `costSource` is `reported`; a missing or unknown
-  source counts as an estimate.
+- The total is marked as an estimate unless every counted run's `costSource` is `reported` or `local`; a missing
+  or unknown source counts as an estimate.
+- When every counted run is `local`, the result also carries `local: true`: the task ran only on a model the
+  user's own Ollama served, and the board shows its cost as `free`.
 - With no counted run, a positive cost stored on the task row itself is returned as an estimate; otherwise the
   cost is `null`.
 
-`RUN_COST_SOURCES` lists `reported`, `token-estimate` and `char-estimate`, most trustworthy first.
+`RUN_COST_SOURCES` lists `reported`, `local`, `token-estimate` and `char-estimate`, most trustworthy first. `local`
+is a run on a model the user's own Ollama served, so its $0 is exact.
 
 ## Test it
 

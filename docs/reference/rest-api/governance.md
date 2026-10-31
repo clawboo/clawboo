@@ -214,7 +214,7 @@ curl -X POST http://localhost:18790/api/governance/budgets/team/<team-id>/resume
 
 Reads the append-only audit log, newest first: installs, approvals, tool calls, budget events, cap hits, check results and circuit breaks. There is no write route; the server writes these rows itself. Each row's `summary` was scrubbed of secrets when it was written, and is masked again before it is sent.
 
-The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-runner runs and OpenClaw Routine fires. Team chat and 1:1 chat update the budget row without writing a warning row.
+The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-runner runs and OpenClaw Routine fires. Team chat and 1:1 chat update the budget row without writing a warning row. A task-runner run also writes a `budget` row when a hard cap stops it (`summary.reason` is `'auto_pause'`), or when its final cost report crossed a cap after the work was done (`'cap_reached_at_end'`).
 
 - **Query params**:
 

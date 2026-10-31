@@ -570,7 +570,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 ### Auto-paused: team budget reached. Raise the cap (or resume) to continue.
 
-**What it means:** a budget in hard cap mode reached its limit, so Clawboo stopped the run, sent the task back to **To do** and left this comment. The word before "budget" names the budget that ran out: agent, team, or mission (a task plus everything handed off from it). "node" means a per-run limit, which only a routine set up through the API can carry. In team chat the stopped run's task fails instead, and the chat can show "The run failed: the run was stopped by a budget cap".
+**What it means:** a budget in hard cap mode reached its limit, so Clawboo stopped the run, sent the task back to **To do** and left this comment. The word before "budget" names the budget that ran out: agent, team, or mission (a task plus everything handed off from it). "node" means a per-run limit, which only a routine set up through the API can carry. A Claude Code or Codex run whose final cost report crossed the cap had already finished, so it is not stopped; see **Budget cap reached** below. In team chat the stopped run's task fails instead, and the chat can show "The run failed: the run was stopped by a budget cap".
 
 **Fix:** open **Settings > Insights > Governance**. The budget reads **paused**: click **Resume**, or raise its limit with **Set cap**. If spend is still over the limit, a resumed budget pauses again at the next charge, so raise the limit to keep working. See [Resume or raise a budget](/using/budgets-and-spend#resume-or-raise-a-budget).
 
@@ -582,7 +582,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 ### A cost reads est., or a local model shows a cost
 
-**What it means:** "est." (a `~` before the amount on a card) marks an estimate: the runtime reported no charge, so Clawboo priced the run itself. Models Clawboo has no price for, including every local Ollama model, are estimated at $3 per million input tokens and $15 per million output tokens. An Ollama run costs you nothing.
+**What it means:** "est." (a `~` before the amount on a card) marks an estimate: the runtime reported no charge, so Clawboo priced the run itself. Models Clawboo has no price for are estimated at $3 per million input tokens and $15 per million output tokens. A model your own Ollama serves costs nothing and reads **free**, so a cost on an Ollama run means Clawboo did not count it as local: one of Ollama's cloud models (a `-cloud` tag), which runs on ollama.com, or an OpenClaw agent whose model in `openclaw.json` is not an `ollama/` one.
 
 **Fix:** nothing to fix. [Budgets and spend](/using/budgets-and-spend) lists what each runtime reports and what counts toward a budget.
 
@@ -592,15 +592,15 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 <Accordion title="Tokens Used shows zero for my agents">
 
-**What it means:** **Tokens Used** counts OpenClaw agents only. Clawboo Native, Claude Code, Codex and Hermes agents show zero there, however much they worked.
+**What it means:** **Tokens Used** lists Clawboo Native, Claude Code, Codex and Hermes runs only from the release that added them, so their earlier work reads zero, and it does not count their one-to-one chats. An OpenClaw agent's turns count only when Clawboo's server sees them and can match them to an agent in Clawboo.
 
-**Fix:** see their cost on each task's card and, once you add a budget, on its row in **Settings > Insights > Governance**. A Hermes agent's routine and API runs record no cost and do not count toward budgets; check those in your provider's own dashboard.
+**Fix:** see older costs on each task's card and, once you add a budget, on its row in **Settings > Insights > Governance**.
 
 </Accordion>
 
 <Accordion title="Budget cap reached">
 
-**What it means:** an OpenClaw agent's routine run went over a hard cap. The run is recorded, and the routine's next run is refused.
+**What it means:** a run went over a hard cap as it ended: an OpenClaw agent's routine run, or an agent routine or API run whose last cost report crossed the cap (usually Claude Code or Codex, which report cost only then). The run is recorded, any result it produced is kept, and the next run is refused.
 
 **Fix:** raise the cap, or **Resume** the budget, in **Settings > Insights > Governance**.
 

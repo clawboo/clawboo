@@ -145,7 +145,7 @@ You should see the **Ollama** row read **Connected**, with a **Default** badge.
 
 </Steps>
 
-Picking **Ollama** on onboarding's connect step does the same. Clawboo reaches Ollama at `http://localhost:11434/v1`, or at `OLLAMA_BASE_URL` when you set one. Models that can't use tools are marked `(can't use tools)`, and embedding models are left out. Clawboo has no price for local models, so it records an estimated cost for Ollama runs even though they cost you nothing. [Clawboo Native](/runtimes/native) has the details.
+Picking **Ollama** on onboarding's connect step does the same. Clawboo reaches Ollama at `http://localhost:11434/v1`, or at `OLLAMA_BASE_URL` when you set one. Models that can't use tools are marked `(can't use tools)`, and embedding models are left out. Ollama runs cost you nothing, so Clawboo records them at $0 and their tasks read **free** on the Board. Ollama's cloud models (a `-cloud` tag) run on ollama.com and are estimated like other models without a price. [Clawboo Native](/runtimes/native) has the details.
 
 ## Choose the default provider and model
 

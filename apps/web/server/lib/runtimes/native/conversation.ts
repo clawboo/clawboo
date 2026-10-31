@@ -264,7 +264,7 @@ export class Conversation {
       // Account the turn + emit its cost DELTA (live budget signal).
       this.lastInputTokens = usage.inputTokens
       this.totalOutputTokens += usage.outputTokens
-      const priced = priceTurn(client.activeModel(), usage)
+      const priced = priceTurn(client.activeModel(), usage, client.activeProvider())
       if (priced.costUsd != null) {
         this.totalCostUsd += priced.costUsd
         this.anyPriced = true
@@ -274,6 +274,7 @@ export class Conversation {
         usage,
         costUsd: priced.costUsd,
         ...(priced.estimated ? { estimated: true } : {}),
+        ...(priced.local ? { local: true } : {}),
         model: client.activeModel(),
       })
 

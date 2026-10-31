@@ -124,6 +124,7 @@ export function parseSessionMessagePayload(payload: unknown): SessionMessagePayl
     ...(typeof p['messageSeq'] === 'number' ? { messageSeq: p['messageSeq'] } : {}),
     ...(typeof p['runId'] === 'string' ? { runId: p['runId'] } : {}),
     ...(typeof p['model'] === 'string' ? { model: p['model'] } : {}),
+    ...(typeof p['modelProvider'] === 'string' ? { modelProvider: p['modelProvider'] } : {}),
     ...(typeof p['inputTokens'] === 'number' ? { inputTokens: p['inputTokens'] } : {}),
     ...(typeof p['outputTokens'] === 'number' ? { outputTokens: p['outputTokens'] } : {}),
   }

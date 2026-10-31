@@ -75,20 +75,27 @@ export const createExecutionBody = z.object({
 })
 export type CreateExecutionBody = z.infer<typeof createExecutionBody>
 
-export const completeExecutionBody = z.object({
-  status: z.enum(['succeeded', 'failed', 'timed_out', 'cancelled']),
-  summary: z.string().max(20_000).optional(),
-  error: z.string().max(20_000).optional(),
-  afterCommit: z.string().max(200).optional(),
-  inputTokens: z.number().int().optional(),
-  outputTokens: z.number().int().optional(),
-  cacheRead: z.number().int().optional(),
-  cacheWrite: z.number().int().optional(),
-  costUsd: z.number().optional(),
-  // No default: a cost sent without a source is stored with a null source, which
-  // the board shows as an estimate.
-  costSource: z.enum(RUN_COST_SOURCES).optional(),
-})
+export const completeExecutionBody = z
+  .object({
+    status: z.enum(['succeeded', 'failed', 'timed_out', 'cancelled']),
+    summary: z.string().max(20_000).optional(),
+    error: z.string().max(20_000).optional(),
+    afterCommit: z.string().max(200).optional(),
+    inputTokens: z.number().int().optional(),
+    outputTokens: z.number().int().optional(),
+    cacheRead: z.number().int().optional(),
+    cacheWrite: z.number().int().optional(),
+    costUsd: z.number().optional(),
+    // No default: a cost sent without a source is stored with a null source, which
+    // the board shows as an estimate.
+    costSource: z.enum(RUN_COST_SOURCES).optional(),
+  })
+  .refine((b) => b.costSource !== 'local' || !b.costUsd, {
+    // `local` means the run cost nothing (a model your own Ollama served); a
+    // nonzero cost under it would read "free" on the board.
+    message: "costSource 'local' is only for a cost of 0",
+    path: ['costSource'],
+  })
 export type CompleteExecutionBody = z.infer<typeof completeExecutionBody>
 
 // Dependency-link body — `taskId` waits on `dependsOnTaskId` before it becomes

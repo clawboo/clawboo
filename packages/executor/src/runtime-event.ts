@@ -62,13 +62,15 @@ export type RuntimeEvent =
       detail?: string
     })
   // Token usage (+ USD when the runtime reports it). `costUsd` is null when the
-  // runtime cannot supply USD; `estimated` flags a derived (non-authoritative) value.
+  // runtime cannot supply USD; `estimated` flags a derived (non-authoritative) value;
+  // `local` flags a model served by the user's own Ollama, whose cost is an exact 0.
   | (RuntimeEventBase & {
       kind: 'cost'
       costUsd: number | null
       usage: Usage
       model: string | null
       estimated?: boolean
+      local?: boolean
     })
   // Terminal summary for a single run/turn.
   | (RuntimeEventBase & {

@@ -89,6 +89,7 @@ export function mapNativeEvent(
           usage: ev.usage,
           model: ev.model,
           ...(ev.estimated ? { estimated: true } : {}),
+          ...(ev.local ? { local: true } : {}),
         },
       ]
 

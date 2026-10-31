@@ -219,7 +219,7 @@ The cleanup function unsubscribes, clears the sweep, and calls `patchQueue.dispo
 
 ## Cost on this path
 
-OpenClaw turn cost is recorded on the server, not here. The session activity watcher reads the Gateway's `session.message` commits on the server's own connection and records each turn's real model and token counts in `cost_records`, including turns no browser saw. `recordChatCost` in the hook therefore returns early for an agent whose runtime is `openclaw`, so a turn is never billed twice.
+OpenClaw turn cost is recorded on the server, not here. The session activity watcher reads the Gateway's `session.message` commits on the server's own connection and records each turn's real model and token counts in `cost_records`, including turns no browser saw. It prices a turn with the provider beside the model, so a turn a local Ollama served is recorded at $0. `recordChatCost` in the hook therefore returns early for an agent whose runtime is `openclaw`, so a turn is never billed twice. Clawboo Native, Claude Code, Codex and Hermes runs reach `cost_records` from the server too: the task runner and the team engine write one row per run with `recordRunTokens` (`runTokenLog.ts`).
 
 For any other fleet row whose turn arrives as a Gateway `chat` frame, `recordChatCost` still takes the `commitChat` intent's `cost`, estimates a missing input side from the agent's last user message at about 4 characters per token, and posts `/api/cost-records`.
 
