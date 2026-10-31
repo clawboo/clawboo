@@ -84,16 +84,6 @@ A **mission** is one chain of hand-offs, counted on its top task: the first task
 
 ## Set a budget
 
-### Find the id first
-
-The form asks for the scope's id, not its name, and the dashboard does not show full ids. Open the API in your browser, at the same address as your dashboard (use your own port):
-
-- **Team ids**: `/api/teams`, for example `http://localhost:18790/api/teams`. Each team lists its `id` and `name`.
-- **Agent ids**: `/api/agents`.
-- **Mission ids**: `/api/board`. A mission's id is the id of its top task, the one whose `parentTaskId` is `null`.
-
-Clawboo does not check the id you type. A budget for a mistyped id is created, but nothing ever charges it.
-
 ### Create the budget
 
 <Steps>
@@ -106,13 +96,13 @@ Open **Settings** > **Insights** > **Governance**. The **Budgets** section lists
 
 <Step title="Pick the scope">
 
-In the form below the list, pick **agent**, **mission** or **team**. The list also offers **tenant**, but nothing charges a tenant budget, so it never warns or pauses.
+In the form below the list, pick **agent**, **team** or **mission**.
 
 </Step>
 
-<Step title="Enter the id and the limit">
+<Step title="Pick who it covers and the limit">
 
-Type the id in **scope id**. Enter the limit in dollars in the next field, which reads **warn at $** (or **cap $** once you pick a hard cap). The smallest limit is $0.01.
+In the next list, choose the agent, team or board task by name; type to search. Agents show their team, so two agents with the same name stay apart, archived teams are left out, and for a mission the list holds the top-level board tasks, newest first. Enter the limit in dollars in the next field, which reads **warn at $** (or **cap $** once you pick a hard cap). The smallest limit is $0.01.
 
 </Step>
 
@@ -126,7 +116,7 @@ Pick **warn only** (selected at first) or **hard cap**. See the next section for
 
 Press **Set budget**.
 
-You should see a row with the scope and id, a **warn** or **cap** pill, the status **active**, the spend against the limit (for example `$0.00 / $5.00`) and a bar. The list refreshes every 5 seconds while the panel is open.
+You should see a row with the scope, the agent, team or task by name (or its id, once it is deleted), a **warn** or **cap** pill, the status **active**, the spend against the limit (for example `$0.00 / $5.00`) and a bar. The list refreshes every 5 seconds while the panel is open.
 
 </Step>
 
@@ -208,7 +198,7 @@ At 80% the status turns **soft_capped** (amber). At 100% it stays amber, and not
 
 <Step title="Switch to a hard cap when you are ready">
 
-In the form, pick the same scope and id, enter the limit you want, pick **hard cap**, and press **Set budget**. The spend so far is kept, so if it is already at or over the new limit, the budget pauses at once.
+In the form, pick the same scope and the same agent, team or task, enter the limit you want, pick **hard cap**, and press **Set budget**. The spend so far is kept, so if it is already at or over the new limit, the budget pauses at once.
 
 You should see the **cap** pill on the row.
 
@@ -260,19 +250,19 @@ Spend is still at or over the limit, which the **will re-pause** pill on the row
 
 <Accordion title="My hard cap turned into warn only">
 
-The budget was saved again from the form, which starts on **warn only**. Pick the same scope and id in the form, pick **hard cap**, and press **Set budget**. Use **Set cap** on the row whenever you only want a new limit.
+The budget was saved again from the form, which starts on **warn only**. Pick the same scope and the same agent, team or task in the form, pick **hard cap**, and press **Set budget**. Use **Set cap** on the row whenever you only want a new limit.
 
 </Accordion>
 
 <Accordion title="Set budget did nothing">
 
-With an empty **scope id**, or a limit that is not a number, the button does nothing. With a limit of $0, Clawboo refuses the budget and the form clears without a message. Enter a limit of at least $0.01.
+With no agent, team or task chosen, or a limit that is not a number, the button does nothing. With a limit of $0, Clawboo refuses the budget and the form clears without a message. Enter a limit of at least $0.01.
 
 </Accordion>
 
 <Accordion title="The budget's bar never moves">
 
-Check the id: Clawboo accepts any id, so a budget for a mistyped one is never charged. A **tenant** budget is never charged either. A budget also counts only spend after it was created, and some work charges no budget at all: one-to-one chat with an OpenClaw agent, and anything on a local Ollama model, which costs nothing.
+A budget made through the API for an id that matches nothing is never charged, because the API accepts any id. A **tenant** budget is never charged either. A budget also counts only spend after it was created, and some work charges no budget at all: one-to-one chat with an OpenClaw agent, and anything on a local Ollama model, which costs nothing.
 
 </Accordion>
 

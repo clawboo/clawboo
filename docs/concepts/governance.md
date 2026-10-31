@@ -51,7 +51,7 @@ A **budget** is a dollar limit on one scope:
 - **mission**: one delegation tree, counted on its top task (the first task in the chain of hand-offs).
 - **team**: everything a team's runs spend.
 
-The scope list in the Governance panel also offers **tenant**. Nothing charges a tenant budget, so it never warns and never pauses.
+There is also a **tenant** scope, which the Governance form no longer offers. Nothing charges a tenant budget, so one made earlier or through the API never warns and never pauses.
 
 Each budget has a mode:
 

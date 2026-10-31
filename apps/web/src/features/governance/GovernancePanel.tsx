@@ -4,9 +4,10 @@
 // <ToolApprovalQueue/> — same resolve UX as the Approvals panel), and the
 // append-only forensic audit log (filterable). Pause-at-cap is AUTOMATIC in the
 // executor — the UI only raises caps + resumes. tenantId is surfaced read-only
-// (the dormant per-tenant seam).
+// (the dormant per-tenant seam). Budgets are created and shown by agent, team or
+// board task name; the id stays in the tooltip.
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { motion } from 'framer-motion'
 
 import {
@@ -20,7 +21,10 @@ import {
 } from 'lucide-react'
 
 import { ToolApprovalQueue } from '@/features/approvals/ToolApprovalQueue'
+import { fetchBoardResult } from '@/lib/boardClient'
 import { useReadSequencer } from '@/lib/useReadSequencer'
+import { useFleetStore } from '@/stores/fleet'
+import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -41,11 +45,16 @@ import {
   type AuditEventType,
   type AuditRow,
   type Budget,
-  type BudgetScope,
   type BudgetMode,
 } from '@/lib/governanceClient'
+import {
+  CREATABLE_SCOPES,
+  budgetTargetName,
+  targetOptions,
+  type BudgetTask,
+  type CreatableScope,
+} from '@/features/governance/budgetTargets'
 
-const SCOPES: BudgetScope[] = ['agent', 'mission', 'team', 'tenant']
 const EVENT_TYPES: AuditEventType[] = [
   'install',
   'approval',
@@ -115,7 +124,122 @@ function summarize(raw: string): string {
   }
 }
 
-function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
+// Board tasks for the mission picker and the mission rows' titles. `loading` until
+// the first read answers; `failed` only when no read has succeeded yet.
+interface TaskLoad {
+  state: 'loading' | 'ok' | 'failed'
+  tasks: BudgetTask[]
+}
+
+// Agent and team names come from the app's stores (kept current by the shell), so
+// these leaves subscribe themselves and a streaming agent doesn't re-render the panel.
+function BudgetTarget({ b, tasks }: { b: Budget; tasks: BudgetTask[] }) {
+  const agents = useFleetStore((s) => s.agents)
+  const teams = useTeamStore((s) => s.teams)
+  const { name, detail } = budgetTargetName(b, { agents, teams, tasks })
+  if (!name) {
+    return (
+      <span
+        data-testid="budget-target"
+        className="font-data truncate text-[13px] text-foreground"
+        title={b.scopeId}
+      >
+        {b.scopeId}
+      </span>
+    )
+  }
+  return (
+    <span
+      data-testid="budget-target"
+      className="flex min-w-0 items-baseline gap-1.5"
+      title={b.scopeId}
+    >
+      <span className="truncate text-[13px] font-medium text-foreground">{name}</span>{' '}
+      {detail && <span className="truncate text-[11px] text-muted-foreground">· {detail}</span>}
+    </span>
+  )
+}
+
+const PICKER_COPY: Record<
+  CreatableScope,
+  { label: string; choose: string; none: string; search: string }
+> = {
+  agent: {
+    label: 'Agent',
+    choose: 'Choose an agent',
+    none: 'No agents yet',
+    search: 'Search agents or teams…',
+  },
+  team: { label: 'Team', choose: 'Choose a team', none: 'No teams yet', search: 'Search teams…' },
+  mission: {
+    label: 'Board task',
+    choose: 'Choose a board task',
+    none: 'No board tasks yet',
+    search: 'Search board tasks…',
+  },
+}
+
+function BudgetTargetPicker({
+  scope,
+  value,
+  onChange,
+  taskLoad,
+}: {
+  scope: CreatableScope
+  value: string
+  onChange: (id: string) => void
+  taskLoad: TaskLoad
+}) {
+  const agents = useFleetStore((s) => s.agents)
+  const teams = useTeamStore((s) => s.teams)
+  const tasks = taskLoad.tasks
+  const options = useMemo(
+    () => targetOptions(scope, { agents, teams, tasks }),
+    [scope, agents, teams, tasks],
+  )
+  // A picked target that has left the list (deleted, archived, no longer a
+  // top-level task) is cleared, so Set budget cannot save a budget for something
+  // the form no longer shows.
+  useEffect(() => {
+    if (value && !options.some((o) => o.value === value)) onChange('')
+  }, [value, options, onChange])
+  const copy = PICKER_COPY[scope]
+  let placeholder = copy.choose
+  if (options.length === 0) {
+    placeholder =
+      scope !== 'mission' || taskLoad.state === 'ok'
+        ? copy.none
+        : taskLoad.state === 'loading'
+          ? 'Loading board tasks…'
+          : "Couldn't load board tasks"
+  }
+  return (
+    <Select
+      size="md"
+      searchable
+      aria-label={copy.label}
+      data-testid="budget-target-picker"
+      value={value}
+      onChange={onChange}
+      options={options}
+      placeholder={placeholder}
+      searchPlaceholder={copy.search}
+      disabled={options.length === 0}
+      menuWidth={320}
+      style={{ width: 220 }}
+    />
+  )
+}
+
+function BudgetRow({
+  b,
+  tasks,
+  onChanged,
+}: {
+  b: Budget
+  tasks: BudgetTask[]
+  onChanged: () => void
+}) {
   const [capInput, setCapInput] = useState('')
   const addToast = useToastStore((s) => s.addToast)
   const pct = b.limitUsdCents > 0 ? Math.min(100, (b.spentUsdCents / b.limitUsdCents) * 100) : 0
@@ -130,9 +254,7 @@ function BudgetRow({ b, onChanged }: { b: Budget; onChanged: () => void }) {
           <span className="font-data rounded-full bg-foreground/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.04em] text-foreground/60">
             {b.scope}
           </span>
-          <span className="font-data truncate text-[13px] text-foreground" title={b.scopeId}>
-            {b.scopeId}
-          </span>
+          <BudgetTarget b={b} tasks={tasks} />
           {b.tenantId && (
             <span className="font-data text-[11px] text-muted-foreground">
               · tenant {b.tenantId}
@@ -269,17 +391,42 @@ export function GovernancePanel() {
   const [auditType, setAuditType] = useState<AuditEventType | ''>('')
   const [auditSince, setAuditSince] = useState<number | null>(null)
 
-  // New-budget form
-  const [newScope, setNewScope] = useState<BudgetScope>('agent')
+  // New-budget form. The scope id is picked by name, so it resets with the scope.
+  const [newScope, setNewScope] = useState<CreatableScope>('agent')
   const [newScopeId, setNewScopeId] = useState('')
   const [newLimit, setNewLimit] = useState('')
   // Default posture is track-and-warn (a hard cap is the explicit opt-in).
   const [newMode, setNewMode] = useState<BudgetMode>('warn')
 
-  // Budgets and the audit log are independent polls over independent state, so each gets
-  // its own sequencer — a budget write must not invalidate an in-flight audit read.
+  // Budgets, the audit log and the board tasks are independent reads over independent
+  // state, so each gets its own sequencer: a budget write must not invalidate an
+  // in-flight audit read.
   const budgetReads = useReadSequencer()
   const auditReads = useReadSequencer()
+  const taskReads = useReadSequencer()
+
+  // Board tasks name the mission budgets and fill the mission picker. Read when
+  // either first needs them and on Refresh, not polled.
+  const [taskLoad, setTaskLoad] = useState<TaskLoad>({ state: 'loading', tasks: [] })
+  const needTasks = newScope === 'mission' || budgets.some((b) => b.scope === 'mission')
+
+  const refreshTasks = useCallback(async () => {
+    const read = taskReads.beginRead()
+    const r = await fetchBoardResult()
+    if (!read.isCurrent()) return
+    // A failed re-read keeps the last good list.
+    setTaskLoad((prev) =>
+      r.ok
+        ? { state: 'ok', tasks: r.tasks }
+        : prev.state === 'ok'
+          ? prev
+          : { state: 'failed', tasks: [] },
+    )
+  }, [taskReads])
+
+  useEffect(() => {
+    if (needTasks) void refreshTasks()
+  }, [needTasks, refreshTasks])
 
   const refreshBudgets = useCallback(async () => {
     const read = budgetReads.beginRead()
@@ -345,6 +492,7 @@ export function GovernancePanel() {
               onClick={() => {
                 void refreshBudgets()
                 void refreshAudit()
+                if (needTasks) void refreshTasks()
               }}
             >
               <RefreshCw size={14} strokeWidth={2} /> Refresh
@@ -395,7 +543,7 @@ export function GovernancePanel() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ ...ENTER_SPRING, delay: listDelay(i) }}
                 >
-                  <BudgetRow b={b} onChanged={() => void refreshBudgets()} />
+                  <BudgetRow b={b} tasks={taskLoad.tasks} onChanged={() => void refreshBudgets()} />
                 </motion.div>
               ))
             )}
@@ -409,15 +557,17 @@ export function GovernancePanel() {
                 size="md"
                 aria-label="Budget scope"
                 value={newScope}
-                onChange={(v) => setNewScope(v as BudgetScope)}
-                options={SCOPES.map((s) => ({ value: s, label: s }))}
+                onChange={(v) => {
+                  setNewScope(v as CreatableScope)
+                  setNewScopeId('')
+                }}
+                options={CREATABLE_SCOPES.map((s) => ({ value: s, label: s }))}
               />
-              <input
+              <BudgetTargetPicker
+                scope={newScope}
                 value={newScopeId}
-                onChange={(e) => setNewScopeId(e.target.value)}
-                placeholder="scope id"
-                className={`font-data ${inputClass}`}
-                style={{ width: 160 }}
+                onChange={setNewScopeId}
+                taskLoad={taskLoad}
               />
               <input
                 value={newLimit}
@@ -461,6 +611,15 @@ export function GovernancePanel() {
               >
                 Set budget
               </Button>
+              {newScope === 'mission' && (
+                <p
+                  data-testid="budget-mission-hint"
+                  className="w-full text-[12px] leading-relaxed text-foreground/50"
+                >
+                  A mission is a top-level board task. Spend from the subtasks it hands off counts
+                  toward it too.
+                </p>
+              )}
             </div>
           </section>
 
