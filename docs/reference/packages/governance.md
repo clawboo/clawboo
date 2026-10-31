@@ -47,8 +47,8 @@ anything. That depends on the budget's mode, stored by `@clawboo/db`:
 
 - **`warn`, the default.** Spend is tracked and warnings fire at the soft threshold and at 100%. A warn budget is
   stored as `soft_capped` even past its limit, so it never reads `paused` and never stops work.
-- **`cap`, opt-in.** The budget pauses at 100%, and the task runner refuses to start work for a paused scope
-  (`budget_paused`).
+- **`cap`, opt-in.** The budget pauses at 100%, and the task runner, team chat and one-to-one chat refuse to start
+  work for a paused scope (`budget_paused`).
 
 Spend is kept in micro-cents (`MICRO_CENTS_PER_CENT`), so sub-cent turns still add up. Which run paths a hard cap
 can actually stop, and when, is explained in [Budgets and guardrails](/concepts/governance); the user's view is

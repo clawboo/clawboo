@@ -33,8 +33,8 @@ export interface ChatTurnOutcome {
   decided?: boolean
   /** What the speaker posted (for obs/debug). */
   summary?: string
-  /** Set when this turn's recorded spend tripped a CAP budget — the exchange stops
-   *  driving further turns (the in-exchange half of the kill-switch). */
+  /** Set when a paused CAP budget refused this turn, or its recorded spend tripped
+   *  one: the exchange stops driving further turns. */
   budgetStopped?: BudgetScope | null
 }
 
@@ -119,7 +119,7 @@ export async function runExchange(input: RunExchangeInput): Promise<ExchangeResu
     for (const o of outcome.obligations) if (o !== sel.speaker.agentId) pending.add(o)
     lastSpeaker = sel.speaker.agentId
 
-    // A turn whose recorded spend tripped a CAP budget halts the exchange.
+    // A turn a CAP budget refused, or whose spend tripped one, halts the exchange.
     if (outcome.budgetStopped) return end('budget_paused', turn)
 
     if (pending.size === 0) return end('no_pending_obligation', turn)

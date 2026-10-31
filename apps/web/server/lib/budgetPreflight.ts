@@ -35,3 +35,10 @@ export function budgetPreflight(
   }
   return { blocked: false }
 }
+
+/** The notice for a turn or run the gate refused, shared by the chat paths
+ *  (team chat, rooms, one-to-one chat) so they say the same thing. A refused
+ *  hand-off carries it too, after the board's "Run failed:" prefix. */
+export function budgetRefusalText(scope: BudgetScope): string {
+  return `The ${scope} budget is paused at its hard cap, so this run did not start. Raise the cap or resume it in Governance to continue.`
+}

@@ -29,6 +29,7 @@ import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
@@ -129,9 +130,10 @@ export interface DriveAgentChatParams {
  * this (it's detached: the reply streams via the SSE). Streams the running
  * assistant text to the per-session `chatDeltaBus` (the SSE's ephemeral delta
  * channel), commits the reply, and records the run's spend (agent scope; a paused
- * CAP budget aborts). Turns for one agent run one at a time: a persistent-home
- * runtime on its home mutex (shared with team runs and routines for the same
- * agent), any other on a per-agent chat lock. Best-effort: never throws.
+ * CAP budget refuses the turn, or aborts one already going). Turns for one agent
+ * run one at a time: a persistent-home runtime on its home mutex (shared with team
+ * runs and routines for the same agent), any other on a per-agent chat lock.
+ * Best-effort: never throws.
  */
 export async function driveAgentChat(params: DriveAgentChatParams): Promise<void> {
   const { db, agentId, message, mcpBaseUrl } = params
@@ -181,6 +183,21 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   const workdir = taskRunWorkdirFor(runtime, row?.teamId)
 
   const runJob = async (): Promise<void> => {
+    // A paused hard cap on the agent refuses the turn before it starts, as in team
+    // chat and the task runner. Only the agent's budget: it is the only one a 1:1
+    // turn is charged to. Read holding the lock, so a cap the turn ahead of this one
+    // paused is seen. A ledger read that fails lets the turn go, as a failed spend
+    // write does below.
+    let pre: BudgetPreflightResult = { blocked: false }
+    try {
+      pre = budgetPreflight(db, { agentId })
+    } catch {
+      // Never a silent non-response over the guardrail's own bookkeeping.
+    }
+    if (pre.blocked) {
+      persist(budgetRefusalText(pre.scope), true)
+      return
+    }
     if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
     // CONTINUATION, read while holding the lock: a message queued behind a running
     // turn must resume the session that turn just saved, not the one both turns saw

@@ -48,6 +48,7 @@ import type { RuntimeAdapter, RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { formatPeerPost } from '@clawboo/mcp'
 
+import { budgetPreflight, budgetRefusalText } from '../budgetPreflight'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { ensureTeamWorkdir } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
@@ -161,6 +162,23 @@ export async function dispatchChatTurn(
 ): Promise<ChatTurnOutcome> {
   const { db, participant, roomId, teamId } = deps
   const agentId = participant.agentId
+
+  // Every turn checks the budgets this turn would charge, not only the first: a
+  // speaker obliged later may be over its own cap, and the turn before may have
+  // paused the team's. A refusal tells the person and stops the exchange, as a
+  // turn that trips a cap does.
+  const pre = budgetPreflight(db, { agentId, teamId })
+  if (pre.blocked) {
+    persistTeamChatEntry(db, {
+      teamId,
+      agentId,
+      text: budgetRefusalText(pre.scope),
+      role: 'system',
+      kind: 'meta',
+    })
+    return { obligations: [], decided: false, summary: '', budgetStopped: pre.scope }
+  }
+
   const prior = loadChatLeaderState(db, roomId, agentId)
 
   // RESTORE: the new room posts since this runtime's cursor, wrapped as evidence

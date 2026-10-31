@@ -111,6 +111,21 @@ describe('governance REST', () => {
     expect((graced.body() as { willRepause: boolean }).willRepause).toBe(false)
   })
 
+  it('a POST without a mode keeps a hard cap a hard cap; an explicit mode still switches it', () => {
+    const body = (b: Record<string, unknown>) =>
+      req({ body: { scope: 'team', scopeId: 't1', ...b } })
+    budgetsSetPOST(body({ limitUsdCents: 100, mode: 'cap' }), mockRes().res)
+
+    const raised = mockRes()
+    budgetsSetPOST(body({ limitUsdCents: 300 }), raised.res)
+    expect(raised.statusCode()).toBe(200)
+    expect((raised.body() as { budget: { mode: string } }).budget.mode).toBe('cap')
+
+    const switched = mockRes()
+    budgetsSetPOST(body({ limitUsdCents: 300, mode: 'warn' }), switched.res)
+    expect((switched.body() as { budget: { mode: string } }).budget.mode).toBe('warn')
+  })
+
   it('delegation-approval: 400 without leader, sticky allow_always fast-path', async () => {
     const bad = mockRes()
     await delegationApprovalPOST(req({ body: {} }), bad.res)

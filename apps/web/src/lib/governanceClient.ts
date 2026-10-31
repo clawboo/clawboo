@@ -62,7 +62,8 @@ export interface SetBudgetInput {
   scope: BudgetScope
   scopeId: string
   limitUsdCents: number
-  /** Posture: 'cap' auto-pauses at 100%, 'warn' only warns. Default 'cap'. */
+  /** Posture: 'cap' pauses at 100%, 'warn' only warns. Omitted: a new budget is
+   *  'warn' and an existing one keeps its mode. */
   mode?: BudgetMode
   tenantId?: string | null
 }

@@ -51,7 +51,7 @@ A team routine posts its instructions into the team's **General** chat, never in
 
 The lead is told the message came from a routine and that you may not be watching, so it should carry the work out and make reasonable assumptions instead of asking questions and waiting. The fire counts as done, shown as **posted**, once the message reaches the lead, even if the lead's turn waits behind one already running. From there it is ordinary team chat, with the same hand-offs, Board tasks, **Stop** button and [guardrails](/concepts/governance) as a message you typed. A team routine creates no Board task of its own.
 
-A team fire fails when the team no longer exists, is archived, has no active members, or does not take messages from routines.
+A team fire fails when the team no longer exists, is archived, has no active members, or does not take messages from routines. It also fails when a paused hard-cap budget on the team or on the agent it goes to refuses that agent's turn as it starts. If the agent was busy when the routine fired, the fire already counted as **posted**, so a refusal when its turn comes shows only in the chat.
 
 ## What an agent routine does
 
@@ -74,7 +74,8 @@ The Routines dialog sets who a routine goes to, its schedule, its name and its i
 
 A routine whose fire fails stops itself. Its dialog shows **Stopped after a failed run.** with the error, and it does not run again until you press **Resume**. Common causes:
 
-- an agent routine's run is refused before it starts, because a hard-cap budget for the agent, the team or the task's delegation tree is already paused (team routines are not checked);
+- an agent routine's run is refused before it starts, because a hard-cap budget for the agent, the team or the task's delegation tree is already paused;
+- a team routine's message is refused the same way, because a hard-cap budget for the team or the agent it goes to is already paused;
 - a circuit breaker or a hard cap stopped an agent routine's run while it was still working (a Claude Code or Codex run whose last cost report crosses a hard cap keeps its result, and the paused budget refuses the routine's next run instead);
 - the run itself failed or timed out;
 - the OpenClaw Gateway was not connected (OpenClaw agents only);

@@ -442,7 +442,7 @@ An agents' exchange ended.
 }
 ```
 
-`reason` is `max_turns` (the turn cap was reached with replies still owed), `no_pending_obligation` (nobody owed a reply), `budget_paused` (a hard-cap budget stopped a turn) or `aborted` (the caller disconnected). The typed shape lists only the first two.
+`reason` is `max_turns` (the turn cap was reached with replies still owed), `no_pending_obligation` (nobody owed a reply), `budget_paused` (a paused hard-cap budget refused a turn, or a turn's spend paused one) or `aborted` (the caller disconnected). The typed shape lists only the first two.
 
 ## Connector events
 

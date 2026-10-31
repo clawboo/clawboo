@@ -114,8 +114,10 @@ export interface SetBudgetLimitInput {
   scope: BudgetScope
   scopeId: string
   limitUsdCents: number
-  /** 'cap' (auto-pause at 100%) or 'warn' (track-and-warn, never pause). Default
-   *  'warn' — the locked product posture (track-and-warn). A hard cap is opt-in. */
+  /** 'cap' (auto-pause at 100%) or 'warn' (track-and-warn, never pause). Omitted:
+   *  a new budget starts 'warn' (the locked track-and-warn posture; a hard cap is
+   *  opt-in) and an existing one keeps its mode, so raising a limit never drops a
+   *  hard cap. */
   mode?: BudgetMode
   tenantId?: string | null
 }
@@ -126,9 +128,10 @@ export interface SetBudgetLimitInput {
 export function setBudgetLimit(db: ClawbooDb, input: SetBudgetLimitInput): DbBudget {
   const now = Date.now()
   const limitUsdCents = Math.max(0, Math.round(input.limitUsdCents))
-  // Track-and-warn is the locked default posture; a hard 'cap' is opt-in.
-  const mode: BudgetMode = input.mode === 'cap' ? 'cap' : 'warn'
   const existing = getBudget(db, input.scope, input.scopeId)
+  // Track-and-warn is the locked default posture for a new budget; a hard 'cap' is
+  // opt-in. A save that names no mode keeps the one the budget already has.
+  const mode: BudgetMode = input.mode ?? ((existing?.mode as BudgetMode) === 'cap' ? 'cap' : 'warn')
   if (!existing) {
     const row: DbBudget = {
       id: randomUUID(),

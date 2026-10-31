@@ -17,6 +17,8 @@ import {
   chatMessages,
   teams,
   getSetting,
+  recordSpend,
+  setBudgetLimit,
   setSetting,
   SqliteMemoryStore,
   type ClawbooDb,
@@ -584,6 +586,56 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
       makeAdapter: () => adapter,
     })
     expect(rowsFor(sk).map((r) => r.text)).toEqual(['All done.'])
+  })
+
+  it('a paused hard cap on the agent refuses the turn before it starts and says why', async () => {
+    seedAgent('cc-x', 'claude-code')
+    const sk = directChatSessionKey('cc-x', 'claude-code')
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'agent', 'cc-x', 150)
+    const statuses: string[] = []
+    const unsub = subscribeAgentStatus(sk, (u) => statuses.push(u.status))
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hi' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    expect(adapter.startCalls).toBe(0)
+    expect(rowsFor(sk)).toEqual([
+      expect.objectContaining({
+        role: 'system',
+        kind: 'meta',
+        text: expect.stringContaining('The agent budget is paused at its hard cap'),
+      }),
+    ])
+    expect(statuses).toEqual([])
+    unsub()
+  })
+
+  it('a paused team cap does not refuse a 1:1 turn, which is charged to the agent only', async () => {
+    seedAgent('cc-x', 'claude-code', 'team-1')
+    setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'team', 'team-1', 150)
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hi' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => adapter,
+    })
+    expect(adapter.startCalls).toBe(1)
   })
 
   it('a queued turn resumes the session the turn ahead of it just saved', async () => {

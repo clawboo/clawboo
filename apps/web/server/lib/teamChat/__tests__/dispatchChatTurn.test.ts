@@ -5,9 +5,11 @@
 // dispatch the exchange tests use), covering exchange-safety-001/002/004.
 
 import {
+  chatMessages,
   createDb,
   getBudget,
   readRoom,
+  recordSpend,
   resolveRoomForTeam,
   setBudgetLimit,
   type ClawbooDb,
@@ -191,5 +193,70 @@ describe('dispatchChatTurn: a connector ask never leaks its marker', () => {
     expect(loadChatLeaderState(db, roomId, participant.agentId).lastSummary).not.toContain(
       '[[connect:',
     )
+  })
+})
+
+describe('dispatchChatTurn: a paused hard cap refuses the turn before it starts', () => {
+  function notices(): Array<{ role: string; kind: string; text: string }> {
+    return db
+      .select()
+      .from(chatMessages)
+      .all()
+      .map((row) => JSON.parse(row.data) as { role: string; kind: string; text: string })
+  }
+
+  it.each(['agent', 'team'] as const)(
+    'a paused %s cap: no run, no post, a notice in the chat, and the exchange is told to stop',
+    async (scope) => {
+      const teamId = `tPaused-${scope}`
+      const roomId = resolveRoomForTeam(teamId)
+      const scopeId = scope === 'agent' ? participant.agentId : teamId
+      setBudgetLimit(db, { scope, scopeId, limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, scope, scopeId, 150)
+      let built = 0
+      const make = adapterFactory({ costUsd: 0.05 })
+
+      const out = await dispatchChatTurn(
+        {
+          db,
+          participant,
+          roomId,
+          teamId,
+          makeAdapter: (ctx) => {
+            built += 1
+            return make(ctx)
+          },
+        },
+        1,
+      )
+
+      expect(built).toBe(0)
+      expect(out.budgetStopped).toBe(scope)
+      expect(readRoom(db, { roomId })).toHaveLength(0)
+      expect(loadChatLeaderState(db, roomId, participant.agentId).turnIndex).toBe(0)
+      expect(notices()).toEqual([
+        expect.objectContaining({
+          role: 'system',
+          kind: 'meta',
+          text: expect.stringContaining(`The ${scope} budget is paused at its hard cap`),
+        }),
+      ])
+    },
+  )
+
+  it('a warn-only budget past its limit lets the turn run', async () => {
+    const teamId = 'tWarn'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 100, mode: 'warn' })
+    recordSpend(db, 'team', teamId, 500)
+
+    const out = await dispatchChatTurn(
+      { db, participant, roomId, teamId, makeAdapter: adapterFactory({}) },
+      1,
+    )
+
+    expect(out.budgetStopped).toBeNull()
+    expect(readRoom(db, { roomId })).toHaveLength(1)
+    expect(notices()).toEqual([])
   })
 })

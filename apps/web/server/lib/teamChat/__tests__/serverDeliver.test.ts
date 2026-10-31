@@ -24,6 +24,7 @@ import {
   listExecutions,
   listUndeliveredInbox,
   postToRoom,
+  recordSpend,
   resolveRoomForTeam,
   setBudgetLimit,
   setSetting,
@@ -39,7 +40,12 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
-import { createNudgeQueue, type NudgeQueue, type RunStamp } from '@clawboo/team-orchestration'
+import {
+  createNudgeQueue,
+  DeliveryRefusedError,
+  type NudgeQueue,
+  type RunStamp,
+} from '@clawboo/team-orchestration'
 
 import { getDb, resetDb } from '../../db'
 import { homeDispatchMutex } from '../../executorRunner'
@@ -1367,6 +1373,102 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     await tick()
     await tick()
     expect(adapter.aborted).toBeGreaterThanOrEqual(1)
+  })
+
+  describe('budget gate before a run starts', () => {
+    /** Take a scope to a paused hard cap. */
+    function pause(scope: 'agent' | 'mission' | 'team', scopeId: string): void {
+      setBudgetLimit(db, { scope, scopeId, limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, scope, scopeId, 150)
+    }
+    const doneAdapter = (): FakeAdapter =>
+      new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+        })(),
+      )
+
+    it("refuses a person's turn on a paused agent cap, says why in the chat, and starts nothing", async () => {
+      pause('agent', 'a1')
+      const adapter = doneAdapter()
+      const w = wire(adapter)
+      const err = await w.deliver(SK, 'a1', 'hi', HUMAN_TURN).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(DeliveryRefusedError)
+      expect((err as Error).message).toMatch(/The agent budget is paused at its hard cap/)
+      expect(adapter.startCalls).toBe(0)
+      expect(w.metas).toEqual([{ sk: SK, text: (err as Error).message }])
+      expect(w.statuses).toEqual([])
+      // The refused turn holds no slot: the next one is not queued behind it.
+      expect(w.nudge.isBusy(SK)).toBe(false)
+    })
+
+    it('refuses on a paused team cap', async () => {
+      pause('team', 'T')
+      const adapter = doneAdapter()
+      const w = wire(adapter)
+      await expect(w.deliver(SK, 'a1', 'hi', HUMAN_TURN)).rejects.toThrow(
+        /The team budget is paused/,
+      )
+      expect(adapter.startCalls).toBe(0)
+    })
+
+    it("refuses a handed-off task on its mission's paused cap, with the reason for the engine and no chat notice", async () => {
+      pause('mission', 'task-1')
+      const adapter = doneAdapter()
+      const w = wire(adapter, { taskId: 'task-1' })
+      await expect(
+        w.deliver(SK, 'a1', 'do the task', { kind: 'delegation', fromAgentId: 'leader' }),
+      ).rejects.toThrow(/The mission budget is paused/)
+      expect(adapter.startCalls).toBe(0)
+      expect(w.metas).toEqual([])
+    })
+
+    it('lets the run start under a warn-only budget past its limit, or a cap that is not paused', async () => {
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'warn' })
+      recordSpend(db, 'agent', 'a1', 500)
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, 'team', 'T', 50)
+      const adapter = doneAdapter()
+      const w = wire(adapter)
+      await w.deliver(SK, 'a1', 'hi', HUMAN_TURN)
+      expect(adapter.startCalls).toBe(1)
+      expect(w.metas).toEqual([])
+    })
+
+    it('tells the chat once per pause about refused task updates, but answers every person', async () => {
+      pause('agent', 'a1')
+      const w = wire(doneAdapter())
+      await expect(w.deliver(SK, 'a1', 'update 1', SYSTEM_TURN)).rejects.toThrow()
+      await expect(w.deliver(SK, 'a1', 'update 2', SYSTEM_TURN)).rejects.toThrow()
+      expect(w.metas).toHaveLength(1)
+      await expect(w.deliver(SK, 'a1', 'hi', HUMAN_TURN)).rejects.toThrow()
+      await expect(w.deliver(SK, 'a1', 'hi again', HUMAN_TURN)).rejects.toThrow()
+      expect(w.metas).toHaveLength(3)
+    })
+
+    it('refuses a message queued behind a run that paused the cap, and frees the session', async () => {
+      const gate = deferred()
+      let runs = 0
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          runs += 1
+          if (runs === 1) await gate.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+        })(),
+      )
+      const w = wire(adapter)
+      await w.deliver(SK, 'a1', 'first', HUMAN_TURN) // running, held open
+      await w.deliver(SK, 'a1', 'second', HUMAN_TURN) // queued behind it
+      expect(adapter.startCalls).toBe(1)
+      pause('agent', 'a1') // the first run's spend takes the cap to 100%
+      gate.resolve()
+      for (let i = 0; i < 6; i++) await tick()
+      expect(adapter.startCalls).toBe(1)
+      expect(w.metas.map((m) => m.text)).toEqual([
+        expect.stringMatching(/The agent budget is paused/),
+      ])
+      expect(w.nudge.isBusy(SK)).toBe(false)
+    })
   })
 
   it('injects a live-roster context for a team run (teammates by name, recipient excluded)', async () => {

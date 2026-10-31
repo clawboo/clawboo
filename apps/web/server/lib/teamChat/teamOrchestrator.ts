@@ -30,6 +30,7 @@ import {
   buildTeamSessionKey,
   createBoardOrchestrator,
   createNudgeQueue,
+  DeliveryRefusedError,
   HUMAN_TURN,
   type BoardOrchestrator,
   type DispatchOutcome,
@@ -502,6 +503,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         })
       }
       await deliver(sk, targetId, stimulus, origin).catch(async (err: unknown) => {
+        // A refusal (a paused hard-cap budget) has already put its reason in the
+        // chat. Nothing is down, so no retry and no "could not reach" notice.
+        if (err instanceof DeliveryRefusedError) {
+          delivery.failure = err.message
+          return
+        }
         log.error({ err, teamId, targetId }, 'team-orchestrator user-turn delivery failed')
         if (isOperatorDown(err)) {
           const recovered = await getRegistry()

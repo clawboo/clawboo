@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { agents, chatMessages, teams } from '@clawboo/db'
 import type { TranscriptEntry } from '@clawboo/protocol'
-import type { TurnOrigin } from '@clawboo/team-orchestration'
+import { DeliveryRefusedError, type TurnOrigin } from '@clawboo/team-orchestration'
 
 const delivered: Array<{ sessionKey: string; agentId: string; task: string; origin: TurnOrigin }> =
   []
@@ -137,6 +137,19 @@ describe('team chat ingest from a routine', () => {
     const entries = transcript()
     expect(entries.map((e) => e.role)).toEqual(['user', 'system'])
     expect(entries[1]?.text).toContain('Could not reach the team')
+  })
+
+  it('a refused delivery is reported with its reason and adds no "could not reach" note', async () => {
+    // The refusal's own notice is written by the deliver primitive (faked here).
+    const reason =
+      'The team budget is paused at its hard cap, so this run did not start. Raise the cap or resume it in Governance to continue.'
+    failNextDelivery = new DeliveryRefusedError(reason)
+    const result = await getTeamOrchestrator('T').enqueueUserMessage({
+      stimulus: 'Do the thing.',
+      routine: { id: 'r1', name: 'Chore' },
+    })
+    expect(result).toEqual({ ok: false, error: reason })
+    expect(transcript().map((e) => e.role)).toEqual(['user'])
   })
 
   it('a team with nobody on it takes no message', async () => {

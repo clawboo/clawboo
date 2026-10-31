@@ -106,6 +106,24 @@ describe('track-and-warn mode (the track-and-warn default posture)', () => {
     expect(getBudget(db, 'agent', 'a1')?.status).not.toBe('paused')
     expect(getBudget(db, 'agent', 'a1')?.mode).toBe('warn')
   })
+
+  it('a save without a mode keeps a hard cap a hard cap', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'agent', 'a1', 150)
+    const saved = setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 120 })
+    expect(saved.mode).toBe('cap')
+    expect(saved.status).toBe('paused')
+    expect(getBudget(db, 'agent', 'a1')?.mode).toBe('cap')
+    expect(getBudget(db, 'agent', 'a1')?.status).toBe('paused')
+  })
+
+  it('a save without a mode keeps a warn budget warn, and a new budget starts warn', () => {
+    expect(setBudgetLimit(db, { scope: 'team', scopeId: 't1', limitUsdCents: 100 }).mode).toBe(
+      'warn',
+    )
+    setBudgetLimit(db, { scope: 'team', scopeId: 't1', limitUsdCents: 300 })
+    expect(getBudget(db, 'team', 't1')?.mode).toBe('warn')
+  })
 })
 
 describe('setBudgetLimit / resumeBudget (human override)', () => {

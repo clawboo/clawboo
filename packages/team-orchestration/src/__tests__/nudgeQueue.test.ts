@@ -92,6 +92,44 @@ describe('createNudgeQueue', () => {
     expect(sent).toEqual(['a', 'b'])
   })
 
+  it('a queued send that never started frees the session and the next queued send goes', async () => {
+    const nq = createNudgeQueue()
+    const sent: string[] = []
+    await nq.deliver('s1', async () => {
+      sent.push('a')
+    }) // s1 busy
+    void nq.deliver('s1', async () => {
+      throw new Error('refused before it started')
+    })
+    void nq.deliver('s1', async () => {
+      sent.push('c')
+    })
+    nq.markIdle('s1') // a ends; the refused send flushes and rejects
+    await new Promise((r) => setTimeout(r, 0))
+    expect(sent).toEqual(['a', 'c'])
+    nq.markIdle('s1') // c ends
+    expect(nq.isBusy('s1')).toBe(false)
+  })
+
+  it('a queued send that rejects after a reset leaves the new owner of the session alone', async () => {
+    const nq = createNudgeQueue()
+    let reject: (err: Error) => void = () => undefined
+    await nq.deliver('s1', async () => undefined) // s1 busy
+    void nq.deliver(
+      's1',
+      () =>
+        new Promise<void>((_resolve, rej) => {
+          reject = rej
+        }),
+    )
+    nq.markIdle('s1') // the queued send starts and waits
+    nq.reset() // a Stop
+    await nq.deliver('s1', async () => undefined) // delivered after the Stop, now running
+    reject(new Error('refused'))
+    await new Promise((r) => setTimeout(r, 0))
+    expect(nq.isBusy('s1')).toBe(true)
+  })
+
   it('onWedge fires before the wedge force-idles (abort the stale run before a second starts)', async () => {
     const order: string[] = []
     const nq = createNudgeQueue({

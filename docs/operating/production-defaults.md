@@ -54,7 +54,7 @@ The address is the connection's own, and forwarding headers are ignored. Behind 
 
 A fresh install has no budgets, so nothing caps spend. To set a ceiling, open **Settings > Insights > Governance**, create a budget for an agent or a team, and choose **hard cap**. When spend reaches the cap, the budget pauses and that scope gets no new work; how fast a running agent stops depends on its runtime. A **warn only** budget tracks spend against its limit and never stops work. See [Budgets and spend](/using/budgets-and-spend) for what each runtime reports and how a cap stops each kind of run.
 
-There is no install-wide cap. The Governance form also offers a `tenant` scope, but nothing charges or enforces it. Through the API, saving a budget without a `mode` makes it warn only, even when it was a hard cap. System Health's **budget posture** row always shows the shipped default, `track-and-warn`, not the budgets you create.
+There is no install-wide cap. The API also accepts a `tenant` scope, but nothing charges or enforces it, and the Governance form does not offer it. Through the API, a new budget saved without a `mode` is warn only, and an existing one keeps its mode. System Health's **budget posture** row always shows the shipped default, `track-and-warn`, not the budgets you create.
 
 ## OpenTelemetry
 

@@ -133,7 +133,7 @@ The card in the dashboard offers only a one-time allow and **Don't allow**. The 
 
 ### Budgets
 
-A budget counts what your agents spend and warns you as it fills. That is the default. A **hard cap**, which pauses work at 100%, is opt-in. In team chat a hard cap does not keep new turns from starting, and it stops a run partway only on Clawboo Native with a model Clawboo prices. [Budgets and guardrails](/concepts/governance) has the details for each path.
+A budget counts what your agents spend and warns you as it fills. That is the default. A **hard cap**, which pauses work at 100%, is opt-in. In team chat a paused hard cap refuses new runs, but it stops a run already going only on Clawboo Native with a model Clawboo prices. [Budgets and guardrails](/concepts/governance) has the details for each path.
 
 ### Circuit breakers
 

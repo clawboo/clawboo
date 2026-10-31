@@ -97,16 +97,12 @@ Creates a budget for a scope, or changes the limit and mode of an existing one. 
   scope: 'agent' | 'mission' | 'team' | 'tenant'  // required
   scopeId: string                                  // required, non-empty
   limitUsdCents: number                            // required, a positive integer (0 is refused)
-  mode?: 'cap' | 'warn'                            // 'warn' unless you send 'cap', on every write
+  mode?: 'cap' | 'warn'                            // omitted: 'warn' for a new budget, unchanged for an existing one
   tenantId?: string | null
 }
 ```
 
-<Warning>
-
-`mode` is applied on every write, not only on create. Re-sending a `cap` budget without `mode: 'cap'`, for example to raise its limit, turns it into a `warn` budget and removes the hard stop. Always send `mode: 'cap'` when you update a hard cap.
-
-</Warning>
+Sending `mode` sets it, on create and on update. Leaving it out keeps an existing budget's mode, so re-sending a `cap` budget with only a new `limitUsdCents` keeps the hard stop. To turn a hard cap into a warning, send `mode: 'warn'`.
 
 A limit of `0` is refused: a budget is a positive limit, and an untracked scope is one with no row. There is no delete route; to stop a cap, change it to `warn` or raise its limit.
 
