@@ -16,7 +16,7 @@ keywords:
 
 These are the environment variables Clawboo's own code reads, and the ones it sets on programs it starts. Set them in the shell or service that runs `clawboo`. The server reads most of them once at startup, so run `clawboo restart` after a change.
 
-Durations are in milliseconds. An unset, empty or non-numeric value means the default. Agent runtimes and OpenClaw read variables of their own, which this page does not cover.
+Durations are in milliseconds, and an unset, empty or non-numeric duration means the default. Each variable's section below says how it handles other values. Agent runtimes and OpenClaw read variables of their own, which this page does not cover.
 
 | Variable                               | Default                           | What it does                                                 |
 | -------------------------------------- | --------------------------------- | ------------------------------------------------------------ |

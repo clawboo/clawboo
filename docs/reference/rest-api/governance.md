@@ -311,10 +311,10 @@ Lists stored approval decisions from `approval_history`, newest first. This is a
 
 - **Query params**:
 
-| Param     | Type   | Default | Notes                                                                       |
-| --------- | ------ | ------- | --------------------------------------------------------------------------- |
-| `agentId` | string | none    | Only this agent's decisions                                                 |
-| `limit`   | number | `50`    | Kept between 1 and 200. Send a number: a non-numeric value skips that clamp |
+| Param     | Type   | Default | Notes                                                                                                           |
+| --------- | ------ | ------- | --------------------------------------------------------------------------------------------------------------- |
+| `agentId` | string | none    | Only this agent's decisions                                                                                     |
+| `limit`   | number | `50`    | Kept between 1 and 200. Send a number: a non-numeric value becomes `NaN`, and the query then runs with no limit |
 
 - **Request body**: none.
 

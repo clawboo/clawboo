@@ -15,7 +15,7 @@ keywords:
 
 Two server-side layers follow the same pattern as [AgentSource](/internals/agent-source): a neutral record type, a per-source adapter trait, a multiplexer that merges every adapter's records into one stream, and a process-wide singleton that registers the adapters.
 
-- **`CapabilitySource`** projects what each runtime can do (skills, tools, connectors) as `CapabilityRecord`s. Six sources are registered: one per runtime plus one for Clawboo's own outbound connectors. The [Org chart](/using/org-chart) and the [Capabilities panel](/using/capabilities) both read this stream.
+- **`CapabilitySource`** projects what each runtime can do (skills, tools, connectors) as `CapabilityRecord`s. Six sources are registered: one for each of the five real runtimes (the test-only `clawboo-mock` has none) plus one for Clawboo's own outbound connectors. The [Org chart](/using/org-chart) and the [Capabilities panel](/using/capabilities) both read this stream.
 - **`ScheduleSource`** projects when work fires as `ScheduleRecord`s. Two sources are registered: Clawboo Routines and the OpenClaw Gateway's own cron.
 
 Use this page when you add a source, change how a capability or schedule is written, or debug a degraded source.

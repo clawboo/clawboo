@@ -66,7 +66,7 @@ A script sends the cookie itself. Add `-b` to any example on these pages:
 curl -b "clawboo_access=$STUDIO_ACCESS_TOKEN" http://localhost:18790/api/agents
 ```
 
-Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer instead of the route's response.
+Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer (or a `401` when the token is wrong) instead of the route's response.
 
 | Request                                  | Status | Body                                                                                              |
 | ---------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |

@@ -104,7 +104,7 @@ network, so run it by hand.
 <Step title="Add the logo">
 
 Run `pnpm generate:brand-marks`. It rebuilds `apps/web/src/features/connectors/brandMarks.ts` from simple-icons and
-attaches a mark only when the connector's name matches a simple-icons title, or through an entry you add to
+attaches a mark only when the connector's display name, the first word of it, or its slug (lower-cased, punctuation removed) matches a simple-icons title or slug, or through an entry you add to
 `ALIASES` in `scripts/generate-brand-marks.ts`. A connector with no match shows no logo, which is better than the
 wrong one.
 

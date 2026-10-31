@@ -152,7 +152,7 @@ Totals for the **Tokens Used** panel, built from the records of the last 30 days
     date: string // en-US short date, for example "Oct 28"
     cost: number
     tokens: number
-  }> // 30 entries, oldest first, ending today; days with no records are 0
+  }> // 30 entries, oldest first, from 29 days ago through today; days with no records are 0. Records from 30 days ago count in the month totals but have no entry here.
 }
 ```
 

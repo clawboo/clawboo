@@ -262,7 +262,7 @@ curl -X POST http://localhost:18790/api/schedules \
 
 ## `PATCH /api/schedules/:id`
 
-Pauses or resumes a schedule, or changes its cron spec, label, task template, payload or target. The body takes one of two shapes; anything else is a **400**. The change goes to the source named in `:id`.
+Pauses or resumes a schedule, or changes its cron spec, label, task template, payload or target. The body takes one of two shapes; a body with neither is a **400**, and a body with both runs `action` and ignores `patch`. The change goes to the source named in `:id`.
 
 For a Routine:
 
@@ -286,7 +286,7 @@ For a Gateway cron job:
 - **The job id is not checked by Clawboo.** It goes to the Gateway as is, and a Gateway error (for example an unknown job) answers **500** with the Gateway's message, not **404**. The same holds for delete and run.
 
 - **Path params**: `id` (composite schedule id).
-- **Request body**: exactly one of:
+- **Request body**: one of:
 
 ```ts
 {

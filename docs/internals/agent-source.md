@@ -48,7 +48,7 @@ flowchart TD
     RAS <--> DB
 ```
 
-One rule shapes every operation: reads come from SQLite, and writes go to the owning upstream and mirror back. A disconnected Gateway therefore degrades a write on an OpenClaw agent (`503`), never a read: `GET /api/agents` still answers, flagged `stale`.
+One rule shapes every operation: registry reads come from SQLite, and writes go to the owning upstream and mirror back. A disconnected Gateway therefore degrades a write on an OpenClaw agent (`503`), never a registry read: `GET /api/agents` still answers, flagged `stale`. Listing an OpenClaw agent's sessions is the exception (see `listSessions` below).
 
 ## The AgentSource trait
 

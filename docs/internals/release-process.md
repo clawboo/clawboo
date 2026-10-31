@@ -25,7 +25,7 @@ graph TD
 
 ## Versions
 
-`apps/cli/package.json` holds the version of the last release. The `.changeset/*.md` files on `main` describe the next one, so `ls .changeset` tells you what the next `publish.yml` run does: any changeset file means it opens or updates a Version PR, none means it publishes.
+`apps/cli/package.json` holds the version of the last release. The `.changeset/*.md` files on `main` describe the next one, so `ls .changeset` tells you what the next `publish.yml` run does: any changeset file means it opens or updates a Version PR, none means it runs `changeset publish`. That publishes only when the version in `apps/cli/package.json` is not on npm yet; otherwise the run succeeds and publishes nothing.
 
 The CLI's version string comes from the build. `apps/cli/tsup.config.ts` sets `define: { __CLI_VERSION__: JSON.stringify(pkg.version) }`, and `apps/cli/src/version.ts` exports it as `VERSION`, falling back to `0.0.0-dev` when the code runs unbundled under tsx or Vitest. `clawboo --version` prints it, and the CLI passes it to every server it starts as `CLAWBOO_VERSION`.
 

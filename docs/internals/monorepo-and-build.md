@@ -122,7 +122,7 @@ The server's libraries ship inside the CLI as one bundle. `tsup.server.config.ts
 
 npm adds its usual files on top (`package.json`, the README, the license).
 
-A few modules stay outside the bundle:
+A few modules stay outside the server bundle (the CLI's own `dist/index.js` also leaves its declared `@clack/prompts`, `chalk`, `commander` and `ora` external):
 
 - **External and declared in the CLI's `dependencies`:** `better-sqlite3`, `ws`, `pino`, `pino-pretty` and `@composio/client`.
 - **External and optional:** `@opentelemetry/*` and `@anthropic-ai/claude-agent-sdk`. Both load lazily, and the npm package ships neither. Without OpenTelemetry, traces stay in the event log and OTLP export is unavailable. Without the Agent SDK, a Claude Code run fails with a message that says what to install (see [Claude Code](/runtimes/claude-code)).
@@ -155,7 +155,7 @@ Run these from the repo root. The Turbo-backed ones fan out across the workspace
 | `pnpm test:bundle-externals` | The static check that the assembled bundles load only declared, builtin or optional modules.                                                    |
 | `pnpm prepublish:check`      | `pnpm catalog:verify && pnpm verify:connectors && pnpm assemble && pnpm test:clean-install`.                                                    |
 
-A Husky pre-commit hook runs `lint-staged`, which applies `eslint --fix` and Prettier to staged code files and Prettier to staged JSON, Markdown, YAML and CSS.
+A Husky pre-commit hook runs `lint-staged`, which applies `eslint --fix` and Prettier to staged code files and Prettier to staged JSON, `.md`, YAML and CSS files. Staged `.mdx` files get no Prettier pass, so run `pnpm format` before committing one.
 
 ### The dev stack
 
