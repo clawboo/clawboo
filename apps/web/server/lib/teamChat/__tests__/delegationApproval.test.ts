@@ -75,18 +75,31 @@ describe('resolveDelegationApproval', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  it('skips the prompt when the leader has a sticky allow_always for the scope', async () => {
+  it('asks again after an earlier allow_always: a hand-off is never remembered', async () => {
     const seed = createApproval(db, { toolName: 'delegate:code', agentId: 'L', args: {} })
     resolveApproval(db, seed.id, 'allow_always')
 
-    const resolution = await resolveDelegationApproval(db, {
+    const pending = resolveDelegationApproval(db, {
       leaderAgentId: 'L',
       targetAgentName: 'Ops',
       task: 'deploy to production',
     })
-    expect(resolution).toBe('allow_always')
-    // No NEW pending approval was opened (the sticky path returns early).
-    expect(listPendingApprovals(db)).toHaveLength(0)
+    const open = listPendingApprovals(db)
+    expect(open).toHaveLength(1)
+    // The card offers no Always, and an API Always would mint nothing.
+    expect(open[0]!.neverRemember).toBe(1)
+    resolveApproval(db, open[0]!.id, 'allow_always')
+    expect(await pending).toBe('allow_always')
+
+    // The next risky hand-off from the same leader asks again.
+    const next = resolveDelegationApproval(db, {
+      leaderAgentId: 'L',
+      targetAgentName: 'Ops',
+      task: 'deploy to production',
+    })
+    expect(listPendingApprovals(db)).toHaveLength(1)
+    resolveApproval(db, listPendingApprovals(db)[0]!.id, 'deny')
+    expect(await next).toBe('deny')
   })
 
   it('opens a pending approval and resolves to the leader decision (deny → skip)', async () => {

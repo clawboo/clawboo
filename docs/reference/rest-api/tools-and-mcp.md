@@ -24,7 +24,7 @@ The MCP routes speak the Model Context Protocol (JSON-RPC over Streamable HTTP),
 
 </Note>
 
-Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the approval resolve and the MCP transport; none is on the sensitive tier. Request bodies are JSON (up to 2 MB). Argument and result summaries are scrubbed when they are written; the approval queue and the audit log mask them again before they leave the server, and the `/api/tools*` routes mask their error messages. The `curl` examples assume the access gate is off. With `STUDIO_ACCESS_TOKEN` set, the `/api/tools*` routes and `GET /api/mcp/config` need the access cookie (`-b 'clawboo_access=<token>'`, see [Authentication](/reference/rest-api/index#authentication)), and the MCP transport takes the `attachToken` described below.
+Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the approval resolve and the MCP transport; none is on the sensitive tier. Request bodies are JSON (up to 2 MB). Argument and result summaries are scrubbed when they are written; the approval queue and the audit log mask them again before they leave the server, and the `/api/tools*` routes mask their error messages. The `curl` examples assume the access gate is off. With `STUDIO_ACCESS_TOKEN` set, the `/api/tools*` routes, `GET /api/mcp/config` and `POST /api/mcp/attach-secret/rotate` need the access cookie (`-b 'clawboo_access=<token>'`, see [Authentication](/reference/rest-api/index#authentication)), and the MCP transport takes the `attachToken` described below.
 
 ## Routes
 
@@ -35,6 +35,7 @@ Every route here is on the general [rate limit](/reference/rest-api/index#rate-l
 | POST   | `/api/tools/approvals/:id/resolve` | Answer a pending approval (allow once, always, or deny) | No              |
 | GET    | `/api/tools/audit`                 | The tool-call audit log (before and after each call)    | No              |
 | GET    | `/api/mcp/config`                  | Build an attach snippet for one runtime and one server  | No              |
+| POST   | `/api/mcp/attach-secret/rotate`    | Replace the secret behind every attach URL              | No              |
 | POST   | `/api/mcp/tasks`                   | MCP JSON-RPC requests (Tasks server)                    | Streamable HTTP |
 | GET    | `/api/mcp/tasks`                   | MCP event stream for a Tasks session                    | SSE             |
 | DELETE | `/api/mcp/tasks`                   | End a Tasks session                                     | No              |
@@ -393,7 +394,7 @@ Without a binding this session is an unverified caller, so its `tools/list` leav
 
 Builds a copy-and-paste attach snippet for one runtime and one MCP server. The HTTP address uses the port this server is bound to (`http://127.0.0.1:<port>`), never the request's `Host` header, so a forged `Host` cannot send a runtime's MCP traffic elsewhere. If that port is unknown, it falls back to `CLAWBOO_API_PORT`, else `18790`.
 
-Every `http` URL it returns carries the `attachToken`. Send `scopeTeamId` or `scopeAgentId` and the URL also carries those parameters with a matching `scopeSig`, so the binding counts. Because the route signs whatever identity you ask for, it always needs the access cookie while the gate is on; the `attachToken` does not open it.
+Every `http` URL it returns carries the `attachToken`. Send `scopeTeamId` or `scopeAgentId` and the URL also carries those parameters with a matching `scopeSig`, so the binding counts. Because the route signs the identity you ask for, it always needs the access cookie while the gate is on; the `attachToken` does not open it.
 
 - **Query params**:
 
@@ -402,10 +403,10 @@ Every `http` URL it returns carries the `attachToken`. Send `scopeTeamId` or `sc
 | `server`       | string | `tasks`       | `tasks`, `memory`, `tools`, `teamchat` (anything else is a **400**) |
 | `runtime`      | string | `claude-code` | `claude-code`, `codex`, `openclaw`                                  |
 | `transport`    | string | `http`        | `http`; any other value is treated as `stdio`                       |
-| `scopeTeamId`  | string | none          | A team to bind, covered by `scopeSig`                               |
+| `scopeTeamId`  | string | none          | A team to bind, covered by `scopeSig`. It must exist                |
 | `scopeAgentId` | string | none          | An agent to bind, covered by `scopeSig`                             |
 
-Only `server` is checked. An unknown `runtime` answers `200` with `{ "ok": true }` and no `config`.
+`scopeTeamId` must name a team in the `teams` table, archived or not. A `scopeAgentId` that is a Clawboo agent must be on that team; an id no Clawboo agent uses is signed as given, for an outside agent's own identity. `runtime` and `transport` are not checked: an unknown `runtime` answers `200` with `{ "ok": true }` and no `config`.
 
 <Warning>
 
@@ -417,10 +418,12 @@ Binding `scopeAgentId` to an existing agent makes your outside agent act as that
 
 ### Responses
 
-**`400 Bad Request`**: `server` is not one of the four servers:
+**`400 Bad Request`**: `server` is not one of the four servers, `scopeTeamId` names no team, or `scopeAgentId` is a Clawboo agent on another team:
 
 ```json
 { "error": "unknown server: <server>" }
+{ "error": "unknown team: <scopeTeamId>" }
+{ "error": "agent <scopeAgentId> is not on team <scopeTeamId>" }
 ```
 
 **`200 OK`**: the attach config:
@@ -464,9 +467,39 @@ curl 'http://localhost:18790/api/mcp/config?runtime=claude-code&server=memory&sc
 
 ---
 
+## `POST /api/mcp/attach-secret/rotate`
+
+Replaces the per-install secret that every `attachToken`, `scopeSig` and `provSig` is derived from. Every attach URL minted before stops verifying at once: the ones you copied, the ones a local OpenClaw Gateway holds, and those of runs already in progress. Clawboo's own runtimes get new URLs on their next run, and the OpenClaw Gateway's registered URLs are replaced straight away when it is connected (otherwise on its next connection). Use it when an attach URL leaks, then copy new URLs from `GET /api/mcp/config`.
+
+Like `GET /api/mcp/config`, it always needs the access cookie while the gate is on; the `attachToken` does not open it.
+
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**:
+
+```json
+{ "ok": true }
+```
+
+**`500 Internal Server Error`**: the new secret could not be stored:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -s -X POST http://localhost:18790/api/mcp/attach-secret/rotate
+```
+
+---
+
 ## Error envelope
 
-The `/api/tools*` routes and `GET /api/mcp/config` use the standard `{ "error": string }` body; on the `/api/tools*` routes the message is masked. The resolve route's validation `400` adds `details`. The MCP transport answers with the JSON-RPC error bodies in its table, except for the gate's `401` and a `500`, which use the standard body. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
+The `/api/tools*` routes, `GET /api/mcp/config` and `POST /api/mcp/attach-secret/rotate` use the standard `{ "error": string }` body; on the `/api/tools*` routes the message is masked. The resolve route's validation `400` adds `details`. The MCP transport answers with the JSON-RPC error bodies in its table, except for the gate's `401` and a `500`, which use the standard body. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
 
 **Source of truth:** `apps/web/server/api/tools.ts` and `mcp.ts`; the servers in `packages/mcp/src/` (`http.ts`, `config.ts`, `tasks/`, `memory/`, `tools/`, `teamchat/`); the gate in `packages/gateway-proxy/src/access-gate.ts`; approvals in `packages/db/src/tools/persistence.ts`.
 

@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { carriesAttachToken } from '../../../api/mcp'
 import { getDb, resetDb } from '../../db'
+import { rotateMcpAttachSecret } from '../../mcpAttachSecret'
 import {
   OpenClawAgentSource,
   pendingUpstreamDeletes,
@@ -619,6 +620,26 @@ describe('OpenClawAgentSource', () => {
     for (const name of CLAWBOO_SERVERS) {
       expect(registered(fake)[name]?.url, name).toContain('attachToken=')
     }
+    await src.stop()
+  })
+
+  it('re-registers fresh URLs after the attach secret is rotated', async () => {
+    const fake = new FakeGateway()
+    fake.list = { defaultId: 'a1', mainKey: 'main', agents: [{ id: 'a1', name: 'Boo' }] }
+    const src = makeSourceWithMcp(fake, 'http://127.0.0.1:18790', 'ws://127.0.0.1:18789')
+    await src.start()
+    await flush()
+    const before = registered(fake)['clawboo-tasks']!.url
+
+    rotateMcpAttachSecret(getDb())
+    await src.refreshMcpServers()
+    const after = new URL(registered(fake)['clawboo-tasks']!.url)
+    expect(after.toString()).not.toBe(before)
+    expect(carriesAttachToken({ url: after.pathname + after.search } as IncomingMessage)).toBe(true)
+    const stale = new URL(before)
+    expect(carriesAttachToken({ url: stale.pathname + stale.search } as IncomingMessage)).toBe(
+      false,
+    )
     await src.stop()
   })
 

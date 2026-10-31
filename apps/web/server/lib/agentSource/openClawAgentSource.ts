@@ -523,6 +523,13 @@ export class OpenClawAgentSource implements AgentSource {
     this.setConnection('disconnected')
   }
 
+  /** Re-register Clawboo's MCP URLs in the Gateway config now, for a change that
+   *  alters them (an attach-secret rotation). A disconnected source skips it: the
+   *  next connect registers the current URLs anyway. Never throws. */
+  async refreshMcpServers(): Promise<void> {
+    await this.registerSharedMcpServers()
+  }
+
   /** Re-read settings + reconnect (called when settings change or the gateway starts).
    *  Clears any auth block: an explicit reconnect means "the credentials/pairing may
    *  have changed — try again now" (the recovery path out of the long auth backoff). */

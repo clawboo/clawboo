@@ -23,6 +23,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { mkdir, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 import type { ClaudeCodeDriver, ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
@@ -30,6 +31,7 @@ import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/
 import type { StartOpts, SteerOptions } from '@clawboo/executor'
 
 import { buildChildEnv } from './childEnv'
+import { claudeCodeIsolation } from './claudeCodeIsolation'
 import type { RuntimeRunContext } from './types'
 
 // Minimal structural shapes for the SDK objects we read — deliberately decoupled
@@ -374,6 +376,9 @@ export function createClaudeCodeDriver(
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
       }
+      // Off the operator's own Claude Code settings, memory and MCP servers; the
+      // working folder's project files still apply. See claudeCodeIsolation.ts.
+      Object.assign(options, claudeCodeIsolation(ctx.cwd ?? process.cwd(), os.homedir()))
       const model = ctx.model ?? opts.model
       if (ctx.cwd) options['cwd'] = ctx.cwd
       if (model) options['model'] = model

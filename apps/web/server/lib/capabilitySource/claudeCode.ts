@@ -1,5 +1,6 @@
-// claude-code CapabilitySource — Claude Code runs against the user's real
-// ~/.claude (clawboo injects mcpServers per query(), never reads .claude/skills;
+// claude-code CapabilitySource: Claude Code runs with the user's real HOME but
+// none of their ~/.claude setup (see runtimes/claudeCodeIsolation.ts; clawboo
+// injects mcpServers per query(), never reads .claude/skills;
 // the system:init event carries only session_id+model). So clawboo has NO
 // persistent Claude store to manage: it surfaces the clawboo-attached MCP servers
 // + Claude's built-ins, both `observe-only`. write() → unsupported.

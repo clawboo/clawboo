@@ -8,7 +8,7 @@
 
 import { randomBytes } from 'node:crypto'
 
-import { getSetting, settings, type ClawbooDb } from '@clawboo/db'
+import { getSetting, setSetting, settings, type ClawbooDb } from '@clawboo/db'
 
 const KEY = 'mcp-attach-scope-secret'
 
@@ -35,6 +35,33 @@ export function getMcpAttachSecret(db: ClawbooDb): string {
   const winner = getSetting(db, KEY) ?? minted
   cached = winner
   return winner
+}
+
+const rotationListeners = new Set<() => void>()
+
+/**
+ * Replace the install's attach-signing secret. Every attach token and scope
+ * signature minted under the old one stops verifying at once: copied URLs, the
+ * local Gateway's registered URLs and the URLs of runs already in flight. New
+ * runs get fresh URLs; a listener (the OpenClaw source) re-registers the Gateway's.
+ */
+export function rotateMcpAttachSecret(db: ClawbooDb): void {
+  const minted = randomBytes(32).toString('hex')
+  setSetting(db, KEY, minted)
+  cached = minted
+  for (const listener of rotationListeners) {
+    try {
+      listener()
+    } catch {
+      // A listener's failure must not undo or block the rotation itself.
+    }
+  }
+}
+
+/** Run `listener` after each rotation. Returns the unsubscribe. */
+export function onMcpAttachSecretRotated(listener: () => void): () => void {
+  rotationListeners.add(listener)
+  return () => rotationListeners.delete(listener)
 }
 
 /** Test-only: forget the process cache so a fresh db mints/reads its own. */

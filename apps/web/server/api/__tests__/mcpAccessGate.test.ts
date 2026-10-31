@@ -11,6 +11,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
+import { agents, teams } from '@clawboo/db'
 import { createAccessGate } from '@clawboo/gateway-proxy'
 import { REDACTION_MASK } from '@clawboo/logger'
 import { MCP_SERVER_NAMES, mcpHttpUrl, signAttachAccess } from '@clawboo/mcp'
@@ -18,9 +19,18 @@ import type { Request, Response } from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { getMcpAttachSecret, resetMcpAttachSecretCache } from '../../lib/mcpAttachSecret'
+import {
+  getMcpAttachSecret,
+  onMcpAttachSecretRotated,
+  resetMcpAttachSecretCache,
+} from '../../lib/mcpAttachSecret'
 import { withAttachSecret } from '../../lib/runtimes'
-import { carriesAttachToken, mcpConfigGET, redactAttachCredentials } from '../mcp'
+import {
+  carriesAttachToken,
+  mcpAttachSecretRotatePOST,
+  mcpConfigGET,
+  redactAttachCredentials,
+} from '../mcp'
 
 const OPERATOR_TOKEN = 'operator-token-value'
 const BASE = 'http://127.0.0.1:18790'
@@ -176,21 +186,73 @@ describe('carriesAttachToken', () => {
 })
 
 describe('mcpConfigGET (the operator copy-paste snippet)', () => {
-  function snippetUrl(query: Record<string, string>): string {
-    let body: { config: { structured: Record<string, { url: string }> } } | undefined
+  type ConfigBody = { config?: { structured: Record<string, { url: string }> }; error?: string }
+  function callConfig(query: Record<string, string>): { status: number; body: ConfigBody } {
+    let body: ConfigBody = {}
+    let status = 200
     const req = { query, app: { locals: { apiPort: 18790 } } } as unknown as Request
     const res = {
-      json(v: typeof body) {
+      json(v: ConfigBody) {
         body = v
         return this
       },
-      status() {
+      status(code: number) {
+        status = code
         return this
       },
     } as unknown as Response
     mcpConfigGET(req, res)
-    return Object.values(body!.config.structured)[0]!.url
+    return { status, body }
   }
+  function snippetUrl(query: Record<string, string>): string {
+    return Object.values(callConfig(query).body.config!.structured)[0]!.url
+  }
+
+  beforeAll(() => {
+    const now = Date.now()
+    const db = getDb()
+    for (const id of ['team-a', 'team-b'])
+      db.insert(teams)
+        .values({ id, name: id, icon: 'x', color: '#000', createdAt: now, updatedAt: now })
+        .run()
+    db.insert(agents)
+      .values({
+        id: 'agent-b',
+        name: 'B',
+        gatewayId: 'agent-b',
+        teamId: 'team-b',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+  })
+
+  it('refuses to sign a team that does not exist', () => {
+    const { status, body } = callConfig({ server: 'tasks', scopeTeamId: 'no-such-team' })
+    expect(status).toBe(400)
+    expect(body.error).toBe('unknown team: no-such-team')
+  })
+
+  it('refuses to sign a Clawboo agent for a team it is not on', () => {
+    const { status, body } = callConfig({
+      server: 'teamchat',
+      scopeTeamId: 'team-a',
+      scopeAgentId: 'agent-b',
+    })
+    expect(status).toBe(400)
+    expect(body.error).toBe('agent agent-b is not on team team-a')
+  })
+
+  it("signs an outside agent's own id on an existing team, and a Clawboo agent on its own", () => {
+    for (const query of [
+      { server: 'memory', scopeTeamId: 'team-a', scopeAgentId: 'external-claude' },
+      { server: 'memory', scopeTeamId: 'team-b', scopeAgentId: 'agent-b' },
+    ]) {
+      const url = snippetUrl(query)
+      expect(url).toContain('scopeSig=')
+      expect(url).toContain(`scopeAgentId=${query.scopeAgentId}`)
+    }
+  })
 
   it('an unscoped snippet carries the attach token, so it works on a gated install', () => {
     const url = snippetUrl({ runtime: 'claude-code', server: 'tasks', transport: 'http' })
@@ -239,5 +301,45 @@ describe('redactAttachCredentials (the request log)', () => {
   it('leaves malformed and look-alike names alone', () => {
     const url = '/api/mcp/tasks?attachToken%ZZ=1&attachTokenX=2&%E0%A4%A=3&flag'
     expect(redactAttachCredentials(url)).toBe(url)
+  })
+})
+
+describe('rotating the attach secret', () => {
+  it('is operator-only: a valid attach token does not reach the rotate route', () => {
+    const path = `/api/mcp/attach-secret/rotate?attachToken=${signAttachAccess(secret())}`
+    expect(carriesAttachToken(mockReq(path))).toBe(false)
+    expect(admitted(gate, mockReq(path))).toBe(false)
+  })
+
+  it('voids every token and signature minted before, and tells the Gateway source', () => {
+    const before = signAttachAccess(secret())
+    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(true)
+    let notified = 0
+    const stop = onMcpAttachSecretRotated(() => {
+      notified += 1
+    })
+
+    let body: unknown
+    const res = {
+      json(v: unknown) {
+        body = v
+        return this
+      },
+      status() {
+        return this
+      },
+    } as unknown as Response
+    mcpAttachSecretRotatePOST({} as Request, res)
+    stop()
+
+    expect(body).toEqual({ ok: true })
+    expect(notified).toBe(1)
+    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${before}`))).toBe(false)
+    const after = signAttachAccess(secret())
+    expect(after).not.toBe(before)
+    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${after}`))).toBe(true)
+    // The new secret is the stored one, not only the process cache.
+    resetMcpAttachSecretCache()
+    expect(signAttachAccess(secret())).toBe(after)
   })
 })

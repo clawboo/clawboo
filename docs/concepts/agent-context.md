@@ -24,7 +24,7 @@ Each time an agent runs, it gets a message plus a block of context that Clawboo 
 
 An agent's input has three layers:
 
-1. **The runtime's own setup**: its system prompt and its tools. Clawboo Native builds its system prompt from the agent's SOUL.md and adds today's date. OpenClaw builds its own from the agent's files in its OpenClaw workspace. Claude Code, Codex and Hermes use their own, and Claude Code also loads your `~/.claude` settings and memory, as the Claude Code CLI does.
+1. **The runtime's own setup**: its system prompt and its tools. Clawboo Native builds its system prompt from the agent's SOUL.md and adds today's date. OpenClaw builds its own from the agent's files in its OpenClaw workspace. Claude Code, Codex and Hermes use their own. Claude Code also reads the `CLAUDE.md` of the folder it works in, but nothing from your own `~/.claude`.
 2. **Clawboo's context**, put together when the run starts and placed in front of the message.
 3. **The message**: what you wrote, or the task text an agent wrote for a teammate.
 

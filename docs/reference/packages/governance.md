@@ -147,9 +147,10 @@ never remembered, and they run before the approval policy, so a policy of `never
 
 <Step title="Apply standing rules and the policy">
 
-A standing deny rule denies, and a standing allow rule allows unless the tool is marked never-remember. A
-never-remember tool always asks, whatever the policy. Then the policy decides: `always` asks, `writes` asks for a
-mutating tool, `never` allows, and `risk` asks for a destructive tool or a mutating tool with external effects.
+A standing deny rule denies. A never-remember tool always asks, whatever the policy. A policy of `always` asks
+next, even for a tool a standing allow rule covers, and marks the request never-remember. Otherwise a standing
+allow rule allows, and then the policy decides: `writes` asks for a mutating tool, `never` allows, and `risk` asks
+for a destructive tool or a mutating tool with external effects.
 
 </Step>
 

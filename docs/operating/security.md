@@ -133,7 +133,7 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
   - it connects directly from a loopback address;
   - it has none of the headers a proxy adds: `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or `X-Real-IP`.
 
-  `/api/mcp/config` always needs the cookie. A leaked attach token is useless from another machine or through your proxy.
+  `/api/mcp/config` always needs the cookie. A leaked attach token is useless from another machine or through your proxy, and `POST /api/mcp/attach-secret/rotate` replaces every token and signature at once (see [MCP servers](/operating/mcp-servers#the-attach-token)).
 
 - **On 0.5.0 and older**, any request from `127.0.0.1` reaches all of `/api/mcp/` without the cookie. See the advisory at the top of this page.
 
