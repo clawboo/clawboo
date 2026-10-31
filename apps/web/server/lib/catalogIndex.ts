@@ -20,8 +20,11 @@
 // NOTHING HERE THROWS. Offline, firewalled, 404, corrupt bytes - every one of
 // them returns the seed, because `SelectTeamStep` renders with
 // `allowStartFromScratch={false}` and an empty catalog is a first run with
-// nothing to click. Modelled on `updateCheck.ts`: cache successes, never cache
-// or propagate a failure.
+// nothing to click. A failure is never propagated, but whatever the refresh
+// produced IS cached for the same 6h as a success, the seed-only fallback
+// included, so an offline dashboard tries the network once per window rather
+// than on every request. (`updateCheck.ts` differs here: it never caches a
+// failure.)
 //
 // INTEGRITY IS THE ANCHOR, NOT THE URL. The index is mutable; each pack bundle
 // it names is immutable and carries `sha256-<base64>` over its exact bytes. A
@@ -416,8 +419,8 @@ async function buildSnapshot(): Promise<CatalogSnapshot> {
 
 /**
  * The merged catalog: the compiled seed union every pack whose bytes verified.
- * Never throws, never returns an empty catalog. Cached for 6h, and concurrent
- * callers share one build.
+ * Never throws, never returns an empty catalog. Cached for 6h, including the
+ * seed a failed refresh falls back to, and concurrent callers share one build.
  */
 export async function getCatalogSnapshot(now: number = Date.now()): Promise<CatalogSnapshot> {
   if (cache && now - cache.at < CACHE_TTL_MS) return cache.snapshot
