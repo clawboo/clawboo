@@ -174,7 +174,7 @@ The router registers 199 routes: 89 `GET`, 79 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 
 | Page                                                 | Routes | What it covers                                                                                                                                      |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Agents](/reference/rest-api/agents)                 | 19     | `/api/agents*`: list, create, sync, delete, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 native chat |
+| [Agents](/reference/rest-api/agents)                 | 19     | `/api/agents*`: list, create, sync, delete, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 agent chats |
 | [Teams](/reference/rest-api/teams)                   | 21     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat), `/api/team-rules/:teamId`, `/api/team-chat*`                               |
 | [Board](/reference/rest-api/board)                   | 24     | `/api/board*`: tasks, claim, status changes, comments, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview      |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                           |

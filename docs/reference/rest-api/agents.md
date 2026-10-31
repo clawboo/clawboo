@@ -37,7 +37,7 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | GET    | `/api/agents/:agentId/screenshot`         | The newest browser screenshot for this agent                  | No      |
 | POST   | `/api/agents/:agentId/screenshot/capture` | Take a fresh screenshot of a browser already open for it      | No      |
 | PATCH  | `/api/agents/:agentId/model`              | Change a native or Hermes agent's model (and provider)        | No      |
-| POST   | `/api/agents/:agentId/chat`               | Start one 1:1 chat turn with a native agent (`202`)           | No      |
+| POST   | `/api/agents/:agentId/chat`               | Start one 1:1 chat turn, any runtime but OpenClaw (`202`)     | No      |
 | POST   | `/api/agents/:agentId/chat/stop`          | Stop the agent's running 1:1 turn                             | No      |
 | GET    | `/api/agents/:agentId/chat/stream`        | Live tail of the agent's 1:1 chat                             | SSE     |
 | GET    | `/api/agents/:agentId/shell`              | Whether a native agent may ask to run commands                | No      |
@@ -841,7 +841,11 @@ curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
 
 ## `POST /api/agents/:agentId/chat`
 
-Starts one turn of a `clawboo-native` agent's 1:1 chat (Boo Zero's personal chat, or any native agent's). The route stores your message under the session key `agent:<agentId>:native`, starts the reply in the background and answers **202** at once. The reply streams over `GET /api/agents/:agentId/chat/stream` and is saved by the server, so closing the connection does not stop it. Agents on other runtimes answer **404**; an OpenClaw agent's 1:1 chat goes through the Gateway connection instead.
+Starts one turn of the 1:1 chat of a `clawboo-native`, `claude-code`, `codex` or `hermes` agent, Boo Zero's personal chat included. The route stores your message under the agent's 1:1 session key, the `sessionKey` in its record: `agent:<agentId>:native` for a native agent and `agent:<agentId>:<runtime>` for the others. It starts the reply in the background and answers **202** at once. The reply streams over `GET /api/agents/:agentId/chat/stream` and is saved by the server, so closing the connection does not stop it. An OpenClaw agent answers **404**; its 1:1 chat goes through the Gateway connection instead.
+
+Each turn resumes the session the agent's previous 1:1 turn saved, so the conversation carries over. The pointer is one setting per agent, `native-chat-session:<agentId>`, whatever the runtime. `/reset` in the chat clears it, and so does a failed Claude Code, Codex or Hermes turn that tried to resume, so the next turn starts a fresh session. One agent's turns run one at a time: a second message waits for the turn in front of it. On Clawboo Native, Codex and Hermes it also waits for that agent's team-chat runs and routines, and a turn that cannot start within 10 minutes leaves the notice "This agent was busy with another run and did not pick the message up in time. Send it again." Claude Code, Codex and Hermes get the agent's `SOUL.md` as a persona block on every turn.
+
+Every turn starts in the agent's team folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`_no-team` for an agent on no team), created `0700` before the run. If the folder cannot be created, the turn ends with a notice instead of starting anywhere else. A native agent gets its file tools there, and `run_command` when its shell switch is on. A turn that fails before it writes any reply leaves a notice with the reason, including a run ended after `CLAWBOO_RUN_SILENT_TIMEOUT_MS` (30 minutes by default) with no events. A turn that fails partway keeps the text it had written.
 
 - **Path params**: `agentId`.
 - **Request body**:
@@ -878,10 +882,10 @@ Starts one turn of a `clawboo-native` agent's 1:1 chat (Boo Zero's personal chat
 { "error": "message required" }
 ```
 
-**`404 Not Found`**: the agent's `runtime` is not `clawboo-native`:
+**`404 Not Found`**: the agent is unknown, or its `runtime` is `openclaw`:
 
 ```json
-{ "error": "agent is not a native conversational agent" }
+{ "error": "agent does not chat through the server" }
 ```
 
 **`500 Internal Server Error`**: any other failure:
@@ -902,7 +906,7 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat \
 
 ## `POST /api/agents/:agentId/chat/stop`
 
-Stops the agent's running 1:1 turn (the composer's **Stop** button). A native agent has at most one running 1:1 turn; with none running the call changes nothing and still answers **200**.
+Stops the agent's running 1:1 turn (the composer's **Stop** button). An agent has at most one running 1:1 turn; with none running the call changes nothing and still answers **200**.
 
 - **Path params**: `agentId`.
 - **Request body**: none.
@@ -937,7 +941,7 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop
 
 ## `GET /api/agents/:agentId/chat/stream`
 
-A Server-Sent Events tail of the agent's 1:1 chat (`agent:<agentId>:native`). It only reads; it never starts a turn. It sends two kinds of frame: stored `chat_messages` rows, polled every 750 ms past a row-id cursor (each with an `id:` line, so they replay on resume), and live frames for streaming text and run state (no `id:` line, never replayed).
+A Server-Sent Events tail of the agent's 1:1 chat (`agent:<agentId>:native`, or `agent:<agentId>:<runtime>` for a Claude Code, Codex or Hermes agent). It only reads; it never starts a turn. It sends two kinds of frame: stored `chat_messages` rows, polled every 750 ms past a row-id cursor (each with an `id:` line, so they replay on resume), and live frames for streaming text and run state (no `id:` line, never replayed).
 
 **Where it starts.** With no `Last-Event-ID` header and no `since`, the stream starts at the newest stored message and sends only what follows. Load the history first with `GET /api/chat-history` (see [Chat history API](/reference/rest-api/chat-history)). A supplied cursor resumes after that row id; `Last-Event-ID` wins over `since`, and an invalid or negative value resumes from `0` (the whole chat).
 
@@ -1062,7 +1066,7 @@ The confirmation the dashboard shows before switching this on exists only in the
 
 </Note>
 
-Switching this on is necessary for `run_command` to exist, but not enough. The tool is also left out of any run without a working directory, which in practice means 1:1 chat. Team chat, delegated turns and task runs all carry one: the team's folder, or the task's worktree. It is never offered on Windows.
+Switching this on is necessary for `run_command` to exist, but not enough. The tool is also left out of any run without a working directory. Team chat, 1:1 chat, delegated turns and task runs all carry one: the team's folder, or the task's worktree. It is never offered on Windows.
 
 ### Responses
 

@@ -77,13 +77,13 @@ If the in-app sign-in fails, the panel shows the reason and the command to run y
 | Leading a team    | A Codex leader hands work to teammates with the `team_delegate` tool.                                                                                                                             |
 | Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff). |
 | Steering          | Live. A comment on a running task joins the turn in progress; Codex reads it at its next model call, after the command that is running. See [Board](/using/board).                                |
-| Sessions          | A Codex agent leading a chat continues the same Codex thread from one turn to the next, separately for each chat room.                                                                            |
+| Sessions          | A Codex agent leading a chat continues the same Codex thread from one turn to the next, separately for each chat room. Its one-to-one chat continues one session until `/reset`.                  |
 | Memory            | Clawboo's shared memory, through the Memory tools, plus the thread history in the agent's Codex folder.                                                                                           |
 | Cost              | An estimate from the tokens Codex reports. See [Costs](#costs).                                                                                                                                   |
 
 ### Each agent's Codex folder
 
-Each Codex agent gets its own Codex home at `~/.clawboo/runtimes/codex/<agent id>`, created so only your user can open it. Codex keeps the agent's sessions there, which is how a leader continues its thread. Before each run, Clawboo:
+Each Codex agent gets its own Codex home at `~/.clawboo/runtimes/codex/<agent id>`, created so only your user can open it. Codex keeps the agent's sessions there, which is how a leader, or the agent's own chat, continues its thread. Before each run, Clawboo:
 
 - copies your ChatGPT sign-in (`~/.codex/auth.json`) into the folder when the copy there is missing, unusable or older than yours. Codex refreshes the copy itself, so Clawboo never overwrites a newer one.
 - writes the folder's `config.toml`, which lists Clawboo's MCP servers. Your own `~/.codex/config.toml` is not read, and Clawboo never writes to `~/.codex`.
@@ -100,7 +100,7 @@ Clawboo runs Codex with its own sandbox and approval prompts turned off (approva
 
 </Warning>
 
-- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, and on research and review runs (which includes every agent Routine you create in the app), Codex starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task with no team uses `workspaces/_no-team`). That folder only sets where it starts: Codex can still read and change any file your user account can, including Clawboo's database and key vault.
+- **A worktree is not a sandbox.** Only a task-runner run of a task that changes files, with a repository named, works in its own git worktree, which keeps its edits off your main checkout. Everywhere else there is no worktree: in team chat, in the agent's own chat, and on research and review runs (which includes every agent Routine you create in the app), Codex starts in its team's folder, `~/.clawboo/workspaces/<team id>`, which every member of the team shares (a task or an agent with no team uses `workspaces/_no-team`). That folder only sets where it starts: Codex can still read and change any file your user account can, including Clawboo's database and key vault.
 - **Clawboo's approvals do not cover Codex's own tools.** Calls the agent makes through Clawboo's Tools server (connectors, for example) go through Clawboo's checks and can ask you first. Codex's shell commands, file edits and web searches never do. If Codex asks for an approval or an answer mid-run, Clawboo declines, so the run never waits for a person who is not there.
 - **Clawboo hides some secrets from it, by name only.** Before a run, Clawboo removes its own secrets and a fixed list of common credentials (GitHub, npm, cloud, Stripe, Slack and database variables) from the environment Codex inherits. Other variables pass through, and credential files on disk stay readable.
 

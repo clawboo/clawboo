@@ -117,9 +117,9 @@ Most work reaches a runtime along one of two server paths. They share the board 
 | Circuit breakers      | No                                                                                                       | Yes                                                                                                         |
 | Memory auto-injection | No                                                                                                       | Yes                                                                                                         |
 
-Two smaller paths sit beside these. A Routine fire aimed at one OpenClaw agent goes through a dispatcher on the server's Gateway connection (`apps/web/server/lib/routines/openclawDispatch.ts`), with no worktree and no verification. A 1:1 chat with a Clawboo Native agent runs one conversational turn in `apps/web/server/lib/agentChat/`, with no board task.
+Two smaller paths sit beside these. A Routine fire aimed at one OpenClaw agent goes through a dispatcher on the server's Gateway connection (`apps/web/server/lib/routines/openclawDispatch.ts`), with no worktree and no verification. A 1:1 chat with a Clawboo Native, Claude Code, Codex or Hermes agent runs one conversational turn per message in `apps/web/server/lib/agentChat/driveAgentChat.ts`, with no board task, in the agent's team folder (`workspaces/_no-team` for an agent on no team).
 
-Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off on both paths. A worktree keeps a task's file changes apart, but it is not a sandbox, and neither is the team's folder that a run without a worktree starts in. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
+Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off on every path, 1:1 chat included. A worktree keeps a task's file changes apart, but it is not a sandbox, and neither is the team's folder that a run without a worktree starts in. [What agents can do](/concepts/permissions) is the page that explains this; [Verification](/concepts/verification) and [Governance](/concepts/governance) cover the checks and budget guards per path.
 
 ## Where to start reading
 

@@ -41,7 +41,7 @@ An agent routine on OpenClaw takes a third, smaller path: a dispatcher that send
 | Delegation depth and fan-out caps | On                       | Yes                              | Depth only                      | No                     |
 | Approval for risky delegations    | On                       | Yes                              | No                              | No                     |
 
-One-to-one chat follows its own rules. A Clawboo Native agent's one-to-one chat charges only that agent's budget, and only for a priced model. One-to-one chat with an OpenClaw agent is not charged to any budget.
+One-to-one chat follows its own rules. One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent charges only that agent's budget. As in team chat, nothing checks a budget before a turn starts, only a Clawboo Native run on a priced model can stop partway, and every other turn is charged when it ends. One-to-one chat with an OpenClaw agent is not charged to any budget.
 
 ## Budgets
 
@@ -141,7 +141,7 @@ The approval card in the dashboard offers only a one-time allow and **Don't allo
 Separate approvals decide whether an agent may run a shell command or act in a connected app without asking you:
 
 - An OpenClaw agent's **Command Execution** setting (new OpenClaw agents start at **Ask for Unknown**). See [Command permissions](/using/command-permissions).
-- A Clawboo Native agent's **Let this Boo ask to run commands** switch, off by default. When it is on, the agent asks before every command, and a run can ask at most 10 times. Commands are offered only on task-runner runs in a worktree, never in team chat or one-to-one chat, and never on Windows.
+- A Clawboo Native agent's **Let this Boo ask to run commands** switch, off by default. When it is on, the agent asks before every command, and a run can ask at most 10 times. Commands are offered on runs that have a working folder, which includes team chat and one-to-one chat, and never on Windows.
 - Approvals for actions in connected apps. See [Approvals](/using/approvals).
 
 Claude Code, Codex and Hermes run with their own approval prompts turned off, so Clawboo does not ask before their commands. [What agents can do](/concepts/permissions) explains what that means for your files.
@@ -149,7 +149,7 @@ Claude Code, Codex and Hermes run with their own approval prompts turned off, so
 ## What these guardrails do not cover
 
 - **What a run can touch.** Budgets, breakers and caps limit spend and effort. A run that stays under its budget can still read and change anything its runtime can reach. See [What agents can do](/concepts/permissions).
-- **Stuck runs in team chat.** Team chat has no circuit breakers. Besides the delegation caps, its guard against a stuck run is time. A handed-off task whose run reports nothing for 8 minutes is failed (24 minutes while the agent is inside one tool call), and any run silent for 30 minutes is ended. The task runner ends a run after the same 30 minutes of silence.
+- **Stuck runs in team chat.** Team chat has no circuit breakers. Besides the delegation caps, its guard against a stuck run is time. A handed-off task whose run reports nothing for 8 minutes is failed (24 minutes while the agent is inside one tool call), and any run silent for 30 minutes is ended. The task runner and one-to-one chat end a run after the same 30 minutes of silence.
 - **Warnings from team-chat spend.** Spend from team chat moves a budget's bar and status in the Governance panel, but no warning event is written to the audit log.
 - **Expensive but healthy runs.** The breakers are tuned so a healthy run never trips them, so a costly run that keeps making progress passes them. A hard-cap budget is the only limit set in dollars, and it holds only as far as [What a hard cap stops](#what-a-hard-cap-stops) describes.
 

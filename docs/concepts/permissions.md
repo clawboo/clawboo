@@ -24,19 +24,19 @@ The short answer: Claude Code, Codex and Hermes run with their own permission pr
 
 <Warning>
 
-A git worktree keeps two agents' file changes apart. It is not a sandbox. Claude Code, Codex and Hermes run as you: they can read and change any file your user account can, reach the network, and start other programs. Without a worktree, as in team chat, they start in their team's folder, `~/.clawboo/workspaces/<team id>`. That folder is only where they start, not a fence: from there they can still reach Clawboo's database and saved keys, like any other file you can open.
+A git worktree keeps two agents' file changes apart. It is not a sandbox. Claude Code, Codex and Hermes run as you: they can read and change any file your user account can, reach the network, and start other programs. Without a worktree, as in team chat or an agent's own chat, they start in their team's folder, `~/.clawboo/workspaces/<team id>`. That folder is only where they start, not a fence: from there they can still reach Clawboo's database and saved keys, like any other file you can open.
 
 </Warning>
 
 ## Each runtime at a glance
 
-| Runtime        | Its own prompts and sandbox                          | Where it works                                                                                                                                     | Clawboo asks you before                                             |
-| -------------- | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Clawboo Native | None of its own: Clawboo provides its tools          | Task runner with a repository: the task's worktree, except for research and review tasks. One-to-one chat: no folder. Otherwise: the team's folder | Each shell command, once you turn shell commands on                 |
-| Claude Code    | Off (`bypassPermissions`)                            | Task runner with a repository: the task's worktree, except for research and review tasks. Otherwise: the team's folder                             | Nothing it does with its own tools                                  |
-| Codex          | Off (approval `never`, sandbox `danger-full-access`) | Same as Claude Code                                                                                                                                | Nothing it does with its own tools                                  |
-| Hermes         | Off (`--yolo`)                                       | Same as Claude Code                                                                                                                                | Nothing it does with its own tools                                  |
-| OpenClaw       | The OpenClaw Gateway's own settings                  | The agent's own OpenClaw workspace, never a Clawboo worktree                                                                                       | Shell commands, following the agent's **Command Execution** setting |
+| Runtime        | Its own prompts and sandbox                          | Where it works                                                                                                                                    | Clawboo asks you before                                             |
+| -------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Clawboo Native | None of its own: Clawboo provides its tools          | Task runner with a repository: the task's worktree, except for research and review tasks. Otherwise, including one-to-one chat: the team's folder | Each shell command, once you turn shell commands on                 |
+| Claude Code    | Off (`bypassPermissions`)                            | Task runner with a repository: the task's worktree, except for research and review tasks. Otherwise: the team's folder                            | Nothing it does with its own tools                                  |
+| Codex          | Off (approval `never`, sandbox `danger-full-access`) | Same as Claude Code                                                                                                                               | Nothing it does with its own tools                                  |
+| Hermes         | Off (`--yolo`)                                       | Same as Claude Code                                                                                                                               | Nothing it does with its own tools                                  |
+| OpenClaw       | The OpenClaw Gateway's own settings                  | The agent's own OpenClaw workspace, never a Clawboo worktree                                                                                      | Shell commands, following the agent's **Command Execution** setting |
 
 On every runtime, calls to connectors go through Clawboo and follow the rules in [Connectors](#connectors). Team chat and the task runner are the two ways Clawboo runs agents; [How a team works](/intro/how-it-works) explains which work takes which path.
 
@@ -44,9 +44,8 @@ On every runtime, calls to connectors go through Clawboo and follow the rules in
 
 Clawboo itself runs these agents, so every tool they have is one Clawboo built:
 
-- **In team chat and on research and review tasks** it works in its team's folder, with tools to list, read and write files there.
+- **In team chat, in one-to-one chat and on research and review tasks** it works in its team's folder, with tools to list, read and write files there. In one-to-one chat, an agent on no team works in `~/.clawboo/workspaces/_no-team`.
 - **On a task-runner run with a repository** it gets the same tools inside the task's worktree.
-- **In one-to-one chat** it has no working folder, so it has no file or shell tools.
 - **File tools stay inside their folder.** A path outside it is refused, and so is a path that leads out of it through a symlink.
 - **In every run** it also works through Clawboo's tools: the board, memory, the peer room, handing work to teammates, and the connectors you share with it.
 - **Shell commands are off by default.** To turn them on for one agent, open its page, then **Details** > **Permissions**, and switch on **Let this Boo ask to run commands**.
@@ -76,6 +75,7 @@ Where they start depends on the path:
 - **Task runner, with a repository:** in the task's own git worktree, a separate checkout under `~/.clawboo/worktrees`. That is their starting folder, not a fence. A task that changes files but names no repository is refused, rather than run somewhere else.
 - **Task runner, research or review task:** no worktree, even with a repository. Agent Routines you create in the app run this way. They start in the team's folder, the same as team chat. A task with no team starts in a shared folder, `~/.clawboo/workspaces/_no-team`.
 - **Team chat**, including board tasks you give an agent: no worktree. They start in the team's folder, `~/.clawboo/workspaces/<team id>` (under `CLAWBOO_HOME` when you set it). Every member and every room of the team shares this one folder.
+- **One-to-one chat** on the agent's page: no worktree. They start in the team's folder, or in `~/.clawboo/workspaces/_no-team` for an agent on no team.
 
 Clawboo creates the team's folder the first time a run needs it, readable only by your user account. If it cannot create the folder, the run does not start. The folder only sets where these runtimes start; it fences nothing in.
 
@@ -163,7 +163,7 @@ An image in an agent's markdown never loads on its own. In chat, a task's report
 <Accordion title="Under the hood">
 
 - **Driver settings.** Claude Code runs through the Agent SDK `query()` with `permissionMode: 'bypassPermissions'` and `allowDangerouslySkipPermissions: true`, and sets no `settingSources`, so the SDK loads every settings source (`apps/web/server/lib/runtimes/claudeCodeDriver.ts`). Codex runs `codex app-server` with `approvalPolicy: 'never'` and `sandbox: 'danger-full-access'`; its `codex exec` fallback passes `--dangerously-bypass-approvals-and-sandbox` (`codexAppServerDriver.ts`, `codexDriver.ts`). Hermes runs `hermes chat` with `--yolo --accept-hooks` (`hermesDriver.ts`).
-- **Working folder.** Team-chat runs (`serverDeliver.ts` and `runTeamExchange.ts` in `apps/web/server/lib/teamChat/`) and task-runner runs without a worktree set `cwd` to `<CLAWBOO_HOME>/workspaces/<teamId>`, or `workspaces/_no-team` for a task with no team, for Claude Code, Codex, Hermes and Clawboo Native (`apps/web/server/lib/runtimes/teamWorkdir.ts`). The folder is created with mode `0700` before the run starts, and a run whose folder cannot be created fails instead of starting in the server's working directory. A one-to-one chat sets no `cwd`.
+- **Working folder.** Team-chat runs (`serverDeliver.ts` and `runTeamExchange.ts` in `apps/web/server/lib/teamChat/`) and task-runner runs without a worktree set `cwd` to `<CLAWBOO_HOME>/workspaces/<teamId>`, or `workspaces/_no-team` for a task with no team, for Claude Code, Codex, Hermes and Clawboo Native (`apps/web/server/lib/runtimes/teamWorkdir.ts`). The folder is created with mode `0700` before the run starts, and a run whose folder cannot be created fails instead of starting in the server's working directory. One-to-one chat (`apps/web/server/lib/agentChat/driveAgentChat.ts`) sets the same `cwd` for those four runtimes, with `_no-team` for an agent on no team.
 - **Task-runner isolation.** Task kinds `research` and `review` get no worktree. Any other kind needs a `repoPath`, or the run fails with `workspace_unavailable` (`apps/web/server/lib/executorRunner.ts`, `packages/worktrees/src/isolation.ts`).
 - **Native tools.** `buildFileTools` and `buildExecTool` return no tools when the run has no `cwd` (`apps/web/server/lib/runtimes/native/`). The file tools refuse a path that is a symlink, or that resolves outside the `cwd` once every symlink above it is followed (`resolveJailedOnDisk` in `fileTools.ts`).
 - **Environment scrubbing.** `apps/web/server/lib/runtimes/childEnv.ts` lists the removed variables.

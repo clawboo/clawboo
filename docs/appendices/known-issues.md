@@ -75,7 +75,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** coding agents run commands, edit and delete files, and reach the network without asking you.
 
-**What it affects:** these runtimes start with their own permission prompts and sandboxes turned off, so they can work unattended. They run as your user account and can read and change any file it can. Without a worktree, as in team chat and in agent Routines you create in the app, they start in their team's folder (`~/.clawboo/workspaces/<team id>`). That folder only sets where they start: they can still reach Clawboo's database and saved keys. A git worktree keeps one task's file changes apart from another's; it is not a sandbox.
+**What it affects:** these runtimes start with their own permission prompts and sandboxes turned off, so they can work unattended. They run as your user account and can read and change any file it can. Without a worktree, as in team chat, in an agent's own chat and in agent Routines you create in the app, they start in their team's folder (`~/.clawboo/workspaces/<team id>`). That folder only sets where they start: they can still reach Clawboo's database and saved keys. A git worktree keeps one task's file changes apart from another's; it is not a sandbox.
 
 **What to do:** give coding agents only work you would let them do unattended. For work you do not fully trust, run Clawboo under a separate user account or in a virtual machine. See [What agents can do](/concepts/permissions).
 
@@ -98,7 +98,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 **What it affects:**
 
 - Each command is one program and its arguments, with no pipes, redirects or chained commands.
-- Commands are offered only on runs that have a working folder (every run except one-to-one chat), and never on Windows.
+- Commands are offered in team chat, one-to-one chat and task runs alike, but never on Windows.
 - One run can ask about at most 10 commands. A card waits 10 minutes for your answer, and the run waits with it.
 - Once you decline a command, or let a card expire, the agent cannot ask again in that run.
 

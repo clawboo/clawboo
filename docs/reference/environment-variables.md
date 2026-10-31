@@ -338,7 +338,7 @@ The Composio API address for brokered apps. The Composio key itself is saved in 
 - Default: `1800000` (30 minutes)
 - Example: `CLAWBOO_RUN_SILENT_TIMEOUT_MS=3600000`
 
-How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines) and to agent Routines on Clawboo Native, Claude Code, Codex and Hermes. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults).
+How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines), to agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and to one-to-one chat with those agents. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults).
 
 ### CLAWBOO_HOME_MUTEX_ACQUIRE_MS
 

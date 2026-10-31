@@ -102,7 +102,7 @@ Clawboo also writes to OpenClaw's `~/.openclaw` folder in a few cases:
 It depends on the runtime:
 
 - **Claude Code, Codex and Hermes** run with their own approval prompts and sandboxes turned off. They can read and change any file your user account can, and run commands, without asking you.
-- **Clawboo Native** agents read and write files only inside the folder their run works in: their team's folder in team chat and on research and review tasks, or the task's own git worktree. In a one-to-one chat they have no file or command tools. Commands stay off until you switch on **Let this Boo ask to run commands** on the agent's page, under **Details > Permissions**, and then every command asks you first.
+- **Clawboo Native** agents read and write files only inside the folder their run works in: their team's folder in team chat, in one-to-one chat and on research and review tasks, or the task's own git worktree. Commands stay off until you switch on **Let this Boo ask to run commands** on the agent's page, under **Details > Permissions**, and then every command asks you first.
 - **OpenClaw** agents work in their own OpenClaw workspace, under OpenClaw's own sandbox settings. Their commands follow the **Command Execution** setting under **Details > Permissions** on their page: **Run Freely**, **Ask for Unknown** (where agents you create in Clawboo start) or **Always Ask**.
 
 A git worktree keeps a task's file changes apart from your other files, but it is not a sandbox. For work you do not trust, run Clawboo as a separate user or in a virtual machine. See [What agents can do](/concepts/permissions).
