@@ -9,7 +9,14 @@ import {
   OPENCLAW_NODE_REQUIREMENT,
   isNodeVersionSupportedByOpenclaw,
 } from '@clawboo/protocol'
-import { resolveStateDir, resolveClawbooDir, loadSettings, saveSettings } from '@clawboo/config'
+import {
+  loadSettings,
+  mkdirPrivateSync,
+  resolveClawbooDir,
+  resolveStateDir,
+  saveSettings,
+  writePrivateFileSync,
+} from '@clawboo/config'
 import {
   readGatewayPid,
   writeGatewayPid,
@@ -654,6 +661,8 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
     const port = typeof gatewayPort === 'number' && gatewayPort > 0 ? gatewayPort : DEFAULT_PORT
 
     const stateDir = resolveStateDir()
+    // 0700 if this creates the state dir: the .env written below holds keys.
+    mkdirPrivateSync(stateDir)
     fs.mkdirSync(path.join(stateDir, 'workspace'), { recursive: true })
 
     const gatewayToken = crypto.randomBytes(32).toString('hex')
@@ -704,7 +713,7 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
     } else if (!KEYLESS_PROVIDERS.has(provider) && typeof apiKey === 'string' && apiKey) {
       envContent += `CUSTOM_API_KEY=${apiKey}\n`
     }
-    fs.writeFileSync(path.join(stateDir, '.env'), envContent, 'utf8')
+    writePrivateFileSync(path.join(stateDir, '.env'), envContent)
 
     // Auto-save to Clawboo settings
     const gatewayUrl = `ws://localhost:${port}`
@@ -765,7 +774,7 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
       return
     }
 
-    fs.mkdirSync(stateDir, { recursive: true })
+    mkdirPrivateSync(stateDir)
     const envPath = path.join(stateDir, '.env')
 
     // Reuse an existing gateway token; generate + upsert one if absent.
@@ -804,7 +813,7 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
         envChanged = true
       }
     }
-    if (envChanged) fs.writeFileSync(envPath, envLines.join('\n') + '\n', 'utf8')
+    if (envChanged) writePrivateFileSync(envPath, envLines.join('\n') + '\n')
 
     // Upsert the provider key into .env + auth-profiles (non-destructive). The
     // oauth and Ollama rungs have NO pasted key: the oauth credential is OpenClaw's
@@ -1478,7 +1487,7 @@ export async function openclawConfigPATCH(req: Request, res: Response): Promise<
       }
     }
 
-    fs.mkdirSync(stateDir, { recursive: true })
+    mkdirPrivateSync(stateDir)
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf8')
 
     // Update .env + auth-profiles if apiKeys provided (shared writer).

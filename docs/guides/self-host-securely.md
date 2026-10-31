@@ -131,7 +131,7 @@ A reverse proxy such as nginx, Caddy or a Cloudflare Tunnel gives Clawboo a web 
 openssl rand -hex 24
 ```
 
-This prints a 48-character token. Save it in your password manager now: you need it to sign in, and the server must start with the same value every time. If you write your own token, use only letters, digits, `.`, `_`, `~` and `-`. Any other character turns the token check off.
+This prints a 48-character token. Save it in your password manager now: you need it to sign in, and the server must start with the same value every time. If you write your own token, use only letters, digits, `.`, `_`, `~` and `-`. With any other character the server refuses to start.
 
 </Step>
 
@@ -381,7 +381,7 @@ Clawboo builds the redirect from the `Host` and `X-Forwarded-Proto` it receives.
 
 <Accordion title="The boot log says STUDIO_ACCESS_TOKEN contains an unsupported character">
 
-The token check is off, so everything behind your proxy is open. Make a new token with `openssl rand -hex 24`, start the server with it, and sign in again.
+The token has a character other than letters, digits, `.`, `_`, `~` and `-`, so the server stopped rather than run without the token check. Make a new token with `openssl rand -hex 24`, start the server with it, and sign in again.
 
 </Accordion>
 
@@ -399,7 +399,7 @@ That is expected on a token-protected install: `clawboo`, `clawboo stop` and `cl
 
 <Accordion title="The server exits with SECURITY: refusing to start">
 
-`HOST` is a network address and the server has no working access token. Set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on `127.0.0.1` again.
+`HOST` is a network address and the server has no access token. Set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on `127.0.0.1` again. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, see the entry above.
 
 </Accordion>
 

@@ -75,7 +75,7 @@ All three rules ignore letter case, because 0.5.0 also routes variants such as `
 | Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                    |
 | A web page open in your browser                          | Yes                   | The same-origin guard                                                                                                  |
 | Anyone who can reach a reverse proxy in front of Clawboo | No                    | The access token, or a proxy that authenticates every request                                                          |
-| Another user account on the same computer                | Partly                | Your Clawboo folder is readable only by you (OpenClaw's `~/.openclaw/.env` may not be); the API needs the access token |
+| Another user account on the same computer                | Partly                | Your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you; the API needs the access token |
 | Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                 |
 
 The last three rows share one cause: anything that reaches Clawboo from `127.0.0.1` looks like you. Without `STUDIO_ACCESS_TOKEN`, it can call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs.
@@ -112,7 +112,7 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
 
 <Warning>
 
-**Use only letters, digits, `.`, `_`, `~` and `-` in the token.** Any other character turns the check off. The server prints a warning that `STUDIO_ACCESS_TOKEN contains an unsupported character` and that the access gate is disabled, then keeps running. On a network bind it then refuses to start, but behind a reverse proxy on the same machine the dashboard is open. Output from `openssl rand -base64` can contain `+`, `/` or `=`. Generate tokens with `openssl rand -hex 24`, save the value, and check the boot log.
+**Use only letters, digits, `.`, `_`, `~` and `-` in the token.** With any other character the server refuses to start, on every bind: it logs `SECURITY: refusing to start`, names the character and the allowed set, and exits with code 1. `CLAWBOO_ALLOW_INSECURE=1` does not skip this, because it allows running with no token, not with one the check cannot use. Output from `openssl rand -base64` can contain `+`, `/` or `=`. Generate tokens with `openssl rand -hex 24` and save the value. On 0.5.0 and older, such a token turns the check off and the server keeps running, so behind a reverse proxy on the same machine the dashboard is open.
 
 </Warning>
 
@@ -166,6 +166,8 @@ Clawboo encrypts the keys it stores for itself, but some copies are plain text. 
 
 Clawboo writes the Providers copies so the OpenClaw Gateway can use the same key. **Disconnect** under **Providers** removes the vault copy and the OpenClaw copies. A key you connect on a Runtimes card stays in the vault. For which runtime reads which key, and what each Disconnect removes, see [Providers and runtimes](/using/providers-and-runtimes).
 
+**The plain-text files are owner-only.** Clawboo writes `.env`, each `auth-profiles.json` and `settings.json` readable only by you (mode `0600`), and narrows an existing file to `0600` before it writes new contents. If it cannot narrow a file that others can read (one another user owns, say), it refuses to write the key into it. When Clawboo creates `~/.clawboo` or `~/.openclaw`, it makes them owner-only (`0700`); an existing `~/.openclaw` keeps its mode. A file that 0.5.0 or older wrote keeps its mode until Clawboo writes it again. Programs running as you can still read these files. Modes are best-effort on Windows.
+
 **What the vault protects.** Each value is encrypted with AES-256-GCM. The key sits next to the ciphertext, so the encryption protects `runtime-keys.json` when that file is copied or shared on its own. Anything that can read your Clawboo folder can read the key too. A wrong or missing key never yields part of a value: saved keys read as missing, and System Health reports that the master key changed.
 
 **Keeping the key elsewhere.** `CLAWBOO_SECRETS_MASTER_KEY` supplies the key from the environment instead of `master.key`. Move your existing key rather than creating a new one, or every saved key becomes unreadable:
@@ -202,7 +204,7 @@ Then start the server as usual, with this variable set every time. If it is miss
 
 This keeps a copy or backup of your Clawboo folder from carrying the key. It does not stop a program running as you, which can read both files.
 
-**Treat the database and its backups as secrets.** `clawboo.db` holds every board, chat and memory, and the secret that signs MCP attach URLs. Anyone with a copy can sign attach URLs as any of your agents. Clawboo keeps the database and your Clawboo folder readable only by you (file modes are advisory on Windows). `clawboo backup` writes its file with your default permissions, so restrict it yourself, for example with `chmod 600`. See [Data and state](/operating/data-and-state).
+**Treat the database and its backups as secrets.** `clawboo.db` holds every board, chat and memory, and the secret that signs MCP attach URLs. Anyone with a copy can sign attach URLs as any of your agents. Clawboo keeps the database and your Clawboo folder readable only by you (file modes are advisory on Windows). `clawboo backup` writes its file readable only by you (mode `0600`) from the first byte. A backup made with 0.5.0 or older has your default permissions, so restrict it with `chmod 600`. See [Data and state](/operating/data-and-state).
 
 ## What agents can do on your machine
 

@@ -8,7 +8,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { describe, expect, it } from 'vitest'
 
-import { createAccessGate } from '../access-gate'
+import { ACCESS_TOKEN_CHARSET, createAccessGate, findUnsupportedTokenChar } from '../access-gate'
 
 const TOKEN = 'super-secret-token-value'
 
@@ -285,19 +285,48 @@ describe('access gate — /api/mcp/* behind a same-host reverse proxy', () => {
   })
 })
 
-describe('access gate — token charset (an unusable token fails loud, not a silent lockout)', () => {
-  it('disables the gate when the token carries a cookie-delimiter / non-token char', () => {
-    for (const bad of ['has space', 'semi;colon', 'comma,token', 'pct%encode', 'plus+token']) {
-      const gate = createAccessGate({ token: bad })
-      expect(gate.enabled).toBe(false) // disabled, not a silent permanent 401
-      const cap = mockRes()
-      expect(gate.handleHttp(mockReq('/api/settings'), cap.res)).toBe(false)
+describe('access gate: token charset (an unusable token is refused, never a gate-less fallback)', () => {
+  const UNUSABLE: Array<[token: string, bad: string]> = [
+    ['has space', ' '],
+    ['semi;colon', ';'],
+    ['comma,token', ','],
+    ['pct%encode', '%'],
+    ['plus+token', '+'],
+    // `openssl rand -base64` output: the realistic way to hit this.
+    ['q8Zr/Xk1Lw==', '/'],
+  ]
+
+  it('throws, naming the character and the allowed set, instead of disabling the gate', () => {
+    for (const [token, bad] of UNUSABLE) {
+      expect(() => createAccessGate({ token })).toThrow(
+        `STUDIO_ACCESS_TOKEN contains an unsupported character (${JSON.stringify(bad)}); ` +
+          'use only [A-Za-z0-9._~-].',
+      )
     }
+  })
+
+  it('findUnsupportedTokenChar reports the first unusable character', () => {
+    for (const [token, bad] of UNUSABLE) {
+      expect(findUnsupportedTokenChar(token)).toBe(bad)
+    }
+  })
+
+  it('findUnsupportedTokenChar is null for a safe token, and for a blank or unset one', () => {
+    expect(findUnsupportedTokenChar('A1b2._~-token')).toBeNull()
+    // Surrounding whitespace is trimmed, the same as the gate does.
+    expect(findUnsupportedTokenChar('  A1b2._~-token\n')).toBeNull()
+    expect(findUnsupportedTokenChar('')).toBeNull()
+    expect(findUnsupportedTokenChar('   ')).toBeNull()
+    expect(findUnsupportedTokenChar(undefined)).toBeNull()
   })
 
   it('stays enabled for a safe token charset', () => {
     const gate = createAccessGate({ token: 'A1b2._~-token' })
     expect(gate.enabled).toBe(true)
+  })
+
+  it('exports the allowed set the error message names', () => {
+    expect(ACCESS_TOKEN_CHARSET).toBe('A-Za-z0-9._~-')
   })
 })
 

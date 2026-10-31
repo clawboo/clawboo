@@ -51,6 +51,7 @@ import {
   waitForPortFree,
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
+import { accessTokenRefusal } from './lib/accessTokenRefusal'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
@@ -160,6 +161,14 @@ async function main() {
   log.info({ dev, hostname, port }, 'Starting Clawboo server')
 
   // ── Access gate ───────────────────────────────────────────────────────────
+
+  // Fail-closed: a token the gate cannot use stops the boot on every bind, with or
+  // without CLAWBOO_ALLOW_INSECURE (see accessTokenRefusal).
+  const tokenRefusal = accessTokenRefusal(process.env['STUDIO_ACCESS_TOKEN'])
+  if (tokenRefusal) {
+    log.error({ hostname, port }, tokenRefusal)
+    process.exit(1)
+  }
 
   const accessGate = createAccessGate({
     token: process.env['STUDIO_ACCESS_TOKEN'],

@@ -85,8 +85,10 @@ These functions remove folders recursively and run commands, so every path they 
   throws if it would land anywhere but one segment below the root.
 - **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
   folder from the root and the task id, and throw if the stored record points somewhere else.
-- **Review checkouts are trusted input.** `removeReviewWorktree` removes the path in the record it is given without
-  that check, so pass it only a record `provisionReviewWorktree` returned.
+- **Review checkouts stay in the review folder.** `removeReviewWorktree(repo, worktree, rootDir)` throws before it
+  removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
+  `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
+  its own path the same way.
 - **Verify commands run in Clawboo's folder only.** The server's verification gate refuses a worktree path outside
   Clawboo's state folder before it runs `VERIFY_CMD`.
 

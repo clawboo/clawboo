@@ -397,6 +397,25 @@ export interface ReviewOptions {
   rootDir?: string
 }
 
+/** Where a repo's review worktrees live (overridable). */
+function reviewRootFor(repoPath: string, rootDir?: string): string {
+  return path.resolve(rootDir ?? path.join(repoPath, '.clawboo', 'reviews'))
+}
+
+/**
+ * `candidate` resolved, or a thrown error unless it sits exactly one segment
+ * below `reviewRoot`. Every review worktree is `<reviewRoot>/<short sha>`, and
+ * both the provisioner and the teardown recursively remove that directory, so
+ * the root itself, anything deeper, and anything outside are all refused.
+ */
+function ownedReviewDir(reviewRoot: string, candidate: string): string {
+  const resolved = path.resolve(candidate)
+  if (resolved === reviewRoot || path.dirname(resolved) !== reviewRoot) {
+    throw new Error(`review worktree path is not inside ${reviewRoot}: ${candidate}`)
+  }
+  return resolved
+}
+
 /**
  * Provision a **detached** read-only reviewer worktree at a specific commit.
  * Detached HEAD = no branch, so a reviewer has nothing to push: review can never
@@ -404,9 +423,8 @@ export interface ReviewOptions {
  * e.g. an OpenClaw read-only sandbox; this gives the structural guarantee.)
  */
 export async function provisionReviewWorktree(opts: ReviewOptions): Promise<Worktree> {
-  const reviewRoot = opts.rootDir ?? path.join(opts.repoPath, '.clawboo', 'reviews')
-  const shortSha = opts.sha.slice(0, 12)
-  const worktreePath = path.join(reviewRoot, shortSha)
+  const reviewRoot = reviewRootFor(opts.repoPath, opts.rootDir)
+  const worktreePath = ownedReviewDir(reviewRoot, path.join(reviewRoot, opts.sha.slice(0, 12)))
 
   return mutex.run(worktreePath, async () => {
     if (!(await isGitRepo(opts.repoPath))) {
@@ -423,10 +441,19 @@ export async function provisionReviewWorktree(opts: ReviewOptions): Promise<Work
   })
 }
 
-/** Tear down a review worktree (no branch to delete — it was detached). */
-export async function removeReviewWorktree(repoPath: string, worktree: Worktree): Promise<void> {
-  await mutex.run(worktree.worktreePath, async () => {
-    await removeWorktree(repoPath, worktree.worktreePath)
-    await rm(worktree.worktreePath, { recursive: true, force: true })
+/**
+ * Tear down a review worktree (no branch to delete: it was detached). Pass the
+ * same `rootDir` the worktree was provisioned with: a path that is not directly
+ * under that root throws before anything is removed.
+ */
+export async function removeReviewWorktree(
+  repoPath: string,
+  worktree: Worktree,
+  rootDir?: string,
+): Promise<void> {
+  const worktreePath = ownedReviewDir(reviewRootFor(repoPath, rootDir), worktree.worktreePath)
+  await mutex.run(worktreePath, async () => {
+    await removeWorktree(repoPath, worktreePath)
+    await rm(worktreePath, { recursive: true, force: true })
   })
 }

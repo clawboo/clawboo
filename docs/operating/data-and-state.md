@@ -69,7 +69,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 | `worktrees/`                         | Git worktrees for board tasks that run in a repository                                                                                                                      | No: Clawboo removes old ones itself         | Uncommitted work in those checkouts.                                                             |
 | `reviews/`                           | Read-only checkouts for verifying finished work                                                                                                                             | Yes, when no check is running               | Nothing.                                                                                         |
 
-On macOS and Linux, Clawboo makes the database, its working files and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `workspaces/` instead, created readable only by you. It still has your account's full file access; see [What agents can do](/concepts/permissions).
+On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `workspaces/` instead, created readable only by you. It still has your account's full file access; see [What agents can do](/concepts/permissions).
 
 ## What Clawboo writes in OpenClaw's folder
 
@@ -84,6 +84,8 @@ OpenClaw keeps its state in `~/.openclaw` (`OPENCLAW_STATE_DIR` moves it). Clawb
 | Connect to the Gateway (every time)                   | Through the Gateway: its config registers Clawboo's Memory, Tasks and Tools MCP servers and denies the tools that spawn sub-agents, keeping your own denials.                                                                                                                                    |
 | Start a Gateway that asks for a repair                | Clawboo runs `openclaw doctor --fix` once, then tries again.                                                                                                                                                                                                                                     |
 | Run a Clawboo MCP stdio bin without `CLAWBOO_DB_PATH` | `~/.openclaw/clawboo/clawboo.db`, a separate database the bin creates. See [Two database paths](#two-database-paths).                                                                                                                                                                            |
+
+On macOS and Linux, Clawboo makes `.env` and each `auth-profiles.json` readable only by you (mode `0600`) whenever it writes them, and creates `~/.openclaw` owner-only (`0700`) if it does not exist yet. An existing `~/.openclaw` keeps its mode.
 
 Clawboo also reads `openclaw.json` (the Gateway's port and token when `settings.json` has none), `.env` (the last place it looks for a provider key, after your environment and the vault), the agents' `auth-profiles.json` (which providers OpenClaw has keys or sign-ins for), and `state/openclaw.sqlite`. It opens that database read-only, to show the standing command permissions on an OpenClaw agent's **Permissions** tab and which browser tab belongs to which agent.
 
@@ -112,7 +114,7 @@ clawboo backup ~/backups/clawboo.db --force
 
 With no argument it writes `clawboo-backup-<date>-<time>.db` in the current folder. Give it a folder to write the timestamped file there, or a file name. It refuses to replace an existing file unless you add `-f` (`--force`).
 
-It copies the database only. The file holds all your teams, tasks, chats and memory, and the secret that signs MCP attach URLs, yet it is created with your default file permissions. Restrict it:
+It copies the database only. The file holds all your teams, tasks, chats and memory, and the secret that signs MCP attach URLs, so on macOS and Linux it is readable only by you (mode `0600`) from the moment it is created. If the backup fails, the partial file is removed. A backup made with 0.5.0 or older has your default file permissions; restrict it:
 
 ```bash
 chmod 600 clawboo-backup-*.db

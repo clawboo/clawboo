@@ -2,6 +2,8 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { mkdirPrivateSync, writePrivateFileSync } from './privateFiles'
+
 // The URL path prefix the whole app is served under. Re-exported by name (a
 // `export *` of a workspace dep breaks downstream bundling in this repo).
 export {
@@ -12,6 +14,13 @@ export {
   type BasePathOk,
   type BasePathResult,
 } from './basePath'
+
+export {
+  PRIVATE_DIR_MODE,
+  PRIVATE_FILE_MODE,
+  mkdirPrivateSync,
+  writePrivateFileSync,
+} from './privateFiles'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -255,8 +264,8 @@ export function saveSettings(
   const settingsPath = resolveSettingsPath(env)
   const settingsDir = path.dirname(settingsPath)
 
-  // Ensure directory exists
-  fs.mkdirSync(settingsDir, { recursive: true })
+  // Ensure directory exists (0700 if this call creates it: the file holds tokens)
+  mkdirPrivateSync(settingsDir)
 
   // Read current settings
   const current = readJsonFile(settingsPath) ?? {}
@@ -280,5 +289,5 @@ export function saveSettings(
     next['firstRunDismissedAt'] = updates.firstRunDismissedAt
   }
 
-  fs.writeFileSync(settingsPath, JSON.stringify(next, null, 2), 'utf8')
+  writePrivateFileSync(settingsPath, JSON.stringify(next, null, 2))
 }

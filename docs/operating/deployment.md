@@ -104,7 +104,7 @@ CLAWBOO_ALLOWED_HOSTS=dash.example.com
 CLAWBOO_ALLOWED_ORIGINS=https://dash.example.com
 ```
 
-Generate the token with `openssl rand -hex 24` and save it in your password manager before you start the server. Use only letters, digits, `.`, `_`, `~` and `-`: any other character turns the token check off.
+Generate the token with `openssl rand -hex 24` and save it in your password manager before you start the server. Use only letters, digits, `.`, `_`, `~` and `-`: with any other character the server refuses to start.
 
 The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network, not your own account.
 
@@ -239,7 +239,7 @@ The launcher cannot find `server.js` next to itself. Reinstall with `npm install
 
 <Accordion title="SECURITY: refusing to start">
 
-`HOST` is set to a network address and the server has no working access token. See [Reach Clawboo from another machine](/guides/self-host-securely), or unset `HOST` to listen on `127.0.0.1` only.
+`HOST` is set to a network address and the server has no access token. See [Reach Clawboo from another machine](/guides/self-host-securely), or unset `HOST` to listen on `127.0.0.1` only. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, the token has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops the server on any address: replace it with one from `openssl rand -hex 24`.
 
 </Accordion>
 

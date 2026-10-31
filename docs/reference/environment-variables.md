@@ -112,7 +112,7 @@ With a token set, every `/api/*` request and the Gateway WebSocket need the `cla
 Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI cannot use a gated server; see [CLI reference](/reference/cli).
 
 <Warning>
-Use only letters, digits, `.`, `_`, `~` and `-`. Any other character, such as the `+`, `/` or `=` in a base64 token, turns the gate off and the server only prints a warning. On a wide bind the server then refuses to start, but behind a reverse proxy on the same machine every `/api/*` route stays open while you think it is protected.
+Use only letters, digits, `.`, `_`, `~` and `-`. With any other character, such as the `+`, `/` or `=` in a base64 token, the server logs `SECURITY: refusing to start` with the character and the allowed set, and exits with code 1, on every bind. `CLAWBOO_ALLOW_INSECURE=1` does not skip this. On 0.5.0 and older, such a token turns the gate off with only a warning, which behind a reverse proxy on the same machine leaves every `/api/*` route open.
 </Warning>
 
 With no token set, the first request that reaches the server through a reverse proxy logs a one-time `SECURITY:` warning, because such a proxy delivers every request from `127.0.0.1`. [Security](/operating/security) explains what the gate does and does not protect.
@@ -125,7 +125,7 @@ Lets the server start on a wide bind with no access token.
 - Default: unset
 - Example: `CLAWBOO_ALLOW_INSECURE=1`
 
-With it, a non-loopback `HOST` and no valid token starts the server with a loud `SECURITY:` warning instead of exiting. It has no effect on a loopback bind or when a token is set. Use it only behind a proxy that authenticates every request.
+With it, a non-loopback `HOST` and no token starts the server with a loud `SECURITY:` warning instead of exiting. It has no effect on a loopback bind or when a token is set, and it does not skip the refusal of a token with an unsupported character. Use it only behind a proxy that authenticates every request.
 
 ### CLAWBOO_ALLOWED_ORIGINS
 
