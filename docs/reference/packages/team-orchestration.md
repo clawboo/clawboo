@@ -63,7 +63,12 @@ would lose to its own claim, and one that completed the task would complete it t
   from prose. The tag parsers tolerate a missing opening `<`, and stripping removes the whole tag from what the
   chat shows.
 - **One task per session.** A session works one task at a time. A message for a busy session waits in the nudge
-  queue (`createNudgeQueue`) and goes out at its next turn boundary.
+  queue (`createNudgeQueue`) and goes out at its next turn boundary. A queued message whose run never starts frees
+  the session for the next one.
+- **A refused delivery says why.** When `deliver` rejects, the engine fails the task at once instead of waiting for
+  the watchdog. A host that decided not to start the run, such as the web server when a hard-cap budget is paused,
+  rejects with a `DeliveryRefusedError`, and its message becomes the task's failure comment and what the delegator
+  is told. Any other rejection is reported as a message the agent did not receive.
 - **Bounded trees.** Delegation depth is capped by `MAX_SPAWN_DEPTH`, the same constant the board and the task
   runner use, and fan-out per turn by `caps.maxFanout`. A lost claim is never retried. After
   `MAX_DELEGATION_FAILURES` failures in a row of the same task by the same agent, the engine refuses to delegate it

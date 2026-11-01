@@ -34,6 +34,7 @@ import {
   type DelegationSignal,
   type KnownAgent,
 } from './boardOrchestration'
+import { DeliveryRefusedError } from './deliveryRefused'
 import type { RunStamp, TurnOrigin } from './turnOrigin'
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 
@@ -180,6 +181,8 @@ interface HarnessOpts {
   sessionKeyForAgent?: (id: string) => string | null
   /** When set, `deliver` rejects for these target agent ids (delivery-failure tests). */
   deliverRejectsFor?: Set<string>
+  /** When set, `deliver` refuses these target agent ids with the mapped reason. */
+  deliverRefusesFor?: Map<string, string>
   /** Sessions the HOST reports as having a live run (the server's abortMap). */
   busySessions?: Set<string>
   /** Sessions with ANY turn in flight or queued (the server's nudge queue). */
@@ -242,6 +245,8 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       agentIdForSession,
       deliver: async (sessionKey, agentId, task, origin) => {
         if (opts?.deliverRejectsFor?.has(agentId)) throw new Error('delivery rejected')
+        const refusal = opts?.deliverRefusesFor?.get(agentId)
+        if (refusal) throw new DeliveryRefusedError(refusal)
         await opts?.onDeliverStart?.(agentId)
         delivered.push({ sessionKey, agentId, task, origin })
       },
@@ -1105,6 +1110,23 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(delivered.filter((d) => d.agentId === 'a2')).toHaveLength(0)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(delivered)[0]!.task).toMatch(/DID NOT COMPLETE/)
+    })
+
+    it('fails a refused delivery with the reason the host gave, not a generic rejection', async () => {
+      const reason = 'The agent budget is paused at its hard cap, so this run did not start.'
+      const { board, delivered, orchestrator } = makeHarness({
+        deliverRefusesFor: new Map([['a2', reason]]),
+      })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">do it</delegate>'),
+      )
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+      expect(board.comments.some((c) => c.taskId === t1 && c.body.includes(reason))).toBe(true)
+      expect(board.comments.some((c) => /message was rejected/.test(c.body))).toBe(false)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)[0]!.task).toContain(reason)
     })
 
     it('reflects a fan-out cap overflow to the delegator (work not silently dropped)', async () => {

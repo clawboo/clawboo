@@ -26,6 +26,7 @@ import type { RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
+import { DeliveryRefusedError } from './deliveryRefused'
 import {
   buildTaskUpdateMessage,
   type OutstandingDelegation,
@@ -959,13 +960,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         fromAgentId: reflectTargetFor(task.id),
       })
       delivered = true
-    } catch {
+    } catch (err) {
       // Delivery rejected (the agent never received the task) — fail it now rather
-      // than waiting out the 8-minute watchdog.
+      // than waiting out the 8-minute watchdog. A refusal says why in its own words.
       await failForSession(
         targetSk,
         'error',
-        `Could not deliver the task to ${signal.targetAgentName} (the message was rejected).`,
+        err instanceof DeliveryRefusedError
+          ? err.message
+          : `Could not deliver the task to ${signal.targetAgentName} (the message was rejected).`,
       )
     } finally {
       if (pendingStart.get(targetSk) === task.id) pendingStart.delete(targetSk)
@@ -1149,11 +1152,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           : { kind: 'delegation', fromAgentId: reflectTargetFor(taskId) },
       )
       delivered = true
-    } catch {
+    } catch (err) {
       await failForSession(
         targetSk,
         'error',
-        `Could not deliver the step to ${nameOf(agentId)} (the message was rejected).`,
+        err instanceof DeliveryRefusedError
+          ? err.message
+          : `Could not deliver the step to ${nameOf(agentId)} (the message was rejected).`,
       )
     } finally {
       if (pendingStart.get(targetSk) === taskId) pendingStart.delete(targetSk)

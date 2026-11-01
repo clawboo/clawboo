@@ -34,14 +34,14 @@ An agent routine on OpenClaw takes a third, smaller path: a dispatcher that send
 | --------------------------------- | ------------------------ | -------------------------------- | ------------------------------- | ---------------------- |
 | Spend counted against budgets     | On, once a budget exists | Yes                              | Yes                             | Yes                    |
 | Budget warnings in the audit log  | On, once a budget exists | No                               | Yes                             | Yes                    |
-| Hard cap refuses the next run     | Off until you set one    | No                               | Yes                             | Yes                    |
+| Hard cap refuses the next run     | Off until you set one    | Yes                              | Yes                             | Yes                    |
 | Hard cap stops a run partway      | Off until you set one    | Clawboo Native on a priced model | Clawboo Native                  | No                     |
 | Per-run cost cap                  | Off                      | No                               | Routines set up through the API | No                     |
 | Circuit breakers                  | On                       | No                               | Yes                             | No                     |
 | Delegation depth and fan-out caps | On                       | Yes                              | Depth only                      | No                     |
 | Approval for risky delegations    | On                       | Yes                              | No                              | No                     |
 
-One-to-one chat follows its own rules. One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent charges only that agent's budget. As in team chat, nothing checks a budget before a turn starts, only a Clawboo Native run on a priced model can stop partway, and every other turn is charged when it ends. One-to-one chat with an OpenClaw agent is not charged to any budget.
+One-to-one chat follows its own rules. One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent charges only that agent's budget, so a paused hard cap on that agent refuses a turn before it starts, and the team's budget does not. As in team chat, only a Clawboo Native run on a priced model can stop partway, and every other turn is charged when it ends. One-to-one chat with an OpenClaw agent is not charged to any budget.
 
 ## Budgets
 
@@ -70,7 +70,7 @@ Everything else is an estimate: from token counts where the runtime reports them
 
 **In the task runner**, Clawboo checks the agent, mission and team budgets before a run starts and refuses the run if a hard cap among them is paused. During the run it counts each cost report, and once a hard cap pauses, it stops the run at its next sign of more work: more text, a tool call or another model turn, or 5 seconds of silence. Only Clawboo Native reports cost while it works, once per model turn. Claude Code and Codex report cost only as the run ends. If that report takes a hard cap to its limit, the work is already done, so Clawboo keeps it: the result is posted, the task moves on as usual with the comment "Budget cap reached (`<scope>`) by this run's final cost report", and the next run is refused. A run that ends without any cost report is charged an estimate from its text.
 
-**In team chat**, nothing checks a budget before a turn starts. A Clawboo Native run on a priced model stops after its next model turn once a hard cap pauses. Every other run (Claude Code, Codex, Hermes, OpenClaw, and Clawboo Native on other models) is charged when it finishes. The budget then reads paused, but the next team-chat turn still runs. To halt a team that is over its budget, press **Stop** in the chat.
+**In team chat**, Clawboo checks the agent, team and, for a run that works on a task, mission budgets before each run starts, and refuses the run if a hard cap among them is paused. A message you send then gets a notice in the chat instead of a reply. A handed-off task, or a task you gave an agent on the Board, is not started and waits in **Needs you** with the same notice in a comment. Once a run is going, a Clawboo Native run on a priced model stops after its next model turn when a hard cap pauses. Every other run (Claude Code, Codex, Hermes, OpenClaw, and Clawboo Native on other models) is charged when it finishes, so it can take a budget past its limit, and the next run is refused. To end a run that is going, press **Stop** in the chat.
 
 **For an OpenClaw agent routine**, a paused hard cap refuses the fire before it starts. OpenClaw reports no cost while it works, so Clawboo estimates the run from its text when it ends, whether it succeeded, failed, timed out or was stopped. If that estimate crosses the cap, the task gets the comment "Budget cap reached" and the routine's next fire is refused.
 
@@ -80,11 +80,7 @@ When a hard cap stops a task-runner run, the run is cancelled and the task goes 
 
 **Resume** puts a paused budget back to active. If spend is still at or over the limit, the next cost report pauses it again, and the row shows a **will re-pause** pill. To make room, raise the limit with **Set cap** on the budget's row.
 
-<Warning>
-
-**Saving a budget again can turn a hard cap into warn only.** The mode is set on every save. Saving the same scope from the create form with **warn only** selected (the form's default), or sending `POST /api/governance/budgets` without `"mode": "cap"`, switches the budget to warn only. To raise a hard cap's limit, use **Set cap** on its row, which keeps the mode.
-
-</Warning>
+Saving a budget again keeps its mode unless you pick another. **Set cap** on a row keeps it, the create form switches to the mode of the budget you pick, and `POST /api/governance/budgets` keeps it when the request sends no `mode`.
 
 There is one more way a hard cap appears: creating a Clawboo Native agent through the API with a `budgetUsd` value also creates a hard-cap budget for that agent.
 

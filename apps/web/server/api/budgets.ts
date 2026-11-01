@@ -25,7 +25,9 @@ export function budgetsListGET(_req: Request, res: Response): void {
   res.json({ budgets: listBudgets(getDb()) })
 }
 
-// POST /api/governance/budgets — { scope, scopeId, limitUsdCents, tenantId? } (set/raise a cap)
+// POST /api/governance/budgets: { scope, scopeId, limitUsdCents, mode?, tenantId? }
+// (set/raise a cap). Without `mode`, a new budget is warn-only and an existing one
+// keeps its mode.
 export function budgetsSetPOST(req: Request, res: Response): void {
   const parsed = setBudgetBody.safeParse(req.body ?? {})
   if (!parsed.success) {

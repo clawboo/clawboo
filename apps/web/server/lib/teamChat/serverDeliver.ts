@@ -52,6 +52,7 @@ import { classifyError, isHarnessBug } from '@clawboo/obs'
 import {
   buildTurnEnvelope,
   classifyTurn,
+  DeliveryRefusedError,
   isChatVisible,
   isTeamSessionKey,
   type NudgeQueue,
@@ -61,6 +62,7 @@ import {
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
+import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
 import { registerRunSteer } from '../runSteers'
@@ -239,6 +241,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
   const publishDelta = deps.publishDelta
   const publishStatus = deps.publishStatus
   const makeAdapterForAgent = deps.makeAdapterForAgent
+  /** Agents already told, in the chat, that a paused budget refused their turn. A
+   *  task update to a paused lead is retried, and one notice per pause is enough;
+   *  a person's or a routine's message always gets its own. Cleared when the
+   *  agent's next run starts. */
+  const budgetNoticeShown = new Set<string>()
 
   /** Record this run's spend; return true if a CAP budget crossed 100% (kill-switch).
    *  A budget-ledger failure must NEVER propagate: it would be caught by the drain's
@@ -1043,6 +1050,32 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               settleRefused(before)
               return
             }
+            // The budget gate, as in the task runner: a paused hard cap on the agent,
+            // the mission its task belongs to or the team refuses the run before it
+            // starts. Read while holding the agent's lock, so a cap that the run
+            // ahead of this one paused is seen. A ledger read that fails lets the run
+            // go, as a failed spend write does (see recordSpendForRun).
+            let budget: BudgetPreflightResult = { blocked: false }
+            try {
+              const missionTaskId = taskForSession(targetSessionKey)
+              budget = budgetPreflight(db, {
+                agentId: targetAgentId,
+                missionId: missionTaskId ? missionRootId(db, missionTaskId) : null,
+                teamId,
+              })
+            } catch (err) {
+              log.error({ err, agentId: targetAgentId }, 'budget gate could not read the budgets')
+            }
+            if (budget.blocked) {
+              const text = budgetRefusalText(budget.scope)
+              const personAsked = origin.kind === 'human' || origin.kind === 'schedule'
+              if (chatVisible && (personAsked || !budgetNoticeShown.has(targetAgentId))) {
+                budgetNoticeShown.add(targetAgentId)
+                deps.persistMeta?.(targetSessionKey, text)
+              }
+              failStart(new DeliveryRefusedError(text))
+              return
+            }
             if (capturedWorkdir) {
               try {
                 await ensureTeamWorkdir(capturedWorkdir)
@@ -1103,6 +1136,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            budgetNoticeShown.delete(targetAgentId)
             // The run STARTED with the catch-up in its context, so the cursor may
             // advance — and only now. Advancing at render time would let a failed
             // start eat the posts, which is the same rule the digest follows one

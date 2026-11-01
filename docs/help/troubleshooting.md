@@ -405,7 +405,7 @@ pipx install --python python3.12 'hermes-agent[anthropic]<1'
 2. **The runtime is connected.** In **Settings > Runtimes**, the agent's runtime reads **Connected**. An OpenClaw agent also needs the OpenClaw Gateway online.
 3. **Needs you.** A command, an app call or a risky hand-off may be waiting for your answer on the **Board**.
 4. **The agent is busy.** An agent works on one thing at a time, so new work waits until it is free. A waiting task stays in **To do**.
-5. **A budget.** A budget in hard cap mode that reached its limit stops some runs; see [Budgets and costs](#budgets-and-costs).
+5. **A budget.** A budget in hard cap mode that reached its limit refuses new runs, with a notice in the chat; see [Budgets and costs](#budgets-and-costs).
 
 If it still does not answer, go through [When an agent is not doing what you asked](#when-an-agent-is-not-doing-what-you-asked).
 
@@ -574,9 +574,15 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 **Fix:** open **Settings > Insights > Governance**. The budget reads **paused**: click **Resume**, or raise its limit with **Set cap**. If spend is still over the limit, a resumed budget pauses again at the next charge, so raise the limit to keep working. See [Resume or raise a budget](/using/budgets-and-spend#resume-or-raise-a-budget).
 
+### The team budget is paused at its hard cap, so this run did not start.
+
+**What it means:** a budget in hard cap mode reached its limit, so Clawboo refused the run before it started. The word before "budget" names the budget: agent, team, or mission (a task plus everything handed off from it). In team chat Clawboo checks the agent's and the team's budgets, and the mission's for a run on a task; one-to-one chat checks only the agent's. A handed-off task, or one you gave an agent on the Board, carries the same sentence in a comment and waits in **Needs you**.
+
+**Fix:** open **Settings > Insights > Governance** and raise the budget's limit with **Set cap**, or click **Resume**. Then send your message again, or press **Retry** on the task. See [Resume or raise a budget](/using/budgets-and-spend#resume-or-raise-a-budget).
+
 ### My hard cap did not stop the team
 
-**What it means:** in team chat, nothing checks a budget before a turn starts. Only a Clawboo Native run on a priced model reports cost while it works, so only that run stops partway. Every other run is charged when it finishes, and the next team-chat turn still runs.
+**What it means:** a paused hard cap refuses new runs, but a run already going finishes unless it is Clawboo Native on a priced model, which stops after its next model turn. Every other run is charged when it finishes, which can take the budget past 100%. If new messages still get answers, the budget is **warn only**, which never pauses.
 
 **Fix:** press **Stop** in the team's chat to halt it right away. [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops) explains what a cap can stop on each path, and [Budgets and spend](/using/budgets-and-spend) shows how to watch spend.
 

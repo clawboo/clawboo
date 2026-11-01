@@ -337,6 +337,193 @@ describe('GovernancePanel', () => {
     )
   })
 
+  it('shows the mode of a budget the picked agent already has, so saving keeps a hard cap', async () => {
+    seedDirectory()
+    server.use(
+      http.get('/api/governance/budgets', () =>
+        HttpResponse.json({
+          budgets: [
+            budget({
+              scope: 'agent',
+              scopeId: 'a-solo',
+              mode: 'cap',
+              status: 'paused',
+              limitUsdCents: 500,
+              spentUsdCents: 520,
+              tenantId: null,
+            }),
+          ],
+        }),
+      ),
+      http.get('/api/governance/audit', () => HttpResponse.json({ audit: [] })),
+    )
+    const posted = capturePosts()
+    const user = userEvent.setup()
+    render(<GovernancePanel />)
+    await screen.findByTestId('budget-row')
+
+    expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+    expect(screen.queryByTestId('budget-existing-hint')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Agent' }))
+    await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+
+    expect(screen.getByRole('radio', { name: 'hard cap' })).toBeChecked()
+    expect(screen.getByTestId('budget-existing-hint')).toHaveTextContent(
+      'This already has a hard cap budget of $5.00.',
+    )
+    await user.type(screen.getByPlaceholderText('cap $'), '8')
+    await user.click(screen.getByTestId('budget-create'))
+
+    await waitFor(() =>
+      expect(posted).toHaveBeenCalledWith({
+        scope: 'agent',
+        scopeId: 'a-solo',
+        limitUsdCents: 800,
+        mode: 'cap',
+      }),
+    )
+  })
+
+  it('goes back to the mode the person chose when the next pick has no budget', async () => {
+    seedDirectory()
+    server.use(
+      http.get('/api/governance/budgets', () =>
+        HttpResponse.json({
+          budgets: [budget({ scope: 'agent', scopeId: 'a-solo', mode: 'cap', tenantId: null })],
+        }),
+      ),
+      http.get('/api/governance/audit', () => HttpResponse.json({ audit: [] })),
+    )
+    const user = userEvent.setup()
+    render(<GovernancePanel />)
+    await screen.findByTestId('budget-row')
+
+    const picker = screen.getByRole('button', { name: 'Agent' })
+    await user.click(picker)
+    await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+    expect(screen.getByRole('radio', { name: 'hard cap' })).toBeChecked()
+
+    await user.click(picker)
+    await user.click(screen.getByRole('option', { name: 'Researcher · Marketing' }))
+    expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+    expect(screen.queryByTestId('budget-existing-hint')).toBeNull()
+  })
+
+  describe('a pick made before the budget list loads', () => {
+    /** Hold the first budget read until `release()`; later reads answer at once. */
+    function slowBudgets() {
+      let release: () => void = () => undefined
+      const held = new Promise<void>((r) => (release = r))
+      let first = true
+      const rows = [budget({ scope: 'agent', scopeId: 'a-solo', mode: 'cap', tenantId: null })]
+      server.use(
+        http.get('/api/governance/budgets', async () => {
+          if (first) {
+            first = false
+            await held
+          }
+          return HttpResponse.json({ budgets: rows })
+        }),
+        http.get('/api/governance/audit', () => HttpResponse.json({ audit: [] })),
+      )
+      return { release }
+    }
+
+    it("lands on the target's hard cap once the list arrives, so saving keeps it", async () => {
+      seedDirectory()
+      const { release } = slowBudgets()
+      const posted = capturePosts()
+      const user = userEvent.setup()
+      render(<GovernancePanel />)
+
+      await user.click(await screen.findByRole('button', { name: 'Agent' }))
+      await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+      expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+
+      release()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'hard cap' })).toBeChecked())
+      expect(screen.getByTestId('budget-existing-hint')).toHaveTextContent('hard cap')
+      await user.type(screen.getByPlaceholderText('cap $'), '9')
+      await user.click(screen.getByTestId('budget-create'))
+
+      await waitFor(() =>
+        expect(posted).toHaveBeenCalledWith({
+          scope: 'agent',
+          scopeId: 'a-solo',
+          limitUsdCents: 900,
+          mode: 'cap',
+        }),
+      )
+    })
+
+    it('keeps a mode the person chose after picking, even when the list arrives later', async () => {
+      seedDirectory()
+      const { release } = slowBudgets()
+      const posted = capturePosts()
+      const user = userEvent.setup()
+      render(<GovernancePanel />)
+
+      await user.click(await screen.findByRole('button', { name: 'Agent' }))
+      await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+      await user.click(screen.getByRole('radio', { name: 'warn only' }))
+
+      release()
+      await screen.findByTestId('budget-existing-hint')
+      expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+      await user.type(screen.getByPlaceholderText('warn at $'), '9')
+      await user.click(screen.getByTestId('budget-create'))
+
+      await waitFor(() =>
+        expect(posted).toHaveBeenCalledWith({
+          scope: 'agent',
+          scopeId: 'a-solo',
+          limitUsdCents: 900,
+          mode: 'warn',
+        }),
+      )
+    })
+  })
+
+  it('keeps the mode the person picks after choosing a target that has a budget', async () => {
+    seedDirectory()
+    server.use(
+      http.get('/api/governance/budgets', () =>
+        HttpResponse.json({
+          budgets: [budget({ scope: 'agent', scopeId: 'a-solo', mode: 'cap', tenantId: null })],
+        }),
+      ),
+      http.get('/api/governance/audit', () => HttpResponse.json({ audit: [] })),
+    )
+    const posted = capturePosts()
+    const user = userEvent.setup()
+    render(<GovernancePanel />)
+    await screen.findByTestId('budget-row')
+
+    await user.click(screen.getByRole('button', { name: 'Agent' }))
+    await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+    await user.click(screen.getByRole('radio', { name: 'warn only' }))
+    await user.type(screen.getByPlaceholderText('warn at $'), '3')
+    await user.click(screen.getByTestId('budget-create'))
+
+    await waitFor(() =>
+      expect(posted).toHaveBeenCalledWith({
+        scope: 'agent',
+        scopeId: 'a-solo',
+        limitUsdCents: 300,
+        mode: 'warn',
+      }),
+    )
+  })
+
+  it('says what a hard cap refuses without claiming it stops every run at once', async () => {
+    stubEmptyLists()
+    render(<GovernancePanel />)
+    const panel = await screen.findByTestId('governance-panel')
+    expect(panel).not.toHaveTextContent(/the moment a scope crosses 100%/)
+    expect(panel).toHaveTextContent(/new runs it covers are refused/)
+    expect(panel).toHaveTextContent(/only some Clawboo Native runs stop partway/)
+  })
+
   it('clears a picked agent that leaves the list, and then submits nothing', async () => {
     seedDirectory()
     stubEmptyLists()

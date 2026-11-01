@@ -104,11 +104,13 @@ In the form below the list, pick **agent**, **team** or **mission**.
 
 In the next list, choose the agent, team or board task by name; type to search. Agents show their team, so two agents with the same name stay apart, archived teams are left out, and for a mission the list holds the top-level board tasks, newest first. Enter the limit in dollars in the next field, which reads **warn at $** (or **cap $** once you pick a hard cap). The smallest limit is $0.01.
 
+If what you picked already has a budget, a line under the form says so, for example `This already has a hard cap budget of $5.00.`, and the form switches to that budget's mode. **Set budget** then changes that budget instead of adding a second one.
+
 </Step>
 
 <Step title="Pick the mode">
 
-Pick **warn only** (selected at first) or **hard cap**. See the next section for the difference.
+Pick **warn only** (selected at first, unless what you picked already has a budget) or **hard cap**. See the next section for the difference.
 
 </Step>
 
@@ -138,14 +140,14 @@ When an agent routine, a run started through the API, or an OpenClaw routine tak
 
 ## What a hard cap stops
 
-A paused hard cap does not stop every kind of work at once. It depends on where the work runs:
+A paused hard cap refuses new runs on every path below. Whether it also stops a run that is already going depends on where the work runs:
 
-| Where the work runs                                                         | Before a run starts                   | While a run is going                                                                                                                                                                                                                                                     |
-| --------------------------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Team chat: General, rooms, team routines, Board tasks and hand-offs         | Not checked, so new turns still start | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
-| Agent routines and API runs on Clawboo Native, Claude Code, Codex or Hermes | The run is refused                    | A run that keeps working past the cap is stopped. Claude Code and Codex report their cost only as the run ends, so their work is already done: the result is kept and posted, and the next run is refused. A run with no cost report is charged an estimate when it ends |
-| OpenClaw agent routines                                                     | The run is refused                    | The run finishes. Its estimate is charged when it ends, whether it succeeded or not, and the next run is refused                                                                                                                                                         |
-| One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent   | Not checked                           | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
+| Where the work runs                                                         | Before a run starts                                       | While a run is going                                                                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Team chat: General, rooms, team routines, Board tasks and hand-offs         | The run is refused                                        | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
+| Agent routines and API runs on Clawboo Native, Claude Code, Codex or Hermes | The run is refused                                        | A run that keeps working past the cap is stopped. Claude Code and Codex report their cost only as the run ends, so their work is already done: the result is kept and posted, and the next run is refused. A run with no cost report is charged an estimate when it ends |
+| OpenClaw agent routines                                                     | The run is refused                                        | The run finishes. Its estimate is charged when it ends, whether it succeeded or not, and the next run is refused                                                                                                                                                         |
+| One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent   | The turn is refused when the agent's own budget is paused | A Clawboo Native run on a priced model stops after its next model turn. Every other run is charged when it ends, so it finishes                                                                                                                                          |
 
 What you see when a hard cap stops work:
 
@@ -153,9 +155,11 @@ What you see when a hard cap stops work:
 - **A run whose last cost report crossed the cap** (the usual case for Claude Code and Codex) had already ended, so it is not stopped: its result is posted, its task moves on as usual, and the comment reads `Budget cap reached (<scope>) by this run's final cost report. The run had already ended, so what it produced is kept; the next run is refused until you raise the cap or resume.`
 - **An agent routine** counts the refused or stopped run as a failure. The routine stops until you resume it, and its task waits in **Needs you**; see [When a routine stops](/using/routines#when-a-routine-stops).
 - **An OpenClaw routine** whose estimate crosses the cap leaves the comment `Budget cap reached (<scope>). This run is recorded; the next scheduled fire is blocked until you raise the cap or resume.`
-- **Team chat and one-to-one chat**: a stopped run that had not replied yet leaves the message `The run failed: the run was stopped by a budget cap`. In team chat, a handed-off task it was working on waits in **Needs you**.
+- **Team chat and one-to-one chat**, before a run starts: Clawboo checks the agent's budget, the team's and, for a run that works on a task, the mission's (one-to-one chat checks only the agent's, the one budget it is charged to). When a hard cap among them is paused, nothing runs, and the chat shows `The <scope> budget is paused at its hard cap, so this run did not start. Raise the cap or resume it in Governance to continue.` A handed-off task, or a task you gave an agent on the Board, is not started either: it waits in **Needs you** with that sentence in a comment, and for a hand-off, the agent that handed it off is told.
+- **A team routine** whose message is refused that way counts as a failed run with that sentence as its error, and stops until you resume it. If the lead was busy when the routine fired, the fire already counted as posted, so the refusal shows only in the chat.
+- **Team chat and one-to-one chat**, during a run: a stopped run that had not replied yet leaves the message `The run failed: the run was stopped by a budget cap`. In team chat, a handed-off task it was working on waits in **Needs you**.
 
-To halt a team that keeps working past its budget, press **Stop** in its chat. [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops) has the full rules.
+A run that is already going when its budget pauses usually finishes. To end it at once, press **Stop** in the team's chat. [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops) has the full rules.
 
 ## Resume or raise a budget
 
@@ -164,13 +168,9 @@ A paused budget shows a **Resume** button on its row.
 - **Resume** puts the budget back to **active** at once, without changing the limit. If spend is still at or over the limit, a message warns you and the row shows **will re-pause**: the next recorded spend pauses it again.
 - **Set cap** changes the limit. Type the new amount in the row's **new cap $** field and press **Set cap**. It keeps the row's mode. A limit above the current spend un-pauses the budget: it reads **active** again, or **soft_capped** while spend is still 80% of the new limit or more.
 
-To give a paused budget room, use **Set cap** with a higher limit. Then restart what it stopped, for example with **Retry** on its task in **Needs you**, or **Resume** on the routine under **Settings** > **Workspace** > **Routines**.
+To give a paused budget room, use **Set cap** with a higher limit. Then restart what it stopped, for example with **Retry** on its task in **Needs you**, **Resume** on the routine under **Settings** > **Workspace** > **Routines**, or by sending your message again.
 
-<Warning>
-
-**Saving a budget from the form sets its mode again.** The form starts on **warn only**, so pressing **Set budget** for a scope that already has a hard cap turns it into warn only, with no message. A `POST /api/governance/budgets` without `"mode": "cap"` does the same. To raise a hard cap, use **Set cap** on its row. To turn a warn-only budget into a hard cap, save it from the form with **hard cap** picked.
-
-</Warning>
+You can also change a budget from the form below the list: pick the same agent, team or task, and the form switches to that budget's mode. Enter the new limit, pick the other mode if you want to change it, and press **Set budget**. A save that names no mode, such as a `POST /api/governance/budgets` without `mode`, keeps the budget's mode.
 
 ## Try a budget out first
 
@@ -219,7 +219,7 @@ The event types that matter for spend:
 | `circuit_break` | A circuit breaker stopping an agent routine or API run that was going nowhere                                                             |
 | `approval`      | Decisions on risky hand-offs, and unanswered approvals that Clawboo's cleanup expired                                                     |
 
-Resuming a budget writes no entry, and neither does spend in team chat or one-to-one chat.
+Resuming a budget writes no entry, and neither does a run a paused budget refused, or spend in team chat or one-to-one chat.
 
 ## The rest of the Governance panel
 
@@ -232,13 +232,13 @@ Resuming a budget writes no entry, and neither does spend in team chat or one-to
 
 <Accordion title="My budget passed 100% and nothing stopped">
 
-A **warn only** budget never pauses anything; switch it to **hard cap** (see the Warning above). A hard cap in team chat stops only Clawboo Native runs on a priced model. Other team-chat runs finish, and their cost is charged when they end. See [What a hard cap stops](#what-a-hard-cap-stops).
+A **warn only** budget never pauses anything; switch it to **hard cap** (see [Resume or raise a budget](#resume-or-raise-a-budget)). A hard cap refuses new runs, but a run already going stops partway only on Clawboo Native with a priced model. Other runs finish, and their cost is charged when they end, so the budget can end up past 100%. See [What a hard cap stops](#what-a-hard-cap-stops).
 
 </Accordion>
 
 <Accordion title="The budget is paused, but the team still runs">
 
-Team chat does not check budgets before a turn starts, so new messages still start runs. Press **Stop** in the team's chat to end what is running, and hold back new work until you raise the limit.
+New runs are refused once a hard cap pauses, but a run that was already going finishes, unless it is Clawboo Native on a priced model, which stops after its next model turn. Press **Stop** in the team's chat to end what is running. If new messages still get answers, check the budget's mode pill: a **warn** budget never pauses.
 
 </Accordion>
 
@@ -250,7 +250,7 @@ Spend is still at or over the limit, which the **will re-pause** pill on the row
 
 <Accordion title="My hard cap turned into warn only">
 
-The budget was saved again from the form, which starts on **warn only**. Pick the same scope and the same agent, team or task in the form, pick **hard cap**, and press **Set budget**. Use **Set cap** on the row whenever you only want a new limit.
+Someone saved it again with **warn only** picked, or sent `"mode": "warn"` through the API. Pick the same scope and the same agent, team or task in the form, pick **hard cap**, and press **Set budget**. Use **Set cap** on the row whenever you only want a new limit.
 
 </Accordion>
 
@@ -295,7 +295,7 @@ Spend from team chat and one-to-one chat updates the budget's bar and status wit
 <Accordion title="Under the hood">
 
 - **Statuses and modes.** Budgets are stored with the modes `warn` and `cap` and the statuses `active`, `soft_capped` and `paused`. A `warn` budget never reads `paused`. Spend is kept in fractions of a cent, so many tiny costs add up, and each scope (agent, mission, team) is updated in its own write.
-- **Budgets over REST.** `GET /api/governance/budgets` lists them. `POST /api/governance/budgets` takes `{ "scope", "scopeId", "limitUsdCents", "mode" }`, where `limitUsdCents` is a positive whole number and a missing `mode` means `warn`; saving an existing scope updates its limit and mode. `POST /api/governance/budgets/:scope/:scopeId/resume` resumes a budget and answers `willRepause`; when spend is at or over the limit, an optional `graceUsdCents` raises the limit to the current spend plus the grace and keeps the mode. There is no delete route.
+- **Budgets over REST.** `GET /api/governance/budgets` lists them. `POST /api/governance/budgets` takes `{ "scope", "scopeId", "limitUsdCents", "mode" }`, where `limitUsdCents` is a positive whole number. A new budget without `mode` is `warn`; saving an existing scope updates its limit, and its mode only when you send one. `POST /api/governance/budgets/:scope/:scopeId/resume` resumes a budget and answers `willRepause`; when spend is at or over the limit, an optional `graceUsdCents` raises the limit to the current spend plus the grace and keeps the mode. There is no delete route.
 - **The audit log over REST.** `GET /api/governance/audit` takes `agentId`, `eventType`, `since` and `limit` (at most 1,000).
 - **Another way to get a hard cap.** Creating a Clawboo Native agent through the API with `budgetUsd` also creates a hard-cap budget for that agent.
 - **Run costs.** Each run records its cost with a source of `reported`, `local`, `token-estimate` or `char-estimate`. A task's total reads as an estimate when any of its runs is neither `reported` nor `local`, and as free when all of them are `local`.

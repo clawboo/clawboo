@@ -106,6 +106,7 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - The Kanban lanes run unbroken to the bottom, and dropdown menus are as wide as their longest option.
 - Team chat runs, and task runs that only read (routines made in the dashboard included), start in a folder of their team, `~/.clawboo/workspaces/<team id>`, instead of the folder that holds Clawboo's database and keys. The folder only sets where Claude Code, Codex and Hermes start: they keep full access to your files. Clawboo Native agents get their file tools there, kept inside the folder. An agent's **Workspace** tab shows the folder, and deleting a team deletes it with its files. See [What agents can do](/concepts/permissions).
 - A model your own Ollama serves is recorded at $0 and reads **free**, a Claude Code or Codex run whose final cost report crosses a hard cap keeps its result (the next run is refused instead), every run that ended without a cost report is estimated, and **Tokens Used** lists every runtime. See [Budgets and spend](/using/budgets-and-spend).
+- A paused hard cap now refuses new team-chat and one-to-one chat turns before they start, with a notice in the chat saying which budget is paused; a refused hand-off waits in **Needs you** with the reason. Saving a budget again keeps its mode unless you pick another, and the Governance form shows the mode of a budget you already have. See [What a hard cap stops](/using/budgets-and-spend#what-a-hard-cap-stops).
 
 </Update>
 

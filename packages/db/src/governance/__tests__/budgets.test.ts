@@ -1,6 +1,9 @@
+import { once } from 'node:events'
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { Worker } from 'node:worker_threads'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -105,6 +108,64 @@ describe('track-and-warn mode (the track-and-warn default posture)', () => {
     setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'warn' })
     expect(getBudget(db, 'agent', 'a1')?.status).not.toBe('paused')
     expect(getBudget(db, 'agent', 'a1')?.mode).toBe('warn')
+  })
+
+  it('a save without a mode keeps a hard cap a hard cap', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'agent', 'a1', 150)
+    const saved = setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 120 })
+    expect(saved.mode).toBe('cap')
+    expect(saved.status).toBe('paused')
+    expect(getBudget(db, 'agent', 'a1')?.mode).toBe('cap')
+    expect(getBudget(db, 'agent', 'a1')?.status).toBe('paused')
+  })
+
+  it('a save without a mode keeps the mode another writer stored while it waited', async () => {
+    // A second connection, on its own thread, switches the budget to a hard cap and
+    // holds the write lock for a while before committing. The mode-less save starts
+    // during that window, so it must read the mode under the same lock it writes
+    // with; reading first and writing later would put the stale 'warn' back.
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'warn' })
+    const worker = new Worker(
+      `
+      const { parentPort, workerData } = require('node:worker_threads')
+      const Database = require(workerData.driver)
+      const conn = new Database(workerData.file)
+      conn.pragma('busy_timeout = 5000')
+      conn.exec('BEGIN IMMEDIATE')
+      conn.prepare("UPDATE budgets SET mode = 'cap' WHERE scope = 'agent' AND scope_id = 'a1'").run()
+      parentPort.postMessage('locked')
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, workerData.holdMs)
+      conn.exec('COMMIT')
+      conn.close()
+      `,
+      {
+        eval: true,
+        workerData: {
+          // __filename is provided by vitest for this CommonJS package.
+          driver: createRequire(__filename).resolve('better-sqlite3'),
+          file: path.join(dir, 'test.db'),
+          holdMs: 400,
+        },
+      },
+    )
+    const exited = once(worker, 'exit')
+    await once(worker, 'message')
+
+    const saved = setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 300 })
+    await exited
+
+    expect(saved.mode).toBe('cap')
+    expect(getBudget(db, 'agent', 'a1')?.mode).toBe('cap')
+    expect(getBudget(db, 'agent', 'a1')?.limitUsdCents).toBe(300)
+  })
+
+  it('a save without a mode keeps a warn budget warn, and a new budget starts warn', () => {
+    expect(setBudgetLimit(db, { scope: 'team', scopeId: 't1', limitUsdCents: 100 }).mode).toBe(
+      'warn',
+    )
+    setBudgetLimit(db, { scope: 'team', scopeId: 't1', limitUsdCents: 300 })
+    expect(getBudget(db, 'team', 't1')?.mode).toBe('warn')
   })
 })
 

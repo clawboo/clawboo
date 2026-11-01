@@ -150,8 +150,9 @@ A few modules carry rules worth knowing before you change them:
 - **Mark only what was delivered.** After `packInboxRows`, mark delivered only the row ids it reported as included.
 - **Scrub before storing.** Tool arguments, results and event payloads pass through `scrubSecrets`, which replaces
   credential-looking values with `[REDACTED]`.
-- **Budgets default to warn.** `setBudgetLimit` writes `mode: 'warn'` unless the caller passes `mode: 'cap'`, and it
-  rewrites the mode on every call, so re-setting a hard cap without `mode` turns it back into a warning.
+- **Budgets default to warn.** `setBudgetLimit` creates a budget in `mode: 'warn'` unless the caller passes
+  `mode: 'cap'`. Updating a budget without `mode` keeps the mode it has, so re-setting a hard cap's limit keeps it a
+  hard cap.
 
 `pnpm --filter @clawboo/db db:studio` opens Drizzle Studio on the development file `packages/db/dev.db`, never on
 your real database.

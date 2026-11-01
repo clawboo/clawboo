@@ -118,23 +118,13 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **Status:** open.
 
-### A hard cap does not reliably stop team chat
+### A hard cap does not stop most runs partway
 
-**What you see:** a budget in **hard cap** mode reads paused at 100%, but the team keeps working.
+**What you see:** a budget in **hard cap** mode reads paused at 100%, but a run that was already going keeps working until it finishes, and the budget ends up past its limit.
 
-**What it affects:** nothing checks a budget before a team chat turn starts. A Clawboo Native run on a model Clawboo prices stops after its next model turn. Every other run is charged when it finishes, so the next turn still runs. On the task runner and for OpenClaw agent routines, a paused hard cap does refuse the next run.
+**What it affects:** only Clawboo Native reports cost while it works, so only a Clawboo Native run can be stopped partway (in team chat and one-to-one chat, only on a model Clawboo prices). Every other run is charged when it finishes. New runs are refused once the budget is paused, on every path.
 
-**What to do:** to halt a team that is over budget, press **Stop** in the chat. See [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops).
-
-**Status:** open.
-
-### Saving a budget again can switch a hard cap to warn only
-
-**What you see:** a budget you set to **hard cap** reads **warn only** after you change it.
-
-**What it affects:** every save sets the mode. Saving the same scope from the create form with **warn only** selected (the form's default) switches the budget to warn only, and so does an API call that sends no mode.
-
-**What to do:** to raise a hard cap's limit, use **Set cap** on its row, which keeps the mode. See [Budgets and guardrails](/concepts/governance).
+**What to do:** to end a run that is going, press **Stop** in the chat. See [What a hard cap stops](/concepts/governance#what-a-hard-cap-stops).
 
 **Status:** open.
 

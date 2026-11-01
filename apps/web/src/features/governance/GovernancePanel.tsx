@@ -395,8 +395,24 @@ export function GovernancePanel() {
   const [newScope, setNewScope] = useState<CreatableScope>('agent')
   const [newScopeId, setNewScopeId] = useState('')
   const [newLimit, setNewLimit] = useState('')
-  // Default posture is track-and-warn (a hard cap is the explicit opt-in).
-  const [newMode, setNewMode] = useState<BudgetMode>('warn')
+  // The mode the person chose (default posture is track-and-warn; a hard cap is the
+  // explicit opt-in), and whether they chose it since picking the current target.
+  const [chosenMode, setChosenMode] = useState<BudgetMode>('warn')
+  const [modeChosenForPick, setModeChosenForPick] = useState(false)
+  // The budget the picked agent, team or task already has, if any: saving the form
+  // updates it rather than creating a second one.
+  const existingBudget = newScopeId
+    ? budgets.find((b) => b.scope === newScope && b.scopeId === newScopeId)
+    : undefined
+  // Until the person picks a mode for this target, one that already has a budget
+  // shows that budget's mode. Read from the latest budget list on every render, so a
+  // pick made before the list loads still lands on it and a re-save keeps a hard cap.
+  const newMode: BudgetMode =
+    existingBudget && !modeChosenForPick
+      ? existingBudget.mode === 'warn'
+        ? 'warn'
+        : 'cap'
+      : chosenMode
 
   // Budgets, the audit log and the board tasks are independent reads over independent
   // state, so each gets its own sequencer: a budget write must not invalidate an
@@ -427,6 +443,12 @@ export function GovernancePanel() {
   useEffect(() => {
     if (needTasks) void refreshTasks()
   }, [needTasks, refreshTasks])
+
+  // A new pick shows its own budget's mode again (see `newMode`).
+  const pickTarget = useCallback((id: string) => {
+    setNewScopeId(id)
+    setModeChosenForPick(false)
+  }, [])
 
   const refreshBudgets = useCallback(async () => {
     const read = budgetReads.beginRead()
@@ -510,9 +532,11 @@ export function GovernancePanel() {
             <div className="text-[13px] leading-relaxed text-foreground/55">
               Default posture is <strong>track-and-warn</strong>: nothing pauses your agents out of
               the box. A <strong>warn</strong> budget records spend and warns at 80% / 100% but
-              never stops a run; a <strong>cap</strong> budget is the opt-in hard cap — the executor
-              auto-pauses the moment a scope crosses 100%. From here you set a budget, raise a cap,
-              or resume a paused scope.
+              never stops a run. A <strong>cap</strong> budget is the opt-in hard cap: once recorded
+              spend reaches 100% it reads paused, and new runs it covers are refused until you raise
+              the cap or resume it. A run already going is usually charged when it ends, so it
+              finishes; only some Clawboo Native runs stop partway. From here you set a budget,
+              raise a cap, or resume a paused scope.
             </div>
             {!budgetsOk ? (
               <div data-testid="governance-fetch-error">
@@ -559,14 +583,14 @@ export function GovernancePanel() {
                 value={newScope}
                 onChange={(v) => {
                   setNewScope(v as CreatableScope)
-                  setNewScopeId('')
+                  pickTarget('')
                 }}
                 options={CREATABLE_SCOPES.map((s) => ({ value: s, label: s }))}
               />
               <BudgetTargetPicker
                 scope={newScope}
                 value={newScopeId}
-                onChange={setNewScopeId}
+                onChange={pickTarget}
                 taskLoad={taskLoad}
               />
               <input
@@ -586,7 +610,10 @@ export function GovernancePanel() {
                     { id: 'cap', label: 'hard cap' },
                   ]}
                   value={newMode}
-                  onChange={(v) => setNewMode(v as BudgetMode)}
+                  onChange={(v) => {
+                    setChosenMode(v as BudgetMode)
+                    setModeChosenForPick(true)
+                  }}
                 />
               </div>
               <Button
@@ -611,6 +638,16 @@ export function GovernancePanel() {
               >
                 Set budget
               </Button>
+              {existingBudget && (
+                <p
+                  data-testid="budget-existing-hint"
+                  className="w-full text-[12px] leading-relaxed text-foreground/50"
+                >
+                  This already has a {existingBudget.mode === 'warn' ? 'warn only' : 'hard cap'}{' '}
+                  budget of {dollars(existingBudget.limitUsdCents)}. Set budget changes its limit
+                  and mode.
+                </p>
+              )}
               {newScope === 'mission' && (
                 <p
                   data-testid="budget-mission-hint"

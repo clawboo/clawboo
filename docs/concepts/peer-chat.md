@@ -73,7 +73,7 @@ Change the port if your server uses another one (see [CLI](/reference/cli)). Wit
 
 - **Who speaks.** The agents in `firstSpeakers`, or the team's Leader when you list none. Boo Zero is not a member, so it does not take part. With no Leader and no `firstSpeakers`, the exchange ends at once with no turns. After the first speakers, each member that a turn delegates or reports to gets a turn, so an agent can speak more than once. The exchange ends when nobody is owed a turn or the turn limit is reached.
 - **Turn limit.** 5 turns by default. A `maxExchangeTurns` you pass is kept between 1 and 5 times the number of members.
-- **Spending.** A team or speaker whose hard-cap budget is paused refuses the exchange before any turn runs. A turn that trips a hard cap ends it.
+- **Spending.** A team or first speaker whose hard-cap budget is paused refuses the exchange before any turn runs. Every later turn checks its speaker's budget and the team's again: a paused hard cap refuses that turn, adds a notice to the team chat and ends the exchange. A turn that trips a hard cap ends it too.
 - **One at a time.** A second exchange for the same team while one is running gets `409`. Closing the request stops the exchange before its next turn.
 - **Errors.** `400` without a `teamId`, `404` for an unknown team, and `422` when the team has no agents, a first speaker is not a member, or a budget is paused.
 

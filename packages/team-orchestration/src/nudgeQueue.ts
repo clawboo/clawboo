@@ -7,7 +7,9 @@
 // Two robustness guarantees beyond the basic queue:
 //   • An IMMEDIATE send (idle session) PROPAGATES a rejection so the caller can
 //     fail the task right away instead of waiting out the 8-min watchdog. The
-//     session is un-busied on failure so it isn't wedged.
+//     session is un-busied on failure so it isn't wedged. A QUEUED send that
+//     rejects has no caller left to tell; it frees the session and the next
+//     queued send goes, as at a turn boundary.
 //   • A per-session WEDGE TIMEOUT force-idles a session whose turn boundary is
 //     never observed (a dropped/lost `done` frame), so queued sends (e.g. a
 //     `[Task Update]` to a busy leader) can't sit forever. Re-armed on every
@@ -58,6 +60,8 @@ export function createNudgeQueue(opts?: {
   const busy = new Set<string>()
   const queues = new Map<string, Array<() => Promise<void>>>()
   const wedgeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  /** Bumped by `reset()`: a send flushed before it no longer owns its session. */
+  let generation = 0
 
   const clearWedge = (sessionKey: string): void => {
     const t = wedgeTimers.get(sessionKey)
@@ -96,7 +100,13 @@ export function createNudgeQueue(opts?: {
     // own `done` (which markIdle → flushes the next one). FIFO drain.
     busy.add(sessionKey)
     armWedge(sessionKey)
-    void next().catch(() => undefined)
+    const gen = generation
+    void next().catch(() => {
+      // It never started a run, so no `done` will free the session: free it here
+      // and let the next queued send go. Not after a reset, which handed the
+      // session to whatever was delivered since.
+      if (gen === generation) markIdle(sessionKey)
+    })
   }
 
   function markIdle(sessionKey: string): void {
@@ -147,6 +157,7 @@ export function createNudgeQueue(opts?: {
       busy.clear()
     },
     reset() {
+      generation++
       for (const t of wedgeTimers.values()) clearTimeout(t)
       wedgeTimers.clear()
       busy.clear()

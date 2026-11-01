@@ -43,7 +43,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Brief**: a team's short description, edited together with its rules. Boo Zero reads it only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Boo Zero's page also has a **Global Brief**, which Clawboo saves but does not use yet. See [Teams](/using/teams) and [Boo Zero](/using/boo-zero).
 
-**Budget**: a dollar limit on one agent, team or mission. In **warn only** mode, the default, Clawboo counts spend and warns you as the budget fills. In **hard cap** mode, which you opt into, it also pauses work at 100%, though in team chat a hard cap can stop only some runs. No budget exists until you create one. See [Budgets and spend](/using/budgets-and-spend).
+**Budget**: a dollar limit on one agent, team or mission. In **warn only** mode, the default, Clawboo counts spend and warns you as the budget fills. In **hard cap** mode, which you opt into, it also pauses work at 100%: new runs are refused, though a run already going may finish first. No budget exists until you create one. See [Budgets and spend](/using/budgets-and-spend).
 
 ### C
 
