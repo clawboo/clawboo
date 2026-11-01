@@ -409,6 +409,81 @@ describe('GovernancePanel', () => {
     expect(screen.queryByTestId('budget-existing-hint')).toBeNull()
   })
 
+  describe('a pick made before the budget list loads', () => {
+    /** Hold the first budget read until `release()`; later reads answer at once. */
+    function slowBudgets() {
+      let release: () => void = () => undefined
+      const held = new Promise<void>((r) => (release = r))
+      let first = true
+      const rows = [budget({ scope: 'agent', scopeId: 'a-solo', mode: 'cap', tenantId: null })]
+      server.use(
+        http.get('/api/governance/budgets', async () => {
+          if (first) {
+            first = false
+            await held
+          }
+          return HttpResponse.json({ budgets: rows })
+        }),
+        http.get('/api/governance/audit', () => HttpResponse.json({ audit: [] })),
+      )
+      return { release }
+    }
+
+    it("lands on the target's hard cap once the list arrives, so saving keeps it", async () => {
+      seedDirectory()
+      const { release } = slowBudgets()
+      const posted = capturePosts()
+      const user = userEvent.setup()
+      render(<GovernancePanel />)
+
+      await user.click(await screen.findByRole('button', { name: 'Agent' }))
+      await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+      expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+
+      release()
+      await waitFor(() => expect(screen.getByRole('radio', { name: 'hard cap' })).toBeChecked())
+      expect(screen.getByTestId('budget-existing-hint')).toHaveTextContent('hard cap')
+      await user.type(screen.getByPlaceholderText('cap $'), '9')
+      await user.click(screen.getByTestId('budget-create'))
+
+      await waitFor(() =>
+        expect(posted).toHaveBeenCalledWith({
+          scope: 'agent',
+          scopeId: 'a-solo',
+          limitUsdCents: 900,
+          mode: 'cap',
+        }),
+      )
+    })
+
+    it('keeps a mode the person chose after picking, even when the list arrives later', async () => {
+      seedDirectory()
+      const { release } = slowBudgets()
+      const posted = capturePosts()
+      const user = userEvent.setup()
+      render(<GovernancePanel />)
+
+      await user.click(await screen.findByRole('button', { name: 'Agent' }))
+      await user.click(screen.getByRole('option', { name: 'Solo · no team' }))
+      await user.click(screen.getByRole('radio', { name: 'warn only' }))
+
+      release()
+      await screen.findByTestId('budget-existing-hint')
+      expect(screen.getByRole('radio', { name: 'warn only' })).toBeChecked()
+      await user.type(screen.getByPlaceholderText('warn at $'), '9')
+      await user.click(screen.getByTestId('budget-create'))
+
+      await waitFor(() =>
+        expect(posted).toHaveBeenCalledWith({
+          scope: 'agent',
+          scopeId: 'a-solo',
+          limitUsdCents: 900,
+          mode: 'warn',
+        }),
+      )
+    })
+  })
+
   it('keeps the mode the person picks after choosing a target that has a budget', async () => {
     seedDirectory()
     server.use(

@@ -124,42 +124,48 @@ export interface SetBudgetLimitInput {
 
 /** Upsert a budget cap. A new scope starts at spent 0 / active. Re-setting the
  *  limit recomputes status from the EXISTING spend — so raising the cap above the
- *  current spend un-pauses the scope (the "raise the cap to resume" path). */
+ *  current spend un-pauses the scope (the "raise the cap to resume" path). The read
+ *  and the write share one BEGIN IMMEDIATE transaction, so a save that keeps the
+ *  mode keeps the one stored at write time, not one a concurrent save replaced. */
 export function setBudgetLimit(db: ClawbooDb, input: SetBudgetLimitInput): DbBudget {
   const now = Date.now()
   const limitUsdCents = Math.max(0, Math.round(input.limitUsdCents))
-  const existing = getBudget(db, input.scope, input.scopeId)
-  // Track-and-warn is the locked default posture for a new budget; a hard 'cap' is
-  // opt-in. A save that names no mode keeps the one the budget already has.
-  const mode: BudgetMode = input.mode ?? ((existing?.mode as BudgetMode) === 'cap' ? 'cap' : 'warn')
-  if (!existing) {
-    const row: DbBudget = {
-      id: randomUUID(),
-      scope: input.scope,
-      scopeId: input.scopeId,
-      limitUsdCents,
-      spentUsdCents: 0,
-      spentMicroCents: 0,
-      status: 'active',
-      mode,
-      tenantId: input.tenantId ?? null,
-      createdAt: now,
-      updatedAt: now,
+  return immediateWrite(db, (tx) => {
+    const existing = tx
+      .select()
+      .from(budgets)
+      .where(and(eq(budgets.scope, input.scope), eq(budgets.scopeId, input.scopeId)))
+      .get() as DbBudget | undefined
+    // Track-and-warn is the locked default posture for a new budget; a hard 'cap' is
+    // opt-in. A save that names no mode keeps the one the budget already has.
+    const mode: BudgetMode =
+      input.mode ?? ((existing?.mode as BudgetMode) === 'cap' ? 'cap' : 'warn')
+    if (!existing) {
+      const row: DbBudget = {
+        id: randomUUID(),
+        scope: input.scope,
+        scopeId: input.scopeId,
+        limitUsdCents,
+        spentUsdCents: 0,
+        spentMicroCents: 0,
+        status: 'active',
+        mode,
+        tenantId: input.tenantId ?? null,
+        createdAt: now,
+        updatedAt: now,
+      }
+      tx.insert(budgets).values(row).run()
+      return row
     }
-    withWriteRetry(() => db.insert(budgets).values(row).run())
-    return row
-  }
-  // Recompute from the EXISTING spend; a warn-mode budget never reads 'paused'.
-  let status = statusForSpend(limitUsdCents, existing.spentUsdCents)
-  if (mode === 'warn' && status === 'paused') status = 'soft_capped'
-  withWriteRetry(() =>
-    db
-      .update(budgets)
+    // Recompute from the EXISTING spend; a warn-mode budget never reads 'paused'.
+    let status = statusForSpend(limitUsdCents, existing.spentUsdCents)
+    if (mode === 'warn' && status === 'paused') status = 'soft_capped'
+    tx.update(budgets)
       .set({ limitUsdCents, mode, status, updatedAt: now })
       .where(eq(budgets.id, existing.id))
-      .run(),
-  )
-  return { ...existing, limitUsdCents, mode, status, updatedAt: now }
+      .run()
+    return { ...existing, limitUsdCents, mode, status, updatedAt: now }
+  })
 }
 
 export interface ResumeBudgetOptions {

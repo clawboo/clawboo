@@ -395,16 +395,24 @@ export function GovernancePanel() {
   const [newScope, setNewScope] = useState<CreatableScope>('agent')
   const [newScopeId, setNewScopeId] = useState('')
   const [newLimit, setNewLimit] = useState('')
-  // Default posture is track-and-warn (a hard cap is the explicit opt-in).
-  const [newMode, setNewMode] = useState<BudgetMode>('warn')
-  // The mode the person chose. Picking something that already has a budget shows
-  // that budget's mode instead; picking anything else goes back to this one.
+  // The mode the person chose (default posture is track-and-warn; a hard cap is the
+  // explicit opt-in), and whether they chose it since picking the current target.
   const [chosenMode, setChosenMode] = useState<BudgetMode>('warn')
+  const [modeChosenForPick, setModeChosenForPick] = useState(false)
   // The budget the picked agent, team or task already has, if any: saving the form
   // updates it rather than creating a second one.
   const existingBudget = newScopeId
     ? budgets.find((b) => b.scope === newScope && b.scopeId === newScopeId)
     : undefined
+  // Until the person picks a mode for this target, one that already has a budget
+  // shows that budget's mode. Read from the latest budget list on every render, so a
+  // pick made before the list loads still lands on it and a re-save keeps a hard cap.
+  const newMode: BudgetMode =
+    existingBudget && !modeChosenForPick
+      ? existingBudget.mode === 'warn'
+        ? 'warn'
+        : 'cap'
+      : chosenMode
 
   // Budgets, the audit log and the board tasks are independent reads over independent
   // state, so each gets its own sequencer: a budget write must not invalidate an
@@ -436,16 +444,11 @@ export function GovernancePanel() {
     if (needTasks) void refreshTasks()
   }, [needTasks, refreshTasks])
 
-  // Picking something that already has a budget shows that budget's mode, so saving
-  // it with a new limit keeps a hard cap a hard cap unless the person switches it.
-  const pickTarget = useCallback(
-    (id: string) => {
-      setNewScopeId(id)
-      const existing = id ? budgets.find((b) => b.scope === newScope && b.scopeId === id) : null
-      setNewMode(existing ? (existing.mode === 'warn' ? 'warn' : 'cap') : chosenMode)
-    },
-    [budgets, newScope, chosenMode],
-  )
+  // A new pick shows its own budget's mode again (see `newMode`).
+  const pickTarget = useCallback((id: string) => {
+    setNewScopeId(id)
+    setModeChosenForPick(false)
+  }, [])
 
   const refreshBudgets = useCallback(async () => {
     const read = budgetReads.beginRead()
@@ -608,8 +611,8 @@ export function GovernancePanel() {
                   ]}
                   value={newMode}
                   onChange={(v) => {
-                    setNewMode(v as BudgetMode)
                     setChosenMode(v as BudgetMode)
+                    setModeChosenForPick(true)
                   }}
                 />
               </div>
