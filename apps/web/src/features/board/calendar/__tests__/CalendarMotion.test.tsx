@@ -790,6 +790,9 @@ describe('the Today ping', () => {
 
   it('never pings on load, on a read, on the arrows or from the date picker', async () => {
     const user = fakeClock()
+    // Midweek noon, so the week arrows and the date picker never cross a week
+    // or month edge that depends on when the test runs.
+    vi.setSystemTime(new Date(2026, 9, 28, 12))
     const pings = watchPings()
     const board = serveBoard([
       { id: 't1', title: 'Any task', status: 'todo', createdAt: earlierToday() },

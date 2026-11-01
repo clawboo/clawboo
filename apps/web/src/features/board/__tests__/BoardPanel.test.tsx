@@ -88,7 +88,10 @@ beforeEach(() => {
   resetBoardStorage()
   useToastStore.setState({ toasts: [] }) // isolate toast assertions across tests
 })
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('BoardPanel', () => {
   it('renders columns + cards from GET /api/board', async () => {
@@ -1109,7 +1112,10 @@ describe('BoardPanel', () => {
 
   it('steps only through the cards the board draws, not a folded Earlier row', async () => {
     // Week view. Backlog work from before the week sits in Earlier, folded
-    // because it is only parked work; J and K pass over it.
+    // because it is only parked work; J and K pass over it. The clock is set to
+    // midweek noon: run just after the week starts, "two hours ago" is last week.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 9, 28, 12))
     const HOUR = 60 * 60 * 1000
     const tasks = [
       {
