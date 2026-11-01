@@ -1,5 +1,0 @@
----
-'clawboo': minor
----
-
-The Board is calmer and easier to read. It opens on Kanban, a dense status board with Needs you first, and keeps Today, Week and Month as its calendar views; a view you already picked is kept. Cards and lanes are neutral, with colour only in each column's status mark and amber for what needs you. Titles are 14px, times and costs use plain figures, and cards no longer tint, clip, lift on hover or roll their counts. The header is one bar: the title, the team, the Star and New task (C). The toolbar holds Find (/ or Cmd+K), Filter (by agent, tasks nobody has, or what is running now), Display (routine runs, the Cancelled column, cost and time on cards) and the view menu. A Needs you card shows why it waits and one action, with the rest in its menu. The task drawer reads like a document: the agent's report once, as markdown, then the brief, the properties, verification, the workspace, run history, comments and activity, each folding from its heading, and J and K step through the column. Loading, empty and filtered states match the board.

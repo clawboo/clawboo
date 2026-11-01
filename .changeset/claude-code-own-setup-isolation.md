@@ -1,5 +1,0 @@
----
-'clawboo': patch
----
-
-Claude Code agents leave your own Claude Code setup out. They used to load everything your `claude` command loads: your `~/.claude/settings.json` (plugins, hooks, `env`, permissions, model), the MCP servers you added to your own Claude Code, your `~/.claude/CLAUDE.md` and rules, and Claude Code's auto memory for the repository a task's worktree came from, which they could also write to. Now the driver loads only the project tier (`settingSources: ['project']`), excludes every `CLAUDE.md` above the working folder and in your home folder, and turns auto memory off, with `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` set in the agent's environment so an inherited `0` cannot turn it back on. A repository's own `CLAUDE.md`, `.claude/settings.json` and `.mcp.json` still apply. Sign-in is unchanged: the Anthropic key goes in the environment, and the `claude` command's own sign-in is not a settings file. Auth you set in `~/.claude/settings.json`, such as an `env` block with `ANTHROPIC_BASE_URL` or an `apiKeyHelper`, no longer reaches agents; set those variables in the environment you start Clawboo with.
