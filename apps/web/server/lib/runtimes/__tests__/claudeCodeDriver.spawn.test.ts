@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   createClaudeCodeDriver,
+  createStderrTail,
   spawnTrackedClaudeProcess,
   withStderrTail,
   type SdkModule,
@@ -158,6 +159,85 @@ describe('createClaudeCodeDriver: the CLI is spawned through the tracked hook', 
       ok: false,
       errorMessage: 'Claude Code process exited with code 1. stderr: Invalid API key ••••',
     })
+  })
+
+  it('does not show part of a key the 2048-character cut fell inside', async () => {
+    // Only the last 2048 characters are kept. The cut lands 20 characters before
+    // the end of the key, where the redaction can no longer recognise it.
+    const key = 'sk-ant-' + 'Q7'.repeat(30)
+    const last = 'Invalid API key\n'
+    const filler = 'y'.repeat(2048 - 21 - last.length - 1) + '\n'
+    const stderr = 'x'.repeat(500) + ' ' + key + '\n' + filler + last
+    const sdk: SdkModule = {
+      query({ options }) {
+        return {
+          [Symbol.asyncIterator]: () => ({
+            async next() {
+              const spawnFn = options?.['spawnClaudeCodeProcess'] as
+                ((o: SdkSpawnOptions) => ChildProcess) | undefined
+              if (!spawnFn) throw new Error('no spawnClaudeCodeProcess option')
+              const child = spawnFn({
+                command: process.execPath,
+                args: ['-e', 'process.stderr.write(process.env.STDERR_TEXT); process.exitCode = 1'],
+                env: { ...process.env, STDERR_TEXT: stderr },
+              })
+              await closed(child)
+              throw new Error('Claude Code process exited with code 1')
+            },
+          }),
+        }
+      },
+    }
+    const driver = createClaudeCodeDriver(OPTS, CTX, { loadSdk: async () => sdk })
+    const seen: ClaudeNativeEvent[] = []
+    driver.onEvent((ev) => seen.push(ev))
+    await driver.start()
+    for (let i = 0; i < 200 && !seen.some((e) => e.type === 'result'); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+    }
+
+    const result = seen.find((e) => e.type === 'result') as { errorMessage?: string } | undefined
+    expect(result?.errorMessage).toContain('stderr: ')
+    expect(result?.errorMessage).toContain('Invalid API key')
+    expect(result?.errorMessage).not.toContain('Q7Q7')
+  })
+})
+
+describe('createStderrTail', () => {
+  it('keeps everything while it fits', () => {
+    const tail = createStderrTail(32)
+    tail.push('one\n')
+    tail.push('two\n')
+    expect(tail.text).toBe('one\ntwo\n')
+  })
+
+  it('drops the line the cut falls inside and keeps the lines after it', () => {
+    const tail = createStderrTail(16)
+    tail.push('token sk-ant-abcdefgh\nshort\nlast\n')
+    expect(tail.text).toBe('short\nlast\n')
+  })
+
+  it('keeps a line that starts exactly at the cut', () => {
+    const tail = createStderrTail(10)
+    tail.push('0123456789\n0123456789')
+    expect(tail.text).toBe('0123456789')
+  })
+
+  it('drops the rest of a cut line that arrives in later chunks', () => {
+    const tail = createStderrTail(16)
+    tail.push('key sk-ant-abcdefghijklmnop')
+    expect(tail.text).toBe('')
+    tail.push('qrstuvwxyz')
+    expect(tail.text).toBe('')
+    tail.push('0123\nnext line\n')
+    expect(tail.text).toBe('next line\n')
+  })
+
+  it('keeps a key whole when it is split across chunks but not cut', () => {
+    const tail = createStderrTail(64)
+    tail.push('Invalid API key sk-ant-abcd')
+    tail.push('efghijklmnop\n')
+    expect(tail.text).toBe('Invalid API key sk-ant-abcdefghijklmnop\n')
   })
 })
 

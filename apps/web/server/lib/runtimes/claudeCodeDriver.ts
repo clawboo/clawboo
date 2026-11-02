@@ -137,6 +137,47 @@ export function spawnTrackedClaudeProcess(
 const STDERR_TAIL_CHARS = 2048
 
 /**
+ * The end of the CLI's stderr, kept for an exit error.
+ *
+ * It always begins at the start of a line. Keeping the last `max` characters
+ * cuts wherever the count falls, which can be inside a key, and the redaction in
+ * `withStderrTail` does not recognise the half of a key it is left with. So a
+ * line whose start was cut off is dropped whole, including the rest of it that
+ * arrives in later chunks.
+ */
+export function createStderrTail(max = STDERR_TAIL_CHARS): {
+  push(chunk: string): void
+  readonly text: string
+} {
+  let text = ''
+  /** The start of the current line was dropped, so the rest of it goes too. */
+  let midLine = false
+  return {
+    push(chunk) {
+      if (midLine) {
+        const nl = chunk.indexOf('\n')
+        if (nl === -1) return
+        midLine = false
+        chunk = chunk.slice(nl + 1)
+      }
+      text += chunk
+      if (text.length <= max) return
+      // The first line that starts within the last `max` characters.
+      const nl = text.indexOf('\n', text.length - max - 1)
+      if (nl === -1) {
+        text = ''
+        midLine = true
+      } else {
+        text = text.slice(nl + 1)
+      }
+    },
+    get text() {
+      return text
+    },
+  }
+}
+
+/**
  * Put the CLI's stderr back on an exit error.
  *
  * The SDK appends it only for a process it spawned itself, and for a run that
@@ -387,7 +428,7 @@ export function createClaudeCodeDriver(
   const abort = new AbortController()
   const input = createInputStream()
   /** The end of the CLI's stderr, for an exit error (see `withStderrTail`). */
-  let stderrTail = ''
+  const stderrTail = createStderrTail()
   /** Set once the run's single terminal has been pushed. */
   let finished = false
   /** Steers pushed and not yet seen consumed, by uuid -> settle. */
@@ -466,9 +507,7 @@ export function createClaudeCodeDriver(
       // Spawn the CLI ourselves so its pid is known: shutdown reaps it, and the
       // next boot reaps it if this engine dies without one.
       options['spawnClaudeCodeProcess'] = (spawnOpts: SdkSpawnOptions) =>
-        spawnTrackedClaudeProcess(spawnOpts, (chunk) => {
-          stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS)
-        })
+        spawnTrackedClaudeProcess(spawnOpts, (chunk) => stderrTail.push(chunk))
       for await (const msg of mod.query({ prompt: input.stream, options })) {
         if (finished) break
         if (msg.type === 'assistant') noteConsumed(msg)
@@ -521,7 +560,10 @@ export function createClaudeCodeDriver(
         type: 'result',
         ok: false,
         summary: '',
-        errorMessage: withStderrTail(err instanceof Error ? err.message : String(err), stderrTail),
+        errorMessage: withStderrTail(
+          err instanceof Error ? err.message : String(err),
+          stderrTail.text,
+        ),
       })
     }
   }
