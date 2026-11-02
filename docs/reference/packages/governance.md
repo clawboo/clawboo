@@ -97,6 +97,9 @@ task-runner runs in a git worktree with changes to check) is explained in [How w
   or a diff over the size threshold (`DEFAULT_CRITIC_THRESHOLD`).
 - **The verify command.** `parseVerifyCommand` reads `VERIFY_CMD` from a task's `init.sh` and returns `null` for a
   missing value or the placeholder Clawboo writes.
+- **Where a verdict came from.** A gate result records its `commandSource` (`configured`, `scaffold`, `agent` or
+  `none`), and a critic verdict that ran records its `outcome` (`reviewed`, `empty` or `errored`). Both are optional,
+  so verdicts stored before they existed still parse.
 
 ## Connector grants
 

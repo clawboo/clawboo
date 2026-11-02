@@ -89,7 +89,7 @@ Create a team, and in **Customize team** set a member's runtime to **Hermes**. Y
 | Other agent files | Not used. Hermes keeps its own `MEMORY.md` in its folder (below), apart from the agent page's file tabs. See [Agents](/using/agents).                                                                               |
 | Model             | The model picked for the member in team setup, or one picked later with the model control on the agent's page. Otherwise a default for its provider. See [Which provider Hermes uses](#which-provider-hermes-uses). |
 | Hermes folder     | Each agent has its own Hermes home that persists between runs (below).                                                                                                                                              |
-| Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), listed in the folder's `mcp.json`.                                                                                                        |
+| Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), listed in the `mcp_servers` block of the folder's `config.yaml`.                                                                          |
 | Leading a team    | A Hermes leader hands work to teammates with the `team_delegate` tool.                                                                                                                                              |
 | Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff).                   |
 | Steering          | Stop and resume. Hermes cannot read input mid-run, so a comment stops the run and starts it again in the same session with your comment. See [Board](/using/board).                                                 |
@@ -116,10 +116,9 @@ Clawboo hands Hermes only its OpenRouter, Anthropic and OpenAI keys. If your Her
 
 ### The agent's Hermes folder
 
-Each Hermes agent has its own Hermes home at `~/.clawboo/runtimes/hermes/<agent id>`, created so only your user can open it. Everything Hermes saves there is its own and stays between runs. Clawboo writes only three files there:
+Each Hermes agent has its own Hermes home at `~/.clawboo/runtimes/hermes/<agent id>`, created so only your user can open it. Everything Hermes saves there is its own and stays between runs. Clawboo writes only two files there:
 
-- `mcp.json`, refreshed before every run, which connects Hermes to Clawboo's servers.
-- `config.yaml`, copied once from your `~/.hermes/config.yaml` when the folder has none. Clawboo never updates the copy, so later changes to your own config do not reach the agent.
+- `config.yaml`, copied once from your `~/.hermes/config.yaml` while the folder's copy holds nothing of its own. Clawboo never updates the copy, so later changes to your own config do not reach the agent. Before every run Clawboo rewrites one block in it, between `# >>> clawboo mcp_servers` markers, which connects Hermes to Clawboo's servers. Hermes reads MCP servers only from `mcp_servers` in this file; when your copy has its own `mcp_servers`, Clawboo's servers go inside it and yours keep working.
 - `auth.json`, a copy of your Hermes ChatGPT sign-in, made when the copy there is missing, unusable or older than yours.
 
 Clawboo never writes to your own `~/.hermes`, and it does not copy your Hermes `.env`: provider keys reach each run through its environment.
@@ -202,6 +201,18 @@ Hermes's ChatGPT sign-in uses a one-time code, which some ChatGPT accounts turn 
 
 </Accordion>
 
+<Accordion title="A Hermes agent says it has no Clawboo tools">
+
+List the MCP servers Hermes sees for that agent:
+
+```bash
+HERMES_HOME=~/.clawboo/runtimes/hermes/<agent id> hermes mcp list
+```
+
+It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there: write that mapping as indented lines in the agent's `config.yaml`.
+
+</Accordion>
+
 <Accordion title="My change to ~/.hermes/config.yaml has no effect">
 
 Each agent uses its own copy, made once. Edit `~/.clawboo/runtimes/hermes/<agent id>/config.yaml`, or delete it so the next run copies your current config again.
@@ -219,6 +230,7 @@ Each agent uses its own copy, made once. Edit `~/.clawboo/runtimes/hermes/<agent
 <Accordion title="Under the hood">
 
 - Each run is `hermes chat -q <prompt> -Q --yolo --accept-hooks [-m <model>] [--resume <session id>] [--provider <id>] [--continue]`. Clawboo sets `HERMES_HOME` to the agent's folder and puts the connected OpenRouter, Anthropic and OpenAI keys in its environment.
+- While a run works, Clawboo marks it alive once a minute. `-Q` prints nothing until the run ends, so without that a long delegated Hermes task would look silent and be stopped after eight minutes.
 - `-Q` prints the reply on stdout and the session id on stderr. When the task runner picks a task back up on Hermes, Clawboo resumes the saved session with `--resume` (never in a newly created folder). To take a comment, it stops the run and starts it again with `--resume`, or with `--continue` when it does not know the session id yet.
 - Hermes has its own task board; Clawboo does not sync it. Hermes works on Clawboo's board through the Tasks tools.
 - Run a board task on Hermes directly with `POST /api/runtimes/hermes/run`; see the [Runtimes API](/reference/rest-api/runtimes).
