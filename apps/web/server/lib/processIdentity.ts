@@ -56,8 +56,9 @@ const NO_START_TIMES: StartTimes = { ok: false, times: new Map() }
  * delay startup and slow enough to hit its own timeout on a loaded CI runner,
  * which is how it came back empty and quietly disabled the reaper there.
  *
- * Pass LIVE pids only. A dead or out-of-range pid poisons the whole batch: `ps -p`
- * exits non-zero and prints NOTHING when any id is invalid.
+ * Pass LIVE pids only. An out-of-range pid poisons the whole batch: `ps -p`
+ * exits non-zero and prints NOTHING when any id is invalid. A pid that merely
+ * died in the meantime is left out of the answer.
  *
  * On POSIX, `lstart` rather than `etimes`: the latter is Linux-only and macOS
  * rejects it. `ps` formats `lstart` in the user's locale, and `Date.parse` cannot
@@ -99,6 +100,8 @@ export function processStartTimes(pids: readonly number[]): StartTimes {
       const raw = execFileSync('ps', ['-o', 'pid=,lstart=', '-p', safe.join(',')], {
         encoding: 'utf8',
         env: { ...process.env, LC_ALL: 'C' },
+        // Captured, not inherited: telling "none exist" from an error reads it.
+        stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 10_000,
         windowsHide: true,
       })
@@ -112,11 +115,16 @@ export function processStartTimes(pids: readonly number[]): StartTimes {
         if (Number.isInteger(id) && Number.isFinite(parsed)) times.set(id, parsed)
       }
     }
-  } catch {
-    // `ps -p` exits non-zero when NONE of the pids exist, which is a legitimate
-    // answer rather than a broken probe. Anything else (no such binary, a
-    // timeout) means this host cannot answer at all.
-    return times.size > 0 ? { ok: true, times } : NO_START_TIMES
+  } catch (err) {
+    // `ps -p` exits 1 and prints nothing at all when NONE of the pids exist,
+    // which is an answer rather than a broken probe. Anything else (no such
+    // binary, a timeout, an error message) means this host cannot answer.
+    const { status, stderr } = err as { status?: unknown; stderr?: unknown }
+    const noneExist =
+      process.platform !== 'win32' &&
+      status === 1 &&
+      (typeof stderr !== 'string' || stderr.trim() === '')
+    return noneExist ? { ok: true, times } : NO_START_TIMES
   }
   return { ok: true, times }
 }

@@ -3,6 +3,8 @@
 // answer, the reap leaves the process alone, so a probe that quietly fails in
 // some locales turns the reap off for everyone using them.
 
+import { spawn } from 'node:child_process'
+
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { processStartTimes } from '../processIdentity'
@@ -46,5 +48,18 @@ describe('processStartTimes', () => {
     process.env['LANG'] = 'ru_RU.UTF-8'
     const probe = processStartTimes([process.pid])
     expect(probe.times.get(process.pid)).toBeDefined()
+  })
+
+  it('answers, rather than failing, when none of the pids is running any more', async () => {
+    // A pid can die between the caller's liveness check and the probe. `ps`
+    // then exits 1 with no output: that says the process is gone, which is
+    // different from a host that cannot report start times at all.
+    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' })
+    const pid = child.pid
+    await new Promise<void>((resolve) => child.once('exit', () => resolve()))
+    if (!pid) throw new Error('no pid')
+    const probe = processStartTimes([pid])
+    expect(probe.ok).toBe(true)
+    expect(probe.times.size).toBe(0)
   })
 })
