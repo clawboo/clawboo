@@ -48,7 +48,7 @@ The server keeps running after the launcher exits. `clawboo stop` stops it, and 
 
 <Note>
 
-With `STUDIO_ACCESS_TOKEN` set, the launcher cannot read the server's status. It cannot tell when a token-protected server is ready, and it will not stop or restart one. `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token. `clawboo stop` also prints a command that stops it by port. Start a token-protected server directly instead.
+With `STUDIO_ACCESS_TOKEN` set on the server, the launcher uses the `STUDIO_ACCESS_TOKEN` from the shell you run it in. A server the launcher starts inherits that token, so the launcher sees it answer, and `clawboo stop` and `clawboo restart` work. From a shell without the server's token, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, and `clawboo stop` also prints a command that stops it by port. The browser still needs the access cookie: open `http://localhost:<port>/?access_token=<token>` once. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 </Note>
 
@@ -160,7 +160,7 @@ clawboo restart
 
 Or run `clawboo`: it notices that the running server is older and offers to restart it.
 
-With `STUDIO_ACCESS_TOKEN` set, `clawboo restart` cannot restart the server and the old version keeps running. Stop it with the command `clawboo restart` prints, or through the service manager that runs it, then start it again [directly](#start-the-server-directly) or through that service manager.
+With `STUDIO_ACCESS_TOKEN` set, run `clawboo restart` from a shell that has the server's token. Without it, `clawboo restart` cannot restart the server and the old version keeps running. Stop it with the command `clawboo restart` prints, or through the service manager that runs it, then start it again [directly](#start-the-server-directly) or through that service manager.
 
 </Tab>
 
@@ -209,13 +209,13 @@ A pinned port gets no fallback. Free that port, choose another, or unset `CLAWBO
 
 <Accordion title="Dashboard is taking too long to start.">
 
-The launcher waited 45 seconds without an answer. It prints the last lines of `~/.clawboo/server.log` and the log's path: read them for the cause. If you set `STUDIO_ACCESS_TOKEN`, the server may be running fine, because the launcher cannot see past the token. Open the dashboard with `?access_token=<your-token>`, and start token-protected servers directly from now on.
+The launcher waited 45 seconds without an answer. It prints the last lines of `~/.clawboo/server.log` and the log's path: read them for the cause. On 0.5.0 and older, if you set `STUDIO_ACCESS_TOKEN`, the server may be running fine, because those launchers cannot see past the token. Open the dashboard with `?access_token=<your-token>`. Newer launchers use the token from the shell and see the server answer.
 
 </Accordion>
 
 <Accordion title="A Clawboo server is running on port N, but it requires an access token.">
 
-Expected on a token-protected install. Open the address the message prints, with your token in place of `<token>`. To stop the server, press Ctrl+C in its terminal, use your service manager, or run the command `clawboo stop` prints.
+The shell you ran the command in does not have the server's token. Set `STUDIO_ACCESS_TOKEN` to that token and run the command again. To open the dashboard, open the address the message prints, with your token in place of `<token>`. Without the token, stop the server with Ctrl+C in its terminal, with your service manager, or with the command `clawboo stop` prints.
 
 </Accordion>
 

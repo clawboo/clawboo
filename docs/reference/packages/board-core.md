@@ -59,8 +59,8 @@ type check.
 - `isTerminal(status)` is `true` for `done` and `cancelled`.
 
 The server is the authority: `updateStatus` re-checks the table against the freshly read row, and an illegal move
-through the board API returns `409`. The one writer outside the table is the orphan reaper (`reconcileOrphans`),
-which releases a stale `in_progress` or `in_review` task straight to `todo`.
+through the board API returns `409`. The orphan reaper (`reconcileOrphans`) writes rows directly but follows the
+table: a stale `in_progress` task goes to `todo`, and a stale `in_review` task goes to `blocked`.
 
 The board view shows **Needs you** and then five status columns (**Backlog**, **To do**, **In progress**,
 **Done**, **Cancelled**). An `in_review` task sits in **In progress** under a **Verifying** badge, and every

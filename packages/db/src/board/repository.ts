@@ -1334,6 +1334,10 @@ export interface ReconcileResult {
   reconciled: number
 }
 
+/** The comment on a task in review whose run stopped with the server. */
+export const ORPHANED_REVIEW_NOTE =
+  'The run working on this task stopped when Clawboo restarted while the task was in review, so it is waiting for you. Retry runs it again, or Dismiss drops it.'
+
 /**
  * On startup, reap `running` execs whose driver is provably gone. LIVENESS-AWARE:
  * a run is reaped only when its task's `updatedAt` has missed several heartbeats
@@ -1344,7 +1348,11 @@ export interface ReconcileResult {
  * in-flight cascades. A run whose process truly died stops beating and is reaped
  * here (when already stale at boot) or by the interval sweep within the TTL.
  * Reaped execs get `failed` + `recovery_tombstone=1` (idempotent — no infinite
- * auto-resume) and their task released to `todo`. One BEGIN IMMEDIATE txn.
+ * auto-resume). An `in_progress` task is released to `todo`, so it runs again. An
+ * `in_review` task goes to `blocked` (Needs you) with a system comment instead: it
+ * was waiting on a review, a rerun could repeat finished work, and `in_review ->
+ * todo` is not a legal move. Both follow the transition table. One BEGIN
+ * IMMEDIATE txn.
  */
 export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }): ReconcileResult {
   // Default: the same order of magnitude as the sweep TTL (6 missed beats).
@@ -1385,19 +1393,53 @@ export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }
           status: 'todo',
           updatedAt: now,
         })
-        .where(and(eq(tasks.id, ex.taskId), inArray(tasks.status, ['in_progress', 'in_review'])))
+        .where(and(eq(tasks.id, ex.taskId), eq(tasks.status, 'in_progress')))
         .returning({ teamId: tasks.teamId })
         .all() as Array<{ teamId: string | null }>
       // Publish only when the row actually changed — the guard can no-op (the
-      // task already left in_progress/in_review) and a phantom release would
-      // wake pumps for nothing.
-      if (released.length > 0)
+      // task already left in_progress) and a phantom release would wake pumps
+      // for nothing.
+      if (released.length > 0) {
         releasedEvents.push({
           kind: 'task_released',
           taskId: ex.taskId,
           teamId: released[0]!.teamId ?? null,
           via: 'orphan-reap',
         })
+        continue
+      }
+      // Assignee and verdict stay, so the card still says whose work it is and
+      // what any check found.
+      const parked = tx
+        .update(tasks)
+        .set({ status: 'blocked', updatedAt: now })
+        .where(and(eq(tasks.id, ex.taskId), eq(tasks.status, 'in_review')))
+        .returning({ teamId: tasks.teamId })
+        .all() as Array<{ teamId: string | null }>
+      if (parked.length > 0) {
+        const teamId = parked[0]!.teamId ?? null
+        tx.insert(taskComments)
+          .values({
+            id: randomUUID(),
+            taskId: ex.taskId,
+            authorAgentId: null,
+            authorType: 'system',
+            body: ORPHANED_REVIEW_NOTE,
+            tenantId: null,
+            createdAt: now,
+          })
+          .run()
+        releasedEvents.push(
+          { kind: 'status_changed', taskId: ex.taskId, teamId, status: 'blocked' },
+          {
+            kind: 'comment_added',
+            taskId: ex.taskId,
+            teamId,
+            authorType: 'system',
+            authorAgentId: null,
+          },
+        )
+      }
     }
     return { reconciled: orphans.length }
   })

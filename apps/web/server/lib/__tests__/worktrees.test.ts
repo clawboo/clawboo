@@ -217,6 +217,40 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(getTask(db, taskId)?.status).toBe('done')
   })
 
+  it('complete with an empty diff lands done from To do too (a released or unclaimed task)', async () => {
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    expect(prov.ok).toBe(true)
+    if (!prov.ok) return
+    // A pause hand-off releases the task to To do while its workspace stays active.
+    const db = getDb()
+    expect(updateStatus(db, taskId, 'todo').ok).toBe(true)
+
+    const result = await actOnTaskWorkspace(taskId, 'complete')
+    if (!result.ok || result.action !== 'complete') throw new Error('expected complete')
+    expect(result.complete.cleaned).toBe(true)
+    expect(result.taskStatus).toBe('done')
+    expect(getTask(db, taskId)?.status).toBe('done')
+  })
+
+  it('complete with a non-empty diff runs the check from To do too', async () => {
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    expect(prov.ok).toBe(true)
+    if (!prov.ok) return
+    const db = getDb()
+    expect(updateStatus(db, taskId, 'todo').ok).toBe(true)
+    await writeFile(path.join(prov.worktree.worktreePath, 'feature.ts'), 'export const x = 1\n')
+
+    const result = await actOnTaskWorkspace(taskId, 'complete')
+    if (!result.ok || result.action !== 'complete') throw new Error('expected complete')
+    // The placeholder command fails the first check, which sends the task back
+    // for a fix instead of leaving it unchecked in To do.
+    expect(result.verified).toBe('fail')
+    expect(getTask(db, taskId)?.status).toBe('in_progress')
+    expect(getTaskVerification(db, taskId)?.attempts).toHaveLength(1)
+  })
+
   it('AC3 — complete with a non-empty diff retains the worktree + branch; the verify gate runs', async () => {
     const taskId = newClaimedCodeTask()
     const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })

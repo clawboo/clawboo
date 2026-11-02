@@ -177,7 +177,7 @@ describe('secretsVault', () => {
       expect(isRuntimeDisconnected('clawboo-native')).toBe(false)
     })
 
-    it('a disconnected runtime resolves vault-only — the ambient fallbacks are suppressed', () => {
+    it('a disconnected runtime resolves no key: ambient, or kept in the vault for others', () => {
       // The disconnect-does-nothing bug: the key ALSO lives in OpenClaw's .env
       // (and/or the shell env), so after a vault delete the runtime silently
       // re-credentialed itself through resolveRuntimeKey's fallback chain.
@@ -189,12 +189,11 @@ describe('secretsVault', () => {
         // Both ambient sources are invisible to the disconnected runtime…
         expect(resolveRuntimeKeyForRuntime('clawboo-native', 'OPENROUTER_API_KEY')).toBeNull()
         expect(resolveRuntimeKeyForRuntime('clawboo-native', 'ANTHROPIC_API_KEY')).toBeNull()
-        // …while an explicit vault key still counts…
+        // …and so is a vault key its disconnect kept because another runtime reads it…
         setRuntimeSecret('OPENROUTER_API_KEY', 'sk-or-vault')
-        expect(resolveRuntimeKeyForRuntime('clawboo-native', 'OPENROUTER_API_KEY')).toBe(
-          'sk-or-vault',
-        )
-        // …and OTHER runtimes keep the full auto-connect chain.
+        expect(resolveRuntimeKeyForRuntime('clawboo-native', 'OPENROUTER_API_KEY')).toBeNull()
+        // …while OTHER runtimes keep the full chain, that vault key included.
+        expect(resolveRuntimeKeyForRuntime('hermes', 'OPENROUTER_API_KEY')).toBe('sk-or-vault')
         expect(resolveRuntimeKeyForRuntime('claude-code', 'ANTHROPIC_API_KEY')).toBe('sk-ant-shell')
       } finally {
         delete process.env['ANTHROPIC_API_KEY']

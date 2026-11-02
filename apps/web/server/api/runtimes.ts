@@ -21,6 +21,8 @@ import {
   resolvePython,
   resolveRuntimeBin,
   resolveShimName,
+  type PythonCandidate,
+  type PythonRange,
 } from '../lib/platform'
 import { invalidateCodexAuthCache, isCodexLoggedIn } from '../lib/runtimes/codexAuth'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
@@ -36,11 +38,13 @@ import {
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
 import {
   deriveConnectionState,
+  disconnectPlanFor,
   getDescriptor,
   isRuntimeId,
   NON_OPENCLAW_RUNTIME_IDS,
   type NonOpenClawRuntimeId,
   type RuntimeDescriptor,
+  runtimeKeySlots,
 } from '../lib/runtimes/descriptor'
 import {
   deleteRuntimeSecret,
@@ -101,9 +105,9 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   // detectAuthProfileKeys precedent; values never leave the helper) folds into
   // hasCredential so a subscription-only hermes reads Connected/ready.
   const hermesCodexAuth = id === 'hermes' && installed ? isHermesCodexAuthPresent() : false
-  // Runtime-scoped resolution: an EXPLICITLY disconnected runtime is vault-only,
-  // so the ambient process-env / OpenClaw-.env fallbacks can't keep the card
-  // reading "Connected" after a disconnect (the disconnect-does-nothing bug).
+  // Runtime-scoped resolution: an EXPLICITLY disconnected runtime resolves no key,
+  // so neither the ambient process-env / OpenClaw-.env fallbacks nor a vault key
+  // it shares with another runtime keep the card reading "Connected".
   const hasCredential =
     envVars.some((v) => Boolean(resolveRuntimeKeyForRuntime(id, v))) || hermesCodexAuth
   // Native's keyless provider: a set-up local Ollama readies the runtime with no key
@@ -135,6 +139,9 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
     // Additive: native-only "local Ollama is set up" signal (the providers manager
     // renders its Ollama row from it). Always false for other runtimes.
     ollamaConnected,
+    // What a full Disconnect would delete and keep (stored keys only), so its
+    // confirm can say exactly that. Env-var names only, never a value.
+    disconnectPlan: disconnectPlanFor(id, (v) => Boolean(getRuntimeSecret(v))).plan,
     installCommand: d.installCommand,
     docsUrl: d.docsUrl,
     connectionState: deriveConnectionState(
@@ -293,18 +300,82 @@ function installViaNpm(
   streamInstallChild(res, ctl.child, d)
 }
 
+/** "3.11 to 3.13", "3.11 or newer", or "3" for a package with no range. */
+function pythonRangeLabel(range: PythonRange): string {
+  const hasMax = Number.isFinite(range.maxMinor)
+  if (range.minMinor > 0 && hasMax) {
+    return range.minMinor === range.maxMinor
+      ? `3.${range.minMinor}`
+      : `3.${range.minMinor} to 3.${range.maxMinor}`
+  }
+  if (range.minMinor > 0) return `3.${range.minMinor} or newer`
+  if (hasMax) return `3.${range.maxMinor} or older`
+  return '3'
+}
+
+/** The install error when no Python inside the package's range was found. It
+ *  names the range and every Python that WAS found, so a 3.14 reads as outside
+ *  the range instead of as missing or too old. */
+function pythonUnavailableEvent(
+  d: RuntimeDescriptor,
+  range: PythonRange,
+  found: PythonCandidate[],
+): Record<string, unknown> {
+  const label = pythonRangeLabel(range)
+  // The install hint names the top of the range (the bottom when it has no top).
+  const top = Number.isFinite(range.maxMinor)
+    ? range.maxMinor
+    : range.minMinor > 0
+      ? range.minMinor
+      : null
+  const hint =
+    top !== null
+      ? `Install Python 3.${top} (for example \`brew install python@3.${top}\`), then Retry.`
+      : 'Install Python 3, then Retry.'
+  if (found.length === 0) {
+    return {
+      type: 'error',
+      code: 'PYTHON_MISSING',
+      message: `Python ${label} (with pip or pipx) not found. ${hint}`,
+    }
+  }
+  const versions = [
+    ...new Set(
+      found.map(
+        (c) =>
+          `${c.version}${/Xcode\.app|CommandLineTools/i.test(c.bin) ? ' (Xcode Command Line Tools)' : ''}`,
+      ),
+    ),
+  ]
+  const list =
+    versions.length > 1
+      ? `${versions.slice(0, -1).join(', ')} and ${versions[versions.length - 1]}`
+      : versions[0]
+  return {
+    type: 'error',
+    code: found.every((c) => c.minor < range.minMinor) ? 'PYTHON_TOO_OLD' : 'PYTHON_UNSUPPORTED',
+    message: `${d.name} needs Python ${label}, but Clawboo found only Python ${list}. ${hint}`,
+  }
+}
+
 function installViaPip(
   res: Response,
   d: RuntimeDescriptor,
   ctl: { child: ChildProcess | null },
 ): void {
-  // Resolve an interpreter new enough for the package (Hermes needs >=3.11).
-  // Prefers python3.13/3.12/3.11 over the bare `python3` so a fresh macOS whose
-  // default is the Xcode CLT Python 3.9 still works when a newer Python exists.
-  const { compatible, best } = resolvePython(d.pythonMinMinor ?? 0)
+  // Resolve the newest interpreter INSIDE the package's range (Hermes: 3.11 to
+  // 3.13). The newest overall is not enough: a 3.14 would beat an installed 3.12
+  // and pip would then find no release for it.
+  const range: PythonRange = {
+    minMinor: d.pythonMinMinor ?? 0,
+    maxMinor: d.pythonMaxMinor ?? Number.POSITIVE_INFINITY,
+  }
+  const { compatible, found } = resolvePython(range)
 
   // Prefer pipx (sidesteps PEP-668 entirely); pin its interpreter to the
-  // compatible one so it never builds the venv with a too-old default Python.
+  // in-range one so it never builds the venv with an out-of-range default Python.
+  // With no in-range interpreter found, pipx runs on its own default Python,
+  // which may be one this probe could not see.
   const pipx = resolveRuntimeBin('pipx') ?? findExecutable('pipx')
   if (pipx) {
     sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing via pipx…' })
@@ -328,29 +399,10 @@ function installViaPip(
     return
   }
 
-  // No pipx → `python -m pip install --user` with a compatible interpreter,
+  // No pipx → `python -m pip install --user` with an in-range interpreter,
   // retrying once with --break-system-packages for PEP-668 environments.
   if (!compatible) {
-    const min = d.pythonMinMinor ?? 0
-    if (best && min) {
-      const clt = /Xcode\.app|CommandLineTools/i.test(best.bin)
-      sendEvent(res, {
-        type: 'error',
-        code: 'PYTHON_TOO_OLD',
-        message:
-          `${d.name} needs Python 3.${min} or newer, but the Python on this machine is ` +
-          `${best.version}${clt ? ' (Xcode Command Line Tools)' : ''}. Install a newer Python ` +
-          '(e.g. `brew install python@3.12`) or pipx (`brew install pipx`), then Retry.',
-      })
-    } else {
-      sendEvent(res, {
-        type: 'error',
-        code: 'PYTHON_MISSING',
-        message:
-          `Python ${min ? `3.${min}+` : '3'} (with pip or pipx) not found. Install it ` +
-          '(e.g. `brew install python@3.12` or `brew install pipx`), then Retry.',
-      })
-    }
+    sendEvent(res, pythonUnavailableEvent(d, range, found))
     res.end()
     return
   }
@@ -480,6 +532,20 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
     // stores must count. Nothing is stored and the key is never echoed.
     const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
     if (d.id === 'clawboo-native' && provider && resolveRuntimeKey(targetEnvVar)) {
+      setRuntimeDisconnected(id, false)
+      res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
+      return
+    }
+    // The same reuse for a single-provider runtime (Claude Code, Hermes): its
+    // disconnect keeps a key another runtime still reads, so connecting it again
+    // can use that key instead of asking for a re-paste. A `provider` here names
+    // a key this runtime cannot be told to use, so it gets the 400 below rather
+    // than a success on whichever other key happens to resolve.
+    if (
+      d.id !== 'clawboo-native' &&
+      !provider &&
+      runtimeKeySlots(d).some((v) => resolveRuntimeKey(v))
+    ) {
       setRuntimeDisconnected(id, false)
       res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
       return
@@ -657,20 +723,18 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
 }
 
 // ─── POST /api/runtimes/:id/disconnect ───────────────────────────────────────
-// Clears the stored credential; keeps the binary (card → needs-auth). TWO parts,
-// both load-bearing (each alone left the card silently "Connected" — the reported
-// disconnect-does-nothing bug):
-//  • Delete EVERY vault slot the runtime draws on (envVar + altEnvVars) — a
-//    multi-provider runtime's key usually lives under an ALT slot (e.g. native
-//    connected via OpenRouter stores OPENROUTER_API_KEY, not the primary
-//    ANTHROPIC_API_KEY), so deleting only `d.envVar` missed the real credential.
-//    The vault holds ONE copy of each provider key, so a sibling runtime reusing
-//    the same key loses it too — inherent to key sharing, and honest.
-//  • Record the per-runtime disconnect override — without it the ambient
-//    fallbacks (a shell-exported var, OpenClaw's ~/.openclaw/.env) immediately
-//    re-credential the runtime through `resolveRuntimeKey` and nothing visibly
-//    changes. While set, this runtime resolves keys vault-only; the next
-//    connect clears it. For native it also records local Ollama as REMOVED, so
+// Stops the runtime using any key; keeps the binary (card → needs-auth). TWO
+// parts:
+//  • Delete the vault slots ONLY this runtime reads (envVar + altEnvVars). The
+//    vault holds ONE copy of each provider key for every runtime, so a slot
+//    another runtime also reads stays in place for it (disconnecting Hermes used
+//    to delete the Anthropic and OpenAI keys Clawboo Native and Claude Code run
+//    on). `disconnectPlanFor` decides; the status route shows the same plan so
+//    the confirm names exactly what goes and what stays.
+//  • Record the per-runtime disconnect override. While set, this runtime
+//    resolves NO key: not an ambient one (a shell-exported var, OpenClaw's
+//    ~/.openclaw/.env) and not a kept shared one. The next connect of THIS
+//    runtime clears it. For native it also records local Ollama as REMOVED, so
 //    disconnect means the same for every provider: Ollama agents stop, and a later
 //    key connect or an ambient OLLAMA_BASE_URL can't turn it back on. Only picking
 //    Ollama again does.
@@ -680,11 +744,10 @@ export async function runtimesHealthcheckPOST(req: Request, res: Response): Prom
 export function runtimesDisconnectPOST(req: Request, res: Response): void {
   const id = requireRuntimeId(req, res)
   if (!id) return
-  const d = getDescriptor(id)
   const body = (req.body ?? {}) as { provider?: unknown }
   const provider = typeof body.provider === 'string' ? body.provider.trim() : ''
   // A provider that is sent but unreadable must not fall through to the full
-  // disconnect below, which deletes every key this runtime holds.
+  // disconnect below, which deletes the keys only this runtime reads.
   if (body.provider !== undefined && !provider) {
     res.status(400).json({ error: 'provider must be a non-empty string' })
     return
@@ -702,18 +765,18 @@ export function runtimesDisconnectPOST(req: Request, res: Response): void {
     res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
     return
   }
-  const removed: string[] = []
-  for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
-    if (envVar) {
-      deleteRuntimeSecret(envVar)
-      removed.push(envVar)
-    }
-  }
+  const { deletes, plan } = disconnectPlanFor(id, (v) => Boolean(getRuntimeSecret(v)))
+  for (const envVar of deletes) deleteRuntimeSecret(envVar)
   if (id === 'clawboo-native') setKeylessProviderChoice('ollama', false)
   setRuntimeDisconnected(id, true)
   // Stop embedding memory with a key the user just removed.
-  onEmbeddingKeysChanged({ removed })
-  res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
+  onEmbeddingKeysChanged({ removed: deletes })
+  res.json({
+    ok: true,
+    connectionState: runtimeStatus(id)['connectionState'],
+    removed: plan.removes,
+    kept: plan.keeps,
+  })
 }
 
 // ─── POST /api/runtimes/:id/logout ───────────────────────────────────────────

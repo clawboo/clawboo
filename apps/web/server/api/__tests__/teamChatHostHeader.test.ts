@@ -32,6 +32,9 @@ function mockRes(): Response & { _status: number; _json?: unknown } {
       ;(this as { _json?: unknown })._json = body
       return this
     },
+    on() {
+      return this
+    },
   }
   return res as unknown as Response & { _status: number; _json?: unknown }
 }

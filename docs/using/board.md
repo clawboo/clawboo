@@ -143,7 +143,7 @@ The **More** menu holds what the card's button does not: **Retry**, the team's a
 
 ### When a task runs again by itself
 
-If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. **Retry** always runs a task again, whatever its count.
+If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
 
 When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever.
 
