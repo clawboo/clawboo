@@ -13,6 +13,15 @@ export type RuntimeId = 'claude-code' | 'codex' | 'hermes' | 'clawboo-native'
 
 export type ConnectionState = 'not-installed' | 'needs-auth' | 'needs-login' | 'ready' | 'unknown'
 
+/** What a full runtime Disconnect does to the vault (`GET /api/runtimes`). Only
+ *  slots that hold a key are listed. */
+export interface RuntimeDisconnectPlan {
+  /** Saved keys it deletes: no other runtime reads them. */
+  removes: string[]
+  /** Saved keys it keeps, each with the other runtimes (by name) that read it. */
+  keeps: { envVar: string; sharedWith: string[] }[]
+}
+
 export interface RuntimeStatus {
   id: RuntimeId
   name?: string
@@ -21,6 +30,12 @@ export interface RuntimeStatus {
   authKind?: 'api-key' | 'oauth' | 'none'
   envVar?: string | null
   hasCredential?: boolean
+  /** A key for this runtime is saved in the vault (not just in the environment).
+   *  With `hasCredential` false it means the runtime was disconnected and kept a
+   *  key another runtime also uses, which a keyless connect can reuse. */
+  hasVaultCredential?: boolean
+  /** What a full Disconnect would delete and keep, by env-var name. */
+  disconnectPlan?: RuntimeDisconnectPlan
   /** Hermes-only: a ChatGPT-subscription login (`hermes login --provider
    *  openai-codex`) is present — gates the subscription model group. */
   codexAuth?: boolean

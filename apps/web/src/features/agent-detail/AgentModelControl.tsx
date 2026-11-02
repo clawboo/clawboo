@@ -1,9 +1,10 @@
 // The agent's runtime icon fused with its model control as ONE element: a
 // runtime-tinted icon cell + a divider + either the editable model dropdown
-// (native / OpenClaw / Hermes, which honor a per-agent model — Hermes routes every
-// model through OpenRouter, editable here like native) OR a framed "runtime-managed
-// model" note (Codex / Claude Code, which run on their account / SDK default). Showing
-// the OpenClaw model dropdown for the note runtimes was misleading, so a note replaces it.
+// (native / OpenClaw / Hermes, which honor a per-agent model; a Hermes model runs on
+// OpenRouter, editable here like native) OR a framed "runtime-managed model" note
+// (Codex / Claude Code, which run on their account / SDK default, and a Hermes agent
+// on the ChatGPT subscription, whose caller passes `note`). Showing the OpenClaw model
+// dropdown for the note runtimes was misleading, so a note replaces it.
 
 import { MarkGlyph, resolveRuntimeMark } from '@/features/runtimes/RuntimeBrand'
 import type { ModelGroup } from '@/lib/modelCatalog'
@@ -33,11 +34,17 @@ interface AgentModelControlProps {
   groups?: ModelGroup[]
   configuredProviders?: Set<string>
   hideDefault?: boolean
+  /** Show this note instead of the dropdown, whatever the runtime. */
+  note?: { pill: string; tip: string } | null
 }
 
-export function AgentModelControl({ runtime, ...selectorProps }: AgentModelControlProps) {
+export function AgentModelControl({
+  runtime,
+  note: noteOverride,
+  ...selectorProps
+}: AgentModelControlProps) {
   const mark = resolveRuntimeMark(runtime)
-  const note = runtime ? RUNTIME_MODEL_NOTE[runtime] : undefined
+  const note = noteOverride ?? (runtime ? RUNTIME_MODEL_NOTE[runtime] : undefined)
   return (
     <div
       className="inline-flex items-stretch rounded-lg border border-border bg-surface"

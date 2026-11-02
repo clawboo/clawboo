@@ -64,10 +64,66 @@ export function probePort(host: string, port: number, timeoutMs = 2_000): Promis
  * - `clawboo` — a Clawboo dashboard we can talk to.
  * - `gated`   — a Clawboo dashboard that 401'd us: it is running, but the
  *               install sets `STUDIO_ACCESS_TOKEN` and every `/api/*` route
- *               needs the cookie. We can identify it but not use it.
+ *               needs the cookie, and this launcher has no token the server
+ *               accepts. We can identify it but not use it.
  * - `none`    — closed, unreachable, or something that isn't Clawboo.
  */
 export type DashboardProbe = 'clawboo' | 'gated' | 'none'
+
+/** The access gate's cookie name (the default in packages/gateway-proxy/src/access-gate.ts). */
+const ACCESS_COOKIE = 'clawboo_access'
+
+/**
+ * The access token this launcher holds: its own `STUDIO_ACCESS_TOKEN`, trimmed
+ * the way the gate trims it. A server this launcher starts inherits this
+ * environment, so this is that server's token. Null when unset or blank.
+ */
+export function launcherAccessToken(env: NodeJS.ProcessEnv = process.env): string | null {
+  const token = (env['STUDIO_ACCESS_TOKEN'] ?? '').trim()
+  return token || null
+}
+
+interface JsonReply {
+  status: number
+  ok: boolean
+  body: unknown
+}
+
+/** One GET of a JSON route. Null when the request fails or the answer is not JSON. */
+async function getJson(
+  url: string,
+  timeoutMs: number,
+  headers: Record<string, string>,
+): Promise<JsonReply | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers })
+    const ct = res.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) return null
+    return { status: res.status, ok: res.ok, body: await res.json() }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * GET a JSON route on a local dashboard. When the access gate refuses the plain
+ * request and this launcher holds a token, ask once more with the token as the
+ * gate's cookie. The token is sent only to a port that has just answered with
+ * the gate's own refusal, so another service listening in the port window
+ * (Gateway helper ports, a Chrome debugging port) never receives it.
+ */
+async function getDashboardJson(
+  url: string,
+  timeoutMs: number,
+  headers: Record<string, string> = {},
+): Promise<JsonReply | null> {
+  const first = await getJson(url, timeoutMs, headers)
+  if (first === null || first.status !== 401 || !isAccessGateError(first.body)) return first
+  const token = launcherAccessToken()
+  if (token === null) return first
+  const second = await getJson(url, timeoutMs, { ...headers, Cookie: `${ACCESS_COOKIE}=${token}` })
+  return second ?? first
+}
 
 /**
  * Verify a port is hosting Clawboo's dashboard (not some other service that
@@ -85,6 +141,10 @@ export type DashboardProbe = 'clawboo' | 'gated' | 'none'
  * server even though it won't serve us. Without that distinction the launcher
  * concludes nothing is running and forks a SECOND server on a token-gated
  * install — every run leaking another orphan.
+ *
+ * When this launcher holds the server's `STUDIO_ACCESS_TOKEN`, the gated server
+ * is asked again with it (see `getDashboardJson`) and counts as `clawboo`. That
+ * is what lets the launcher see a token-gated server it has just started.
  */
 export async function probeDashboard(
   host: string,
@@ -93,24 +153,20 @@ export async function probeDashboard(
 ): Promise<DashboardProbe> {
   // Cheap TCP probe first — skip the HTTP cost on closed ports.
   if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return 'none'
-  try {
-    const res = await fetch(`http://${host}:${port}/api/settings`, {
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) return 'none'
-    const body = (await res.json()) as Record<string, unknown>
-    if (res.status === 401) return isAccessGateError(body) ? 'gated' : 'none'
-    if (!res.ok) return 'none'
-    // Clawboo's /api/settings ALWAYS includes these two fields. Gateway's
-    // auxiliary ports return plain "Unauthorized"; Chrome's debug returns
-    // an array of debugger targets — neither matches this shape.
-    return typeof body['gatewayUrl'] === 'string' && typeof body['hasToken'] === 'boolean'
-      ? 'clawboo'
-      : 'none'
-  } catch {
-    return 'none'
-  }
+  const reply = await getDashboardJson(`http://${host}:${port}/api/settings`, timeoutMs)
+  if (reply === null) return 'none'
+  if (reply.status === 401) return isAccessGateError(reply.body) ? 'gated' : 'none'
+  if (!reply.ok || !isRecord(reply.body)) return 'none'
+  // Clawboo's /api/settings ALWAYS includes these two fields. Gateway's
+  // auxiliary ports return plain "Unauthorized"; Chrome's debug returns
+  // an array of debugger targets. Neither matches this shape.
+  return typeof reply.body['gatewayUrl'] === 'string' && typeof reply.body['hasToken'] === 'boolean'
+    ? 'clawboo'
+    : 'none'
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
 /**
@@ -118,7 +174,8 @@ export async function probeDashboard(
  * `{ error: 'Clawboo access token required. …' }`. Requiring both markers keeps
  * an unrelated service's JSON 401 from being read as a Clawboo instance.
  */
-function isAccessGateError(body: Record<string, unknown>): boolean {
+function isAccessGateError(body: unknown): boolean {
+  if (!isRecord(body)) return false
   const message = body['error']
   if (typeof message !== 'string') return false
   const lower = message.toLowerCase()
@@ -325,25 +382,22 @@ const SELF_VERSION_TIMEOUT_MS = 2_000
  * The content-type check is load-bearing, not defensive: a server old enough to
  * lack this route falls through to the production SPA catch-all, which answers
  * 200 with `index.html`. `res.ok` is true there and `res.json()` would throw.
+ *
+ * On a token-gated server it sends this launcher's token the same way the probe
+ * does, so the version check still runs there.
  */
 export async function fetchServerVersion(
   port: number,
   timeoutMs = SELF_VERSION_TIMEOUT_MS,
 ): Promise<string | null> {
-  try {
-    const res = await fetch(`http://localhost:${port}/api/system/self-version?local=1`, {
-      signal: AbortSignal.timeout(timeoutMs),
-      headers: { Accept: 'application/json' },
-    })
-    if (!res.ok) return null
-    const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) return null
-    const body = (await res.json()) as Record<string, unknown>
-    const current = body['current']
-    return typeof current === 'string' && current.trim() ? current.trim() : null
-  } catch {
-    return null
-  }
+  const reply = await getDashboardJson(
+    `http://localhost:${port}/api/system/self-version?local=1`,
+    timeoutMs,
+    { Accept: 'application/json' },
+  )
+  if (reply === null || !reply.ok || !isRecord(reply.body)) return null
+  const current = reply.body['current']
+  return typeof current === 'string' && current.trim() ? current.trim() : null
 }
 
 // ─── Server lifecycle ─────────────────────────────────────────────────────────

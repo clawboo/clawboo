@@ -1,5 +1,5 @@
-// Hermes model catalog — the models the Hermes per-agent picker (CreateTeamModal)
-// offers.
+// Hermes model catalog: the models the Hermes pickers offer, in team setup
+// (CreateTeamModal) and on a Hermes agent's page (the MiniGraph model control).
 //
 // Hermes reaches EVERY model through OpenRouter: the single OpenRouter key (Hermes's
 // primary credential + the onboarding default) proxies Anthropic (`anthropic/…`),
@@ -72,4 +72,40 @@ export function hermesModelExec(id: string): { provider: string; model: string }
     return { provider: 'openai-codex', model: id.slice(CODEX_PREFIX.length) }
   }
   return { provider: 'openrouter', model: id }
+}
+
+/** The provider stored in a Hermes agent's execConfig `{ provider, model }`, or null. */
+export function hermesStoredProvider(execConfig: unknown): string | null {
+  if (!execConfig || typeof execConfig !== 'object') return null
+  const provider = (execConfig as Record<string, unknown>)['provider']
+  return typeof provider === 'string' && provider ? provider : null
+}
+
+/** The agent page's note for a Hermes agent on the ChatGPT subscription, in place
+ *  of a model switch: the plan's model list is live-only and the page has no live
+ *  source for it, so it offers none (never a hard-coded list), and the OpenRouter
+ *  list would move the agent off its plan. Null for any other Hermes agent. */
+export function hermesPlanModelNote(
+  execConfig: unknown,
+  model: string | null,
+): { pill: string; tip: string } | null {
+  if (hermesStoredProvider(execConfig) !== 'openai-codex') return null
+  const bare = model?.startsWith(CODEX_PREFIX) ? model.slice(CODEX_PREFIX.length) : model
+  return {
+    pill: bare ? `${bare} · ChatGPT plan` : 'ChatGPT plan',
+    tip: 'This agent runs on your ChatGPT plan. The plan has no model list here, so its model is not changed on this page.',
+  }
+}
+
+/** What the agent page saves for a picked Hermes model. A pick from a picker group
+ *  names its provider (see `hermesModelExec`). A typed custom id names none, so the
+ *  server keeps the provider the agent already runs on, unless the id carries the
+ *  `openai-codex/` prefix. Null for an empty id. */
+export function hermesModelSave(
+  id: string,
+  fromGroup: boolean,
+): { model: string; provider?: string } | null {
+  if (!id) return null
+  if (fromGroup || id.startsWith(CODEX_PREFIX)) return hermesModelExec(id)
+  return { model: id }
 }

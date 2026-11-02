@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { canTransition, isLocked, isTerminal } from '@clawboo/board-core'
+import { canTransition, isLocked, isTerminal, type TaskStatus } from '@clawboo/board-core'
 import { eq, sql as dsql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -36,6 +36,7 @@ import {
   reconcileOrphans,
   reconcileStaleInProgress,
   TaskDependencyCycleError,
+  ORPHANED_REVIEW_NOTE,
   updateStatus,
   updateTaskFields,
   type GuardedCreateResult,
@@ -156,6 +157,23 @@ describe('orphan reconciliation', () => {
     const r2 = reconcileOrphans(reopened, { staleAfterMs: -10_000 })
     expect(r2.reconciled).toBe(0)
     expect(getTask(reopened, t.id)?.status).toBe('todo')
+  })
+
+  it('a task in review whose run died goes to blocked with a comment, by legal moves only', () => {
+    const t = createTask(db, { title: 'in review', teamId: 'team1' })
+    claimTask(db, t.id, 'agent-a') // → in_progress
+    createExecutionProcess(db, { taskId: t.id, executorType: 'codex' }) // → running
+    expect(updateStatus(db, t.id, 'in_review').ok).toBe(true) // the agent asked for review
+
+    const reopened = createDb(dbPath)
+    expect(reconcileOrphans(reopened, { staleAfterMs: -10_000 }).reconciled).toBe(1)
+
+    const after = getTask(reopened, t.id)
+    // `in_review -> todo` is not in the transition table; `in_review -> blocked` is.
+    expect(canTransition('in_review', after!.status as TaskStatus)).toBe(true)
+    expect(after?.status).toBe('blocked')
+    expect(after?.assigneeAgentId).toBe('agent-a')
+    expect(getComments(reopened, t.id).map((c) => c.body)).toContain(ORPHANED_REVIEW_NOTE)
   })
 
   it('a STILL-BEATING running exec is NOT reaped (live sibling process / fast restart)', () => {

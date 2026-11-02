@@ -792,15 +792,15 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/screenshot/capture
 Changes the model of a `clawboo-native` or `hermes` agent, and optionally its provider. It needs no Gateway.
 
 - **Native agent:** the stored agent config is rewritten, and the next run uses it. With a `provider`, the provider, model and the key variable it reads (`envVar`) change together, so a model picked from another provider's list never runs against the old provider. Without a `provider`, only the model changes, which is also how you set a custom model id for the current provider. The server checks the provider name but not the model string, so custom ids work.
-- **Hermes agent:** Hermes reaches every model through OpenRouter, so the model is stored as `{ provider: 'openrouter', model }` and any other `provider` is a `400`.
+- **Hermes agent:** the model is stored as `{ provider, model }` in the agent's `execConfig`, where `provider` is `openrouter` (an OpenRouter model id) or `openai-codex` (a ChatGPT subscription model). Without a `provider`, the agent keeps the provider it already has, so a model change never moves a ChatGPT-subscription agent onto OpenRouter. An agent with no provider stored stays unpinned: Hermes runs the model on the provider its keys or ChatGPT sign-in give it. Any other `provider` is a `400`.
 - **Other runtimes** answer `404`. An OpenClaw agent's model is set through `PATCH /api/system/openclaw-config` (see [System API](/reference/rest-api/system)).
 
 - **Path params**: `agentId`.
-- **Request body**: `{ model: string, provider?: string }`. `provider` must be one of `anthropic`, `openai`, `openrouter`, `ollama`, `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`. With `ollama`, which needs no key, the stored `envVar` is `OLLAMA_BASE_URL`.
+- **Request body**: `{ model: string, provider?: string }`. For a native agent, `provider` must be one of `anthropic`, `openai`, `openrouter`, `ollama`, `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`. With `ollama`, which needs no key, the stored `envVar` is `OLLAMA_BASE_URL`. For a Hermes agent, it must be `openrouter` or `openai-codex`.
 
 ### Responses
 
-**`200 OK`**: the model (and the provider, when sent) was saved. `provider` is echoed only when the request carried one:
+**`200 OK`**: the model (and the provider, when sent) was saved. For a native agent, `provider` is echoed only when the request carried one. A Hermes agent's reply always carries `provider`: the one it is pinned to, or `null` when it has none:
 
 ```json
 { "ok": true, "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }
@@ -808,12 +808,12 @@ Changes the model of a `clawboo-native` or `hermes` agent, and optionally its pr
 
 **`400 Bad Request`**: one of these messages:
 
-| `error`                                                                              | Cause                                |
-| ------------------------------------------------------------------------------------ | ------------------------------------ |
-| `model (non-empty string) required`                                                  | `model` is missing or blank          |
-| `unknown provider '<provider>'`                                                      | `provider` is not in the list above  |
-| `hermes routes every model via OpenRouter; provider must be 'openrouter' or omitted` | A Hermes agent with another provider |
-| `agentId required`                                                                   | Missing `agentId` segment            |
+| `error`                                                                                         | Cause                                                                     |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `model (non-empty string) required`                                                             | `model` is missing or blank                                               |
+| `unknown provider '<provider>'`                                                                 | `provider` is not in the list above, or `openai-codex` for a native agent |
+| `hermes models run on 'openrouter' or 'openai-codex'; provider must be one of those or omitted` | A Hermes agent with another provider                                      |
+| `agentId required`                                                                              | Missing `agentId` segment                                                 |
 
 **`404 Not Found`**: one of these messages:
 

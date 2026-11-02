@@ -170,7 +170,7 @@ clawboo stop
 clawboo restart
 ```
 
-`clawboo stop` is safe to run when nothing is running. `clawboo restart` starts a fresh server on the same port and opens your browser. With npx, run `npx clawboo@latest stop`. On a server protected by `STUDIO_ACCESS_TOKEN`, both commands refuse and print a command that stops the server by its port. See the [CLI reference](/reference/cli).
+`clawboo stop` is safe to run when nothing is running. `clawboo restart` starts a fresh server on the same port and opens your browser. With npx, run `npx clawboo@latest stop`. On a server protected by `STUDIO_ACCESS_TOKEN`, run them from a shell that has the server's token. Without it, both commands refuse and print a command that stops the server by its port. See the [CLI reference](/reference/cli).
 
 ### How do I update Clawboo?
 
@@ -185,7 +185,7 @@ clawboo restart
 
 ### How do I reset Clawboo?
 
-An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database. If the server uses an access token, `clawboo stop` cannot stop it: stop it with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints, and delete files only after it has stopped.
+An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database. If the server uses an access token, run `clawboo stop` from a shell that has the token, or stop the server with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. Delete files only after it has stopped.
 
 To reset only the data, delete the database and its two side files. The `&&` deletes them only if `clawboo stop` succeeds:
 

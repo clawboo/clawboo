@@ -151,7 +151,7 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 
 Leave `HOST` unset, because the proxy connects to `127.0.0.1`. `CLAWBOO_API_PORT` pins the port the proxy forwards to. The two allowlist variables let requests that use your address pass Clawboo's same-origin guard. Without them the dashboard page loads, but every API call fails with `403 Cross-origin request blocked.`
 
-Start the server directly like this rather than with `clawboo`, which cannot manage a server that has a token. You should see a log line saying Clawboo is ready. To keep it running after you log out, [run it as a service](/operating/deployment#run-it-as-a-service).
+This starts the server in this terminal, and you should see a log line saying Clawboo is ready. `clawboo` works too: run in this shell, it passes these variables to the server it starts, and with the token set there `clawboo stop` and `clawboo restart` can stop and restart that server. To keep it running after you log out, [run it as a service](/operating/deployment#run-it-as-a-service).
 
 </Step>
 
@@ -393,7 +393,7 @@ The server has no access token, so the dashboard and every `/api/` route are ope
 
 <Accordion title="clawboo says a server is running but requires an access token">
 
-That is expected on a token-protected install: `clawboo`, `clawboo stop` and `clawboo restart` cannot use its API. Stop the server with Ctrl+C in its terminal, with your service manager, or with the command `clawboo stop` prints.
+The shell you ran the command in does not have the server's token, so `clawboo`, `clawboo stop` and `clawboo restart` cannot use its API. Set `STUDIO_ACCESS_TOKEN` to the server's token in that shell and run the command again. Otherwise stop the server with Ctrl+C in its terminal, with your service manager, or with the command `clawboo stop` prints.
 
 </Accordion>
 

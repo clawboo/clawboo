@@ -139,7 +139,7 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
 
 **The proxy warning.** With no token set, the first request that carries one of those proxy headers makes the server log a one-time `SECURITY:` warning. It says that the dashboard and every `/api/` route are open to anyone who can reach the proxy. The warning never blocks a request.
 
-**The `clawboo` command cannot manage a server that has a token.** Its status check gets a `401`, so `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, then exit. Run with the token in its environment and no server running, `clawboo` starts one but cannot see it answer: after about 45 seconds it prints `Dashboard is taking too long to start.` and exits, while the server keeps running. Start and stop a token-protected server directly or with a service manager, as described in [Run the Clawboo server](/operating/deployment).
+**The `clawboo` command needs the token in its shell.** Its status check gets a `401` from a server that has a token. The command then asks that port once more with the `STUDIO_ACCESS_TOKEN` from its own shell as the access cookie. It sends the token only to a port whose `401` is the access gate's own, so another service in the port range never receives it, and it never puts the token in a URL or a command line. A server that `clawboo` starts inherits the shell's token, so the command sees it answer. From a shell without the server's token, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, then exit. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 <Accordion title="Under the hood">
 

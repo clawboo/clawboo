@@ -344,13 +344,15 @@ export function getKeylessProviderChoice(provider: string): boolean | null {
 
 /**
  * Runtime-scoped key resolution: the full `resolveRuntimeKey` chain, EXCEPT for
- * a runtime the user explicitly disconnected — then vault-only, so the ambient
- * process-env / OpenClaw-.env fallbacks can't silently re-credential it. Every
- * per-runtime key-assembly site (status, team runs, 1:1 chat, REST runs,
- * routines) resolves through this; the bare `resolveRuntimeKey` remains for
- * non-runtime-scoped reads (OpenClaw provisioning reuse).
+ * a runtime the user explicitly disconnected, which resolves no key at all until
+ * it is connected again. Not an ambient one (process env, OpenClaw's .env), and
+ * not a vault key it shares with another runtime: its disconnect leaves those in
+ * place for the runtimes still using them. Every per-runtime key-assembly site
+ * (status, team runs, 1:1 chat, REST runs, routines) resolves through this; the
+ * bare `resolveRuntimeKey` remains for non-runtime-scoped reads (OpenClaw
+ * provisioning reuse).
  */
 export function resolveRuntimeKeyForRuntime(runtimeId: string, envVar: string): string | null {
-  if (isRuntimeDisconnected(runtimeId)) return getRuntimeSecret(envVar)
+  if (isRuntimeDisconnected(runtimeId)) return null
   return resolveRuntimeKey(envVar)
 }

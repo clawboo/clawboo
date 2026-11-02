@@ -301,9 +301,14 @@ export async function agentGET(req: Request, res: Response): Promise<void> {
 // provider is set). The server has no model-to-provider catalog (custom ids are
 // supported), so it validates the provider name and trusts the model string;
 // the SPA sends the provider of the group the user picked from. Hermes persists
-// to its execConfig `{ provider, model }`: it routes every model through
-// OpenRouter, so any other explicit provider is a 400. Codex / Claude Code
-// (account / SDK default) + OpenClaw (via the Gateway) are not editable here → 404.
+// to its execConfig `{ provider, model }`, where the provider is OpenRouter or the
+// ChatGPT subscription (`openai-codex`); any other explicit provider is a 400.
+// Without a provider a Hermes agent KEEPS the one it has, so a model change never
+// moves a subscription agent onto OpenRouter. Codex / Claude Code (account / SDK
+// default) + OpenClaw (via the Gateway) are not editable here → 404.
+/** The providers a Hermes agent's model can be pinned to from this route. */
+const HERMES_MODEL_PROVIDERS: readonly string[] = ['openrouter', 'openai-codex']
+
 export async function agentModelPATCH(req: Request, res: Response): Promise<void> {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
@@ -321,7 +326,8 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
     res.status(400).json({ error: 'model (non-empty string) required' })
     return
   }
-  if (providerSupplied && !(KNOWN_PROVIDERS as readonly string[]).includes(provider)) {
+  const nativeProvider = (KNOWN_PROVIDERS as readonly string[]).includes(provider)
+  if (providerSupplied && !nativeProvider && !HERMES_MODEL_PROVIDERS.includes(provider)) {
     res.status(400).json({ error: `unknown provider '${String(body?.provider)}'` })
     return
   }
@@ -333,6 +339,11 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
       return
     }
     if (agent.runtime === 'clawboo-native') {
+      // `openai-codex` passed the shared check for Hermes; a native agent cannot run it.
+      if (providerSupplied && !nativeProvider) {
+        res.status(400).json({ error: `unknown provider '${String(body?.provider)}'` })
+        return
+      }
       const db = getDb()
       const config = loadAgentConfig(db, agentId)
       if (!config) {
@@ -355,16 +366,30 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
       return
     }
     if (agent.runtime === 'hermes') {
-      if (provider && provider !== 'openrouter') {
+      if (providerSupplied && !HERMES_MODEL_PROVIDERS.includes(provider)) {
         res.status(400).json({
-          error: `hermes routes every model via OpenRouter; provider must be 'openrouter' or omitted`,
+          error: `hermes models run on 'openrouter' or 'openai-codex'; provider must be one of those or omitted`,
         })
         return
       }
-      // Hermes routes every model via OpenRouter, so store { provider, model } in the
-      // execConfig the run reads (serverDeliver → ctx.model + providerHint).
-      await source.updateAgent(agentId, { execConfig: { provider: 'openrouter', model } })
-      res.json({ ok: true, model, ...(provider ? { provider } : {}) })
+      // Store { provider, model } in the execConfig the run reads (serverDeliver →
+      // ctx.model + providerHint), keeping its other keys. An explicit provider is
+      // the picker group the user chose from. Without one (a typed custom id) the
+      // agent keeps the provider it already has, so a ChatGPT-subscription agent
+      // stays on its plan, and an agent with none stays UNPINNED: the driver then
+      // runs the model on the provider its keys and sign-ins give it. Pinning
+      // `openrouter` there would make the driver drop the model on a setup with
+      // no OpenRouter key and run the plan's default instead.
+      const exec =
+        agent.execConfig && typeof agent.execConfig === 'object' && !Array.isArray(agent.execConfig)
+          ? (agent.execConfig as Record<string, unknown>)
+          : {}
+      const stored = typeof exec['provider'] === 'string' ? exec['provider'].trim() : ''
+      const nextProvider = provider || stored || null
+      await source.updateAgent(agentId, {
+        execConfig: { ...exec, model, ...(nextProvider ? { provider: nextProvider } : {}) },
+      })
+      res.json({ ok: true, model, provider: nextProvider })
       return
     }
     res.status(404).json({ error: 'model change via this route is native/hermes-only' })

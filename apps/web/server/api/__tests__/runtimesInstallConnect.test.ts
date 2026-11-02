@@ -18,7 +18,7 @@ import { resetDb } from '../../lib/db'
 // ── Mock platform: control which CLI bins are "installed". ───────────────────
 type PyResult = {
   compatible: { bin: string; minor: number; version: string } | null
-  best: { bin: string; minor: number; version: string } | null
+  found: { bin: string; minor: number; version: string }[]
 }
 const platformState = vi.hoisted(() => ({
   bins: {} as Record<string, string | null>,
@@ -39,9 +39,9 @@ vi.mock('../../lib/platform', () => ({
       platformState.bins['python3'] ??
       platformState.bins['python'] ??
       null
-    if (!bin) return { compatible: null, best: null }
+    if (!bin) return { compatible: null, found: [] }
     const c = { bin, minor: 12, version: '3.12' }
-    return { compatible: c, best: c }
+    return { compatible: c, found: [c] }
   },
 }))
 
@@ -332,11 +332,13 @@ describe('runtimes install/connect REST', () => {
     // never a doomed pip spawn that returns "(from versions: none)".
     platformState.pythonOverride = {
       compatible: null,
-      best: {
-        bin: '/Applications/Xcode.app/Contents/Developer/usr/bin/python3',
-        minor: 9,
-        version: '3.9',
-      },
+      found: [
+        {
+          bin: '/Applications/Xcode.app/Contents/Developer/usr/bin/python3',
+          minor: 9,
+          version: '3.9',
+        },
+      ],
     }
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
@@ -345,6 +347,23 @@ describe('runtimes install/connect REST', () => {
     expect(err).toBeTruthy()
     expect(String(err?.['message'])).toMatch(/3\.11/)
     expect(String(err?.['message'])).toMatch(/Xcode/)
+    expect(spawnState.calls.length).toBe(0)
+  })
+
+  it('hermes install names the 3.11 to 3.13 range when only a Python 3.14 exists', async () => {
+    // hermes-agent requires >=3.11,<3.14, so a machine whose only Python is 3.14
+    // needs an error that names the range, not "too old" and not a doomed pip run.
+    platformState.pythonOverride = {
+      compatible: null,
+      found: [{ bin: '/opt/homebrew/bin/python3.14', minor: 14, version: '3.14' }],
+    }
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    await m.ended
+    const err = m.events().find((e) => e['type'] === 'error')
+    expect(err?.['code']).toBe('PYTHON_UNSUPPORTED')
+    expect(String(err?.['message'])).toContain('Python 3.11 to 3.13')
+    expect(String(err?.['message'])).toContain('found only Python 3.14')
     expect(spawnState.calls.length).toBe(0)
   })
 
@@ -397,7 +416,7 @@ describe('runtimes install/connect REST', () => {
     expect((c.body() as { connectionState: string }).connectionState).toBe('ready')
   })
 
-  it('disconnect clears the credential', () => {
+  it('disconnect stops the runtime and keeps a key another runtime also reads', () => {
     platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
     runtimesConnectPOST(
       req({ params: { id: 'hermes' }, body: { apiKey: 'sk-or-x' } }),
@@ -407,27 +426,91 @@ describe('runtimes install/connect REST', () => {
     const m = mockRes()
     runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(m.statusCode()).toBe(200)
-    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(false)
+    // Clawboo Native reads OPENROUTER_API_KEY too, so the key stays for it.
+    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
     expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
+    expect(m.body()).toMatchObject({
+      removed: [],
+      kept: [{ envVar: 'OPENROUTER_API_KEY', sharedWith: ['Clawboo Native'] }],
+    })
   })
 
-  it('disconnect clears an ALT-slot credential too (native connected via OpenRouter)', () => {
-    // The reported bug's first half: native's primary slot is ANTHROPIC_API_KEY,
-    // but a key connected under a provider lands in an altEnvVars slot — deleting
-    // only the primary left the real credential behind and the card "Connected".
+  it('disconnect deletes an ALT-slot key no other runtime reads (native connected via Groq)', () => {
+    // Native's primary slot is ANTHROPIC_API_KEY, but a key connected under a
+    // provider lands in an altEnvVars slot: deleting only the primary left the
+    // real credential behind and the card "Connected".
     runtimesConnectPOST(
       req({
         params: { id: 'clawboo-native' },
-        body: { apiKey: 'sk-or-live', provider: 'openrouter' },
+        body: { apiKey: 'gsk-live', provider: 'groq' },
       }),
       mockRes().res,
     )
-    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(true)
+    expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(true)
     const m = mockRes()
     runtimesDisconnectPOST(req({ params: { id: 'clawboo-native' } }), m.res)
     expect(m.statusCode()).toBe(200)
-    expect(hasRuntimeSecret('OPENROUTER_API_KEY')).toBe(false)
+    expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(false)
     expect((m.body() as { connectionState: string }).connectionState).toBe('needs-auth')
+    expect(m.body()).toMatchObject({ removed: ['GROQ_API_KEY'], kept: [] })
+  })
+
+  it('disconnecting Hermes leaves Clawboo Native and Claude Code their keys', async () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    platformState.bins['claude'] = '/usr/bin/claude'
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-shared')
+    setRuntimeSecret('OPENAI_API_KEY', 'sk-openai-shared')
+    runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), mockRes().res)
+
+    expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(true)
+    expect(hasRuntimeSecret('OPENAI_API_KEY')).toBe(true)
+    const g = mockRes()
+    await runtimesListGET(req(), g.res)
+    const byId = (id: string) =>
+      (g.body() as { runtimes: Record<string, unknown>[] }).runtimes.find((r) => r['id'] === id)!
+    expect(byId('hermes')['connectionState']).toBe('needs-auth')
+    expect(byId('claude-code')['connectionState']).toBe('ready')
+    expect(byId('clawboo-native')['connectionState']).toBe('ready')
+  })
+
+  it('the status carries what a Disconnect would delete and keep (saved keys only)', async () => {
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-x')
+    setRuntimeSecret('GROQ_API_KEY', 'gsk-x')
+    const g = mockRes()
+    await runtimesListGET(req(), g.res)
+    const native = (g.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'clawboo-native',
+    )!
+    expect(native['disconnectPlan']).toEqual({
+      removes: ['GROQ_API_KEY'],
+      keeps: [{ envVar: 'ANTHROPIC_API_KEY', sharedWith: ['Claude Code', 'Hermes'] }],
+    })
+    expect(JSON.stringify(native)).not.toContain('sk-ant-x')
+  })
+
+  it('a keyless connect naming a provider is refused on a single-provider runtime', () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-other')
+    setRuntimeDisconnected('hermes', true)
+    const m = mockRes()
+    runtimesConnectPOST(req({ params: { id: 'hermes' }, body: { provider: 'openrouter' } }), m.res)
+    expect(m.statusCode()).toBe(400)
+    expect(isRuntimeDisconnected('hermes')).toBe(true)
+  })
+
+  it('a disconnected runtime connects again with the key it kept, without a re-paste', () => {
+    platformState.bins['claude'] = '/usr/bin/claude'
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-kept')
+    runtimesDisconnectPOST(req({ params: { id: 'claude-code' } }), mockRes().res)
+    expect(isRuntimeDisconnected('claude-code')).toBe(true)
+    expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(true)
+
+    const m = mockRes()
+    runtimesConnectPOST(req({ params: { id: 'claude-code' }, body: {} }), m.res)
+    expect(m.statusCode()).toBe(200)
+    expect((m.body() as { connectionState: string }).connectionState).toBe('ready')
+    expect(isRuntimeDisconnected('claude-code')).toBe(false)
+    expect(JSON.stringify(m.body())).not.toContain('sk-ant-kept')
   })
 
   it('disconnect suppresses the ambient OpenClaw-.env fallback until reconnect', async () => {
