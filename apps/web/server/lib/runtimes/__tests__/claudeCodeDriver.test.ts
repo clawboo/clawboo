@@ -205,6 +205,28 @@ describe('createClaudeCodeDriver: an API error is a failed run', () => {
     ).toEqual([{ type: 'text', text: 'partial answer' }])
   })
 
+  it('keeps the real cause of an error_during_execution result, which also sets is_error', () => {
+    expect(
+      translateClaudeMessage(
+        {
+          type: 'result',
+          subtype: 'error_during_execution',
+          is_error: true,
+          errors: ['tool crashed'],
+        },
+        { apiError: 'authentication_failed' },
+      ),
+    ).toMatchObject([{ type: 'result', ok: false, errorMessage: 'tool crashed' }])
+    expect(
+      translateClaudeMessage({
+        type: 'result',
+        subtype: 'error_during_execution',
+        is_error: true,
+        errors: ['tool crashed'],
+      })[0],
+    ).not.toHaveProperty('errorCode')
+  })
+
   it('leaves a clean success untouched', () => {
     expect(
       translateClaudeMessage({ type: 'result', subtype: 'success', is_error: false, result: 'ok' }),

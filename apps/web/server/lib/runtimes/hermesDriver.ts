@@ -52,6 +52,7 @@ import path from 'node:path'
 import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
 import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/mcp'
 import type { StartOpts } from '@clawboo/executor'
+import { createLogger } from '@clawboo/logger'
 
 import { resolveRuntimeBin } from '../platform'
 import {
@@ -67,6 +68,8 @@ import type { RuntimeRunContext } from './types'
 const asRecord = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null
 const asStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
+const log = createLogger('hermes-driver')
 
 /** How often a running Hermes process reports that it is still alive. Well
  *  under the shortest idle watchdog (the 8-minute delegation sweep). */
@@ -326,6 +329,14 @@ export function createHermesDriver(
           ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
           : null,
       })
+      if (ctx.mcpBaseUrl && !home.mcpAttached) {
+        // The seeded config declares `mcp_servers` on one line with servers in it,
+        // which a line edit cannot extend: this run has none of clawboo's tools.
+        log.warn(
+          { home: homeDir },
+          "Hermes config.yaml has a one-line mcp_servers mapping; clawboo's MCP servers were not attached",
+        )
+      }
       return buildHermesSpawnPlan(opts, ctx, home)
     },
     parseLine(line: string): HermesNativeEvent[] {

@@ -40,8 +40,10 @@ export type Finding = z.infer<typeof findingSchema>
  *  judgement). `passed` is the gate's truth; the tails are scrubbed evidence. */
 /**
  * Where the gate's command came from. `configured`: the team's verify command
- * setting, passed in by clawboo. `scaffold`: the command clawboo wrote into the
- * task's init.sh when it set up the worktree, unchanged since. `agent`: a command
+ * setting, passed in by clawboo. `scaffold`: the worktree's command matches the
+ * init.sh of the task's scaffold commit, the one clawboo wrote. Only
+ * `configured` is a guarantee: the scaffold commit is found by its message,
+ * which a builder can also write. `agent`: a command
  * the builder wrote or edited in its own worktree (it differs from the scaffold
  * commit's), so the builder chose what it is judged by. `none`: no command.
  */

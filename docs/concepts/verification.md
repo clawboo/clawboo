@@ -96,7 +96,7 @@ To get a useful check, say in the task which command proves the work, for exampl
 
 </Tip>
 
-The agent that did the work can edit `init.sh`, so without a team verify command it can also weaken its own check. Each check therefore records where its command came from, and the task drawer shows the command with its source: **set for the team**, **from the task setup** (the `init.sh` Clawboo wrote, unchanged), or **written by the agent**, which is flagged. The reviewer is the independent part.
+The agent that did the work can edit `init.sh`, so without a team verify command it can also weaken its own check. Each check therefore records where its command came from, and the task drawer shows the command with its source: **set for the team**, **from the task setup** (the `init.sh` Clawboo wrote, unchanged), or **written by the agent**, which is flagged. Only **set for the team** is a guarantee: an agent can also write a commit that looks like the setup's, so **from the task setup** means no edit was found, not that none was made. The reviewer is the independent part.
 
 ## When the reviewer runs
 

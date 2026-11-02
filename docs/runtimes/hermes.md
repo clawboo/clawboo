@@ -209,7 +209,7 @@ List the MCP servers Hermes sees for that agent:
 HERMES_HOME=~/.clawboo/runtimes/hermes/<agent id> hermes mcp list
 ```
 
-It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there: write that mapping as indented lines in the agent's `config.yaml`.
+It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there and logs a warning on each run: write that mapping as indented lines in the agent's `config.yaml`.
 
 </Accordion>
 

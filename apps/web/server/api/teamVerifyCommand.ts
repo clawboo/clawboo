@@ -7,7 +7,7 @@
 // boundary against an agent that runs as the same user.
 
 import type { Request, Response } from 'express'
-import { setSetting, teams } from '@clawboo/db'
+import { appendAudit, setSetting, teams } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
 import { getDb } from '../lib/db'
@@ -63,7 +63,14 @@ export function teamVerifyCommandPUT(req: Request, res: Response): void {
       res.status(404).json({ error: 'team not found' })
       return
     }
+    const previous = readTeamVerifyCommand(db, teamId)
     setSetting(db, teamVerifyCommandSettingKey(teamId), JSON.stringify({ command }))
+    // The command runs through a shell on every check, so each change is on record.
+    appendAudit(db, {
+      eventType: 'verification',
+      teamId,
+      summary: { action: 'set_team_verify_command', command, previous },
+    })
     res.json({ command })
   } catch (err) {
     res.status(500).json({ error: String(err) })

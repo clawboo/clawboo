@@ -9,8 +9,10 @@
 // for the team is passed in and always wins. Without one, the worktree's command
 // counts as clawboo's only while it matches the init.sh of the task's scaffold
 // commit, read from the repository itself; anything else is the builder's own.
-// This tells a cooperative builder's choice apart from clawboo's. It is not a
-// security boundary against an agent that runs as the same user.
+// This tells a cooperative builder's choice apart from clawboo's, and only a
+// `configured` command is a guarantee: a reloaded worktree finds its scaffold
+// commit by message (`findScaffoldCommit`), which the builder can also write,
+// and an agent running as the same user can change any of these files.
 
 import { spawn } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'

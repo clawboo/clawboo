@@ -35,6 +35,21 @@ const RULES: Rule[] = [
     test: /\b(abort|aborted|cancel(?:l?ed)?|sigint|sigterm|user[\s_-]?(?:aborted|cancel))\b/i,
   },
   { cls: 'Timeout', test: /\b(timeout|timed?[\s_-]?out|etimedout|deadline[\s_-]?exceeded)\b/i },
+  // Missing or rejected credentials: the environment the runtime runs in has no
+  // working login or key. Covers the typed causes the Claude Agent SDK reports
+  // (`authentication_failed`, ...), checked before InvalidArgs so the HTTP status
+  // in the message does not decide.
+  {
+    cls: 'UnexpectedEnv',
+    test: /\b(authentication[\s_-]?failed|oauth[\s_-]?org[\s_-]?not[\s_-]?allowed|cloud[\s_-]?credential[\s_-]?error|invalid[\s_-]?api[\s_-]?key|unauthori[sz]ed)\b/i,
+  },
+  // The provider refused the account (billing, a hold, a pending verification).
+  // Anthropic sends a low credit balance as a 400, so this too goes before
+  // InvalidArgs.
+  {
+    cls: 'ProviderError',
+    test: /\b(billing[\s_-]?error|account[\s_-]?on[\s_-]?hold|verification[\s_-]?required|credit balance)\b/i,
+  },
   {
     cls: 'UnexpectedEnv',
     test: /\b(enoent|eacces|eperm|einval|espawn|command not found|no such file|permission denied|not installed|spawn\s|module not found|cannot find module)\b/i,
@@ -48,11 +63,11 @@ const RULES: Rule[] = [
   },
   {
     cls: 'InvalidArgs',
-    test: /\b(400|422|invalid[\s_-]?(?:argument|param|input|request)|bad request|validation|unprocessable|missing required|schema|malformed)\b/i,
+    test: /\b(400|422|invalid[\s_-]?(?:argument|param|input|request)|bad request|validation|unprocessable|missing required|schema|malformed|model[\s_-]?not[\s_-]?found)\b/i,
   },
   {
     cls: 'ProviderError',
-    test: /\b(50[0234]|provider[\s_-]?error|upstream|overloaded|service unavailable|bad gateway|internal server error|api[\s_-]?error|model[\s_-]?error)\b/i,
+    test: /\b(50[0234]|provider[\s_-]?error|upstream|overloaded|service unavailable|bad gateway|internal server error|server[\s_-]?error|api[\s_-]?error|model[\s_-]?error)\b/i,
   },
 ]
 

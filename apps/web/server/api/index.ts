@@ -338,7 +338,9 @@ router.post('/api/team-chat/exchange', teamChatExchangePOST)
 router.get('/api/team-rules/:teamId', teamRulesGET)
 router.put('/api/team-rules/:teamId', teamRulesPUT)
 router.get('/api/team-verify-command/:teamId', teamVerifyCommandGET)
-router.put('/api/team-verify-command/:teamId', teamVerifyCommandPUT)
+// Sets a shell command the verification gate later runs: rate-limited like the
+// other routes that change what runs.
+router.put('/api/team-verify-command/:teamId', sensitiveLimiter, teamVerifyCommandPUT)
 
 // Agents — the registry-of-record (AgentSource decoupling). SQLite is the source
 // of truth; the OpenClawAgentSource syncs the Gateway IN. Reads serve SQLite (work

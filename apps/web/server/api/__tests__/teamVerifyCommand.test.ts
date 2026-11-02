@@ -7,10 +7,14 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { teams } from '@clawboo/db'
+import { listGovernanceAudit, setSetting, settings, teams } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
+import { apiRouter } from '../index'
+import { teamsDELETE } from '../teams'
 import { teamVerifyCommandGET, teamVerifyCommandPUT } from '../teamVerifyCommand'
+import { sensitiveLimiter } from '../../lib/rateLimit'
 import { getDb, resetDb } from '../../lib/db'
 import { readTeamVerifyCommand } from '../../lib/verification/teamVerifyCommand'
 
@@ -76,6 +80,38 @@ describe('team verify command API', () => {
       expect(r.status()).toBe(400)
     }
     expect(readTeamVerifyCommand(getDb(), 'team-1')).toBeNull()
+  })
+
+  it('records every change in the governance audit log', () => {
+    teamVerifyCommandPUT(req('team-1', { command: 'npm test' }), fakeRes().res)
+    teamVerifyCommandPUT(req('team-1', { command: 'pnpm test' }), fakeRes().res)
+    const rows = listGovernanceAudit(getDb(), { eventType: 'verification' })
+    const summaries = rows.map((r) => JSON.parse(r.summary) as Record<string, unknown>)
+    expect(rows.every((r) => r.teamId === 'team-1')).toBe(true)
+    expect(summaries).toEqual(
+      expect.arrayContaining([
+        { action: 'set_team_verify_command', command: 'npm test', previous: null },
+        { action: 'set_team_verify_command', command: 'pnpm test', previous: 'npm test' },
+      ]),
+    )
+  })
+
+  it('is behind the sensitive rate limiter', () => {
+    type Layer = {
+      route?: { path: string; methods: Record<string, boolean>; stack: { handle: unknown }[] }
+    }
+    const layer = (apiRouter as unknown as { stack: Layer[] }).stack.find(
+      (l) => l.route?.path === '/api/team-verify-command/:teamId' && l.route.methods['put'],
+    )
+    expect(layer?.route?.stack.map((s) => s.handle)).toContain(sensitiveLimiter)
+  })
+
+  it('deleting the team removes its verify command', async () => {
+    setSetting(getDb(), 'team-verify-command:team-1', JSON.stringify({ command: 'npm test' }))
+    await teamsDELETE({ params: { id: 'team-1' } } as unknown as Request, fakeRes().res)
+    expect(
+      getDb().select().from(settings).where(eq(settings.key, 'team-verify-command:team-1')).get(),
+    ).toBeUndefined()
   })
 
   it('refuses a team that does not exist', () => {

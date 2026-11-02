@@ -17,6 +17,7 @@
 //   `_load_mcp_config`); a `mcp.json` is read only inside plugin bundles.
 
 import { chmod, copyFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -255,7 +256,7 @@ export async function provisionHermesHome(
     if (onDisk !== null) await rm(configPath, { force: true })
   } else if (merged.body !== onDisk) {
     // Write-then-rename, so a crash mid-write never truncates the seeded config.
-    const tmp = `${configPath}.clawboo-tmp`
+    const tmp = `${configPath}.clawboo-${process.pid}-${randomUUID()}.tmp`
     await writeFile(tmp, merged.body, { encoding: 'utf8', mode: 0o600 })
     await rename(tmp, configPath)
     await chmod(configPath, 0o600).catch(() => undefined) // owner-only (no-op on Windows)

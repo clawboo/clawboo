@@ -231,8 +231,11 @@ function stringifyToolContent(content: unknown): string {
   }
 }
 
-/** True when a `result` reports a turn that ended on an API error. */
-const isApiErrorResult = (msg: SdkMessage): boolean => msg.is_error === true
+/** True when a `result` reports a turn that ended on an API error: the CLI
+ *  sends those as a success carrying the error text. An `error_*` subtype also
+ *  sets `is_error`, but it names its own cause in `errors`. */
+const isApiErrorResult = (msg: SdkMessage): boolean =>
+  msg.subtype === 'success' && msg.is_error === true
 
 /** The API-error cause an assistant message stands in for, or null. A
  *  `max_output_tokens` message still carries the model's (truncated) output. */
@@ -450,7 +453,7 @@ export function createClaudeCodeDriver(
         const unread = [...pendingSteers.keys()].some((id) => !passiveSteers.has(id))
         const turnApiError = apiError
         apiError = null
-        if (msg.subtype === 'success' && !isApiErrorResult(msg) && unread) continue
+        if (msg.subtype === 'success' && msg.is_error !== true && unread) continue
         for (const ev of translateClaudeMessage(msg, { apiError: turnApiError })) {
           if (ev.type !== 'result') {
             push(ev)

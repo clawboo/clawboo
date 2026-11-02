@@ -48,6 +48,30 @@ describe('error taxonomy', () => {
     expect(isUnexpectedFor('clawboo-native', 'ContextOverflow')).toBe(false)
   })
 
+  it('classifies the typed causes Claude Code reports for an API error, never as a harness bug', () => {
+    const cases: Array<[string, string, string]> = [
+      [
+        'authentication_failed',
+        'Invalid API key · Fix external API key (HTTP 401)',
+        'UnexpectedEnv',
+      ],
+      ['oauth_org_not_allowed', 'Your organization does not allow this login', 'UnexpectedEnv'],
+      ['cloud_credential_error', 'Could not load cloud credentials', 'UnexpectedEnv'],
+      ['billing_error', 'Credit balance is too low (HTTP 400)', 'ProviderError'],
+      ['account_on_hold', 'This account is on hold (HTTP 403)', 'ProviderError'],
+      ['verification_required', 'Verify your account to continue', 'ProviderError'],
+      ['rate_limit', 'Request rejected (HTTP 429)', 'RateLimited'],
+      ['overloaded', 'Overloaded (HTTP 529)', 'ProviderError'],
+      ['server_error', 'Something went wrong on our side', 'ProviderError'],
+      ['invalid_request', 'Bad input (HTTP 400)', 'InvalidArgs'],
+      ['model_not_found', 'There is no such model', 'InvalidArgs'],
+    ]
+    for (const [code, message, cls] of cases) {
+      expect(classifyError(code, message), code).toBe(cls)
+      expect(isUnexpectedFor('claude-code', classifyError(code, message)), code).toBe(false)
+    }
+  })
+
   it('isUnexpectedFor: Unknown is always unexpected; baselined classes are expected', () => {
     expect(isUnexpectedFor('claude-code', 'Unknown')).toBe(true)
     expect(isUnexpectedFor('claude-code', 'Timeout')).toBe(false)
