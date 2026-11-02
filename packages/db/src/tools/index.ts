@@ -74,7 +74,7 @@ export {
   type NamespaceResult,
 } from './namespace'
 export { ToolRegistry, createBuiltinRegistry, type VisibleTool } from './registry'
-export { BUILTIN_TOOLS, deletePathTool, echoTool, memoryNoteTool, webSearchTool } from './builtins'
+export { BUILTIN_TOOLS, echoTool, memoryNoteTool } from './builtins'
 
 export {
   createApproval,

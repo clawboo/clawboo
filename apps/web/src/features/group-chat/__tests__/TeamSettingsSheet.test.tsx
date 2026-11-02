@@ -51,6 +51,19 @@ describe('TeamSettingsSheet', () => {
     expect(dialog).toHaveAttribute('data-testid', 'team-settings-sheet')
   })
 
+  it('says what reads the brief and the rules, without promising a per-turn brief', async () => {
+    renderSheet(<TeamSettingsSheet team={TEAM} onClose={noop} />)
+    expect(
+      await screen.findByText("Rules are read on every turn by the team's agents and Boo Zero."),
+    ).toBeInTheDocument()
+    expect(
+      await screen.findByText(/Boo Zero reads it when a message in its own chat @mentions Acme/),
+    ).toBeInTheDocument()
+    // No team-chat turn reads the brief, so neither may the copy say so.
+    expect(screen.queryByText(/Brief \+ rules read on every turn/)).toBeNull()
+    expect(screen.queryByText(/whenever it operates in/)).toBeNull()
+  })
+
   it('closes on Escape', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()

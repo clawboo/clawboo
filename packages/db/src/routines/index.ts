@@ -20,6 +20,7 @@ export {
   queueRunNow,
   updateScheduledRun,
   deleteScheduledRun,
+  deleteScheduledRunsForAgent,
   reconcileScheduledRuns,
   type RegisterScheduledRunInput,
   type RegisterScheduledRunResult,

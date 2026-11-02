@@ -66,7 +66,7 @@ Most settings you change in the dashboard are rows in the `settings` table of `c
 | Setting                                                   | Where you change it                                                                            |
 | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
 | Default Clawboo Native provider and model                 | Onboarding, or **Make default** in the Clawboo Native providers list (**Settings > Runtimes**) |
-| Boo Zero's display name and global brief                  | Boo Zero's agent page, **Brief**                                                               |
+| Boo Zero's display name                                   | Boo Zero's agent page, **Brief**                                                               |
 | Team rules and your introduction to a team                | Team chat: `/rule`, the team's brief and rules sheet, the Know Your Team step                  |
 | Whether memory may use OpenAI for embeddings              | Memory, when no local Ollama embedding model is available                                      |
 | Custom connectors and connector arguments                 | Connectors                                                                                     |

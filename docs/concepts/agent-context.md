@@ -67,7 +67,6 @@ The message is the task's title. The task runner adds no team rules, teammate li
 - **Teammates' working steps.** A leader gets each teammate's final reply, not the transcript of how it got there.
 - **Your conversation, on a teammate's turn.** A teammate gets the task text the leader wrote for it, and not your introduction. A vague hand-off makes a vague task.
 - **The team brief.** Team-chat turns carry the team rules, not the brief. The brief reaches Boo Zero only when you mention the team (`@TeamName`) in Boo Zero's own chat.
-- **The global brief.** The brief under **Details** > **Brief** on Boo Zero's page is saved but not sent to any agent.
 - **Memory, on team-chat turns.** Nothing is added for them; agents look facts up with their memory tools. Only task-runner runs get facts added.
 - **The time of day.** Clawboo Native's setup carries today's date (in UTC), not the time.
 - **Tools a run cannot use.** A tool that is off is left out rather than refused. A Clawboo Native agent whose shell commands are off, for example, sees no command tool at all.

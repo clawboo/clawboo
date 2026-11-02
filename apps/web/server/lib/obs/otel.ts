@@ -37,6 +37,19 @@ let initStarted = false
 let tracer: ObsTracer | null = null
 let sdkRef: { shutdown?: () => Promise<unknown> } | null = null
 
+/** Why the exporter is not running although an endpoint is set. */
+export type OtelInitFailure = 'sdk-missing' | 'init-failed'
+let initFailure: OtelInitFailure | null = null
+
+/** A failed `import()` of the SDK means it is not installed (the npm package does
+ *  not ship it); anything else is the SDK itself failing to start. */
+export function classifyOtelInitError(err: unknown): OtelInitFailure {
+  const code = (err as { code?: unknown } | null)?.code
+  return code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND'
+    ? 'sdk-missing'
+    : 'init-failed'
+}
+
 export async function initOtel(): Promise<void> {
   if (initStarted) return
   initStarted = true
@@ -106,12 +119,18 @@ export async function initOtel(): Promise<void> {
     }
     process.once('SIGTERM', shutdown)
     process.once('beforeExit', shutdown)
-  } catch {
+  } catch (err) {
     // SDK absent (lean bundled CLI) or init failed → event-log-only.
     tracer = null
+    initFailure = classifyOtelInitError(err)
   }
 }
 
 export function getObsTracer(): ObsTracer | null {
   return tracer
+}
+
+/** Set only after `initOtel` ran with an endpoint configured and did not start. */
+export function getOtelInitFailure(): OtelInitFailure | null {
+  return initFailure
 }

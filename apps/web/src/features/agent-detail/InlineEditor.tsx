@@ -23,7 +23,6 @@ import { ExecSettings } from '@/features/settings/ExecSettings'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { DisplayNameEditor } from '@/features/boo-zero/DisplayNameEditor'
-import { GlobalBriefEditor } from '@/features/boo-zero/GlobalBriefEditor'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { Button } from '@/features/shared/Button'
 import { Spinner } from '@/features/shared/Spinner'
@@ -131,9 +130,8 @@ export function InlineEditor({
     return [...supported, ...extras]
   }, [agentRuntime, fileExists])
 
-  // The Brief tab is Boo-Zero-only — it holds the Display Name override + the
-  // Global Brief (Boo Zero's load-bearing identity surface). Other agents
-  // don't get the tab at all, so the tab strip stays clean.
+  // The Brief tab is Boo-Zero-only: it holds the Display Name override. Other
+  // agents don't get the tab at all, so the tab strip stays clean.
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const isBooZero = booZeroAgentId !== null && booZeroAgentId === agentId
   // Pull the latest display name from the fleet store so the editor sees
@@ -431,10 +429,10 @@ export function InlineEditor({
           </div>
         )}
 
-        {/* Brief tab — Boo Zero only (gated at allTabs construction).
-            Holds the Display Name override + the Global Brief — the
-            load-bearing identity surface that runs through every Boo
-            Zero turn. */}
+        {/* Brief tab, Boo Zero only (gated at allTabs construction). Holds the
+            Display Name override. It used to hold a Global Brief too, which
+            nothing ever read into a prompt; guidance Boo Zero must follow
+            belongs in a team's rules. */}
         {activeTab === 'brief' && isBooZero && (
           <div
             style={{
@@ -451,12 +449,6 @@ export function InlineEditor({
                 Display name
               </h3>
               <DisplayNameEditor agentId={agentId} currentName={liveAgentName} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
-                Global brief
-              </h3>
-              <GlobalBriefEditor />
             </div>
           </div>
         )}
@@ -481,7 +473,7 @@ export function InlineEditor({
               : activeTab === 'workspace'
                 ? `${agentName} · Workspace · read-only`
                 : activeTab === 'brief'
-                  ? `${agentName} · Brief — display name + global brief`
+                  ? `${agentName} · Brief · display name`
                   : AGENT_FILE_META[activeTab].hint}
         </span>
         <span>

@@ -388,6 +388,28 @@ export function mergeSoulWithCustomPersonality(
 }
 
 /**
+ * SOUL.md rebuilt from what `GET /api/personality` returned, or null when
+ * nothing usable is stored (leave the file as read).
+ *
+ * Custom text wins over the slider values, the same rule the Personality panel
+ * saves by: in custom mode the stored row keeps BOTH, so an editor that looked
+ * only at `values` replaced the custom block with the slider one and the next
+ * save wrote that over the user's own instructions.
+ */
+export function mergeSoulWithStoredPersonality(
+  existingContent: string,
+  stored: { values?: unknown; customText?: unknown },
+): string | null {
+  if (typeof stored.customText === 'string' && stored.customText.trim()) {
+    return mergeSoulWithCustomPersonality(existingContent, stored.customText)
+  }
+  if (stored.values && isPersonalityValues(stored.values)) {
+    return mergeSoulWithPersonality(existingContent, stored.values)
+  }
+  return null
+}
+
+/**
  * Type guard for personality values from SQLite JSON.
  */
 export function isPersonalityValues(obj: unknown): obj is PersonalityValues {

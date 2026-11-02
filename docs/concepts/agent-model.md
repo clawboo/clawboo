@@ -55,7 +55,7 @@ Usually Boo Zero belongs to no team, which is how it can preside over all of the
 
 If none of these exists, each chat is led by the team's Leader (below) when that agent is in the chat, and otherwise by the chat's first member. A team with no active members has no lead at all.
 
-To rename Boo Zero, open Boo Zero's own page and use its **Brief** tab. The briefs you can write for Boo Zero reach it less often than their names suggest: the global brief is saved but not read, and a team's brief is read only when you mention that team in Boo Zero's own chat. [Configure Boo Zero](/using/boo-zero) lists exactly what Boo Zero reads.
+To rename Boo Zero, open Boo Zero's own page and use its **Brief** tab. A team's brief reaches Boo Zero less often than its name suggests: it is read only when you mention that team in Boo Zero's own chat. [Configure Boo Zero](/using/boo-zero) lists exactly what Boo Zero reads.
 
 ## A team's Leader
 
@@ -75,7 +75,7 @@ On Clawboo Native, the Leader is set up as a lead. It gets the lead instructions
 - **Who an agent is**: its personality and files, on the agent's page. See [Manage agents](/using/agents).
 - **Its team**: set when you create it. **Create Boo** adds the new agent to the team you have selected. An agent belongs to one team at a time, or to none.
 - **Its runtime**: chosen once, when you create the agent or deploy its team.
-- **Boo Zero's name**: on Boo Zero's page. [Configure Boo Zero](/using/boo-zero) covers the name, the briefs, and which of them Boo Zero reads.
+- **Boo Zero's name**: on Boo Zero's page. [Configure Boo Zero](/using/boo-zero) covers the name, the team briefs, and when Boo Zero reads them.
 
 ## Limits
 
@@ -100,5 +100,5 @@ On Clawboo Native, the Leader is set up as a lead. It gets the lead instructions
 - [Teams, rooms and runtimes](/concepts/teams-and-planes): what a team shares and what each runtime keeps to itself.
 - [How work is delegated](/concepts/delegation-and-orchestration): how Boo Zero hands work to teammates.
 - [Choose a runtime](/runtimes/index): what each of the five runtimes is good at.
-- [Configure Boo Zero](/using/boo-zero): Boo Zero's name, global brief and team briefs.
+- [Configure Boo Zero](/using/boo-zero): Boo Zero's name and team briefs.
 - [Manage agents](/using/agents): create, edit and remove agents.

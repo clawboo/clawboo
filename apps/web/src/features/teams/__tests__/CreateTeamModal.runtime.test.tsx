@@ -390,6 +390,11 @@ describe('CreateTeamModal deploy', () => {
     // Coder deployed native (the override).
     const memberCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
     expect(memberCall[2]).toBe('clawboo-native')
+
+    // The skill list (TOOLS.md) goes to the OpenClaw member only; the server
+    // moves it into AGENTS.md there. A native agent would only store it unread.
+    expect((leaderCall[1] as { tools?: string }).tools).toBe('# tools')
+    expect((memberCall[1] as { tools?: string }).tools ?? '').toBe('')
   })
 
   it('tolerates one agent failing to create (continues; reports N of M)', async () => {

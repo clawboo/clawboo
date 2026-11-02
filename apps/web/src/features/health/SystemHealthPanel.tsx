@@ -291,7 +291,9 @@ export function SystemHealthPanel() {
                 value={
                   report.config.otelActive
                     ? 'OTel exporter active'
-                    : 'local event log (OTel opt-in)'
+                    : report.config.otelConfigured
+                      ? 'local event log (OTLP endpoint set, exporter not running)'
+                      : 'local event log (OTel opt-in)'
                 }
               />
             </SectionCard>

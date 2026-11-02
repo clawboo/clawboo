@@ -223,7 +223,7 @@ CLAWBOO_DB_PATH="$HOME/.clawboo/clawboo.db" clawboo-mcp-tasks
 ```
 
 - The memory bin looks for an embedding provider every 60 seconds: a local Ollama with `nomic-embed-text` at `http://localhost:11434`, then `OPENAI_API_KEY` when remote embeddings are allowed. With neither, memory search is keyword-only.
-- The tools bin offers the tools whose requirements its own environment meets, for example `web_search` only when `TAVILY_API_KEY` is set.
+- The tools bin offers the two built-in tools, `echo` and `note`, and `read_tool_result`. It has no connector tools.
 - A stdio caller has no Clawboo identity: TeamChat tools take the author and team as arguments.
 
 See [MCP servers](/operating/mcp-servers) to attach an outside agent and [MCP tools](/reference/mcp-tools) for every tool and its inputs.

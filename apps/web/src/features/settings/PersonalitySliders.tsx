@@ -61,6 +61,11 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   const [values, setValues] = useState<PersonalityValues>({ ...DEFAULT_VALUES })
   const [customMode, setCustomMode] = useState(false)
+  // Read by the slider handlers, which must do nothing in custom mode: a slider
+  // commit saves `customText: null` and rewrites SOUL.md, which would erase the
+  // custom instructions. A ref, so the memoized handlers see the current mode.
+  const customModeRef = useRef(false)
+  customModeRef.current = customMode
   const [customText, setCustomText] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -144,6 +149,9 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
 
   // handleChange: updates local state + marks dirty (no save call).
   const handleChange = useCallback((key: PersonalityKey, value: number) => {
+    // A dirty value is saved on agent switch WITHOUT customText, which the
+    // server reads as clearing it.
+    if (customModeRef.current) return
     setValues((prev) => {
       const next = { ...prev, [key]: value }
       dirtyRef.current = next
@@ -156,6 +164,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   const commitValues = useCallback(
     (next: PersonalityValues) => {
       if (!selectedAgentId) return
+      if (customModeRef.current) return
       setValues(next)
       dirtyRef.current = null
 
@@ -325,7 +334,12 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   return (
     <div className="space-y-6">
       {/* Sliders */}
+      {/* INERT, not just dimmed, in custom mode. `pointerEvents: none` stopped
+          the mouse but not the keyboard: Tab still reached a slider or preset,
+          and a key press saved the slider personality over the custom text. */}
       <div
+        inert={customMode}
+        data-testid="personality-slider-block"
         style={{
           opacity: customMode ? 0.3 : 1,
           pointerEvents: customMode ? 'none' : 'auto',

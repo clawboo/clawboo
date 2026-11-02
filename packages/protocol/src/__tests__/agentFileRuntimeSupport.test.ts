@@ -19,15 +19,11 @@ import {
 
 describe('agent file runtime support', () => {
   it('OpenClaw lists exactly the files clawboo seeds at agent creation', () => {
-    // openClawAgentSource.createAgent writes these four and only these four.
+    // openClawAgentSource.createAgent writes these three and only these three.
     // Listing a file here makes its tab ALWAYS visible, so the list has to stop
-    // at what clawboo itself puts there.
-    expect(agentFilesForRuntime('openclaw')).toEqual([
-      'SOUL.md',
-      'IDENTITY.md',
-      'TOOLS.md',
-      'AGENTS.md',
-    ])
+    // at what clawboo itself puts there. TOOLS.md is out: the 2026.9 Gateway
+    // refuses to read or write it, so its tab could only ever fail.
+    expect(agentFilesForRuntime('openclaw')).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENTS.md'])
     // Still the widest of the known runtimes.
     for (const rt of ['clawboo-native', 'claude-code', 'codex', 'hermes']) {
       expect(agentFilesForRuntime(rt).length).toBeLessThan(agentFilesForRuntime('openclaw').length)
@@ -61,12 +57,16 @@ describe('agent file runtime support', () => {
     }
   })
 
-  it('the unwired-but-seeded files stay OpenClaw-only', () => {
-    for (const name of ['IDENTITY.md', 'TOOLS.md'] as const) {
-      expect(agentFilesForRuntime('openclaw')).toContain(name)
-      for (const rt of ['clawboo-native', 'claude-code', 'codex', 'hermes']) {
-        expect(agentFilesForRuntime(rt)).not.toContain(name)
-      }
+  it('IDENTITY.md stays OpenClaw-only', () => {
+    expect(agentFilesForRuntime('openclaw')).toContain('IDENTITY.md')
+    for (const rt of ['clawboo-native', 'claude-code', 'codex', 'hermes']) {
+      expect(agentFilesForRuntime(rt)).not.toContain('IDENTITY.md')
+    }
+  })
+
+  it('no known runtime offers a TOOLS.md tab by default', () => {
+    for (const rt of Object.keys(AGENT_FILE_RUNTIME_SUPPORT)) {
+      expect(agentFilesForRuntime(rt)).not.toContain('TOOLS.md')
     }
   })
 

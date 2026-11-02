@@ -41,7 +41,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Boo Zero**: your team leader. One agent leads the chats of every team: it answers messages that @mention no one, and hands work to teammates. Clawboo creates it on Clawboo Native once you have a Clawboo Native agent on a team and a connected provider; otherwise it uses your OpenClaw Gateway's default agent. See [Boo Zero](/using/boo-zero).
 
-**Brief**: a team's short description, edited together with its rules. Boo Zero reads it only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Boo Zero's page also has a **Global Brief**, which Clawboo saves but does not use yet. See [Teams](/using/teams) and [Boo Zero](/using/boo-zero).
+**Brief**: a team's short description, edited together with its rules. Boo Zero reads it only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Guidance Boo Zero must follow on every turn belongs in the team's rules. See [Teams](/using/teams) and [Boo Zero](/using/boo-zero).
 
 **Budget**: a dollar limit on one agent, team or mission. In **warn only** mode, the default, Clawboo counts spend and warns you as the budget fills. In **hard cap** mode, which you opt into, it also pauses work at 100%: new runs are refused, though a run already going may finish first. No budget exists until you create one. See [Budgets and spend](/using/budgets-and-spend).
 

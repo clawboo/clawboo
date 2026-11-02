@@ -35,6 +35,7 @@ const REPORT = {
     budgetHardCapUsdCents: null,
     budgetWarnSoftPct: 80,
     otelEnabledByDefault: false,
+    otelConfigured: false,
     otelActive: false,
   },
   resolved: {
@@ -71,6 +72,26 @@ describe('SystemHealthPanel', () => {
     // Production-defaults posture is surfaced (track-and-warn, no hard cap).
     expect(screen.getByText(/track-and-warn/i)).toBeInTheDocument()
     expect(screen.getByText('/home/u/.clawboo/clawboo.db')).toBeInTheDocument()
+  })
+
+  it('says the exporter is not running when an endpoint is set but nothing started', async () => {
+    server.use(
+      http.get('/api/health', () =>
+        HttpResponse.json({
+          ...REPORT,
+          config: { ...REPORT.config, otelConfigured: true, otelActive: false },
+        }),
+      ),
+    )
+
+    render(<SystemHealthPanel />)
+
+    await waitFor(() =>
+      expect(
+        screen.getByText('local event log (OTLP endpoint set, exporter not running)'),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText('OTel exporter active')).not.toBeInTheDocument()
   })
 
   it('Re-run probe POSTs /api/health/recheck and re-renders the fresh report', async () => {

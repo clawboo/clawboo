@@ -1,13 +1,13 @@
 ---
 title: 'Boo Zero API'
 sidebarTitle: 'Boo Zero'
-description: "REST reference for Boo Zero's team briefs, global brief and display name, and the override that picks which agent is Boo Zero."
+description: "REST reference for Boo Zero's team briefs and display name, and the override that picks which agent is Boo Zero."
 keywords: ['misc', 'boo zero', 'team brief', 'global brief', 'display name', 'leader override']
 ---
 
-Boo Zero is your team leader: one agent that coordinates every team. These routes store the briefs written for it, a display name the dashboard shows for it, and the override that decides which agent is Boo Zero. Use this page when you script team setup or move the leader role to another agent.
+Boo Zero is your team leader: one agent that coordinates every team. These routes store the team briefs written for it, a display name the dashboard shows for it, and the override that decides which agent is Boo Zero. Use this page when you script team setup or move the leader role to another agent.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All nine routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
+Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All seven routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
 
 ## Routes
 
@@ -16,8 +16,6 @@ Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_T
 | GET    | `/api/boo-zero/team-briefs/:teamId`   | Read a team's brief                                         |
 | PUT    | `/api/boo-zero/team-briefs/:teamId`   | Save a team's brief                                         |
 | DELETE | `/api/boo-zero/team-briefs/:teamId`   | Remove a team's brief                                       |
-| GET    | `/api/boo-zero/global-brief`          | Read the global brief                                       |
-| PUT    | `/api/boo-zero/global-brief`          | Save the global brief                                       |
 | GET    | `/api/boo-zero/display-name/:agentId` | Read the display name saved for an agent                    |
 | PUT    | `/api/boo-zero/display-name/:agentId` | Save or clear that display name                             |
 | GET    | `/api/boo-zero/override`              | Read the leader override and the agent that is Boo Zero now |
@@ -27,12 +25,13 @@ Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_T
 
 A brief is markdown. A missing brief reads as `content: null`, not as a `404`; the dashboard then shows a generated default.
 
-| Brief  | Stored in                                               | Where it reaches a model                                                                                    |
-| ------ | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Team   | The `boo_zero_team_briefs` table, deleted with the team | Only in Boo Zero's 1:1 chat, when a message starts with `@TeamName`: the brief rides in that team's summary |
-| Global | The `settings` table, key `boo-zero:global-brief`       | Nowhere: it is stored and shown in its editor, and no chat or task sends it to a model                      |
+| Brief | Stored in                                               | Where it reaches a model                                                                                    |
+| ----- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Team  | The `boo_zero_team_briefs` table, deleted with the team | Only in Boo Zero's 1:1 chat, when a message starts with `@TeamName`: the brief rides in that team's summary |
 
-The dashboard edits the team brief from the team chat's settings sheet and the global brief from Boo Zero's own page; see [Boo Zero](/using/boo-zero).
+The dashboard edits the team brief from the team chat's settings sheet; see [Boo Zero](/using/boo-zero).
+
+There is no global brief. `GET` and `PUT /api/boo-zero/global-brief` were removed, so they answer like any unknown path: `404`, except that in a built app a `GET` returns the dashboard page (see [Requests and responses](/reference/rest-api/index#requests-and-responses)). A global brief an older version saved stays in the `settings` table under the key `boo-zero:global-brief`, and nothing reads it. Guidance Boo Zero must follow in a team belongs in that team's rules (`PUT /api/team-rules/:teamId` on the [Teams API](/reference/rest-api/teams)), which are read on every turn.
 
 ### `GET /api/boo-zero/team-briefs/:teamId`
 
@@ -96,50 +95,6 @@ Removes the team's brief. Removing a brief that does not exist still answers `20
 
 ```bash
 curl -X DELETE http://localhost:18790/api/boo-zero/team-briefs/<team-id>
-```
-
-### `GET /api/boo-zero/global-brief`
-
-#### Responses
-
-**`200 OK`**: the stored brief, or `null` content when unset. `updatedAt` is always `null` on this route:
-
-```ts
-{ content: string | null, updatedAt: null }
-```
-
-**`500 Internal Server Error`**: a database failure, `{ "error": "<message>" }`.
-
-#### Example
-
-```bash
-curl http://localhost:18790/api/boo-zero/global-brief
-```
-
-### `PUT /api/boo-zero/global-brief`
-
-Creates or replaces the global brief.
-
-- **Request body**: `{ "content": string }` (required).
-
-#### Responses
-
-**`200 OK`**: `updatedAt` is the time of the save:
-
-```ts
-{ content: string, updatedAt: number }
-```
-
-**`400 Bad Request`**: `{ "error": "content (string) required" }`.
-
-**`500 Internal Server Error`**: a database failure, `{ "error": "<message>" }`.
-
-#### Example
-
-```bash
-curl -X PUT http://localhost:18790/api/boo-zero/global-brief \
-  -H 'Content-Type: application/json' \
-  -d '{"content":"# Global brief\n\nKeep every team focused on the launch."}'
 ```
 
 ## Display name
@@ -286,7 +241,7 @@ curl -X POST http://localhost:18790/api/boo-zero/override \
 
 ## Related
 
-- [Boo Zero](/using/boo-zero): where the dashboard edits the briefs and the display name
+- [Boo Zero](/using/boo-zero): where the dashboard edits the display name, and when Boo Zero reads a team's brief
 - [Teams API](/reference/rest-api/teams): team rules, rooms, and the team activity summary
 - [Agents API](/reference/rest-api/agents): `defaultId` in `GET /api/agents` is the agent this page calls Boo Zero
 - [Agent model](/concepts/agent-model): Boo Zero and a team's own Leader
