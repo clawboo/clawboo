@@ -102,6 +102,28 @@ export function withBrowsingGuidance(existing: string | undefined | null): strin
 }
 
 /**
+ * One level deeper for every markdown heading, so a TOOLS.md's own headings sit
+ * below the "## Tools" heading they are moved under. Lines inside a fenced code
+ * block are left alone: a `# comment` in a shell snippet is not a heading.
+ */
+function demoteHeadings(md: string): string {
+  let fence: { ch: string; len: number } | null = null
+  return md
+    .split('\n')
+    .map((line) => {
+      const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1]
+      if (marker) {
+        // A fence closes on the same character, at least as long as it opened.
+        if (!fence) fence = { ch: marker[0]!, len: marker.length }
+        else if (marker[0] === fence.ch && marker.length >= fence.len) fence = null
+        return line
+      }
+      return fence ? line : line.replace(/^(#{1,5}) /, '#$1 ')
+    })
+    .join('\n')
+}
+
+/**
  * Move an agent's TOOLS.md notes into its AGENTS.md, for an OpenClaw Gateway.
  *
  * The 2026.9 Gateway no longer loads TOOLS.md into the agent's context and
@@ -118,11 +140,7 @@ export function foldToolsIntoAgentsMd(
   toolsMd: string | undefined | null,
 ): string {
   const agents = agentsMd ?? ''
-  const body = (toolsMd ?? '')
-    .replace(/^\s*#\s+TOOLS\b[^\n]*\n?/i, '')
-    .trim()
-    // Keep the notes' own headings below the new "## Tools" heading.
-    .replace(/^(#{1,5}) /gm, '#$1 ')
+  const body = demoteHeadings((toolsMd ?? '').replace(/^\s*#\s+TOOLS\b[^\n]*\n?/i, '').trim())
   if (!body || agents.includes(body)) return agents
   const section = `## Tools\n\n${body}\n`
   return agents.trim() ? `${agents.trimEnd()}\n\n${section}` : section

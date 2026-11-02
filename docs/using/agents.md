@@ -198,7 +198,7 @@ Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo ru
 - **On the Org chart or a team graph:** right-click the agent's Boo, then **Delete**. It deletes at once, with no confirmation.
 - **In the all-agents list:** right-click Boo Zero's mascot and choose **Show all agents**. Hover the agent's row, click the trash icon, then confirm. The prompt warns **This cannot be undone.**
 
-Deleting removes the agent, its files, its personality, its own chat history and the routines that send work to it. Team routines stay. It works without the OpenClaw Gateway. An OpenClaw agent leaves Clawboo at once, and leaves the Gateway at once too, or the next time Clawboo connects if the Gateway is offline. If the Gateway refuses the delete (it will not delete its only agent), the agent comes back.
+Deleting removes the agent, its files, its personality, its own chat history and the routines that send work to it. Team routines stay. It works without the OpenClaw Gateway. An OpenClaw agent leaves Clawboo at once, and leaves the Gateway at once too, or the next time Clawboo connects if the Gateway is offline. If the Gateway refuses the delete (it will not delete its only agent), the agent comes back. That is why an OpenClaw agent deleted while the Gateway is offline keeps its routines until the Gateway confirms the delete.
 
 ## Troubleshooting
 

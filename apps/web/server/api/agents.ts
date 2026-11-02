@@ -532,7 +532,6 @@ function deleteLocalAgentRows(agentId: string): void {
     .where(like(settings.key, nativeTeamSessionKeysForAgentLike(agentId)))
     .run()
   db.delete(agents).where(eq(agents.id, agentId)).run()
-  deleteAgentRoutines([agentId])
 }
 
 export async function agentsDELETE(req: Request, res: Response): Promise<void> {
@@ -557,6 +556,10 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
         const openClaw = getRegistry().source
         const pending = source === openClaw && openClaw.deferUpstreamDelete(agentId)
         deleteLocalAgentRows(agentId)
+        // Its routines stay while the Gateway delete is only owed: a Gateway that
+        // refuses it brings the agent back on the next sync, and the routines
+        // must still be there. The source deletes them once the delete settles.
+        if (!pending) deleteAgentRoutines([agentId])
         res.json({ ok: true, upstreamDeleted: false, upstreamDeletePending: pending })
         return
       }

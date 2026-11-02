@@ -13,7 +13,9 @@ import {
   agents,
   approvalHistory,
   costRecords,
+  deleteScheduledRunsForAgent,
   getSetting,
+  scheduledRuns,
   setSetting,
   settings,
   teams,
@@ -791,7 +793,12 @@ export class OpenClawAgentSource implements AgentSource {
     for (const gatewayId of pendingUpstreamDeletes(db)) {
       try {
         await client.agents.delete(gatewayId)
+        // The tombstone holds the Clawboo id. Its routines were kept while the
+        // delete was only owed, because a refusal brings the agent back; now
+        // that the Gateway has deleted it, they go.
+        const clawbooId = getSetting(db, PENDING_DELETE_PREFIX + gatewayId) ?? gatewayId
         clearPendingDelete(db, gatewayId)
+        deleteScheduledRunsForAgent(db, clawbooId)
         deleted.add(gatewayId)
       } catch (err) {
         if (isDeleteRefusal(err)) {
@@ -896,9 +903,25 @@ export class OpenClawAgentSource implements AgentSource {
         for (const id of missing) this.emit({ kind: 'agent-archived', at: now, agentId: id })
       }
 
-      // A tombstoned agent the Gateway no longer lists needs no delete.
+      // A tombstoned agent the Gateway no longer lists needs no delete. It is gone
+      // for good, so the routines kept while its delete was owed go with it.
       const settled = [...pending].filter((id) => !listedIds.has(id))
       if (settled.length > 0) {
+        const settledIds = tx
+          .select({ value: settings.value })
+          .from(settings)
+          .where(
+            inArray(
+              settings.key,
+              settled.map((id) => PENDING_DELETE_PREFIX + id),
+            ),
+          )
+          .all()
+          .map((r) => r.value)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+        if (settledIds.length > 0) {
+          tx.delete(scheduledRuns).where(inArray(scheduledRuns.agentId, settledIds)).run()
+        }
         tx.delete(settings)
           .where(
             inArray(

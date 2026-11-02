@@ -1,13 +1,14 @@
 // Boo Zero brief management — *redirected*.
 //
-// History note: this panel used to host four editors (Display Name, Global
-// Brief, Per-Team Briefs, Team Rules) in the System view. That conflated
-// agent-scoped surfaces (Display Name + Global Brief belong to Boo Zero) with
-// team-scoped surfaces (Per-Team Brief + Team Rules belong to each team).
+// History note: this panel used to host the Boo Zero editors (Display Name,
+// Per-Team Briefs, Team Rules) in the System view. That conflated the
+// agent-scoped surface (Display Name belongs to Boo Zero) with team-scoped
+// surfaces (Per-Team Brief + Team Rules belong to each team). There is no
+// Global Brief any more: it was saved but never read, and it was removed.
 //
 // The editors have moved to where their data actually lives:
-//   • Display Name + Global Brief → Boo Zero's individual agent view, in
-//     the new `Brief` tab (visible only when viewing Boo Zero).
+//   • Display Name → Boo Zero's individual agent view, in the `Brief` tab
+//     (visible only when viewing Boo Zero).
 //   • Per-Team Brief + Team Rules → each team's settings sheet, opened from
 //     the gear icon on the team chat header.
 //
@@ -136,7 +137,7 @@ export function BooZeroBriefsPanel() {
       <RedirectLink
         icon={booZeroAgent ? <BooAvatar seed={booZeroAgent.id} size={26} isBooZero /> : null}
         iconTinted={false}
-        title="Boo Zero — Display name & Global brief"
+        title="Boo Zero: Display name"
         description="Live in the Boo Zero agent view, in the Brief tab."
         cta="Open Boo Zero"
         onClick={handleOpenBooZeroBrief}

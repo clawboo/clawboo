@@ -27,6 +27,40 @@ describe('foldToolsIntoAgentsMd', () => {
     expect(foldToolsIntoAgentsMd(once, TOOLS)).toBe(once)
   })
 
+  it('leaves lines inside fenced code alone', () => {
+    const tools = [
+      '# TOOLS',
+      '',
+      '## Deploy',
+      '```bash',
+      '# build first',
+      'make build',
+      '```',
+      '~~~',
+      '## not a heading either',
+      '~~~',
+      '### After',
+    ].join('\n')
+    expect(foldToolsIntoAgentsMd('# AGENTS\n', tools)).toBe(
+      [
+        '# AGENTS',
+        '',
+        '## Tools',
+        '',
+        '### Deploy',
+        '```bash',
+        '# build first',
+        'make build',
+        '```',
+        '~~~',
+        '## not a heading either',
+        '~~~',
+        '#### After',
+        '',
+      ].join('\n'),
+    )
+  })
+
   it('works when there is no AGENTS.md yet', () => {
     expect(foldToolsIntoAgentsMd(undefined, '# TOOLS\n\nUse the staging SSH alias.\n')).toBe(
       '## Tools\n\nUse the staging SSH alias.\n',

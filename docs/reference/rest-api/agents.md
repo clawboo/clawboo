@@ -312,7 +312,7 @@ curl http://localhost:18790/api/agents/registry/health
 
 ## `POST /api/agents/cleanup-ghosts`
 
-A one-shot cleanup the dashboard runs after it loads the Gateway's agent list. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows, its per-agent settings and the routines that target it. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
+A cleanup for scripts and manual recovery. The dashboard does not call it: it pushes the Gateway's list to `POST /api/agents/sync`, which archives agents missing from the list and deletes nothing. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows, its per-agent settings and the routines that target it. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
 
 - **Path params**: none.
 - **Query params**:
@@ -414,7 +414,7 @@ curl http://localhost:18790/api/agents/<agent-id>
 
 ## `DELETE /api/agents/:agentId`
 
-Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it, and deletes every routine that targets the agent (team routines target no agent and stay). If the Gateway connection is down, the local rows and routines are removed anyway.
+Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it, and deletes every routine that targets the agent (team routines target no agent and stay). If the Gateway connection is down, the local rows are removed anyway, but an OpenClaw agent's routines stay until its Gateway delete settles (see the note below): the Gateway can refuse the delete and bring the agent back.
 
 <Note>
 

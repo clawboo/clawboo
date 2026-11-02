@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 200 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 201 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 

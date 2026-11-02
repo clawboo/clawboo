@@ -9,7 +9,14 @@ import type { IncomingMessage } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, getSetting, setSetting, teams } from '@clawboo/db'
+import {
+  agents,
+  getScheduledRun,
+  getSetting,
+  registerScheduledRun,
+  setSetting,
+  teams,
+} from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -373,6 +380,79 @@ describe('OpenClawAgentSource', () => {
       await src.sync()
       expect(deleteCalls).toBe(1)
       await src.stop()
+    })
+
+    // An owed delete is not a delete yet. DELETE /api/agents/:id keeps the
+    // agent's routines while the Gateway is down, so they have to go only once
+    // the delete settles, and stay when the Gateway refuses it.
+    function routineFor(agentId: string): string {
+      const r = registerScheduledRun(getDb(), {
+        agentId,
+        teamId: null,
+        cronSpec: '0 9 * * *',
+        taskTemplate: '{}',
+        nextRunAt: Date.now() + 60_000,
+      })
+      if (!r.ok) throw new Error(r.reason)
+      return r.run.id
+    }
+
+    it("keeps the agent's routines when the Gateway refuses the delete", async () => {
+      const fake = syncedGateway()
+      fake.agents.delete = (agentId: string) =>
+        Promise.reject(
+          new GatewayResponseError({
+            code: 'INVALID_REQUEST',
+            message: `Agent "${agentId}" is the only configured agent and cannot be deleted.`,
+          }),
+        )
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      const routine = routineFor('a2')
+      deleteOffline(src, 'a2')
+
+      await src.start()
+      expect(await src.getAgent('a2')).not.toBeNull()
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+      await src.stop()
+    })
+
+    it("deletes the agent's routines once the Gateway accepts the delete", async () => {
+      const fake = syncedGateway()
+      fake.agents.delete = (agentId: string) => {
+        fake.list.agents = fake.list.agents.filter((a) => a.id !== agentId)
+        return Promise.resolve()
+      }
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      const routine = routineFor('a2')
+      const other = routineFor('a1')
+      deleteOffline(src, 'a2')
+      // Owed, not done: nothing is deleted while the Gateway is away.
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+
+      await src.start()
+      expect(getScheduledRun(getDb(), routine)).toBeNull()
+      expect(getScheduledRun(getDb(), other)).not.toBeNull()
+      await src.stop()
+    })
+
+    it("deletes the agent's routines once the Gateway no longer lists it", async () => {
+      const src = makeSource(new FakeGateway())
+      insertOpenClawRow('a2', 'gw-a2')
+      const routine = routineFor('a2')
+      deleteOffline(src, 'a2')
+
+      src.upsertFromList([{ id: 'a1' }, { id: 'gw-a2' }], {
+        defaultId: 'a1',
+        mainKey: 'main',
+        scope: '',
+      })
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+      src.upsertFromList([{ id: 'a1' }], { defaultId: 'a1', mainKey: 'main', scope: '' })
+      expect(getScheduledRun(getDb(), routine)).toBeNull()
     })
 
     it('records nothing for an id with no OpenClaw row', () => {

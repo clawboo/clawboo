@@ -189,7 +189,7 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect((list.body() as { pendingDeleteIds: string[] }).pendingDeleteIds).toEqual([])
   })
 
-  it("DELETE /api/agents/:id removes the agent's routines and leaves other routines alone", async () => {
+  it("DELETE /api/agents/:id removes the agent's routines once the delete is done, and leaves other routines alone", async () => {
     const db = getDb()
     const routineFor = (agentId: string) => {
       const r = registerScheduledRun(db, {
@@ -220,10 +220,23 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect(getScheduledRun(db, nativeRoutine)).toBeNull()
     expect(getScheduledRun(db, openClawRoutine)).not.toBeNull()
 
-    // The disconnected fallback (SQLite-only cleanup) takes them too.
+    // With the Gateway down the delete is only owed. A Gateway that refuses it
+    // brings the agent back, so its routines stay until the delete settles.
     const delOpenClaw = mockRes()
     await agentsDELETE(req({ params: { agentId: 'a1' } }), delOpenClaw.res)
-    expect((delOpenClaw.body() as { upstreamDeleted: boolean }).upstreamDeleted).toBe(false)
+    expect(delOpenClaw.body()).toMatchObject({
+      upstreamDeleted: false,
+      upstreamDeletePending: true,
+    })
+    expect(getScheduledRun(db, openClawRoutine)).not.toBeNull()
+
+    // The Gateway's list comes back without it: settled, and the routines go.
+    const sync = mockRes()
+    await agentsSyncPOST(
+      req({ body: { defaultId: 'main', mainKey: 'main', agents: [{ id: 'main' }] } }),
+      sync.res,
+    )
+    expect(sync.status()).toBe(200)
     expect(getScheduledRun(db, openClawRoutine)).toBeNull()
 
     // A team routine targets no agent and survives both.
