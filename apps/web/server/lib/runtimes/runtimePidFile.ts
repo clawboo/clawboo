@@ -19,7 +19,7 @@
 //   rewrites another's records.
 // - FAIL CLOSED. A child is signalled only when the boot matches AND the process
 //   holding its pid is shown to have started before our record (within
-//   `START_TIME_SLACK_MS`). The connector reap still signals when this host
+//   `CHILD_START_TIME_SLACK_MS`). The connector reap still signals when this host
 //   cannot report start times at all; this one does not: a runtime reap is a
 //   whole-tree kill of an agent, so a pid that cannot be shown to still be ours
 //   is left alone and counted.
@@ -41,6 +41,19 @@ import {
   type StartTimes,
 } from '../processIdentity'
 import { killProcessTreeByPid } from './killTree'
+
+/**
+ * How far after a child's record the process holding its pid may have started
+ * and still be that child.
+ *
+ * The record is written as soon as the spawn returns, so the child really
+ * started a moment BEFORE it. This only absorbs `ps` reporting start times to
+ * the second. It is much tighter than the connectors' `START_TIME_SLACK_MS`,
+ * whose records are written after a handshake: a match here kills a whole
+ * process tree, so a process that took a recycled pid shortly after the record
+ * must not pass.
+ */
+export const CHILD_START_TIME_SLACK_MS = 5_000
 
 /** The engine process that wrote a record file. */
 interface EngineIdentity {
@@ -308,7 +321,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       // A recycled pid started AFTER we recorded the original; ours started just
       // before. No answer for a pid that was alive a moment ago means it is gone.
       const startedAt = probe.times.get(child.pid)
-      if (startedAt === undefined || startedAt > child.startedAt + START_TIME_SLACK_MS) {
+      if (startedAt === undefined || startedAt > child.startedAt + CHILD_START_TIME_SLACK_MS) {
         report.expired += 1
         continue
       }

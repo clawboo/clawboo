@@ -184,6 +184,22 @@ describe('boot reap of runtime children', () => {
     expect(alive(stranger)).toBe(true)
   })
 
+  it('does not signal a pid whose process started half a minute after the record', () => {
+    // A record is written as soon as the spawn returns, so a process that took
+    // the pid even seconds later is not the child: killing it would take a
+    // stranger's whole process tree.
+    const stranger = spawnSleeper()
+    writeEngineFile('gone.json', {
+      owner: goneEngine(),
+      children: [{ pid: stranger, startedAt: Date.now() - 30_000 }],
+    })
+    const killed: number[] = []
+    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    expect(killed).toEqual([])
+    expect(report.expired).toBe(1)
+    expect(alive(stranger)).toBe(true)
+  })
+
   it('leaves the runs of an engine that is still running', () => {
     // Two engines can share a state dir. A live sleeper stands in for the other
     // engine, recorded with the start time it really has.
