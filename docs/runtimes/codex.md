@@ -56,7 +56,7 @@ You should see the row read **Connected**. The same sign-in is on **Settings** >
 
 <Step title="Put Codex agents on a team">
 
-Create a team, and in **Customize team** set a member's runtime to **Codex**, then deploy the team. You can pick Codex there only while its row reads **Connected**; until then it is greyed out with "Connect in Runtimes". See [Teams](/using/teams) for the full flow.
+Create a team, and in **Customize team** set a member's runtime to **Codex**, then deploy the team. You can pick Codex there only while its row reads **Connected**; until then it is greyed out with "Connect in Runtimes". When Codex is the only runtime you have connected, for example after signing in with ChatGPT with no API key, a Marketplace team's members already start on Codex. See [Teams](/using/teams) for the full flow.
 
 </Step>
 

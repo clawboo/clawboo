@@ -21,6 +21,16 @@ describe('system-of-record scaffold', () => {
     expect(md).toContain('- [ ] Feature X works')
   })
 
+  it('tells the agent to set VERIFY_CMD when the task has no verify command yet', () => {
+    const md = renderTaskMd({ ...scaffoldInput('abc'), commands: undefined })
+    expect(md).toContain('Set `VERIFY_CMD` in `init.sh` to the command that proves the work')
+    expect(md).toContain('the placeholder it starts with counts as a failed check')
+    // With a command given, it says the command is what checks the work.
+    expect(renderTaskMd(scaffoldInput('abc'))).toContain(
+      'Make sure `VERIFY_CMD` in `init.sh` still proves the work',
+    )
+  })
+
   it('renders a fail-loud, runtime-agnostic init.sh with the configured commands', () => {
     const sh = renderInitSh(scaffoldInput())
     expect(sh).toContain('#!/usr/bin/env bash')

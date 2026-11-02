@@ -44,11 +44,16 @@ export interface RuntimeDescriptor {
   packageManager: 'npm' | 'pip' | null
   /** Package to install (`npm install -g <pkg>` / `pip|pipx install <pkg>`). */
   pkg: string | null
-  /** For a `pip` runtime: the minimum Python 3 MINOR version the package needs
-   *  (e.g. 11 for `>=3.11`). The installer resolves a matching interpreter,
-   *  preferring version-specific binaries over the bare `python3` (which on a
-   *  fresh macOS is the Xcode Command Line Tools Python 3.9 — too old). */
+  /** For a `pip` runtime: the lowest Python 3 MINOR version the package installs
+   *  on (e.g. 11 for `>=3.11`). The installer resolves an interpreter inside
+   *  `pythonMinMinor`..`pythonMaxMinor`, preferring version-specific binaries
+   *  over the bare `python3` (which on a fresh macOS is the Xcode Command Line
+   *  Tools Python 3.9, too old). */
   pythonMinMinor?: number
+  /** For a `pip` runtime: the highest Python 3 MINOR version the package installs
+   *  on (e.g. 13 for `<3.14`). Omitted = no upper bound. Without it the installer
+   *  would take the newest Python it finds, so a 3.14 would win over a 3.12. */
+  pythonMaxMinor?: number
   /** Human-readable install command (UI + error remediation). */
   installCommand: string | null
   /** Ships inside the clawboo server — always installed, never installable. */
@@ -112,10 +117,12 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     // separate install. Confirmed against the installed CLI (`--provider
     // anthropic` errors "the 'anthropic' package is required" without it).
     pkg: 'hermes-agent[anthropic]<1',
-    // hermes-agent requires Python >=3.11,<3.14. A fresh macOS `python3` is the
-    // Xcode CLT Python 3.9, which requires-python excludes → pip reports
-    // "(from versions: none)". The installer resolves a 3.11+ interpreter first.
+    // hermes-agent requires Python >=3.11,<3.14. An interpreter outside that range
+    // (a fresh macOS `python3` is the Xcode CLT Python 3.9; Homebrew's newest is
+    // 3.14) makes pip report "(from versions: none)", so the installer resolves a
+    // 3.11 to 3.13 interpreter first.
     pythonMinMinor: 11,
+    pythonMaxMinor: 13,
     installCommand: "pipx install 'hermes-agent[anthropic]<1'",
     builtIn: false,
     authKind: 'api-key',
@@ -169,6 +176,44 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
 
 export function getDescriptor(id: NonOpenClawRuntimeId): RuntimeDescriptor {
   return RUNTIME_DESCRIPTORS[id]
+}
+
+/** Every vault slot a runtime reads: its primary key, then its alternatives. */
+export function runtimeKeySlots(d: RuntimeDescriptor): string[] {
+  return [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
+}
+
+export interface DisconnectPlan {
+  /** Stored keys a full disconnect deletes: no other runtime reads them. */
+  removes: string[]
+  /** Stored keys it keeps, with the other runtimes (by name) that read each one. */
+  keeps: { envVar: string; sharedWith: string[] }[]
+}
+
+/**
+ * What a full Disconnect of `id` does to the vault. The vault holds one copy of
+ * each provider key for every runtime, so a slot another runtime also reads stays
+ * (this runtime just stops using it), and only a slot nobody else reads is
+ * deleted. `deletes` is every such slot, stored or not; `plan` lists only the
+ * slots that hold a key, which is what the confirm names.
+ */
+export function disconnectPlanFor(
+  id: NonOpenClawRuntimeId,
+  stored: (envVar: string) => boolean,
+): { deletes: string[]; plan: DisconnectPlan } {
+  const others = (Object.keys(RUNTIME_DESCRIPTORS) as NonOpenClawRuntimeId[])
+    .filter((other) => other !== id && other !== 'clawboo-mock')
+    .map((other) => RUNTIME_DESCRIPTORS[other])
+  const deletes: string[] = []
+  const plan: DisconnectPlan = { removes: [], keeps: [] }
+  for (const envVar of runtimeKeySlots(RUNTIME_DESCRIPTORS[id])) {
+    const sharedWith = others.filter((o) => runtimeKeySlots(o).includes(envVar)).map((o) => o.name)
+    if (sharedWith.length === 0) deletes.push(envVar)
+    if (!stored(envVar)) continue
+    if (sharedWith.length === 0) plan.removes.push(envVar)
+    else plan.keeps.push({ envVar, sharedWith })
+  }
+  return { deletes, plan }
 }
 
 export function isRuntimeId(id: string): id is NonOpenClawRuntimeId {

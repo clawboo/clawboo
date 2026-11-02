@@ -49,7 +49,7 @@ Nobody checks writing work automatically. A task that finishes in team chat goes
 
 You should see **Team deployed!**, and then the team's **General** chat opens.
 
-With no OpenClaw Gateway connected, each row reads **OpenClaw unavailable · using Clawboo Native**. That is expected: the team runs on Clawboo Native. If you only signed in with ChatGPT, set every row to **Codex** before you click **Deploy team**, because Clawboo Native needs an API key or Ollama. A member's runtime cannot be changed after the deploy.
+With no OpenClaw Gateway connected, each row reads **OpenClaw unavailable · using** and names the runtime it uses instead: Clawboo Native when you have an API key or Ollama, or **Codex** if you only signed in with ChatGPT. That is expected. A member's runtime cannot be changed after the deploy.
 
 <Frame caption="The Teams tab of the Marketplace. Marketing Squad and Research Lab are built in, so they are there even offline.">
   ![The Marketplace Teams tab with team cards, each with Details and Deploy buttons](/images/team-gallery.png)
@@ -176,11 +176,11 @@ To copy a result, select the text and copy it (`Cmd/Ctrl + C`). There is no expo
 
 <AccordionGroup>
 
-<Accordion title="Every member reads OpenClaw unavailable · using Clawboo Native">
+<Accordion title="Every member reads OpenClaw unavailable">
 
-**What it means:** a marketplace team suggests OpenClaw, and no OpenClaw Gateway is connected, so each member falls back to Clawboo Native.
+**What it means:** a marketplace team suggests OpenClaw, and no OpenClaw Gateway is connected, so each member uses the first runtime you have connected instead: Clawboo Native, Claude Code, Codex or Hermes, in that order.
 
-**Fix:** nothing, if Clawboo Native is what you want. To run the members on OpenClaw, set up OpenClaw first (see [OpenClaw](/runtimes/openclaw)), then deploy the team.
+**Fix:** nothing, if that runtime is what you want. To run the members on OpenClaw, set up OpenClaw first (see [OpenClaw](/runtimes/openclaw)), then deploy the team.
 
 </Accordion>
 

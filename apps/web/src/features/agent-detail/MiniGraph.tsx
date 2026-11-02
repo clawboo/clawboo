@@ -38,7 +38,7 @@ import {
   type LooseNodeData,
 } from '@/features/graph/looseNodes'
 import { agentAlreadyHas, attachLooseToAgent } from '@/features/graph/operations/attachLoose'
-import { useFleetStore } from '@/stores/fleet'
+import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
@@ -46,6 +46,7 @@ import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
 import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
+import { hermesModelSave, hermesPlanModelNote } from '@/lib/hermesModelCatalog'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
@@ -765,7 +766,13 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
   const addToast = useToastStore((s) => s.addToast)
   // Native model groups with the OpenRouter list fetched live (shared, cached query).
   const nativeGroups = useNativeModelGroups()
+  // Hermes: the live OpenRouter list. A Hermes agent on the ChatGPT subscription
+  // gets a note with its current model instead of a switch: the plan's model list
+  // is live-only and this page has no source for it, and an OpenRouter pick would
+  // move the agent off its plan.
   const hermesGroups = useHermesModelGroups()
+  const hermesPlanNote =
+    agent?.runtime === 'hermes' ? hermesPlanModelNote(agent.execConfig, agent.model ?? null) : null
 
   // ── Default model (fetched once, shared with the graph's model orbital) ────
   const defaultModel = useOpenclawDefaultModel()
@@ -788,15 +795,36 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
   const handleModelChange = useCallback(
     async (model: string | null, groupProvider?: string) => {
       if (!agent) return
+      // Hermes persists its execConfig `{ provider, model }` via the model route. A
+      // pick from the OpenRouter group sends `openrouter`. A typed custom id sends
+      // none (the server keeps the agent's current provider) unless it carries the
+      // `openai-codex/` prefix. The fleet store holds the stored form: the bare
+      // model and its provider.
+      if (agent.runtime === 'hermes') {
+        const save = model ? hermesModelSave(model, groupProvider !== undefined) : null
+        if (!save) return
+        const fleet = useFleetStore.getState()
+        fleet.updateAgentModel(agent.id, save.model)
+        if (save.provider) {
+          fleet.updateExecConfig(agent.id, {
+            ...(agent.execConfig ?? {}),
+            provider: save.provider,
+            model: save.model,
+          } as unknown as AgentState['execConfig'])
+        }
+        try {
+          await setAgentModel(agent.id, save.model, save.provider)
+        } catch {
+          addToast({ message: 'Failed to save model', type: 'error' })
+        }
+        return
+      }
       // Update fleet store immediately
       useFleetStore.getState().updateAgentModel(agent.id, model)
       // Native agents: persist to the AgentConfig via the native route (no Gateway
       // session — the next run reads primaryModel). Native has no "revert to default",
       // so `model` is always a concrete id here (the selector hides the Default row).
-      // Native + Hermes persist a per-agent model via the model route (native → its
-      // AgentConfig primaryModel; Hermes → its execConfig `{ provider, model }`, routed
-      // via OpenRouter). Both have no "revert to default", so `model` is a concrete id.
-      if (agent.runtime === 'clawboo-native' || agent.runtime === 'hermes') {
+      if (agent.runtime === 'clawboo-native') {
         if (model) {
           try {
             // The picker offers every provider's models, so a native pick sends the
@@ -806,10 +834,9 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
             // whose ids are the provider's verbatim ones, so an id lookup would
             // miss nearly all of them. No group (the custom-id input) means no
             // provider, which leaves the agent's provider untouched.
-            const provider =
-              agent.runtime === 'clawboo-native' && groupProvider
-                ? (nativeProviderIdForGroup(groupProvider) ?? undefined)
-                : undefined
+            const provider = groupProvider
+              ? (nativeProviderIdForGroup(groupProvider) ?? undefined)
+              : undefined
             await setAgentModel(agent.id, model, provider)
             // The stored provider decides whether this agent's key slot resolves,
             // so re-read the registry to refresh `providerReady` (the badge would
@@ -878,6 +905,7 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
           <AgentModelControl
             runtime={agent.runtime}
             currentModel={agent.model ?? null}
+            note={hermesPlanNote}
             defaultModel={defaultModel}
             onModelChange={handleModelChange}
             {...(agent.runtime === 'clawboo-native'

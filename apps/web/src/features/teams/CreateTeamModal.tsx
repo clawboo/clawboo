@@ -238,8 +238,8 @@ export function CreateTeamModal({
   // sets status='connected' with client=null and no Gateway — so the registry-health
   // signal is the accurate "OpenClaw is reachable" test, and it's what lets OpenClaw be
   // picked in thin-client / degraded-gateway mode (browser client null, server operator
-  // connection live). When NEITHER is connected, marketplace rows degrade to Native so a
-  // deploy still succeeds Gateway-free.
+  // connection live). When NEITHER is connected, marketplace rows fall back to the
+  // first connected runtime so a deploy still works Gateway-free.
   const openclawConnected =
     (connStatus === 'connected' && client !== null) || serverOpenclawConnected
   const openSettings = useSettingsModalStore((s) => s.openSettings)
@@ -288,7 +288,8 @@ export function CreateTeamModal({
   // ── Runtime selection (PER-AGENT) ───────────────────────────────────────────
   // There is no single "team runtime": every agent picks its own runtime, defaulting
   // to the catalog "chef's suggestion" (a marketplace team → OpenClaw; a blank team →
-  // Native), degraded to Native when unavailable. The universal Boo Zero leads any mix.
+  // Native), moved to the first connected runtime when unavailable. The universal Boo
+  // Zero leads any mix.
   const [runtimeStatuses, setRuntimeStatuses] = useState<RuntimeStatus[]>([])
   // Hermes picker groups: live OpenRouter + (when a hermes ChatGPT login is
   // detected — `codexAuth` on the fetched status) the subscription group. An
@@ -452,8 +453,9 @@ export function CreateTeamModal({
       }),
     [selectedProfile, isMarketplaceTeam, preferRuntime],
   )
-  /** The resolved default = the suggestion degraded to Native when unavailable;
-   *  `.degradedFrom` is non-null when it was degraded (drives the inline note). */
+  /** The resolved default = the suggestion, or the first connected runtime when the
+   *  suggestion is unavailable; `.degradedFrom` is non-null when it moved (drives the
+   *  inline note). */
   const resolvedDefaultFor = useCallback(
     (agentCatalogId: string) => resolveDefaultRuntime(suggestedFor(agentCatalogId), availability),
     [suggestedFor, availability],
@@ -533,6 +535,37 @@ export function CreateTeamModal({
 
     setError(null)
 
+    // What this attempt has created so far, declared outside the try so the catch
+    // can undo a half-finished deploy.
+    const previousSelectedTeamId = useTeamStore.getState().selectedTeamId
+    let createdTeamId: string | null = null
+    let createdCount = 0
+
+    // A deploy that created the team row but no agent removes that row again. The
+    // next attempt reuses this modal's team id (the preview palette is seeded from
+    // it), so a leftover row would make the server refuse that create, and it would
+    // stay behind as an empty team. If the delete fails, the next attempt gets a
+    // fresh id instead, so it can still go through.
+    const discardEmptyTeam = async (teamId: string) => {
+      try {
+        const del = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}`, {
+          method: 'DELETE',
+        })
+        if (!del.ok) throw new Error('Failed to delete team')
+        useTeamStore.getState().removeTeam(teamId)
+        const { teams, selectedTeamId } = useTeamStore.getState()
+        if (
+          selectedTeamId === null &&
+          previousSelectedTeamId &&
+          teams.some((t) => t.id === previousSelectedTeamId)
+        ) {
+          useTeamStore.getState().selectTeam(previousSelectedTeamId)
+        }
+      } catch {
+        setPendingTeamId(crypto.randomUUID())
+      }
+    }
+
     try {
       // Resolve the catalog agents up front — used for dedup, deploy, and counts.
       // Deploy is the one path that needs the markdown bodies, so this is where
@@ -556,9 +589,9 @@ export function CreateTeamModal({
 
       // Any agent EXPLICITLY on OpenClaw needs OpenClaw reachable — the server-side
       // operator connection (its AgentSource create 503s otherwise), NOT a browser
-      // Gateway client. The resolver already degrades an OpenClaw *suggestion* to Native
-      // when OpenClaw is down, so this only trips when the user forces OpenClaw on a
-      // member while OpenClaw is disconnected.
+      // Gateway client. The resolver already moves an OpenClaw *suggestion* to another
+      // runtime when OpenClaw is down, so this only trips when the user forces OpenClaw
+      // on a member while OpenClaw is disconnected.
       const anyOpenClaw = resolved.some((a) => agentSourceIdFor(a.id) === 'openclaw')
       if (anyOpenClaw && !openclawConnected) {
         setError(
@@ -602,6 +635,7 @@ export function CreateTeamModal({
       const { team } = (await res.json()) as {
         team: { id: string; name: string; icon: string; color: string; templateId: string | null }
       }
+      createdTeamId = team.id
 
       // Add to store + select
       useTeamStore.getState().addTeam({
@@ -681,7 +715,6 @@ export function CreateTeamModal({
       // (ChatGPT-subscription) deploy designates when no genuine leader role exists.
       let firstCreatedAgentId: string | null = null
       const failedAgents: string[] = []
-      let createdCount = 0
 
       for (let i = 0; i < resolved.length; i++) {
         const agent = resolved[i]
@@ -848,9 +881,10 @@ export function CreateTeamModal({
       // visible in the UI, deterministic on the server.
       if (preferRuntime === 'codex' && !leaderAgentId) leaderAgentId = firstCreatedAgentId
 
-      // Nothing deployed — surface it. The (empty) team row stays so the user can
-      // retry or delete it.
+      // Nothing deployed: remove the empty team row, then surface it, so pressing
+      // Deploy again starts clean.
       if (createdCount === 0) {
+        await discardEmptyTeam(team.id)
         setError('No agents could be created. Check that the runtime is connected, then retry.')
         setStep('customize')
         return
@@ -994,6 +1028,13 @@ export function CreateTeamModal({
         onCreated(team.id)
       }, 800)
     } catch (err) {
+      // A failure after the team row was created: an empty team is removed, as
+      // above. A team that already has agents is kept, and the next attempt gets a
+      // fresh id so it cannot collide with it.
+      if (createdTeamId) {
+        if (createdCount === 0) await discardEmptyTeam(createdTeamId)
+        else setPendingTeamId(crypto.randomUUID())
+      }
       setError(err instanceof Error ? err.message : 'Something went wrong')
       setStep('customize')
     }
@@ -1215,10 +1256,9 @@ export function CreateTeamModal({
                         const overridden = agent.id in agentRuntimes
                         const value = agentRuntimes[agent.id] ?? resolvedDefault.selected
                         const degradedFrom = overridden ? null : resolvedDefault.degradedFrom
-                        const degradedLabel = degradedFrom
-                          ? (agentRuntimeOpts.find((o) => o.sourceId === degradedFrom)?.label ??
-                            degradedFrom)
-                          : null
+                        const labelFor = (sid: SelectableSourceId) =>
+                          agentRuntimeOpts.find((o) => o.sourceId === sid)?.label ?? sid
+                        const degradedLabel = degradedFrom ? labelFor(degradedFrom) : null
                         const showModel = runtimeHasModelPicker(value)
                         // The deploy sends modelTier 'leader' for exactly this row.
                         const nativeTierDefault = isLeaderRow
@@ -1303,7 +1343,8 @@ export function CreateTeamModal({
                             </div>
                             {degradedLabel && (
                               <p className="pl-[34px] text-[10.5px] text-muted-foreground">
-                                {degradedLabel} unavailable · using Clawboo Native
+                                {degradedLabel} unavailable · using{' '}
+                                {labelFor(resolvedDefault.selected)}
                               </p>
                             )}
                           </div>

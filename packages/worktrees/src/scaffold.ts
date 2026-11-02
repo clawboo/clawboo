@@ -68,9 +68,17 @@ export function renderTaskMd(input: TaskScaffoldInput): string {
     '2. Read `AGENT_HANDOFF.json` (if present) and `task-progress.md` to see where the last runtime left off.',
   )
   lines.push("3. Do the work. Keep changes within this task's scope.")
-  lines.push('4. Record decisions in `DECISIONS.json` and evidence in `VERIFICATION.md`.')
+  // Clawboo checks finished work by running VERIFY_CMD, and the placeholder counts
+  // as a failed check, so the agent has to be told before it finishes, not after
+  // a failed first check.
   lines.push(
-    '5. Before stopping, update `task-progress.md` and write `AGENT_HANDOFF.json` (clock-out).',
+    input.commands?.verify?.trim()
+      ? '4. Make sure `VERIFY_CMD` in `init.sh` still proves the work: Clawboo runs it to check this task when you finish.'
+      : '4. Set `VERIFY_CMD` in `init.sh` to the command that proves the work, for example `npm test`. Clawboo runs it to check this task when you finish, and the placeholder it starts with counts as a failed check.',
+  )
+  lines.push('5. Record decisions in `DECISIONS.json` and evidence in `VERIFICATION.md`.')
+  lines.push(
+    '6. Before stopping, update `task-progress.md` and write `AGENT_HANDOFF.json` (clock-out).',
   )
   lines.push('')
   return lines.join('\n')

@@ -34,7 +34,7 @@ To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
 Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Hermes** row, click **Install**, then **Install** in the panel that opens.
 
-With pipx, Clawboo runs `pipx install --python <python> 'hermes-agent[anthropic]<1'`, passing the newest Python 3.11 or later it finds. Without pipx, it runs `python -m pip install --user 'hermes-agent[anthropic]<1'`, and retries with `--break-system-packages` on a system that blocks user installs. The `[anthropic]` extra is what lets Hermes run on an Anthropic key.
+With pipx, Clawboo runs `pipx install --python <python> 'hermes-agent[anthropic]<1'`, passing the newest Python from 3.11 to 3.13 it finds. A newer Python on the same machine, such as 3.14, is passed over. If Clawboo finds none in that range, pipx uses its own default Python. Without pipx, Clawboo runs `<python> -m pip install --user 'hermes-agent[anthropic]<1'` with that same Python, and retries with `--break-system-packages` on a system that blocks user installs. The `[anthropic]` extra is what lets Hermes run on an Anthropic key.
 
 You should see the row change to **Needs key**, or to **Connected** if a key it can use is already connected.
 
@@ -82,19 +82,19 @@ Create a team, and in **Customize team** set a member's runtime to **Hermes**. Y
 
 ## What Clawboo controls on Hermes
 
-| What              | On Hermes                                                                                                                                                                                                                            |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Persona           | The agent's `SOUL.md` (which the Personality sliders write into) is added to every prompt as a persona block, up to 4,000 characters.                                                                                                |
-| `AGENTS.md`       | Draws the agent's links on the team graph. Hermes never reads it.                                                                                                                                                                    |
-| Other agent files | Not used. Hermes keeps its own `MEMORY.md` in its folder (below), apart from the agent page's file tabs. See [Agents](/using/agents).                                                                                                |
-| Model             | The model picked for the member in team setup, or an OpenRouter model chosen later with the model selector on the agent's page. Otherwise a default for its provider. See [Which provider Hermes uses](#which-provider-hermes-uses). |
-| Hermes folder     | Each agent has its own Hermes home that persists between runs (below).                                                                                                                                                               |
-| Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), listed in the folder's `mcp.json`.                                                                                                                         |
-| Leading a team    | A Hermes leader hands work to teammates with the `team_delegate` tool.                                                                                                                                                               |
-| Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff).                                    |
-| Steering          | Stop and resume. Hermes cannot read input mid-run, so a comment stops the run and starts it again in the same session with your comment. See [Board](/using/board).                                                                  |
-| Memory            | Hermes's own `MEMORY.md`, skills and session history in its folder, plus Clawboo's shared memory through the Memory tools.                                                                                                           |
-| Cost              | Hermes reports none. See [Costs](#costs).                                                                                                                                                                                            |
+| What              | On Hermes                                                                                                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Persona           | The agent's `SOUL.md` (which the Personality sliders write into) is added to every prompt as a persona block, up to 4,000 characters.                                                                               |
+| `AGENTS.md`       | Draws the agent's links on the team graph. Hermes never reads it.                                                                                                                                                   |
+| Other agent files | Not used. Hermes keeps its own `MEMORY.md` in its folder (below), apart from the agent page's file tabs. See [Agents](/using/agents).                                                                               |
+| Model             | The model picked for the member in team setup, or one picked later with the model control on the agent's page. Otherwise a default for its provider. See [Which provider Hermes uses](#which-provider-hermes-uses). |
+| Hermes folder     | Each agent has its own Hermes home that persists between runs (below).                                                                                                                                              |
+| Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP), listed in the folder's `mcp.json`.                                                                                                        |
+| Leading a team    | A Hermes leader hands work to teammates with the `team_delegate` tool.                                                                                                                                              |
+| Worktree          | Only a task-runner run that names a repository gets its own git worktree. Team chat and the tasks a team hands out run without one. See [Worktrees and handoff](/concepts/worktrees-and-handoff).                   |
+| Steering          | Stop and resume. Hermes cannot read input mid-run, so a comment stops the run and starts it again in the same session with your comment. See [Board](/using/board).                                                 |
+| Memory            | Hermes's own `MEMORY.md`, skills and session history in its folder, plus Clawboo's shared memory through the Memory tools.                                                                                          |
+| Cost              | Hermes reports none. See [Costs](#costs).                                                                                                                                                                           |
 
 Clawboo starts Hermes only as `hermes chat`, once per turn or task. It never starts Hermes's own gateway or its built-in scheduling; use [Routines](/using/routines) for recurring work.
 
@@ -146,7 +146,7 @@ Your provider bills the real usage: OpenRouter, Anthropic or OpenAI per token, o
 
 ## Disconnect Hermes
 
-In **Settings** > **Runtimes**, click **Manage** on the **Hermes** row, then **Disconnect**. The dialog mentions only the OpenRouter key, but Clawboo deletes every key Hermes reads from its vault: OpenRouter, Anthropic and OpenAI. The vault keeps one copy of each key for every runtime. A Clawboo Native team or Claude Code that runs on your Anthropic or OpenAI key therefore loses it too, unless it finds the key elsewhere. A Hermes ChatGPT sign-in is not removed, so Hermes can still read **Connected**.
+In **Settings** > **Runtimes**, click **Manage** on the **Hermes** row, then **Disconnect**. Hermes stops using its keys until you connect it again. The vault keeps one copy of each key for every runtime, so a key another runtime also reads stays saved: Clawboo Native reads all three Hermes keys (OpenRouter, Anthropic and OpenAI), and Claude Code reads the Anthropic one. The dialog names each saved key and says whether it is deleted or kept. To connect Hermes again with a kept key, click **Use saved key** on its row. A Hermes ChatGPT sign-in is not removed, so Hermes can still read **Connected**.
 
 To remove a single key instead, open **Manage**, click that provider's row, and use **Disconnect OpenRouter** (or the button for that provider). That removes the one key for every runtime. See [Disconnect a key or a runtime](/using/providers-and-runtimes#disconnect-a-key-or-a-runtime).
 
@@ -162,21 +162,21 @@ To remove a single key instead, open **Manage**, click that provider's row, and 
 
 <AccordionGroup>
 
-<Accordion title="Hermes needs Python 3.11 or newer, but the Python on this machine is 3.9">
+<Accordion title="Hermes needs Python 3.11 to 3.13, but Clawboo found only Python 3.14">
 
-The newest Python Clawboo found is too old, and pipx is not installed. The message names your version, and adds "(Xcode Command Line Tools)" on a Mac that only has Apple's Python. Install a newer Python (for example `brew install python@3.12`) or pipx (`brew install pipx`), then click **Retry**.
+pipx is not installed, and every Python Clawboo found is outside 3.11 to 3.13. The message lists each version it found, too old or too new, and adds "(Xcode Command Line Tools)" to Apple's own Python on a Mac. Install Python 3.13 (for example `brew install python@3.13`), then click **Retry**.
 
 </Accordion>
 
-<Accordion title="Python 3.11+ (with pip or pipx) not found.">
+<Accordion title="Python 3.11 to 3.13 (with pip or pipx) not found.">
 
-Clawboo found neither pipx nor Python 3. Install Python 3.12 or pipx, then click **Retry**.
+Clawboo found neither pipx nor Python 3. Install Python 3.13 (for example `brew install python@3.13`), then click **Retry**.
 
 </Accordion>
 
 <Accordion title="The install fails with (from versions: none)">
 
-pip found no `hermes-agent` release for your Python. That happens when the Python it used is older than 3.11 or newer than 3.13. Clawboo picks the newest Python 3.11 or later it finds, so a Python 3.14 wins over a 3.12 you also have. Install Hermes yourself with a supported Python, then click **Refresh** at the top of the Runtimes panel:
+pip found no `hermes-agent` release for the Python it used. That happens when that Python is older than 3.11 or newer than 3.13. Clawboo passes pipx the newest Python from 3.11 to 3.13 it finds; when it finds none, pipx falls back to its own default Python, which can be 3.14. Install Python 3.13, or install Hermes yourself with a supported Python, then click **Refresh** at the top of the Runtimes panel:
 
 ```bash
 pipx install --python python3.12 'hermes-agent[anthropic]<1'

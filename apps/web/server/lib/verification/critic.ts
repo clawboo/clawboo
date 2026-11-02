@@ -16,7 +16,9 @@ import type { RuntimeAdapter } from '@clawboo/executor'
 import { driveStructuredJudge } from '@clawboo/obs'
 import { provisionReviewWorktree, removeReviewWorktree } from '@clawboo/worktrees'
 
+import { isLocalModel } from '../costUtils'
 import type { RuntimeRunContext } from '../runtimes'
+import { estimateRunCostUsdFromUsage } from '../runtimes/estimateCost'
 
 const REVIEW_PROMPT = [
   'You are an INDEPENDENT code reviewer (builder ≠ judge). Review ONLY the changes at this checkout.',
@@ -46,6 +48,23 @@ export interface CriticInput {
   riskFlag?: boolean
   /** Where the detached review worktree is checked out (OUTSIDE the user repo). */
   reviewRootDir: string
+  /** Told what the reviewer's run cost once it has run, so the caller can charge it. */
+  onSpend?: (spend: ReviewerSpend) => void
+}
+
+/** What a reviewer run cost, as its runtime reported it. */
+export interface ReviewerSpend {
+  runtime: string
+  model: string | null
+  /** Reported (or priced from reported token usage) USD; null when the run
+   *  reported nothing, so the caller prices it like any other unreported run. */
+  usd: number | null
+  inputTokens: number
+  outputTokens: number
+  /** The prompt and reply lengths, for pricing a run that reported nothing. */
+  inputChars: number
+  outputChars: number
+  sessionKey: string
 }
 
 const unparseable = (text: string): Finding[] => [
@@ -82,16 +101,27 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
       mcpBaseUrl: input.mcpBaseUrl ?? null,
     }
     const adapter = input.makeReviewerAdapter(ctx)
+    const sessionKey = `review:${input.reviewSha.slice(0, 12)}`
+    const message = 'Review the changes at this checkout.'
     const run = await adapter.start(
       { taskId: null, teamId: null },
       {
         agentId: 'critic',
-        sessionKey: `review:${input.reviewSha.slice(0, 12)}`,
-        message: 'Review the changes at this checkout.',
+        sessionKey,
+        message,
         model: input.reviewerModel ?? null,
         context: REVIEW_PROMPT,
       },
     )
+    // The reviewer is a paid run like any other, so its cost is counted the way
+    // the task runner counts a pass: every `cost` event (a local model is free,
+    // usage without a price is priced from the tokens), else the `done` total.
+    let costUsd: number | null = null
+    let doneCostUsd: number | null = null
+    let inputTokens = 0
+    let outputTokens = 0
+    let model: string | null = input.reviewerModel ?? null
+    let outputChars = 0
 
     // Drain the reviewer's stream to text, then parse a typed verdict with a
     // way-out via the shared judge drive (@clawboo/obs) — the same extract +
@@ -102,17 +132,60 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
       for await (const ev of adapter.events(run)) {
         if (ev.kind === 'text-delta') {
           if (ev.channel !== 'reasoning') text += ev.text
+        } else if (ev.kind === 'cost') {
+          const local = ev.local === true || (ev.costUsd == null && isLocalModel(ev.model))
+          const usd = local
+            ? 0
+            : ev.costUsd != null
+              ? ev.costUsd
+              : ev.usage
+                ? estimateRunCostUsdFromUsage({
+                    model: ev.model,
+                    inputTokens: ev.usage.inputTokens,
+                    outputTokens: ev.usage.outputTokens,
+                  })
+                : 0
+          costUsd = (costUsd ?? 0) + usd
+          if (ev.model) model = ev.model
+          if (ev.usage) {
+            inputTokens += ev.usage.inputTokens
+            outputTokens += ev.usage.outputTokens
+          }
         } else if (ev.kind === 'done') {
           if (ev.summary && ev.summary.length > text.length) text = ev.summary
+          if (ev.costUsd != null) doneCostUsd = ev.costUsd
+          if (ev.usage && inputTokens + outputTokens === 0) {
+            inputTokens = ev.usage.inputTokens
+            outputTokens = ev.usage.outputTokens
+          }
           break
         } else if (ev.kind === 'error') {
           break
         }
       }
+      outputChars = text.length
       return text
     }
 
     const judged = await driveStructuredJudge({ runText: drain, schema: criticOutputSchema })
+      // Reported whether or not the verdict parses: the run was paid for either way.
+      // A failed charge must not turn into a failed review.
+      .finally(() => {
+        try {
+          input.onSpend?.({
+            runtime: adapter.id,
+            model,
+            usd: costUsd ?? doneCostUsd,
+            inputTokens,
+            outputTokens,
+            inputChars: REVIEW_PROMPT.length + message.length,
+            outputChars,
+            sessionKey,
+          })
+        } catch {
+          /* best effort */
+        }
+      })
     const findings =
       judged.status === 'parsed' && judged.value
         ? judged.value.findings

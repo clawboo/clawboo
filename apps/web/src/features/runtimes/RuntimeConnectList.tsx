@@ -271,6 +271,7 @@ function RuntimeRow({
         <RuntimeManageBody
           runtimeId={entry.id}
           name={entry.name}
+          status={status}
           onChanged={onChanged}
           onDiagnostics={diagnostics}
           // The Manage view carries the shared provider manager (connected keys,

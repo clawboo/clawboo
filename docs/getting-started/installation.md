@@ -164,7 +164,7 @@ The installed package is incomplete. Run `npx clawboo@latest`, or reinstall with
 
 <Accordion title="A Clawboo server is running on port N, but it requires an access token.">
 
-You set `STUDIO_ACCESS_TOKEN` to protect the dashboard, so the command cannot talk to the server. Open `http://localhost:18790/?access_token=YOUR_TOKEN` once in your browser (use the port the message names), or unset the variable and restart the server. `clawboo stop` and `clawboo restart` cannot confirm a protected server either; they print a command that stops it by hand.
+You set `STUDIO_ACCESS_TOKEN` to protect the dashboard, and the shell you ran the command in does not have that token, so the command cannot talk to the server. Set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo stop` and `clawboo restart` then work too. To open the dashboard in your browser, visit `http://localhost:18790/?access_token=YOUR_TOKEN` once (use the port the message names). Without the token, `clawboo stop` and `clawboo restart` print a command that stops the server by hand.
 
 </Accordion>
 

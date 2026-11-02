@@ -29,6 +29,8 @@ import { promisify } from 'node:util'
 import type { Request, Response } from 'express'
 
 import {
+  agents,
+  costRecords,
   createTask,
   getBudget,
   getComments,
@@ -46,6 +48,7 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runtimesRunPOST } from '../../api/runtimes'
@@ -235,6 +238,9 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     expect(result.usedWorktree).toBe(true)
     expect(result.doneReason).toBe('success')
     expect(result.status).toBe('done') // verify gate passed → in_review → done
+    // A worktree run is told up front that VERIFY_CMD in init.sh checks its work.
+    expect(adapter.startedOpts?.context).toContain('`VERIFY_CMD` from `init.sh`')
+    expect(adapter.startedOpts?.context).toContain('`TASK.md`')
 
     const db = getDb()
 
@@ -275,6 +281,97 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     }
     expect(kinds[0]).toBe('span_start')
     expect(kinds[kinds.length - 1]).toBe('span_end') // the span brackets the whole run incl. verify
+  })
+
+  it("charges the reviewer's run to the agent's budget and lists it in Tokens Used", async () => {
+    const db = getDb()
+    const now = Date.now()
+    db.insert(agents)
+      .values({
+        id: 'claude-1',
+        name: 'Coder',
+        gatewayId: 'claude-1',
+        runtime: 'claude-code',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'claude-1', limitUsdCents: 10_000 })
+    // A handed-off task (it has a parent) always gets the reviewer.
+    const parentId = newCodeTask('Ship the feature')
+    const taskId = createTask(db, {
+      title: 'Implement the thing',
+      description: 'do it',
+      status: 'todo',
+      teamId: 'team-1',
+      parentTaskId: parentId,
+    }).id
+
+    const builder = scriptBuilder()
+    builder.costUsd(0.05)
+    builder.done('success')
+    const review = '{"findings":[]}'
+    const reviewer: RuntimeEvent[] = [
+      {
+        runId: 'v',
+        sessionId: 'v',
+        ts: 1,
+        seq: 1,
+        kind: 'text-delta',
+        text: review,
+        channel: 'assistant',
+      },
+      {
+        runId: 'v',
+        sessionId: 'v',
+        ts: 1,
+        seq: 2,
+        kind: 'cost',
+        costUsd: 0.2,
+        usage: { inputTokens: 900, outputTokens: 40 },
+        model: 'reviewer-model',
+      },
+      {
+        runId: 'v',
+        sessionId: 'v',
+        ts: 1,
+        seq: 3,
+        kind: 'done',
+        reason: 'success',
+        summary: review,
+      },
+    ] as RuntimeEvent[]
+    let liveCalls = 0
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: (ctx: RuntimeRunContext) => {
+        if (!ctx.cwd) return new ScriptedAdapter('claude-code', [])
+        liveCalls += 1
+        if (liveCalls === 1) {
+          dirtyWorktree(ctx.cwd)
+          return new ScriptedAdapter('claude-code', builder.build())
+        }
+        return new ScriptedAdapter('claude-code', reviewer)
+      },
+      taskId,
+      assigneeAgentId: 'claude-1',
+      repoPath: repo,
+      kind: 'code',
+      mcpBaseUrl: 'http://localhost:18790',
+    })
+
+    expect(result.ok && result.status).toBe('done')
+    expect(getTaskVerification(db, taskId)?.attempts[0]?.critic.ran).toBe(true)
+    // 5 cents for the build plus 20 for the review.
+    expect(getBudget(db, 'agent', 'claude-1')?.spentUsdCents).toBeCloseTo(25, 5)
+    const rows = db.select().from(costRecords).where(eq(costRecords.agentId, 'claude-1')).all()
+    const reviewRow = rows.find((r) => r.sessionKey?.startsWith('review:'))
+    expect(reviewRow).toMatchObject({
+      model: 'reviewer-model',
+      inputTokens: 900,
+      outputTokens: 40,
+      costUsd: 0.2,
+    })
   })
 
   it('all-on halt path: a budget trip cancels the run cleanly and SKIPS verify', async () => {

@@ -6,7 +6,9 @@
 // drawer (health checks, integration); the actions live here now.
 //
 // Disconnect signs out on EVERY runtime, honestly per runtime:
-//   - api-key (native / claude-code / hermes) → remove the vault key.
+//   - api-key (native / claude-code / hermes) → stop using its keys; delete the
+//     saved ones no other runtime uses (the confirm names each, from the plan the
+//     runtime's status carries).
 //   - codex (oauth)   → `codex logout` (signs out the shared ChatGPT subscription).
 //   - openclaw        → stop the local gateway (reversible).
 
@@ -18,10 +20,12 @@ import {
   disconnectRuntime,
   signOutRuntime,
   type RuntimeId,
+  type RuntimeStatus,
 } from '@clawboo/control-client'
 
 import { Button } from '@/features/shared/Button'
 import { confirm } from '@/stores/confirm'
+import { runtimeDisconnectMessage } from './disconnectCopy'
 import { useToastStore } from '@/stores/toast'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
@@ -36,25 +40,25 @@ interface DisconnectCopy {
   tone: 'default' | 'danger'
 }
 
+// The api-key runtimes' messages are built from the runtime's disconnect plan
+// at click time (see `runtimeDisconnectMessage`), so they carry none here.
 const DISCONNECT_COPY: Record<ManageRuntimeId, DisconnectCopy> = {
   'clawboo-native': {
     label: 'Disconnect',
     title: 'Disconnect Clawboo Native?',
-    message:
-      "This removes the provider key powering your team's built-in runtime. Your team can't run until you reconnect a key.",
+    message: '',
     tone: 'danger',
   },
   'claude-code': {
     label: 'Disconnect',
     title: 'Disconnect Claude Code?',
-    message: "This removes its saved API key from the vault. You'll re-enter it to reconnect.",
+    message: '',
     tone: 'danger',
   },
   hermes: {
     label: 'Disconnect',
     title: 'Disconnect Hermes?',
-    message:
-      "This removes its saved OpenRouter key from the vault. You'll re-enter it to reconnect.",
+    message: '',
     tone: 'danger',
   },
   codex: {
@@ -76,6 +80,9 @@ const DISCONNECT_COPY: Record<ManageRuntimeId, DisconnectCopy> = {
 export interface RuntimeManageBodyProps {
   runtimeId: ManageRuntimeId
   name: string
+  /** The runtime's live status: its disconnect plan names, in the confirm, the
+   *  keys a Disconnect deletes and the ones it keeps. */
+  status?: RuntimeStatus
   /** Re-probe after a disconnect / sub sign-in. */
   onChanged: () => void | Promise<void>
   /** Open the read-only diagnostics drawer (the "Details" affordance). */
@@ -88,6 +95,7 @@ export interface RuntimeManageBodyProps {
 export function RuntimeManageBody({
   runtimeId,
   name,
+  status,
   onChanged,
   onDiagnostics,
   extra,
@@ -97,10 +105,15 @@ export function RuntimeManageBody({
 
   async function handleDisconnect(): Promise<void> {
     const copy = DISCONNECT_COPY[runtimeId]
+    const keyed = runtimeId !== 'openclaw' && runtimeId !== 'codex'
     if (
       !(await confirm({
         title: copy.title,
-        message: copy.message,
+        message: keyed
+          ? runtimeDisconnectMessage(name, status?.disconnectPlan, {
+              ollama: status?.ollamaConnected === true,
+            })
+          : copy.message,
         confirmLabel: copy.label,
         tone: copy.tone,
       }))

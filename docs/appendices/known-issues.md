@@ -67,7 +67,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** to remove a single key, use **Disconnect** on its row under **Settings** > **Providers**. To undo a runtime's disconnect, connect the keys again. See [Disconnect a key or a runtime](/using/providers-and-runtimes#disconnect-a-key-or-a-runtime).
 
-**Status:** open.
+**Status:** fixed on main. From the next release, a runtime's **Disconnect** keeps any key another runtime also reads and only stops that runtime using it, and its dialog names each saved key it deletes and each one it keeps.
 
 ## What agents can reach
 
@@ -144,7 +144,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** tasks reach **Done** without a check result.
 
-**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure, so the first check fails unless the agent sets a real command.
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own; from the next release, the run's instructions and the worktree's `TASK.md` tell it to.
 
 **What to do:** review results yourself. For runs that are checked, name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
 
@@ -257,12 +257,12 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 ### Runtime requirements that catch people out
 
-| Runtime     | Limit                                                                                                                                                                                                       | What to do                                                                                                                                   |
-| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Claude Code | Needs an Anthropic API key: a `claude` CLI signed in with a Claude subscription is not enough. On an npm install it also needs the Claude Agent SDK next to Clawboo, which a one-off `npx` run cannot load. | Run `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, then `clawboo restart`. See [Claude Code](/runtimes/claude-code).               |
-| Codex       | Connects only with **Sign in with ChatGPT**, never an API key. A Codex too old to have `codex app-server` runs without live steering: a comment waits for its next run.                                     | Update Codex with `npm install -g @openai/codex@0`. See [Codex](/runtimes/codex).                                                            |
-| Hermes      | Installs only on Python 3.11 to 3.13. The in-app install picks the newest Python 3.11 or later it finds, so it fails when that one is 3.14 or newer.                                                        | Install it yourself with a supported Python: `pipx install --python python3.13 'hermes-agent[anthropic]<1'`. See [Hermes](/runtimes/hermes). |
-| OpenClaw    | On Windows, the dashboard cannot run OpenClaw's own **Sign in with ChatGPT**.                                                                                                                               | Run the command the setup panel shows in your own terminal. See [OpenClaw](/runtimes/openclaw).                                              |
+| Runtime     | Limit                                                                                                                                                                                                       | What to do                                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Claude Code | Needs an Anthropic API key: a `claude` CLI signed in with a Claude subscription is not enough. On an npm install it also needs the Claude Agent SDK next to Clawboo, which a one-off `npx` run cannot load. | Run `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, then `clawboo restart`. See [Claude Code](/runtimes/claude-code). |
+| Codex       | Connects only with **Sign in with ChatGPT**, never an API key. A Codex too old to have `codex app-server` runs without live steering: a comment waits for its next run.                                     | Update Codex with `npm install -g @openai/codex@0`. See [Codex](/runtimes/codex).                                              |
+| Hermes      | Installs only on Python 3.11 to 3.13. The in-app install picks the newest Python in that range. If it finds none, pipx uses its own default Python, which can be 3.14, and the install fails.               | Install Python 3.13 and click **Retry**, or install it yourself with a supported Python. See [Hermes](/runtimes/hermes).       |
+| OpenClaw    | On Windows, the dashboard cannot run OpenClaw's own **Sign in with ChatGPT**.                                                                                                                               | Run the command the setup panel shows in your own terminal. See [OpenClaw](/runtimes/openclaw).                                |
 
 ### The full Marketplace needs an internet connection
 
@@ -294,7 +294,7 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 **What to do:** stop and start that server the way you started it, for example with `Ctrl+C` in its terminal or through your service manager. To open a server you just started, visit `http://localhost:18790/?access_token=<token>` (use your port if it is not 18790). See [Run the Clawboo server](/operating/deployment) and [CLI reference](/reference/cli).
 
-**Status:** open.
+**Status:** fixed on main. From the next release, the command uses the `STUDIO_ACCESS_TOKEN` set in the shell you run it from. With the server's token there, `clawboo` sees a server it just started and opens it, and `clawboo stop` and `clawboo restart` work. Without it, they print the same notice as before.
 
 ### One install serves one person
 
@@ -343,6 +343,12 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server    |
 | With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart |
 | With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display   |
+| The in-app Hermes install picks Python 3.14 over an installed 3.12, and fails                                                                                                                         | Hermes    |
+| Picking a model on a Hermes agent's page moves an agent on the ChatGPT subscription to OpenRouter                                                                                                     | Hermes    |
+| On a ChatGPT-only setup, a Marketplace deploy starts its members on Clawboo Native, which has no provider there, and pressing **Deploy** again after "No agents could be created" fails               | Teams     |
+| The reviewer's run on checked work is not charged to any budget and is missing from **Tokens Used**                                                                                                   | Budgets   |
+| `POST /api/team-chat/exchange` cancels every exchange at its first turn                                                                                                                               | Team chat |
+| A runtime's **Disconnect** deletes keys other runtimes use, and its dialog names only one (see [the entry above](#disconnecting-a-runtime-deletes-keys-other-runtimes-use))                           | Providers |
 
 ## Related
 
