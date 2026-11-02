@@ -7,6 +7,7 @@
 // that tell "still ours" from "somebody else's process wearing our number".
 
 import { execFileSync } from 'node:child_process'
+import { readlinkSync } from 'node:fs'
 import os from 'node:os'
 
 /**
@@ -27,6 +28,25 @@ export const MAX_TRUSTED_AGE_MS = 12 * 60 * 60_000
  */
 export function currentBootAt(): number {
   return Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000
+}
+
+/**
+ * The PID namespace this process runs in, or null where there is none to tell.
+ *
+ * Engines in two containers can share one state directory through a volume.
+ * A pid in the other engine's record then names a process in ITS namespace,
+ * and the same number here belongs to something else, even one that started
+ * before the record and so passes the start-time check. On Linux the namespace
+ * is what `/proc/self/ns/pid` links to (`pid:[4026531836]`). macOS and Windows
+ * have no PID namespaces, so null there means every process shares one.
+ */
+export function currentPidNamespace(): string | null {
+  if (process.platform !== 'linux') return null
+  try {
+    return readlinkSync('/proc/self/ns/pid')
+  } catch {
+    return null
+  }
 }
 
 /**

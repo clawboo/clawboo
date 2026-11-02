@@ -18,7 +18,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { currentBootAt } from '../../processIdentity'
+import { currentBootAt, currentPidNamespace } from '../../processIdentity'
 import { killProcessTreeByPid } from '../killTree'
 import {
   __resetRuntimePidRecordForTests,
@@ -35,7 +35,7 @@ const isWin = process.platform === 'win32'
 const DEAD_PID = 4_194_304
 
 interface RecordFileShape {
-  owner: { pid: number; startedAt: number; bootAt: number }
+  owner: { pid: number; startedAt: number; bootAt: number; pidNamespace?: string | null }
   children: { pid: number; startedAt: number; command?: string }[]
 }
 
@@ -95,6 +95,7 @@ const goneEngine = () => ({
   pid: DEAD_PID,
   startedAt: Date.now() - 60 * 60_000,
   bootAt: currentBootAt(),
+  pidNamespace: currentPidNamespace(),
 })
 
 function ownFiles(): string[] {
@@ -123,6 +124,7 @@ describe('runtime pid record', () => {
     const record = readOwn()
     expect(record.owner.pid).toBe(process.pid)
     expect(record.owner.bootAt).toBe(currentBootAt())
+    expect(record.owner.pidNamespace).toBe(currentPidNamespace())
     expect(record.children.map((c) => [c.pid, c.command])).toEqual([
       [111, 'codex'],
       [222, 'hermes'],
@@ -200,13 +202,62 @@ describe('boot reap of runtime children', () => {
     expect(alive(stranger)).toBe(true)
   })
 
+  it('leaves a file from another PID namespace alone', () => {
+    // Another container sharing the state directory: its pids name processes in
+    // its own namespace, so the same number here is somebody else, and its
+    // engine may be running where this process cannot see it.
+    const child = spawnSleeper()
+    const file = writeEngineFile('elsewhere.json', {
+      owner: { ...goneEngine(), pidNamespace: 'pid:[222]' },
+      children: [{ pid: child, startedAt: Date.now() }],
+    })
+    const killed: number[] = []
+    const report = reapOrphanedRuntimeChildren({
+      kill: (pid) => killed.push(pid),
+      pidNamespace: 'pid:[111]',
+    })
+    expect(killed).toEqual([])
+    expect(report.foreign).toBe(1)
+    expect(existsSync(file)).toBe(true)
+  })
+
+  it('leaves a file that does not say which PID namespace wrote it', () => {
+    const child = spawnSleeper()
+    const { pidNamespace: _, ...owner } = goneEngine()
+    const file = writeEngineFile('unmarked.json', {
+      owner,
+      children: [{ pid: child, startedAt: Date.now() }],
+    })
+    const killed: number[] = []
+    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    expect(killed).toEqual([])
+    expect(report.foreign).toBe(1)
+    expect(existsSync(file)).toBe(true)
+  })
+
+  it('reaps a file from its own PID namespace', () => {
+    const child = spawnSleeper()
+    writeEngineFile('here.json', {
+      owner: { ...goneEngine(), pidNamespace: 'pid:[111]' },
+      children: [{ pid: child, startedAt: Date.now() }],
+    })
+    const killed: number[] = []
+    reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid), pidNamespace: 'pid:[111]' })
+    expect(killed).toEqual([child])
+  })
+
   it('leaves the runs of an engine that is still running', () => {
     // Two engines can share a state dir. A live sleeper stands in for the other
     // engine, recorded with the start time it really has.
     const engine = spawnSleeper()
     const child = spawnSleeper()
     const file = writeEngineFile('live.json', {
-      owner: { pid: engine, startedAt: Date.now(), bootAt: currentBootAt() },
+      owner: {
+        pid: engine,
+        startedAt: Date.now(),
+        bootAt: currentBootAt(),
+        pidNamespace: currentPidNamespace(),
+      },
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
@@ -222,7 +273,12 @@ describe('boot reap of runtime children', () => {
     const stranger = spawnSleeper()
     const child = spawnSleeper()
     writeEngineFile('recycled.json', {
-      owner: { pid: stranger, startedAt: Date.now() - 2 * 60 * 60_000, bootAt: currentBootAt() },
+      owner: {
+        pid: stranger,
+        startedAt: Date.now() - 2 * 60 * 60_000,
+        bootAt: currentBootAt(),
+        pidNamespace: currentPidNamespace(),
+      },
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
@@ -234,7 +290,12 @@ describe('boot reap of runtime children', () => {
     // A container restart can hand the new engine its predecessor's pid.
     const child = spawnSleeper()
     writeEngineFile('same-pid.json', {
-      owner: { pid: process.pid, startedAt: Date.now() - 60 * 60_000, bootAt: currentBootAt() },
+      owner: {
+        pid: process.pid,
+        startedAt: Date.now() - 60 * 60_000,
+        bootAt: currentBootAt(),
+        pidNamespace: currentPidNamespace(),
+      },
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
@@ -288,7 +349,12 @@ describe('boot reap of runtime children', () => {
     const engine = spawnSleeper()
     const child = spawnSleeper()
     writeEngineFile('unknown.json', {
-      owner: { pid: engine, startedAt: Date.now() - 2 * 60 * 60_000, bootAt: currentBootAt() },
+      owner: {
+        pid: engine,
+        startedAt: Date.now() - 2 * 60 * 60_000,
+        bootAt: currentBootAt(),
+        pidNamespace: currentPidNamespace(),
+      },
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []

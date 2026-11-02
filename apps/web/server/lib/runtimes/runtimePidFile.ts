@@ -34,6 +34,7 @@ import { resolveClawbooDir } from '@clawboo/config'
 
 import {
   currentBootAt,
+  currentPidNamespace,
   isAlive,
   MAX_TRUSTED_AGE_MS,
   processStartTimes,
@@ -64,6 +65,9 @@ interface EngineIdentity {
   /** See `currentBootAt`. Every child in the file shares it: none can outlive a
    *  reboot. */
   bootAt: number
+  /** See `currentPidNamespace`. Its pids mean these processes only inside it.
+   *  Absent in a file that predates it, which the reap then leaves alone. */
+  pidNamespace?: string | null
 }
 
 export interface RuntimePidEntry {
@@ -107,6 +111,7 @@ export function startRuntimePidRecord(): void {
     pid: process.pid,
     startedAt: Math.round(Date.now() - process.uptime() * 1000),
     bootAt: currentBootAt(),
+    pidNamespace: currentPidNamespace(),
   }
   // The start time is in the name so a later engine handed the same pid gets a
   // file of its own instead of overwriting this one.
@@ -168,6 +173,9 @@ function parseRecord(raw: unknown): RecordFile | null {
     owner.pid <= 0 ||
     typeof owner.startedAt !== 'number' ||
     typeof owner.bootAt !== 'number' ||
+    (owner.pidNamespace !== undefined &&
+      owner.pidNamespace !== null &&
+      typeof owner.pidNamespace !== 'string') ||
     !Array.isArray(list)
   ) {
     return null
@@ -243,6 +251,9 @@ export interface RuntimeReapReport {
   unverified: number
   /** Files left alone because the engine that wrote them is still running. */
   liveEngines: number
+  /** Files left alone because they were written in another PID namespace (or
+   *  do not say which), where their pids name different processes. */
+  foreign: number
 }
 
 export interface RuntimeReapDeps {
@@ -250,6 +261,8 @@ export interface RuntimeReapDeps {
   kill?: (pid: number) => void
   /** Test seam for the start-time probe. */
   startTimes?: (pids: readonly number[]) => StartTimes
+  /** Test seam for this process's PID namespace (see `currentPidNamespace`). */
+  pidNamespace?: string | null
 }
 
 const killOrphanTree = (pid: number): void => killProcessTreeByPid(pid, { group: true })
@@ -263,9 +276,22 @@ const killOrphanTree = (pid: number): void => killProcessTreeByPid(pid, { group:
  */
 export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): RuntimeReapReport {
   const kill = deps.kill ?? killOrphanTree
-  const report: RuntimeReapReport = { killed: 0, expired: 0, unverified: 0, liveEngines: 0 }
+  const report: RuntimeReapReport = {
+    killed: 0,
+    expired: 0,
+    unverified: 0,
+    liveEngines: 0,
+    foreign: 0,
+  }
   const files = readOtherEngines()
   if (files.length === 0) return report
+
+  // A file from another PID namespace is not ours to judge: its pids name other
+  // processes here, and its owner may be running where this process cannot see
+  // it. It stays as it is, for the engine that can read it.
+  const pidNamespace = deps.pidNamespace !== undefined ? deps.pidNamespace : currentPidNamespace()
+  const ours = (record: RecordFile): boolean =>
+    record.owner.pidNamespace !== undefined && record.owner.pidNamespace === pidNamespace
 
   const now = Date.now()
   const bootAt = currentBootAt()
@@ -275,7 +301,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
   // the engines that might still be running, and the children worth asking about.
   const candidates = new Set<number>()
   for (const { record } of files) {
-    if (!record || record.owner.bootAt !== bootAt) continue
+    if (!record || !ours(record) || record.owner.bootAt !== bootAt) continue
     if (record.owner.pid !== process.pid && isAlive(record.owner.pid)) {
       candidates.add(record.owner.pid)
     }
@@ -288,6 +314,10 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
   for (const { file, record } of files) {
     if (!record) {
       removeRecord(file)
+      continue
+    }
+    if (!ours(record)) {
+      report.foreign += 1
       continue
     }
     // A DIFFERENT BOOT: every child died with it, and the numbers have been
