@@ -439,6 +439,48 @@ describe('Conversation turn loop', () => {
     expect(result.costUsd).toBeGreaterThan(0)
   })
 
+  it("keeps a tool call's provider data (a Gemini thought signature) in the transcript for the next turn", async () => {
+    const signature = {
+      provider: 'google',
+      fields: { extra_content: { google: { thought_signature: 'sig-A' } } },
+    }
+    const scripted = scriptedClient([
+      [
+        { type: 'tool-call', id: 'tc1', name: 'list_files', input: {}, providerData: signature },
+        { type: 'tool-call', id: 'tc2', name: 'list_files', input: {} },
+        usage(100, 30),
+      ],
+      [{ type: 'text', delta: 'done' }, usage(180, 12)],
+    ])
+    await makeConversation(scripted).run()
+    const second = scripted.seenParams[1]!
+    const assistant = second.messages.find((m) => m.role === 'assistant')
+    expect(assistant?.content).toEqual([
+      { type: 'tool-call', id: 'tc1', name: 'list_files', input: {}, providerData: signature },
+      { type: 'tool-call', id: 'tc2', name: 'list_files', input: {} },
+    ])
+  })
+
+  it('prices a cached turn at the cache rates', async () => {
+    // claude-haiku-4-5: $1/M input, $0.10/M cache read, $1.25/M cache write, $5/M output.
+    const scripted = scriptedClient([
+      [
+        { type: 'text', delta: 'done' },
+        {
+          type: 'usage',
+          inputTokens: 1_000_000,
+          cachedInputTokens: 600_000,
+          cacheWriteInputTokens: 300_000,
+          outputTokens: 0,
+        },
+      ],
+    ])
+    await makeConversation(scripted).run()
+    const turn = events.find((e) => e.type === 'turn') as { costUsd: number }
+    // 100k fresh ($0.10) + 600k read ($0.06) + 300k written ($0.375).
+    expect(turn.costUsd).toBeCloseTo(0.535, 6)
+  })
+
   it('setModel applies at the next provider call', async () => {
     const scripted = scriptedClient([[{ type: 'text', delta: 'x' }, usage(5, 1)]])
     const conversation = makeConversation(scripted)

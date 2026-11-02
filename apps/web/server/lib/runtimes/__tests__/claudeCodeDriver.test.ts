@@ -7,9 +7,13 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
+import { mapClaudeEvent, type ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
 
-import { createClaudeCodeDriver, isAgentSdkMissing } from '../claudeCodeDriver'
+import {
+  createClaudeCodeDriver,
+  isAgentSdkMissing,
+  translateClaudeMessage,
+} from '../claudeCodeDriver'
 import type { RuntimeRunContext } from '../types'
 
 function resolverError(code: string, message: string): Error {
@@ -134,5 +138,96 @@ describe('createClaudeCodeDriver: abort is a clean terminal, not a failure', () 
     // here becomes `kind: 'error', fatal: true` instead.
     expect(terminal).toMatchObject({ ok: true, aborted: true })
     expect(terminal).not.toHaveProperty('errorMessage')
+  })
+})
+
+// An API error (expired login, bad key, billing limit) reaches the SDK consumer
+// as an assistant notice flagged with its cause, then a `result` with
+// `subtype: 'success'` AND `is_error: true`. The frames below are the ones the
+// CLI bundled with SDK 0.3.268 emits for an invalid ANTHROPIC_API_KEY. The run
+// must end as a failure carrying the cause, so the task is not marked done
+// with the error text as its result.
+describe('createClaudeCodeDriver: an API error is a failed run', () => {
+  const frames = [
+    { type: 'system', subtype: 'init', session_id: 'sess-1', model: 'claude-sonnet-5' },
+    {
+      type: 'assistant',
+      error: 'authentication_failed',
+      message: { content: [{ type: 'text', text: 'Invalid API key · Fix external API key' }] },
+    },
+    {
+      type: 'result',
+      subtype: 'success',
+      is_error: true,
+      api_error_status: 401,
+      result: 'Invalid API key · Fix external API key',
+      session_id: 'sess-1',
+      total_cost_usd: 0,
+      usage: { input_tokens: 0, output_tokens: 0 },
+    },
+  ]
+
+  it('reports ok:false with the error text, the HTTP status and the typed cause', async () => {
+    const driver = createClaudeCodeDriver(
+      { agentId: 'a1', sessionKey: 'agent:a1:team:t', message: 'hi', model: null, context: null },
+      { cwd: null, model: null, apiKeyEnv: {} } as unknown as RuntimeRunContext,
+      {
+        loadSdk: async () => ({
+          query: () =>
+            (async function* () {
+              for (const f of frames) yield f
+            })(),
+        }),
+      },
+    )
+    const seen: ClaudeNativeEvent[] = []
+    driver.onEvent((ev) => seen.push(ev))
+    await driver.start()
+    for (let i = 0; i < 10 && !seen.some((e) => e.type === 'result'); i++)
+      await new Promise((r) => setTimeout(r, 0))
+
+    // The CLI's error notice never streams as if the model wrote it.
+    expect(seen.filter((e) => e.type === 'text')).toEqual([])
+    expect(seen.find((e) => e.type === 'result')).toMatchObject({
+      ok: false,
+      errorMessage: 'Invalid API key · Fix external API key (HTTP 401)',
+      errorCode: 'authentication_failed',
+    })
+  })
+
+  it('keeps the text of a max_output_tokens message, which is real model output', () => {
+    expect(
+      translateClaudeMessage({
+        type: 'assistant',
+        error: 'max_output_tokens',
+        message: { content: [{ type: 'text', text: 'partial answer' }] },
+      }),
+    ).toEqual([{ type: 'text', text: 'partial answer' }])
+  })
+
+  it('leaves a clean success untouched', () => {
+    expect(
+      translateClaudeMessage({ type: 'result', subtype: 'success', is_error: false, result: 'ok' }),
+    ).toMatchObject([{ type: 'result', ok: true, summary: 'ok' }])
+  })
+
+  it('the adapter carries the cause onto the fatal error event', () => {
+    let seq = 0
+    const out = mapClaudeEvent(
+      {
+        type: 'result',
+        ok: false,
+        summary: 'Invalid API key',
+        errorMessage: 'Invalid API key',
+        errorCode: 'authentication_failed',
+      },
+      { runId: 'r1', sessionId: null },
+      () => ++seq,
+    )
+    expect(out.find((e) => e.kind === 'error')).toMatchObject({
+      code: 'authentication_failed',
+      fatal: true,
+    })
+    expect(out.find((e) => e.kind === 'done')).toMatchObject({ reason: 'error' })
   })
 })

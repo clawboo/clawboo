@@ -3,6 +3,12 @@
 // isolated worktree and returns a typed result. Evidence (the command + a scrubbed
 // output tail) is appended to VERIFICATION.md. No regex-scraping of meaning: we
 // read the exit code, period.
+//
+// The builder works in the same worktree the command is read from, so where the
+// command came from is recorded with it (`commandSource`). A check the person set
+// for the team is passed in and always wins. Without one, the worktree's command
+// counts as clawboo's only while it matches the init.sh of the task's scaffold
+// commit, which the builder cannot rewrite; anything else is the builder's own.
 
 import { spawn } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'
@@ -15,8 +21,9 @@ import {
   parseVerifyCommand,
   parseVerifyCommandFromVerificationMd,
   type DeterministicResult,
+  type VerifyCommandSource,
 } from '@clawboo/governance'
-import { SOR_FILES } from '@clawboo/worktrees'
+import { execGit, SOR_FILES } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
@@ -27,8 +34,12 @@ const TAIL_CHARS = 4_000
 
 export interface DeterministicGateInput {
   worktreePath: string
-  /** Explicit override; else parsed from init.sh → VERIFICATION.md. */
+  /** A trusted check (the team's verify command). Wins over the worktree's
+   *  files; else the command is parsed from init.sh, then VERIFICATION.md. */
   verifyCommand?: string | null
+  /** The task's scaffold commit (`Worktree.baseCommit`), whose init.sh is the
+   *  one clawboo wrote. Absent, a worktree command is attributed to the agent. */
+  scaffoldCommit?: string | null
   timeoutMs?: number
   /**
    * Injectable env (tests); defaults to a SCRUBBED child env (`buildChildEnv()` —
@@ -39,11 +50,7 @@ export interface DeterministicGateInput {
   env?: NodeJS.ProcessEnv
 }
 
-async function resolveVerifyCommand(
-  worktreePath: string,
-  override?: string | null,
-): Promise<string | null> {
-  if (override && override.trim()) return override.trim()
+async function worktreeVerifyCommand(worktreePath: string): Promise<string | null> {
   try {
     const fromInit = parseVerifyCommand(
       await readFile(path.join(worktreePath, SOR_FILES.init), 'utf8'),
@@ -61,6 +68,35 @@ async function resolveVerifyCommand(
   }
 }
 
+/** The VERIFY_CMD in init.sh as committed at `commit`, or null (none, the
+ *  placeholder, or an unreadable commit). */
+export async function scaffoldVerifyCommand(
+  worktreePath: string,
+  commit: string,
+): Promise<string | null> {
+  // A commit id only: anything else must never reach git's argv.
+  if (!/^[0-9a-f]{7,64}$/i.test(commit)) return null
+  try {
+    return parseVerifyCommand(await execGit(worktreePath, ['show', `${commit}:${SOR_FILES.init}`]))
+  } catch {
+    return null
+  }
+}
+
+export async function resolveVerifyCommand(
+  worktreePath: string,
+  trusted?: string | null,
+  scaffoldCommit?: string | null,
+): Promise<{ command: string | null; source: VerifyCommandSource }> {
+  if (trusted && trusted.trim()) return { command: trusted.trim(), source: 'configured' }
+  const command = await worktreeVerifyCommand(worktreePath)
+  if (!command) return { command: null, source: 'none' }
+  const scaffolded = scaffoldCommit
+    ? await scaffoldVerifyCommand(worktreePath, scaffoldCommit)
+    : null
+  return { command, source: scaffolded !== null && scaffolded === command ? 'scaffold' : 'agent' }
+}
+
 async function appendEvidence(
   worktreePath: string,
   det: DeterministicResult,
@@ -70,7 +106,7 @@ async function appendEvidence(
     '',
     `### Gate run — ${new Date(at).toISOString()}`,
     '',
-    `- Command: \`${det.command}\``,
+    `- Command: \`${det.command}\`${det.commandSource ? ` (source: ${det.commandSource})` : ''}`,
     `- Result: ${det.passed ? 'PASS' : det.timedOut ? 'TIMED OUT' : 'FAIL'} (exit ${det.exitCode ?? 'null'}, ${det.durationMs}ms)`,
     '',
     '```text',
@@ -123,15 +159,20 @@ export async function runDeterministicGate(
   if (!worktreePath.startsWith(stateRootPrefix)) {
     throw new Error(`worktree path is outside the clawboo state directory: ${worktreePath}`)
   }
-  const command = await resolveVerifyCommand(worktreePath, input.verifyCommand)
+  const { command, source: commandSource } = await resolveVerifyCommand(
+    worktreePath,
+    input.verifyCommand,
+    input.scaffoldCommit,
+  )
   if (!command) {
     return deterministicResultSchema.parse({
       command: '(none configured)',
+      commandSource,
       exitCode: null,
       passed: false,
       stdoutTail: '',
       stderrTail:
-        'No verify command configured (set VERIFY_CMD in init.sh). Cannot certify "done".',
+        'No verify command configured (set the team\'s verify command, or VERIFY_CMD in init.sh). Cannot certify "done".',
       durationMs: 0,
       timedOut: false,
     })
@@ -181,6 +222,7 @@ export async function runDeterministicGate(
 
   const det = deterministicResultSchema.parse({
     command,
+    commandSource,
     exitCode: run.exitCode,
     passed: run.exitCode === 0 && !run.timedOut,
     stdoutTail: scrubResultSummary(run.stdout, TAIL_CHARS),

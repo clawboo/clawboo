@@ -14,15 +14,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type { StartOpts } from '@clawboo/executor'
 
+import { parse as parseYaml } from 'yaml'
+
 import {
   HERMES_SESSION_LINE,
   buildHermesSpawnPlan,
-  hermesMcpConfig,
+  hermesMcpServers,
   parseHermesLine,
   type HermesRunState,
 } from '../hermesDriver'
 import {
+  CLAWBOO_MCP_BEGIN,
   detectProvider,
+  listHermesMcpServerNames,
+  mergeClawbooMcpServers,
   provisionHermesHome,
   seedHermesAuth,
   type ProvisionedHermesHome,
@@ -136,56 +141,130 @@ describe('hermes driver (preserved runtime)', () => {
     expect(second.seededConfig).toBe(true)
   })
 
-  it('mcp.json is clawboo-owned: written/refreshed when a base URL exists, removed when none', async () => {
+  /** Parse a config.yaml body strictly (duplicate keys rejected) and return what
+   *  Hermes's `_load_mcp_config` reads: the top-level `mcp_servers` mapping. */
+  const hermesMcpView = (body: string): Record<string, { url?: string; command?: string }> => {
+    const doc = (parseYaml(body, { uniqueKeys: true }) ?? {}) as Record<string, unknown>
+    return (doc['mcp_servers'] ?? {}) as Record<string, { url?: string; command?: string }>
+  }
+
+  it('attaches the clawboo servers through config.yaml mcp_servers, the only place Hermes reads them', async () => {
     const withMcp = await provisionHermesHome(identityHome(), {
-      mcpJson: hermesMcpConfig('http://localhost:18790'),
+      mcpServers: hermesMcpServers('http://localhost:18790'),
     })
-    const mcpPath = path.join(withMcp.home, 'mcp.json')
-    const parsed = JSON.parse(await readFile(mcpPath, 'utf8')) as {
-      mcpServers: Record<string, { url: string }>
-    }
-    expect(Object.keys(parsed.mcpServers).sort()).toEqual([
+    expect(withMcp.mcpAttached).toBe(true)
+    const configPath = path.join(withMcp.home, 'config.yaml')
+    const servers = hermesMcpView(await readFile(configPath, 'utf8'))
+    expect(Object.keys(servers).sort()).toEqual([
       'clawboo-memory',
       'clawboo-tasks',
       'clawboo-teamchat',
       'clawboo-tools',
     ])
-    for (const server of Object.values(parsed.mcpServers))
-      expect(server.url).toContain('http://localhost:18790')
+    for (const server of Object.values(servers))
+      expect(server.url).toContain('http://localhost:18790/api/mcp/')
+    expect(existsSync(path.join(withMcp.home, 'mcp.json'))).toBe(false)
 
-    // Port change → refreshed.
+    // Port change: the block is rewritten in place, never duplicated.
     await provisionHermesHome(identityHome(), {
-      mcpJson: hermesMcpConfig('http://localhost:19000'),
+      mcpServers: hermesMcpServers('http://localhost:19000'),
     })
-    expect(await readFile(mcpPath, 'utf8')).toContain('19000')
+    const body = await readFile(configPath, 'utf8')
+    expect(body.split(CLAWBOO_MCP_BEGIN)).toHaveLength(2)
+    expect(hermesMcpView(body)['clawboo-tasks']?.url).toContain('19000')
 
-    // No MCP base URL → removed (no stale attach config).
-    await provisionHermesHome(identityHome(), { mcpJson: null })
-    expect(existsSync(mcpPath)).toBe(false)
+    // No MCP base URL: the block goes, and a file holding nothing else goes with it.
+    await provisionHermesHome(identityHome(), { mcpServers: null })
+    expect(existsSync(configPath)).toBe(false)
+  })
+
+  it("merges into the seeded user config's own mcp_servers and keeps the user's servers", async () => {
+    const userDir = path.join(sandbox, '.hermes')
+    await mkdir(userDir, { recursive: true })
+    await writeFile(
+      path.join(userDir, 'config.yaml'),
+      [
+        'model:',
+        '  provider: anthropic',
+        'mcp_servers:   # mine',
+        '    github:',
+        '        command: npx',
+        'agent:',
+        '  max_turns: 40',
+        '',
+      ].join('\n'),
+      'utf8',
+    )
+    const first = await provisionHermesHome(identityHome(), {
+      mcpServers: hermesMcpServers('http://localhost:18790', { teamId: 'team-A' }),
+    })
+    expect(first.seededConfig).toBe(true)
+    const configPath = path.join(first.home, 'config.yaml')
+    const body = await readFile(configPath, 'utf8')
+    const servers = hermesMcpView(body)
+    expect(servers['github']?.command).toBe('npx')
+    expect(servers['clawboo-tasks']?.url).toContain('scopeTeamId=team-A')
+    // The rest of the config is untouched, so the provider still resolves.
+    expect(await detectProvider(first.home)).toBe('anthropic')
+    expect((parseYaml(body) as { agent: { max_turns: number } }).agent.max_turns).toBe(40)
+
+    // A Hermes re-save drops comments: unmarked clawboo entries are still replaced.
+    const resaved = [
+      'model:',
+      '  provider: anthropic',
+      'mcp_servers:',
+      '  github:',
+      '    command: npx',
+      '  clawboo-tasks:',
+      '    url: http://localhost:1/api/mcp/tasks',
+      '',
+    ].join('\n')
+    await writeFile(configPath, resaved, 'utf8')
+    await provisionHermesHome(identityHome(), {
+      mcpServers: hermesMcpServers('http://localhost:18790'),
+    })
+    const after = hermesMcpView(await readFile(configPath, 'utf8'))
+    expect(after['github']?.command).toBe('npx')
+    expect(after['clawboo-tasks']?.url).toContain('localhost:18790')
+    expect(Object.keys(after)).toHaveLength(5)
+  })
+
+  it('mergeClawbooMcpServers handles an empty flow mapping and refuses a non-empty one', () => {
+    const servers = { 'clawboo-tasks': { url: 'http://h/api/mcp/tasks?a=1&b=2' } }
+    const fromEmpty = mergeClawbooMcpServers('mcp_servers: {}\n', servers)
+    expect(fromEmpty.attached).toBe(true)
+    expect(hermesMcpView(fromEmpty.body)['clawboo-tasks']?.url).toBe(
+      'http://h/api/mcp/tasks?a=1&b=2',
+    )
+    const flow = 'mcp_servers: {github: {command: npx}}\n'
+    expect(mergeClawbooMcpServers(flow, servers)).toEqual({ body: flow, attached: false })
+    // Removing the block restores the original body.
+    const plain = 'model:\n  provider: openrouter\n'
+    const added = mergeClawbooMcpServers(plain, servers).body
+    expect(mergeClawbooMcpServers(added, null).body).toBe(plain)
+    expect(listHermesMcpServerNames(added)).toEqual(['clawboo-tasks'])
   })
 
   it('binds the run scope onto the shared Memory and Tasks server URLs (per-run scope)', () => {
-    const json = JSON.parse(
-      hermesMcpConfig('http://localhost:18790', { teamId: 'team-A', agentId: 'agent-1' }),
-    ) as {
-      mcpServers: Record<string, { url: string }>
-    }
-    expect(json.mcpServers['clawboo-memory']?.url).toContain('scopeTeamId=team-A')
-    expect(json.mcpServers['clawboo-memory']?.url).toContain('scopeAgentId=agent-1')
+    const mcpServers = hermesMcpServers('http://localhost:18790', {
+      teamId: 'team-A',
+      agentId: 'agent-1',
+    })
+    expect(mcpServers['clawboo-memory']?.url).toContain('scopeTeamId=team-A')
+    expect(mcpServers['clawboo-memory']?.url).toContain('scopeAgentId=agent-1')
     // Tasks carries the same scope: board READS are forced to the run's team (a
     // bare `list_tasks` must mean "my team's board"), and the agent binding is
     // what enables the mid-run inbox piggyback.
-    expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeTeamId=team-A')
-    expect(json.mcpServers['clawboo-tasks']?.url).toContain('scopeAgentId=agent-1')
-    // Tools stays bare.
-    // Tools carries the run scope now. A connector tool is governed per agent,
+    expect(mcpServers['clawboo-tasks']?.url).toContain('scopeTeamId=team-A')
+    expect(mcpServers['clawboo-tasks']?.url).toContain('scopeAgentId=agent-1')
+    // Tools carries the run scope too. A connector tool is governed per agent,
     // so an attach with no identity could match no agent-scoped grant and every
     // connector call from a spawned runtime would be denied.
-    expect(json.mcpServers['clawboo-tools']?.url).toContain('scopeTeamId=team-A')
+    expect(mcpServers['clawboo-tools']?.url).toContain('scopeTeamId=team-A')
     // TeamChat carries the room + AUTHOR binding (anti-spoof), not the scope params.
-    expect(json.mcpServers['clawboo-teamchat']?.url).toContain('roomTeamId=team-A')
-    expect(json.mcpServers['clawboo-teamchat']?.url).toContain('postAuthorAgentId=agent-1')
-    expect(json.mcpServers['clawboo-teamchat']?.url).not.toContain('scopeTeamId')
+    expect(mcpServers['clawboo-teamchat']?.url).toContain('roomTeamId=team-A')
+    expect(mcpServers['clawboo-teamchat']?.url).toContain('postAuthorAgentId=agent-1')
+    expect(mcpServers['clawboo-teamchat']?.url).not.toContain('scopeTeamId')
   })
 
   // ── provider detection ──────────────────────────────────────────────────────

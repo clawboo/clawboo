@@ -12,11 +12,18 @@
 //
 // Hermes is a single-task WORKER on clawboo's one board of record: clawboo does
 // NOT sync Hermes's internal kanban — Hermes reaches the team's coordination
-// surface by attaching clawboo's Tasks/Memory/Tools MCP (mcp.json in the home).
+// surface by attaching clawboo's Tasks/Memory/Tools/TeamChat MCP servers (the
+// clawboo-owned `mcp_servers` block of the home's config.yaml).
 // It is dispatched ONLY via one-shot `hermes chat` — never `hermes gateway`
 // (channels are Hermes-native and stay off for teammate dispatch).
 //
-// Hermes is non-streaming. Quiet mode (`-Q`) prints the final response on
+// Hermes is non-streaming, so while the process runs the driver emits a
+// `status: running` beat every HERMES_HEARTBEAT_MS. Every idle watchdog counts
+// any event as activity (the delegation sweep, the board drain's silence
+// guard), so a long Hermes run is not killed for printing nothing until exit.
+// The beat proves the process is alive, not that it is progressing.
+//
+// Quiet mode (`-Q`) prints the final response on
 // stdout and the `session_id: …` line on STDERR (live-verified against
 // hermes-agent 0.15.2) — `onClose` scans stderr for it, and `parseHermesLine`
 // ALSO tolerates the line (or a JSON frame carrying `session_id`) on stdout in
@@ -47,7 +54,12 @@ import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/
 import type { StartOpts } from '@clawboo/executor'
 
 import { resolveRuntimeBin } from '../platform'
-import { detectProvider, provisionHermesHome, type ProvisionedHermesHome } from './hermesHome'
+import {
+  detectProvider,
+  provisionHermesHome,
+  type HermesMcpServers,
+  type ProvisionedHermesHome,
+} from './hermesHome'
 import { hasUsableHermesCodexAuth, userHermesAuthPath } from './hermesAuth'
 import { createSpawnDriver, type ResolvedSpawn } from './subprocess'
 import type { RuntimeRunContext } from './types'
@@ -56,15 +68,19 @@ const asRecord = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null
 const asStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 
+/** How often a running Hermes process reports that it is still alive. Well
+ *  under the shortest idle watchdog (the 8-minute delegation sweep). */
+export const HERMES_HEARTBEAT_MS = 60_000
+
 /** Quiet-mode session-info line. Base form `session_id: <id>`, widened to
  *  tolerate `Session ID:` / `session-id:` casing variants. */
 export const HERMES_SESSION_LINE = /^\s*session[\s_-]?id\s*:\s*(\S+)\s*$/i
 
-export function hermesMcpConfig(baseUrl: string, scope?: AttachScope): string {
-  // JSON map of clawboo MCP servers for Hermes's MCP client to load from the
-  // home. Exact filename/shape confirmed against the CLI in the live smoke. The
-  // shared Memory server's URL carries the run's scope (see buildAttachConfig).
-  const servers: Record<string, { url: string }> = {}
+/** The clawboo MCP servers for a Hermes run, written into the home's
+ *  config.yaml by provisionHermesHome. The shared Memory server's URL carries
+ *  the run's scope (see buildAttachConfig). */
+export function hermesMcpServers(baseUrl: string, scope?: AttachScope): HermesMcpServers {
+  const servers: HermesMcpServers = {}
   for (const server of MCP_SERVER_NAMES) {
     const cfg = buildAttachConfig({
       runtime: 'openclaw',
@@ -75,7 +91,7 @@ export function hermesMcpConfig(baseUrl: string, scope?: AttachScope): string {
     })
     servers[`clawboo-${server}`] = { url: (cfg.structured as { url: string }).url }
   }
-  return JSON.stringify({ mcpServers: servers }, null, 2)
+  return servers
 }
 
 export interface HermesRunState {
@@ -283,7 +299,11 @@ export function hermesSteerPrompt(texts: string[]): string {
   ].join('\n\n')
 }
 
-export function createHermesDriver(opts: StartOpts, ctx: RuntimeRunContext): HermesDriver {
+export function createHermesDriver(
+  opts: StartOpts,
+  ctx: RuntimeRunContext,
+  deps: { heartbeatMs?: number } = {},
+): HermesDriver {
   const state: HermesRunState = { lastText: '', sawResult: false }
   /** The home the run started in: a resume must land in the same one. */
   let homeDir: string | null = null
@@ -293,13 +313,17 @@ export function createHermesDriver(opts: StartOpts, ctx: RuntimeRunContext): Her
   let chain: Promise<unknown> = Promise.resolve()
 
   const spawn = createSpawnDriver<HermesNativeEvent>({
+    heartbeat: {
+      everyMs: deps.heartbeatMs ?? HERMES_HEARTBEAT_MS,
+      event: () => ({ type: 'status', phase: 'running' }),
+    },
     async resolve() {
       // Persistent per-identity home when the runner materialized one;
       // otherwise a throwaway home (the conservative one-shot default).
       homeDir = ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-')))
       const home = await provisionHermesHome(homeDir, {
-        mcpJson: ctx.mcpBaseUrl
-          ? hermesMcpConfig(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
+        mcpServers: ctx.mcpBaseUrl
+          ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
           : null,
       })
       return buildHermesSpawnPlan(opts, ctx, home)

@@ -38,8 +38,20 @@ export type Finding = z.infer<typeof findingSchema>
 
 /** Result of the deterministic gate — the strongest signal (an exit code, not a
  *  judgement). `passed` is the gate's truth; the tails are scrubbed evidence. */
+/**
+ * Where the gate's command came from. `configured`: a check the person set for
+ * the team, passed in by clawboo. `scaffold`: the command clawboo wrote into the
+ * task's init.sh when it set up the worktree, unchanged since. `agent`: a command
+ * the builder wrote or edited in its own worktree (it differs from the scaffold
+ * commit's), so the builder chose what it is judged by. `none`: no command.
+ */
+export const verifyCommandSourceSchema = z.enum(['configured', 'scaffold', 'agent', 'none'])
+export type VerifyCommandSource = z.infer<typeof verifyCommandSourceSchema>
+
 export const deterministicResultSchema = z.object({
   command: z.string(),
+  /** Absent on results recorded before it existed. */
+  commandSource: verifyCommandSourceSchema.optional(),
   exitCode: z.number().int().nullable(),
   passed: z.boolean(),
   stdoutTail: z.string().default(''),
@@ -56,10 +68,23 @@ export const criticOutputSchema = z.object({
 })
 export type CriticOutput = z.infer<typeof criticOutputSchema>
 
+/**
+ * What a critic run produced. `reviewed`: the reviewer returned a verdict it
+ * could be held to (possibly zero findings). `empty`: it returned no text at
+ * all. `errored`: it failed, stopped on a fatal error, or returned text with no
+ * readable verdict. Only `reviewed` is a review; the others are recorded so a
+ * review that never happened is not shown as a clean one. The critic stays
+ * non-blocking either way.
+ */
+export const criticOutcomeSchema = z.enum(['reviewed', 'empty', 'errored'])
+export type CriticOutcome = z.infer<typeof criticOutcomeSchema>
+
 /** The stored critic verdict. `ran:false` ⇒ the critic was not triggered (small,
  *  low-risk diff) — no worktree, no model spend. */
 export const criticVerdictSchema = z.object({
   ran: z.boolean(),
+  /** Set whenever `ran` is true. Absent on verdicts recorded before it existed. */
+  outcome: criticOutcomeSchema.optional(),
   findings: z.array(findingSchema).default([]),
   reviewerRuntime: z.string().nullable().default(null),
   // The model the reviewer ran on. Surfaced so a same-model review's bias caveat

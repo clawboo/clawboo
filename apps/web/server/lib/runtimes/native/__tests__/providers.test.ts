@@ -113,7 +113,27 @@ describe('anthropic dialect', () => {
     expect(out).toEqual([
       { type: 'text', delta: 'Working' },
       { type: 'tool-call', id: 'tc9', name: 'write_file', input: { path: 'x.md' } },
-      { type: 'usage', inputTokens: 200, outputTokens: 33, cachedInputTokens: 50 },
+      // inputTokens is the whole prompt: 200 uncached + 50 read from the cache.
+      { type: 'usage', inputTokens: 250, outputTokens: 33, cachedInputTokens: 50 },
+    ])
+  })
+
+  it('counts cache writes into the prompt and reports them apart', () => {
+    const mapper = createAnthropicEventMapper()
+    mapper.handle({
+      type: 'message_start',
+      message: {
+        usage: { input_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 4000 },
+      },
+    })
+    expect(mapper.finish()).toEqual([
+      {
+        type: 'usage',
+        inputTokens: 4010,
+        outputTokens: 0,
+        cachedInputTokens: 0,
+        cacheWriteInputTokens: 4000,
+      },
     ])
   })
 
@@ -209,6 +229,71 @@ describe('openai dialect', () => {
     const out = mapper.finish()
     expect(out[0]).toEqual({ type: 'tool-call', id: 'call_2', name: 'list_files', input: {} })
     expect(out[1]).toMatchObject({ type: 'usage' })
+  })
+
+  // Gemini 3 on the OpenAI-compatible endpoint: the first tool call of a step
+  // carries `extra_content.google.thought_signature`, and the next request must
+  // send it back on that call or Gemini rejects the multi-step tool turn.
+  it('captures a Gemini thought signature and replays it only to Google', () => {
+    const mapper = createOpenAiChunkMapper('google')
+    const sig = { google: { thought_signature: 'CiQB0e2Kb9sig' } }
+    const events = [
+      ...mapper.handle({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'function-call-1',
+                  function: { name: 'list_files', arguments: '{"path":"."}' },
+                  extra_content: sig,
+                },
+                {
+                  index: 1,
+                  id: 'function-call-2',
+                  function: { name: 'read_file', arguments: '{"path":"a.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      ...mapper.handle({ choices: [{ delta: {}, finish_reason: 'tool_calls' }] }),
+    ]
+    const calls = events.filter((e) => e.type === 'tool-call')
+    expect(calls).toEqual([
+      {
+        type: 'tool-call',
+        id: 'function-call-1',
+        name: 'list_files',
+        input: { path: '.' },
+        providerData: { provider: 'google', fields: { extra_content: sig } },
+      },
+      { type: 'tool-call', id: 'function-call-2', name: 'read_file', input: { path: 'a.md' } },
+    ])
+
+    const transcript: NeutralMessage[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look around' }] },
+      { role: 'assistant', content: calls.flatMap((c) => (c.type === 'tool-call' ? [c] : [])) },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool-result', id: 'function-call-1', output: 'a.md', isError: false },
+          { type: 'tool-result', id: 'function-call-2', output: 'hi', isError: false },
+        ],
+      },
+    ]
+    const toGoogle = toOpenAiMessages('sys', transcript, 'google')[2] as {
+      tool_calls: Array<Record<string, unknown>>
+    }
+    expect(toGoogle.tool_calls[0]).toMatchObject({ id: 'function-call-1', extra_content: sig })
+    expect(toGoogle.tool_calls[1]).not.toHaveProperty('extra_content')
+    // A fallback to another provider never sees Google's field.
+    const toOpenAi = toOpenAiMessages('sys', transcript, 'openai')[2] as {
+      tool_calls: Array<Record<string, unknown>>
+    }
+    expect(toOpenAi.tool_calls[0]).not.toHaveProperty('extra_content')
   })
 
   it('ollamaBaseUrl honors the env override', () => {

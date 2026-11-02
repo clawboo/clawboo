@@ -30,6 +30,9 @@ export type ClaudeNativeEvent =
        *  and continue rather than fail the task. */
       maxTurns?: boolean
       errorMessage?: string
+      /** The SDK's typed cause when the run ended on an API error
+       *  (`authentication_failed`, `billing_error`, `rate_limit`, ...). */
+      errorCode?: string
     }
 
 /**

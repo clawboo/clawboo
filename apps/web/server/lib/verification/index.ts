@@ -18,6 +18,7 @@ import {
 import {
   blockingFindings,
   nextCycleDecision,
+  shouldRunCritic,
   verificationStatusFor,
   type CriticVerdict,
   type DebtNote,
@@ -32,7 +33,7 @@ import { commitWorktreeWork } from '@clawboo/worktrees'
 
 import type { RuntimeRunContext } from '../runtimes'
 import { isRiskyDelegation } from '../teamChat/riskyDelegation'
-import { runCritic, type ReviewerSpend } from './critic'
+import { criticErrored, runCritic, type ReviewerSpend } from './critic'
 import { runDeterministicGate } from './deterministicGate'
 
 export { runDeterministicGate } from './deterministicGate'
@@ -54,7 +55,8 @@ export interface VerifyTaskInput {
   worktree: Worktree
   diffStat: DiffStat
   reviewRootDir: string
-  /** Verify command override (else parsed from the worktree's init.sh). */
+  /** The team's verify command, a check the person set (else parsed from the
+   *  worktree's init.sh and attributed by the scaffold-commit comparison). */
   verifyCommand?: string | null
   /** When provided + the gate is green + the diff is risky/large, run the critic. */
   makeReviewerAdapter?: (ctx: RuntimeRunContext) => RuntimeAdapter
@@ -141,11 +143,15 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   const det = await runDeterministicGate({
     worktreePath: input.worktree.worktreePath,
     verifyCommand: input.verifyCommand,
+    scaffoldCommit: input.worktree.baseCommit,
     timeoutMs: input.verifyTimeoutMs,
   })
 
   let critic: CriticVerdict = CRITIC_NOT_RUN
   if (det.passed && input.makeReviewerAdapter) {
+    const riskFlag =
+      input.riskFlag ??
+      isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` })
     try {
       const { head } = await commitWorktreeWork(input.repoPath, input.worktree)
       critic = await runCritic({
@@ -156,15 +162,23 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
         makeReviewerAdapter: input.makeReviewerAdapter,
         reviewerModel: input.reviewerModel,
         mcpBaseUrl: input.mcpBaseUrl,
-        riskFlag:
-          input.riskFlag ??
-          isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` }),
+        riskFlag,
         reviewRootDir: input.reviewRootDir,
         onSpend: input.onReviewerSpend,
       })
-    } catch {
-      // A critic failure must never block (or crash) the deterministic verdict.
-      critic = CRITIC_NOT_RUN
+    } catch (err) {
+      // A critic failure must never block (or crash) the deterministic verdict,
+      // and a review the diff called for that could not run is recorded as such.
+      critic = shouldRunCritic({
+        diffStat: input.diffStat,
+        hasParent: Boolean(task?.parentTaskId),
+        riskFlag,
+      })
+        ? criticErrored({
+            why: err instanceof Error ? err.message : String(err),
+            reviewerModel: input.reviewerModel ?? null,
+          })
+        : CRITIC_NOT_RUN
     }
   }
 
@@ -217,8 +231,10 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       status,
       attempt: attemptNumber,
       command: det.command,
+      ...(det.commandSource ? { commandSource: det.commandSource } : {}),
       detPassed: det.passed,
       criticRan: critic.ran,
+      ...(critic.outcome ? { criticOutcome: critic.outcome } : {}),
       criticFindings: critic.findings.length,
       blocking: blockingFindings(critic).length,
     },
