@@ -267,6 +267,7 @@ The task cards.
 | `completed_at`         | `INTEGER`                             | Set when the task first reaches `done` or `cancelled`                                                                                                                                    |
 | `room_id`              | `TEXT`                                | Plain reference to `rooms.id`: the room the task was delegated in; null means General. A subtask takes its parent's room                                                                 |
 | `person_moved_at`      | `INTEGER`                             | When a person last moved the card on the board or in the task drawer. While no run has started since, an agent's own status write through the tasks MCP tools is refused                 |
+| `runner_inputs`        | `TEXT`                                | JSON: what the task runner was given for the task's latest run (runtime, agent, repository, kind, model). Null for a task the runner never ran. **Retry** and **Assign** read it         |
 
 Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`).
 

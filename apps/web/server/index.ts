@@ -40,6 +40,7 @@ import {
   orchestratorKey,
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
+import { pumpRunnerReruns } from './lib/runnerRerun'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
@@ -558,6 +559,9 @@ async function main() {
     const pump = (): void => {
       try {
         const db = getDb()
+        // Tasks the task runner ran re-fire through the runner, not team chat
+        // (team chat's ready list skips them; see lib/runnerRerun).
+        pumpRunnerReruns(db, mcpBase)
         // One orchestrator per team chat room, so the scan names the room too
         // (null = the team's own group chat).
         const wake = new Map<string, { teamId: string; roomId: string | null }>()

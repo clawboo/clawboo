@@ -26,7 +26,7 @@ Use this page to learn what each guardrail does and where it applies. To create,
 Work reaches your agents along two main paths. [How a team works](/intro/how-it-works) explains both.
 
 - **Team chat.** Messages in General and rooms, the hand-offs they lead to, and the tasks you give an agent on the Board. Most work runs here.
-- **The task runner.** Agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API with `POST /api/runtimes/:id/run`.
+- **The task runner.** Agent routines on Clawboo Native, Claude Code, Codex and Hermes, runs started through the API with `POST /api/runtimes/:id/run`, and a **Retry** or **Assign** on a task it ran, for an agent not on OpenClaw.
 
 An agent routine on OpenClaw takes a third, smaller path: a dispatcher that sends the work over the OpenClaw Gateway and waits for the result. The guardrails differ by path:
 

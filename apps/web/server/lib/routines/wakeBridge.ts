@@ -43,8 +43,8 @@ import { getRegistry } from '../agentSource'
 import { emitEvent } from '../obs'
 import { runTaskOnRuntime } from '../executorRunner'
 import { adapterFactoryFor } from '../runtimes'
-import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
-import { resolveRuntimeKeyForRuntime } from '../secretsVault'
+import { isOrchestratableRuntimeId } from '../runtimes/descriptor'
+import { runtimeKeyEnv } from '../runtimes/runKeyEnv'
 import { resolveServerOrchestrated } from '../teamChat/resolveServerOrchestrated'
 import {
   getTeamOrchestrator,
@@ -79,19 +79,6 @@ function loadAgentRow(db: ClawbooDb, agentId: string): DbAgent | null {
   return (
     (db.select().from(agents).where(eq(agents.id, agentId)).get() as DbAgent | undefined) ?? null
   )
-}
-
-/** Vault → spawned-run env, mirroring the runtimes REST run handler. */
-function buildApiKeyEnv(runtime: string): Record<string, string> {
-  const apiKeyEnv: Record<string, string> = {}
-  if (!isRuntimeId(runtime)) return apiKeyEnv
-  const d = getDescriptor(runtime)
-  for (const envVar of [d.envVar, ...(d.altEnvVars ?? [])]) {
-    if (!envVar) continue
-    const key = resolveRuntimeKeyForRuntime(runtime, envVar)
-    if (key) apiKeyEnv[envVar] = key
-  }
-  return apiKeyEnv
 }
 
 /**
@@ -337,7 +324,7 @@ export async function dispatchRoutine(
   const runTask = deps.runTask ?? runTaskOnRuntime
   let result: Awaited<ReturnType<typeof runTaskOnRuntime>>
   try {
-    const apiKeyEnv = buildApiKeyEnv(runtime)
+    const apiKeyEnv = runtimeKeyEnv(runtime)
     result = await runTask({
       db,
       makeAdapter: adapterFactoryFor(runtime as Parameters<typeof adapterFactoryFor>[0]),
