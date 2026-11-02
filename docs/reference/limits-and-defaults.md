@@ -9,6 +9,8 @@ This page lists every number Clawboo builds in that changes what you see: caps, 
 
 Some limits apply to only one of the two ways work runs. **Team chat** covers every chat turn, delegated task and team Routine. **Task runner** covers agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started with `POST /api/runtimes/:id/run`. [How a team works](/intro/how-it-works) explains both.
 
+Limits on running work count only the time the computer is awake. When a laptop sleeps, Clawboo sees the gap when it wakes and leaves it out, so closing the lid does not use up a delegated task's quiet time, a run's 30 minutes of silence, a running task's heartbeat window or an OpenClaw Routine run's 10 minutes. Approval windows count clock time, asleep or not.
+
 | Area                                              | What it covers                                                  |
 | ------------------------------------------------- | --------------------------------------------------------------- |
 | [Delegation](#delegation)                         | Depth, fan-out, subtask caps, watchdogs                         |
@@ -28,14 +30,14 @@ Some limits apply to only one of the two ways work runs. **Team chat** covers ev
 | Limit                                                                                | Value            | Change it | Source                                                        |
 | ------------------------------------------------------------------------------------ | ---------------- | --------- | ------------------------------------------------------------- |
 | Delegation depth: a task with this many parent tasks cannot delegate or get subtasks | 2                | No        | `packages/governance/src/caps/predicates.ts:12`               |
-| Delegations one turn can start (team chat); the rest are skipped with a note         | 8                | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:56`         |
+| Delegations one turn can start (team chat); the rest are skipped with a note         | 8                | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:57`         |
 | Subtasks under one parent task, finished ones included (Tasks MCP)                   | 24               | No        | `packages/governance/src/caps/predicates.ts:19`               |
 | New top-level tasks an agent can create (Tasks MCP)                                  | 30 per 5 minutes | No        | `packages/governance/src/caps/predicates.ts:28-29`            |
-| Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:104`   |
-| Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:62`    |
-| The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:89,96` |
-| How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:57`         |
-| Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:52`    |
+| Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:105`   |
+| Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:63`    |
+| The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:90,97` |
+| How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:58`         |
+| Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:53`    |
 
 The board's own REST API (`POST /api/board`) is not subject to the Tasks MCP caps. [Governance](/concepts/governance) explains the caps and when each applies.
 
@@ -43,7 +45,7 @@ The board's own REST API (`POST /api/board`) is not subject to the Tasks MCP cap
 
 | Limit                                                                                                               | Value                                          | Change it                                                | Source                                               |
 | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
-| Silence before a run is stopped (team chat, task runner, one-to-one chat)                                           | 30 minutes, then 5 seconds for it to wind down | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`                          | `packages/executor/src/idleTimeout.ts:18,22`         |
+| Silence before a run is stopped (team chat, task runner, one-to-one chat)                                           | 30 minutes, then 5 seconds for it to wind down | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`                          | `packages/executor/src/idleTimeout.ts:22,26`         |
 | Wait for the same agent's previous run to finish                                                                    | 10 minutes                                     | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`                          | `apps/web/server/lib/executorRunner.ts:142`          |
 | Model turns per Clawboo Native run (one model call plus its tool calls each)                                        | 16                                             | Per agent config, not in the dashboard                   | `packages/adapters/native/src/agentConfig.ts:97`     |
 | Context rotation: start a fresh session at this share of the context window (task runner)                           | 85%                                            | No                                                       | `packages/executor/src/session-rotation.ts:147`      |
@@ -74,9 +76,9 @@ Checks run only for task-runner work in a git worktree with changes; [How work i
 | Limit                                                                          | Value                                        | Change it                                 | Source                                                |
 | ------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------------- | ----------------------------------------------------- |
 | Heartbeat from a running task                                                  | Every 30 seconds                             | No                                        | `packages/db/src/board/repository.ts:427`             |
-| Missed heartbeats before an **In progress** task returns to **To do**          | 3 minutes                                    | `CLAWBOO_BOARD_STALE_TTL_MS`              | `apps/web/server/index.ts:557`                        |
-| How often that check runs                                                      | Every minute, and once at startup            | `CLAWBOO_BOARD_STALE_SWEEP_MS`            | `apps/web/server/index.ts:558`                        |
-| Waking delegated work that is ready to run                                     | 10 seconds after startup, then every minute  | `CLAWBOO_DISPATCH_PUMP_MS` (the interval) | `apps/web/server/index.ts:584,623`                    |
+| Missed heartbeats before an **In progress** task returns to **To do**          | 3 minutes                                    | `CLAWBOO_BOARD_STALE_TTL_MS`              | `apps/web/server/index.ts:558`                        |
+| How often that check runs                                                      | Every minute, and once at startup            | `CLAWBOO_BOARD_STALE_SWEEP_MS`            | `apps/web/server/index.ts:559`                        |
+| Waking delegated work that is ready to run                                     | 10 seconds after startup, then every minute  | `CLAWBOO_DISPATCH_PUMP_MS` (the interval) | `apps/web/server/index.ts:592,631`                    |
 | Failed or timed-out runs in a row before a task stops being retried on its own | 3 (a Stop is never retried)                  | No                                        | `packages/board-core/src/dispatch.ts:33`              |
 | Text of your comment passed to the agent working on the task                   | The first 1,000 characters                   | No                                        | `apps/web/server/lib/teamChat/taskSteer.ts:27`        |
 | Replies to a waiting task that start one run between them                      | Sent within 15 seconds of each other         | No                                        | `apps/web/server/lib/teamChat/personReply.ts:53`      |
@@ -154,7 +156,7 @@ A budget set to hard cap pauses work at 100% of its limit; the default mode only
 | API requests per client address                                                                                | 3,000 per minute                            | No                                           | `apps/web/server/lib/rateLimit.ts:24,29`                                                                |
 | Requests to the 27 sensitive routes (installs, sign-ins, connector and runtime setup, the team verify command) | 60 per minute in total, on top of the above | No                                           | `apps/web/server/lib/rateLimit.ts:38`                                                                   |
 | Requests for the dashboard's page and files                                                                    | 3,000 per minute, counted separately        | No                                           | `apps/web/server/lib/rateLimit.ts:47`                                                                   |
-| JSON request body                                                                                              | 2 MB                                        | No                                           | `apps/web/server/index.ts:331`                                                                          |
+| JSON request body                                                                                              | 2 MB                                        | No                                           | `apps/web/server/index.ts:332`                                                                          |
 | File shown in a task's workspace preview                                                                       | 8 MiB                                       | No                                           | `apps/web/server/lib/workspacePreview.ts:43`                                                            |
 
 Over a rate limit the server answers 429 with a `Retry-After` header. The [REST API overview](/reference/rest-api/index) lists the sensitive routes.
@@ -169,7 +171,7 @@ Over a rate limit the server answers 429 with a `Retry-After` header. The [REST 
 | `clawboo stop`: wait after SIGTERM, then after SIGKILL | 4 seconds, then 2 seconds                                                     | No                                    | `apps/cli/src/lifecycle.ts:574,576`              |
 | `server.log` size before it rotates to `server.log.1`  | 5 MiB, checked at each launch                                                 | No                                    | `apps/cli/src/server-log.ts:19`                  |
 | Log lines shown after a start timeout                  | The last 12, from the final 8 KiB                                             | No                                    | `apps/cli/src/server-log.ts:60`                  |
-| A restarted server's wait for its old port             | 15 seconds                                                                    | No                                    | `apps/web/server/index.ts:156`                   |
+| A restarted server's wait for its old port             | 15 seconds                                                                    | No                                    | `apps/web/server/index.ts:157`                   |
 | Shutdown wait for runtime processes to exit            | 5 seconds                                                                     | No                                    | `apps/web/server/lib/runtimes/subprocess.ts:171` |
 | Gateway check at startup                               | 1.5 seconds                                                                   | No                                    | `apps/web/server/lib/defaults.ts:42`             |
 | Health check of the server's own MCP servers           | Every minute; a failed one is retried after 30 seconds, doubling to 5 minutes | `CLAWBOO_MCP_PROBE_MS` (the interval) | `apps/web/server/lib/mcpSupervisor.ts:30-32`     |

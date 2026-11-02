@@ -253,7 +253,7 @@ On a ChatGPT plan you pay a flat fee, so these figures are a budget guide, not y
 - **No worktree, no checks.** OpenClaw agents work in their own Gateway workspace. Clawboo never gives them a git worktree and never runs verification on their work; see [How work is checked](/concepts/verification).
 - **Global memory, no connectors from the graph.** See [Clawboo tools inside OpenClaw](#clawboo-tools-inside-openclaw).
 - **A Gateway on this computer.** **Set up OpenClaw** configures and starts a local Gateway. Clawboo registers its MCP servers at a `127.0.0.1` address, which a Gateway on another machine can't reach.
-- **Routine runs stop after 10 minutes.** An OpenClaw Routine run that hasn't finished by then is stopped. `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS` changes the limit.
+- **Routine runs stop after 10 minutes.** An OpenClaw Routine run that hasn't finished by then is stopped. Time the computer spends asleep does not count. `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS` changes the limit.
 - **The 2026.9 line.** Clawboo installs `openclaw@~2026.9`, because it writes OpenClaw's configuration in that line's format.
 - **Not on the runtimes API.** `/api/runtimes/openclaw/...` answers `404`. OpenClaw is managed through the [System API](/reference/rest-api/system).
 
