@@ -50,6 +50,10 @@ export interface AwakeTimer {
  * awake. Instead of one long timer it checks every `AWAKE_TIMER_TICK_MS` and
  * moves its deadline past any suspension it sees, so a sleep longer than `ms`
  * does not fire it on wake. The timer never holds a Node process open.
+ *
+ * It reads the wall clock. A clock set back delays `fn` by the size of the
+ * step. A clock set forward by up to one tick makes it that much early, and a
+ * bigger jump is taken for a suspension.
  */
 export function setAwakeTimeout(
   fn: () => void,
