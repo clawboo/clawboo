@@ -7,10 +7,10 @@
 // and force-kills the tree. Best-effort throughout: a dead/exited pid is a no-op.
 //
 // SAFETY: the negative-pid signal targets the group whose id == the child pid,
-// which (for a detached spawn) is exactly that child's own group — never the
+// which (for a detached spawn) is exactly that child's own group, never the
 // server's. If the child was NOT spawned detached, `-pid` resolves to a
-// non-existent group (ESRCH) and we fall back to a direct `child.kill`, so this
-// can never signal the parent's process group.
+// non-existent group (ESRCH) and we walk the child's descendants instead, so
+// this can never signal the parent's process group.
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 
@@ -162,12 +162,13 @@ export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: nu
   try {
     process.kill(-pid, 'SIGTERM')
   } catch {
-    // ESRCH (group gone) — fall back to the direct child (non-detached safety),
-    // which also covers an already-exited process. Never targets another group.
-    try {
-      child?.kill('SIGTERM')
-    } catch {
-      /* gone */
+    // ESRCH: no group with this id, so the child was not spawned detached (the
+    // Claude Code CLI, which the Agent SDK's hook hands us) or has exited. Walk
+    // its descendants and escalate like a group, but only while Node has not
+    // reaped it: until then its pid cannot have been handed to another process.
+    // An exited child needs nothing.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      killProcessTreeByPid(pid, opts)
     }
     return
   }

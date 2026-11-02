@@ -123,6 +123,44 @@ describe.skipIf(isWin)('killProcessTree (spawned runtime abort)', () => {
     expect(pidAlive(pid)).toBe(false) // SIGTERM swallowed → SIGKILL escalation reaped it
   })
 
+  it('stops a child that was not spawned detached, with its grandchild, when it traps SIGTERM', async () => {
+    // The Claude Code CLI is spawned without `detached`, so the group signal
+    // finds no group. Both the child and what it started must still go.
+    const { spawn } = await import('node:child_process')
+    const child = spawn(
+      process.execPath,
+      ['-e', ['process.on("SIGTERM", () => {})', PARENT_SCRIPT].join('\n')],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+    const pid = child.pid!
+    const gpid = await new Promise<number>((resolve, reject) => {
+      let buf = ''
+      child.stdout!.on('data', (d: Buffer) => {
+        buf += d.toString()
+        const found = gpidOf(buf.split('\n')[0] ?? '')
+        if (found) resolve(found)
+      })
+      child.once('exit', () => reject(new Error('the child exited before it reported')))
+    })
+    try {
+      killProcessTree(child, { graceMs: 150 })
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && (pidAlive(pid) || pidAlive(gpid))) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      expect(pidAlive(pid)).toBe(false)
+      expect(pidAlive(gpid)).toBe(false)
+    } finally {
+      for (const p of [gpid, pid]) {
+        try {
+          process.kill(p, 'SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  })
+
   it('reaps a SIGTERM-trapping grandchild when the group LEADER dies on SIGTERM (escalation survives the leader exit)', async () => {
     // The exact case the prior 'exit' early-clear broke (the deterministicGate verify
     // subtree): a shell LEADER that dies on the group SIGTERM (no trap) whose grandchild
