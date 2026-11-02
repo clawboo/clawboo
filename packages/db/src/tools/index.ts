@@ -26,11 +26,13 @@ export {
 
 export {
   argClampInspector,
+  dashboardInspector,
   defaultInspectors,
   riskClassifierInspector,
   runInspectors,
   scopeInspector,
   securityInspector,
+  setDashboardPorts,
 } from './inspectors'
 
 export {

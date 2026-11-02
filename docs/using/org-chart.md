@@ -120,7 +120,7 @@ To share a connector, drag from the small handle on the right edge of its tile a
 | **Write** | Create and update. Risky calls ask you first                                |
 | **Admin** | Settings and deletion too                                                   |
 
-Connecting a connector in **Connectors** gives no agent access by itself: you attach it to agents here. See [Connectors](/using/connectors).
+Connecting a connector in **Connectors** gives no agent access by itself: attach it to agents here, or pick them under **Who can use it?** on the connector's detail pane. See [Connectors](/using/connectors).
 
 ## Take things back
 
@@ -139,6 +139,7 @@ Some lines cannot be removed, and the panel says why: a capability that came wit
 Right-click a Boo, or focus it and press the Menu key, **Shift+F10** or **Alt+Enter**, to open its menu:
 
 - **Open agent** opens the agent's page, with its chat, files and personality.
+- **Move to team** opens a dialog to move the agent to another of your teams, with its routines. Boo Zero's menu does not have it. See [Move an agent to another team](/using/agents#move-an-agent-to-another-team).
 - **Delete** deletes the agent at once. It works without an OpenClaw Gateway.
 
 <Warning>

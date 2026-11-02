@@ -73,7 +73,7 @@ On Clawboo Native, the Leader is set up as a lead. It gets the lead instructions
 ## What you control
 
 - **Who an agent is**: its personality and files, on the agent's page. See [Manage agents](/using/agents).
-- **Its team**: set when you create it. **Create Boo** adds the new agent to the team you have selected. An agent belongs to one team at a time, or to none.
+- **Its team**: set when you create it. **Create Boo** adds the new agent to the team you have selected. An agent belongs to one team at a time, or to none. To move it later, right-click its Boo on the Org chart and choose **Move to team**; see [Manage agents](/using/agents#move-an-agent-to-another-team).
 - **Its runtime**: chosen once, when you create the agent or deploy its team.
 - **Boo Zero's name**: on Boo Zero's page. [Configure Boo Zero](/using/boo-zero) covers the name, the team briefs, and when Boo Zero reads them.
 

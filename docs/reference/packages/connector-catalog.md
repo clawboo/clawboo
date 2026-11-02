@@ -82,6 +82,11 @@ will not start without a path or value only a person can supply, set `requiresUs
 `userArgument` (with `replacesArg` when the args hold a placeholder to replace). A browser connector also declares
 `perAgentProfileFlag` in its `launch`, so each agent gets its own browser profile.
 
+When the server marks tools destructive that are not, list the ones that are in `destructiveTools` (raw tool
+names). A listed tool needs admin access; an unlisted one is treated as a write, whatever the server's own
+`destructiveHint` says. Playwright sets this, because it marks navigate and click destructive. Check the list
+against the new `tools/list` whenever you move the pin.
+
 </Step>
 
 <Step title="Run the checks">

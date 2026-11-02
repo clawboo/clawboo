@@ -87,6 +87,7 @@ The **team rail** is the narrow column on the far left:
 
 - Boo Zero's red mascot sits at the top. Click it to open [Boo Zero](/using/boo-zero)'s page. Right-click it and choose **Show all agents** to list every agent.
 - Each team has an icon. Click one to open that team. Right-click it to archive the team, refresh its protocol, or delete it (see [Teams](/using/teams)).
+- When a team is archived, **Archived** and the number of archived teams appear after the team icons. Click it to show those teams; click one to unarchive it (see [Archive a team](/using/teams#archive-a-team)).
 - The dashed **+** at the bottom (**Create a team**) opens the [Marketplace](/using/marketplace) on its **Teams** tab.
 
 The **agent column** sits next to it. From top to bottom:

@@ -233,6 +233,115 @@ describe('the grant gate', () => {
     expect(res.denied).toBe('grant:grant-revoked')
   })
 
+  // The approval card's "Do not ask again for 30 days". The grant gate honoured
+  // the rule an Always minted, but the risk inspector asked again for every
+  // external change without reading it, so the box changed nothing.
+  async function answerNextApproval(
+    db: ClawbooDb,
+    decision: 'allow_once' | 'allow_always',
+  ): Promise<{ neverRemember: number | null }> {
+    for (let i = 0; i < 400 && listPendingApprovals(db).length === 0; i += 1) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const pending = listPendingApprovals(db)
+    expect(pending).toHaveLength(1)
+    resolveApproval(db, pending[0]!.id, decision)
+    return { neverRemember: pending[0]!.neverRemember }
+  }
+
+  it('an external change answered Always runs without asking the next time', async () => {
+    const grant = upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'write',
+      approvalPolicy: 'risk',
+    })
+    const registry = new ToolRegistry()
+    registry.register(connectorTool({ name: 'gh_comment', readOnly: false, risk: 'external' }))
+    const call = () =>
+      executeBrokeredCall(
+        db,
+        { name: 'gh_comment', args: {} },
+        ctx({ agentId: 'a1', connectorId: CONNECTOR }),
+        { registry, approvalPollMs: 5, approvalTimeoutMs: 5_000 },
+      )
+
+    const first = call()
+    const asked = await answerNextApproval(db, 'allow_always')
+    expect(asked.neverRemember).toBe(0)
+    expect((await first).ok).toBe(true)
+    expect(listStandingRules(db, grant.id)).toHaveLength(1)
+
+    // The rule answers the second call: it runs, and nothing is pending.
+    const second = await call()
+    expect(second.ok).toBe(true)
+    expect(listPendingApprovals(db)).toHaveLength(0)
+  })
+
+  it('a destructive call never offers the box, and still asks with a rule on file', async () => {
+    const grant = upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'admin',
+      approvalPolicy: 'risk',
+    })
+    const registry = new ToolRegistry()
+    registry.register(
+      connectorTool({ name: 'gh_delete', readOnly: false, destructive: true, risk: 'external' }),
+    )
+    const call = () =>
+      executeBrokeredCall(
+        db,
+        { name: 'gh_delete', args: {} },
+        ctx({ agentId: 'a1', connectorId: CONNECTOR }),
+        { registry, approvalPollMs: 5, approvalTimeoutMs: 5_000 },
+      )
+
+    const first = call()
+    expect((await answerNextApproval(db, 'allow_once')).neverRemember).toBe(1)
+    expect((await first).ok).toBe(true)
+
+    // Even a rule minted some other way does not stop a destructive prompt.
+    mintStandingRule(db, {
+      grantId: grant.id,
+      toolName: 'gh_delete',
+      argsShape: null,
+      decision: 'allow',
+      expiresAt: Date.now() + 60_000,
+    })
+    const second = call()
+    expect((await answerNextApproval(db, 'allow_once')).neverRemember).toBe(1)
+    expect((await second).ok).toBe(true)
+  })
+
+  it('a caller cannot claim a remembered rule it does not have', async () => {
+    upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: CONNECTOR,
+      capabilityId: null,
+      mode: 'write',
+      approvalPolicy: 'risk',
+    })
+    const registry = new ToolRegistry()
+    registry.register(connectorTool({ name: 'gh_comment', readOnly: false, risk: 'external' }))
+    const inflight = executeBrokeredCall(
+      db,
+      { name: 'gh_comment', args: {} },
+      ctx({ agentId: 'a1', connectorId: CONNECTOR, rememberedAllow: true }),
+      { registry, approvalPollMs: 5, approvalTimeoutMs: 5_000 },
+    )
+    await answerNextApproval(db, 'allow_once')
+    expect((await inflight).ok).toBe(true)
+  })
+
   it('still asks under an always-ask grant that has a remembered Always, and remembers nothing', async () => {
     const grant = upsertGrant(db, {
       subjectKind: 'agent',

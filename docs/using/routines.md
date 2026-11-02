@@ -32,7 +32,7 @@ The lead is Boo Zero when you have one, otherwise the team's Leader, otherwise i
 
 ## Before you begin
 
-- A team task needs a team with at least one member. An agent task needs an agent; agents on no team can have routines too.
+- A team task needs a team with at least one member. An agent task needs an agent; agents on no team can have routines too. When you [move an agent to another team](/using/agents#move-an-agent-to-another-team), its agent tasks move with it, except one set to run a particular task on the old team, which is paused there.
 - Agents on OpenClaw need the OpenClaw Gateway connected when the routine runs.
 - Clawboo must be running. Routines fire from the Clawboo server, so nothing runs while it is stopped or the computer sleeps.
 
@@ -253,7 +253,7 @@ curl -X POST http://127.0.0.1:18790/api/schedules \
   }'
 ```
 
-For an agent routine, send `"target": "agent"` (the default) and an `agentId` instead of the `teamId`. The routine is filed on the agent's own team. A team or agent that does not exist or is archived, or a `teamId` that is not the agent's team, is refused with `400` and `code: "invalid_routine_target"`. A schedule Clawboo cannot read is refused with `400` and `code: "invalid_cron_spec"`, with the reason in `error`. Unlike the dialog, the API accepts a `once@` time in the past; that routine reads **finished** straight away.
+For an agent routine, send `"target": "agent"` (the default) and an `agentId` instead of the `teamId`. The routine is filed on the agent's own team, and moves with the agent if it moves to another team, unless it is bound to a team task (`teamTaskId`), in which case the move pauses it on the old team. A team or agent that does not exist or is archived, or a `teamId` that is not the agent's team, is refused with `400` and `code: "invalid_routine_target"`. A schedule Clawboo cannot read is refused with `400` and `code: "invalid_cron_spec"`, with the reason in `error`. Unlike the dialog, the API accepts a `once@` time in the past; that routine reads **finished** straight away.
 
 The task template takes fields the dialog does not offer:
 

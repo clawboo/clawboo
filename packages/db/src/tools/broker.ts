@@ -185,11 +185,14 @@ export async function executeBrokeredCall(
   // it off the arguments is the only place that distinction exists.
   const appGap = brokeredAppGap(db, validatedCall, ctx, gate, opts.brokeredToolkits)
 
-  // Inspector chain.
+  // Inspector chain. `rememberedAllow` is the broker's own reading of the gate,
+  // overwriting any value a caller put on the context: only a rule the operator
+  // minted may stand in for the external-change prompt.
+  const rememberedAllow = gate?.decision.kind === 'allow' && Boolean(gate.decision.ruleId)
   const outcome = await runInspectors(
     validatedCall,
     descriptor,
-    ctx,
+    { ...ctx, rememberedAllow },
     opts.inspectors ?? defaultInspectors,
   )
   if (outcome.decision === 'deny') {
@@ -232,8 +235,12 @@ export async function executeBrokeredCall(
       grantId: gate?.decision.grantId ?? null,
       connectorId: gate?.connectorId ?? null,
       // PERSISTED from the verdict, so the resolve path can never mint a durable
-      // rule the prompt did not offer.
-      neverRemember: grantApproval?.neverRemember ?? false,
+      // rule the prompt did not offer. A destructive call is never remembered:
+      // it asks every time, rule or not, so offering the box would be a lie.
+      neverRemember:
+        (grantApproval?.neverRemember ?? false) ||
+        descriptor.risk === 'destructive' ||
+        descriptor.destructive === true,
       ruleReason: grantApproval?.reason ?? null,
       // The SERVER's own reading, carried to the card. Without it the browser
       // has only the tool's name to go on, which generalises to whatever

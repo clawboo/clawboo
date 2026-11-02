@@ -152,7 +152,7 @@ Answers an approval. An unknown `decision` is a **400**. The route then loads th
 
 **A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending`; any other row (already answered, or marked `expired`) comes back unchanged with **200**, so check `status` in the response. A waiting broker sees the answer the next time it checks.
 
-For a `tool` row, `allow_always` also creates a standing allow rule tied to the row's grant: later calls of the same tool under that grant run without asking, whatever their arguments, for 30 days. No rule is made when the row has no `grantId`, when it has `neverRemember: 1`, or when this call did not change the row (it was already answered).
+For a `tool` row, `allow_always` also creates a standing allow rule tied to the row's grant: later calls of the same tool under that grant run without asking, whatever their arguments, for 30 days. That covers a call with an external effect too. A call to a destructive tool is stored with `neverRemember: 1` and asks every time, even when a rule exists. No rule is made when the row has no `grantId`, when it has `neverRemember: 1`, or when this call did not change the row (it was already answered).
 
 **A `kind: 'exec'` row** is held by the OpenClaw Gateway, and answering Clawboo's copy alone would not release the command. So the answer goes to the Gateway as `exec.approval.resolve`, in OpenClaw's own words (`allow_once` becomes `allow-once`, `allow_always` becomes `allow-always`, `deny` stays `deny`), and Clawboo marks its copy only after the Gateway takes it. This branch answers a different **200** body and is the only one that can answer **502**.
 

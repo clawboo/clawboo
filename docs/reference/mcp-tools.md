@@ -391,8 +391,8 @@ A call goes through these checks in order:
 
 1. The tool must exist, be enabled and be available, and its arguments must validate.
 2. A connector tool must pass the grant check for the calling agent and team.
-3. A security scan of the arguments can refuse the call. Numeric `limit`, `max`, `count`, `maxResults`, `top_k` and `topK` arguments above 1,000 are lowered to 1,000.
-4. A destructive tool, an external tool that is not read-only, or a grant that asks for approval waits up to 5 minutes for a person to answer.
+3. A call whose arguments point at the Clawboo dashboard on this computer (any loopback spelling of the port the server listens on) is refused with `dashboard:agents may not open the Clawboo dashboard`. A security scan of the arguments can refuse the call. Numeric `limit`, `max`, `count`, `maxResults`, `top_k` and `topK` arguments above 1,000 are lowered to 1,000.
+4. A destructive tool, an external tool that is not read-only, or a grant that asks for approval waits up to 5 minutes for a person to answer. An earlier **Always** for the same tool under the same grant skips this wait, but never for a destructive tool, a grant set to `always`, or a run that might leak data.
 5. The call runs, and its arguments and result are recorded in the audit with secrets scrubbed.
 
 Results:

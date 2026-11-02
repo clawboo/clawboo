@@ -13,12 +13,13 @@ keywords:
     'Stop sharing',
     'Playwright',
     'Chrome DevTools',
+    'Who can use it?',
   ]
 ---
 
 A connector gives your agents tools beyond chat: a browser, a database, Linear, Notion, Gmail. Each connector is an MCP server (Model Context Protocol, the common way to hand tools to an AI agent). Use this page to connect one, give it to the agents that need it, and take it back.
 
-Connecting and giving access are two separate steps. **Connect** starts the connector, but no agent can see or call its tools until you give it to that agent on the graph.
+Connecting and giving access are two separate steps. **Connect** starts the connector, but no agent can see or call its tools until you give it to that agent, on the connector's detail pane or on the graph.
 
 ## Before you begin
 
@@ -58,7 +59,7 @@ What happens next depends on what the connector needs:
 
 <Step title="Check that it connected">
 
-The row shows a green tick, and a message confirms it with the connector's tool count and the reminder "Connect it to an agent to use it."
+The row shows a green tick, and a message confirms it with the connector's tool count and the reminder "No agent can use it until you give it access."
 
 </Step>
 
@@ -125,7 +126,7 @@ Your agents reach every Composio app through the **Composio** connector in the *
 
 <Step title="Give the app to an agent">
 
-Give the app to an agent the same way as any connector (next section): the graph's picker lists connected apps with the connectors. Each app an agent holds shows as its own tile, so you can see which agents can reach your email.
+Give the app to an agent on the graph, the same way as any connector (next section): the graph's picker lists connected apps with the connectors. Each app an agent holds shows as its own tile, so you can see which agents can reach your email.
 
 </Step>
 
@@ -135,9 +136,31 @@ Composio keeps each app's sign-in tokens on its own servers, and Clawboo holds o
 
 ## Give a connector to an agent
 
-You give access on a graph: the **Org chart**, a team's **Team graph** card, or the **Graph** card on an agent's page. Click a Boo to open its ring of tiles; each connector tile on the ring is one the agent can use.
+You give access on the connector's detail pane in Connectors, or on a graph: the **Org chart**, a team's **Team graph** card, or the **Graph** card on an agent's page. On a graph, click a Boo to open its ring of tiles; each connector tile on the ring is one the agent can use.
 
 <Tabs>
+
+<Tab title="Pick agents on the connector's pane">
+
+<Steps>
+
+<Step title="Open the connector">
+
+In Connectors, click a connected connector's row. Its detail pane shows **Who can use it?** right under the connect action. It lists every agent; an agent that already has access is ticked and reads **Has access**.
+
+</Step>
+
+<Step title="Pick the agents">
+
+Tick each agent that should use it, then press **Give access**. Each one gets write access, and risky calls ask you first: the same access a thread drawn on the graph gives.
+
+</Step>
+
+</Steps>
+
+OpenClaw agents are listed but cannot be picked, and read **OpenClaw agents cannot use shared connectors**; see [OpenClaw agents and connectors](#openclaw-agents-and-connectors).
+
+</Tab>
 
 <Tab title="Pull a thread off the Boo">
 
@@ -211,23 +234,23 @@ The **Share** dialog asks for **Read**, **Write** or **Admin** access (see the t
 | --------- | -------------------------------------------------------------------------------------------------------- |
 | **Read**  | Look things up. Only tools that a reviewed connector marks as read-only; the agent does not see the rest |
 | **Write** | Create and update. Risky calls ask you first                                                             |
-| **Admin** | Also the tools a reviewed connector marks as destructive, such as deleting. Use sparingly                |
+| **Admin** | Also the destructive tools of a reviewed connector, such as deleting. Use sparingly                      |
 
 Pick **Write** for most connectors. Many tools do not say whether they only read, so a **Read** grant hides them.
 
 ### Who can use a connector
 
 - **Right after you connect it:** no agent. Its tools are hidden from every agent, and a call to them is refused.
-- **After you give it to an agent on the graph:** that agent only, with the access you chose. Every other agent still has no access until you give it to them too.
+- **After you give it to an agent:** that agent only, with the access you chose. Every other agent still has no access until you give it to them too.
 - **The exception:** the two browser connectors, which every agent gets automatically (next section).
 
 ### Every agent gets a browser
 
-The two browser connectors, **Playwright** and **Chrome DevTools**, are connected for you the first time Clawboo starts, and every agent gets both with write access. OpenClaw agents get the tiles too, but cannot use them; see [OpenClaw agents and connectors](#openclaw-agents-and-connectors). In Chrome DevTools, actions that change something, such as opening a page or clicking, ask you first. Playwright marks each of those actions as destructive, so with write access an agent sees only Playwright's reading tools, such as a snapshot of the page. To let an agent act through Playwright, **Stop sharing** Playwright with it, then share it again from another agent's tile with **Admin** access. Each action still asks first. Each agent has its own browser profile, so two agents can be signed in to different accounts on the same site. The browser tiles sit on the agent's ring like any other connector, so you can take them away (next section), and a removed browser stays removed after a restart.
+The two browser connectors, **Playwright** and **Chrome DevTools**, are connected for you the first time Clawboo starts, and every agent gets both with write access. OpenClaw agents get the tiles too, but cannot use them; see [OpenClaw agents and connectors](#openclaw-agents-and-connectors). In Chrome DevTools, actions that change something, such as opening a page or clicking, ask you first, and the two that run script in the page or hand a file from this computer to a website (`evaluate_script` and `upload_file`) count as destructive and need **Admin** access. Playwright works the same way with write access: an agent can open pages, click, type, fill in forms, pick options, hover, drag, press keys, manage tabs, resize the window, answer page dialogs and go back, and each of those actions asks you first. Its reading tools, such as a snapshot or a screenshot of the page, need only read access and run without asking. Four Playwright tools count as destructive and need **Admin** access: the two that run code (`browser_run_code_unsafe` and `browser_evaluate`) and the two that can hand a file from this computer to a website (`browser_file_upload` and `browser_drop`). To stop one action asking every time, tick **Do not ask again for this for 30 days** on its card (see [When a connector call asks you first](#when-a-connector-call-asks-you-first)). Neither browser can open the Clawboo dashboard itself: both start with its address on this computer blocked, and Clawboo refuses any connector call that points at it, so an agent cannot use a browser to approve its own requests. Other local addresses, such as an app you are developing, stay reachable. Each agent has its own browser profile, so two agents can be signed in to different accounts on the same site. The browser tiles sit on the agent's ring like any other connector, so you can take them away (next section), and a removed browser stays removed after a restart.
 
 ## See and take back access
 
-The graph is the list of who can use what: every tile on a Boo's ring is something that agent can reach. A tile that several agents share shows a small count, such as **x3**; hover it to highlight the others.
+The graph is the list of who can use what: every tile on a Boo's ring is something that agent can reach. A connector's detail pane also marks the agents that have it as **Has access**, under **Who can use it?**. A tile that several agents share shows a small count, such as **x3**; hover it to highlight the others.
 
 Click a connector tile to see its toolbar:
 
@@ -249,15 +272,17 @@ Which calls ask depends on the connector:
 
 - **GitHub, Linear, Sentry, Airtable and Notion, and any server you added yourself, ask before every call.** They can read your private data, take in content from outside and send data out. That combination is how data gets leaked, so you cannot turn these questions off.
 - **Actions in apps reached through Composio ask every time too.**
-- **On the other connectors**, a call that only reads runs without asking when Clawboo reviewed the connector and the tool says it only reads. A call that changes something asks first when the connector can reach the internet. A tool the connector marks as destructive needs **Admin** access and asks first.
+- **On the other connectors**, a call that only reads runs without asking when Clawboo reviewed the connector and the tool says it only reads. A call that changes something asks first when the connector can reach the internet. A destructive tool needs **Admin** access and asks every time. For Playwright, Clawboo's own list decides which tools are destructive; on the other reviewed connectors, the connector marks them itself.
 
-Some cards offer **Do not ask again for this for 30 days**. Ticking it saves your answer for that tool on that agent, but a call that changes or deletes something still asks every time: a second check asks about those calls whatever you ticked.
+Some cards offer **Do not ask again for this for 30 days**. Tick it, then allow the call: for 30 days that agent calls that tool, with any arguments, without asking, under the access you gave it. A destructive call never offers the box and asks every time. Approvals remembered by an earlier version of Clawboo, when the box did not stop these prompts, are cleared once on the first start after you upgrade, so none starts allowing calls it was never meant to allow.
 
 ## When an agent asks for a connector
 
-Agents are told which connectors are connected and which ones you could add. An agent that needs one it does not have says so and stops, and a card in the chat offers a button for each connector it named, such as **Connect Linear** or **Add key Notion**. The button opens that connector in Connectors.
+Agents are told which connectors are connected and which ones you could add. An agent that needs one it does not have says so and stops, and a card in the chat offers a button for each connector it named, such as **Connect Linear** or **Add key Notion**. The button opens that connector in Connectors, with the asking agent already ticked under **Who can use it?** and marked **Asked for it**.
 
-The card only takes you to the connector: connecting it there does not give the agent access. Give it to the agent on the graph, then press **Continue** on the card (in a team chat) so the agent picks the work back up.
+As soon as the connector connects on that pane, whether by its connect button, a saved key or a sign-in, the asking agent gets write access, and risky calls ask you first. Nothing changes when the agent already has access, or when it is an OpenClaw agent, which is never ticked. If you took the agent's access away earlier, its request does not give it back: the agent stays ticked, marked **Access taken back**, and **Give access** shares it again only if you click it.
+
+The card counts a connector as done only when it is connected and the asking agent has access. A connector that is connected but not shared with that agent shows a button such as **Share Linear with Ada** instead, which opens the connector and gives that agent access. Once the agent can use every connector it asked for, the card shows **Continue** (in a team chat): press it so the agent picks the work back up.
 
 ## Add your own MCP server
 
@@ -279,7 +304,7 @@ Press **Add**. The server joins **More connectors** as one of your own entries.
 
 <Step title="Connect it and give it to an agent">
 
-Press **Connect** on its row, then give it to an agent on the graph.
+Press **Connect** on its row, then give it to an agent under **Who can use it?** or on the graph.
 
 </Step>
 
@@ -289,7 +314,7 @@ The form has no URL field, so a remote MCP server cannot be added here. A commun
 
 ## OpenClaw agents and connectors
 
-OpenClaw agents reach Clawboo's tools through one setting in the OpenClaw Gateway that all of them share, so Clawboo cannot tell which OpenClaw agent is calling. As a result, connectors you give an OpenClaw agent on the graph do not reach it, the browser connectors included. It can use apps reached through Composio, and each action in those apps asks you first. The Gateway's own MCP servers and plugins are separate: they are listed in the [Capabilities](/using/capabilities) panel.
+OpenClaw agents reach Clawboo's tools through one setting in the OpenClaw Gateway that all of them share, so Clawboo cannot tell which OpenClaw agent is calling. As a result, connectors you give an OpenClaw agent on the graph do not reach it, the browser connectors included, and **Who can use it?** does not let you pick one. It can use apps reached through Composio, and each action in those apps asks you first. The Gateway's own MCP servers and plugins are separate: they are listed in the [Capabilities](/using/capabilities) panel.
 
 ## Keep connectors safe
 
@@ -305,7 +330,7 @@ A local connector is a program running under your user account. Clawboo starts i
 
 <Accordion title="An agent says a connector is connected but cannot use it">
 
-Connecting makes a connector available; it gives no agent access. Agents are told which connectors are connected whether or not they hold one. Give the connector to that agent on the graph, then ask again.
+Connecting makes a connector available; it gives no agent access. Agents are told which connectors are connected whether or not they hold one. Give the connector to that agent under **Who can use it?** on its detail pane, or on the graph, then ask again.
 
 </Accordion>
 

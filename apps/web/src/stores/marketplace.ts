@@ -111,7 +111,18 @@ interface MarketplaceStore {
    * the shelf rather than re-opening whatever was last linked.
    */
   openConnectorSlug: string | null
-  setOpenConnectorSlug: (slug: string | null) => void
+  /**
+   * The agent that asked for the connector, when the link came from its
+   * "ask for a connector" card. The connector page preselects it in "Who can
+   * use it?" and gives it access once the connector is connected, so the agent
+   * that asked is the one that gets it. Set and cleared with the slug, so the
+   * panel reads it before it clears the slug.
+   */
+  connectorAskFor: { agentId: string; agentName: string } | null
+  setOpenConnectorSlug: (
+    slug: string | null,
+    askFor?: { agentId: string; agentName: string } | null,
+  ) => void
   setConnectorCategoryFilter: (c: string) => void
 }
 
@@ -145,6 +156,7 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   // Teams lead the marketplace (first tab + default landing).
   marketplaceTab: 'teams',
   openConnectorSlug: null,
+  connectorAskFor: null,
   teamSearchQuery: '',
   teamCategoryFilter: 'all',
   teamSourceFilter: 'all',
@@ -210,6 +222,7 @@ export const useMarketplaceStore = create<MarketplaceStore>((set) => ({
   setAgentSourceFilter: (agentSourceFilter) => set({ agentSourceFilter }),
   setAgentCategoryFilter: (agentCategoryFilter) => set({ agentCategoryFilter }),
   setConnectorSearchQuery: (connectorSearchQuery) => set({ connectorSearchQuery }),
-  setOpenConnectorSlug: (openConnectorSlug) => set({ openConnectorSlug }),
+  setOpenConnectorSlug: (openConnectorSlug, askFor = null) =>
+    set({ openConnectorSlug, connectorAskFor: openConnectorSlug ? askFor : null }),
   setConnectorCategoryFilter: (connectorCategoryFilter) => set({ connectorCategoryFilter }),
 }))
