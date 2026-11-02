@@ -12,9 +12,11 @@ import {
   InvalidRoutineTargetError,
   ScheduleSourceUnavailableError,
   TeamTaskDomainViolationError,
+  UnknownScheduleError,
 } from '@clawboo/scheduler'
 
 import {
+  isUnknownCronJob,
   OpenClawGatewayCronScheduleSource,
   sessionTargetFor,
   type OperatorCronClientLike,
@@ -285,6 +287,48 @@ describe('OpenClawGatewayCronScheduleSource', () => {
       source.write({ kind: 'remove', id: 'openclaw-gateway-cron:job-1' }),
     ).rejects.toBeInstanceOf(ScheduleSourceUnavailableError)
     expect(client.calls).toHaveLength(0)
+  })
+
+  it('answers an unknown job id as UnknownScheduleError (404), not a raw Gateway error', async () => {
+    const client = makeFakeClient()
+    // OpenClaw 2026.9's own not-found answer: INVALID_REQUEST with a detail code.
+    client.operatorCall = async () => {
+      throw Object.assign(new Error('Automation not found: nope. List automations and retry.'), {
+        code: 'INVALID_REQUEST',
+        details: { code: 'CRON_JOB_NOT_FOUND', jobId: 'nope' },
+      })
+    }
+    const source = new OpenClawGatewayCronScheduleSource(client)
+    for (const action of [
+      { kind: 'update' as const, id: 'openclaw-gateway-cron:nope', patch: { label: 'x' } },
+      { kind: 'pause' as const, id: 'openclaw-gateway-cron:nope' },
+      { kind: 'resume' as const, id: 'openclaw-gateway-cron:nope' },
+      { kind: 'remove' as const, id: 'openclaw-gateway-cron:nope' },
+      { kind: 'run' as const, id: 'openclaw-gateway-cron:nope' },
+    ]) {
+      await expect(source.write(action)).rejects.toBeInstanceOf(UnknownScheduleError)
+    }
+  })
+
+  it('passes any other Gateway refusal through unchanged', async () => {
+    const client = makeFakeClient()
+    const refusal = new Error('invalid cron.update params: patch did not normalize')
+    client.operatorCall = async () => {
+      throw refusal
+    }
+    const source = new OpenClawGatewayCronScheduleSource(client)
+    await expect(
+      source.write({ kind: 'update', id: 'openclaw-gateway-cron:job-1', patch: { label: 'x' } }),
+    ).rejects.toBe(refusal)
+  })
+
+  it('reads the message form of not-found too', () => {
+    expect(isUnknownCronJob(new Error('invalid cron.update params: unknown cron job id: j'))).toBe(
+      true,
+    )
+    expect(isUnknownCronJob(new Error('cron job not found: j. List automations'))).toBe(true)
+    expect(isUnknownCronJob(new Error('gateway_disconnected'))).toBe(false)
+    expect(isUnknownCronJob('cron job not found')).toBe(false)
   })
 
   it('serves a warm cache as stale when the Gateway drops mid-session', async () => {

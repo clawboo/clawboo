@@ -71,9 +71,8 @@ export const REFERENCED_PACKAGE_DEFAULTS = {
 /**
  * Operational defaults that live as env-overridable module constants in their home
  * modules. Documented here (value + env var + home) for the single catalog and the
- * defaults drift-test; NOT the runtime source (the modules are). Mind the future
- * horizon: each is a per-process value today and would become per-tenant config in
- * a hosted multi-tenant world without changing the default chosen now.
+ * defaults drift-test; NOT the runtime source (the modules are). Each is a
+ * per-process value.
  */
 export const OPERATIONAL_DEFAULTS = {
   approvalTtlMs: {

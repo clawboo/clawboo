@@ -1,8 +1,8 @@
 // ─── Capability inventory repository (data-access layer) ─────────────────────
 // The ONLY place that reads/writes the `capabilities` table — the durable
 // projection of the unified capability inventory. Mirrors the board repository
-// convention (keeps raw Drizzle out of apps/web; the single seam a future
-// SQLite→Postgres / multi-tenant swap targets). `upsertCapabilities` is a
+// convention (keeps raw Drizzle out of apps/web; the single seam for any change
+// of storage). `upsertCapabilities` is a
 // SOURCE-SCOPED reconcile: a re-read from one adapter replaces only that
 // adapter's rows, never another's — so a disconnected Gateway never wipes the
 // native/Hermes rows. The row is a cache; a fresh `read()` repopulates it (no

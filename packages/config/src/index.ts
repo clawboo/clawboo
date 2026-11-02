@@ -35,7 +35,6 @@ const DEFAULT_GATEWAY_URL = 'ws://localhost:18789'
 export interface ClawbooSettings {
   gatewayUrl: string
   gatewayToken: string
-  studioAccessToken?: string
   /** Epoch ms the user dismissed the first-run nudge (undefined = not dismissed). */
   firstRunDismissedAt?: number
 }
@@ -244,10 +243,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
 
   const url = typeof gateway?.['url'] === 'string' ? gateway['url'].trim() : ''
   const rawToken = typeof gateway?.['token'] === 'string' ? gateway['token'].trim() : ''
-  const studioAccessToken =
-    typeof parsed?.['studioAccessToken'] === 'string'
-      ? parsed['studioAccessToken'].trim()
-      : undefined
   const firstRunDismissedAt =
     typeof parsed?.['firstRunDismissedAt'] === 'number' ? parsed['firstRunDismissedAt'] : undefined
 
@@ -263,7 +258,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
       return {
         gatewayUrl: url || defaults.url,
         gatewayToken: defaults.token,
-        studioAccessToken: studioAccessToken || undefined,
         ...(firstRunDismissedAt !== undefined ? { firstRunDismissedAt } : {}),
       }
     }
@@ -272,7 +266,6 @@ export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSetti
   return {
     gatewayUrl: url || DEFAULT_GATEWAY_URL,
     gatewayToken: token,
-    studioAccessToken: studioAccessToken || undefined,
     ...(firstRunDismissedAt !== undefined ? { firstRunDismissedAt } : {}),
   }
 }
@@ -299,10 +292,6 @@ export function saveSettings(
   const next: Record<string, unknown> = {
     ...current,
     gateway,
-  }
-
-  if (updates.studioAccessToken !== undefined) {
-    next['studioAccessToken'] = updates.studioAccessToken
   }
 
   if (updates.firstRunDismissedAt !== undefined) {

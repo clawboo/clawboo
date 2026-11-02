@@ -516,9 +516,6 @@ importers:
       '@clawboo/gateway-client':
         specifier: workspace:*
         version: link:../../gateway-client
-      '@clawboo/logger':
-        specifier: workspace:*
-        version: link:../../logger
       '@clawboo/protocol':
         specifier: workspace:*
         version: link:../../protocol
@@ -785,9 +782,6 @@ importers:
       '@noble/ed25519':
         specifier: ^3.2.0
         version: 3.2.0
-      ws:
-        specifier: ^8.21.3
-        version: 8.21.3
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*
@@ -795,9 +789,6 @@ importers:
       '@types/node':
         specifier: ^26.5.1
         version: 26.5.1
-      '@types/ws':
-        specifier: ^8.5.0
-        version: 8.18.1
       tsup:
         specifier: ^8.4.0
         version: 8.5.1(jiti@2.7.0)(postcss@8.5.28)(tsx@4.23.13)(typescript@6.0.3)(yaml@2.9.0)

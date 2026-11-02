@@ -224,15 +224,31 @@ describe('ClaudeCodeCapabilitySource', () => {
 })
 
 describe('CodexCapabilitySource', () => {
-  it('surfaces MCP connectors as external-write + manageable-but-pending-auth (the disabled+hint row)', async () => {
-    const { records } = await new CodexCapabilitySource().read()
+  it('before a codex login: external-write + manageable-but-pending-auth (the disabled+hint row)', async () => {
+    const { records } = await new CodexCapabilitySource({
+      isLoggedIn: async () => false,
+    }).read()
     const connectors = records.filter((r) => r.kind === 'connector')
     expect(connectors.length).toBeGreaterThanOrEqual(3)
     expect(
       connectors.every(
-        (r) => r.manageability === 'external-write' && r.status === 'manageable-but-pending-auth',
+        (r) =>
+          r.manageability === 'external-write' &&
+          r.status === 'manageable-but-pending-auth' &&
+          r.hint?.includes('codex login'),
       ),
     ).toBe(true)
+  })
+
+  it('after a codex login: ready, with nothing to switch', async () => {
+    const { records } = await new CodexCapabilitySource({ isLoggedIn: async () => true }).read()
+    const connectors = records.filter((r) => r.kind === 'connector')
+    expect(connectors.length).toBeGreaterThanOrEqual(3)
+    for (const r of connectors) {
+      expect(r.status).toBe('ready')
+      expect(r.writable).toBe(false)
+      expect(r.hint).toBeUndefined()
+    }
   })
 })
 

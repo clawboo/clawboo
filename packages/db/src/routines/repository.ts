@@ -242,7 +242,13 @@ export function recordRunOutcome(
 export type SetStatusResult =
   { ok: true; run: DbScheduledRun } | { ok: false; reason: 'not_found' | 'illegal_transition' }
 
-/** pause / resume with the state machine enforced inside BEGIN IMMEDIATE. */
+/**
+ * pause / resume with the state machine enforced inside BEGIN IMMEDIATE.
+ *
+ * A pause DISARMS the row: `next_run_at` goes to null, like a parked error row,
+ * so nothing reads a paused Routine as having a next run. Resume passes the
+ * recomputed value in `opts.nextRunAt`.
+ */
 export function setScheduledRunStatus(
   db: ClawbooDb,
   id: string,
@@ -262,7 +268,11 @@ export function setScheduledRunStatus(
       .set({
         status: to,
         updatedAt: now,
-        ...(opts.nextRunAt !== undefined ? { nextRunAt: opts.nextRunAt } : {}),
+        ...(to === 'paused'
+          ? { nextRunAt: null }
+          : opts.nextRunAt !== undefined
+            ? { nextRunAt: opts.nextRunAt }
+            : {}),
         ...(to === 'idle' ? { lastError: null } : {}),
       })
       .where(eq(scheduledRuns.id, id))

@@ -342,6 +342,32 @@ export function humanizeApproval(input: HumanizeInput): HumanizedApproval {
     }
   }
 
+  // ── A risky hand-off ──
+  //
+  // A leader in team chat handed a teammate a task whose text holds a risky
+  // word. The row is filed under a `delegate:<kind>` scope name, which the
+  // general path below printed as `wants to run "Delegate:code"`. The task text
+  // and the teammate are the only things that decide anything, so they lead.
+  if (bare.startsWith('delegate:')) {
+    const target =
+      typeof args?.['targetAgentName'] === 'string' && args['targetAgentName'].trim()
+        ? args['targetAgentName'].trim()
+        : null
+    const task = typeof args?.['task'] === 'string' ? args['task'].trim() : ''
+    return {
+      headline: `${who} wants to hand a task to ${target ?? 'a teammate'}.`,
+      chip: 'Task has a risky word',
+      actionClass: 'unknown',
+      decisive: [
+        ...(target ? [{ label: 'Teammate', value: target }] : []),
+        ...(task ? [{ label: 'Task', value: show(task, 400) }] : []),
+      ],
+      remainder: [],
+      agentNote: null,
+      confident: true,
+    }
+  }
+
   // ── The broker: the app and the operation live in the arguments ──
   const batch = args?.['tools']
   if (Array.isArray(batch) && batch.length > 0) {

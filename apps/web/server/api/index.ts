@@ -176,7 +176,6 @@ import {
   obsEventsGET,
   obsGraphGET,
   obsHealthGET,
-  obsIngestPOST,
   obsStreamGET,
   obsTraceGET,
 } from './obs'
@@ -561,7 +560,6 @@ router.get('/api/obs/errors', obsErrorsGET)
 router.get('/api/obs/health', obsHealthGET)
 router.get('/api/obs/graph', obsGraphGET)
 router.get('/api/obs/stream', obsStreamGET) // SSE live-tail (task/agent/team scoped)
-router.post('/api/obs/ingest', obsIngestPOST) // client mirror of OpenClaw runtime events
 
 // System Health — the boot-probe surface (state dir, vault, db, port, mcp, gateway).
 router.get('/api/health', healthGET)

@@ -1,8 +1,9 @@
 // REST for the unified capability inventory. GET serves the ONE merged stream
 // (records + per-source degradation) both the Ghost Graph and the dashboard
 // consume. POST /:action is manageability-gated: install/enable/disable route to
-// the owning source's write() (observe-only → 422); `approve` reuses the existing
-// approval handshake (resolveApproval) — no second approval path. Writes are
+// the owning source's write() (observe-only → 422); `approve` answers through the
+// same decision as the tools route (`decideApproval`), so an OpenClaw command is
+// released by the Gateway, not just marked answered here. Writes are
 // audited inside the source adapters (the existing tool-broker audit log, not forked here).
 
 import {
@@ -10,12 +11,14 @@ import {
   UnsupportedCapabilityWriteError,
   type CapabilityInstallSpec,
 } from '@clawboo/capability-registry'
-import { agents, getCapability, resolveApproval } from '@clawboo/db'
+import { agents, getCapability } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
+import { decideApproval } from '../lib/approvalDecision'
 import { getDb } from '../lib/db'
 import { rowToRecord } from '../lib/capabilitySource/mapper'
+import { CapabilityInstallBlockedError } from '../lib/capabilitySource/native'
 import { getCapabilityMultiplexer } from '../lib/capabilitySource/registry'
 import { loadCapabilities, type CapabilityFilter } from '../lib/capabilitySource/service'
 import { redactValue } from '../lib/redact'
@@ -80,12 +83,8 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
         res.status(400).json({ error: 'approve requires { id, decision }' })
         return
       }
-      const updated = resolveApproval(db, id, decision)
-      if (!updated) {
-        res.status(404).json({ error: 'approval not found' })
-        return
-      }
-      res.json({ ok: true, approval: updated })
+      const answer = await decideApproval(db, id, decision)
+      res.status(answer.status).json(answer.body)
       return
     }
 
@@ -169,6 +168,12 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
     }
     if (err instanceof UnsupportedCapabilityWriteError) {
       res.status(422).json({ error: err.message, manageability: err.manageability })
+      return
+    }
+    // The injection scan refused the install: the same 422 and shape as a
+    // blocked POST /api/skills.
+    if (err instanceof CapabilityInstallBlockedError) {
+      res.status(422).json({ ok: false, error: err.message, findings: err.findings })
       return
     }
     res.status(500).json({ error: redactValue(String(err)) })

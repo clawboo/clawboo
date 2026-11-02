@@ -87,6 +87,25 @@ describe('TeamChat MCP (quartet)', () => {
     expect(tailParsed.posts[0]!.wrapped).toContain('three')
   })
 
+  it('a page cut short by limit keeps the rest for the next read', async () => {
+    const a = await connectInMemory(createTeamChatServer(db, { boundIdentity: ident('a', 'tm1') }))
+    const b = await connectInMemory(createTeamChatServer(db, { boundIdentity: ident('b', 'tm1') }))
+    for (const text of ['one', 'two', 'three']) await callText(a, 'team_chat_post', { text })
+    const first = await callText(b, 'team_chat_subscribe', { limit: 2 })
+    const firstParsed = JSON.parse(first.text) as { posts: { wrapped: string }[]; nextSeq: number }
+    expect(firstParsed.posts).toHaveLength(2)
+    // Not the room head (3): that would skip 'three' for good.
+    expect(firstParsed.nextSeq).toBe(2)
+    const rest = await callText(b, 'team_chat_subscribe', {
+      sinceSeq: firstParsed.nextSeq,
+      limit: 2,
+    })
+    const restParsed = JSON.parse(rest.text) as { posts: { wrapped: string }[]; nextSeq: number }
+    expect(restParsed.posts).toHaveLength(1)
+    expect(restParsed.posts[0]!.wrapped).toContain('three')
+    expect(restParsed.nextSeq).toBe(3)
+  })
+
   it('subscribe advances nextSeq to the room head past the caller’s OWN trailing posts (no stall)', async () => {
     const a = await connectInMemory(createTeamChatServer(db, { boundIdentity: ident('a', 'tm1') }))
     const b = await connectInMemory(createTeamChatServer(db, { boundIdentity: ident('b', 'tm1') }))

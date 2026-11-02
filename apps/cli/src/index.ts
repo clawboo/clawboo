@@ -387,7 +387,7 @@ async function run(opts: LaunchOptions): Promise<void> {
       '\n' +
       chalk.gray('  •  Deploy a pre-built team or create your own') +
       '\n' +
-      chalk.gray('  •  Open Ghost Graph to see your agent topology') +
+      chalk.gray('  •  Open the Org chart to see your teams and agents') +
       '\n' +
       chalk.gray('  •  Browse the Marketplace for skills and team templates') +
       '\n' +
@@ -610,7 +610,9 @@ const program = new Command()
 
 program
   .name('clawboo')
-  .description('The open-source platform for OpenClaw agent teams')
+  .description(
+    'Run a team of AI agents on Claude Code, Codex, Hermes, OpenClaw or built-in agents.',
+  )
   .version(VERSION)
   .option('--no-version-check', 'Skip comparing a running server against this launcher.')
   .option('-y, --yes', 'Restart an older running server without prompting.')

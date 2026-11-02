@@ -9,6 +9,7 @@ import { CreateTeamModalLazy, preloadCreateTeamModal } from '@/features/teams/Cr
 import { apiFetch, consumeApiSSE } from '@clawboo/control-client'
 import { SkyAtmosphere } from '@/features/atmosphere'
 import { Button } from '@/features/shared/Button'
+import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import type { SystemInfo } from '@/stores/system'
 
 // ─── System Status Hint ──────────────────────────────────────────────────────
@@ -268,9 +269,13 @@ export function WelcomeState() {
         <div className="relative z-10 mt-1 flex gap-2">
           {(
             [
-              { label: 'Org chart', icon: Network, view: 'graph' as const },
-              { label: 'Marketplace', icon: ShoppingCart, view: 'marketplace' as const },
-              { label: 'Cost', icon: BarChart3, view: 'cost' as const },
+              { label: NAV_VIEW_LABELS.graph, icon: Network, view: 'graph' as const },
+              {
+                label: NAV_VIEW_LABELS.marketplace,
+                icon: ShoppingCart,
+                view: 'marketplace' as const,
+              },
+              { label: NAV_VIEW_LABELS.cost, icon: BarChart3, view: 'cost' as const },
             ] as { label: string; icon: LucideIcon; view: 'graph' | 'marketplace' | 'cost' }[]
           ).map((item) => {
             const Icon = item.icon
