@@ -34,6 +34,7 @@ import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
 import { startMemoryEmbedding } from './lib/memoryEmbedding'
+import { createStaleTaskSweep } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
@@ -556,9 +557,16 @@ async function main() {
     // detach exists to prevent. A guard test pins the relationship.
     const ttlMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
     const intervalMs = positiveIntEnv('CLAWBOO_BOARD_STALE_SWEEP_MS', 60_000)
+    // A pass right after the machine wakes must not read every live run's
+    // pre-sleep beat as stale; the pass allows for the slept time.
+    const pass = createStaleTaskSweep({
+      ttlMs,
+      intervalMs,
+      reconcile: (olderThanMs) => reconcileStaleInProgress(getDb(), olderThanMs).reconciled,
+    })
     const sweep = (): void => {
       try {
-        const { reconciled } = reconcileStaleInProgress(getDb(), ttlMs)
+        const reconciled = pass()
         if (reconciled > 0) log.info({ reconciled }, 'Board: released stale in_progress tasks')
       } catch (err) {
         log.error({ err }, 'Board: stale-task sweep failed (non-fatal)')

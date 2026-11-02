@@ -9,8 +9,12 @@
 // only if the iterator stays silent through the grace too does the stream end.
 //
 // The timer is IDLE-reset, not total: every event re-arms it, so a long but
-// streaming run never trips. Distinct from the engine's 8-min delegate watchdog
-// (which fails the TASK): this frees the PROCESS-side resources beneath it.
+// streaming run never trips. It counts awake time, so a machine that slept past
+// the ceiling does not abort its runs on wake. Distinct from the engine's 8-min
+// delegate watchdog (which fails the TASK): this frees the PROCESS-side resources
+// beneath it.
+
+import { setAwakeTimeout, type AwakeTimer } from './suspendDetector'
 
 /** Default silence ceiling before a run's drain gives up on its iterator. High
  *  on purpose — an open tool call (build/test) is legitimately silent for many
@@ -52,14 +56,13 @@ export async function* withIdleTimeout<T>(
   try {
     for (;;) {
       const windowMs = idled ? (opts.graceMs ?? IDLE_ABORT_GRACE_MS) : opts.idleMs
-      let timer: ReturnType<typeof setTimeout> | undefined
+      let timer: AwakeTimer | undefined
       const expiry = new Promise<'idle'>((resolve) => {
-        timer = setTimeout(() => resolve('idle'), windowMs)
-        ;(timer as { unref?: () => void }).unref?.()
+        timer = setAwakeTimeout(() => resolve('idle'), windowMs)
       })
       pending ??= it.next()
       const winner = await Promise.race([pending.then((r) => ({ r })), expiry])
-      clearTimeout(timer)
+      timer?.clear()
       if (winner === 'idle') {
         if (idled) return // silent through the grace too — give up
         idled = true

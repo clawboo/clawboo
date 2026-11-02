@@ -13,7 +13,10 @@
 //   • A per-session WEDGE TIMEOUT force-idles a session whose turn boundary is
 //     never observed (a dropped/lost `done` frame), so queued sends (e.g. a
 //     `[Task Update]` to a busy leader) can't sit forever. Re-armed on every
-//     `markBusy`, so an actively-streaming session never trips it.
+//     `markBusy`, so an actively-streaming session never trips it, and counted
+//     in awake time, so a machine that slept does not trip it on wake.
+
+import { setAwakeTimeout, type AwakeTimer } from '@clawboo/executor'
 
 export interface NudgeQueue {
   /**
@@ -59,21 +62,21 @@ export function createNudgeQueue(opts?: {
   const wedgeMs = opts?.wedgeTimeoutMs ?? DEFAULT_WEDGE_TIMEOUT_MS
   const busy = new Set<string>()
   const queues = new Map<string, Array<() => Promise<void>>>()
-  const wedgeTimers = new Map<string, ReturnType<typeof setTimeout>>()
+  const wedgeTimers = new Map<string, AwakeTimer>()
   /** Bumped by `reset()`: a send flushed before it no longer owns its session. */
   let generation = 0
 
   const clearWedge = (sessionKey: string): void => {
     const t = wedgeTimers.get(sessionKey)
     if (t) {
-      clearTimeout(t)
+      t.clear()
       wedgeTimers.delete(sessionKey)
     }
   }
 
   const armWedge = (sessionKey: string): void => {
     clearWedge(sessionKey)
-    const t = setTimeout(() => {
+    const t = setAwakeTimeout(() => {
       // The turn boundary was never observed — force-idle so queued sends aren't
       // wedged. (The orchestrator's own watchdog handles the task side.) First
       // abort any genuinely-still-running run so the flush below can't start a
@@ -82,12 +85,6 @@ export function createNudgeQueue(opts?: {
       void Promise.resolve(opts?.onWedge?.(sessionKey)).catch(() => undefined)
       markIdle(sessionKey)
     }, wedgeMs)
-    // `setTimeout` is typed as the DOM's (returning `number`) because this
-    // package is browser-safe, but under Node the handle is a Timeout carrying
-    // `unref`. TS 6 rejects the direct assertion as non-overlapping, so widen
-    // through `unknown`; the runtime probe below is what actually guards it.
-    const handle = t as unknown as { unref?: () => void }
-    if (typeof handle.unref === 'function') handle.unref()
     wedgeTimers.set(sessionKey, t)
   }
 
@@ -148,7 +145,7 @@ export function createNudgeQueue(opts?: {
       // recipient's turn boundary may never arrive post-teardown, so a queued
       // reflection would otherwise be lost. Bounded: one batched send per queued
       // item, no re-entrancy (callers invoke this only at teardown).
-      for (const t of wedgeTimers.values()) clearTimeout(t)
+      for (const t of wedgeTimers.values()) t.clear()
       wedgeTimers.clear()
       for (const q of queues.values()) {
         for (const send of q) void send().catch(() => undefined)
@@ -158,7 +155,7 @@ export function createNudgeQueue(opts?: {
     },
     reset() {
       generation++
-      for (const t of wedgeTimers.values()) clearTimeout(t)
+      for (const t of wedgeTimers.values()) t.clear()
       wedgeTimers.clear()
       busy.clear()
       queues.clear()

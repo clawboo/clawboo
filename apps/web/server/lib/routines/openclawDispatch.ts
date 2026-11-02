@@ -30,7 +30,7 @@ import {
   type DbAgent,
   type DbScheduledRun,
 } from '@clawboo/db'
-import type { RuntimeEvent } from '@clawboo/executor'
+import { createSuspendDetector, type RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import type { TaskTemplate } from '@clawboo/scheduler'
 import { KeyedMutex } from '@clawboo/worktrees'
@@ -44,6 +44,11 @@ import { createRunCostTally, type SettledRunCost } from '../runtimes/runCostTall
 import type { RoutineDispatchOutcome } from './wakeBridge'
 
 const DEFAULT_WATCHDOG_MS = 10 * 60_000 // 10 min
+
+/** How often the drain re-checks its watchdog. Waking on a tick, instead of
+ *  waiting out the whole budget in one timer, is how it notices that the machine
+ *  slept: the gap between two ticks is far longer than this. */
+const WATCHDOG_TICK_MS = 30_000
 
 /**
  * The executor type this dispatcher records on its execution rows. On the board
@@ -350,9 +355,15 @@ async function drainClaimedRoutineRun(
   }
 
   // Drain to the first terminal `done`, bounded by the watchdog. `error`
-  // events are remembered but only `done` (or the watchdog) is terminal.
-  const deadline = Date.now() + watchdogMs(input.watchdogMs)
+  // events are remembered but only `done` (or the watchdog) is terminal. The
+  // budget is awake time: a sleep of the machine moves the deadline past it,
+  // so a run that was working when the lid closed is not timed out on wake.
+  let deadline = Date.now() + watchdogMs(input.watchdogMs)
+  const suspendedFor = createSuspendDetector(WATCHDOG_TICK_MS, Date.now())
   const iterator = adapter.events(runHandle)[Symbol.asyncIterator]()
+  // The read still waiting when a tick wins the race: the next pass awaits the
+  // same one, since a second `next()` would skip the event it is reading.
+  let pendingNext: Promise<IteratorResult<RuntimeEvent>> | null = null
   // A person commenting on the task steers this run while it works (see runSteers).
   const steerHandle = registerRunSteer(taskId, adapter, runHandle)
   let terminal: (RuntimeEvent & { kind: 'done' }) | null = null
@@ -365,18 +376,21 @@ async function drainClaimedRoutineRun(
 
   try {
     for (;;) {
-      const remaining = deadline - Date.now()
+      const at = Date.now()
+      deadline += suspendedFor(at)
+      const remaining = deadline - at
       if (remaining <= 0) {
         timedOut = true
         break
       }
       let timer: ReturnType<typeof setTimeout> | undefined
-      let raced: IteratorResult<RuntimeEvent> | 'timeout' | 'stopped'
+      let raced: IteratorResult<RuntimeEvent> | 'tick' | 'stopped'
+      pendingNext ??= iterator.next()
       try {
         raced = await Promise.race([
-          iterator.next(),
-          new Promise<'timeout'>((resolve) => {
-            timer = setTimeout(() => resolve('timeout'), remaining)
+          pendingNext,
+          new Promise<'tick'>((resolve) => {
+            timer = setTimeout(() => resolve('tick'), Math.min(remaining, WATCHDOG_TICK_MS))
             timer.unref?.()
           }),
           stopped,
@@ -385,10 +399,9 @@ async function drainClaimedRoutineRun(
         if (timer) clearTimeout(timer)
       }
       if (raced === 'stopped') break
-      if (raced === 'timeout') {
-        timedOut = true
-        break
-      }
+      // A tick only re-checks the deadline, at the top of the loop.
+      if (raced === 'tick') continue
+      pendingNext = null
       if (raced.done) break
       const ev = raced.value
       costTally.observe(ev)

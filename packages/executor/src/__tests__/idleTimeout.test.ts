@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { withIdleTimeout } from '../idleTimeout'
 
@@ -107,6 +107,48 @@ describe('withIdleTimeout', () => {
     await consume
     expect(idled).toBe(true)
     expect(seen).toEqual([])
+  })
+})
+
+/** A macOS sleep under fake timers: the wall clock jumps and every timer whose
+ *  delay passed fires once, on wake. (`vi.setSystemTime` would move the pending
+ *  timers along with the clock, so a plain setTimeout would pass too.) */
+const sleepFor = (ms: number): void =>
+  (globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
+
+describe('withIdleTimeout across a machine sleep', () => {
+  it('a sleep longer than the ceiling does not abort the run on wake', async () => {
+    vi.useFakeTimers()
+    try {
+      const MIN = 60_000
+      const src = manualSource<string>()
+      const seen: string[] = []
+      let idled = false
+      const consume = (async () => {
+        for await (const v of withIdleTimeout(src.iterable, {
+          idleMs: 30 * MIN,
+          onIdle: () => {
+            idled = true
+          },
+        }))
+          seen.push(v)
+      })()
+      src.push('working')
+      await vi.advanceTimersByTimeAsync(5 * MIN)
+
+      sleepFor(120 * MIN)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(idled).toBe(false)
+
+      // The run carries on and finishes normally.
+      src.push('done')
+      src.end()
+      await consume
+      expect(seen).toEqual(['working', 'done'])
+      expect(idled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

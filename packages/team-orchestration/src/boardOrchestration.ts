@@ -22,7 +22,7 @@ import {
   MAX_AUTO_FIRES,
   type TaskAttention,
 } from '@clawboo/board-core'
-import type { RuntimeEvent } from '@clawboo/executor'
+import { createSuspendDetector, type RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
@@ -413,6 +413,15 @@ export interface BoardOrchestratorDeps {
   abortSession?: (sessionKey: string) => void
   /** Injectable clock for the idle watchdog (tests). Defaults to `Date.now`. */
   now?: () => number
+  /**
+   * How often the host calls `sweepStaleSessions`. Given it, the watchdog can tell
+   * a suspended process from a silent delegate: a gap between two sweeps far
+   * longer than this means the machine slept, and that time is left off every
+   * idle clock, so closing a laptop's lid does not fail every in-flight
+   * delegation on wake. Omitted (a caller that sweeps irregularly, like the
+   * contract suite), every gap counts as awake time.
+   */
+  sweepIntervalMs?: number
 }
 
 export interface BoardOrchestrator {
@@ -437,7 +446,8 @@ export interface BoardOrchestrator {
    * Fail any delegated child that has emitted no lifecycle event for longer than
    * `DELEGATION_IDLE_TIMEOUT_MS` — reflects the timeout to the leader so it is
    * never left standing. Driven by an interval in the server orchestrator
-   * (`teamOrchestrator`); the contract suite drives it directly.
+   * (`teamOrchestrator`); the contract suite drives it directly. Time the process
+   * spent suspended (see `sweepIntervalMs`) does not count as silence.
    */
   sweepStaleSessions(): Promise<void>
   /**
@@ -565,6 +575,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   let reflectTimer: ReturnType<typeof setTimeout> | null = null
 
   const now = deps.now ?? (() => Date.now())
+  // Baselined at creation, so a sleep before the first sweep is caught too.
+  const suspendedFor =
+    deps.sweepIntervalMs != null ? createSuspendDetector(deps.sweepIntervalMs, now()) : null
   const emit = (change: BoardChange): void => deps.onBoardChange?.(change)
 
   /** Who a task's result reports back to: its delegator (reduce-point), else the leader. */
@@ -1726,6 +1739,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  orchestrator can't grow them without bound. */
   async function sweepStaleSessions(): Promise<void> {
     const tnow = now()
+    // The machine slept since the last sweep. That time is no delegate's silence,
+    // so every age clock moves past it before anything is judged; one refreshed
+    // after the wake is already current and never moves past now.
+    const slept = suspendedFor?.(tnow) ?? 0
+    if (slept > 0)
+      for (const clocks of [lastActivityAt, recentlyTerminated, processed, intentMissed])
+        for (const [k, ts] of clocks) clocks.set(k, Math.min(ts + slept, tnow))
     for (const [k, ts] of processed) if (ts <= tnow - PROCESSED_TTL_MS) processed.delete(k)
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
     for (const [s, ts] of recentlyTerminated)

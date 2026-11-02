@@ -23,7 +23,7 @@
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
 import { enqueueInbox, getActiveRoom, type ClawbooDb } from '@clawboo/db'
-import { steeringOf } from '@clawboo/executor'
+import { createSuspendDetector, steeringOf } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
 import {
   agentIdFromSessionKey,
@@ -134,6 +134,8 @@ interface Instance {
   orchestrator: TeamOrchestrator
   touch(): void
   getLastActivity(): number
+  /** Move the idle clock past `ms` the process spent suspended, never past `at`. */
+  forgiveSuspension(ms: number, at: number): void
   /** No run in flight — safe to evict. A cascade the user walked away from is
    *  NOT quiescent, so the idle-TTL scan can never dispose it mid-work. */
   isQuiescent(): boolean
@@ -282,6 +284,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
 
   const engine = createBoardOrchestrator({
     teamId,
+    // The cadence of the idle-watchdog interval below, so a sleep between two
+    // sweeps is not mistaken for every delegate going silent.
+    sweepIntervalMs: SWEEP_INTERVAL_MS,
     // Room-scoped: the tasks this engine creates carry its room, and its reads
     // (projection load, ready pump, resume) see only its room's tasks.
     board: createServerBoardClient(db, { roomId }),
@@ -644,6 +649,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     orchestrator,
     touch,
     getLastActivity: () => lastActivityAt,
+    forgiveSuspension: (ms, at) => {
+      lastActivityAt = Math.min(lastActivityAt + ms, at)
+    },
     // A live run registers itself in `abortMap` for its whole lifetime, so an
     // empty map is exactly "nothing running".
     isQuiescent: () => abortMap.size === 0,
@@ -785,5 +793,21 @@ export function shouldEvictInstance(idleForMs: number, quiescent: boolean): bool
   return quiescent || idleForMs > HARD_TTL_MS
 }
 
-const evictScan = setInterval(() => evictIdleOrchestrators(), EVICT_SCAN_MS)
+/**
+ * The eviction interval's pass. After the machine slept, every idle clock first
+ * moves past the sleep: an overnight lid-close is not hours of silence, and the
+ * hard ceiling would otherwise evict every busy instance on wake, aborting its
+ * runs. Exported for tests; the interval below is the only production caller.
+ */
+export function createEvictionScan(startAt: number = Date.now()): (at?: number) => number {
+  const suspendedFor = createSuspendDetector(EVICT_SCAN_MS, startAt)
+  return (at = Date.now()) => {
+    const slept = suspendedFor(at)
+    if (slept > 0) for (const inst of instances.values()) inst.forgiveSuspension(slept, at)
+    return evictIdleOrchestrators(at)
+  }
+}
+
+const evictionScan = createEvictionScan()
+const evictScan = setInterval(() => evictionScan(), EVICT_SCAN_MS)
 evictScan.unref?.()
