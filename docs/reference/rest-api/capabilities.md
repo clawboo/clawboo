@@ -242,7 +242,7 @@ Turns an existing capability on or off by its `id`. The route looks the row up f
 
 Answers a pending tool-call approval: the same `tool_call_approvals` rows the approval cards on the board and in chat answer. Answering a row that is already resolved changes nothing and returns the row as it is.
 
-An `allow_always` on an approval tied to a connector grant also saves a standing rule that allows that tool, with any arguments, for 30 days, unless the prompt marked the call as one that cannot be remembered (`neverRemember`).
+An `allow_always` on an approval tied to a connector grant also saves a standing rule that allows that tool, with any arguments, for 30 days, unless the prompt marked the call as one that cannot be remembered (`neverRemember`). A call to a destructive tool is always marked that way.
 
 This action only updates the row. An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding) is not released by it; answer those with `POST /api/tools/approvals/:id/resolve` (see [Tools and MCP](/reference/rest-api/tools-and-mcp)), which also tells the Gateway.
 

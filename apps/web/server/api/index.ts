@@ -54,6 +54,7 @@ import { teamChatStreamGET } from './teamChatStream'
 import {
   agentsDELETE,
   agentsCleanupPOST,
+  agentMovePOST,
   agentsListGET,
   agentsRegistryHealthGET,
   agentsCreatePOST,
@@ -351,6 +352,7 @@ router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
 router.get('/api/agents/:agentId', agentGET)
 router.patch('/api/agents/:agentId/model', agentModelPATCH)
 router.delete('/api/agents/:agentId', agentsDELETE)
+router.post('/api/agents/:agentId/move', agentMovePOST)
 router.get('/api/agents/:agentId/files/:name', agentFileGET)
 router.put('/api/agents/:agentId/files/:name', agentFilePUT)
 router.get('/api/agents/:agentId/sessions', agentSessionsGET)

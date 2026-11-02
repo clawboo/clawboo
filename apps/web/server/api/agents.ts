@@ -39,6 +39,7 @@ import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForAgentLike } from '../lib/teamChat/nativeTeamSession'
 import { getRoutinesTicker } from '../lib/routines/ticker'
+import { moveAgentToTeam } from '../lib/agentMove'
 
 // The source throws Error('gateway_disconnected') when a write/file/session op
 // needs a live Gateway but the server-side connection is down.
@@ -565,6 +566,41 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
       }
       throw err
     }
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/agents/:agentId/move ──────────────────────────────────────────
+//
+// Body: { teamId: string }
+//
+// Moves the agent to another team in one transaction: its team, its not-yet-
+// started tasks on the old team (unbound and left there), its own routines, its
+// old rooms and its leader resume pointers (see lib/agentMove.ts). Refused for
+// Boo Zero, for a team's lead, and while the agent has a task in progress.
+
+export function agentMovePOST(req: Request, res: Response): void {
+  const agentId = req.params['agentId'] as string | undefined
+  const body = req.body as { teamId?: unknown } | undefined
+  const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
+  if (!agentId || !teamId) {
+    res.status(400).json({ error: 'agentId and teamId are required' })
+    return
+  }
+  try {
+    const db = getDb()
+    const result = moveAgentToTeam(db, {
+      agentId,
+      toTeamId: teamId,
+      booZeroId: resolveBooZero(db)?.id ?? null,
+    })
+    if (!result.ok) {
+      res.status(result.status).json({ error: result.error })
+      return
+    }
+    if (result.routinesMoved > 0) getRoutinesTicker()?.requestRescan()
+    res.json(result)
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

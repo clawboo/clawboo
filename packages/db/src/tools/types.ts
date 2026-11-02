@@ -72,6 +72,13 @@ export interface ToolCallContext {
    */
   runTrifecta?: TrifectaTags
   tainted?: boolean
+  /**
+   * The grant gate allowed this call through a standing "Always" rule (the
+   * approval card's "Do not ask again for 30 days"). Set by the broker before
+   * the inspector chain runs, overwriting whatever a caller passed, so it can
+   * only ever reflect a rule the operator actually minted.
+   */
+  rememberedAllow?: boolean
 }
 
 export interface ToolDescriptor {

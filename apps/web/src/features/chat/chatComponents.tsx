@@ -38,6 +38,8 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useViewStore } from '@/stores/view'
 import { useConnectorCostState } from '@/features/connectors/useConnectorCostState'
+import { listLiveConnectors } from '@/features/connectors/liveConnectors'
+import { apiFetch } from '@clawboo/control-client'
 import {
   agentIdFromSessionKey,
   roomIdFromSessionKey,
@@ -534,6 +536,44 @@ export const ThinkingSection = memo(function ThinkingSection({
 // ─── ConnectorAskCard ────────────────────────────────────────────────────────
 
 /**
+ * The slugs of the live connectors `agentId` holds a grant for, or null while
+ * that is still being read. Connected is not the same as usable: a connector
+ * the agent has no grant for gives it no tools, which is often exactly why it
+ * asked.
+ */
+function useSlugsSharedWith(agentId: string | null, liveSig: string): Set<string> | null {
+  const [slugs, setSlugs] = useState<Set<string> | null>(null)
+  useEffect(() => {
+    if (!agentId) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const [live, res] = await Promise.all([
+          listLiveConnectors(),
+          apiFetch(`/api/grants?subjectId=${encodeURIComponent(agentId)}`),
+        ])
+        const body = res.ok
+          ? ((await res.json()) as {
+              grants?: { connectorId: string | null; revokedAt: number | null }[]
+            })
+          : { grants: [] }
+        const held = new Set(
+          (body.grants ?? []).filter((g) => g.revokedAt == null).map((g) => g.connectorId),
+        )
+        if (!cancelled)
+          setSlugs(new Set(live.filter((r) => held.has(r.connectorId)).map((r) => r.slug)))
+      } catch {
+        if (!cancelled) setSlugs(new Set())
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [agentId, liveSig])
+  return slugs
+}
+
+/**
  * The moment of ask, rendered where the asking happened.
  *
  * The agent said it needs something and stopped. Everything else about this
@@ -563,20 +603,37 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
   // and only a FAILED send unlatches it so the operator can retry.
   const [resumeState, setResumeState] = useState<'idle' | 'sending' | 'sent'>('idle')
   const defs = slugs.map((s) => connectorBySlug(s)).filter((d): d is ConnectorDefinition => !!d)
-  if (defs.length === 0) return null
 
-  const open = (slug: string) => {
-    useMarketplaceStore.getState().setOpenConnectorSlug(slug)
-    useViewStore.getState().navigateTo('connectors')
-  }
-
-  const done = defs.filter((d) => isLive(d.slug))
-  const pending = defs.filter((d) => !isLive(d.slug))
   // Only a TEAM room can be resumed: the 1:1 agent chat has its own send path,
   // and a Continue button that silently did nothing there would be worse than
   // no button at all.
   const teamId = teamIdFromSessionKey(sessionKey)
   const agentId = agentIdFromSessionKey(sessionKey)
+  const agentName = useFleetStore((s) => s.agents.find((a) => a.id === agentId)?.name ?? null)
+  const liveSig = defs
+    .filter((d) => isLive(d.slug))
+    .map((d) => d.slug)
+    .join(',')
+  const shared = useSlugsSharedWith(agentId, liveSig)
+
+  // THE ASKING AGENT TRAVELS WITH THE LINK. The connector page preselects it
+  // and gives it access once the connector is up; connecting from here used to
+  // grant nobody, so the agent still could not call a single tool.
+  const open = (slug: string) => {
+    useMarketplaceStore
+      .getState()
+      .setOpenConnectorSlug(slug, agentId && agentName ? { agentId, agentName } : null)
+    useViewStore.getState().navigateTo('connectors')
+  }
+
+  // Done means USABLE BY THIS AGENT: live and shared with it. Live alone is
+  // what the card used to check, and it read "connected" while the agent that
+  // asked still had no access.
+  const usable = (slug: string): boolean =>
+    isLive(slug) && (!agentId || shared === null || shared.has(slug))
+  const done = defs.filter((d) => usable(d.slug))
+  const pending = defs.filter((d) => !usable(d.slug))
+  if (defs.length === 0) return null
 
   return (
     <div className="flex justify-center">
@@ -638,7 +695,9 @@ const ConnectorAskCard = memo(function ConnectorAskCard({
           <div className="mt-2.5 flex flex-wrap gap-2">
             {pending.map((d) => (
               <Button key={d.slug} size="sm" onClick={() => open(d.slug)}>
-                {COST_COPY[costOf(d)].action} {d.displayName}
+                {isLive(d.slug)
+                  ? `Share ${d.displayName}${agentName ? ` with ${agentName}` : ''}`
+                  : `${COST_COPY[costOf(d)].action} ${d.displayName}`}
               </Button>
             ))}
           </div>

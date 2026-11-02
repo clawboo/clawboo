@@ -119,7 +119,7 @@ Cleanup commits a worktree's changes before removing it and keeps its branch.
 | Limit                                                     | Value                                   | Change it                             | Source                                                      |
 | --------------------------------------------------------- | --------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
 | Approval prompt for a tool call or a risky delegation     | 5 minutes, then it expires              | No                                    | `packages/db/src/tools/persistence.ts:27,34`                |
-| **Always** on a connector tool                            | 30 days                                 | No                                    | `packages/db/src/tools/persistence.ts:230`                  |
+| **Always** on a connector tool                            | 30 days; destructive tools always ask   | No                                    | `packages/db/src/tools/persistence.ts:230`                  |
 | **Always** on a risky delegation                          | Does not expire                         | No                                    | `packages/db/src/governance/approvalScope.ts:11`            |
 | Clawboo Native command prompt                             | 10 minutes                              | No                                    | `apps/web/server/lib/runtimes/native/execTool.ts:47`        |
 | Commands a Clawboo Native agent can ask to run in one run | 10                                      | No                                    | `apps/web/server/lib/runtimes/native/execTool.ts:59`        |

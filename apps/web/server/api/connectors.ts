@@ -355,6 +355,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       launch: { transport: 'streamable-http', url: def.launch.url },
       egressAllow: def.egressAllow,
       trifecta: def.trifecta,
+      ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
     }
   }
   return {
@@ -375,6 +376,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,
+    ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
     authInputs: def.auth.inputs,
   }
 }

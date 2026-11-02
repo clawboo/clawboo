@@ -59,7 +59,7 @@ You should see the agent's Boo tile in the team's agent column.
 ### What a new agent starts with
 
 - The **House Style** personality (see [Tune the personality](#tune-the-personality)).
-- The browser connectors, Playwright and Chrome DevTools. Chrome DevTools asks you before each action; with the access a new agent gets, Playwright offers only its reading tools. See [Connectors](/using/connectors) for how to let an agent act through Playwright.
+- The browser connectors, Playwright and Chrome DevTools, with write access. An agent on any runtime but OpenClaw can open pages, click and fill in forms, and each such action asks you first. A few Playwright tools, such as running code in the page, need Admin access. See [Connectors](/using/connectors#every-agent-gets-a-browser).
 - On OpenClaw: **Ask for Unknown** for commands, so it asks your approval before running a command that is not on its list. Clawboo sets this at the Gateway, and if the Gateway refuses the setting, the agent is not created.
 - On Clawboo Native: no commands at all until you turn on **Let this Boo ask to run commands** (see [Permissions](#permissions)).
 
@@ -192,6 +192,19 @@ Clawboo keeps the files of Clawboo Native, Claude Code, Codex and Hermes agents 
 See [Command permissions](/using/command-permissions) for the details.
 
 Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo runs them with their own approval prompts and sandboxes turned off, so they can read and change any file your user account can. See [What agents can do](/concepts/permissions).
+
+## Move an agent to another team
+
+1. On the Org chart or a team graph, right-click the agent's Boo and choose **Move to team**. Boo Zero has no such row: it leads every team and joins none.
+2. Pick one of your other active teams, then click **Move**.
+
+A message says where the agent went. If it had tasks it had not started, the message adds how many, for example **2 unstarted tasks stay on Growth's board, unassigned.** Moving works without the OpenClaw Gateway.
+
+- **Moves with it:** its own routines. Team routines stay with their team.
+- **Stays on the old team:** tasks it had not started, unassigned, for someone there to pick up. Tasks in review or done stay there too, with the agent still named on them. Files it saved in the old team's folder, and memory and budgets set for the old team, stay as well. A budget set on the agent itself follows it.
+- **Changes:** it leaves the old team's rooms, and from its next run it works in the new team's folder. An OpenClaw agent's AGENTS.md still names its old teammates until you edit it.
+
+The dialog refuses the move, and says why, while the agent leads its team (**It leads its team. Choose another lead for that team first.**) or is working on a task (**It is working on a task. Try again when the task finishes.**).
 
 ## Delete an agent
 

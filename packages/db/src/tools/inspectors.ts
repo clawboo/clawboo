@@ -90,7 +90,7 @@ export const argClampInspector: Inspector = (call): InspectorDecision => {
 
 /** RISK — destructive/external tools require human approval (risk-classified, so
  *  only these prompt — safe tools run unattended). */
-export const riskClassifierInspector: Inspector = (_call, descriptor): InspectorDecision => {
+export const riskClassifierInspector: Inspector = (_call, descriptor, ctx): InspectorDecision => {
   // An explicit destructive annotation prompts whatever the connector-level
   // risk floor says, and outranks a contradictory `readOnly` on the same tool.
   if (descriptor.risk === 'destructive' || descriptor.destructive === true) {
@@ -106,7 +106,15 @@ export const riskClassifierInspector: Inspector = (_call, descriptor): Inspector
   // "side effects", which a read-only tool does not have, and the practical
   // result was an agent waiting on an approval nobody was watching for and then
   // reporting the timeout as a service outage.
-  if (descriptor.risk === 'external' && descriptor.readOnly !== true) {
+  //
+  // A standing "Always" rule answers this one. The operator was shown this
+  // external change and asked not to be asked again; asking anyway made the
+  // card's 30-day box do nothing. Destructive calls above never get this pass.
+  if (
+    descriptor.risk === 'external' &&
+    descriptor.readOnly !== true &&
+    ctx?.rememberedAllow !== true
+  ) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" has external side effects and needs approval.`,

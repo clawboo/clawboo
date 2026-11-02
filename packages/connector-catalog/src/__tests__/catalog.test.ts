@@ -290,3 +290,21 @@ describe('per-agent browser profiles', () => {
     }
   })
 })
+
+describe('Playwright destructive tools', () => {
+  it('lists exactly the truly destructive tools for the pinned version', () => {
+    // Playwright marks navigate and click destructive, which put the browser
+    // behind an admin grant. The catalog list replaces that marking, so it is
+    // tied to the pin: moving the pin means re-reading the new tools/list.
+    const def = CONNECTOR_DEFINITIONS.find((d) => d.slug === 'playwright')!
+    expect(def.launch.transport === 'stdio' && def.launch.pinnedVersion).toBe('0.0.79')
+    expect(def.destructiveTools).toEqual([
+      'browser_run_code_unsafe',
+      'browser_evaluate',
+      'browser_file_upload',
+      'browser_drop',
+    ])
+    expect(def.destructiveTools).not.toContain('browser_navigate')
+    expect(def.destructiveTools).not.toContain('browser_click')
+  })
+})

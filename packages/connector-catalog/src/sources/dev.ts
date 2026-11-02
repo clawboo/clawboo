@@ -170,6 +170,17 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
     // than shipping a list that implies containment it does not provide.
     egressAllow: ['*'],
     trifecta: { readsPrivateData: false, ingestsUntrustedContent: true, canEgress: true },
+    // 0.0.79 marks 19 of its 24 default tools destructive, navigate, click and
+    // type included, which put the whole browser behind an admin grant. These
+    // four are the ones that are: arbitrary code in the page or in Playwright,
+    // and the two that can hand a local file to a website. Checked against
+    // 0.0.79's own tools/list; re-check when the pin moves.
+    destructiveTools: [
+      'browser_run_code_unsafe',
+      'browser_evaluate',
+      'browser_file_upload',
+      'browser_drop',
+    ],
     tags: ['browser', 'automation', 'testing', 'scraping'],
     homepage: 'https://github.com/microsoft/playwright-mcp',
   },

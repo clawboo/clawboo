@@ -214,6 +214,18 @@ export interface ConnectorDefinition {
   egressAllow: string[]
   trifecta: ConnectorTrifectaHint
   /**
+   * The tools that are truly destructive, decided by the catalog rather than by
+   * the server's own `destructiveHint`.
+   *
+   * When set, a tool counts as destructive exactly when its name is listed, and
+   * the server's `destructiveHint` is ignored. A destructive tool needs an admin
+   * grant, so a server that marks EVERY action destructive (Playwright marks
+   * navigate and click that way) would otherwise leave a write grant able to do
+   * nothing but read. Matched against the raw tool names of the pinned version:
+   * re-check the list whenever the pin moves.
+   */
+  destructiveTools?: readonly string[]
+  /**
    * The server refuses to start without an argument only a human can supply.
    *
    * DECLARED rather than inferred. A placeholder-shaped arg is detectable by

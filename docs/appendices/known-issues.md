@@ -174,23 +174,6 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 ## Teams and Boo Zero
 
-### Archived teams cannot be restored from the dashboard
-
-**What you see:** an archived team disappears from the team rail and every other view, and no screen lists archived teams.
-
-**What it affects:** the team's agents, chats and tasks are kept, but the dashboard offers no way back to them.
-
-**What to do:** restore the team through the API, then reload the dashboard. Find its id, then clear the archive flag (use your port if it is not 18790):
-
-```bash
-curl 'http://localhost:18790/api/teams?includeArchived=true'
-curl -X PATCH 'http://localhost:18790/api/teams/TEAM_ID' -H 'Content-Type: application/json' -d '{"isArchived": 0}'
-```
-
-With an access token set, send your access cookie too. See [Teams](/using/teams).
-
-**Status:** open.
-
 ### Refresh Protocol needs an OpenClaw Gateway, even without OpenClaw agents
 
 **What you see:** **Refresh Protocol** on a team reports **Not connected to Gateway**.
@@ -290,42 +273,46 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 These problems affect the 0.5.0 release. They are fixed on main and ship with the next release, which the [changelog](/appendices/changelog) describes under **Unreleased**.
 
-| What you see on 0.5.0                                                                                                                                                                                 | Area      |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| Requests to `/api/mcp/` through a reverse proxy on the same machine skip the access token (see the [first entry on this page](#security-and-access))                                                  | Security  |
-| A `STUDIO_ACCESS_TOKEN` with an unsupported character turns the access check off (see [the entry above](#an-access-token-with-an-unsupported-character-turns-the-access-check-off))                   | Security  |
-| Clawboo writes `~/.openclaw/.env`, OpenClaw agents' `auth-profiles.json`, `settings.json` and `clawboo backup` files with your default permissions                                                    | Security  |
-| Over HTTP, a TeamChat MCP session with no signed identity can read and post in any team's [peer chat](/concepts/peer-chat) as any agent, and `create_subtask` can file work under another team's task | Security  |
-| Claude Code agents load your own `~/.claude` settings, plugins, MCP servers and memory (see [the entry above](#claude-code-agents-follow-your-own-claude-code-settings))                              | Security  |
-| A remembered **Always** on a connector tool skips the prompt even under access set to ask every time (`approvalPolicy: always`)                                                                       | Security  |
-| An `allow_always` answer to a risky hand-off, sent through the API, stops that leader's risky hand-offs from asking again, with no end date                                                           | Security  |
-| `/api/mcp/config` signs any team id, and replacing the attach secret means editing the database by hand                                                                                               | Security  |
-| Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama    |
-| Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama    |
-| Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers |
-| **Set up OpenClaw** asks for an Anthropic, OpenAI or OpenRouter key even when Ollama is your provider                                                                                                 | OpenClaw  |
-| After you change OpenClaw's Gateway port, **Set up OpenClaw** still points Clawboo at port 18789                                                                                                      | OpenClaw  |
-| Without an OpenClaw Gateway, **Create Boo** is missing, the graph's **New agent** fails with `gateway_disconnected`, and deleting agents does not work                                                | Agents    |
-| An OpenClaw agent deleted while the Gateway is down comes back on the next connect                                                                                                                    | OpenClaw  |
-| Approving this device during OpenClaw setup can stick on "Approved. Reconnecting…" with only **Cancel**                                                                                               | OpenClaw  |
-| The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw  |
-| A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates   |
-| The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server    |
-| With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart |
-| With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display   |
-| The in-app Hermes install picks Python 3.14 over an installed 3.12, and fails                                                                                                                         | Hermes    |
-| Picking a model on a Hermes agent's page moves an agent on the ChatGPT subscription to OpenRouter                                                                                                     | Hermes    |
-| On a ChatGPT-only setup, a Marketplace deploy starts its members on Clawboo Native, which has no provider there, and pressing **Deploy** again after "No agents could be created" fails               | Teams     |
-| The reviewer's run on checked work is not charged to any budget and is missing from **Tokens Used**                                                                                                   | Budgets   |
-| `POST /api/team-chat/exchange` cancels every exchange at its first turn                                                                                                                               | Team chat |
-| A runtime's **Disconnect** deletes keys other runtimes use, and its dialog names only one (see [the entry above](#disconnecting-a-runtime-deletes-keys-other-runtimes-use))                           | Providers |
-| On OpenClaw 2026.9, **Create Boo** and Marketplace deploys of OpenClaw agents fail partway, because Clawboo wrote a TOOLS.md that Gateway refuses                                                     | OpenClaw  |
-| Saving SOUL.md while custom personality instructions are on writes the slider personality over them                                                                                                   | Agents    |
-| Deleting an agent leaves its routines behind, and each one fails with `agent ... not found`                                                                                                           | Routines  |
-| Removing a route on the Org chart does nothing without an OpenClaw Gateway, and the empty Org chart says to connect one                                                                               | Org chart |
-| **System Health** reads degraded on an install that never set up OpenClaw, and says "OTel exporter active" when nothing is exported                                                                   | Health    |
-| Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools     |
-| Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero  |
+| What you see on 0.5.0                                                                                                                                                                                 | Area       |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| Requests to `/api/mcp/` through a reverse proxy on the same machine skip the access token (see the [first entry on this page](#security-and-access))                                                  | Security   |
+| A `STUDIO_ACCESS_TOKEN` with an unsupported character turns the access check off (see [the entry above](#an-access-token-with-an-unsupported-character-turns-the-access-check-off))                   | Security   |
+| Clawboo writes `~/.openclaw/.env`, OpenClaw agents' `auth-profiles.json`, `settings.json` and `clawboo backup` files with your default permissions                                                    | Security   |
+| Over HTTP, a TeamChat MCP session with no signed identity can read and post in any team's [peer chat](/concepts/peer-chat) as any agent, and `create_subtask` can file work under another team's task | Security   |
+| Claude Code agents load your own `~/.claude` settings, plugins, MCP servers and memory (see [the entry above](#claude-code-agents-follow-your-own-claude-code-settings))                              | Security   |
+| A remembered **Always** on a connector tool skips the prompt even under access set to ask every time (`approvalPolicy: always`)                                                                       | Security   |
+| An `allow_always` answer to a risky hand-off, sent through the API, stops that leader's risky hand-offs from asking again, with no end date                                                           | Security   |
+| `/api/mcp/config` signs any team id, and replacing the attach secret means editing the database by hand                                                                                               | Security   |
+| Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama     |
+| Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama     |
+| Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers  |
+| **Set up OpenClaw** asks for an Anthropic, OpenAI or OpenRouter key even when Ollama is your provider                                                                                                 | OpenClaw   |
+| After you change OpenClaw's Gateway port, **Set up OpenClaw** still points Clawboo at port 18789                                                                                                      | OpenClaw   |
+| Without an OpenClaw Gateway, **Create Boo** is missing, the graph's **New agent** fails with `gateway_disconnected`, and deleting agents does not work                                                | Agents     |
+| An OpenClaw agent deleted while the Gateway is down comes back on the next connect                                                                                                                    | OpenClaw   |
+| Approving this device during OpenClaw setup can stick on "Approved. Reconnecting…" with only **Cancel**                                                                                               | OpenClaw   |
+| The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw   |
+| A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates    |
+| The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server     |
+| With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart  |
+| With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display    |
+| The in-app Hermes install picks Python 3.14 over an installed 3.12, and fails                                                                                                                         | Hermes     |
+| Picking a model on a Hermes agent's page moves an agent on the ChatGPT subscription to OpenRouter                                                                                                     | Hermes     |
+| On a ChatGPT-only setup, a Marketplace deploy starts its members on Clawboo Native, which has no provider there, and pressing **Deploy** again after "No agents could be created" fails               | Teams      |
+| The reviewer's run on checked work is not charged to any budget and is missing from **Tokens Used**                                                                                                   | Budgets    |
+| `POST /api/team-chat/exchange` cancels every exchange at its first turn                                                                                                                               | Team chat  |
+| A runtime's **Disconnect** deletes keys other runtimes use, and its dialog names only one (see [the entry above](#disconnecting-a-runtime-deletes-keys-other-runtimes-use))                           | Providers  |
+| On OpenClaw 2026.9, **Create Boo** and Marketplace deploys of OpenClaw agents fail partway, because Clawboo wrote a TOOLS.md that Gateway refuses                                                     | OpenClaw   |
+| Saving SOUL.md while custom personality instructions are on writes the slider personality over them                                                                                                   | Agents     |
+| Deleting an agent leaves its routines behind, and each one fails with `agent ... not found`                                                                                                           | Routines   |
+| Removing a route on the Org chart does nothing without an OpenClaw Gateway, and the empty Org chart says to connect one                                                                               | Org chart  |
+| **System Health** reads degraded on an install that never set up OpenClaw, and says "OTel exporter active" when nothing is exported                                                                   | Health     |
+| Connecting a connector, even from an agent's request for it, gives no agent access unless you draw it on the graph                                                                                    | Connectors |
+| The default browser access can only read pages, because Playwright marks navigate and click as destructive                                                                                            | Connectors |
+| "Do not ask again for this for 30 days" on a connector call never stops the next prompt                                                                                                               | Connectors |
+| Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools      |
+| Archived teams cannot be restored from the dashboard, and an agent cannot move to another team                                                                                                        | Teams      |
+| Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero   |
 
 ## Related
 

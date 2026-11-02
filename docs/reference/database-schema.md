@@ -504,7 +504,7 @@ Approval requests. `kind: 'tool'` is a call Clawboo itself is holding (the broke
 | `tenant_id`      | `TEXT`                                | Unused                                                                                                                                             |
 | `grant_id`       | `TEXT`                                | The connector grant the call was checked against                                                                                                   |
 | `connector_id`   | `TEXT`                                |                                                                                                                                                    |
-| `never_remember` | `INTEGER`, not null, default `0`      | `1` when "Always" must not be offered                                                                                                              |
+| `never_remember` | `INTEGER`, not null, default `0`      | `1` when "Always" must not be offered, which includes every call to a destructive tool                                                             |
 | `rule_reason`    | `TEXT`                                | Why the grant asked: `policy-always`, `policy-writes`, `risk-destructive`, `risk-external`, `lethal-trifecta`, `tainted-run` or `never-remembered` |
 | `tool_class`     | `TEXT`                                | `read`, `write` or `destructive`                                                                                                                   |
 | `tool_summary`   | `TEXT`                                | The tool's own one-line description (for `exec`, the first 200 characters of the command)                                                          |

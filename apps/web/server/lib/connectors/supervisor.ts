@@ -82,6 +82,9 @@ export interface ConnectableDefinition {
   accessToken?: string | (() => string | null | Promise<string | null>)
   egressAllow: readonly string[]
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
+  /** The catalog's own list of destructive tools, which replaces the server's
+   *  `destructiveHint` when present (see ConnectorDefinition.destructiveTools). */
+  destructiveTools?: readonly string[]
   /** Credentials the connector declared. Resolved from the vault, never ambient. */
   authInputs?: readonly DeclaredInput[]
 }
@@ -139,6 +142,7 @@ function toDescriptor(
     // Only a CURATED entry earns belief in its own annotations: the trust comes
     // from the catalog vouching for the package, never from the server's say-so.
     trustAnnotations: def.provenance === 'curated',
+    ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
     trifecta: def.trifecta,
     executor: async (args, ctx) => {
       const connectorId = connectorInstanceId(def.slug)

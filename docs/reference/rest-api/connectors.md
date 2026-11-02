@@ -680,6 +680,8 @@ curl -X DELETE http://localhost:18790/api/connectors/custom/my-notes
 
 A grant says that a subject (one agent, one team, or every agent) may use a capability (a connector, a tool or a skill) in a given mode, under a given approval policy. Clawboo's connector gate reads grants before a connector tool runs, and the graphs draw your grants as edges. A grant's `origin` is `owner` when it records what an agent's own runtime already attaches, and `operator` when a person shared the capability. Only `operator` grants are drawn with a **Detach** control.
 
+The dashboard creates an agent grant with `mode: 'write'` and `approvalPolicy: 'risk'` in three places: **Give access** under **Who can use it?** on a connector's detail pane, a thread drawn on a graph, and a connector's detail pane opened from an agent's ask card in chat, which gives that agent the connector once it connects. All three call `POST /api/grants`.
+
 These routes read and write the local database only, and need no credential.
 
 ```ts
@@ -714,7 +716,7 @@ interface GrantRow {
 | `risk` (default) | Calls to destructive tools, and to outside tools that change something |
 | `never`          | The policy never asks                                                  |
 
-Some calls ask whatever the policy says, for example in a run that combines private data, untrusted content and a way to send data out. Under `always`, a standing rule from an earlier **Always** answer does not skip the prompt, and the prompt cannot be remembered (`neverRemember`). Under the other policies a standing allow rule runs the tool without asking; revoking the grant deletes those rules. A tool whose required mode ranks above the grant's `mode` is denied. A stored value that cannot be read falls back to its safest reading: `mode` reads as `read`, `state` as `suspended`, `approvalPolicy` as `always`, an unreadable `toolAllow` as `[]` and an unreadable `toolDeny` as `['*']`.
+Some calls ask whatever the policy says, for example in a run that combines private data, untrusted content and a way to send data out. Under `always`, a standing rule from an earlier **Always** answer does not skip the prompt, and the prompt cannot be remembered (`neverRemember`). Under the other policies a standing allow rule runs the tool without asking, including a call that changes something outside Clawboo; revoking the grant deletes those rules. A destructive tool is the exception: it asks every time, even with a rule on file, and its prompt cannot be remembered. A tool whose required mode ranks above the grant's `mode` is denied: a read-only tool needs `read`, a destructive tool `admin`, and any other tool `write`. Clawboo trusts a server's own read-only and destructive marks only on a curated connector. A curated entry can instead list its destructive tools itself (`destructiveTools`, set for Playwright): then a listed tool is destructive and an unlisted one is not, whatever the server says. A stored value that cannot be read falls back to its safest reading: `mode` reads as `read`, `state` as `suspended`, `approvalPolicy` as `always`, an unreadable `toolAllow` as `[]` and an unreadable `toolDeny` as `['*']`.
 
 ### `GET /api/grants`
 

@@ -91,12 +91,12 @@ export async function connectConnector(
   useToastStore.getState().addToast({
     // NOT "available to your agents", which this said while connecting also
     // granted the connector to the whole fleet. Connecting now makes a connector
-    // available and gives it to nobody; an agent gets it when the operator draws
-    // an edge to it. Saying otherwise would describe permissions the agent does
-    // not have.
+    // available and gives it to nobody; an agent gets it from "Who can use it?"
+    // on the connector's page or an edge drawn on the graph. Saying otherwise
+    // would describe permissions the agent does not have.
     message: skipped
-      ? `${displayName} connected. ${body.tools.length} tools, ${skipped} skipped. Connect it to an agent to use it.`
-      : `${displayName} connected. ${body.tools.length} tools. Connect it to an agent to use it.`,
+      ? `${displayName} connected. ${body.tools.length} tools, ${skipped} skipped. No agent can use it until you give it access.`
+      : `${displayName} connected. ${body.tools.length} tools. No agent can use it until you give it access.`,
     type: 'success',
   })
   return body
@@ -138,25 +138,9 @@ export async function disconnectConnector(
   return true
 }
 
-export interface LiveConnectorRow {
-  connectorId: string
-  slug: string
-  toolCount: number
-  tools: string[]
-  skipped: { name: string; reason: string }[]
-}
-
-/** Everything currently connected. */
-export async function listLiveConnectors(): Promise<LiveConnectorRow[]> {
-  try {
-    const res = await apiFetch('/api/connectors')
-    if (!res.ok) return []
-    const body = (await res.json()) as { connectors?: LiveConnectorRow[] }
-    return body.connectors ?? []
-  } catch {
-    return []
-  }
-}
+// Lives in features/connectors so a surface in the eager bundle (the chat's
+// connector ask card) can read it without pulling the marketplace in.
+export { listLiveConnectors, type LiveConnectorRow } from '@/features/connectors/liveConnectors'
 
 export interface CredentialStatus {
   key: string

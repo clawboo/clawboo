@@ -72,6 +72,7 @@ import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
 import { GraphContextMenu } from './GraphContextMenu'
+import { MoveAgentDialog } from '@/features/teams/MoveAgentDialog'
 import { connectionRefusal } from './connectionGrammar'
 import { judgeSavedPositions } from './savedPositionHealth'
 import { GrantComposer } from './GrantComposer'
@@ -85,6 +86,7 @@ import { useAddToGraph } from './useAddToGraph'
 import { isLooseNodeId, useLooseNodes, useLooseNodeStore, type LooseNodeData } from './looseNodes'
 import { agentAlreadyHas, attachLooseToAgent } from './operations/attachLoose'
 import { useConnectionStore } from '@/stores/connection'
+import { useBooZeroStore } from '@/stores/booZero'
 import { graphPhysics } from './graphPhysics'
 import { edgeKeyAction, graphKeyAction, isTypingTarget, readKeyEvent } from './graphKeyAction'
 import { EdgeMarkers } from './edges/EdgeMarkers'
@@ -347,6 +349,8 @@ export function GhostGraph({
   )
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [moving, setMoving] = useState<{ agentId: string; agentName: string } | null>(null)
+  const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
 
   // Hide the MiniMap (bottom-right overview) by default to give Boos more
   // visible canvas. A small floating toggle button takes its place; clicking
@@ -1999,6 +2003,14 @@ export function GhostGraph({
             useViewStore.getState().openAgent(contextMenu.agentId)
             setContextMenu(null)
           }}
+          onMove={
+            contextMenu.agentId === booZeroAgentId
+              ? undefined
+              : () => {
+                  setMoving({ agentId: contextMenu.agentId, agentName: contextMenu.agentName })
+                  setContextMenu(null)
+                }
+          }
           onDelete={() => {
             // Likewise no Gateway gate: deletion is a REST route on this server,
             // and gating it left Delete inert in native mode.
@@ -2010,6 +2022,14 @@ export function GhostGraph({
             }
             setContextMenu(null)
           }}
+        />
+      )}
+
+      {moving && (
+        <MoveAgentDialog
+          agentId={moving.agentId}
+          agentName={moving.agentName}
+          onClose={() => setMoving(null)}
         />
       )}
 
