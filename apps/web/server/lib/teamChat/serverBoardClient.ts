@@ -41,6 +41,7 @@ import type {
 } from '@clawboo/team-orchestration'
 
 import { emitEvent } from '../obs'
+import { runsOnTaskRunner } from '../runnerRoute'
 
 export interface ServerBoardClientOptions {
   /**
@@ -226,7 +227,12 @@ export function createServerBoardClient(
 
     async getReadyTasks(teamId): Promise<BoardTask[]> {
       try {
-        return getReadyTasks(db, scoped ? { teamId, roomId } : { teamId }) as BoardTask[]
+        // A task the task runner ran, bound to an agent the runner can run, is
+        // the runner's to fire (lib/runnerRerun): fired from here it would rerun
+        // as a team-chat turn, with no worktree and no check.
+        return getReadyTasks(db, scoped ? { teamId, roomId } : { teamId }).filter(
+          (t) => !runsOnTaskRunner(db, t),
+        ) as BoardTask[]
       } catch {
         return []
       }
