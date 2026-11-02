@@ -63,6 +63,11 @@ describe('findModelLabel', () => {
   it('returns null for an unknown model id', () => {
     expect(findModelLabel('acme/does-not-exist')).toBeNull()
   })
+
+  it('lists Gemini 3.6 Flash and not the retired Gemini 2.0 Flash', () => {
+    expect(findModelLabel('google/gemini-3.6-flash')).toBe('Gemini 3.6 Flash')
+    expect(findModelLabel('google/gemini-2.0-flash')).toBeNull()
+  })
 })
 
 describe('findProviderForModel', () => {

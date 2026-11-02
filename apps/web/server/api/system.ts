@@ -60,7 +60,7 @@ const DEFAULT_PORT = 18789
 const OPENCLAW_MODEL_MAP: Record<string, string> = {
   anthropic: 'anthropic/claude-sonnet-4-5',
   openai: 'openai/gpt-5.4',
-  google: 'google/gemini-2.0-flash',
+  google: 'google/gemini-3.6-flash',
   openrouter: 'openrouter/anthropic/claude-sonnet-4-5',
   xai: 'xai/grok-3',
   groq: 'groq/llama-3.3-70b-versatile',
