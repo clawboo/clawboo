@@ -207,6 +207,23 @@ describe('executor runner (real board + real git worktree)', () => {
     })
   })
 
+  it('does not save a handoff pause, so a person’s rerun can finish the task', async () => {
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'Paused for handoff.')
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'claude-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true,
+    })
+    const raw = getTask(getDb(), taskId)?.runnerInputs ?? ''
+    expect(raw).toContain('claude-code')
+    expect(raw).not.toContain('keepForResume')
+  })
+
   it('a re-dispatch after an INTERRUPTED attempt is told, and told what is unknown', async () => {
     // The tombstone strings the recovery writers have always produced were read
     // back to nobody, so a re-dispatch started cold and could redo a side effect

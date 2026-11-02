@@ -6,6 +6,9 @@
 // or Assign could only hand the task to team chat, which provisions no worktree
 // and runs no verification. The runner records them when it claims the task, and
 // those routes read them back to run it the same way again.
+//
+// A handoff pause (`keepForResume`) is deliberately not kept: a person who reruns
+// a paused task wants it finished, and replaying the pause would park it again.
 
 import { eq } from 'drizzle-orm'
 
@@ -23,7 +26,6 @@ export interface TaskRunnerInputs {
   /** The isolation kind (`code`, `research`, ...), or null for the default. */
   kind: string | null
   model: string | null
-  keepForResume?: boolean
   maxNodeCents?: number
 }
 
@@ -62,7 +64,6 @@ export function readTaskRunnerInputs(
     repoPath: optString(r['repoPath']),
     kind: optString(r['kind']),
     model: optString(r['model']),
-    ...(r['keepForResume'] === true ? { keepForResume: true } : {}),
     ...(typeof r['maxNodeCents'] === 'number' && Number.isFinite(r['maxNodeCents'])
       ? { maxNodeCents: r['maxNodeCents'] }
       : {}),

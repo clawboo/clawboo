@@ -57,7 +57,12 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
-import { requestRunnerRerun, runnerRerunFor } from '../lib/runnerRerun'
+import {
+  cancelRunnerRerun,
+  requestRunnerRerun,
+  runnerRerunFor,
+  type RunnerRerun,
+} from '../lib/runnerRerun'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
@@ -243,6 +248,32 @@ export function boardCreatePOST(req: Request, res: Response): void {
   }
 }
 
+/**
+ * Start a task a person asked for: through the task runner when `runner` is
+ * given, else through its team's chat. Either way, a rerun of this task still
+ * waiting to claim it is stopped first, so it cannot claim the task after the
+ * run started here.
+ */
+function startTask(
+  db: ClawbooDb,
+  taskId: string,
+  teamId: string | null,
+  runner: { agentId: string; rerun: RunnerRerun } | null,
+  mcpBaseUrl: string | null,
+): void {
+  cancelRunnerRerun(taskId)
+  if (runner) {
+    requestRunnerRerun(db, {
+      taskId,
+      assigneeAgentId: runner.agentId,
+      rerun: runner.rerun,
+      mcpBaseUrl,
+    })
+  } else if (teamId) {
+    requestTaskDispatch(teamId, taskId, mcpBaseUrl)
+  }
+}
+
 // ─── POST /api/board/:taskId/retry ──────────────────────────────────────────
 // Run a task again because a person asked: one that failed, timed out, was
 // stopped, was parked after failing repeatedly, or was left in progress with
@@ -254,7 +285,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
 // A task the task runner ran goes back through the runner with the inputs it
 // saved (see lib/runnerRerun), so it keeps its worktree and verification; its
 // agent is the one bound to it, else the one the runner ran it for. Any other
-// task goes to its team's chat.
+// task goes to its team's chat, which needs an agent bound to it.
 export function boardRetryPOST(req: Request, res: Response): void {
   try {
     const db = getDb()
@@ -273,11 +304,12 @@ export function boardRetryPOST(req: Request, res: Response): void {
       res.status(409).json({ ok: false, error: 'not_retryable' })
       return
     }
-    const agentId =
-      delegationTargetOf(task.sourceDelegationId) ??
-      readTaskRunnerInputs(task)?.assigneeAgentId ??
-      null
-    const rerun = agentId ? runnerRerunFor(db, task, agentId) : null
+    const bound = delegationTargetOf(task.sourceDelegationId)
+    const candidate = bound ?? readTaskRunnerInputs(task)?.assigneeAgentId ?? null
+    const rerun = candidate ? runnerRerunFor(db, task, candidate) : null
+    // The agent the runner ran it for counts only for a runner rerun: team chat
+    // fires a task by its binding, and has nothing to run without one.
+    const agentId = rerun ? candidate : bound
     if (!rerun && !task.teamId) {
       res.status(409).json({ ok: false, error: 'no_team' })
       return
@@ -300,16 +332,7 @@ export function boardRetryPOST(req: Request, res: Response): void {
       })
     }
     addComment(db, taskId, 'Retry requested.', 'user')
-    if (rerun) {
-      requestRunnerRerun(db, {
-        taskId,
-        assigneeAgentId: agentId,
-        rerun,
-        mcpBaseUrl: loopbackMcpBaseUrl(req),
-      })
-    } else {
-      requestTaskDispatch(task.teamId!, taskId, loopbackMcpBaseUrl(req))
-    }
+    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
@@ -371,16 +394,7 @@ export function boardAssignPOST(req: Request, res: Response): void {
     }
     addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
     const rerun = runnerRerunFor(db, task, agentId)
-    if (rerun) {
-      requestRunnerRerun(db, {
-        taskId,
-        assigneeAgentId: agentId,
-        rerun,
-        mcpBaseUrl: loopbackMcpBaseUrl(req),
-      })
-    } else {
-      requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
-    }
+    startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
@@ -562,7 +576,13 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         const mcpBaseUrl = loopbackMcpBaseUrl(req)
         try {
           delivery = await deliverPersonReply(db, task, parsed.data.body, {
-            dispatch: (teamId, id) => requestTaskDispatch(teamId, id, mcpBaseUrl),
+            // As Retry does: a task the runner ran goes back through the runner.
+            dispatch: (teamId, id) => {
+              const current = getTask(db, id)
+              const agentId = delegationTargetOf(current?.sourceDelegationId)
+              const rerun = current && agentId ? runnerRerunFor(db, current, agentId) : null
+              startTask(db, id, teamId, agentId && rerun ? { agentId, rerun } : null, mcpBaseUrl)
+            },
           })
         } catch (err) {
           // The comment is saved: say it was not delivered rather than fail the

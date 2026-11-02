@@ -218,7 +218,9 @@ curl -X POST http://localhost:18790/api/board \
 
 Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked`, `backlog` or stranded `in_progress` task (no assignee and no run going) is moved back to `todo` first, which clears its assignee and check result. The route adds a `user` comment `Retry requested.` to the task and hands it straight to its bound agent. The board's automatic limit of three re-runs does not apply to a retry a person asks for. The response does not wait for the run to start.
 
-**A task the task runner ran** (an agent Routine, or `POST /api/runtimes/:id/run`) has `runnerInputs`, and goes back through the runner with them: the same repository, isolation kind and model, so it gets a worktree and its check again. Its agent is the bound one, else the one the runner ran it for, and it needs no team. The run uses that agent's runtime (an id with no agent row keeps the saved runtime). When that is a runtime the runner cannot run, such as OpenClaw, the task goes to team chat. A task with no `runnerInputs`, which includes tasks the runner ran before it started saving them, goes to its team's chat as before.
+**A task the task runner ran** (an agent Routine, or `POST /api/runtimes/:id/run`) has `runnerInputs`, and goes back through the runner with them: the same repository and isolation kind, so it gets a worktree when the task names a repository, and its check again. Its agent is the bound one, else the one the runner ran it for, and it needs no team. The run uses that agent's runtime, and the saved model only on the saved runtime. A removed agent runs nothing, and neither does an id with no agent row unless it is the saved runtime's own id (the id the run route uses when it names no agent). When the runner cannot run the agent, such as one on OpenClaw, the task goes to team chat if an agent is bound to it, and answers `409 unassigned` if none is. A task with no `runnerInputs`, which includes tasks the runner ran before it started saving them, goes to its team's chat as before.
+
+A runner rerun that does not start (the runner refuses it, for example because a budget is paused at its hard cap, or it times out waiting for the agent) moves the task to `blocked` with a `system` comment that gives the reason. A Retry or Assign stops a rerun of the same task that is still waiting to start. Team chat never fires a task the runner reruns: when its run fails and it goes back to `todo` with an agent bound, the server re-fires it through the runner, under the same three-runs limit.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -233,7 +235,7 @@ Runs a stuck task again because a person asked: one that failed, timed out, was 
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), or `unassigned` (no agent is bound to it and the runner never ran it; use `assign`).
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), or `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`).
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 

@@ -623,17 +623,6 @@ async function runTaskInner(
     // Atomic claim — a lost claim is a conflict and is NEVER retried.
     const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
     if (!claim.ok) return { ok: false, reason: 'conflict' }
-    // Kept on the task so a person's Retry or Assign runs it this way again
-    // (worktree, verification), not as a team-chat turn. See board.ts.
-    setTaskRunnerInputs(db, taskId, {
-      runtime: runtimeId,
-      assigneeAgentId,
-      repoPath: input.repoPath ?? null,
-      kind: input.kind ?? null,
-      model: input.model ?? null,
-      ...(input.keepForResume ? { keepForResume: true } : {}),
-      ...(input.maxNodeCents != null ? { maxNodeCents: input.maxNodeCents } : {}),
-    })
   } else {
     // Fix re-dispatch of a task this runner already owns (verify FAIL keeps it
     // `in_progress`): verify ownership instead of claiming. Anything else —
@@ -645,6 +634,37 @@ async function runTaskInner(
   // From here the task is ours (freshly claimed, or re-verified for a fix cycle);
   // an unexpected throw must release it (see the safety net in runTaskOnRuntime).
   claimState.claimed = true
+
+  // Kept on the task so a person's Retry or Assign runs it this way again
+  // (worktree, verification), not as a team-chat turn. See lib/runnerRerun.
+  // Written AFTER `claimed`, and best-effort: a failed write must neither strand
+  // the claimed task nor stop the run it describes. The handoff pause is not
+  // kept (see @clawboo/db runnerInputs).
+  if (!input.fixCycle) {
+    try {
+      setTaskRunnerInputs(db, taskId, {
+        runtime: runtimeId,
+        assigneeAgentId,
+        repoPath: input.repoPath ?? null,
+        kind: input.kind ?? null,
+        model: input.model ?? null,
+        ...(input.maxNodeCents != null ? { maxNodeCents: input.maxNodeCents } : {}),
+      })
+    } catch (err) {
+      logStructured({
+        level: 'warn',
+        component: 'executorRunner',
+        action: 'runner_inputs_unsaved',
+        correlationId: span.traceId,
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
 
   const exec = createExecutionProcess(db, {
     taskId,

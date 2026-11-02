@@ -27,11 +27,30 @@ describe('task runner inputs', () => {
       repoPath: '/repo',
       kind: 'code',
       model: null,
-      keepForResume: true,
       maxNodeCents: 100,
     }
     setTaskRunnerInputs(db, task.id, inputs)
     expect(readTaskRunnerInputs(getTask(db, task.id))).toEqual(inputs)
+  })
+
+  it('drops a handoff pause an earlier build saved, so a rerun is not paused again', () => {
+    const read = readTaskRunnerInputs({
+      runnerInputs: JSON.stringify({
+        runtime: 'codex',
+        assigneeAgentId: 'coder',
+        repoPath: '/repo',
+        kind: 'code',
+        model: null,
+        keepForResume: true,
+      }),
+    })
+    expect(read).toEqual({
+      runtime: 'codex',
+      assigneeAgentId: 'coder',
+      repoPath: '/repo',
+      kind: 'code',
+      model: null,
+    })
   })
 
   it('reads a row it cannot use as none', () => {
