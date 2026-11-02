@@ -29,11 +29,14 @@ export function dashboardLoopbackOrigins(port: number | null = dashboardPort): s
   )
 }
 
-/** URLPattern syntax reads `[` and `:` as pattern characters, so an IPv6 host
- *  has to be escaped or the pattern is rejected (and the browser with it). */
+/** URLPattern syntax reads `[`, `:` and other characters as pattern syntax, so
+ *  an IPv6 host has to be escaped or the pattern is rejected (and the browser
+ *  with it). Every special character is escaped, the escape itself first. */
+const escapeUrlPattern = (text: string): string => text.replace(/[\\:[\]{}()*+?]/g, '\\$&')
+
 function toUrlPattern(origin: string): string {
   const m = /^(https?:\/\/)\[([^\]]+)\](.*)$/.exec(origin)
-  const escaped = m ? `${m[1]}\\[${m[2]!.replace(/:/g, '\\:')}\\]${m[3]}` : origin
+  const escaped = m ? `${m[1]}\\[${escapeUrlPattern(m[2]!)}\\]${m[3]}` : origin
   return `${escaped}/*`
 }
 

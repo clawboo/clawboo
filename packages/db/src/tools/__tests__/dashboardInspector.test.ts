@@ -58,6 +58,13 @@ describe('dashboardInspector', () => {
     expect(await decide({ url })).toBe('allow')
   })
 
+  it('reads a very long run of host characters quickly, and passes it', async () => {
+    const started = performance.now()
+    expect(await decide({ url: '-'.repeat(200_000) })).toBe('allow')
+    expect(await decide({ url: `${'a.'.repeat(50_000)}x` })).toBe('allow')
+    expect(performance.now() - started).toBeLessThan(500)
+  })
+
   it('does nothing before the server has said which port the dashboard uses', async () => {
     setDashboardPorts([])
     expect(await decide({ url: 'http://127.0.0.1:18790/' })).toBe('allow')
