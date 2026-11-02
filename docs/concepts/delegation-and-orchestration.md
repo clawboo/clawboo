@@ -117,6 +117,8 @@ The check is a plain whole-word match on the task text, so ordinary work that me
 | A teammate goes quiet | 8 minutes with no activity; 24 minutes while it is inside one tool call, or waiting for another run on the same agent | The task is marked blocked as **Timed out**, and the lead is told.                                                                    |
 | Repeated failures     | 3 failures in a row of the same task by the same teammate                                                             | Clawboo stops handing that task to that teammate and tells the lead to do it, reassign it, or tell you it cannot be done.             |
 
+Only time the computer is awake counts toward going quiet, so closing a laptop's lid does not time out a teammate that was working.
+
 [Limits and defaults](/reference/limits-and-defaults) lists these with every other number Clawboo enforces.
 
 ## Where a failure shows up

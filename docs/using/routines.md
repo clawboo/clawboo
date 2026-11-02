@@ -112,7 +112,7 @@ Times follow the clock and time zone of the machine that runs Clawboo. If Clawbo
 | Needs                             | A team member to answer                                                        | The agent's runtime connected                              | The Gateway connected                                                   |
 | Counts as done                    | When the message reaches the lead (**posted**)                                 | When the task finishes (**done**)                          | When the task finishes (**done**)                                       |
 | Gets from [Memory](/using/memory) | Nothing automatically; agents search it as needed                              | The most relevant facts, at the start of the run           | Nothing automatically                                                   |
-| Time limit                        | Ends after 30 minutes with no activity                                         | Ends after 30 minutes with no activity                     | Ends after 10 minutes in total                                          |
+| Time limit                        | Ends after 30 minutes of awake time with no activity                           | Ends after 30 minutes of awake time with no activity       | Ends after 10 minutes of awake time in total                            |
 
 Budgets apply to routine runs like any other work, and an agent task is refused before it starts when a hard-cap budget it falls under is already paused; see [Budgets and spend](/using/budgets-and-spend). [How routines run](/concepts/scheduling) lists the other guardrails each kind gets.
 
