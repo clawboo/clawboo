@@ -539,14 +539,16 @@ export function CreateTeamModal({
     // can undo a half-finished deploy.
     const previousSelectedTeamId = useTeamStore.getState().selectedTeamId
     let createdTeamId: string | null = null
+    let createdTeamName = ''
     let createdCount = 0
 
     // A deploy that created the team row but no agent removes that row again. The
     // next attempt reuses this modal's team id (the preview palette is seeded from
     // it), so a leftover row would make the server refuse that create, and it would
     // stay behind as an empty team. If the delete fails, the next attempt gets a
-    // fresh id instead, so it can still go through.
-    const discardEmptyTeam = async (teamId: string) => {
+    // fresh id instead, so it can still go through, and the caller tells the person
+    // the empty team is still there (resolves false).
+    const discardEmptyTeam = async (teamId: string): Promise<boolean> => {
       try {
         const del = await apiFetch(`/api/teams/${encodeURIComponent(teamId)}`, {
           method: 'DELETE',
@@ -561,10 +563,14 @@ export function CreateTeamModal({
         ) {
           useTeamStore.getState().selectTeam(previousSelectedTeamId)
         }
+        return true
       } catch {
         setPendingTeamId(crypto.randomUUID())
+        return false
       }
     }
+    const leftBehind = (name: string) =>
+      ` The empty team "${name}" could not be removed: delete it from the team rail, or the next try adds a second team.`
 
     try {
       // Resolve the catalog agents up front — used for dedup, deploy, and counts.
@@ -636,6 +642,7 @@ export function CreateTeamModal({
         team: { id: string; name: string; icon: string; color: string; templateId: string | null }
       }
       createdTeamId = team.id
+      createdTeamName = team.name
 
       // Add to store + select
       useTeamStore.getState().addTeam({
@@ -884,8 +891,11 @@ export function CreateTeamModal({
       // Nothing deployed: remove the empty team row, then surface it, so pressing
       // Deploy again starts clean.
       if (createdCount === 0) {
-        await discardEmptyTeam(team.id)
-        setError('No agents could be created. Check that the runtime is connected, then retry.')
+        const removed = await discardEmptyTeam(team.id)
+        setError(
+          'No agents could be created. Check that the runtime is connected, then retry.' +
+            (removed ? '' : leftBehind(team.name)),
+        )
         setStep('customize')
         return
       }
@@ -1031,11 +1041,13 @@ export function CreateTeamModal({
       // A failure after the team row was created: an empty team is removed, as
       // above. A team that already has agents is kept, and the next attempt gets a
       // fresh id so it cannot collide with it.
+      let note = ''
       if (createdTeamId) {
-        if (createdCount === 0) await discardEmptyTeam(createdTeamId)
-        else setPendingTeamId(crypto.randomUUID())
+        if (createdCount === 0) {
+          if (!(await discardEmptyTeam(createdTeamId))) note = leftBehind(createdTeamName)
+        } else setPendingTeamId(crypto.randomUUID())
       }
-      setError(err instanceof Error ? err.message : 'Something went wrong')
+      setError((err instanceof Error ? err.message : 'Something went wrong') + note)
       setStep('customize')
     }
   }, [

@@ -133,14 +133,17 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
         if (ev.kind === 'text-delta') {
           if (ev.channel !== 'reasoning') text += ev.text
         } else if (ev.kind === 'cost') {
-          const local = ev.local === true || (ev.costUsd == null && isLocalModel(ev.model))
+          // A cost event without a model ran on the model the review was started
+          // with, so price it (and tell a free local model) by that one.
+          const costModel = ev.model ?? input.reviewerModel ?? null
+          const local = ev.local === true || (ev.costUsd == null && isLocalModel(costModel))
           const usd = local
             ? 0
             : ev.costUsd != null
               ? ev.costUsd
               : ev.usage
                 ? estimateRunCostUsdFromUsage({
-                    model: ev.model,
+                    model: costModel,
                     inputTokens: ev.usage.inputTokens,
                     outputTokens: ev.usage.outputTokens,
                   })

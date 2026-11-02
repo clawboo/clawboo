@@ -96,7 +96,7 @@ Clawboo Native needs a provider to answer. Without one, the team still deploys, 
 ### What happens when you deploy
 
 - **Clashing names get a number.** If agents or a team with the same names already exist, Clawboo gives the new ones the next free number, for example **Code Reviewer Boo 2**. It also updates who hands work to whom to match.
-- **One failed agent does not stop the rest.** Clawboo keeps going, then lists any failures in a message such as **2 of 3 agents created (Writer Boo failed)**. If no agent can be created, you return to the customize step with **No agents could be created. Check that the runtime is connected, then retry.** Clawboo removes the empty team it made, so you can click **Deploy team** again.
+- **One failed agent does not stop the rest.** Clawboo keeps going, then lists any failures in a message such as **2 of 3 agents created (Writer Boo failed)**. If no agent can be created, you return to the customize step with **No agents could be created. Check that the runtime is connected, then retry.** Clawboo removes the empty team it made, so you can click **Deploy team** again. If it cannot, the message says so: delete that team from the team rail, or the next try adds a second team.
 - **OpenClaw members need the Gateway.** If you put a member on OpenClaw while the Gateway is offline, the deploy stops with **Connect an OpenClaw Gateway to deploy the OpenClaw members, or switch them to another runtime.**
 - **The team gets a brief.** Clawboo writes a starting [team brief](#team-brief) that you can edit.
 
@@ -209,7 +209,7 @@ Deleting a team cannot be undone, and the files in its folder go with it. **Dele
 
 **What it means:** no agent in the template could be created. Clawboo removes the empty team it made for this deploy.
 
-**Fix:** open **Settings > Runtimes**, check that the runtimes you picked are connected, then deploy again. If Clawboo could not remove the empty team, it stays in the team rail; delete it if you do not need it.
+**Fix:** open **Settings > Runtimes**, check that the runtimes you picked are connected, then deploy again. If Clawboo could not remove the empty team, the message says so and the team stays in the team rail. Delete it there, or the next deploy adds a second team.
 
 </Accordion>
 

@@ -38,7 +38,7 @@ import {
   type LooseNodeData,
 } from '@/features/graph/looseNodes'
 import { agentAlreadyHas, attachLooseToAgent } from '@/features/graph/operations/attachLoose'
-import { useFleetStore, type AgentState } from '@/stores/fleet'
+import { useFleetStore } from '@/stores/fleet'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { ConnectorMarkStyles } from '@/features/connectors/ConnectorMark'
@@ -46,7 +46,8 @@ import { AgentModelControl } from './AgentModelControl'
 import { useMiniGraphData } from './useMiniGraphData'
 import { useHermesModelGroups, useNativeModelGroups } from '@/lib/useOpenRouterModels'
 import { nativeProviderIdForGroup } from '@/lib/nativeModelCatalog'
-import { hermesModelSave, hermesPlanModelNote } from '@/lib/hermesModelCatalog'
+import { hermesPlanModelNote } from '@/lib/hermesModelCatalog'
+import { saveHermesModelPick } from './hermesModelPick'
 import { refreshFleetFromRegistry } from '@/lib/agentSourceClient'
 import { useOpenclawDefaultModel } from '@/lib/openclawDefaultModel'
 import { onReducedMotionChange, prefersReducedMotion } from '@/lib/prefersReducedMotion'
@@ -798,23 +799,9 @@ function MiniGraphFrame({ agentId }: { agentId: string }) {
       // Hermes persists its execConfig `{ provider, model }` via the model route. A
       // pick from the OpenRouter group sends `openrouter`. A typed custom id sends
       // none (the server keeps the agent's current provider) unless it carries the
-      // `openai-codex/` prefix. The fleet store holds the stored form: the bare
-      // model and its provider.
+      // `openai-codex/` prefix. A failed save puts the page back as it was.
       if (agent.runtime === 'hermes') {
-        const save = model ? hermesModelSave(model, groupProvider !== undefined) : null
-        if (!save) return
-        const fleet = useFleetStore.getState()
-        fleet.updateAgentModel(agent.id, save.model)
-        if (save.provider) {
-          fleet.updateExecConfig(agent.id, {
-            ...(agent.execConfig ?? {}),
-            provider: save.provider,
-            model: save.model,
-          } as unknown as AgentState['execConfig'])
-        }
-        try {
-          await setAgentModel(agent.id, save.model, save.provider)
-        } catch {
+        if (!(await saveHermesModelPick(agent, model, groupProvider !== undefined))) {
           addToast({ message: 'Failed to save model', type: 'error' })
         }
         return

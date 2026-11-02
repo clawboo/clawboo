@@ -389,6 +389,30 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     })
   })
 
+  it('PATCH /api/agents/:id/model leaves a hermes agent with no provider unpinned', async () => {
+    // A member deployed on Default stores no provider, and its runs take the
+    // provider its keys or ChatGPT sign-in give it. A model change that names no
+    // provider (a typed id) must not pin openrouter: on a setup with no OpenRouter
+    // key the driver would drop that pick and its model.
+    const create = mockRes()
+    await agentsCreatePOST(req({ body: { name: 'Free Hermes', sourceId: 'hermes' } }), create.res)
+    const id = (create.body() as { agent: { id: string } }).agent.id
+
+    const typed = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'vendor/custom-model' } }),
+      typed.res,
+    )
+    expect(typed.status()).toBe(200)
+    expect(typed.body()).toEqual({ ok: true, model: 'vendor/custom-model', provider: null })
+    const row = getDb()
+      .select()
+      .from(agents)
+      .all()
+      .find((a) => a.id === id)
+    expect(JSON.parse(row!.execConfig!)).toEqual({ model: 'vendor/custom-model' })
+  })
+
   it('PATCH /api/agents/:id/model keeps a ChatGPT-subscription hermes agent on its provider', async () => {
     // Deployed from team setup with a subscription model: execConfig carries
     // provider openai-codex. A model change that names no provider must leave the

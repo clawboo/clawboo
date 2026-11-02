@@ -222,7 +222,7 @@ Connects a runtime. What it does depends on the runtime:
 - **Claude Code** stores `apiKey` under `ANTHROPIC_API_KEY`.
 - **Hermes** stores `apiKey` under `OPENROUTER_API_KEY`. Hermes also runs on an `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` already stored, or on a ChatGPT sign-in.
 - **Clawboo Native** stores `apiKey` in the slot for `provider` (table below). With `provider: "ollama"` it records that you picked local Ollama and stores nothing. With a `provider` and no `apiKey`, it reuses a key that already exists for that provider.
-- **Claude Code and Hermes** with no `apiKey` reuse a key that already resolves for one of their variables, such as one a disconnect kept because another runtime reads it. With none, the answer is `400`.
+- **Claude Code and Hermes** with no `apiKey` and no `provider` reuse a key that already resolves for one of their variables, such as one a disconnect kept because another runtime reads it. With none, or with a `provider`, the answer is `400`.
 
 The key goes into Clawboo's encrypted vault only; it is not copied to OpenClaw's files (`POST /api/providers/:id/connect` does that). Every successful connect clears this runtime's disconnect flag, so keys in the server's environment and in `~/.openclaw/.env` count for it again. The key is never echoed back.
 

@@ -888,6 +888,10 @@ describe('CreateTeamModal retry after a deploy that created no agents', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await screen.findByText(NO_AGENTS)
+    // The person is told the empty team is still there.
+    expect(
+      screen.getByText(/could not be removed: delete it from the team rail/i),
+    ).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(4))

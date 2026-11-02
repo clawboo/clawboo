@@ -95,6 +95,26 @@ class FakeReviewerAdapter implements RuntimeAdapter {
   async writeContext() {}
 }
 
+/** A reviewer whose runtime reports usage with no price and no model. */
+class UnpricedReviewerAdapter extends FakeReviewerAdapter {
+  override events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+    const inner = super.events(run)
+    return (async function* () {
+      yield {
+        runId: run.sessionKey,
+        sessionId: run.sessionKey,
+        ts: 1,
+        seq: 0,
+        kind: 'cost',
+        costUsd: null,
+        usage: { inputTokens: 40_000, outputTokens: 2_000 },
+        model: null,
+      } as RuntimeEvent
+      yield* inner
+    })()
+  }
+}
+
 async function provisionForTask(
   repoPath: string,
   verifyCmd: string,
@@ -298,6 +318,28 @@ describe('verification gate (real board + real git worktree)', () => {
       })
       expect(verdict.attempts[0]?.critic.ran).toBe(true)
       expect(verdict.status).toBe('pass')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    "prices a reviewer cost report with no model at the review's model (a local one is free)",
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const spends: Array<number | null> = []
+      await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        reviewerModel: 'ollama/llama3.2',
+        makeReviewerAdapter: () => new UnpricedReviewerAdapter('{"findings":[]}'),
+        onReviewerSpend: (s) => spends.push(s.usd),
+      })
+      expect(spends).toEqual([0])
     },
     WORKTREE_TIMEOUT_MS,
   )

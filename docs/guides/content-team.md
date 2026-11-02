@@ -22,13 +22,12 @@ The same steps work for a research team. Pick **Research Lab** instead of **Mark
 ## Before you begin
 
 - Clawboo is installed and onboarding is done, with one way to run agents connected: an API key, **Sign in with ChatGPT**, or a local Ollama model. See the [Quickstart](/getting-started/quickstart), or [Run Clawboo without an API key](/guides/no-api-key).
-- If you only signed in with ChatGPT (no API key and no Ollama), you will set every member to **Codex** in step 1.
 
 ## What this team can and cannot do
 
 Read this before you rely on the team. What an agent can do depends on its runtime, the engine it runs on:
 
-- **Clawboo Native** runs a marketplace team when no OpenClaw Gateway is connected. Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read and write files only in the team's own folder, and they cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
+- **Clawboo Native** runs a member when no OpenClaw Gateway is connected and you have an API key or Ollama (with only a ChatGPT sign-in, members start on Codex instead). Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read and write files only in the team's own folder, and they cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
 - **OpenClaw** agents use the tools your OpenClaw Gateway gives them.
 - **Claude Code, Codex and Hermes** agents bring their own tools for commands and files, and run with their own approval prompts turned off. Read [What agents can do](/concepts/permissions) before you put one on a team.
 

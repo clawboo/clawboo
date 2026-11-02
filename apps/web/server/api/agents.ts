@@ -374,16 +374,18 @@ export async function agentModelPATCH(req: Request, res: Response): Promise<void
       // ctx.model + providerHint), keeping its other keys. An explicit provider is
       // the picker group the user chose from. Without one (a typed custom id) the
       // agent keeps the provider it already has, so a ChatGPT-subscription agent
-      // stays on its plan. An agent with no stored provider gets OpenRouter, the
-      // provider of the picker's default group.
+      // stays on its plan, and an agent with none stays UNPINNED: the driver then
+      // runs the model on the provider its keys and sign-ins give it. Pinning
+      // `openrouter` there would make the driver drop the model on a setup with
+      // no OpenRouter key and run the plan's default instead.
       const exec =
         agent.execConfig && typeof agent.execConfig === 'object' && !Array.isArray(agent.execConfig)
           ? (agent.execConfig as Record<string, unknown>)
           : {}
       const stored = typeof exec['provider'] === 'string' ? exec['provider'].trim() : ''
-      const nextProvider = provider || stored || 'openrouter'
+      const nextProvider = provider || stored || null
       await source.updateAgent(agentId, {
-        execConfig: { ...exec, provider: nextProvider, model },
+        execConfig: { ...exec, model, ...(nextProvider ? { provider: nextProvider } : {}) },
       })
       res.json({ ok: true, model, provider: nextProvider })
       return

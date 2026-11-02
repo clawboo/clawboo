@@ -538,8 +538,14 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
     }
     // The same reuse for a single-provider runtime (Claude Code, Hermes): its
     // disconnect keeps a key another runtime still reads, so connecting it again
-    // can use that key instead of asking for a re-paste.
-    if (d.id !== 'clawboo-native' && runtimeKeySlots(d).some((v) => resolveRuntimeKey(v))) {
+    // can use that key instead of asking for a re-paste. A `provider` here names
+    // a key this runtime cannot be told to use, so it gets the 400 below rather
+    // than a success on whichever other key happens to resolve.
+    if (
+      d.id !== 'clawboo-native' &&
+      !provider &&
+      runtimeKeySlots(d).some((v) => resolveRuntimeKey(v))
+    ) {
       setRuntimeDisconnected(id, false)
       res.json({ ok: true, connectionState: runtimeStatus(id)['connectionState'] })
       return

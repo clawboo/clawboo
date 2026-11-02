@@ -488,6 +488,16 @@ describe('runtimes install/connect REST', () => {
     expect(JSON.stringify(native)).not.toContain('sk-ant-x')
   })
 
+  it('a keyless connect naming a provider is refused on a single-provider runtime', () => {
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-other')
+    setRuntimeDisconnected('hermes', true)
+    const m = mockRes()
+    runtimesConnectPOST(req({ params: { id: 'hermes' }, body: { provider: 'openrouter' } }), m.res)
+    expect(m.statusCode()).toBe(400)
+    expect(isRuntimeDisconnected('hermes')).toBe(true)
+  })
+
   it('a disconnected runtime connects again with the key it kept, without a re-paste', () => {
     platformState.bins['claude'] = '/usr/bin/claude'
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-kept')
