@@ -60,9 +60,11 @@ const NO_START_TIMES: StartTimes = { ok: false, times: new Map() }
  * exits non-zero and prints NOTHING when any id is invalid.
  *
  * On POSIX, `lstart` rather than `etimes`: the latter is Linux-only and macOS
- * rejects it. On Windows there is no `ps`, so PowerShell reports the same fact,
- * emitted as a round-trip ISO string so parsing does not depend on the machine's
- * locale.
+ * rejects it. `ps` formats `lstart` in the user's locale, and `Date.parse` cannot
+ * read most month names outside English (a German "Okt." or "Dez."), so it runs
+ * under the C locale. On Windows there is no `ps`, so PowerShell reports the
+ * same fact, emitted as a round-trip ISO string so parsing does not depend on
+ * the machine's locale.
  */
 export function processStartTimes(pids: readonly number[]): StartTimes {
   // The pids reach a command line below, and the only validation a record
@@ -96,6 +98,7 @@ export function processStartTimes(pids: readonly number[]): StartTimes {
     } else {
       const raw = execFileSync('ps', ['-o', 'pid=,lstart=', '-p', safe.join(',')], {
         encoding: 'utf8',
+        env: { ...process.env, LC_ALL: 'C' },
         timeout: 10_000,
         windowsHide: true,
       })
