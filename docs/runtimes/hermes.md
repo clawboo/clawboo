@@ -206,8 +206,10 @@ Hermes's ChatGPT sign-in uses a one-time code, which some ChatGPT accounts turn 
 List the MCP servers Hermes sees for that agent:
 
 ```bash
-HERMES_HOME=~/.clawboo/runtimes/hermes/<agent id> hermes mcp list
+HERMES_HOME="${CLAWBOO_HOME:-$HOME/.clawboo}/runtimes/hermes/<agent id>" hermes mcp list
 ```
+
+Run it in a shell with the same `CLAWBOO_HOME` as the server, or none if the server uses the default.
 
 It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there and logs a warning on each run: write that mapping as indented lines in the agent's `config.yaml`.
 
@@ -230,7 +232,7 @@ Each agent uses its own copy, made once. Edit `~/.clawboo/runtimes/hermes/<agent
 <Accordion title="Under the hood">
 
 - Each run is `hermes chat -q <prompt> -Q --yolo --accept-hooks [-m <model>] [--resume <session id>] [--provider <id>] [--continue]`. Clawboo sets `HERMES_HOME` to the agent's folder and puts the connected OpenRouter, Anthropic and OpenAI keys in its environment.
-- While a run works, Clawboo marks it alive once a minute. `-Q` prints nothing until the run ends, so without that a long delegated Hermes task would look silent and be stopped after eight minutes.
+- While a run works, Clawboo marks it alive once a minute, for up to two hours; after that a run that still prints nothing meets the usual silence limits. `-Q` prints nothing until the run ends, so without that a long delegated Hermes task would look silent and be stopped after eight minutes.
 - `-Q` prints the reply on stdout and the session id on stderr. When the task runner picks a task back up on Hermes, Clawboo resumes the saved session with `--resume` (never in a newly created folder). To take a comment, it stops the run and starts it again with `--resume`, or with `--continue` when it does not know the session id yet.
 - Hermes has its own task board; Clawboo does not sync it. Hermes works on Clawboo's board through the Tasks tools.
 - Run a board task on Hermes directly with `POST /api/runtimes/hermes/run`; see the [Runtimes API](/reference/rest-api/runtimes).

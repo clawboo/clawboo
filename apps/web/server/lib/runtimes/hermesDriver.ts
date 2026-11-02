@@ -21,7 +21,8 @@
 // `status: running` beat every HERMES_HEARTBEAT_MS. Every idle watchdog counts
 // any event as activity (the delegation sweep, the board drain's silence
 // guard), so a long Hermes run is not killed for printing nothing until exit.
-// The beat proves the process is alive, not that it is progressing.
+// The beat proves the process is alive, not that it is progressing, so it
+// stops after HERMES_HEARTBEAT_MAX_MS and a hung run meets the silence limits.
 //
 // Quiet mode (`-Q`) prints the final response on
 // stdout and the `session_id: …` line on STDERR (live-verified against
@@ -74,6 +75,9 @@ const log = createLogger('hermes-driver')
 /** How often a running Hermes process reports that it is still alive. Well
  *  under the shortest idle watchdog (the 8-minute delegation sweep). */
 export const HERMES_HEARTBEAT_MS = 60_000
+/** How long it keeps reporting. Past this a run that still prints nothing is
+ *  left to the silence limits, so a hung process cannot run forever. */
+export const HERMES_HEARTBEAT_MAX_MS = 2 * 60 * 60_000
 
 /** Quiet-mode session-info line. Base form `session_id: <id>`, widened to
  *  tolerate `Session ID:` / `session-id:` casing variants. */
@@ -305,7 +309,7 @@ export function hermesSteerPrompt(texts: string[]): string {
 export function createHermesDriver(
   opts: StartOpts,
   ctx: RuntimeRunContext,
-  deps: { heartbeatMs?: number } = {},
+  deps: { heartbeatMs?: number; heartbeatMaxMs?: number } = {},
 ): HermesDriver {
   const state: HermesRunState = { lastText: '', sawResult: false }
   /** The home the run started in: a resume must land in the same one. */
@@ -318,6 +322,7 @@ export function createHermesDriver(
   const spawn = createSpawnDriver<HermesNativeEvent>({
     heartbeat: {
       everyMs: deps.heartbeatMs ?? HERMES_HEARTBEAT_MS,
+      maxMs: deps.heartbeatMaxMs ?? HERMES_HEARTBEAT_MAX_MS,
       event: () => ({ type: 'status', phase: 'running' }),
     },
     async resolve() {

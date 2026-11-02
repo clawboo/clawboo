@@ -256,8 +256,9 @@ export interface SpawnDriverConfig<N> {
   ) => N[]
   /** A liveness event pushed every `everyMs` from the first spawn until the run
    *  ends, for a CLI that prints nothing until it exits. It says the process is
-   *  alive, not that it is making progress. */
-  heartbeat?: { everyMs: number; event: () => N }
+   *  alive, not that it is making progress, so it stops after `maxMs`: from then
+   *  on the host's silence limits apply again and can stop a hung process. */
+  heartbeat?: { everyMs: number; maxMs: number; event: () => N }
 }
 
 export interface SpawnDriver<N> {
@@ -317,9 +318,10 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
   }
   const startHeartbeat = (): void => {
     if (!cfg.heartbeat || beat || exited) return
-    const { everyMs, event } = cfg.heartbeat
+    const { everyMs, maxMs, event } = cfg.heartbeat
+    const until = Date.now() + maxMs
     beat = setInterval(() => {
-      if (exited) stopHeartbeat()
+      if (exited || Date.now() > until) stopHeartbeat()
       else push(event())
     }, everyMs)
     // Never let the heartbeat itself hold the event loop open.

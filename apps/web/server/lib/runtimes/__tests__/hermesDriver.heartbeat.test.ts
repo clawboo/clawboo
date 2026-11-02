@@ -94,6 +94,27 @@ describe.skipIf(process.platform === 'win32')('createHermesDriver: liveness hear
     expect(seen.length).toBe(after)
   })
 
+  it('stops beating after its cap, so a hung run meets the silence limits', async () => {
+    process.env['FAKE_WORK_MS'] = '60000'
+    const driver = createHermesDriver(
+      OPTS,
+      { homeDir: path.join(dir, 'home') },
+      { heartbeatMs: 20, heartbeatMaxMs: 120 },
+    )
+    const seen: HermesNativeEvent[] = []
+    driver.onEvent((ev) => seen.push(ev))
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'status'))
+    await new Promise((r) => setTimeout(r, 400))
+    const beats = seen.filter((e) => e.type === 'status').length
+    await new Promise((r) => setTimeout(r, 200))
+    // Still running, but no longer beating.
+    expect(seen.some((e) => e.type === 'result')).toBe(false)
+    expect(seen.filter((e) => e.type === 'status').length).toBe(beats)
+    await driver.abort()
+    await until(() => seen.some((e) => e.type === 'result'))
+  })
+
   it('maps a beat to a running status event, which the watchdogs count as activity', () => {
     let seq = 0
     const out = mapHermesEvent(

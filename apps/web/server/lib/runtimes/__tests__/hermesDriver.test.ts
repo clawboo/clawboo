@@ -229,6 +229,17 @@ describe('hermes driver (preserved runtime)', () => {
     expect(Object.keys(after)).toHaveLength(5)
   })
 
+  it('leaves no temp copy of the attach config when the write fails', async () => {
+    const home = identityHome()
+    // A directory where config.yaml belongs makes the final rename fail.
+    await mkdir(path.join(home, 'config.yaml', 'blocker'), { recursive: true })
+    await expect(
+      provisionHermesHome(home, { mcpServers: hermesMcpServers('http://localhost:18790') }),
+    ).rejects.toThrow()
+    const { readdir } = await import('node:fs/promises')
+    expect((await readdir(home)).filter((f) => f.endsWith('.tmp'))).toEqual([])
+  })
+
   it('mergeClawbooMcpServers handles an empty flow mapping and refuses a non-empty one', () => {
     const servers = { 'clawboo-tasks': { url: 'http://h/api/mcp/tasks?a=1&b=2' } }
     const fromEmpty = mergeClawbooMcpServers('mcp_servers: {}\n', servers)

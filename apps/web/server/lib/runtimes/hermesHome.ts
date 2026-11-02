@@ -257,8 +257,14 @@ export async function provisionHermesHome(
   } else if (merged.body !== onDisk) {
     // Write-then-rename, so a crash mid-write never truncates the seeded config.
     const tmp = `${configPath}.clawboo-${process.pid}-${randomUUID()}.tmp`
-    await writeFile(tmp, merged.body, { encoding: 'utf8', mode: 0o600 })
-    await rename(tmp, configPath)
+    try {
+      await writeFile(tmp, merged.body, { encoding: 'utf8', mode: 0o600 })
+      await rename(tmp, configPath)
+    } catch (err) {
+      // The temp copy holds the attach URLs: never leave it behind.
+      await rm(tmp, { force: true }).catch(() => undefined)
+      throw err
+    }
     await chmod(configPath, 0o600).catch(() => undefined) // owner-only (no-op on Windows)
   }
   // Earlier versions wrote the servers to `mcp.json`, which Hermes never reads.
