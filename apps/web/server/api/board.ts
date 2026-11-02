@@ -35,6 +35,7 @@ import {
   listExecutions,
   listTasks,
   provisionWorkspaceBody,
+  readTaskRunnerInputs,
   runCostForTasks,
   runningSinceForTasks,
   TaskDependencyCycleError,
@@ -56,6 +57,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
+import { requestRunnerRerun, runnerRerunFor } from '../lib/runnerRerun'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
@@ -248,6 +250,11 @@ export function boardCreatePOST(req: Request, res: Response): void {
 // clears the old assignee and verdict) and straight to its bound agent, past the
 // automatic pump's "don't keep re-firing this" policy: that policy exists to stop
 // the MACHINE retrying forever, not to overrule the person.
+//
+// A task the task runner ran goes back through the runner with the inputs it
+// saved (see lib/runnerRerun), so it keeps its worktree and verification; its
+// agent is the one bound to it, else the one the runner ran it for. Any other
+// task goes to its team's chat.
 export function boardRetryPOST(req: Request, res: Response): void {
   try {
     const db = getDb()
@@ -266,11 +273,15 @@ export function boardRetryPOST(req: Request, res: Response): void {
       res.status(409).json({ ok: false, error: 'not_retryable' })
       return
     }
-    if (!task.teamId) {
+    const agentId =
+      delegationTargetOf(task.sourceDelegationId) ??
+      readTaskRunnerInputs(task)?.assigneeAgentId ??
+      null
+    const rerun = agentId ? runnerRerunFor(db, task, agentId) : null
+    if (!rerun && !task.teamId) {
       res.status(409).json({ ok: false, error: 'no_team' })
       return
     }
-    const agentId = delegationTargetOf(task.sourceDelegationId)
     if (!agentId) {
       res.status(409).json({ ok: false, error: 'unassigned' })
       return
@@ -289,7 +300,16 @@ export function boardRetryPOST(req: Request, res: Response): void {
       })
     }
     addComment(db, taskId, 'Retry requested.', 'user')
-    requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
+    if (rerun) {
+      requestRunnerRerun(db, {
+        taskId,
+        assigneeAgentId: agentId,
+        rerun,
+        mcpBaseUrl: loopbackMcpBaseUrl(req),
+      })
+    } else {
+      requestTaskDispatch(task.teamId!, taskId, loopbackMcpBaseUrl(req))
+    }
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
@@ -299,7 +319,9 @@ export function boardRetryPOST(req: Request, res: Response): void {
 // ─── POST /api/board/:taskId/assign ─────────────────────────────────────────
 // Hand a task nobody is working on to one agent on its team, and start it. For a
 // card no agent will ever pick up (created without one, or made by an agent's own
-// `create_task`), and for re-routing a failed task to someone else.
+// `create_task`), and for re-routing a failed task to someone else. A task the
+// task runner ran is run by the runner again, on the new agent's runtime, when
+// that runtime is one the runner drives (see the Retry note above).
 export function boardAssignPOST(req: Request, res: Response): void {
   try {
     const db = getDb()
@@ -348,7 +370,17 @@ export function boardAssignPOST(req: Request, res: Response): void {
       })
     }
     addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
-    requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
+    const rerun = runnerRerunFor(db, task, agentId)
+    if (rerun) {
+      requestRunnerRerun(db, {
+        taskId,
+        assigneeAgentId: agentId,
+        rerun,
+        mcpBaseUrl: loopbackMcpBaseUrl(req),
+      })
+    } else {
+      requestTaskDispatch(task.teamId, taskId, loopbackMcpBaseUrl(req))
+    }
     res.json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })

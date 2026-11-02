@@ -108,6 +108,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     updatedAt: number
     completedAt: number | null
     personMovedAt: number | null // when a person last moved the card (see PATCH below)
+    runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
@@ -217,6 +218,8 @@ curl -X POST http://localhost:18790/api/board \
 
 Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked`, `backlog` or stranded `in_progress` task (no assignee and no run going) is moved back to `todo` first, which clears its assignee and check result. The route adds a `user` comment `Retry requested.` to the task and hands it straight to its bound agent. The board's automatic limit of three re-runs does not apply to a retry a person asks for. The response does not wait for the run to start.
 
+**A task the task runner ran** (an agent Routine, or `POST /api/runtimes/:id/run`) has `runnerInputs`, and goes back through the runner with them: the same repository, isolation kind and model, so it gets a worktree and its check again. Its agent is the bound one, else the one the runner ran it for, and it needs no team. The run uses that agent's runtime (an id with no agent row keeps the saved runtime). When that is a runtime the runner cannot run, such as OpenClaw, the task goes to team chat. A task with no `runnerInputs`, which includes tasks the runner ran before it started saving them, goes to its team's chat as before.
+
 - **Path params**: `taskId`.
 - **Request body**: none.
 
@@ -230,7 +233,7 @@ Runs a stuck task again because a person asked: one that failed, timed out, was 
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team`, or `unassigned` (no agent is bound to it; use `assign`).
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), or `unassigned` (no agent is bound to it and the runner never ran it; use `assign`).
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -245,6 +248,8 @@ curl -X POST http://localhost:18790/api/board/<task-id>/retry
 ## `POST /api/board/:taskId/assign`
 
 Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started.
+
+A task with `runnerInputs` starts through the task runner, on the new agent's runtime, with the saved repository and isolation kind; the saved model is kept only when the runtime is the same. An agent on a runtime the runner cannot run, such as OpenClaw, and a task with no `runnerInputs`, start in team chat. See `retry` above.
 
 - **Path params**: `taskId`.
 - **Request body**: `{ agentId: string }`.

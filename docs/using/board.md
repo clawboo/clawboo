@@ -139,7 +139,7 @@ When several runs in a row failed, the badge counts them, for example **Failed 2
 
 The **More** menu holds what the card's button does not: **Retry**, the team's agents under **Assign to** (or **Give to someone else** when the task is bound to an agent), and always **Dismiss**. **Dismiss** asks first, then moves the task to **Cancelled**, along with any later plan steps that were waiting on it.
 
-**Retry** and **Assign** also leave a note in the task's comments. Tasks that failed the same way share one card that lists them, with **Retry all** and, in its **More** menu, **Dismiss all**, which asks first. When nothing waits, the column says "Nothing needs you right now". In Week and Month, Needs you shows three items, then **+N more**. While you look at another week or month, Needs you folds into a narrow rail with its count: click it to go back to today.
+**Retry** and **Assign** also leave a note in the task's comments. A task the task runner ran (an agent Routine, or a run started through the API) runs through the task runner again, in a worktree and checked as before, when the agent is on Clawboo Native, Claude Code, Codex or Hermes. Other tasks, and tasks the runner ran before Clawboo started saving how it ran them, run in team chat; see [How a team works](/intro/how-it-works). Tasks that failed the same way share one card that lists them, with **Retry all** and, in its **More** menu, **Dismiss all**, which asks first. When nothing waits, the column says "Nothing needs you right now". In Week and Month, Needs you shows three items, then **+N more**. While you look at another week or month, Needs you folds into a narrow rail with its count: click it to go back to today.
 
 ### When a task runs again by itself
 

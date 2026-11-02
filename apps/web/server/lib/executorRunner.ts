@@ -33,6 +33,7 @@ import {
   recordSpend,
   releaseTask,
   scrubResultSummary,
+  setTaskRunnerInputs,
   startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
@@ -622,6 +623,17 @@ async function runTaskInner(
     // Atomic claim — a lost claim is a conflict and is NEVER retried.
     const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
     if (!claim.ok) return { ok: false, reason: 'conflict' }
+    // Kept on the task so a person's Retry or Assign runs it this way again
+    // (worktree, verification), not as a team-chat turn. See board.ts.
+    setTaskRunnerInputs(db, taskId, {
+      runtime: runtimeId,
+      assigneeAgentId,
+      repoPath: input.repoPath ?? null,
+      kind: input.kind ?? null,
+      model: input.model ?? null,
+      ...(input.keepForResume ? { keepForResume: true } : {}),
+      ...(input.maxNodeCents != null ? { maxNodeCents: input.maxNodeCents } : {}),
+    })
   } else {
     // Fix re-dispatch of a task this runner already owns (verify FAIL keeps it
     // `in_progress`): verify ownership instead of claiming. Anything else —

@@ -37,6 +37,7 @@ import {
   listEvents,
   listExecutions,
   listGovernanceAudit,
+  readTaskRunnerInputs,
   setBudgetLimit,
 } from '@clawboo/db'
 import type {
@@ -181,6 +182,29 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(result.summary).toContain('Implemented and verified')
     // The runner injected an MCP availability note into the prompt context.
     expect(fake.startedOpts?.context ?? '').toContain('MCP')
+  })
+
+  it('saves what it was given on the task, so a person can rerun it the same way', async () => {
+    const taskId = newCodeTask()
+    const fake = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'Done.')
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'claude-1',
+      repoPath: repo,
+      kind: 'code',
+      model: 'claude-sonnet-4-6',
+      maxNodeCents: 250,
+    })
+    expect(readTaskRunnerInputs(getTask(getDb(), taskId))).toEqual({
+      runtime: 'claude-code',
+      assigneeAgentId: 'claude-1',
+      repoPath: repo,
+      kind: 'code',
+      model: 'claude-sonnet-4-6',
+      maxNodeCents: 250,
+    })
   })
 
   it('a re-dispatch after an INTERRUPTED attempt is told, and told what is unknown', async () => {
