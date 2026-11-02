@@ -7,6 +7,7 @@ import { callIfRunning } from '../lib/connectors/agentBrowsers'
 import { getLiveConnector } from '../lib/connectors/supervisor'
 import { newestTabForSourceAgent } from '../lib/openclawSessionTabs'
 import { captureOpenClawTab } from '../lib/openclawTabCapture'
+import { redactValue } from '../lib/redact'
 import { getScreenshot, putScreenshot } from '../lib/screenshotBus'
 import { envVarForProvider, KNOWN_PROVIDERS } from '@clawboo/adapter-native'
 import {
@@ -641,9 +642,8 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
 // outcome — the alternative is clawboo opening a window nobody asked for, and
 // the browser is headed by default.
 //
-// The frame is filed under a RESERVED id, not the requesting agent's. The shared
-// context means this is the fleet's browser, not that agent's, and storing it as
-// theirs would drop the "Shared browser" label the view needs to stay honest.
+// The frame is filed under the requesting agent's id: each Boo has its own
+// browser, and the GET below serves only that agent's frame.
 /**
  * The screenshot tool, found by SUFFIX rather than named outright.
  *
@@ -655,6 +655,16 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
 const isScreenshotTool = (name: string): boolean => name.endsWith('take_screenshot')
 
 export async function agentScreenshotCapturePOST(req: Request, res: Response): Promise<void> {
+  try {
+    await captureScreenshot(req, res)
+  } catch (err) {
+    // Uncaught, Express answers with its HTML error page, which the panel
+    // cannot read.
+    res.status(500).json({ ok: false, error: redactValue(String(err)) })
+  }
+}
+
+async function captureScreenshot(req: Request, res: Response): Promise<void> {
   const agentId = (req.params['agentId'] as string | undefined) ?? ''
   if (!agentId) {
     res.status(400).json({ ok: false, error: 'agentId is required' })

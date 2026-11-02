@@ -201,6 +201,20 @@ describe('POST /api/exec-allowlist/revoke', () => {
     expect(String(out.body['error'])).toContain('disabled on this node')
   })
 
+  it('answers a local failure as a 500, not as the Gateway refusing', async () => {
+    db = {
+      select: () => {
+        throw new Error('SQLITE_BUSY: database is locked')
+      },
+    } as unknown as ClawbooDb
+    const { res, done } = mockRes()
+    await execAllowlistRevokePOST(postReq({ agentId: 'boo', keys: ['k'] }), res)
+    const out = await done
+    expect(out.code).toBe(500)
+    expect(out.body['state']).toBeUndefined()
+    expect(calls).toEqual([])
+  })
+
   it('rejects a body with no keys rather than writing the document', async () => {
     seedAgent('boo', 'openclaw', 'oc-boo')
     const { res, done } = mockRes()

@@ -40,6 +40,7 @@ import {
   deriveConnectionState,
   disconnectPlanFor,
   getDescriptor,
+  isOrchestratableRuntimeId,
   isRuntimeId,
   NON_OPENCLAW_RUNTIME_IDS,
   type NonOpenClawRuntimeId,
@@ -516,6 +517,10 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
   // no key to store, so the CHOICE is what gets recorded, and that alone readies
   // the runtime (served at OLLAMA_BASE_URL, else the local default).
   const targetEnvVar = resolveConnectEnvVar(d, body.provider)
+  if (targetEnvVar === undefined) {
+    res.status(400).json({ error: `unknown provider '${String(body.provider).trim()}'` })
+    return
+  }
   if (targetEnvVar === null) {
     setKeylessProviderChoice('ollama', true)
     setRuntimeDisconnected(id, false)
@@ -574,16 +579,21 @@ export async function runtimesConnectPOST(req: Request, res: Response): Promise<
 /** The vault env-var a connect request targets. Non-native runtimes always use
  *  their single descriptor envVar. The native runtime maps the chosen provider
  *  → its conventional env var (validated against the runtime's known set);
- *  `null` means a keyless provider (Ollama) with nothing to store. */
-function resolveConnectEnvVar(d: RuntimeDescriptor, providerRaw: unknown): string | null {
+ *  `null` means a keyless provider (Ollama) with nothing to store, and
+ *  `undefined` a provider the native runtime cannot drive. That one is refused:
+ *  storing its key under another provider's name would hand, say, a MiniMax key
+ *  to Anthropic. */
+function resolveConnectEnvVar(
+  d: RuntimeDescriptor,
+  providerRaw: unknown,
+): string | null | undefined {
   if (d.id !== 'clawboo-native') return d.envVar
   const provider = typeof providerRaw === 'string' ? providerRaw.trim() : ''
   if (!provider) return d.envVar
   if (provider === 'ollama') return null
   const ev = envVarForProvider(provider)
-  if (!ev) return d.envVar
   const allowed = [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
-  return allowed.includes(ev) ? ev : d.envVar
+  return ev && allowed.includes(ev) ? ev : undefined
 }
 
 // ─── POST /api/runtimes/clawboo-native/healthcheck ───────────────────────────
@@ -824,7 +834,9 @@ export async function runtimesLogoutPOST(req: Request, res: Response): Promise<v
 // Drives the task on the runtime end to end (claim → worktree → run → report-up).
 export async function runtimesRunPOST(req: Request, res: Response): Promise<void> {
   const idRaw = String(req.params['id'] ?? '')
-  if (!isRuntimeId(idRaw)) {
+  // The orchestration check, not the static list: with its flag on, the mock
+  // runtime is a runtime this route can drive.
+  if (!isOrchestratableRuntimeId(idRaw)) {
     res.status(404).json({ error: `unknown runtime '${idRaw}'` })
     return
   }

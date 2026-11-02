@@ -79,9 +79,9 @@ failing the whole list. Writes go to the source that owns the id (ids are `<sour
 `team-task` schedule on a `runtime-own-life` source (the Gateway's) throws `TeamTaskDomainViolationError`. The
 pattern it shares with the capability sources is described on [Capability and schedule sources](/internals/seams).
 
-Every error class carries a `code` for callers to branch on. The REST layer maps them to statuses; note that a
-malformed spec comes back as a `400` whose body code is `invalid_body`, not `invalid_cron_spec`. The full mapping
-is on [Schedules API](/reference/rest-api/schedules).
+Every error class carries a `code` for callers to branch on. The REST layer maps them to statuses and sends each
+class's own `code`, so a malformed spec comes back as a `400` with `invalid_cron_spec`. The full mapping is on
+[Schedules API](/reference/rest-api/schedules).
 
 ## Who uses it
 

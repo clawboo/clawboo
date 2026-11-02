@@ -2,7 +2,7 @@
 // the team header, whose right edge holds the card toggles) and floating cards
 // stacked on the right: the Ghost Graph, the team's Tasks and its Activity. Every split
 // is resizable. With both cards closed the chat takes the whole area. When `animateOpen` is true (the
-// user just finished onboarding and clicked "Continue to Team Space"), the
+// user just finished onboarding and clicked "Continue to team chat"), the
 // graph "opens" down from the top of its card via a clip-path reveal.
 //
 // Why a clip-path reveal and NOT an animated panel resize: the Ghost Graph's

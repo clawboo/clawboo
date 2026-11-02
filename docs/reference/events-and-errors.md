@@ -55,7 +55,7 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 - **Board API** means the board routes the dashboard calls. Board changes made through the [Tasks MCP tools](/reference/mcp-tools) or by the task runner itself update the live board views but are not written to the log as board events.
 - **Task runner** runs serve `POST /api/runtimes/:id/run` and agent routine fires on runtimes other than OpenClaw. **Team engine** runs serve team chat and the tasks it delegates. See [How a team works](/intro/how-it-works) for the two paths.
 - **Peer room** events concern the agents' peer room behind the [TeamChat server](/reference/mcp-tools#teamchat-server), not the team chat you use in the dashboard.
-- A runtime mirror can also push `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health` through `POST /api/obs/ingest` (see [Writing events from outside](#writing-events-from-outside)).
+- Only the server writes events. No API route adds them from outside.
 
 ## Error classes
 
@@ -493,7 +493,7 @@ A connector's health changed.
 { connectorId: string; health: string; detail?: string | null; failures?: number }
 ```
 
-`health` is one of `unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`. The server writes this event with `health: 'error'` and `detail: 'the connector process exited'` when a connector's process stops. The other values can arrive through `POST /api/obs/ingest`. `drift` means the connector's tools no longer match what was approved, so review what changed before trusting it again.
+`health` is one of `unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`. The server writes this event with `health: 'error'` and `detail: 'the connector process exited'` when a connector's process stops; it writes no other value today. `drift` means the connector's tools no longer match what was approved, so review what changed before trusting it again.
 
 ## Cost totals
 
@@ -511,17 +511,6 @@ The **Fleet health** list in the **Observability** panel gives each agent a stat
 | `idle`    | Has no open run                                                                                               |
 
 The panel reads the latest 5,000 events, and a single trace returns at most 5,000 events.
-
-## Writing events from outside
-
-`POST /api/obs/ingest` lets a process on this machine mirror runtime events into the log. The body is `{ "events": [ ... ] }`, and each event may set `kind`, `ts`, `teamId`, `taskId`, `agentId`, `runtime` and `data`.
-
-- Only `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health` are accepted, so board, cost, approval and routine events cannot be forged this way. Other kinds are skipped.
-- At most 200 events per request are read. The answer is `{ "ok": true, "count": <stored> }`.
-- A `ts` more than 60 seconds ahead of the server's clock, or more than 24 hours behind it, is replaced with the server's time. A missing `runtime` is stored as `openclaw`.
-- For `grant_decision` and `connector_health`, unknown fields are dropped, text is redacted and cut to 200 characters (ids to 120), an unknown `health` becomes `unknown`, and an unknown `decision` becomes `deny`.
-
-The route sits behind the access gate like every `/api/` route. See the [Observability API](/reference/rest-api/observability).
 
 ## Structured log lines
 

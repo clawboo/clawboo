@@ -55,10 +55,10 @@ RPC, and typed groups cover the common ones: `agents` (list, create, files), `se
 `GatewayResponseError` carries the Gateway's error code (the pairing flow keys off `NOT_PAIRED`), and
 `isAuthConnectError` and `authRetryAfterMs` tell a caller whether and when to retry an auth failure.
 
-The package is browser-safe: it uses the global `WebSocket` and never imports `ws`, although its manifest still
-lists it. The SPA uses it for the live connection, events and the pairing flow. On the server it backs the shared
-Gateway connection in `apps/web/server/lib/agentSource/registry.ts`, the OpenClaw capability source, and the
-Permissions tab routes. `@clawboo/events` and `@clawboo/adapter-openclaw` import its types.
+The package is browser-safe: it uses the global `WebSocket` and does not depend on `ws`. The SPA uses it for the
+live connection, events and the pairing flow. On the server it backs the shared Gateway connection in
+`apps/web/server/lib/agentSource/registry.ts`, the OpenClaw capability source, and the Permissions tab routes.
+`@clawboo/events` and `@clawboo/adapter-openclaw` import its types.
 
 ## Exec approvals
 

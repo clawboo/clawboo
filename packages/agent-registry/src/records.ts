@@ -4,7 +4,7 @@
 // directions. Each field is documented with its source-of-truth: Gateway-synced
 // (overwritten on every sync) vs SQLite-native (clawboo-owned, preserved across
 // re-sync). The `participantKind`, `runtime`, and `tenantId` fields are open-set /
-// dormant seams for future sessions (human teammates, native runtime, multi-tenant).
+// dormant seams (a human teammate kind, the runtime id, a tenant id).
 
 /** Open-set participant kind. 'human' is a dormant seam (no human path yet). */
 export type ParticipantKind = 'agent' | 'human'

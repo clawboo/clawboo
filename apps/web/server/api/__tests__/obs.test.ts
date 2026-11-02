@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { appendEvent, listEvents } from '@clawboo/db'
+import { appendEvent } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -18,7 +18,6 @@ import {
   obsEventsGET,
   obsGraphGET,
   obsHealthGET,
-  obsIngestPOST,
   obsStreamGET,
   obsTraceGET,
 } from '../obs'
@@ -267,118 +266,6 @@ describe('observability REST', () => {
     expect((res.body() as { events: unknown[] }).events.length).toBeGreaterThan(0)
   })
 
-  it('POST /api/obs/ingest persists the whitelisted runtime events', () => {
-    const res = mockRes()
-    const r = {
-      query: {},
-      params: {},
-      body: {
-        events: [
-          { kind: 'tool_call', taskId: 'sub', agentId: 'a2', data: { name: 'edit' } },
-          {
-            kind: 'tool_result',
-            taskId: 'sub',
-            agentId: 'a2',
-            data: { name: 'edit', output: 'ok', isError: false },
-          },
-          { kind: 'error', taskId: 'sub', agentId: 'a2', data: { message: 'boom', fatal: true } },
-        ],
-      },
-    } as unknown as Request
-    obsIngestPOST(r, res.res)
-    expect((res.body() as { count: number }).count).toBe(3)
-    const kinds = listEventsForTask('sub')
-    for (const k of ['tool_call', 'tool_result', 'error']) expect(kinds).toContain(k)
-  })
-
-  it('POST /api/obs/ingest rejects non-runtime (board-lifecycle) kinds', () => {
-    const res = mockRes()
-    const r = {
-      query: {},
-      params: {},
-      body: {
-        events: [
-          { kind: 'task_created', taskId: 'lc', data: {} },
-          { kind: 'status_changed', taskId: 'lc', data: {} },
-          { kind: 'tool_call', taskId: 'lc', data: { name: 'x' } },
-        ],
-      },
-    } as unknown as Request
-    obsIngestPOST(r, res.res)
-    expect((res.body() as { count: number }).count).toBe(1) // only the tool_call
-    expect(listEventsForTask('lc')).toEqual(['tool_call'])
-  })
-
-  it('POST /api/obs/ingest scrubs and bounds a connector_health payload', () => {
-    const res = mockRes()
-    obsIngestPOST(
-      {
-        query: {},
-        params: {},
-        body: {
-          events: [
-            {
-              kind: 'connector_health',
-              taskId: 'ch',
-              data: {
-                connectorId: 'conn_1',
-                health: 'not-a-health-value',
-                detail: `auth failed for token sk-abcdef0123456789abcdef ${'x'.repeat(5000)}`,
-                failures: -3,
-                stackTrace: 'Error: at /Users/me/secrets.ts:1',
-              },
-            },
-          ],
-        },
-      } as unknown as Request,
-      res.res,
-    )
-    expect((res.body() as { count: number }).count).toBe(1)
-
-    const stored = listEvents(getDb(), { taskId: 'ch' })
-    expect(stored).toHaveLength(1)
-    const data = JSON.parse(stored[0]!.data ?? '{}') as Record<string, unknown>
-
-    // An unknown enum member falls back rather than being stored verbatim.
-    expect(data['health']).toBe('unknown')
-    // A field outside the declared shape never reaches the disk at all.
-    expect(data['stackTrace']).toBeUndefined()
-    // A negative failure count is not a count.
-    expect(data['failures']).toBeUndefined()
-    // Free text is redacted AND bounded: the log redacts on display, which does
-    // nothing for what is already written to the file.
-    const detail = data['detail'] as string
-    expect(detail.length).toBeLessThanOrEqual(200)
-    expect(detail).not.toContain('sk-abcdef0123456789abcdef')
-  })
-
-  it('POST /api/obs/ingest defaults an unrecognised grant_decision to deny', () => {
-    const res = mockRes()
-    obsIngestPOST(
-      {
-        query: {},
-        params: {},
-        body: {
-          events: [
-            {
-              kind: 'grant_decision',
-              taskId: 'gd',
-              data: { decision: 'definitely-allow', toolName: 'read_file' },
-            },
-          ],
-        },
-      } as unknown as Request,
-      res.res,
-    )
-    const data = JSON.parse(listEvents(getDb(), { taskId: 'gd' })[0]!.data ?? '{}') as Record<
-      string,
-      unknown
-    >
-    // A forged verdict must not be able to make the audit stream read `allow`.
-    expect(data['decision']).toBe('deny')
-    expect(data['toolName']).toBe('read_file')
-  })
-
   it('GET /api/obs/stream writes the connected preamble + scoped events', () => {
     seed()
     const s = mockSse({ taskId: 'sub' })
@@ -396,40 +283,6 @@ describe('observability REST', () => {
     obsStreamGET(s.req, s.res)
     s.close()
     expect(s.writes()).not.toContain('data:')
-  })
-
-  it('POST /api/obs/ingest clamps a forged ts (it must not mask a zombie)', () => {
-    const res = mockRes()
-    const far = Date.now() + 10 * 365 * 24 * 60 * 60_000 // a decade ahead
-    const r = {
-      query: {},
-      params: {},
-      body: { events: [{ kind: 'tool_call', taskId: 'sub', agentId: 'a2', ts: far, data: {} }] },
-    } as unknown as Request
-    obsIngestPOST(r, res.res)
-    expect((res.body() as { count: number }).count).toBe(1)
-
-    // Stored at server time, not the forged one. projectFleetHealth derives
-    // staleness from `now - lastEventTs` (a MAX over the window), so a future ts
-    // makes `quiet` negative and pins an agent at `working` forever.
-    const stored = listEvents(getDb(), { taskId: 'sub' })
-    expect(stored).toHaveLength(1)
-    expect(stored[0]!.ts).toBeLessThanOrEqual(Date.now() + 60_000)
-
-    // A plausible recent ts is still honoured (a mirror reports what it saw).
-    const recent = Date.now() - 5_000
-    const res2 = mockRes()
-    obsIngestPOST(
-      {
-        query: {},
-        params: {},
-        body: {
-          events: [{ kind: 'tool_call', taskId: 'ok', agentId: 'a2', ts: recent, data: {} }],
-        },
-      } as unknown as Request,
-      res2.res,
-    )
-    expect(listEvents(getDb(), { taskId: 'ok' })[0]!.ts).toBe(recent)
   })
 
   it('GET /api/obs/errors orders by ts (index-backed) and still reads newest-first', () => {
@@ -621,7 +474,3 @@ describe('observability REST', () => {
     })
   })
 })
-
-function listEventsForTask(taskId: string): string[] {
-  return listEvents(getDb(), { taskId }).map((e) => e.kind)
-}

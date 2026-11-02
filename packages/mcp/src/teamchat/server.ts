@@ -16,6 +16,7 @@
 
 import {
   postToRoom,
+  READ_ROOM_DEFAULT_LIMIT,
   readRoom,
   resolveRoomForTeam,
   roomMaxSeq,
@@ -162,7 +163,14 @@ export function createTeamChatServer(db: ClawbooDb, opts: TeamChatServerOptions 
         // DELIVERED row — `rows` excludes the caller's own posts, so when the
         // caller authored the latest posts the last delivered seq sits below the
         // head and the cursor would stall. Clamp ≥ sinceSeq (never go backward).
-        const nextSeq = Math.max(roomMaxSeq(db, t.roomId), sinceSeq)
+        //
+        // EXCEPT WHEN THE PAGE IS FULL. A full page means `limit` cut the read
+        // short, and jumping to the head would skip every post past it. Stop at
+        // the last post delivered instead, so the next read starts there.
+        const full = rows.length >= (limit ?? READ_ROOM_DEFAULT_LIMIT)
+        const nextSeq = full
+          ? rows[rows.length - 1]!.seq
+          : Math.max(roomMaxSeq(db, t.roomId), sinceSeq)
         return jsonResult({ posts, nextSeq })
       },
     },

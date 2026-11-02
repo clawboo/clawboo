@@ -41,7 +41,6 @@
     "@clawboo/events": "workspace:*",
     "@clawboo/executor": "workspace:*",
     "@clawboo/gateway-client": "workspace:*",
-    "@clawboo/logger": "workspace:*",
     "@clawboo/protocol": "workspace:*"
   },
   "devDependencies": {

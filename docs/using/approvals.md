@@ -74,7 +74,7 @@ Every other request uses a request card, and so does every request in the Govern
 - On some cards, a checkbox that remembers your answer (see [Answer a request](#answer-a-request)).
 - An allow button named for the action, such as **Run it**, **Allow read**, **Send it** or **Delete it** (otherwise **Allow**), and **Don't allow**.
 
-A request card shows a command in full unless it is very long, and adds the **Folder** it runs in when Clawboo knows it. A risky hand-off card names the leader, and the task text and the teammate it is for sit under **Show N more details**.
+A request card shows a command in full unless it is very long, and adds the **Folder** it runs in when Clawboo knows it. A risky hand-off card names the leader and the teammate it is for, and shows the task text.
 
 ## Answer a request
 

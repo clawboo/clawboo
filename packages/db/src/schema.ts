@@ -318,7 +318,7 @@ export const approvalHistory = sqliteTable(
 // state category (distinct from the Gateway-owned agent/session registry — the
 // board only references agents/runtimes by id, never duplicates them). All flag-
 // gated at the route + reconciliation layer; the tables themselves are inert when
-// unused. `tenant_id` is a dormant seam for a future multi-tenant / Postgres swap.
+// unused. `tenant_id` is a dormant seam (always null).
 
 // tasks — the kanban cards. Soft refs (no FK) to team/agent/runtime/session/
 // delegation since those are Gateway- or chat-store-owned; only the internal

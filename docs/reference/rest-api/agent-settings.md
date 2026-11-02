@@ -511,6 +511,8 @@ Pass `key` values back exactly as the GET returned them: a key is a fingerprint 
 
 **`404 Not Found`**: `{ "error": "agent not found" }`.
 
+**`500 Internal Server Error`**: something failed in Clawboo before the Gateway was asked, such as a database read. There is no `state` key: `{ "error": "<message>" }`, redacted.
+
 **`429 Too Many Requests`**: the sensitive limit:
 
 ```json

@@ -925,7 +925,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
             ) : useOllama ? (
               <>
                 <span className="font-semibold">Ollama isn&rsquo;t answering.</span> Start it and
-                try again &mdash; Clawboo runs your agents on your own machine, so Ollama has to be
+                try again. Clawboo runs your agents on your own machine, so Ollama has to be
                 running. {ollamaDetail}
               </>
             ) : (

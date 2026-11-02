@@ -442,7 +442,7 @@ export class OpenClawAgentSource implements AgentSource {
       // tool. Memory stays global-scoped for OpenClaw (its agents are cross-team;
       // an in-Gateway autonomous tool call can't be per-run scoped without
       // reaching into the Gateway) — an organizational, not security, boundary
-      // for the local-first single-user model; the multi-tenant horizon is parked.
+      // for the local-first single-user model.
       //
       // THAT SENTENCE DESCRIBED AN INTENT THE CODE DID NOT IMPLEMENT, until the
       // `unverifiedCaller` flag threaded from `api/mcp.ts`. Memory was not

@@ -278,7 +278,7 @@ export function TeamOnboardingGate({
                   className="mb-2 text-center text-[18px] font-bold text-foreground"
                   style={{ fontFamily: 'var(--font-display)', letterSpacing: '-0.01em' }}
                 >
-                  Your turn — introduce yourself
+                  Your turn: introduce yourself
                 </h3>
                 <p className="mb-5 text-center text-[13px] leading-relaxed text-foreground/55">
                   Tell the team a bit about yourself: your name, what you&rsquo;re working on, or
@@ -309,7 +309,7 @@ export function TeamOnboardingGate({
                   loading={submittingUserIntro}
                   data-testid="submit-user-intro"
                 >
-                  {submittingUserIntro ? 'Saving…' : 'Continue to Team Space'}
+                  {submittingUserIntro ? 'Saving…' : 'Continue to team chat'}
                   {!submittingUserIntro && <Send size={16} strokeWidth={2} />}
                 </Button>
               </motion.div>
