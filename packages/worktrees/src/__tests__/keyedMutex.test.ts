@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { KeyedMutex, MutexAcquireTimeoutError } from '../git'
 
@@ -59,6 +59,63 @@ describe('KeyedMutex', () => {
     const m = new KeyedMutex()
     void m.run('k', () => sleep(20))
     await expect(m.run('k', async () => 'ran', { acquireTimeoutMs: 500 })).resolves.toBe('ran')
+  })
+})
+
+describe('the acquire timeout counts awake time', () => {
+  const MIN = 60_000
+  const ACQUIRE_MS = 10 * MIN
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** What a sleep does to the process on macOS: the wall clock jumps, and every
+   *  timer whose delay passed fires once on wake. `vi.setSystemTime` alone moves
+   *  pending timers along with the clock, so a plain timer would never notice. */
+  function sleepMachine(ms: number): void {
+    ;(globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
+  }
+
+  /** Queue a bounded waiter behind a holder that runs until `release`. */
+  function queueBehindHolder(): {
+    release: () => void
+    outcome: () => 'pending' | 'ran' | 'timed-out'
+  } {
+    const m = new KeyedMutex()
+    let release!: () => void
+    void m.run('k', () => new Promise<void>((r) => (release = r)))
+    let outcome: 'pending' | 'ran' | 'timed-out' = 'pending'
+    m.run('k', async () => 'ran', { acquireTimeoutMs: ACQUIRE_MS }).then(
+      () => (outcome = 'ran'),
+      (err: unknown) => {
+        if (err instanceof MutexAcquireTimeoutError) outcome = 'timed-out'
+      },
+    )
+    return { release: () => release(), outcome: () => outcome }
+  }
+
+  it('a sleep longer than the timeout does not fail a waiter behind a healthy run', async () => {
+    const waiter = queueBehindHolder()
+    await vi.advanceTimersByTimeAsync(4 * MIN)
+
+    // The machine sleeps for an hour, then one tick runs on wake.
+    sleepMachine(60 * MIN)
+    await vi.advanceTimersByTimeAsync(30_000)
+    expect(waiter.outcome()).toBe('pending')
+
+    // The holder finishes after the wake and the waiter gets its turn.
+    waiter.release()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(waiter.outcome()).toBe('ran')
+  })
+
+  it('a holder that really stays wedged still times the waiter out at the limit', async () => {
+    const waiter = queueBehindHolder()
+    await vi.advanceTimersByTimeAsync(ACQUIRE_MS - 1)
+    expect(waiter.outcome()).toBe('pending')
+    await vi.advanceTimersByTimeAsync(1)
+    expect(waiter.outcome()).toBe('timed-out')
+    waiter.release()
   })
 })
 

@@ -1067,6 +1067,9 @@ importers:
 
   packages/worktrees:
     dependencies:
+      '@clawboo/executor':
+        specifier: workspace:*
+        version: link:../executor
       zod:
         specifier: ^3.25.0
         version: 3.25.76
