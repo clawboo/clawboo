@@ -146,9 +146,10 @@ const isLoopbackHost = (host: string): boolean => {
 }
 
 // A host with an explicit port, with or without a scheme in front of it. A match
-// may only start where a host can start (the lookbehind), and the host parts are
-// bounded, so a long run of host characters with no port stays linear.
-const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]{1,64}\]|[a-z0-9.-]{1,253}):(\d{1,5})/gi
+// may only start where a host can start (the lookbehind), so a long run of host
+// characters with no port is read in linear time. The host is not length-capped:
+// a cap would let an over-long `*.localhost` name slip past unmatched.
+const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})/gi
 
 /** Whether a string names a dashboard address. The host is parsed the way a
  *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. */

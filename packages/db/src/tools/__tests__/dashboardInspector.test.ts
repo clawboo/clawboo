@@ -58,6 +58,10 @@ describe('dashboardInspector', () => {
     expect(await decide({ url })).toBe('allow')
   })
 
+  it('refuses an over-long localhost name on the dashboard port', async () => {
+    expect(await decide({ url: `http://${'a'.repeat(300)}.localhost:18790/` })).toBe('deny')
+  })
+
   it('reads a very long run of host characters quickly, and passes it', async () => {
     const started = performance.now()
     expect(await decide({ url: '-'.repeat(200_000) })).toBe('allow')
