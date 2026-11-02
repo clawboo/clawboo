@@ -217,6 +217,26 @@ export function readOpenclawEnvVar(
   return readDotEnvVar(path.join(resolveStateDir(env), '.env'), varName)
 }
 
+/**
+ * Has this machine been set up for an OpenClaw Gateway at all? True when
+ * clawboo's own settings name a Gateway (a URL or a token) or OpenClaw's config
+ * file exists. `loadSettings` cannot answer this: it always returns a URL,
+ * falling back to the default local address, so an install that never used
+ * OpenClaw looks the same as one whose Gateway is down.
+ */
+export function isGatewayConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  const parsed = readJsonFile(resolveSettingsPath(env))
+  const gateway = isRecord(parsed?.['gateway']) ? parsed['gateway'] : null
+  const url = typeof gateway?.['url'] === 'string' ? gateway['url'].trim() : ''
+  const token = typeof gateway?.['token'] === 'string' ? gateway['token'].trim() : ''
+  if (url || token) return true
+  try {
+    return fs.existsSync(path.join(resolveStateDir(env), OPENCLAW_CONFIG_FILENAME))
+  } catch {
+    return false
+  }
+}
+
 export function loadSettings(env: NodeJS.ProcessEnv = process.env): ClawbooSettings {
   const settingsPath = resolveSettingsPath(env)
   const parsed = readJsonFile(settingsPath)

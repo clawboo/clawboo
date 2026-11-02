@@ -51,7 +51,7 @@ Skills you add to an agent are listed in the group of that agent's runtime. The 
 
 <Accordion title="About Clawboo's built-in tools">
 
-The Clawboo Native group lists four built-in tools: `echo`, `note`, `web_search` and `delete_path`. They are simple tools that exercise Clawboo's approval checks. `web_search` reads **Unavailable** unless a Tavily key (`TAVILY_API_KEY`) is set, and neither it nor `delete_path` searches the web or deletes anything. For real web access, give an agent a browser or a search connector; see [Connectors](/using/connectors).
+The Clawboo Native group lists two built-in tools, `echo` and `note`. They are simple tools that exercise Clawboo's tool checks, and neither reaches the web or saves anything. Clawboo has no built-in web search. For web access, give an agent a browser, or connect a search connector such as Exa Search and give it to the agents that need it; see [Connectors](/using/connectors).
 
 </Accordion>
 

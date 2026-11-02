@@ -323,6 +323,19 @@ export function deleteScheduledRun(db: ClawbooDb, id: string): void {
   withWriteRetry(() => db.delete(scheduledRuns).where(eq(scheduledRuns.id, id)).run())
 }
 
+/**
+ * Delete every routine that targets one agent, for when that agent is deleted.
+ * Left in place, each one fires on schedule and fails with "agent not found"
+ * until someone removes it by hand. A team routine keeps no agent (its
+ * `agent_id` is empty), so it is never matched here. Returns the count removed.
+ */
+export function deleteScheduledRunsForAgent(db: ClawbooDb, agentId: string): number {
+  if (!agentId) return 0
+  return withWriteRetry(
+    () => db.delete(scheduledRuns).where(eq(scheduledRuns.agentId, agentId)).run().changes,
+  )
+}
+
 // ─── Boot-resume healing ─────────────────────────────────────────────────────
 
 /**

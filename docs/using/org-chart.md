@@ -130,7 +130,7 @@ Click a line to open its panel at the bottom of the canvas, then click **Remove 
 - Removing a share's line ends that agent's access, with an **Undo** for 8 seconds. **Stop sharing** on the connector tile does the same. **Turn off** on the tile stops the connector itself.
 - Removing a route deletes every line in the first agent's AGENTS.md that mentions the second agent.
 
-Removing a route needs the dashboard connected to an OpenClaw Gateway. Without that connection, **Remove Connection** on a route does nothing. Edit the agent's AGENTS.md instead: on its page, open **Details**, then **Agent Files**, then **AGENTS**, and delete the route line.
+Removing a route works without an OpenClaw Gateway, like adding one. If the agent's AGENTS.md cannot be read or written, the route stays and **Failed to remove routing** appears.
 
 Some lines cannot be removed, and the panel says why: a capability that came with the agent's runtime, and the model tile, which is part of the Boo. **Backspace** never deletes an agent; deleting is on the right-click menu.
 
@@ -211,9 +211,9 @@ The canvas is probably locked: unlock it with the padlock at the bottom right. I
 
 </Accordion>
 
-<Accordion title="Remove Connection on a route does nothing">
+<Accordion title="Removing a route says Failed to remove routing">
 
-Removing a route needs the dashboard connected to an OpenClaw Gateway. Without one, delete the route line from the agent's AGENTS.md on its page instead. See [Take things back](#take-things-back).
+The agent's AGENTS.md could not be read or written, so the route stays. For an OpenClaw agent, check that Clawboo is connected to its OpenClaw Gateway. You can also delete the route line from the agent's AGENTS.md on its page: open **Details**, then **Agent Files**, then **AGENTS**. See [Take things back](#take-things-back).
 
 </Accordion>
 

@@ -475,13 +475,46 @@ describe('OpenClawAgentSource', () => {
     // told how to open a web page, and an instruction that reaches only the
     // agents whose creator happened to pass a file is worse than none, because
     // it reads as a fleet rule while part of the fleet never received it.
-    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'TOOLS.md', 'AGENTS.md'])
+    // TOOLS.md is never sent (the 2026.9 Gateway refuses it); a heading-only
+    // one carries nothing, so AGENTS.md gains nothing from it either.
+    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'AGENTS.md'])
     const agentsMd = fake.fileWrites.find((w) => w.name === 'AGENTS.md')?.content ?? ''
     expect(agentsMd).toContain('Opening web pages')
+    expect(agentsMd).not.toContain('## Tools')
     // The load-bearing line: this is the profile that reaches the operator's own
     // signed-in browser.
     expect(agentsMd).toContain('profile: "user"')
     expect(await src.getAgent('new-Designer')).not.toBeNull()
+    await src.stop()
+  })
+
+  it('createAgent succeeds on a Gateway that refuses TOOLS.md and moves its notes into AGENTS.md', async () => {
+    // OpenClaw 2026.9: agents.files.set answers "unsupported file" for TOOLS.md.
+    const fake = new FakeGateway()
+    const setFile = fake.agents.files.set
+    fake.agents.files.set = (agentId: string, name: string, content: string) =>
+      name === 'TOOLS.md'
+        ? Promise.reject(new Error('unsupported file "TOOLS.md"'))
+        : setFile(agentId, name, content)
+    const src = makeSource(fake)
+    await src.start()
+
+    const record = await src.createAgent({
+      name: 'Researcher',
+      files: {
+        'SOUL.md': '# Researcher\n',
+        'TOOLS.md': '# TOOLS\n\n## Skills\n- web-search\n',
+        'AGENTS.md': '# AGENTS\n\nRoute to @Scout.\n',
+      },
+    })
+
+    expect(record.id).toBe('new-Researcher')
+    expect(fake.fileWrites.map((w) => w.name)).not.toContain('TOOLS.md')
+    const agentsMd = fake.fileWrites.find((w) => w.name === 'AGENTS.md')?.content ?? ''
+    expect(agentsMd).toContain('Route to @Scout.')
+    expect(agentsMd).toContain('## Tools\n\n### Skills\n- web-search')
+    expect(agentsMd).toContain('Opening web pages')
+    expect(await src.getAgent('new-Researcher')).not.toBeNull()
     await src.stop()
   })
 

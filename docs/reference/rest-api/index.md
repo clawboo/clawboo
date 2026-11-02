@@ -170,17 +170,17 @@ The same-origin guard runs on the upgrade first (`403 Forbidden` on failure), th
 
 ## Route index
 
-The router registers 200 routes: 89 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
+The router registers 201 routes: 91 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 6 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                      |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [Agents](/reference/rest-api/agents)                 | 19     | `/api/agents*`: list, create, sync, delete, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 agent chats |
-| [Teams](/reference/rest-api/teams)                   | 21     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat), `/api/team-rules/:teamId`, `/api/team-chat*`                               |
+| [Agents](/reference/rest-api/agents)                 | 21     | `/api/agents*`: list, create, sync, delete, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 agent chats |
+| [Teams](/reference/rest-api/teams)                   | 22     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat), `/api/team-rules/:teamId`, `/api/team-chat*`                               |
 | [Board](/reference/rest-api/board)                   | 24     | `/api/board*`: tasks, claim, status changes, comments, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview      |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                           |
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                            |
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                       |
-| [Boo Zero](/reference/rest-api/boo-zero)             | 9      | `/api/boo-zero/*`: team briefs, the global brief, display names, the leader override                                                                |
+| [Boo Zero](/reference/rest-api/boo-zero)             | 7      | `/api/boo-zero/*`: team briefs, display names, the leader override                                                                                  |
 | [Runtimes](/reference/rest-api/runtimes)             | 17     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                                               |
 | [Schedules](/reference/rest-api/schedules)           | 7      | `/api/schedules*`: Routines and OpenClaw Gateway cron jobs                                                                                          |
 | [Governance](/reference/rest-api/governance)         | 7      | `/api/governance/*` (budgets, audit log, delegation approval), `/api/approvals`                                                                     |

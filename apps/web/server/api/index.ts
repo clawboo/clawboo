@@ -75,8 +75,6 @@ import {
   teamBriefGET,
   teamBriefPUT,
   teamBriefDELETE,
-  globalBriefGET,
-  globalBriefPUT,
   displayNameGET,
   displayNamePUT,
 } from './booZero'
@@ -372,14 +370,11 @@ router.post('/api/agents/:agentId/chat/stop', agentChatStopPOST)
 router.get('/api/agents/:agentId/chat/stream', agentChatStreamGET)
 router.post('/api/agents/:agentId/chat', agentChatIngestPOST)
 
-// Boo Zero context — per-team briefs + global brief.
-// Per-team briefs are SQLite-backed and FK-cascade on team delete; the
-// global brief lives in the settings key/value table.
+// Boo Zero context: per-team briefs (SQLite-backed, FK-cascade on team delete)
+// and the display-name override.
 router.get('/api/boo-zero/team-briefs/:teamId', teamBriefGET)
 router.put('/api/boo-zero/team-briefs/:teamId', teamBriefPUT)
 router.delete('/api/boo-zero/team-briefs/:teamId', teamBriefDELETE)
-router.get('/api/boo-zero/global-brief', globalBriefGET)
-router.put('/api/boo-zero/global-brief', globalBriefPUT)
 router.get('/api/boo-zero/display-name/:agentId', displayNameGET)
 router.put('/api/boo-zero/display-name/:agentId', displayNamePUT)
 // The runtime-neutral leader OVERRIDE ("Make this agent Boo Zero") — the writer

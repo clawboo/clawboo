@@ -415,7 +415,7 @@ A `ts` more than 60 seconds ahead of the server clock, or more than 24 hours beh
 ```bash
 curl -X POST http://localhost:18790/api/obs/ingest \
   -H 'Content-Type: application/json' \
-  -d '{"events":[{"kind":"tool_call","taskId":"<task-uuid>","agentId":"<agent-id>","data":{"toolName":"web_search"}}]}'
+  -d '{"events":[{"kind":"tool_call","taskId":"<task-uuid>","agentId":"<agent-id>","data":{"toolName":"note"}}]}'
 ```
 
 ---

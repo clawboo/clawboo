@@ -105,7 +105,7 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             {team.name} — Settings
           </h2>
           <p className="m-0 mt-0.5 text-[12px] text-foreground/45">
-            Brief + rules read on every turn by team agents and Boo Zero.
+            Rules are read on every turn by the team&apos;s agents and Boo Zero.
           </p>
         </div>
         <IconButton

@@ -206,7 +206,7 @@ interface PackSkill {
 ```
 
 - `files` is a map, so a pack can carry another agent file without a format change.
-- At deploy, Clawboo writes `SOUL.md` with the default personality added, `IDENTITY.md` with the agent's final name (a number is added when the name is taken), `TOOLS.md`, an `AGENTS.md` built from the team's routing and Clawboo's team instructions, and a `CLAWBOO.md` help file.
+- At deploy, Clawboo writes `SOUL.md` with the default personality added, `IDENTITY.md` with the agent's final name (a number is added when the name is taken), an `AGENTS.md` built from the team's routing and Clawboo's team instructions, and a `CLAWBOO.md` help file. On an OpenClaw member, the `TOOLS.md` text goes into `AGENTS.md` under `## Tools`; other runtimes do not get it.
 - `suggestedRuntime` and `defaultRuntime` are optional hints the team dialog uses to preselect a runtime. No pack sets them.
 
 ### Versions

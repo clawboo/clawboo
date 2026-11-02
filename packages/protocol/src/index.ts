@@ -102,6 +102,33 @@ export function withBrowsingGuidance(existing: string | undefined | null): strin
 }
 
 /**
+ * Move an agent's TOOLS.md notes into its AGENTS.md, for an OpenClaw Gateway.
+ *
+ * The 2026.9 Gateway no longer loads TOOLS.md into the agent's context and
+ * refuses `agents.files.set` for it, so writing the file there failed the whole
+ * create. OpenClaw's own upgrade (`openclaw doctor`) moves existing TOOLS.md
+ * notes into an AGENTS.md "## Tools" section; this does the same for a new
+ * agent, so the notes still reach the model on every Gateway version.
+ *
+ * APPENDS, like `withBrowsingGuidance`. A bare "# TOOLS" heading carries
+ * nothing and adds nothing, and content already present is not added twice.
+ */
+export function foldToolsIntoAgentsMd(
+  agentsMd: string | undefined | null,
+  toolsMd: string | undefined | null,
+): string {
+  const agents = agentsMd ?? ''
+  const body = (toolsMd ?? '')
+    .replace(/^\s*#\s+TOOLS\b[^\n]*\n?/i, '')
+    .trim()
+    // Keep the notes' own headings below the new "## Tools" heading.
+    .replace(/^(#{1,5}) /gm, '#$1 ')
+  if (!body || agents.includes(body)) return agents
+  const section = `## Tools\n\n${body}\n`
+  return agents.trim() ? `${agents.trimEnd()}\n\n${section}` : section
+}
+
+/**
  * The npm spec clawboo installs the OpenClaw Gateway with.
  *
  * TILDE, NOT CARET, and that is the whole point of this constant existing.
@@ -326,7 +353,7 @@ export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
   },
   'TOOLS.md': {
     title: 'TOOLS.md',
-    hint: 'Tool notes for the agent to read. Does not configure tools.',
+    hint: 'Tool notes. OpenClaw 2026.9 and later no longer read or accept this file; use AGENTS.md.',
   },
   'HEARTBEAT.md': {
     title: 'HEARTBEAT.md',
@@ -352,11 +379,12 @@ export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
  *   apps/web/server/lib/runtimes/personaBlock.ts). AGENTS.md is listed for its
  *   graph edges, a real effect even though no prompt sees the file.
  *
- * IDENTITY and TOOLS stay OpenClaw-only on purpose: wiring them would turn the
- * prompt into a second, undocumented context channel. An unlisted runtime falls
- * back to the full set: never hide a file we cannot prove is inert.
+ * IDENTITY stays OpenClaw-only on purpose, and TOOLS is listed nowhere: wiring
+ * them into other runtimes would turn the prompt into a second, undocumented
+ * context channel. An unlisted runtime falls back to the full set: never hide a
+ * file we cannot prove is inert.
  *
- * OpenClaw lists the four files clawboo itself seeds at agent creation
+ * OpenClaw lists the three files clawboo itself writes at agent creation
  * (openClawAgentSource.ts), not all seven. USER / HEARTBEAT / MEMORY are part
  * of OpenClaw's file set but clawboo neither creates nor reads them, so an
  * always-on editor for them promises an effect clawboo cannot stand behind.
@@ -364,7 +392,11 @@ export const AGENT_FILE_META: Record<AgentFileName, AgentFileMeta> = {
  * content, so a file a Gateway-side process wrote is never hidden.
  */
 export const AGENT_FILE_RUNTIME_SUPPORT: Readonly<Record<string, readonly AgentFileName[]>> = {
-  openclaw: ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'],
+  // No TOOLS.md: the 2026.9 Gateway that clawboo installs dropped it from the
+  // files it loads and refuses to read or write it. Clawboo folds TOOLS.md
+  // content into AGENTS.md at create instead (foldToolsIntoAgentsMd). An older
+  // Gateway's non-empty TOOLS.md still shows, by the content rule below.
+  openclaw: ['SOUL.md', 'IDENTITY.md', 'AGENTS.md'],
   'clawboo-native': ['SOUL.md', 'AGENTS.md'],
   // SOUL.md became real for the coding runtimes when clawboo started injecting
   // it as a `[Your persona]` block on both prompt paths (personaBlock.ts). That

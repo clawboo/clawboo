@@ -16,7 +16,7 @@
 
 import { accessSync, constants as fsConstants, existsSync, mkdirSync, statSync } from 'node:fs'
 
-import { resolveClawbooDir, loadSettings } from '@clawboo/config'
+import { isGatewayConfigured, resolveClawbooDir, loadSettings } from '@clawboo/config'
 import {
   integrityCheck,
   listTableNames,
@@ -32,7 +32,7 @@ import { getDb, getDbPath } from './db'
 import { DEFAULTS } from './defaults'
 import { probeMcpServer } from './mcpSupervisor'
 import { otlpConfigured } from './obs/obsFlags'
-import { getObsTracer, initOtel } from './obs/otel'
+import { getObsTracer, getOtelInitFailure, initOtel } from './obs/otel'
 import { readApiPortFile } from './portUtils'
 import { getRuntimeSecret, getVaultPaths, hasRuntimeSecret, setRuntimeSecret } from './secretsVault'
 
@@ -55,7 +55,10 @@ export interface BootConfig {
   budgetHardCapUsdCents: number | null
   budgetWarnSoftPct: number
   otelEnabledByDefault: boolean
-  /** Whether an OTLP endpoint is actually configured this boot (vs the default). */
+  /** Whether an OTLP endpoint is configured this boot (vs the default). */
+  otelConfigured: boolean
+  /** Whether the OTLP exporter actually started this boot. A configured endpoint
+   *  is not enough: the npm package does not ship the OpenTelemetry SDK. */
   otelActive: boolean
 }
 
@@ -274,8 +277,10 @@ async function readGatewayConnection(timeoutMs: number): Promise<string> {
  */
 async function probeGatewayConnection(): Promise<CheckOutcome> {
   const settings = loadSettings(process.env)
-  if (!settings.gatewayUrl) {
-    return { ok: true, message: 'OpenClaw Gateway not configured (skipped)' }
+  // `gatewayUrl` is never empty (loadSettings falls back to the default local
+  // address), so on its own it read every install without OpenClaw as degraded.
+  if (!settings.gatewayUrl || !isGatewayConfigured(process.env)) {
+    return { ok: true, message: 'OpenClaw Gateway not set up on this machine (skipped)' }
   }
   const timeoutMs = checkGatewayProbeTimeoutMs()
   const deadline = Date.now() + timeoutMs
@@ -303,6 +308,13 @@ async function probeOtel(): Promise<CheckOutcome> {
   await initOtel()
   if (getObsTracer() !== null) {
     return { ok: true, message: 'OTel exporter initialized' }
+  }
+  if (getOtelInitFailure() === 'sdk-missing') {
+    return {
+      ok: false,
+      message:
+        'OTel endpoint configured, but this install does not include the OpenTelemetry SDK, so nothing is exported. Runs are still recorded in the local event log',
+    }
   }
   return {
     ok: false,
@@ -475,7 +487,9 @@ async function runBootProbeInner(input: { port?: number } = {}): Promise<BootRep
       budgetHardCapUsdCents: DEFAULTS.budgetHardCapUsdCents,
       budgetWarnSoftPct: DEFAULTS.budgetWarnSoftPct,
       otelEnabledByDefault: DEFAULTS.otelEnabledByDefault,
-      otelActive: otlpConfigured(),
+      otelConfigured: otlpConfigured(),
+      // Read after the OTel check above has run initOtel().
+      otelActive: getObsTracer() !== null,
     },
     resolved: {
       clawbooHome,

@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, getSetting, teams } from '@clawboo/db'
+import { agents, getScheduledRun, getSetting, registerScheduledRun, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -187,6 +187,64 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     const list = mockRes()
     await agentsListGET(req(), list.res)
     expect((list.body() as { pendingDeleteIds: string[] }).pendingDeleteIds).toEqual([])
+  })
+
+  it("DELETE /api/agents/:id removes the agent's routines and leaves other routines alone", async () => {
+    const db = getDb()
+    const routineFor = (agentId: string) => {
+      const r = registerScheduledRun(db, {
+        agentId,
+        teamId: 't1',
+        cronSpec: '0 9 * * *',
+        taskTemplate: JSON.stringify({ title: 'Daily report', kind: 'research', priority: 0 }),
+        nextRunAt: Date.now() + 60_000,
+      })
+      if (!r.ok) throw new Error(r.reason)
+      return r.run.id
+    }
+
+    const create = mockRes()
+    await agentsCreatePOST(
+      req({ body: { name: 'Routine Owner', sourceId: 'clawboo-native' } }),
+      create.res,
+    )
+    const nativeId = (create.body() as { agent: { id: string } }).agent.id
+    const nativeRoutine = routineFor(nativeId)
+    const openClawRoutine = routineFor('a1')
+    const teamRoutine = routineFor('')
+
+    // The source's own hard delete.
+    const delNative = mockRes()
+    await agentsDELETE(req({ params: { agentId: nativeId } }), delNative.res)
+    expect(delNative.status()).toBe(200)
+    expect(getScheduledRun(db, nativeRoutine)).toBeNull()
+    expect(getScheduledRun(db, openClawRoutine)).not.toBeNull()
+
+    // The disconnected fallback (SQLite-only cleanup) takes them too.
+    const delOpenClaw = mockRes()
+    await agentsDELETE(req({ params: { agentId: 'a1' } }), delOpenClaw.res)
+    expect((delOpenClaw.body() as { upstreamDeleted: boolean }).upstreamDeleted).toBe(false)
+    expect(getScheduledRun(db, openClawRoutine)).toBeNull()
+
+    // A team routine targets no agent and survives both.
+    expect(getScheduledRun(db, teamRoutine)).not.toBeNull()
+  })
+
+  it("cleanup-ghosts removes a swept agent's routines", async () => {
+    const db = getDb()
+    const r = registerScheduledRun(db, {
+      agentId: 'a1',
+      teamId: 't1',
+      cronSpec: '0 9 * * *',
+      taskTemplate: JSON.stringify({ title: 'Daily report', kind: 'research', priority: 0 }),
+      nextRunAt: Date.now() + 60_000,
+    })
+    if (!r.ok) throw new Error(r.reason)
+
+    const sweep = mockRes()
+    agentsCleanupPOST(req({ body: { liveAgentIds: ['main'] } }), sweep.res)
+    expect((sweep.body() as { deleted: number }).deleted).toBe(1)
+    expect(getScheduledRun(db, r.run.id)).toBeNull()
   })
 
   it('GET /api/agents/registry/health always 200 (reports disconnected)', async () => {

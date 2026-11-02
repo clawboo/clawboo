@@ -172,16 +172,6 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **Status:** open.
 
-### OpenClaw ignores TOOLS.md
-
-**What you see:** an OpenClaw agent's **Agent Files** include a **TOOLS** tab, but what you write there changes nothing.
-
-**What it affects:** OpenClaw 2026.9 and later, the line Clawboo installs, does not load TOOLS.md.
-
-**What to do:** put tool guidance in the agent's AGENTS.md. See [Agents](/using/agents).
-
-**Status:** open.
-
 ## Teams and Boo Zero
 
 ### Archived teams cannot be restored from the dashboard
@@ -201,33 +191,13 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 **Status:** open.
 
-### Boo Zero's Global Brief is not used
+### Refresh Protocol needs an OpenClaw Gateway, even without OpenClaw agents
 
-**What you see:** what you write in **Details** > **Brief** on Boo Zero's page has no effect on what Boo Zero does.
+**What you see:** **Refresh Protocol** on a team reports **Not connected to Gateway**.
 
-**What it affects:** Clawboo saves the Global Brief, but no chat or task sends it to Boo Zero, whatever the description above the box says.
+**What it affects:** it runs only while the dashboard is connected to an OpenClaw Gateway, even for teams with no OpenClaw members.
 
-**What to do:** for guidance Boo Zero must follow in a team, add a [team rule](/using/teams). In Boo Zero's own chat, start a message with @ and a team's name to bring that team's brief into the message. See [What Boo Zero reads](/using/boo-zero).
-
-**Status:** open.
-
-### Saving SOUL.md can overwrite custom personality instructions
-
-**What you see:** after you edit and save SOUL.md under **Agent Files**, your custom personality instructions are gone from the file the agent follows.
-
-**What it affects:** while custom instructions are on, the SOUL tab shows the slider personality instead of your text. Saving that tab writes the slider text over your custom instructions.
-
-**What to do:** while custom instructions are on, change the personality only in the **Personality** section. If it happens, click in your custom instructions and press `Cmd/Ctrl+S` to write them back. See [Agents](/using/agents).
-
-**Status:** open.
-
-### Two team actions need an OpenClaw Gateway, even without OpenClaw agents
-
-**What you see:** **Refresh Protocol** on a team reports **Not connected to Gateway**, and **Remove Connection** on a route on the Org chart does nothing.
-
-**What it affects:** both actions run only while the dashboard is connected to an OpenClaw Gateway, even for teams with no OpenClaw members. Adding a route works without one.
-
-**What to do:** connect a Gateway, or remove the route line from the agent's AGENTS.md on its page. See [Org chart and team graphs](/using/org-chart) and [Teams](/using/teams).
+**What to do:** connect a Gateway, or edit each agent's AGENTS.md on its page. See [Teams](/using/teams).
 
 **Status:** open.
 
@@ -245,7 +215,7 @@ With an access token set, send your access cookie too. See [Teams](/using/teams)
 
 ### OpenTelemetry export does nothing on an npm install
 
-**What you see:** with `OTEL_EXPORTER_OTLP_ENDPOINT` set, no traces reach your collector, and **System Health** shows the **OTel exporter** check as **Degraded**, even though its observability line reads **OTel exporter active**.
+**What you see:** with `OTEL_EXPORTER_OTLP_ENDPOINT` set, no traces reach your collector. **System Health** shows the **OTel exporter** check as **Degraded**, saying the install does not include the OpenTelemetry SDK, and its observability line reads "local event log (OTLP endpoint set, exporter not running)".
 
 **What it affects:** the npm package does not include the OpenTelemetry SDK, so the exporter cannot load. Traces stay in Clawboo's own event log, where the Observability panel shows them.
 
@@ -343,6 +313,13 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server    |
 | With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart |
 | With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display   |
+| On OpenClaw 2026.9, **Create Boo** and Marketplace deploys of OpenClaw agents fail partway, because Clawboo wrote a TOOLS.md that Gateway refuses                                                     | OpenClaw  |
+| Saving SOUL.md while custom personality instructions are on writes the slider personality over them                                                                                                   | Agents    |
+| Deleting an agent leaves its routines behind, and each one fails with `agent ... not found`                                                                                                           | Routines  |
+| Removing a route on the Org chart does nothing without an OpenClaw Gateway, and the empty Org chart says to connect one                                                                               | Org chart |
+| **System Health** reads degraded on an install that never set up OpenClaw, and says "OTel exporter active" when nothing is exported                                                                   | Health    |
+| Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools     |
+| Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero  |
 
 ## Related
 

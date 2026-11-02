@@ -27,6 +27,7 @@ export interface BootConfig {
   budgetHardCapUsdCents: number | null
   budgetWarnSoftPct: number
   otelEnabledByDefault: boolean
+  otelConfigured: boolean
   otelActive: boolean
 }
 

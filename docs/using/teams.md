@@ -241,7 +241,7 @@ Rules apply from the next turn in the team's chats, not to replies already sent.
 
 <Accordion title="Under the hood">
 
-- **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, a TOOLS.md, and an AGENTS.md that lists the teammates and how to hand them work. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
+- **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, and an AGENTS.md that lists the teammates and how to hand them work. On an OpenClaw member, AGENTS.md also carries the catalog's tool notes. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
 - **OpenClaw config.** If any member's routing names a teammate, Clawboo turns on agent-to-agent messaging in the OpenClaw Gateway's config.
 - **API calls.** `PATCH /api/teams/:id` renames a team, changes its Leader, or brings back an archived team. It takes any of `name`, `icon`, `color`, `colorCollectionId`, `leaderAgentId` (an agent id, or `null` for no Leader) and `isArchived`. To find an archived team's id, call `GET /api/teams?includeArchived=true`. An unarchived team returns to the team rail after you reload the page.
 

@@ -1,8 +1,8 @@
 // Boot probe: each check in isolation against a sandboxed fresh ~/.clawboo, the
 // master-key boot-sentinel write-on-first / decrypt-on-subsequent round-trip, the
-// rotated-key degrade, and the api-port-file match. No Gateway runs, so the gateway
-// check degrades (stale) — exactly the brief's degraded-boot scenario — and the
-// report is still ok (no fatal checks).
+// rotated-key degrade, and the api-port-file match. No Gateway runs: the gateway
+// check skips on a sandbox with no OpenClaw set up, and degrades (stale) once an
+// OpenClaw config exists. The report stays ok either way (no fatal checks).
 
 import { chmodSync, mkdirSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -91,9 +91,20 @@ describe('runBootProbe (fresh install)', () => {
     expect(report.fatal).toEqual([]) // still not fatal
   })
 
-  it('degrades the OpenClaw Gateway check (stale) when no Gateway is reachable, but stays ok', async () => {
+  it('skips the OpenClaw Gateway check on an install that never set OpenClaw up', async () => {
     const report = await runBootProbe({ port: 18790 })
-    // The default gatewayUrl resolves but nothing is listening → degraded, not fatal.
+    // loadSettings still answers with the default address; that alone must not
+    // read an install without OpenClaw as degraded.
+    expect(checkById(report, 'openclawGatewayReachable')?.ok).toBe(true)
+    expect(checkById(report, 'openclawGatewayReachable')?.message).toContain('skipped')
+    expect(report.degraded).not.toContain('openclawGatewayReachable')
+  })
+
+  it('degrades the OpenClaw Gateway check (stale) when OpenClaw is set up but unreachable, but stays ok', async () => {
+    mkdirSync(path.join(home, '.openclaw'), { recursive: true })
+    writeFileSync(path.join(home, '.openclaw', 'openclaw.json'), '{}')
+    const report = await runBootProbe({ port: 18790 })
+    // OpenClaw's config exists but nothing is listening → degraded, not fatal.
     expect(checkById(report, 'openclawGatewayReachable')?.ok).toBe(false)
     expect(report.degraded).toContain('openclawGatewayReachable')
     expect(report.fatal).toEqual([])

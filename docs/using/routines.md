@@ -184,16 +184,16 @@ When an agent task's run fails, its task is set aside in **Needs you** on the bo
 
 Two outcomes are not failures and leave the routine running: another agent had already claimed the task, or you moved the task's card on the board while the agent worked on it.
 
-| Error                                                                                    | Cause                                                               | Fix                                                                                                                      |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `dispatch refused: budget_paused` (on OpenClaw, `budget_paused:` and the budget's scope) | A hard-cap budget the agent falls under is paused                   | Raise or resume the budget in **Governance**, then resume the routine. See [Budgets and spend](/using/budgets-and-spend) |
-| The team budget is paused at its hard cap, so this run did not start. (or agent)         | A team routine's message was refused by a paused hard-cap budget    | Raise or resume the budget in **Governance**, then resume the routine                                                    |
-| `gateway_disconnected`                                                                   | An OpenClaw agent's routine ran while the Gateway was not connected | Connect the Gateway (see [OpenClaw](/runtimes/openclaw)), then resume the routine                                        |
-| The team has no active members.                                                          | Nobody was on the team to take the message                          | Add an agent to the team, then resume the routine                                                                        |
-| The team this routine posts to no longer exists.                                         | The team was deleted                                                | Edit the routine to send it somewhere else, or delete it                                                                 |
-| The team "..." is archived.                                                              | The team was archived                                               | Edit the routine to send it to another team, or delete it                                                                |
-| `agent ... not found`, or The agent "..." was removed.                                   | The agent was deleted, or removed from the OpenClaw Gateway         | Edit the routine to send it to another agent, or delete it                                                               |
-| Starts with `run`                                                                        | The agent's run itself failed or timed out                          | Open the task (**View task** in **Recent runs**) to see what went wrong                                                  |
+| Error                                                                                    | Cause                                                                                                        | Fix                                                                                                                      |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `dispatch refused: budget_paused` (on OpenClaw, `budget_paused:` and the budget's scope) | A hard-cap budget the agent falls under is paused                                                            | Raise or resume the budget in **Governance**, then resume the routine. See [Budgets and spend](/using/budgets-and-spend) |
+| The team budget is paused at its hard cap, so this run did not start. (or agent)         | A team routine's message was refused by a paused hard-cap budget                                             | Raise or resume the budget in **Governance**, then resume the routine                                                    |
+| `gateway_disconnected`                                                                   | An OpenClaw agent's routine ran while the Gateway was not connected                                          | Connect the Gateway (see [OpenClaw](/runtimes/openclaw)), then resume the routine                                        |
+| The team has no active members.                                                          | Nobody was on the team to take the message                                                                   | Add an agent to the team, then resume the routine                                                                        |
+| The team this routine posts to no longer exists.                                         | The team was deleted                                                                                         | Edit the routine to send it somewhere else, or delete it                                                                 |
+| The team "..." is archived.                                                              | The team was archived                                                                                        | Edit the routine to send it to another team, or delete it                                                                |
+| `agent ... not found`, or The agent "..." was removed.                                   | The agent was removed from the OpenClaw Gateway outside Clawboo, or deleted by an earlier version of Clawboo | Edit the routine to send it to another agent, or delete it                                                               |
+| Starts with `run`                                                                        | The agent's run itself failed or timed out                                                                   | Open the task (**View task** in **Recent runs**) to see what went wrong                                                  |
 
 An OpenClaw cron job is different: the Gateway owns it, so a failed run shows **failed** but the job stays enabled.
 
@@ -288,7 +288,7 @@ Hover the button to see why. A paused or stopped routine must be resumed before 
 
 <Accordion title="A row reads Team not found or Agent not found">
 
-The team or agent the routine points at was deleted after the routine was made, so its next run will fail. Edit the routine to send it somewhere else, or delete it.
+The team the routine points at was deleted, or its agent was removed from the OpenClaw Gateway outside Clawboo, so its next run will fail. Edit the routine to send it somewhere else, or delete it. Deleting an agent in Clawboo deletes its routines with it.
 
 </Accordion>
 

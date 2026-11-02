@@ -28,7 +28,7 @@ A failed check never stops Clawboo. The server keeps running, so you can read th
 
 ## Read the panel
 
-- **The header pill** sums up the checks: **All systems go**, **N degraded** or **N fatal**. If you don't use OpenClaw, expect **1 degraded** from the **OpenClaw Gateway** check (see [Fix a failing check](#fix-a-failing-check)).
+- **The header pill** sums up the checks: **All systems go**, **N degraded** or **N fatal**.
 - **A banner** appears when a check fails. "Running degraded." means some optional parts are unavailable and the rest of Clawboo works normally. "The install has a fatal problem." means Clawboo cannot work properly until you fix it. The banner points you to the failing check, and to resetting `~/.clawboo` only as the last resort.
 - **Checks** lists each check with an **OK**, **Degraded** or **Fatal** pill, how long it took, and a one-line result. A failed check also shows its details: what went wrong, often with the file or setting involved.
 - **Runtime state** and **Production defaults** show what this server is using (see [Runtime state and defaults](#runtime-state-and-defaults)).
@@ -46,8 +46,8 @@ The checks run in this order. Three of them are fatal when they fail, because no
 | **Database schema**           | Every table and column Clawboo needs is in the database                                                                                                       | Fatal         |
 | **API port file**             | The port file names the port this server listens on                                                                                                           | Degraded      |
 | **MCP servers**               | Clawboo's four tool servers start and answer: tasks (the board), memory, tools (connected apps) and teamchat (messages between agents)                        | Degraded      |
-| **OpenClaw Gateway**          | Clawboo's server is connected to the OpenClaw Gateway. Without a running Gateway it always reads **Degraded**, even if you don't use OpenClaw                 | Degraded      |
-| **OTel exporter**             | The OpenTelemetry exporter loaded. Passes as disabled when no endpoint is set                                                                                 | Degraded      |
+| **OpenClaw Gateway**          | Clawboo's server is connected to the OpenClaw Gateway. Passes as skipped when OpenClaw was never set up on this computer                                      | Degraded      |
+| **OTel exporter**             | The OpenTelemetry exporter started. Passes as disabled when no endpoint is set                                                                                | Degraded      |
 
 ## Fix a failing check
 
@@ -128,7 +128,9 @@ If the result says the vault is unreadable instead, the details give the reason,
 
 <Accordion title="OpenClaw Gateway is Degraded">
 
-**What it means:** Clawboo's server was not connected to the OpenClaw Gateway when the checks ran. The result reads "OpenClaw Gateway not reachable", followed by the connection state, and the details give the Gateway's address. If you don't use OpenClaw, this is expected and harmless: Clawboo checks for a Gateway at its default address on every start, so the check reads **Degraded** and the panel says "Running degraded." even though nothing is wrong. If you do use OpenClaw, your OpenClaw agents still show as they were at the last sync but cannot take work. Your other runtimes are not affected.
+**What it means:** Clawboo's server was not connected to the OpenClaw Gateway when the checks ran. The result reads "OpenClaw Gateway not reachable", followed by the connection state, and the details give the Gateway's address. Your OpenClaw agents still show as they were at the last sync but cannot take work. Your other runtimes are not affected.
+
+The check runs only when OpenClaw is set up on this computer: Clawboo's settings name a Gateway, or OpenClaw's own `openclaw.json` exists. Otherwise it passes as "OpenClaw Gateway not set up on this machine (skipped)". If OpenClaw is installed but you don't use it, this check reads **Degraded** whenever its Gateway is not running, and that is harmless.
 
 **Fix:** if you use OpenClaw, start or reconnect the Gateway in **Settings** > **Runtimes** > **OpenClaw** (**Reconnect**, or **Manage** > **Restart**), then click **Re-run probe**. The check reflects the moment the checks ran, so a Gateway that started afterwards reads **Degraded** until you run them again. [OpenClaw](/runtimes/openclaw) covers the Gateway's own errors.
 
@@ -136,7 +138,7 @@ If the result says the vault is unreadable instead, the details give the reason,
 
 <Accordion title="OTel exporter is Degraded">
 
-**What it means:** an OpenTelemetry endpoint is set (`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), but the exporter failed to load. Traces stay in Clawboo's own log. On an install from npm this is expected: the package does not include the OpenTelemetry SDK.
+**What it means:** an OpenTelemetry endpoint is set (`OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`), but the exporter did not start. Traces stay in Clawboo's own log. On an install from npm this is expected: the package does not include the OpenTelemetry SDK, and the result says so.
 
 **Fix:** to clear the warning, unset both variables and restart Clawboo. To export traces, run Clawboo where the SDK is installed, such as a source checkout. See [Export traces with OpenTelemetry](/using/observability#export-traces-with-opentelemetry).
 
@@ -163,7 +165,7 @@ If the result says the vault is unreadable instead, the details give the reason,
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **log level**      | Always `info`, the shipped level. Setting `LOG_LEVEL` changes what the server logs, but not this row                                                                                                      |
 | **budget posture** | Always "track-and-warn (no global hard cap; warns at 80%)". It does not reflect your budgets: a hard cap you set in **Governance** does not show here (see [Budgets and spend](/using/budgets-and-spend)) |
-| **observability**  | "local event log (OTel opt-in)", or "OTel exporter active" whenever an OpenTelemetry endpoint is set, even if the exporter failed to load. The **OTel exporter** check is the one to trust                |
+| **observability**  | "OTel exporter active" when the exporter started, "local event log (OTLP endpoint set, exporter not running)" when an endpoint is set but it did not start, and "local event log (OTel opt-in)" otherwise |
 
 <Accordion title="Under the hood">
 

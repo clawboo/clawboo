@@ -14,6 +14,7 @@ import {
   appendAudit,
   costRecords,
   approvalHistory,
+  deleteScheduledRunsForAgent,
   evaluateInjection,
   injectionAuditSummary,
   settings,
@@ -37,6 +38,7 @@ import {
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForAgentLike } from '../lib/teamChat/nativeTeamSession'
+import { getRoutinesTicker } from '../lib/routines/ticker'
 
 // The source throws Error('gateway_disconnected') when a write/file/session op
 // needs a live Gateway but the server-side connection is down.
@@ -476,11 +478,20 @@ function perAgentSettingKeys(agentId: string): string[] {
 //   - cost_records.agent_id  → ON DELETE NO ACTION (no cascade), so must
 //     remove first to satisfy FK.
 //   - approval_history.agent_id → same.
+// and the routines that target it (scheduled_runs holds only a soft reference).
 //
 // The owning source deletes the agent from its runtime first (for OpenClaw,
 // the Gateway's `agents.delete`). Without the local cleanup, deleted agents
 // leave permanent ghost rows in SQLite that inflate per-team `agentCount` and
 // pollute namespace checks.
+
+/** A deleted agent's routines go with it, or each one fails on every fire. */
+function deleteAgentRoutines(agentIds: readonly string[]): void {
+  const db = getDb()
+  let removed = 0
+  for (const id of agentIds) removed += deleteScheduledRunsForAgent(db, id)
+  if (removed > 0) getRoutinesTicker()?.requestRescan()
+}
 
 function deleteLocalAgentRows(agentId: string): void {
   const db = getDb()
@@ -496,6 +507,7 @@ function deleteLocalAgentRows(agentId: string): void {
     .where(like(settings.key, nativeTeamSessionKeysForAgentLike(agentId)))
     .run()
   db.delete(agents).where(eq(agents.id, agentId)).run()
+  deleteAgentRoutines([agentId])
 }
 
 export async function agentsDELETE(req: Request, res: Response): Promise<void> {
@@ -513,6 +525,7 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
     const source = sourceForAgent(agentId)
     try {
       await source.archiveAgent(agentId)
+      deleteAgentRoutines([agentId])
       res.json({ ok: true, upstreamDeleted: true })
     } catch (err) {
       if (isDisconnected(err)) {
@@ -593,6 +606,7 @@ export function agentsCleanupPOST(req: Request, res: Response): void {
       db.delete(settings).where(inArray(settings.key, settingKeys)).run()
     }
     db.delete(agents).where(inArray(agents.id, toDelete)).run()
+    deleteAgentRoutines(toDelete)
 
     // Sanity-log how many remain — useful when debugging via curl.
     const remaining = db

@@ -8,7 +8,7 @@
 // GatewayClient + the proxy-device `signConnect`; tests pass a fake). This is the
 // "who exists" layer — it never touches RuntimeAdapter ("how they run").
 
-import { withBrowsingGuidance } from '@clawboo/protocol'
+import { foldToolsIntoAgentsMd, withBrowsingGuidance } from '@clawboo/protocol'
 import {
   agents,
   approvalHistory,
@@ -1059,9 +1059,17 @@ export class OpenClawAgentSource implements AgentSource {
     // AGENTS.md rather than TOOLS.md on purpose: TOOLS.md is dropped from the
     // Gateway's bootstrap allowlist in the 2026.9 line, so guidance filed there
     // would stop reaching the model on upgrade with nothing on screen to say so.
+    //
+    // TOOLS.md itself is never sent. The 2026.9 Gateway answers
+    // `agents.files.set` for it with "unsupported file", which failed the create
+    // after the agent already existed upstream, before AGENTS.md or the exec
+    // posture below were written. Its notes (a Marketplace member's skill list)
+    // go into AGENTS.md instead, as `openclaw doctor` does on upgrade.
     const files = { ...(input.files ?? {}) }
-    files['AGENTS.md'] = withBrowsingGuidance(files['AGENTS.md'])
-    for (const name of ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'] as const) {
+    files['AGENTS.md'] = withBrowsingGuidance(
+      foldToolsIntoAgentsMd(files['AGENTS.md'], files['TOOLS.md']),
+    )
+    for (const name of ['SOUL.md', 'IDENTITY.md', 'AGENTS.md'] as const) {
       const content = files[name]
       if (content) await client.agents.files.set(agentId, name, content)
     }

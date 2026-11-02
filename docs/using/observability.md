@@ -201,7 +201,7 @@ Clawboo can also send its traces to an OpenTelemetry collector, such as Jaeger. 
 
 </Note>
 
-To check whether export started, open **Settings** > **System Health** and read the **OTel exporter** check. "OTel exporter initialized" means it loaded. A **Degraded** check means it did not. Trust the check, not the **observability** row further down: that row reads **OTel exporter active** whenever an endpoint is set, even when the exporter failed to load.
+To check whether export started, open **Settings** > **System Health** and read the **OTel exporter** check. "OTel exporter initialized" means it started. A **Degraded** check means it did not, and on an npm install it says the OpenTelemetry SDK is not included. The **observability** row further down agrees: it reads **OTel exporter active** only when the exporter started.
 
 ## Troubleshooting
 

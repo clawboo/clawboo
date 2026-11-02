@@ -727,6 +727,11 @@ export function CreateTeamModal({
         // neither exists in the catalog. Handing the pack's map straight to
         // `createAgent` would drop the team protocol docs the orchestration
         // contract depends on.
+        // Runtime routing: each agent runs on its resolved runtime (per-agent
+        // override, else the catalog default). A native LEADER (the team-internal
+        // lead that also resolved to native) gets the leader prompt + tier.
+        const sourceId = agentSourceIdFor(agent.id)
+
         const files = {
           soul: soulWithPersonality,
           identity: rewriteTemplateName(
@@ -734,15 +739,14 @@ export function CreateTeamModal({
             agent.name,
             finalAgentName,
           ),
-          tools: agent.files[AGENT_FILE.tools] ?? '',
+          // The skill list goes to OpenClaw members only, where the server moves
+          // it into AGENTS.md (the 2026.9 Gateway no longer reads TOOLS.md).
+          // Every other runtime would only store it in a file nothing reads.
+          tools: sourceId === 'openclaw' ? (agent.files[AGENT_FILE.tools] ?? '') : '',
           agents: enhancedAgentsMd,
           clawboo: clawbooHelpDoc,
         }
 
-        // Runtime routing: each agent runs on its resolved runtime (per-agent
-        // override, else the catalog default). A native LEADER (the team-internal
-        // lead that also resolved to native) gets the leader prompt + tier.
-        const sourceId = agentSourceIdFor(agent.id)
         const isNativeLeader =
           sourceId === 'clawboo-native' && effectiveLeaderAgent?.id === agent.id
 
