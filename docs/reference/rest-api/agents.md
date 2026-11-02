@@ -465,8 +465,8 @@ curl -X DELETE http://localhost:18790/api/agents/<agent-id>
 Moves the agent to another team. It is what **Move to team** on the Org chart and team graphs sends. Everything below changes together in one transaction, or nothing does:
 
 - The agent's `teamId` becomes the new team.
-- Its tasks on the old team that nobody has started (`backlog`, `todo` or `blocked`), whether assigned or handed to it, lose their assignee and stay on the old team's board, unassigned. Tasks in review, done or cancelled stay on the old board with the agent still named on them.
-- Its own routines, the agent routines that target it, move to the new team. Team routines are not touched.
+- Its tasks on the old team that nobody has started (`backlog`, `todo` or `blocked`), whether assigned or handed to it, lose their assignee and stay on the old team's board, unassigned. Done and cancelled tasks stay on the old board with the agent still named on them.
+- Its own routines, the agent routines that target it, move to the new team, except one bound to a specific task (`teamTaskId` in its template): that task is on the old team, so the routine is paused there instead. Team routines are not touched.
 - Its memberships in the old team's chat rooms are removed.
 - Its resume pointers for the old team, in General and in each room, are cleared.
 
@@ -479,7 +479,7 @@ Not moved: the files it saved in the old team's folder (from its next run it wor
 
 ### Responses
 
-**`200 OK`**: the agent moved. `fromTeamId` is `null` for an agent that had no team. `tasksHandedBack` counts the unstarted tasks left unassigned on the old board, and `routinesMoved` the agent's routines now on the new team:
+**`200 OK`**: the agent moved. `fromTeamId` is `null` for an agent that had no team. `tasksHandedBack` counts the unstarted tasks left unassigned on the old board, `routinesMoved` the agent's routines now on the new team, and `routinesPaused` its routines bound to an old-team task, paused on the old team:
 
 ```json
 {
@@ -487,7 +487,8 @@ Not moved: the files it saved in the old team's folder (from its next run it wor
   "fromTeamId": "<old-team-id>",
   "toTeamId": "<team-id>",
   "tasksHandedBack": 2,
-  "routinesMoved": 1
+  "routinesMoved": 1,
+  "routinesPaused": 0
 }
 ```
 
@@ -507,7 +508,7 @@ Not moved: the files it saved in the old team's folder (from its next run it wor
 | `agent_is_boo_zero` | The agent is Boo Zero, which leads every team and joins none              |
 | `team_archived`     | The team to move to is archived                                           |
 | `agent_leads_team`  | The agent is its team's Leader; choose another Leader for that team first |
-| `agent_busy`        | The agent has a task in progress; try again when it finishes              |
+| `agent_busy`        | The agent has a task in progress or in review; try again when it is done  |
 
 **`500 Internal Server Error`**: any other failure:
 

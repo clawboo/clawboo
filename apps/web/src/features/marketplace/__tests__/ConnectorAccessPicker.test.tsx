@@ -21,7 +21,12 @@ const CONNECTOR_ID = 'conn:connector:clawboo:mcp:linear'
 const agent = (id: string, name: string, runtime: string) =>
   ({ id, name, runtime, teamId: 't' }) as AgentState
 
-let grants: { subjectKind: string; subjectId: string; connectorId: string; revokedAt: null }[] = []
+let grants: {
+  subjectKind: string
+  subjectId: string
+  connectorId: string
+  revokedAt: number | null
+}[] = []
 let posted: Record<string, unknown>[] = []
 
 beforeEach(() => {
@@ -134,5 +139,51 @@ describe('ConnectorAccessPicker', () => {
     await screen.findByTestId('connector-access-picker')
     await new Promise((r) => setTimeout(r, 50))
     expect(posted).toEqual([])
+  })
+
+  it('does not restore access a person took away, even when the agent asks again', async () => {
+    // Re-sharing reactivates a revoked grant. Granting on the agent's say-so
+    // would quietly undo the revoke, so a revoked row stops the automatic grant
+    // and leaves the agent preselected for one deliberate click.
+    grants = [
+      ...grants,
+      { subjectKind: 'agent', subjectId: 'writer', connectorId: CONNECTOR_ID, revokedAt: 1 },
+    ]
+    const user = userEvent.setup()
+    render(
+      <ConnectorAccessPicker
+        def={LINEAR}
+        connected
+        askFor={{ agentId: 'writer', agentName: 'Writer' }}
+      />,
+    )
+    expect(await screen.findByText('Access taken back')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 50))
+    expect(posted).toEqual([])
+    expect(screen.getByRole('checkbox', { name: /Writer/ })).toBeChecked()
+
+    await user.click(screen.getByRole('button', { name: 'Give access' }))
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]).toMatchObject({ subjectId: 'writer' })
+  })
+
+  it('never picks or grants an OpenClaw agent that asked', async () => {
+    const user = userEvent.setup()
+    render(
+      <ConnectorAccessPicker
+        def={LINEAR}
+        connected
+        askFor={{ agentId: 'claw', agentName: 'Claw' }}
+      />,
+    )
+    const claw = await screen.findByRole('checkbox', { name: /Claw/ })
+    expect(claw).not.toBeChecked()
+    expect(claw).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Give access' })).toBeDisabled()
+
+    await user.click(screen.getByRole('checkbox', { name: /Writer/ }))
+    await user.click(screen.getByRole('button', { name: 'Give access' }))
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted.map((p) => p['subjectId'])).toEqual(['writer'])
   })
 })

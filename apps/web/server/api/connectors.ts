@@ -373,6 +373,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       ...(def.launch.perAgentProfileFlag
         ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
         : {}),
+      ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,

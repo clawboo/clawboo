@@ -17,7 +17,7 @@ import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import type { Grant, GrantState, StandingRule } from '@clawboo/governance'
 
 import { immediateWrite, withWriteRetry } from '../board/contention'
-import type { ClawbooDb } from '../db'
+import { getSetting, setSetting, type ClawbooDb } from '../db'
 import {
   approvalRules,
   capabilityGrants,
@@ -534,6 +534,30 @@ export interface MintStandingRuleInput {
   /** Epoch ms. Required: the matcher treats a null expiry as immortal. */
   expiresAt: number
   createdFromApprovalId?: string | null
+}
+
+/** Set once the allow rules from before remembered external changes are gone. */
+export const REMEMBERED_CHANGES_RULES_FLAG = 'approval-rules:remember-external-changes:v1'
+
+/**
+ * Delete every standing allow rule saved before an Always could stand in for
+ * the external-change prompt, once per database.
+ *
+ * Until then an Always on an external change minted a rule that changed
+ * nothing: the broker's risk check asked again on every call, and the docs
+ * said so. Those rules now answer that prompt, and some were minted for tools
+ * that were destructive then and are plain writes now (Playwright's navigate
+ * and click). None was given with that meaning, so none may carry it. Deny
+ * rules stay. Rules minted after this point are kept. Returns how many it
+ * deleted, so the caller can say so once.
+ */
+export function retireRulesFromBeforeRememberedChanges(db: ClawbooDb): number {
+  if (getSetting(db, REMEMBERED_CHANGES_RULES_FLAG) !== null) return 0
+  const deleted = withWriteRetry(
+    () => db.delete(approvalRules).where(eq(approvalRules.decision, 'allow')).run().changes,
+  )
+  setSetting(db, REMEMBERED_CHANGES_RULES_FLAG, String(Date.now()))
+  return deleted
 }
 
 export function mintStandingRule(db: ClawbooDb, input: MintStandingRuleInput): DbApprovalRule {

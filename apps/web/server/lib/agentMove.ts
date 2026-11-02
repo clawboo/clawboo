@@ -6,9 +6,16 @@
 // still bound to it would fire into the old team's chat, and its routines would
 // keep posting work there. Everything below changes together or not at all.
 //
+// Refused while the agent holds a locked task (in progress, or in review: a
+// failed check with retries left sends that back to in progress with the same
+// assignee, so the agent would rerun old-team work after the move).
+//
 // What stays where it is, on purpose:
-// - Finished and in-review tasks stay on the old team's board, with the agent
-//   still named on them, as the record of who did the work.
+// - Finished tasks stay on the old team's board, with the agent still named on
+//   them, as the record of who did the work.
+// - A routine bound to one specific team task. That task lives on the old team
+//   and the fire would still run it, for an agent that left, so the routine is
+//   paused where it is for a person to re-point or delete.
 // - The team's folder on disk. The agent starts in the new team's folder from
 //   its next run; files it saved in the old one stay with that team.
 // - Memory and budgets scoped to the old team. Budgets set on the agent itself
@@ -25,8 +32,8 @@ import {
   teams,
   type ClawbooDb,
 } from '@clawboo/db'
-import { delegationTargetOf } from '@clawboo/board-core'
-import { and, eq, inArray, like, or } from 'drizzle-orm'
+import { delegationTargetOf, isLocked, type TaskStatus } from '@clawboo/board-core'
+import { and, eq, inArray, like, ne, or } from 'drizzle-orm'
 
 import { nativeTeamSessionSettingKey } from './teamChat/nativeTeamSession'
 
@@ -39,6 +46,8 @@ export type MoveAgentResult =
       tasksHandedBack: number
       /** The agent's own routines, now posting to the new team. */
       routinesMoved: number
+      /** Its routines bound to an old-team task, paused on the old team. */
+      routinesPaused: number
     }
   | {
       ok: false
@@ -53,9 +62,20 @@ export type MoveAgentResult =
         | 'agent_busy'
     }
 
-/** Statuses of a task nobody is working yet. In progress refuses the move;
- *  in review and finished stay as the old team's record. */
+/** Statuses of a task nobody is working yet. A locked task (in progress, in
+ *  review) refuses the move; finished ones stay as the old team's record. */
 const OPEN_STATUSES = ['backlog', 'todo', 'blocked']
+
+/** The team task a routine's template is bound to, or null. Unreadable JSON
+ *  reads as unbound: the registration boundary validated it. */
+function boundTeamTaskId(taskTemplate: string): string | null {
+  try {
+    const t = JSON.parse(taskTemplate) as { teamTaskId?: unknown }
+    return typeof t.teamTaskId === 'string' && t.teamTaskId ? t.teamTaskId : null
+  } catch {
+    return null
+  }
+}
 
 export function moveAgentToTeam(
   db: ClawbooDb,
@@ -84,19 +104,16 @@ export function moveAgentToTeam(
         return { ok: false, status: 409, error: 'agent_leads_team' }
     }
 
-    // A run in flight reports to the team it started in. Wait for it to finish.
-    const running = tx
-      .select({ id: tasks.id })
+    // A locked task reports to the team it started in, the board's own reading
+    // of "owned": in progress, or in review, which a failed check can send back
+    // to in progress with the same assignee. Wait for it to finish.
+    const holdsLocked = tx
+      .select({ status: tasks.status })
       .from(tasks)
-      .where(
-        and(
-          eq(tasks.assigneeAgentId, agentId),
-          eq(tasks.status, 'in_progress'),
-          eq(tasks.dropped, 0),
-        ),
-      )
-      .get()
-    if (running) return { ok: false, status: 409, error: 'agent_busy' }
+      .where(and(eq(tasks.assigneeAgentId, agentId), eq(tasks.dropped, 0)))
+      .all()
+      .some((t) => isLocked(t.status as TaskStatus))
+    if (holdsLocked) return { ok: false, status: 409, error: 'agent_busy' }
 
     const now = Date.now()
     let tasksHandedBack = 0
@@ -161,15 +178,35 @@ export function moveAgentToTeam(
     }
 
     // The agent's own routines follow it: an agent routine's fire is a board
-    // task for that agent on its own team. Team routines name no agent.
-    const routinesMoved = tx
-      .update(scheduledRuns)
-      .set({ teamId: toTeamId, updatedAt: now })
+    // task for that agent on its own team. Team routines name no agent. A
+    // routine bound to one team task does not: that task is on the old team and
+    // the fire would still run it, so it is paused where it is.
+    const own = tx
+      .select({ id: scheduledRuns.id, taskTemplate: scheduledRuns.taskTemplate })
+      .from(scheduledRuns)
       .where(eq(scheduledRuns.agentId, agentId))
-      .run().changes
+      .all()
+    const bound = own.filter((r) => boundTeamTaskId(r.taskTemplate) !== null).map((r) => r.id)
+    const free = own.filter((r) => boundTeamTaskId(r.taskTemplate) === null).map((r) => r.id)
+    const routinesMoved =
+      free.length > 0
+        ? tx
+            .update(scheduledRuns)
+            .set({ teamId: toTeamId, updatedAt: now })
+            .where(inArray(scheduledRuns.id, free))
+            .run().changes
+        : 0
+    const routinesPaused =
+      bound.length > 0
+        ? tx
+            .update(scheduledRuns)
+            .set({ status: 'paused', updatedAt: now })
+            .where(and(inArray(scheduledRuns.id, bound), ne(scheduledRuns.status, 'paused')))
+            .run().changes
+        : 0
 
     tx.update(agents).set({ teamId: toTeamId, updatedAt: now }).where(eq(agents.id, agentId)).run()
 
-    return { ok: true, fromTeamId, toTeamId, tasksHandedBack, routinesMoved }
+    return { ok: true, fromTeamId, toTeamId, tasksHandedBack, routinesMoved, routinesPaused }
   })
 }

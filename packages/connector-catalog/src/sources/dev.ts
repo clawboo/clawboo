@@ -163,6 +163,9 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       // One browser profile per agent, so two Boos can hold different logins on
       // the same site. Verified present in 0.0.79's own --help.
       perAgentProfileFlag: '--user-data-dir',
+      // Verified in 0.0.79: each origin becomes a context route that aborts
+      // every request to it, navigations and subresources alike.
+      blockOriginsArg: { flag: '--blocked-origins', style: 'origins' },
     },
     auth: { kind: 'none', inputs: [] },
     // Deliberately broad: a browser can reach anything. The egress allowlist is
@@ -199,10 +202,18 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       // Same idea, different spelling: this one takes --userDataDir. Verified
       // present in 1.7.0's own --help.
       perAgentProfileFlag: '--userDataDir',
+      // Verified in 1.7.0: URLPattern strings, checked on navigation and on
+      // runtime requests (its bundled polyfill covers Node 22).
+      blockOriginsArg: { flag: '--blockedUrlPattern', style: 'urlPatterns' },
     },
     auth: { kind: 'none', inputs: [] },
     egressAllow: ['*'],
     trifecta: { readsPrivateData: false, ingestsUntrustedContent: true, canEgress: true },
+    // The opposite problem to Playwright's: 1.7.0 marks NO tool destructive, so
+    // running arbitrary script in the page and handing a local file to a site
+    // were plain writes that a remembered approval would let run unattended.
+    // Checked against 1.7.0's own tools/list; re-check when the pin moves.
+    destructiveTools: ['evaluate_script', 'upload_file'],
     tags: ['browser', 'debugging', 'performance', 'devtools'],
     homepage: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
   },

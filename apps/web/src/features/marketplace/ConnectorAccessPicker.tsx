@@ -9,7 +9,10 @@
 //
 // When the page was opened from an agent's "ask for a connector" card, that
 // agent is preselected, and it is given access as soon as the connector comes
-// up, by whichever path connected it.
+// up, by whichever path connected it. Not when it already has a grant row:
+// a revoked one means a person took access away, and an agent asking again
+// must not undo that. It stays preselected, one click from Give access.
+// OpenClaw agents are never preselected or granted: a grant cannot reach them.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch } from '@clawboo/control-client'
@@ -33,24 +36,28 @@ interface GrantLite {
 const isOpenClaw = (runtime: string | null | undefined): boolean =>
   runtime == null || runtime === 'openclaw'
 
-async function agentsWithAccess(connectorId: string): Promise<Set<string>> {
+interface AccessRows {
+  /** Agents holding a live grant on this connector. */
+  active: Set<string>
+  /** Agents with a grant row of any kind, revoked included. */
+  anyRow: Set<string>
+}
+
+async function accessRows(connectorId: string): Promise<AccessRows> {
+  const empty = { active: new Set<string>(), anyRow: new Set<string>() }
   try {
     const res = await apiFetch('/api/grants')
-    if (!res.ok) return new Set()
+    if (!res.ok) return empty
     const body = (await res.json()) as { grants?: GrantLite[] }
-    return new Set(
-      (body.grants ?? [])
-        .filter(
-          (g) =>
-            g.connectorId === connectorId &&
-            g.subjectKind === 'agent' &&
-            g.subjectId &&
-            g.revokedAt == null,
-        )
-        .map((g) => g.subjectId as string),
+    const mine = (body.grants ?? []).filter(
+      (g) => g.connectorId === connectorId && g.subjectKind === 'agent' && g.subjectId,
     )
+    return {
+      active: new Set(mine.filter((g) => g.revokedAt == null).map((g) => g.subjectId as string)),
+      anyRow: new Set(mine.map((g) => g.subjectId as string)),
+    }
   } catch {
-    return new Set()
+    return empty
   }
 }
 
@@ -67,16 +74,23 @@ export function ConnectorAccessPicker({
   const agents = useFleetStore((s) => s.agents)
   const [connectorId, setConnectorId] = useState<string | null>(null)
   const [granted, setGranted] = useState<Set<string>>(new Set())
-  const [picked, setPicked] = useState<Set<string>>(() =>
-    askFor ? new Set([askFor.agentId]) : new Set(),
-  )
+  const [revoked, setRevoked] = useState<Set<string>>(new Set())
+  // The asker starts picked, unless it is an OpenClaw agent: a grant never
+  // reaches one, and its box is disabled, so it must not ride along on Give access.
+  const [picked, setPicked] = useState<Set<string>>(() => {
+    if (!askFor) return new Set()
+    const asker = useFleetStore.getState().agents.find((a) => a.id === askFor.agentId)
+    return asker && isOpenClaw(asker.runtime) ? new Set() : new Set([askFor.agentId])
+  })
   const [busy, setBusy] = useState(false)
   const autoGranted = useRef(false)
 
   const reload = useCallback(async (): Promise<string | null> => {
     const row = (await listLiveConnectors()).find((r) => r.slug === def.slug) ?? null
     setConnectorId(row?.connectorId ?? null)
-    setGranted(row ? await agentsWithAccess(row.connectorId) : new Set())
+    const rows = row ? await accessRows(row.connectorId) : null
+    setGranted(rows?.active ?? new Set())
+    setRevoked(new Set([...(rows?.anyRow ?? [])].filter((id) => !(rows?.active.has(id) ?? false))))
     return row?.connectorId ?? null
   }, [def.slug])
 
@@ -93,8 +107,12 @@ export function ConnectorAccessPicker({
       // grant nobody, so the agent asked, the person connected, and the agent
       // still could not call a single tool.
       autoGranted.current = true
-      const has = await agentsWithAccess(id)
-      if (has.has(askFor.agentId)) return
+      // ANY ROW, REVOKED INCLUDED, STOPS IT. Re-sharing reactivates a revoked
+      // grant, so granting here would quietly undo a person taking access away,
+      // on nothing but the agent asking again. The asker stays preselected and
+      // Give access is one click.
+      const rows = await accessRows(id)
+      if (rows.anyRow.has(askFor.agentId)) return
       const agent = useFleetStore.getState().agents.find((a) => a.id === askFor.agentId)
       if (agent && isOpenClaw(agent.runtime)) return
       const ok = await grantConnectorToAgent(
@@ -118,7 +136,10 @@ export function ConnectorAccessPicker({
 
   if (!connected || !connectorId) return null
 
-  const toGrant = [...picked].filter((id) => !granted.has(id))
+  const toGrant = [...picked].filter((id) => {
+    const agent = agents.find((a) => a.id === id)
+    return !granted.has(id) && !(agent && isOpenClaw(agent.runtime))
+  })
 
   const give = async (): Promise<void> => {
     setBusy(true)
@@ -192,6 +213,9 @@ export function ConnectorAccessPicker({
                     <span className="text-[11px]">
                       OpenClaw agents cannot use shared connectors
                     </span>
+                  )}
+                  {!has && !openClaw && revoked.has(a.id) && (
+                    <span className="text-[11px]">Access taken back</span>
                   )}
                   {!has && !openClaw && askFor?.agentId === a.id && (
                     <span className="text-[11px]">Asked for it</span>

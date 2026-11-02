@@ -145,6 +145,14 @@ export interface ConnectorStdioLaunch {
    * other agent's pin would then read as drift.
    */
   perAgentProfileFlag?: string
+  /**
+   * How to tell this browser never to load an origin. Clawboo passes the
+   * dashboard's own loopback origins this way, with the port it is really
+   * listening on, so an agent's browser cannot operate the dashboard: approve
+   * its own requests, or give itself connectors. `origins` passes one
+   * semicolon-joined value; `urlPatterns` repeats the flag once per URL pattern.
+   */
+  blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
 }
 
 export interface ConnectorHttpLaunch {

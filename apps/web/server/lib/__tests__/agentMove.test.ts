@@ -107,8 +107,7 @@ describe('moveAgentToTeam', () => {
     seedTask('backlog-a', 'backlog', { assignee: 'a' })
     // A prefix of another agent's id is not a match.
     seedTask('todo-ab', 'todo', { sdid: 'deleg:2:agent:ab' })
-    // The record of finished and reviewed work stays as it is.
-    seedTask('review-a', 'in_review', { assignee: 'a', sdid: 'deleg:3:agent:a' })
+    // The record of finished work stays as it is.
     seedTask('done-a', 'done', { assignee: 'a', sdid: 'deleg:4:agent:a' })
 
     const agentRoutine = registerScheduledRun(db, {
@@ -125,7 +124,15 @@ describe('moveAgentToTeam', () => {
       taskTemplate: '{}',
       nextRunAt: Date.now() + 60_000,
     })
-    if (!agentRoutine.ok || !teamRoutine.ok) throw new Error('seed')
+    // Bound to one old-team task: its fire would still run that task.
+    const boundRoutine = registerScheduledRun(db, {
+      agentId: 'a',
+      teamId: 'old',
+      cronSpec: 'once@2099-01-01T09:00:00.000Z',
+      taskTemplate: JSON.stringify({ title: 'Ship it', kind: 'research', teamTaskId: 'todo-ab' }),
+      nextRunAt: Date.now() + 60_000,
+    })
+    if (!agentRoutine.ok || !teamRoutine.ok || !boundRoutine.ok) throw new Error('seed')
 
     const now = Date.now()
     db.insert(rooms)
@@ -144,6 +151,7 @@ describe('moveAgentToTeam', () => {
       toTeamId: 'new',
       tasksHandedBack: 2,
       routinesMoved: 1,
+      routinesPaused: 1,
     })
     expect(db.select().from(agents).where(eq(agents.id, 'a')).get()?.teamId).toBe('new')
 
@@ -154,11 +162,14 @@ describe('moveAgentToTeam', () => {
     })
     expect(taskRow('backlog-a')).toMatchObject({ assigneeAgentId: null, status: 'backlog' })
     expect(taskRow('todo-ab')?.sourceDelegationId).toBe('deleg:2:agent:ab')
-    expect(taskRow('review-a')).toMatchObject({ assigneeAgentId: 'a', status: 'in_review' })
     expect(taskRow('done-a')).toMatchObject({ assigneeAgentId: 'a', status: 'done' })
 
     expect(getScheduledRun(db, agentRoutine.run.id)?.teamId).toBe('new')
     expect(getScheduledRun(db, teamRoutine.run.id)?.teamId).toBe('old')
+    expect(getScheduledRun(db, boundRoutine.run.id)).toMatchObject({
+      teamId: 'old',
+      status: 'paused',
+    })
 
     expect(db.select().from(roomMembers).where(eq(roomMembers.agentId, 'a')).all()).toEqual([])
     expect(getSetting(db, 'native-team-session:a:old')).toBeNull()
@@ -179,6 +190,14 @@ describe('moveAgentToTeam', () => {
 
     seedTask('running-a', 'in_progress', { assignee: 'a' })
     seedTask('todo-a', 'todo', { sdid: 'deleg:1:agent:a' })
+    expect(moveAgentToTeam(db, { agentId: 'a', toTeamId: 'new', booZeroId: null })).toMatchObject({
+      ok: false,
+      error: 'agent_busy',
+    })
+    // In review counts too: a failed check with retries left sends the task
+    // back to in progress with the same assignee.
+    db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, 'running-a')).run()
+    seedTask('review-a', 'in_review', { assignee: 'a' })
     expect(moveAgentToTeam(db, { agentId: 'a', toTeamId: 'new', booZeroId: null })).toMatchObject({
       ok: false,
       error: 'agent_busy',

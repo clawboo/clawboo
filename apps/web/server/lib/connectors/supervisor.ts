@@ -44,6 +44,7 @@ import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subpro
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn } from './spawnPlan'
+import { blockDashboardArgs } from './dashboardGuard'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
 export interface ConnectableDefinition {
@@ -68,6 +69,8 @@ export interface ConnectableDefinition {
          * declaring it.
          */
         perAgentProfileFlag?: string
+        /** How this browser takes a list of origins to block (see dashboardGuard). */
+        blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
       }
     | { transport: 'streamable-http'; url: string }
   /**
@@ -196,6 +199,7 @@ function spawnSpecFor(def: ConnectableDefinition): AgentBrowserSpawn {
     command: def.launch.command,
     args: def.launch.args,
     profileFlag: def.launch.perAgentProfileFlag,
+    ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
     ...(def.authInputs ? { authInputs: def.authInputs } : {}),
   }
 }
@@ -292,7 +296,10 @@ async function performConnect(
           })
         : await connectStdioConnector({
             command: plan.command,
-            args: plan.args,
+            // The dashboard block rides OUTSIDE the hashed spec, like the
+            // per-agent profile: it carries this server's port, and a port
+            // change must not read as the operator's spec having drifted.
+            args: [...plan.args, ...blockDashboardArgs(launch.blockOriginsArg)],
             // Recorded the moment the child exists, not once the handshake
             // succeeds. A cold `npx` install can hold the handshake open for
             // the better part of a minute, and a hard stop inside that window

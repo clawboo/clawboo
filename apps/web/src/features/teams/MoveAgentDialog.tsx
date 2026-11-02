@@ -16,7 +16,7 @@ import { useToastStore } from '@/stores/toast'
 /** What each refusal means, in words a person can act on. */
 const REFUSALS: Record<string, string> = {
   agent_leads_team: 'It leads its team. Choose another lead for that team first.',
-  agent_busy: 'It is working on a task. Try again when the task finishes.',
+  agent_busy: 'It has a task in progress or in review. Try again when that task is done.',
   agent_is_boo_zero: 'Boo Zero leads every team and does not join one.',
   team_archived: 'That team is archived. Unarchive it first.',
   team_not_found: 'That team no longer exists.',
@@ -29,6 +29,7 @@ interface MoveResponse {
   error?: string
   tasksHandedBack?: number
   routinesMoved?: number
+  routinesPaused?: number
 }
 
 export function MoveAgentDialog({
@@ -73,13 +74,20 @@ export function MoveAgentDialog({
       void hydrateTeams()
       const toName = teams.find((t) => t.id === teamId)?.name ?? 'the team'
       const handed = body.tasksHandedBack ?? 0
-      useToastStore.getState().addToast({
-        type: 'success',
-        message:
-          handed > 0 && fromName
-            ? `Moved ${agentName} to ${toName}. ${handed} unstarted task${handed === 1 ? '' : 's'} stay on ${fromName}'s board, unassigned.`
-            : `Moved ${agentName} to ${toName}.`,
-      })
+      const paused = body.routinesPaused ?? 0
+      const from = fromName ?? 'its old team'
+      const parts = [`Moved ${agentName} to ${toName}.`]
+      if (handed > 0) {
+        parts.push(
+          `${handed} unstarted task${handed === 1 ? '' : 's'} stay on ${from}'s board, unassigned.`,
+        )
+      }
+      if (paused > 0) {
+        parts.push(
+          `${paused} routine${paused === 1 ? '' : 's'} tied to ${from}'s tasks ${paused === 1 ? 'is' : 'are'} paused there.`,
+        )
+      }
+      useToastStore.getState().addToast({ type: 'success', message: parts.join(' ') })
       onClose()
     } catch {
       setError('The move failed. Nothing changed.')

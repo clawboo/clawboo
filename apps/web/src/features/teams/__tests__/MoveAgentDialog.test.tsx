@@ -53,7 +53,14 @@ beforeEach(() => {
   posted = []
   answer = {
     status: 200,
-    body: { ok: true, fromTeamId: 'old', toTeamId: 'new', tasksHandedBack: 2, routinesMoved: 1 },
+    body: {
+      ok: true,
+      fromTeamId: 'old',
+      toTeamId: 'new',
+      tasksHandedBack: 2,
+      routinesMoved: 1,
+      routinesPaused: 1,
+    },
   }
   useToastStore.setState({ toasts: [] })
   useFleetStore.setState({ agents: [SCOUT] })
@@ -89,7 +96,7 @@ describe('MoveAgentDialog', () => {
     expect(posted).toEqual([{ teamId: 'new' }])
     expect(useFleetStore.getState().agents[0]?.teamId).toBe('new')
     expect(useToastStore.getState().toasts.at(-1)?.message).toBe(
-      "Moved Scout to Launch. 2 unstarted tasks stay on Research's board, unassigned.",
+      "Moved Scout to Launch. 2 unstarted tasks stay on Research's board, unassigned. 1 routine tied to Research's tasks is paused there.",
     )
   })
 

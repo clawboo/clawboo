@@ -200,11 +200,11 @@ Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo ru
 
 A message says where the agent went. If it had tasks it had not started, the message adds how many, for example **2 unstarted tasks stay on Growth's board, unassigned.** Moving works without the OpenClaw Gateway.
 
-- **Moves with it:** its own routines. Team routines stay with their team.
-- **Stays on the old team:** tasks it had not started, unassigned, for someone there to pick up. Tasks in review or done stay there too, with the agent still named on them. Files it saved in the old team's folder, and memory and budgets set for the old team, stay as well. A budget set on the agent itself follows it.
+- **Moves with it:** its own routines, except one set to run a particular task: that task is on the old team, so the routine is paused there for you to change or delete, and the message says so. Team routines stay with their team.
+- **Stays on the old team:** tasks it had not started, unassigned, for someone there to pick up. Tasks it finished stay there too, with the agent still named on them. Files it saved in the old team's folder, and memory and budgets set for the old team, stay as well. A budget set on the agent itself follows it.
 - **Changes:** it leaves the old team's rooms, and from its next run it works in the new team's folder. An OpenClaw agent's AGENTS.md still names its old teammates until you edit it.
 
-The dialog refuses the move, and says why, while the agent leads its team (**It leads its team. Choose another lead for that team first.**) or is working on a task (**It is working on a task. Try again when the task finishes.**).
+The dialog refuses the move, and says why, while the agent leads its team (**It leads its team. Choose another lead for that team first.**) or has a task in progress or in review (**It has a task in progress or in review. Try again when that task is done.**). A task in review counts because a failed check can send it back to the same agent.
 
 ## Delete an agent
 
