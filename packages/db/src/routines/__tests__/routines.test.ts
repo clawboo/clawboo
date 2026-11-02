@@ -16,6 +16,7 @@ import { listRoutineFires } from '../history'
 import {
   claimScheduledRun,
   deleteScheduledRun,
+  deleteScheduledRunsForAgent,
   getScheduledRun,
   listQueuedRuns,
   listScheduledRuns,
@@ -278,6 +279,23 @@ describe('user-driven transitions + updates', () => {
     expect(updated).toMatchObject({ cronSpec: '*/5 * * * *', nextRunAt: 7_000 })
     deleteScheduledRun(db, run.id)
     expect(getScheduledRun(db, run.id)).toBeNull()
+  })
+
+  it("deleteScheduledRunsForAgent removes only that agent's routines", () => {
+    const mine = register({ agentId: 'agent-1' })
+    const mineToo = register({ agentId: 'agent-1', cronSpec: '0 17 * * *' })
+    const other = register({ agentId: 'agent-2' })
+    const teamRoutine = register({ agentId: '' })
+
+    expect(deleteScheduledRunsForAgent(db, 'agent-1')).toBe(2)
+    expect(getScheduledRun(db, mine.id)).toBeNull()
+    expect(getScheduledRun(db, mineToo.id)).toBeNull()
+    expect(getScheduledRun(db, other.id)).not.toBeNull()
+    expect(getScheduledRun(db, teamRoutine.id)).not.toBeNull()
+
+    // An empty id would match every team routine; it must match nothing.
+    expect(deleteScheduledRunsForAgent(db, '')).toBe(0)
+    expect(getScheduledRun(db, teamRoutine.id)).not.toBeNull()
   })
 
   it('updateScheduledRun re-points the agent and team, and leaves them alone when omitted', () => {

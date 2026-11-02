@@ -361,6 +361,10 @@ export const tasks = sqliteTable(
     // started before then was overruled, so an agent's own status write from it
     // is refused (see `updateStatus`'s `unlessPersonMoved`).
     personMovedAt: integer('person_moved_at'),
+    // What the task runner was given for the task's latest run (JSON
+    // `TaskRunnerInputs`, see board/runnerInputs.ts), so a person's Retry or
+    // Assign runs it the same way again. NULL for a task the runner never ran.
+    runnerInputs: text('runner_inputs'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),

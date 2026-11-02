@@ -138,7 +138,7 @@ Reads (`listAgents`, `getAgent`, `listTeams`) select from SQLite (`listAgents` i
 
 `createAgent`, `archiveAgent` and the file calls go through the Gateway and guard on a live connection with `requireClient()`, which throws `Error('gateway_disconnected')`; the REST layer maps that to `503`.
 
-- **`createAgent`** asks the Gateway for its config path, derives a `workspace-<slug>` directory beside it, calls `agents.create`, clears any pending-delete marker the returned id still carries, writes `SOUL.md`, `IDENTITY.md`, `TOOLS.md` and `AGENTS.md` through `agents.files.set` (browsing guidance goes into `AGENTS.md`, because the OpenClaw 2026.9 Gateway does not load `TOOLS.md`), tries `CLAWBOO.md` best-effort, applies the command-approval posture (below), and only then inserts the SQLite row.
+- **`createAgent`** asks the Gateway for its config path, derives a `workspace-<slug>` directory beside it, calls `agents.create`, clears any pending-delete marker the returned id still carries, writes `SOUL.md`, `IDENTITY.md` and `AGENTS.md` through `agents.files.set` (the OpenClaw 2026.9 Gateway refuses `TOOLS.md`, so any `TOOLS.md` content is folded into a `## Tools` section of `AGENTS.md` by `foldToolsIntoAgentsMd`, and the browsing guidance is appended there too), tries `CLAWBOO.md` best-effort, applies the command-approval posture (below), and only then inserts the SQLite row.
 - **`updateAgent`** patches the Clawboo-owned columns in SQLite and does not touch the Gateway.
 - **`archiveAgent`** is a hard delete: it deletes the agent upstream, then removes the SQLite row, its cost records, its approval history, and its `boo-zero:display-name:<id>` setting.
 - **`readFile` and `writeFile`** call `agents.files.read` and `agents.files.set`.

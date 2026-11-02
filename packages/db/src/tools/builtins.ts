@@ -1,8 +1,9 @@
 // ─── Builtin tool descriptors ───────────────────────────────────────────────
-// A small set re-expressing real capabilities so the broker has tools to gate,
-// inspect, approve, and audit. Executors are intentionally lightweight (the
-// point is the broker pipeline, not the tool bodies). Replaces, in time, the
-// markdown-bullet skill model — which keeps working in parallel until migrated.
+// The tools every agent gets from clawboo's own tools server, before any
+// connector. Each one must do what its name says: an agent cannot tell a demo
+// executor from a real one. `web_search` (which echoed the query back) and
+// `delete_path` (which deleted nothing) were removed for that reason; web search
+// comes from the search connectors, which run under grants like any other.
 
 import { z } from 'zod'
 
@@ -26,31 +27,4 @@ export const memoryNoteTool: ToolDescriptor = {
   executor: (args) => `noted: ${String(args['note'] ?? '')}`,
 }
 
-export const webSearchTool: ToolDescriptor = {
-  name: 'web_search',
-  description:
-    'Search the web. External side effect → requires approval; hidden until a search provider is configured.',
-  inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().optional() }),
-  // Hidden until a provider is configured (env key OR an authed provider).
-  availability: { anyOf: [{ env: 'TAVILY_API_KEY' }, { auth: 'tavily' }] },
-  owner: 'core',
-  risk: 'external',
-  executor: (args) => `searched: ${String(args['query'] ?? '')}`,
-}
-
-export const deletePathTool: ToolDescriptor = {
-  name: 'delete_path',
-  description:
-    'Delete a path. Destructive → requires approval. (Demo executor — does not actually delete.)',
-  inputSchema: z.object({ path: z.string().min(1) }),
-  owner: 'core',
-  risk: 'destructive',
-  executor: (args) => `would delete: ${String(args['path'] ?? '')}`,
-}
-
-export const BUILTIN_TOOLS: ToolDescriptor[] = [
-  echoTool,
-  memoryNoteTool,
-  webSearchTool,
-  deletePathTool,
-]
+export const BUILTIN_TOOLS: ToolDescriptor[] = [echoTool, memoryNoteTool]

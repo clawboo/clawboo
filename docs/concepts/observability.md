@@ -95,7 +95,7 @@ Clawboo can also send its traces to an OpenTelemetry collector, such as Jaeger o
 
 <Note>
 
-**The npm package does not include the OpenTelemetry SDK.** On an install from npm (`npx clawboo@latest` or a global install), setting the endpoint exports nothing. The exporter cannot load, traces stay in the local log, and **System Health** shows the **OTel exporter** check as degraded. Its **observability** row still reads "OTel exporter active", because that row only reports that an endpoint is set. Export works where the two packages it needs, `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http`, can be loaded, as when you run Clawboo from a source checkout of the repository.
+**The npm package does not include the OpenTelemetry SDK.** On an install from npm (`npx clawboo@latest` or a global install), setting the endpoint exports nothing. The exporter cannot load, traces stay in the local log, and **System Health** shows the **OTel exporter** check as degraded, saying the SDK is not included. Its **observability** row reads "local event log (OTLP endpoint set, exporter not running)". Export works where the two packages it needs, `@opentelemetry/sdk-node` and `@opentelemetry/exporter-trace-otlp-http`, can be loaded, as when you run Clawboo from a source checkout of the repository.
 
 </Note>
 

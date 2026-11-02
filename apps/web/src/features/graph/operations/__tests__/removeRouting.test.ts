@@ -18,11 +18,11 @@ const MOCK_EDGES = [
   { id: 'skill-1', type: 'skill', source: 'boo-src', target: 'skill-x', data: {} },
 ]
 
-// A truthy client satisfies the `if (!client) return` guard; the actual file I/O
-// now routes through the AgentSource REST client (mocked below).
+// No Gateway client at all: route removal must not depend on one. The file
+// I/O goes through the AgentSource REST client (mocked below).
 vi.mock('@/stores/connection', () => ({
   useConnectionStore: {
-    getState: () => ({ client: {} }),
+    getState: () => ({ client: null }),
   },
 }))
 
@@ -125,13 +125,26 @@ describe('removeRouting', () => {
     )
   })
 
-  it('handles missing AGENTS.md gracefully', async () => {
-    mockFilesRead.mockRejectedValue(new Error('Not found'))
+  it('treats an empty AGENTS.md as nothing to remove', async () => {
+    mockFilesRead.mockResolvedValue('')
 
     await removeRouting('dep-src-tgt', 'src', 'tgt')
 
     expect(mockFilesSet).not.toHaveBeenCalled()
     expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
+  })
+
+  it('rolls back and reports an error when AGENTS.md cannot be read', async () => {
+    mockFilesRead.mockRejectedValue(new Error('read failed'))
+
+    await removeRouting('dep-src-tgt', 'src', 'tgt')
+
+    expect(mockFilesSet).not.toHaveBeenCalled()
+    expect(mockSetEdges).toHaveBeenLastCalledWith(MOCK_EDGES)
+    expect(mockAddToast).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'error', message: 'Failed to remove routing' }),
+    )
+    expect(mockAddToast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
   })
 
   it('returns early if target agent not found', async () => {
@@ -148,13 +161,14 @@ describe('removeRouting', () => {
     expect(mockFilesRead).not.toHaveBeenCalled()
   })
 
-  it('does nothing without client', async () => {
+  it('removes the route without a Gateway connection', async () => {
     const { useConnectionStore } = await import('@/stores/connection')
-    vi.spyOn(useConnectionStore, 'getState').mockReturnValueOnce({ client: null } as never)
+    expect(useConnectionStore.getState().client).toBeNull()
 
     await removeRouting('dep-src-tgt', 'src', 'tgt')
 
-    expect(mockSetEdges).not.toHaveBeenCalled()
+    expect(mockFilesSet).toHaveBeenCalledWith('src', 'AGENTS.md', '# AGENTS\n- Some other line\n')
+    expect(mockAddToast).toHaveBeenCalledWith(expect.objectContaining({ type: 'success' }))
   })
 
   it('handles special characters in agent name', async () => {

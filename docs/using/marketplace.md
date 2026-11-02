@@ -52,13 +52,13 @@ Both have a **Deploy** button.
 
 ## What each runtime runs
 
-A catalog agent comes with three texts: its full instructions (the **Identity** you read in its details), a shorter persona, and tool notes. Clawboo saves all three on the new agent, as IDENTITY.md, SOUL.md and TOOLS.md, and adds the default personality to SOUL.md. Which text the agent follows depends on its runtime.
+A catalog agent comes with three texts: its full instructions (the **Identity** you read in its details), a shorter persona, and tool notes such as its skill list. Clawboo saves the first two on the new agent as IDENTITY.md and SOUL.md, and adds the default personality to SOUL.md. An OpenClaw member gets the tool notes in its AGENTS.md, under a **Tools** heading; the other runtimes do not read them, so they are not saved there. Which text the agent follows depends on its runtime.
 
-| Runtime                    | What the agent follows                                                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenClaw                   | IDENTITY.md (the full instructions), SOUL.md, and AGENTS.md (the team and how to hand off work). OpenClaw 2026.9 and later does not load TOOLS.md. |
-| Clawboo Native             | SOUL.md (the persona and personality) plus Clawboo's team-lead or specialist instructions. IDENTITY.md is kept for reference only.                 |
-| Claude Code, Codex, Hermes | SOUL.md, which Clawboo adds to each turn as the agent's persona. IDENTITY.md is kept for reference only.                                           |
+| Runtime                    | What the agent follows                                                                                                             |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| OpenClaw                   | IDENTITY.md (the full instructions), SOUL.md, and AGENTS.md (the team, how to hand off work, and the tool notes).                  |
+| Clawboo Native             | SOUL.md (the persona and personality) plus Clawboo's team-lead or specialist instructions. IDENTITY.md is kept for reference only. |
+| Claude Code, Codex, Hermes | SOUL.md, which Clawboo adds to each turn as the agent's persona. IDENTITY.md is kept for reference only.                           |
 
 So on any runtime other than OpenClaw, the long text you read in **Details** is not what the agent follows. To give the agent more of it, copy what you need into its SOUL.md (see [Agents](/using/agents#edit-the-agent-files)). On Claude Code, Codex and Hermes, Clawboo passes on only the first 4,000 characters of SOUL.md.
 

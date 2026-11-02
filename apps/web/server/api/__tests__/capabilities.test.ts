@@ -174,19 +174,19 @@ describe('capabilities REST', () => {
     // unseeded registry it is a silent no-op and isToolEnabled falls back to true,
     // which would make both assertions below vacuous.
     seedBuiltinTools(db)
-    setToolEnabled(db, 'web_search', false)
-    expect(isToolEnabled(db, 'web_search')).toBe(false)
+    setToolEnabled(db, 'note', false)
+    expect(isToolEnabled(db, 'note')).toBe(false)
     const rec = buildRecord({
       sourceId: 'native',
       runtime: 'clawboo-native',
       scope: 'global',
       kind: 'tool',
-      sourceKey: 'web_search',
+      sourceKey: 'note',
       origin: 'brokered-mcp',
       manageability: 'managed',
-      name: 'web_search',
-      // What native.ts emits for web_search with no TAVILY_API_KEY: the
-      // availability requirement is unmet, and `!enabled` wins the status ternary.
+      name: 'note',
+      // What native.ts emits for a disabled tool whose availability requirement
+      // is unmet: `!enabled` wins the status ternary.
       available: false,
       status: 'disabled',
     })
@@ -194,7 +194,7 @@ describe('capabilities REST', () => {
     const r = mockRes()
     await capabilitiesActionPOST(req({ params: { action: 'enable' }, body: { id: rec.id } }), r.res)
     expect(r.status()).toBe(200)
-    expect(isToolEnabled(db, 'web_search')).toBe(true)
+    expect(isToolEnabled(db, 'note')).toBe(true)
   })
 
   function seedOpenClawConnector(db: ReturnType<typeof getDb>): ReturnType<typeof buildRecord> {

@@ -405,7 +405,7 @@ Stores one approval decision in `approval_history` and returns the stored row.
 ```bash
 curl -X POST http://localhost:18790/api/approvals \
   -H 'Content-Type: application/json' \
-  -d '{"agentId":"<agent-id>","action":"allow-always","toolName":"web_search"}'
+  -d '{"agentId":"<agent-id>","action":"allow-always","toolName":"npm test"}'
 ```
 
 ---

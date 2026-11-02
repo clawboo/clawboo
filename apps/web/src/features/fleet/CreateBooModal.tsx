@@ -90,7 +90,6 @@ export function CreateBooModal({
         {
           soul: soulWithPersonality,
           identity: `# IDENTITY\n\nYou are ${trimmedName}.`,
-          tools: '# TOOLS\n',
         },
         sourceId,
       )

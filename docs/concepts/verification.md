@@ -34,7 +34,7 @@ Nothing in the dashboard starts a checked run. A Routine you create in the app s
 ### Never checked
 
 - Work handed off in team chat, in General or a room, including the steps of a plan
-- Tasks you give an agent on the Board, and reruns from **Retry** or **Assign**
+- Tasks you give an agent on the Board, and their reruns from **Retry** or **Assign**
 - One-to-one chats
 - OpenClaw work. An OpenClaw Routine run gets a comment saying it completed without verification.
 - Routines created in the app
@@ -119,7 +119,7 @@ How the reviewer works:
 
 - **Move a card while it is being checked.** If you move it to **Done** or **Cancelled**, your move wins. Clawboo keeps the check's result on the task but moves nothing.
 - **Accept the work anyway.** While the card is still in **In progress** with **Verifying**, move it to **Done**: if the stored result is a failure, the board asks you to confirm with **Complete anyway**, and Clawboo records the override in the audit log. Once the card is in **Needs you**, the dashboard cannot move it to **Done**; through the API, move the task to `in_progress` and then to `done` with `humanOverride` (see the [Board API](/reference/rest-api/board)).
-- **Run it again.** **Retry**, or another agent picked from the card's **More** menu, sends the task back to **To do** and clears its check result. That rerun goes through the team, not the task runner, so it has no worktree and is not checked.
+- **Run it again.** **Retry**, or another agent picked from the card's **More** menu, sends the task back to **To do** and clears its check result. A task the task runner ran goes back through the runner, with the repository and kind it ran with, and its model when the agent is on the same runtime. It gets a worktree when the task names a repository, and is checked again. That needs an agent the runner can run, not one on OpenClaw. Other tasks, and tasks the runner ran before Clawboo started saving these settings, rerun through the team, with no worktree and no check.
 - **Drop it.** **Dismiss** moves the task to **Cancelled**.
 
 ## The failures checks are for

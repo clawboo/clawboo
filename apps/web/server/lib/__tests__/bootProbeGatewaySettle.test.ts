@@ -34,6 +34,7 @@ vi.mock('@clawboo/config', async (importOriginal) => {
   return {
     ...actual,
     loadSettings: () => ({ gatewayUrl: 'ws://localhost:18789', gatewayToken: 'x' }),
+    isGatewayConfigured: () => true,
   }
 })
 

@@ -164,6 +164,7 @@ interface BootReport {
     budgetHardCapUsdCents: number | null
     budgetWarnSoftPct: number
     otelEnabledByDefault: boolean
+    otelConfigured: boolean
     otelActive: boolean
   }
   resolved: {
@@ -181,19 +182,19 @@ Most failures only degrade: the server keeps running and the panel shows a warni
 
 The checks, in the order they run:
 
-| `id`                       | What it checks                                                                                                                                                                                                                                             | Fatal   |
-| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
-| `clawbooHomeWritable`      | The Clawboo home folder exists (it is created if missing) and is writable                                                                                                                                                                                  | **Yes** |
-| `vaultPerms`               | `secrets/`, the master key and `proxy-device-identity.json` give no access to group or others. Passes on Windows, and before any of them exist                                                                                                             | No      |
-| `masterKeyBootSentinel`    | A value encrypted on first boot still decrypts, so the master key has not changed. When it fails, saved runtime keys cannot be read                                                                                                                        | No      |
-| `databaseIntegrity`        | SQLite's `PRAGMA integrity_check` returns `ok`                                                                                                                                                                                                             | **Yes** |
-| `databaseSchema`           | The core tables exist and no column the schema declares is missing                                                                                                                                                                                         | **Yes** |
-| `apiPortFileMatches`       | The api-port file holds the port the server listens on. Passes without checking when the probe runs before the server has a port                                                                                                                           | No      |
-| `mcpServersHealthy`        | Each built-in MCP server (Tasks, Memory, Tools, TeamChat) can be built and lists its tools                                                                                                                                                                 | No      |
-| `openclawGatewayReachable` | The server's Gateway connection comes up within 1.5 seconds. It always runs, because a Gateway URL always resolves, so an install without OpenClaw lists it in `degraded` while `ok` stays `true`; the server then serves the agents last synced to SQLite | No      |
-| `otelExporterReachable`    | With an OTLP endpoint set, the OpenTelemetry exporter started. With none set, it passes                                                                                                                                                                    | No      |
+| `id`                       | What it checks                                                                                                                                                                                                                                              | Fatal   |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| `clawbooHomeWritable`      | The Clawboo home folder exists (it is created if missing) and is writable                                                                                                                                                                                   | **Yes** |
+| `vaultPerms`               | `secrets/`, the master key and `proxy-device-identity.json` give no access to group or others. Passes on Windows, and before any of them exist                                                                                                              | No      |
+| `masterKeyBootSentinel`    | A value encrypted on first boot still decrypts, so the master key has not changed. When it fails, saved runtime keys cannot be read                                                                                                                         | No      |
+| `databaseIntegrity`        | SQLite's `PRAGMA integrity_check` returns `ok`                                                                                                                                                                                                              | **Yes** |
+| `databaseSchema`           | The core tables exist and no column the schema declares is missing                                                                                                                                                                                          | **Yes** |
+| `apiPortFileMatches`       | The api-port file holds the port the server listens on. Passes without checking when the probe runs before the server has a port                                                                                                                            | No      |
+| `mcpServersHealthy`        | Each built-in MCP server (Tasks, Memory, Tools, TeamChat) can be built and lists its tools                                                                                                                                                                  | No      |
+| `openclawGatewayReachable` | The server's Gateway connection comes up within 1.5 seconds; when it does not, the server serves the agents last synced to SQLite. Passes as skipped when OpenClaw was never set up here: no Gateway URL or token in `settings.json` and no `openclaw.json` | No      |
+| `otelExporterReachable`    | With an OTLP endpoint set, the OpenTelemetry exporter started. With none set, it passes                                                                                                                                                                     | No      |
 
-`config` reports the defaults this build ships, not live overrides: `logLevel` reads `info` even when `LOG_LEVEL` is set. Only `otelActive` reflects this boot.
+`config` reports the defaults this build ships, not live overrides: `logLevel` reads `info` even when `LOG_LEVEL` is set. Only `otelConfigured` and `otelActive` reflect this boot.
 
 | Field                   | Shipped value      | Meaning                                                                                    |
 | ----------------------- | ------------------ | ------------------------------------------------------------------------------------------ |
@@ -202,7 +203,8 @@ The checks, in the order they run:
 | `budgetHardCapUsdCents` | `null`             | No install-wide hard cap                                                                   |
 | `budgetWarnSoftPct`     | `80`               | A budget warns at 80% of its limit                                                         |
 | `otelEnabledByDefault`  | `false`            | OpenTelemetry export is opt-in                                                             |
-| `otelActive`            | this boot          | `true` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set   |
+| `otelConfigured`        | this boot          | `true` when `OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` is set   |
+| `otelActive`            | this boot          | `true` only when the exporter started; an npm install has no OpenTelemetry SDK to start    |
 
 ## Graph layout
 

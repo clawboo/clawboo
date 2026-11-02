@@ -1,7 +1,14 @@
+import fs from 'node:fs'
 import path from 'node:path'
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { resolveStateDir, loadSettings, resolveSettingsPath, resolveClawbooDir } from '../index'
+import {
+  isGatewayConfigured,
+  resolveStateDir,
+  loadSettings,
+  resolveSettingsPath,
+  resolveClawbooDir,
+} from '../index'
 
 // Mock node:fs module
 vi.mock('node:fs', () => ({
@@ -98,5 +105,44 @@ describe('loadSettings', () => {
     const settings = loadSettings({})
     expect(typeof settings.gatewayUrl).toBe('string')
     expect(typeof settings.gatewayToken).toBe('string')
+  })
+})
+
+describe('isGatewayConfigured', () => {
+  const env = { CLAWBOO_HOME: '/h/.clawboo', OPENCLAW_STATE_DIR: '/h/.openclaw' }
+  const settingsFile = path.resolve('/h/.clawboo/settings.json')
+  const openclawConfig = path.resolve('/h/.openclaw/openclaw.json')
+
+  afterEach(() => {
+    vi.mocked(fs.existsSync).mockImplementation(() => false)
+    vi.mocked(fs.readFileSync).mockImplementation(() => '{}')
+  })
+
+  it('is false on an install that never set OpenClaw up', () => {
+    expect(isGatewayConfigured(env)).toBe(false)
+    // loadSettings still answers with the default address, which is why the
+    // health check cannot use it to tell "never set up" from "down".
+    expect(loadSettings(env).gatewayUrl).toBe('ws://localhost:18789')
+  })
+
+  it('is true when clawboo settings name a Gateway', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === settingsFile)
+    vi.mocked(fs.readFileSync).mockImplementation(() =>
+      JSON.stringify({ gateway: { url: 'ws://10.0.0.5:18789' } }),
+    )
+    expect(isGatewayConfigured(env)).toBe(true)
+  })
+
+  it('is false when clawboo settings carry only blank Gateway fields', () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === settingsFile)
+    vi.mocked(fs.readFileSync).mockImplementation(() =>
+      JSON.stringify({ gateway: { url: '  ', token: '' }, firstRunDismissedAt: 1 }),
+    )
+    expect(isGatewayConfigured(env)).toBe(false)
+  })
+
+  it("is true when OpenClaw's own config file exists", () => {
+    vi.mocked(fs.existsSync).mockImplementation((p) => p === openclawConfig)
+    expect(isGatewayConfigured(env)).toBe(true)
   })
 })

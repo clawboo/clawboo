@@ -55,7 +55,7 @@ What the rows mean:
 
 - **Cost.** Estimates count toward your budgets the same way real costs do. A model your own Ollama serves costs nothing, on Clawboo Native or OpenClaw, so its runs are recorded at $0 and read **free**. [Budgets and spend](/using/budgets-and-spend) explains how each runtime's spend is worked out.
 - **Worktrees.** A worktree is a separate checkout of a git repository for one task. No runtime gets one in team chat. Only a task run that names a repository does: one started through the REST API, or an agent Routine whose template names a repository. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
-- **Agent files.** Clawboo Native uses `SOUL.md` as the agent's instructions; Claude Code, Codex and Hermes get it as a persona at the top of each prompt. On every runtime, `AGENTS.md` also draws the agent's links on the team graph. OpenClaw shows a `TOOLS.md` tab, but OpenClaw 2026.9 and later doesn't load that file. See [Agents](/using/agents).
+- **Agent files.** Clawboo Native uses `SOUL.md` as the agent's instructions; Claude Code, Codex and Hermes get it as a persona at the top of each prompt. On every runtime, `AGENTS.md` also draws the agent's links on the team graph. OpenClaw 2026.9 and later neither loads nor accepts `TOOLS.md`, so Clawboo puts an OpenClaw agent's tool notes in `AGENTS.md`. See [Agents](/using/agents).
 - **Commands.** A new OpenClaw agent asks before running a command it hasn't been allowed (**Ask for Unknown**). See [OpenClaw](/runtimes/openclaw#what-a-new-boo-is-allowed-to-run).
 
 <Warning>

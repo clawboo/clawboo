@@ -9,7 +9,14 @@ import type { IncomingMessage } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, getSetting, setSetting, teams } from '@clawboo/db'
+import {
+  agents,
+  getScheduledRun,
+  getSetting,
+  registerScheduledRun,
+  setSetting,
+  teams,
+} from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -375,6 +382,79 @@ describe('OpenClawAgentSource', () => {
       await src.stop()
     })
 
+    // An owed delete is not a delete yet. DELETE /api/agents/:id keeps the
+    // agent's routines while the Gateway is down, so they have to go only once
+    // the delete settles, and stay when the Gateway refuses it.
+    function routineFor(agentId: string): string {
+      const r = registerScheduledRun(getDb(), {
+        agentId,
+        teamId: null,
+        cronSpec: '0 9 * * *',
+        taskTemplate: '{}',
+        nextRunAt: Date.now() + 60_000,
+      })
+      if (!r.ok) throw new Error(r.reason)
+      return r.run.id
+    }
+
+    it("keeps the agent's routines when the Gateway refuses the delete", async () => {
+      const fake = syncedGateway()
+      fake.agents.delete = (agentId: string) =>
+        Promise.reject(
+          new GatewayResponseError({
+            code: 'INVALID_REQUEST',
+            message: `Agent "${agentId}" is the only configured agent and cannot be deleted.`,
+          }),
+        )
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      const routine = routineFor('a2')
+      deleteOffline(src, 'a2')
+
+      await src.start()
+      expect(await src.getAgent('a2')).not.toBeNull()
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+      await src.stop()
+    })
+
+    it("deletes the agent's routines once the Gateway accepts the delete", async () => {
+      const fake = syncedGateway()
+      fake.agents.delete = (agentId: string) => {
+        fake.list.agents = fake.list.agents.filter((a) => a.id !== agentId)
+        return Promise.resolve()
+      }
+      const src = makeSource(fake)
+      await src.start()
+      await src.stop()
+      const routine = routineFor('a2')
+      const other = routineFor('a1')
+      deleteOffline(src, 'a2')
+      // Owed, not done: nothing is deleted while the Gateway is away.
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+
+      await src.start()
+      expect(getScheduledRun(getDb(), routine)).toBeNull()
+      expect(getScheduledRun(getDb(), other)).not.toBeNull()
+      await src.stop()
+    })
+
+    it("deletes the agent's routines once the Gateway no longer lists it", async () => {
+      const src = makeSource(new FakeGateway())
+      insertOpenClawRow('a2', 'gw-a2')
+      const routine = routineFor('a2')
+      deleteOffline(src, 'a2')
+
+      src.upsertFromList([{ id: 'a1' }, { id: 'gw-a2' }], {
+        defaultId: 'a1',
+        mainKey: 'main',
+        scope: '',
+      })
+      expect(getScheduledRun(getDb(), routine)).not.toBeNull()
+      src.upsertFromList([{ id: 'a1' }], { defaultId: 'a1', mainKey: 'main', scope: '' })
+      expect(getScheduledRun(getDb(), routine)).toBeNull()
+    })
+
     it('records nothing for an id with no OpenClaw row', () => {
       const src = makeSource(new FakeGateway())
       expect(src.deferUpstreamDelete('nobody')).toBe(false)
@@ -475,13 +555,46 @@ describe('OpenClawAgentSource', () => {
     // told how to open a web page, and an instruction that reaches only the
     // agents whose creator happened to pass a file is worse than none, because
     // it reads as a fleet rule while part of the fleet never received it.
-    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'TOOLS.md', 'AGENTS.md'])
+    // TOOLS.md is never sent (the 2026.9 Gateway refuses it); a heading-only
+    // one carries nothing, so AGENTS.md gains nothing from it either.
+    expect(fake.fileWrites.map((w) => w.name)).toEqual(['SOUL.md', 'AGENTS.md'])
     const agentsMd = fake.fileWrites.find((w) => w.name === 'AGENTS.md')?.content ?? ''
     expect(agentsMd).toContain('Opening web pages')
+    expect(agentsMd).not.toContain('## Tools')
     // The load-bearing line: this is the profile that reaches the operator's own
     // signed-in browser.
     expect(agentsMd).toContain('profile: "user"')
     expect(await src.getAgent('new-Designer')).not.toBeNull()
+    await src.stop()
+  })
+
+  it('createAgent succeeds on a Gateway that refuses TOOLS.md and moves its notes into AGENTS.md', async () => {
+    // OpenClaw 2026.9: agents.files.set answers "unsupported file" for TOOLS.md.
+    const fake = new FakeGateway()
+    const setFile = fake.agents.files.set
+    fake.agents.files.set = (agentId: string, name: string, content: string) =>
+      name === 'TOOLS.md'
+        ? Promise.reject(new Error('unsupported file "TOOLS.md"'))
+        : setFile(agentId, name, content)
+    const src = makeSource(fake)
+    await src.start()
+
+    const record = await src.createAgent({
+      name: 'Researcher',
+      files: {
+        'SOUL.md': '# Researcher\n',
+        'TOOLS.md': '# TOOLS\n\n## Skills\n- web-search\n',
+        'AGENTS.md': '# AGENTS\n\nRoute to @Scout.\n',
+      },
+    })
+
+    expect(record.id).toBe('new-Researcher')
+    expect(fake.fileWrites.map((w) => w.name)).not.toContain('TOOLS.md')
+    const agentsMd = fake.fileWrites.find((w) => w.name === 'AGENTS.md')?.content ?? ''
+    expect(agentsMd).toContain('Route to @Scout.')
+    expect(agentsMd).toContain('## Tools\n\n### Skills\n- web-search')
+    expect(agentsMd).toContain('Opening web pages')
+    expect(await src.getAgent('new-Researcher')).not.toBeNull()
     await src.stop()
   })
 

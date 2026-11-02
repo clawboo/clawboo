@@ -19,7 +19,9 @@ import {
   getDimensionText,
   getDimensions,
   hasPersonalityBlock,
+  mergeSoulWithCustomPersonality,
   mergeSoulWithPersonality,
+  mergeSoulWithStoredPersonality,
   migratePersonalityValues,
   stripPersonalityBlock,
 } from '../soulPersonality'
@@ -164,5 +166,33 @@ describe('SOUL.md round-trip', () => {
     const twice = mergeSoulWithPersonality(once, { ...DEFAULT_PERSONALITY, bite: 100 })
     expect(twice.match(/clawboo:personality/g)).toHaveLength(1)
     expect(twice.match(/## Limits/g)).toHaveLength(1)
+  })
+})
+
+describe('mergeSoulWithStoredPersonality', () => {
+  const custom = mergeSoulWithCustomPersonality('# SOUL\n\nRole.', 'Answer like a ship captain.')
+
+  it('keeps custom instructions when the row stores both custom text and slider values', () => {
+    const merged = mergeSoulWithStoredPersonality(custom, {
+      values: DEFAULT_PERSONALITY,
+      customText: 'Answer like a ship captain.',
+    })
+    expect(merged).toContain('Answer like a ship captain.')
+    expect(merged).toContain('clawboo:personality-custom')
+    expect(merged).not.toContain('## Limits')
+    expect(stripPersonalityBlock(merged ?? '').trim()).toBe('# SOUL\n\nRole.')
+  })
+
+  it('uses the slider block when no custom text is stored', () => {
+    const merged = mergeSoulWithStoredPersonality('# SOUL\n\nRole.', {
+      values: DEFAULT_PERSONALITY,
+      customText: null,
+    })
+    expect(merged).toBe(mergeSoulWithPersonality('# SOUL\n\nRole.', DEFAULT_PERSONALITY))
+  })
+
+  it('returns null when nothing usable is stored', () => {
+    expect(mergeSoulWithStoredPersonality(custom, { values: null, customText: '   ' })).toBeNull()
+    expect(mergeSoulWithStoredPersonality(custom, {})).toBeNull()
   })
 })

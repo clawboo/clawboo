@@ -348,7 +348,7 @@ curl -X POST http://localhost:18790/api/capabilities/install \
 # Disable a manageable capability
 curl -X POST http://localhost:18790/api/capabilities/disable \
   -H 'Content-Type: application/json' \
-  -d '{"id":"native:tool_registry:delete_path"}'
+  -d '{"id":"native:tool_registry:note"}'
 
 # Answer a pending tool-call approval
 curl -X POST http://localhost:18790/api/capabilities/approve \

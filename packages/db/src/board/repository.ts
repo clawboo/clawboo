@@ -95,6 +95,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     completedAt: null,
     roomId: input.roomId ?? null,
     personMovedAt: null,
+    runnerInputs: null,
   }
 }
 

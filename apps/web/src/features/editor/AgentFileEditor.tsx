@@ -23,11 +23,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useToastStore } from '@/stores/toast'
 import { useGraphStore } from '@/features/graph/store'
 import { mutationQueue } from '@/lib/mutationQueue'
-import {
-  stripPersonalityBlock,
-  mergeSoulWithPersonality,
-  isPersonalityValues,
-} from '@/lib/soulPersonality'
+import { mergeSoulWithStoredPersonality } from '@/lib/soulPersonality'
 import { clawbooEditorThemeDark, clawbooEditorThemeLight } from './editorTheme'
 import { useTheme } from '@/features/theme/useTheme'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -35,7 +31,9 @@ import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const ALL_FILE_TABS: readonly AgentFileName[] = [...AGENT_FILE_NAMES]
-const CORE_FILE_TABS: readonly AgentFileName[] = ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md']
+// No TOOLS.md: the 2026.9 OpenClaw Gateway refuses it. A non-empty one still
+// shows as an extra tab below.
+const CORE_FILE_TABS: readonly AgentFileName[] = ['SOUL.md', 'IDENTITY.md', 'AGENTS.md']
 
 interface FileState {
   content: string
@@ -67,7 +65,7 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     return init
   })
 
-  // Dynamic visible tabs: core 4 always + extra files only when non-empty
+  // Dynamic visible tabs: the core files always + extra files only when non-empty
   const visibleTabs = useMemo(() => {
     const extras = ALL_FILE_TABS.filter(
       (tab) => !(CORE_FILE_TABS as readonly string[]).includes(tab) && files[tab]?.clean.trim(),
@@ -107,19 +105,17 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
         })
 
         // Always strip any stale personality block from SOUL.md and re-merge
-        // from SQLite (the source of truth for slider values). This handles two
+        // from SQLite (the source of truth for the sliders and for custom
+        // instructions, which win when both are stored). This handles two
         // scenarios: (a) Gateway content has no personality block (never written),
         // (b) Gateway has a stale personality block (old code overwrote the role
         // description, or values are out of date).
         const soulRaw = next['SOUL.md']?.content ?? ''
         try {
           const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
-          const data = (await res.json()) as { values: unknown }
-          if (data.values && isPersonalityValues(data.values)) {
-            const base = stripPersonalityBlock(soulRaw)
-            const merged = mergeSoulWithPersonality(base, data.values)
-            next['SOUL.md'] = { content: merged, clean: merged }
-          }
+          const data = (await res.json()) as { values: unknown; customText?: unknown }
+          const merged = mergeSoulWithStoredPersonality(soulRaw, data)
+          if (merged !== null) next['SOUL.md'] = { content: merged, clean: merged }
         } catch {
           // Non-fatal — personality data not merged
         }
@@ -142,12 +138,10 @@ export function AgentFileEditor({ agentId, agentName, onClose }: AgentFileEditor
     void (async () => {
       try {
         const res = await apiFetch(`/api/personality?agentId=${encodeURIComponent(agentId)}`)
-        const data = (await res.json()) as { values: unknown }
-        if (data.values && isPersonalityValues(data.values)) {
-          const currentSoul = filesRef.current['SOUL.md']?.content ?? ''
-          const base = stripPersonalityBlock(currentSoul)
-          const merged = mergeSoulWithPersonality(base, data.values)
-
+        const data = (await res.json()) as { values: unknown; customText?: unknown }
+        const currentSoul = filesRef.current['SOUL.md']?.content ?? ''
+        const merged = mergeSoulWithStoredPersonality(currentSoul, data)
+        if (merged !== null) {
           setFiles((prev) => ({
             ...prev,
             'SOUL.md': { content: merged, clean: merged },

@@ -94,15 +94,17 @@ beforeEach(() => {
 afterEach(() => cleanup())
 
 describe('AgentFileEditor', () => {
-  it('renders the header and the four core tabs, and loads SOUL.md into the editor', async () => {
+  it('renders the header and the three core tabs, and loads SOUL.md into the editor', async () => {
     renderEditor(<AgentFileEditor agentId={AGENT_ID} agentName="Research Boo" onClose={vi.fn()} />)
 
     expect(await screen.findByText('Research Boo')).toBeInTheDocument()
     expect(screen.getByText('Edit Files')).toBeInTheDocument()
 
-    for (const tab of ['SOUL', 'IDENTITY', 'TOOLS', 'AGENTS']) {
+    for (const tab of ['SOUL', 'IDENTITY', 'AGENTS']) {
       expect(screen.getByRole('button', { name: tab })).toBeInTheDocument()
     }
+    // An empty TOOLS.md gets no tab: the 2026.9 OpenClaw Gateway refuses it.
+    expect(screen.queryByRole('button', { name: 'TOOLS' })).not.toBeInTheDocument()
 
     await waitForLoaded('Soul body copy')
     // The spinner overlay clears once all seven reads settle.

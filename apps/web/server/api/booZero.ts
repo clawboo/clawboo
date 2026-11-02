@@ -1,17 +1,19 @@
-// Boo Zero context storage — per-team briefs and a global brief.
+// Boo Zero context storage: per-team briefs and the display-name override.
 //
 // Per-team briefs live in the dedicated `boo_zero_team_briefs` table
-// (FK cascades on team delete). The global brief is stored in `settings`
-// under the key `boo-zero:global-brief`. Both endpoints return `null`
-// content when nothing is stored — the UI falls back to client-side
-// `buildTeamBrief` / `buildGlobalBrief` defaults in that case.
+// (FK cascades on team delete). The endpoint returns `null` content when
+// nothing is stored, and the UI falls back to the client-side `buildTeamBrief`
+// default in that case.
+//
+// There is no global brief. One was saved under `boo-zero:global-brief` but
+// nothing ever read it into a prompt, while its editor said it was injected on
+// every interaction; the field and its routes were removed. A row an older
+// version wrote is left in `settings`, unread.
 
 import type { Request, Response } from 'express'
 import { booZeroTeamBriefs, getSetting, setSetting } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
-
-const GLOBAL_BRIEF_KEY = 'boo-zero:global-brief'
 
 /**
  * Clawboo-side display-name override for Boo Zero. The user's primary
@@ -24,10 +26,6 @@ const GLOBAL_BRIEF_KEY = 'boo-zero:global-brief'
 const DISPLAY_NAME_KEY_PREFIX = 'boo-zero:display-name:'
 
 interface TeamBriefBody {
-  content?: string
-}
-
-interface GlobalBriefBody {
   content?: string
 }
 
@@ -105,42 +103,6 @@ export function teamBriefDELETE(req: Request, res: Response): void {
     const db = getDb()
     db.delete(booZeroTeamBriefs).where(eq(booZeroTeamBriefs.teamId, teamId)).run()
     res.json({ ok: true })
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-}
-
-// ─── GET /api/boo-zero/global-brief ─────────────────────────────────────────
-
-export function globalBriefGET(_req: Request, res: Response): void {
-  try {
-    const db = getDb()
-    const raw = getSetting(db, GLOBAL_BRIEF_KEY)
-    if (raw === null) {
-      res.json({ content: null, updatedAt: null })
-      return
-    }
-    // The settings table value is the raw markdown; the updatedAt is the
-    // settings row's column. We re-query to get it.
-    // (getSetting returns only the value; a small extra select gets the time.)
-    res.json({ content: raw, updatedAt: null })
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-}
-
-// ─── PUT /api/boo-zero/global-brief ─────────────────────────────────────────
-
-export function globalBriefPUT(req: Request, res: Response): void {
-  const body = req.body as GlobalBriefBody | undefined
-  if (!body || typeof body !== 'object' || typeof body.content !== 'string') {
-    res.status(400).json({ error: 'content (string) required' })
-    return
-  }
-  try {
-    const db = getDb()
-    setSetting(db, GLOBAL_BRIEF_KEY, body.content)
-    res.json({ content: body.content, updatedAt: Date.now() })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }

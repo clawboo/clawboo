@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { delegationTargetOf, isHumanAssignment } from '@clawboo/board-core'
+import { delegationTargetOf, encodeHumanAssignment, isHumanAssignment } from '@clawboo/board-core'
 import {
   agents,
   claimTask,
@@ -17,6 +17,7 @@ import {
   createTask,
   getComments,
   getTask,
+  setTaskRunnerInputs,
   teams,
   updateStatus,
 } from '@clawboo/db'
@@ -29,10 +30,31 @@ vi.mock('../../lib/teamChat/boardDispatch', () => ({
     dispatched.push({ teamId, taskId })
   },
 }))
+// The rerun DECISION (runnerRerunFor) stays real; the run itself is recorded.
+const reruns: Array<{ taskId: string; assigneeAgentId: string; runtime: string }> = []
+vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../lib/runnerRerun')>()),
+  requestRunnerRerun: (
+    _db: unknown,
+    input: { taskId: string; assigneeAgentId: string; rerun: { runtime: string } },
+  ) => {
+    reruns.push({
+      taskId: input.taskId,
+      assigneeAgentId: input.assigneeAgentId,
+      runtime: input.rerun.runtime,
+    })
+  },
+}))
 
 const { getDb, resetDb } = await import('../../lib/db')
-const { boardAssignPOST, boardCreatePOST, boardGetGET, boardListGET, boardRetryPOST } =
-  await import('../board')
+const {
+  boardAssignPOST,
+  boardCommentPOST,
+  boardCreatePOST,
+  boardGetGET,
+  boardListGET,
+  boardRetryPOST,
+} = await import('../board')
 
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
   let code = 200
@@ -69,6 +91,7 @@ describe('board: handing a task to one agent', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     dispatched.length = 0
+    reruns.length = 0
     const db = getDb()
     const now = Date.now()
     for (const [id, name] of [
@@ -79,12 +102,29 @@ describe('board: handing a task to one agent', () => {
         .values({ id, name, icon: '🚀', color: '#e94560', createdAt: now, updatedAt: now })
         .run()
     }
-    const agent = (id: string, name: string, teamId: string, archivedAt: number | null = null) =>
+    const agent = (
+      id: string,
+      name: string,
+      teamId: string,
+      archivedAt: number | null = null,
+      runtime = 'openclaw',
+    ) =>
       db
         .insert(agents)
-        .values({ id, name, gatewayId: id, teamId, archivedAt, createdAt: now, updatedAt: now })
+        .values({
+          id,
+          name,
+          gatewayId: id,
+          teamId,
+          archivedAt,
+          runtime,
+          createdAt: now,
+          updatedAt: now,
+        })
         .run()
     agent('coder', 'Coder', TEAM)
+    agent('builder', 'Builder', TEAM, null, 'claude-code')
+    agent('reviewer', 'Reviewer', TEAM, null, 'codex')
     agent('writer', 'Writer', TEAM)
     agent('gone', 'Gone', TEAM, now)
     agent('outsider', 'Outsider', OTHER_TEAM)
@@ -248,6 +288,94 @@ describe('board: handing a task to one agent', () => {
       boardRetryPOST(req({ params: { taskId: 'nope' } }), r.res)
       expect(r.statusCode()).toBe(404)
     })
+
+    describe('a task the task runner ran', () => {
+      /** Failed on the runner for `builder`, then set aside as a Routine does. */
+      function runnerTask(teamId: string | null = TEAM): string {
+        const db = getDb()
+        const t = createTask(db, { title: 'fix it', teamId })
+        setTaskRunnerInputs(db, t.id, {
+          runtime: 'claude-code',
+          assigneeAgentId: 'builder',
+          repoPath: '/repo',
+          kind: 'code',
+          model: null,
+        })
+        claimTask(db, t.id, 'builder')
+        updateStatus(db, t.id, 'blocked')
+        return t.id
+      }
+
+      it('runs it through the runner again for the agent it ran for, not team chat', () => {
+        const id = runnerTask()
+        const r = mockRes()
+        boardRetryPOST(req({ params: { taskId: id } }), r.res)
+        expect(r.statusCode()).toBe(202)
+        expect(getTask(getDb(), id)?.status).toBe('todo')
+        expect(reruns).toEqual([{ taskId: id, assigneeAgentId: 'builder', runtime: 'claude-code' }])
+        expect(dispatched).toEqual([])
+      })
+
+      it('needs no team, because the runner does not go through one', () => {
+        const id = runnerTask(null)
+        const r = mockRes()
+        boardRetryPOST(req({ params: { taskId: id } }), r.res)
+        expect(r.statusCode()).toBe(202)
+        expect(reruns.map((x) => x.taskId)).toEqual([id])
+      })
+
+      it('asks for an Assign when the agent it ran for is gone and none is bound', () => {
+        // Team chat fires a task by its binding, so with no runner rerun and no
+        // binding there is nothing to start: answering 202 would start nothing.
+        const db = getDb()
+        for (const saved of ['gone', 'deleted-agent']) {
+          const t = createTask(db, { title: `ran for ${saved}`, teamId: TEAM })
+          setTaskRunnerInputs(db, t.id, {
+            runtime: 'claude-code',
+            assigneeAgentId: saved,
+            repoPath: null,
+            kind: null,
+            model: null,
+          })
+          updateStatus(db, t.id, 'blocked')
+          const r = mockRes()
+          boardRetryPOST(req({ params: { taskId: t.id } }), r.res)
+          expect(r.statusCode(), saved).toBe(409)
+          expect(r.body(), saved).toMatchObject({ error: 'unassigned' })
+        }
+        expect(reruns).toEqual([])
+        expect(dispatched).toEqual([])
+      })
+
+      it('a person’s reply restarts it through the runner too', async () => {
+        const db = getDb()
+        const t = createTask(db, {
+          title: 'reply to me',
+          teamId: TEAM,
+          sourceDelegationId: encodeHumanAssignment('builder', 'r1'),
+        })
+        setTaskRunnerInputs(db, t.id, {
+          runtime: 'claude-code',
+          assigneeAgentId: 'builder',
+          repoPath: '/repo',
+          kind: 'code',
+          model: null,
+        })
+        updateStatus(db, t.id, 'blocked')
+        const r = mockRes()
+        await boardCommentPOST(
+          req({
+            params: { taskId: t.id },
+            body: { body: 'try the other branch', authorType: 'user' },
+          }),
+          r.res,
+        )
+        expect(reruns).toEqual([
+          { taskId: t.id, assigneeAgentId: 'builder', runtime: 'claude-code' },
+        ])
+        expect(dispatched).toEqual([])
+      })
+    })
   })
 
   describe('POST /api/board/:taskId/assign', () => {
@@ -278,6 +406,40 @@ describe('board: handing a task to one agent', () => {
       const stored = getTask(db, t.id)!
       expect(stored.status).toBe('todo')
       expect(delegationTargetOf(stored.sourceDelegationId)).toBe('writer')
+    })
+
+    it('runs a task-runner task through the runner, on the new agent’s runtime', () => {
+      const db = getDb()
+      const t = createTask(db, { title: 'fix it', teamId: TEAM })
+      setTaskRunnerInputs(db, t.id, {
+        runtime: 'claude-code',
+        assigneeAgentId: 'builder',
+        repoPath: '/repo',
+        kind: 'code',
+        model: null,
+      })
+      const r = mockRes()
+      boardAssignPOST(req({ params: { taskId: t.id }, body: { agentId: 'reviewer' } }), r.res)
+      expect(r.statusCode()).toBe(200)
+      expect(reruns).toEqual([{ taskId: t.id, assigneeAgentId: 'reviewer', runtime: 'codex' }])
+      expect(dispatched).toEqual([])
+    })
+
+    it('hands a task-runner task to team chat when the new agent is one the runner cannot run', () => {
+      const db = getDb()
+      const t = createTask(db, { title: 'fix it', teamId: TEAM })
+      setTaskRunnerInputs(db, t.id, {
+        runtime: 'claude-code',
+        assigneeAgentId: 'builder',
+        repoPath: null,
+        kind: null,
+        model: null,
+      })
+      const r = mockRes()
+      boardAssignPOST(req({ params: { taskId: t.id }, body: { agentId: 'writer' } }), r.res)
+      expect(r.statusCode()).toBe(200)
+      expect(reruns).toEqual([])
+      expect(dispatched).toEqual([{ teamId: TEAM, taskId: t.id }])
     })
 
     it('refuses while the task is being worked, and refuses an agent from another team', () => {

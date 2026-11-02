@@ -8,12 +8,14 @@
 // GatewayClient + the proxy-device `signConnect`; tests pass a fake). This is the
 // "who exists" layer — it never touches RuntimeAdapter ("how they run").
 
-import { withBrowsingGuidance } from '@clawboo/protocol'
+import { foldToolsIntoAgentsMd, withBrowsingGuidance } from '@clawboo/protocol'
 import {
   agents,
   approvalHistory,
   costRecords,
+  deleteScheduledRunsForAgent,
   getSetting,
+  scheduledRuns,
   setSetting,
   settings,
   teams,
@@ -791,7 +793,12 @@ export class OpenClawAgentSource implements AgentSource {
     for (const gatewayId of pendingUpstreamDeletes(db)) {
       try {
         await client.agents.delete(gatewayId)
+        // The tombstone holds the Clawboo id. Its routines were kept while the
+        // delete was only owed, because a refusal brings the agent back; now
+        // that the Gateway has deleted it, they go.
+        const clawbooId = getSetting(db, PENDING_DELETE_PREFIX + gatewayId) ?? gatewayId
         clearPendingDelete(db, gatewayId)
+        deleteScheduledRunsForAgent(db, clawbooId)
         deleted.add(gatewayId)
       } catch (err) {
         if (isDeleteRefusal(err)) {
@@ -896,9 +903,25 @@ export class OpenClawAgentSource implements AgentSource {
         for (const id of missing) this.emit({ kind: 'agent-archived', at: now, agentId: id })
       }
 
-      // A tombstoned agent the Gateway no longer lists needs no delete.
+      // A tombstoned agent the Gateway no longer lists needs no delete. It is gone
+      // for good, so the routines kept while its delete was owed go with it.
       const settled = [...pending].filter((id) => !listedIds.has(id))
       if (settled.length > 0) {
+        const settledIds = tx
+          .select({ value: settings.value })
+          .from(settings)
+          .where(
+            inArray(
+              settings.key,
+              settled.map((id) => PENDING_DELETE_PREFIX + id),
+            ),
+          )
+          .all()
+          .map((r) => r.value)
+          .filter((v): v is string => typeof v === 'string' && v.length > 0)
+        if (settledIds.length > 0) {
+          tx.delete(scheduledRuns).where(inArray(scheduledRuns.agentId, settledIds)).run()
+        }
         tx.delete(settings)
           .where(
             inArray(
@@ -1059,9 +1082,17 @@ export class OpenClawAgentSource implements AgentSource {
     // AGENTS.md rather than TOOLS.md on purpose: TOOLS.md is dropped from the
     // Gateway's bootstrap allowlist in the 2026.9 line, so guidance filed there
     // would stop reaching the model on upgrade with nothing on screen to say so.
+    //
+    // TOOLS.md itself is never sent. The 2026.9 Gateway answers
+    // `agents.files.set` for it with "unsupported file", which failed the create
+    // after the agent already existed upstream, before AGENTS.md or the exec
+    // posture below were written. Its notes (a Marketplace member's skill list)
+    // go into AGENTS.md instead, as `openclaw doctor` does on upgrade.
     const files = { ...(input.files ?? {}) }
-    files['AGENTS.md'] = withBrowsingGuidance(files['AGENTS.md'])
-    for (const name of ['SOUL.md', 'IDENTITY.md', 'TOOLS.md', 'AGENTS.md'] as const) {
+    files['AGENTS.md'] = withBrowsingGuidance(
+      foldToolsIntoAgentsMd(files['AGENTS.md'], files['TOOLS.md']),
+    )
+    for (const name of ['SOUL.md', 'IDENTITY.md', 'AGENTS.md'] as const) {
       const content = files[name]
       if (content) await client.agents.files.set(agentId, name, content)
     }

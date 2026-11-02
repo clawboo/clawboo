@@ -9,18 +9,12 @@
 //   • Claiming teammates "timed out" while they were still mid-response
 //   • Producing unsolicited intros on chat reopen
 //
-// `buildGlobalBrief` in `booZeroBrief.ts` documents most of these rules, but
-// the brief is ONLY surfaced in the maintenance UI — no code path injects it
-// into the LLM's context. The team brief (per-team) IS injected, but the
-// global identity + universal-leader rules are not.
-//
 // This module exports a small canonical rules block that we inject into
-// EVERY message Boo Zero receives — user messages, agent-to-Boo-Zero
+// EVERY message Boo Zero receives: user messages, agent-to-Boo-Zero
 // delegations, wake-ups, the 1:1 chat path. The block is intentionally
 // hard-coded (not user-editable through the UI) so the load-bearing rules
-// can never be accidentally deleted by editing the brief textarea. The
-// user-editable Notes section in `buildGlobalBrief` continues to be
-// optional add-on context that the user can use for team-specific guidance.
+// can never be accidentally deleted. Guidance for one team goes in that
+// team's rules, which every turn also reads.
 //
 // Size budget: ~5 KB (~1.2 K tokens), covering
 // the "Multi-step pipelines" + "<plan> blocks" sections (continue-on-relay

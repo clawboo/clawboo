@@ -33,30 +33,30 @@ Every server reports version `0.1.0` and declares the `tools.listChanged` capabi
 
 ## Tool index
 
-| Tool                                                          | Server   | What it does                                             |
-| ------------------------------------------------------------- | -------- | -------------------------------------------------------- |
-| [`list_tasks`](#list_tasks)                                   | Tasks    | List tasks, or only the ones ready to claim              |
-| [`get_task`](#get_task)                                       | Tasks    | Read one task with its comments and parent chain         |
-| [`create_task`](#create_task)                                 | Tasks    | Create a root task or a subtask                          |
-| [`create_subtask`](#create_subtask)                           | Tasks    | Create a subtask under a parent                          |
-| [`claim_task`](#claim_task)                                   | Tasks    | Atomically claim a `todo` task                           |
-| [`assign_task`](#assign_task)                                 | Tasks    | Atomically hand a `todo` task to an agent                |
-| [`release_task`](#release_task)                               | Tasks    | Put an `in_progress` task back to `todo`                 |
-| [`update_task_status`](#update_task_status)                   | Tasks    | Move a task to another status                            |
-| [`block_task`](#block_task)                                   | Tasks    | Move a task to `blocked`                                 |
-| [`unblock_task`](#unblock_task)                               | Tasks    | Move a task back to `todo`                               |
-| [`add_comment`](#add_comment)                                 | Tasks    | Comment on a task                                        |
-| [`link_task`](#link_task)                                     | Tasks    | Make one task wait for another                           |
-| [`memory_save`](#memory_save)                                 | Memory   | Save a fact or a new version of a procedure              |
-| [`memory_search`](#memory_search)                             | Memory   | Search facts by keyword, meaning, or both                |
-| [`memory_browse`](#memory_browse)                             | Memory   | List the most recently updated facts                     |
-| [`memory_feedback`](#memory_feedback)                         | Memory   | Report whether a recalled fact helped                    |
-| [`echo`, `note`, `web_search`, `delete_path`](#builtin-tools) | Tools    | Demonstration builtins that exercise approvals and audit |
-| [Connector tools](#connector-tools)                           | Tools    | Tools from connectors the agent has been granted         |
-| [`read_tool_result`](#read_tool_result)                       | Tools    | Page through a result that was too large to return whole |
-| [`team_chat_post`](#team_chat_post)                           | TeamChat | Post to the peer room as a named teammate                |
-| [`team_chat_subscribe`](#team_chat_subscribe)                 | TeamChat | Read new peer-room posts since a cursor                  |
-| [`team_delegate`](#team_delegate)                             | TeamChat | Hand work to a teammate by name (orchestrated runs only) |
+| Tool                                          | Server   | What it does                                             |
+| --------------------------------------------- | -------- | -------------------------------------------------------- |
+| [`list_tasks`](#list_tasks)                   | Tasks    | List tasks, or only the ones ready to claim              |
+| [`get_task`](#get_task)                       | Tasks    | Read one task with its comments and parent chain         |
+| [`create_task`](#create_task)                 | Tasks    | Create a root task or a subtask                          |
+| [`create_subtask`](#create_subtask)           | Tasks    | Create a subtask under a parent                          |
+| [`claim_task`](#claim_task)                   | Tasks    | Atomically claim a `todo` task                           |
+| [`assign_task`](#assign_task)                 | Tasks    | Atomically hand a `todo` task to an agent                |
+| [`release_task`](#release_task)               | Tasks    | Put an `in_progress` task back to `todo`                 |
+| [`update_task_status`](#update_task_status)   | Tasks    | Move a task to another status                            |
+| [`block_task`](#block_task)                   | Tasks    | Move a task to `blocked`                                 |
+| [`unblock_task`](#unblock_task)               | Tasks    | Move a task back to `todo`                               |
+| [`add_comment`](#add_comment)                 | Tasks    | Comment on a task                                        |
+| [`link_task`](#link_task)                     | Tasks    | Make one task wait for another                           |
+| [`memory_save`](#memory_save)                 | Memory   | Save a fact or a new version of a procedure              |
+| [`memory_search`](#memory_search)             | Memory   | Search facts by keyword, meaning, or both                |
+| [`memory_browse`](#memory_browse)             | Memory   | List the most recently updated facts                     |
+| [`memory_feedback`](#memory_feedback)         | Memory   | Report whether a recalled fact helped                    |
+| [`echo`, `note`](#builtin-tools)              | Tools    | Simple builtins that exercise the broker and audit       |
+| [Connector tools](#connector-tools)           | Tools    | Tools from connectors the agent has been granted         |
+| [`read_tool_result`](#read_tool_result)       | Tools    | Page through a result that was too large to return whole |
+| [`team_chat_post`](#team_chat_post)           | TeamChat | Post to the peer room as a named teammate                |
+| [`team_chat_subscribe`](#team_chat_subscribe) | TeamChat | Read new peer-room posts since a cursor                  |
+| [`team_delegate`](#team_delegate)             | TeamChat | Hand work to a teammate by name (orchestrated runs only) |
 
 ## Callers and scoping
 
@@ -403,16 +403,14 @@ Results:
 
 ### Builtin tools
 
-These four exist to exercise the broker (approvals, audit and denials). None of them has a side effect.
+These two exist to exercise the broker (the round trip and the audit). Neither has a side effect.
 
-| Tool          | Arguments                                             | Risk                           | Listed                      | Returns                                    |
-| ------------- | ----------------------------------------------------- | ------------------------------ | --------------------------- | ------------------------------------------ |
-| `echo`        | `{ message: string }`                                 | safe                           | Always                      | The message                                |
-| `note`        | `{ note: string }` (non-empty)                        | safe                           | Always                      | `noted: <note>`; nothing is stored         |
-| `web_search`  | `{ query: string; limit?: number }` (query non-empty) | external, asks for approval    | Only with a search provider | `searched: <query>`; no search runs        |
-| `delete_path` | `{ path: string }` (non-empty)                        | destructive, asks for approval | Always                      | `would delete: <path>`; nothing is deleted |
+| Tool   | Arguments                      | Risk | Listed | Returns                            |
+| ------ | ------------------------------ | ---- | ------ | ---------------------------------- |
+| `echo` | `{ message: string }`          | safe | Always | The message                        |
+| `note` | `{ note: string }` (non-empty) | safe | Always | `noted: <note>`; nothing is stored |
 
-A search provider means the `TAVILY_API_KEY` environment variable, or an authorized `tavily` provider. With no search provider and no grant that covers every agent (a `global` grant), an unverified caller is served four tools: `echo`, `note`, `delete_path` and `read_tool_result`.
+There is no built-in web search. For search, connect a search connector such as Exa Search in [Connectors](/using/connectors) and give it to the agents that need it; its tools are then listed as [connector tools](#connector-tools). With no grant that covers every agent (a `global` grant), an unverified caller is served three tools: `echo`, `note` and `read_tool_result`.
 
 ### Connector tools
 

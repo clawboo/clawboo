@@ -1,7 +1,7 @@
 ---
 title: 'Boo Zero, your team leader'
 sidebarTitle: 'Boo Zero'
-description: 'How Boo Zero leads every team, how Clawboo picks it, what it reads, and how to use its own chat, its display name and the briefs.'
+description: 'How Boo Zero leads every team, how Clawboo picks it, what it reads, and how to use its own chat, its display name and the team briefs.'
 icon: 'compass'
 keywords:
   [
@@ -18,7 +18,7 @@ keywords:
 
 Boo Zero is your team leader, and it leads every team. When you send a message in a team's chat without @mentioning anyone, Boo Zero answers it or hands the work to the right teammate. Each hand-off becomes a task on the board. Boo Zero belongs to no team, so you never add it to a team or a room. It still leads **General** and every room of every team that has at least one member.
 
-Use this page to see how Clawboo picks Boo Zero, what Boo Zero reads, and how to use its own chat, its display name and the briefs.
+Use this page to see how Clawboo picks Boo Zero, what Boo Zero reads, and how to use its own chat, its display name and the team briefs.
 
 You can spot Boo Zero by its red Boo, which never wears an accessory. It sits at the top of the team rail, and every team on the Org chart branches off it.
 
@@ -61,13 +61,12 @@ Clawboo then adds a snapshot of that team to this one message: its brief (the fi
 | **Team rules**      | The team's brief and rules, or `/rule` in a team chat | Every turn in that team's chats. Every teammate reads them too.                                                                                        |
 | **A team's brief**  | The team's brief and rules                            | Only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Team chats do not include it. |
 | **Its fixed rules** | Nowhere: they are built in                            | Every message in Boo Zero's own chat.                                                                                                                  |
-| **Global brief**    | **Details > Brief** on Boo Zero's page                | Never. Clawboo does not use the Global Brief yet.                                                                                                      |
 
 In a team's chats, Boo Zero follows its own instructions. Each turn also gives it the team's rules, what you told the team about yourself, and who is on the team. See [What an agent sees](/concepts/agent-context) for the full list. Team rules and the brief are explained on [Teams](/using/teams#team-rules).
 
 On Clawboo Native, Boo Zero's own instructions are its SOUL.md, under **Details > Agent Files** on its page. You can read and change them there, but they tell Boo Zero how to hand out work, so change them with care.
 
-## Set the display name and Global Brief
+## Set the display name
 
 <Steps>
 
@@ -89,19 +88,13 @@ Under **Display name**, type a name of up to 80 characters, then click **Save**.
 
 </Step>
 
-<Step title="Edit the Global Brief (optional)">
-
-Edit the text, then click **Save**. **Regenerate from teams** rebuilds a draft that lists your teams; nothing changes until you click **Save**.
-
-</Step>
-
 </Steps>
 
 The display name is the name the dashboard shows for Boo Zero, and the name its fixed rules use in its own chat. It starts as **Boo Zero**. While the OpenClaw Gateway is connected, saving also puts the new name at the top of Boo Zero's SOUL.md.
 
 <Note>
 
-Clawboo does not use the Global Brief yet. It saves what you write, but no chat or task sends it to Boo Zero, whatever the description above the box says. The default text includes a copy of Boo Zero's fixed rules; editing that copy changes nothing. For guidance Boo Zero must follow in a team, add a [team rule](/using/teams#team-rules).
+**Brief** holds only the display name. For guidance Boo Zero must follow in a team, add a [team rule](/using/teams#team-rules): rules are read on every turn in that team's chats.
 
 </Note>
 
@@ -131,9 +124,9 @@ The dashboard applies the display name when it loads. Reload the page.
 
 </Accordion>
 
-<Accordion title="Boo Zero ignores what I wrote in the Global Brief">
+<Accordion title="The Global Brief is gone">
 
-This is expected: Clawboo does not use the Global Brief yet. Put the guidance in a [team rule](/using/teams#team-rules) instead.
+Clawboo never sent the Global Brief to Boo Zero, so it was removed. A Global Brief you saved in an earlier version stays in Clawboo's database, unread. Put the guidance in a [team rule](/using/teams#team-rules) instead.
 
 </Accordion>
 
@@ -143,7 +136,7 @@ This is expected: Clawboo does not use the Global Brief yet. Put the guidance in
 
 - `GET /api/boo-zero/override` returns `overrideAgentId`, the `effective` Boo Zero, and the `tier` it came from: `override`, `native`, `openclaw`, or `null` when there is none.
 - `POST /api/boo-zero/override` with `{ "agentId": "<agent id>" }` makes any agent Boo Zero, on any runtime. `{ "agentId": null }` clears the choice. A missing or archived agent returns 404.
-- Display name: `GET` and `PUT /api/boo-zero/display-name/:agentId`. Global Brief: `GET` and `PUT /api/boo-zero/global-brief`. Team briefs: `GET`, `PUT` and `DELETE /api/boo-zero/team-briefs/:teamId`.
+- Display name: `GET` and `PUT /api/boo-zero/display-name/:agentId`. Team briefs: `GET`, `PUT` and `DELETE /api/boo-zero/team-briefs/:teamId`. The Global Brief routes, `GET` and `PUT /api/boo-zero/global-brief`, were removed.
 - See the [Boo Zero API reference](/reference/rest-api/boo-zero) for every field.
 
 </Accordion>
