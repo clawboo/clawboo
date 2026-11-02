@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 
-import { installRuntime } from '@clawboo/control-client'
+import { fetchCodexModels, installRuntime } from '@clawboo/control-client'
 
 import { Button } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
@@ -35,8 +35,12 @@ export function CodexUpdateNotice({
       },
       onComplete: () => {
         // Hold the busy state until the refetch lands: the row then reads the
-        // updated CLI and this notice goes away.
+        // updated CLI and this notice goes away. The install dropped the server's
+        // model probe, and the runtime list only starts a new one without waiting,
+        // so wait for the probe first: otherwise the row reads Connected for a
+        // moment even when the new CLI still needs updating.
         void (async () => {
+          await fetchCodexModels()
           await onChanged()
           setUpdating(false)
         })()

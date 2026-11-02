@@ -78,6 +78,18 @@ describe('pickModelInspectionAgent', () => {
     ).toBe('main')
   })
 
+  it('prefers the configured system agent over every roster rule', async () => {
+    const { pickModelInspectionAgent } = await import('../modelCache')
+    expect(
+      pickModelInspectionAgent({
+        agents: {
+          defaults: { systemAgent: { agentId: 'coder' } },
+          entries: { main: {}, coder: {}, other: { default: true } },
+        },
+      }),
+    ).toBe('coder')
+  })
+
   it('reads the legacy agents.list array too, and is null with no agents', async () => {
     const { pickModelInspectionAgent } = await import('../modelCache')
     expect(pickModelInspectionAgent({ agents: { list: [{ id: 'x' }, { id: 'main' }] } })).toBe(
@@ -120,6 +132,23 @@ describe('getModelsFromCli on a multi-agent OpenClaw', () => {
     await getModelsFromCli()
     expect(listMock).toHaveBeenCalledTimes(3)
     expect(argsOf(2)).toContain('--agent')
+  })
+
+  it('a system agent configured after the refusal sends later refreshes plain again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    writeRoster({ entries: { main: {}, coder: {} } })
+    listMock.mockRejectedValueOnce(refusal()).mockResolvedValue(LISTING)
+    const { getModelsFromCli } = await import('../modelCache')
+    await getModelsFromCli()
+    expect(argsOf(1)).toContain('--agent')
+    // The user names an owner: OpenClaw now lists as that agent by itself.
+    writeRoster({
+      defaults: { systemAgent: { agentId: 'coder' } },
+      entries: { main: {}, coder: {} },
+    })
+    vi.setSystemTime(Date.now() + 6 * 60 * 1000)
+    await getModelsFromCli()
+    expect(argsOf(2)).toEqual(['models', 'list', '--all', '--json'])
   })
 
   it('a flagged call that fails sends the next refresh plain again', async () => {

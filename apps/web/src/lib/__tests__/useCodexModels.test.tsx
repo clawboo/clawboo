@@ -4,7 +4,7 @@
 
 import { renderHook, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { server } from '../../__vitest__/mswServer'
 import { MODEL_GROUPS, type ModelGroup } from '../modelCatalog'
@@ -93,6 +93,34 @@ describe('useCodexModels', () => {
     await waitFor(() => expect(calls).toBe(1))
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.models).toEqual([])
+  })
+
+  it('asks again after a minute when the list came back empty, not after five', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      let calls = 0
+      server.use(
+        http.get('/api/runtimes/codex/models', () => {
+          calls += 1
+          return HttpResponse.json(
+            calls === 1
+              ? { models: [], defaultModel: null, updateRequired: false }
+              : { models: LIVE, defaultModel: 'gpt-6-astra', updateRequired: false },
+          )
+        }),
+      )
+      const first = renderHook(() => useCodexModels())
+      await waitFor(() => expect(first.result.current.isLoading).toBe(false))
+      expect(first.result.current.models).toEqual([])
+      first.unmount()
+
+      vi.setSystemTime(Date.now() + 61 * 1000)
+      const second = renderHook(() => useCodexModels())
+      await waitFor(() => expect(second.result.current.models).toEqual(LIVE))
+      expect(calls).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not fetch when disabled', async () => {

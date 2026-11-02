@@ -72,18 +72,33 @@ function transformCliModels(models: CliModel[]): ModelGroup[] {
   return groups
 }
 
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+
+/**
+ * The agent `agents.defaults.systemAgent.agentId` names, or null. OpenClaw lists
+ * models as that agent without being told, so it settles which agent's view a
+ * listing takes. Pure.
+ */
+export function configuredSystemAgent(config: unknown): string | null {
+  const defaults = asRecord(asRecord(asRecord(config)?.['agents'])?.['defaults'])
+  const id = asRecord(defaults?.['systemAgent'])?.['agentId']
+  return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
 /**
  * The agent whose view a model listing takes on a multi-agent OpenClaw. The view
  * differs per agent (it follows that agent's auth: on a live install `main` listed
  * OpenRouter models a team agent without that key did not), so this prefers the
- * agent a person would call the default: an entry marked `default: true`, then
- * `main`, then the first.
+ * configured system agent, then the agent a person would call the default: an
+ * entry marked `default: true`, then `main`, then the first.
  * Reads either roster shape (2026.9's keyed `agents.entries`, or the legacy
  * `agents.list` array). Null when the config names no agent. Pure.
  */
 export function pickModelInspectionAgent(config: unknown): string | null {
-  const record = (v: unknown): Record<string, unknown> | null =>
-    v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
+  const system = configuredSystemAgent(config)
+  if (system) return system
+  const record = asRecord
   const agents = record(record(config)?.['agents'])
   const entries = record(agents?.['entries'])
   const rows: { id: string; isDefault: boolean }[] = entries
@@ -153,8 +168,12 @@ async function runModelList(): Promise<string> {
   }
 
   // Picked from the current config each time: the remembered fact is that an
-  // owner is needed, not which agent, since agents come and go.
-  const owner = listingNeedsOwner ? pickModelInspectionAgent(readOpenClawConfig()) : null
+  // owner is needed, not which agent, since agents come and go. A system agent
+  // configured since the refusal answers it: OpenClaw then lists as that agent
+  // by itself, so the plain command runs again.
+  const config = listingNeedsOwner ? readOpenClawConfig() : null
+  if (listingNeedsOwner && configuredSystemAgent(config)) listingNeedsOwner = false
+  const owner = listingNeedsOwner ? pickModelInspectionAgent(config) : null
   try {
     return await run(owner)
   } catch (err) {

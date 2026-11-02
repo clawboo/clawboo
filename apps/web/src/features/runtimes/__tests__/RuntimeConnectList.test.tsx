@@ -151,6 +151,41 @@ describe('RuntimeConnectList: a Codex CLI too old for the plan', () => {
     expect(installs).toBe(1)
   })
 
+  it('Update Codex waits for the new CLI model read before re-reading the status', async () => {
+    // The install drops the server's model probe and the runtime list does not wait
+    // for the new one, so a status read first would miss a CLI that still needs it.
+    const order: string[] = []
+    let releaseModels: () => void = () => {}
+    server.use(
+      http.post(
+        '/api/runtimes/codex/install',
+        () =>
+          new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+            headers: { 'Content-Type': 'text/event-stream' },
+          }),
+      ),
+      http.get('/api/runtimes/codex/models', async () => {
+        order.push('models requested')
+        await new Promise<void>((r) => {
+          releaseModels = r
+        })
+        order.push('models answered')
+        return HttpResponse.json({ models: [], defaultModel: null, updateRequired: true })
+      }),
+    )
+    const onChanged = vi.fn(() => {
+      order.push('status re-read')
+    })
+    renderCodex({ id: 'codex', connectionState: 'ready', updateRequired: true }, onChanged)
+    await userEvent.click(screen.getByTestId('runtime-list-row-codex-toggle'))
+    await userEvent.click(screen.getByTestId('runtime-codex-update'))
+    await waitFor(() => expect(order).toContain('models requested'))
+    expect(onChanged).not.toHaveBeenCalled()
+    releaseModels()
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(order).toEqual(['models requested', 'models answered', 'status re-read'])
+  })
+
   it('a current Codex reads Connected with Manage and no notice', () => {
     renderCodex({ id: 'codex', connectionState: 'ready', updateRequired: false })
     expect(screen.getByText('Connected')).toBeInTheDocument()

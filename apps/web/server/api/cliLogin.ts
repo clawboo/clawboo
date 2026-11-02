@@ -67,12 +67,17 @@ async function probeLoggedIn(tool: CliLoginTool): Promise<boolean> {
 
 /** The cheap per-tick variant for the store watcher — pure file reads (the
  *  codex CLI probe would spawn a process every tick). Invalidates the codex
- *  cache so the host's follow-up re-check sees fresh truth. */
+ *  caches so the host's follow-up re-check sees fresh truth. The watcher usually
+ *  ends the stream before the child exits, so probeLoggedIn never runs. */
 function watchTickLoggedIn(tool: CliLoginTool): boolean {
   try {
     if (tool === 'codex') {
       const present = hasUsableCodexAuth(userCodexAuthPath())
-      if (present) invalidateCodexAuthCache()
+      if (present) {
+        invalidateCodexAuthCache()
+        // A new sign-in can be a different ChatGPT plan, with different models.
+        invalidateCodexModelsCache()
+      }
       return present
     }
     if (tool === 'hermes') return isHermesCodexAuthPresent()

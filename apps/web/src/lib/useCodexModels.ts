@@ -19,6 +19,9 @@ import {
 } from './modelCatalog'
 
 const STALE_MS = 5 * 60 * 1000
+/** An empty list (unknown, or a failed read) is asked again sooner, as the server
+ *  re-reads its own empty answer after a minute. */
+const EMPTY_STALE_MS = 60 * 1000
 
 let cache: CodexModels | null = null
 let fetchedAt = 0
@@ -26,7 +29,8 @@ let inflight: Promise<void> | null = null
 const subscribers = new Set<() => void>()
 
 function loadCodexModels(): void {
-  if ((cache && Date.now() - fetchedAt < STALE_MS) || inflight) return
+  const staleMs = cache && cache.models.length > 0 ? STALE_MS : EMPTY_STALE_MS
+  if ((cache && Date.now() - fetchedAt < staleMs) || inflight) return
   inflight = fetchCodexModels()
     .then((list) => {
       cache = list
