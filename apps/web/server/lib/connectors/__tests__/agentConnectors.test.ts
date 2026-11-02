@@ -68,4 +68,30 @@ describe('connectorsForAgent', () => {
     ])
     expect(connectorsForAgent(db, live, { agentId: 'a1' }).connected).toEqual([])
   })
+
+  it('an unbound session sees only what is shared with every agent', () => {
+    // OpenClaw's tools session carries no agent: a grant to one agent is not in it.
+    upsertGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a1',
+      capabilityKind: 'connector',
+      connectorId: GITHUB,
+      capabilityId: null,
+      mode: 'read',
+      approvalPolicy: 'never',
+    })
+    upsertGrant(db, {
+      subjectKind: 'global',
+      subjectId: null,
+      capabilityKind: 'connector',
+      connectorId: NOTION,
+      capabilityId: null,
+      mode: 'read',
+      approvalPolicy: 'never',
+    })
+    expect(connectorsForAgent(db, live, { agentId: null, teamId: null })).toEqual({
+      connected: ['notion'],
+      unshared: ['github'],
+    })
+  })
 })

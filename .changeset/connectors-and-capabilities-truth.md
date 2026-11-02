@@ -4,7 +4,7 @@
 
 Agents are told only about connectors shared with them, and several status reports now match what is set up.
 
-**Connectors an agent was not given are not named to it.** The connectors note on a turn you read listed every connector you had connected as usable, including ones never shared with that agent. That told the agent it could use tools it could not see, and told it which apps you had connected for other agents. It now names only the connectors shared with that agent, and never offers one you already connected as something to add.
+**Connectors an agent was not given are not named to it.** The connectors note on a turn you read listed every connector you had connected as usable, including ones never shared with that agent. That told the agent it could use tools it could not see, and told it which apps you had connected for other agents. It now names only the connectors whose tools that agent actually has, and never offers one you already connected as something to add. An OpenClaw agent reaches Clawboo's tools through one setting all OpenClaw agents share, so it is told only about connectors shared with every agent, not the browser each agent is given at first start. A Clawboo Native agent whose tools MCP server is switched off is told about none.
 
 **Approving an OpenClaw command through `POST /api/capabilities/approve` releases it.** It used to mark the approval answered while the Gateway kept holding the command. It now answers through the Gateway, exactly as `POST /api/tools/approvals/:id/resolve` does.
 

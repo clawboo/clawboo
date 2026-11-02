@@ -23,7 +23,7 @@ import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
 import { asc, eq } from 'drizzle-orm'
 
-import { connectorsForAgent } from '../connectors/agentConnectors'
+import { connectorsForRun } from '../connectors/agentConnectors'
 import { listLiveConnectors } from '../connectors/supervisor'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
@@ -348,7 +348,7 @@ export function buildServerTeamContext(
   // because a suggestion on a background worker's turn is spent on a transcript
   // nobody opens. See ./connectorAwareness for why the prohibitions are in it.
   const connectorsBlock = buildConnectorAwareness({
-    ...connectorsForAgent(db, listLiveConnectors(), { agentId: selfAgentId, teamId }),
+    ...connectorsForRun(db, listLiveConnectors(), { agentId: selfAgentId, teamId, runtime }),
     isUserFacing: framing.isUserFacing,
   })
 
