@@ -42,6 +42,20 @@ describe('AgentModelControl', () => {
     expect(screen.queryByText('Team-set model')).not.toBeInTheDocument()
   })
 
+  it('shows a Hermes agent on the ChatGPT plan its model, with no switch to OpenRouter', () => {
+    render(
+      <AgentModelControl
+        runtime="hermes"
+        {...base}
+        currentModel="plan-model-a"
+        note={{ pill: 'plan-model-a · ChatGPT plan', tip: 'Runs on your ChatGPT plan.' }}
+      />,
+    )
+    expect(screen.getByText('plan-model-a · ChatGPT plan')).toBeInTheDocument()
+    // No dropdown: its only list would be OpenRouter's, which moves the agent off the plan.
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  })
+
   it('keeps the Claude Code note (SDK default, not editable)', () => {
     render(<AgentModelControl runtime="claude-code" {...base} />)
     expect(screen.getByText('Claude Code default')).toBeInTheDocument()

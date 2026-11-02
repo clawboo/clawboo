@@ -54,7 +54,7 @@ import {
 
 import { getDb } from './db'
 import type { RuntimeRunContext } from './runtimes'
-import { verifyMaxAttempts, verifyTask } from './verification'
+import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
 import { notifyVerificationParked } from './teamChat/inboxNotices'
 
 /**
@@ -289,6 +289,8 @@ export interface CompleteWorkspaceOpts {
   makeReviewerAdapter?: (ctx: RuntimeRunContext) => RuntimeAdapter
   reviewerModel?: string | null
   mcpBaseUrl?: string | null
+  /** Told what the reviewer's run cost, so the caller can charge it. */
+  onReviewerSpend?: (spend: ReviewerSpend) => void
 }
 
 /**
@@ -322,6 +324,12 @@ export async function actOnTaskWorkspace(
   }
 
   const complete = await completeWorktree(ws.repoPath, worktree, rootDir)
+
+  // `complete` ends a run, so the moves below start from `in_progress`. A task
+  // back in `todo` (released by a pause hand-off, or never claimed) has no legal
+  // move to `done` or `in_review` and would silently stay in To do, so it takes
+  // the step a run would have taken first.
+  if (getTask(db, taskId)?.status === 'todo') updateStatus(db, taskId, 'in_progress')
 
   // Empty diff → land the task without a verification gate. An empty diff has no
   // deliverable to verify, so this is an INTENTIONAL override of the intrinsic
@@ -364,6 +372,7 @@ export async function actOnTaskWorkspace(
     makeReviewerAdapter: opts.makeReviewerAdapter,
     reviewerModel: opts.reviewerModel,
     mcpBaseUrl: opts.mcpBaseUrl,
+    onReviewerSpend: opts.onReviewerSpend,
   })
 
   // A person finished or cancelled the task while its check ran. Their move is

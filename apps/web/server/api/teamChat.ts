@@ -61,10 +61,15 @@ export async function teamChatExchangePOST(req: Request, res: Response): Promise
     res.status(409).json({ ok: false, error: 'an exchange is already running for this room' })
     return
   }
-  // Abort the (potentially minutes-long) exchange when the initiating request
-  // disconnects — no further real model turns are dispatched.
+  // Abort the (potentially minutes-long) exchange when the initiating client
+  // disconnects, so no further real model turns are dispatched. Listen on the
+  // RESPONSE: the request's own 'close' fires as soon as its body has been read
+  // (Node 16+), which aborted every exchange after its first turn. The response
+  // closes before it finishes only when the connection drops.
   const controller = new AbortController()
-  req.on('close', () => controller.abort())
+  res.on('close', () => {
+    if (!res.writableFinished) controller.abort()
+  })
   try {
     const firstSpeakers = Array.isArray(body['firstSpeakers'])
       ? (body['firstSpeakers'] as unknown[]).filter((s): s is string => typeof s === 'string')

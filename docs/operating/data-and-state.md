@@ -148,7 +148,7 @@ The copy holds your vault and its key and your agents' signed-in browser profile
 
 <Note>
 
-With `STUDIO_ACCESS_TOKEN` set, `clawboo stop` and `clawboo restart` cannot identify the server through the access gate. They print its port and a command that stops it by port, then exit without stopping it. Run that command, or stop Clawboo through the service manager that runs it (systemd, Docker). Start it again [directly](/operating/deployment#start-the-server-directly) or through that service manager, not with `clawboo`, which cannot tell when a token-protected server is ready. `clawboo backup` works either way because it reads the database file directly. See the [CLI reference](/reference/cli).
+With `STUDIO_ACCESS_TOKEN` set, run `clawboo stop` and `clawboo restart` from a shell that has the server's token, so they can identify the server through the access gate. Without it, they print its port and a command that stops it by port, then exit without stopping it. Run that command, or stop Clawboo through the service manager that runs it (systemd, Docker), and start it again [directly](/operating/deployment#start-the-server-directly) or through that service manager. `clawboo backup` works either way because it reads the database file directly. See the [CLI reference](/reference/cli#token-gated-installs).
 
 </Note>
 

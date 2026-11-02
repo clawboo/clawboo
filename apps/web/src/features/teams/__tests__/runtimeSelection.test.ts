@@ -157,5 +157,60 @@ describe('runtimeSelection', () => {
         degradedFrom: 'hermes',
       })
     })
+
+    // A ChatGPT-only install: Codex signed in, no provider key, no Ollama, no Gateway.
+    // Clawboo Native has nothing to run on there, so it must not be the default.
+    const chatgptOnly = {
+      statuses: [
+        status('clawboo-native', { hasCredential: false, connectionState: 'needs-auth' }),
+        status('codex', { connectionState: 'ready' }),
+      ],
+      openclawConnected: false,
+    }
+
+    it('ChatGPT-only: an unavailable OpenClaw suggestion falls back to Codex, not Native', () => {
+      expect(resolveDefaultRuntime('openclaw', chatgptOnly)).toEqual({
+        selected: 'codex',
+        degradedFrom: 'openclaw',
+      })
+    })
+
+    it('ChatGPT-only: an unavailable Native suggestion (blank team) also falls back to Codex', () => {
+      expect(resolveDefaultRuntime('clawboo-native', chatgptOnly)).toEqual({
+        selected: 'codex',
+        degradedFrom: 'clawboo-native',
+      })
+    })
+
+    it('a connected Native still wins the fallback over a connected coding runtime', () => {
+      const a = {
+        statuses: [
+          status('clawboo-native', { connectionState: 'ready' }),
+          status('codex', { connectionState: 'ready' }),
+        ],
+        openclawConnected: false,
+      }
+      expect(resolveDefaultRuntime('openclaw', a).selected).toBe('clawboo-native')
+    })
+
+    it('a connected OpenClaw is the fallback for an unavailable coding suggestion when Native has no key', () => {
+      const a = {
+        statuses: [status('codex', { connectionState: 'ready' })],
+        openclawConnected: true,
+      }
+      expect(resolveDefaultRuntime('hermes', a)).toEqual({
+        selected: 'openclaw',
+        degradedFrom: 'hermes',
+      })
+    })
+
+    it('nothing connected: a Native suggestion stays on Native with no "unavailable" note', () => {
+      expect(
+        resolveDefaultRuntime('clawboo-native', { statuses: [], openclawConnected: false }),
+      ).toEqual({
+        selected: 'clawboo-native',
+        degradedFrom: null,
+      })
+    })
   })
 })

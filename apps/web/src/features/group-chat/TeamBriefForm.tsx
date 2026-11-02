@@ -128,8 +128,8 @@ export function TeamBriefForm({
   return (
     <div className="flex flex-col gap-3">
       <p className="m-0 text-[12px] leading-relaxed text-foreground/45">
-        Describes this team — read by Boo Zero whenever it operates in {teamName}. Editable; safe to
-        regenerate from the current team roster.
+        Describes this team. Boo Zero reads it when a message in its own chat @mentions {teamName};
+        team chat turns do not. Editable; safe to regenerate from the current team roster.
       </p>
       <textarea
         // The visible "Brief" heading lives in the parent sheet, so the control

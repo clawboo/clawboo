@@ -71,8 +71,8 @@ Clawboo never merges a task branch; finished work waits on `clawboo/task-<task i
 
 `writeScaffold` writes the first five. `reconstructState(path)` rebuilds what is done, what is broken and what comes
 next from the handoff (falling back to `task-progress.md`) and `init.sh`, with no access to chat or the board, which
-is what lets a different runtime resume the task. The scaffold's `VERIFY_CMD` is a placeholder: until the agent sets
-a real command, the verification gate reports that no verify command is configured and the attempt fails.
+is what lets a different runtime resume the task. The scaffold's `VERIFY_CMD` is a placeholder, and `TASK.md`'s steps tell the agent
+to set it: until the agent sets a real command, the verification gate reports that no verify command is configured and the attempt fails.
 
 ## Path safety
 

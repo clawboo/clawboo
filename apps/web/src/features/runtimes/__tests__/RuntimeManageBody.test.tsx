@@ -88,6 +88,29 @@ describe('RuntimeManageBody', () => {
     expect(hit).toBe(0)
   })
 
+  it('the Disconnect confirm names the keys it deletes and the ones it keeps', async () => {
+    vi.mocked(confirm).mockResolvedValue(false)
+    render(
+      <RuntimeManageBody
+        runtimeId="clawboo-native"
+        name="Clawboo Native"
+        status={{
+          id: 'clawboo-native',
+          disconnectPlan: {
+            removes: ['GROQ_API_KEY'],
+            keeps: [{ envVar: 'ANTHROPIC_API_KEY', sharedWith: ['Claude Code', 'Hermes'] }],
+          },
+        }}
+        onChanged={vi.fn()}
+      />,
+    )
+    await userEvent.click(screen.getByTestId('runtime-clawboo-native-disconnect'))
+    await waitFor(() => expect(confirm).toHaveBeenCalled())
+    expect(vi.mocked(confirm).mock.calls[0]![0].message).toBe(
+      'This deletes your saved Groq key. Your Anthropic key stays saved, because Claude Code and Hermes use it too. Clawboo Native stops using them until you connect it again. To delete that key, disconnect it under Settings > Providers.',
+    )
+  })
+
   it('Details fires onDiagnostics; Re-check fires onChanged', async () => {
     const onDiagnostics = vi.fn()
     const onChanged = vi.fn()

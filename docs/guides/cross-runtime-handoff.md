@@ -122,10 +122,10 @@ Clawboo finds the task's worktree and reuses it. If the folder was removed by a 
 
 When the second run ends, Clawboo compares the worktree with its starting point:
 
-| What changed  | What happens                                                                                                     | The task ends in                                                                                                                                            |
-| ------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nothing       | Clawboo removes the worktree and its branch.                                                                     | **Done**                                                                                                                                                    |
-| Files changed | The check runs: the verify command from the worktree's `init.sh` and, for a large change, a separate review run. | **Done** when it passes. A failure is retried inside the same request; once the attempts are used up (2 by default), **Blocked**, waiting in **Needs you**. |
+| What changed  | What happens                                                                                                              | The task ends in                                                                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nothing       | Clawboo removes the worktree and its branch.                                                                              | **Done**                                                                                                                                                    |
+| Files changed | The check runs: the verify command from the worktree's `init.sh` and, for a large or risky change, a separate review run. | **Done** when it passes. A failure is retried inside the same request; once the attempts are used up (2 by default), **Blocked**, waiting in **Needs you**. |
 
 The request returns once that is settled. The worktree starts with a placeholder verify command, and a placeholder counts as a failed check, which is why the task description in step 1 asks the agent to set `VERIFY_CMD`. See [How work is checked](/concepts/verification).
 

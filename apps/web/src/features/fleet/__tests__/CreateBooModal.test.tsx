@@ -146,6 +146,9 @@ describe('CreateBooModal runtime', () => {
       expect.objectContaining({ soul: expect.stringContaining('# SOUL') }),
       'clawboo-native',
     )
+    // No empty TOOLS.md stub: nothing reads it, and the 2026.9 OpenClaw Gateway
+    // refuses the file outright.
+    expect(createAgentMock.mock.calls[0]?.[1]).not.toHaveProperty('tools')
     expect(assigned).toEqual({ teamId: 't1', body: { agentId: 'a-new' } })
     expect(screen.queryByText(/Not connected to Gateway/)).toBeNull()
   })

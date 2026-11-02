@@ -6,8 +6,9 @@
  * each member on its own runtime and the universal Boo Zero leads regardless, so
  * there is no single "team runtime". A default ("chef's suggestion") comes from the
  * catalog — a browsable marketplace team suggests OpenClaw; a blank/custom team
- * suggests Clawboo Native — degraded to Native when the suggestion isn't available
- * right now (Gateway down / coding runtime not connected), and overridable per agent.
+ * suggests Clawboo Native. It moves to the first connected runtime when the
+ * suggestion isn't available right now (Gateway down / coding runtime not connected
+ * / no provider key), and is overridable per agent.
  */
 
 import type { RuntimeId } from '@/features/runtimes/runtimeCatalog'
@@ -94,15 +95,27 @@ export function suggestedRuntimeFor(args: {
   )
 }
 
-/** The final SELECTED default = the suggestion, degraded to Clawboo Native when the
- *  suggestion isn't available right now (so a deploy always succeeds). `degradedFrom`
- *  drives the "suggestion unavailable — using Clawboo Native" note in the picker. */
+/** Where an unavailable suggestion falls back to, in the picker's own order:
+ *  Clawboo Native, then OpenClaw, then the coding runtimes. */
+const FALLBACK_ORDER: readonly SelectableSourceId[] = [
+  'clawboo-native',
+  'openclaw',
+  ...CODING_RUNTIME_IDS,
+]
+
+/** The final SELECTED default = the suggestion when it is available right now, else
+ *  the first runtime in FALLBACK_ORDER that is. On a ChatGPT-only install (Codex
+ *  signed in, no provider key, no Ollama, no Gateway) that is Codex, not a Clawboo
+ *  Native that has nothing to run on. Only when nothing at all is connected does it
+ *  stay on Clawboo Native. `degradedFrom` names the suggestion it moved away from
+ *  and drives the "X unavailable · using Y" note in the picker. */
 export function resolveDefaultRuntime(
   suggested: SelectableSourceId,
   a: RuntimeAvailability,
 ): { selected: SelectableSourceId; degradedFrom: SelectableSourceId | null } {
   if (runtimeAvailable(suggested, a)) return { selected: suggested, degradedFrom: null }
-  return { selected: 'clawboo-native', degradedFrom: suggested }
+  const selected = FALLBACK_ORDER.find((sid) => runtimeAvailable(sid, a)) ?? 'clawboo-native'
+  return { selected, degradedFrom: selected === suggested ? null : suggested }
 }
 
 /** The PER-AGENT runtime options: Clawboo Native + OpenClaw + the three coding

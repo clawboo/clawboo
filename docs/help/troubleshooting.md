@@ -99,18 +99,18 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 **Fix:** read those log lines. They point to one of three cases:
 
 1. **An error.** For example "CLAWBOO_API_PORT=18800 is already in use.", "No free port available in range 18790-18809." or a line that starts with "SECURITY: refusing to start". Find the message on this page, fix it, then run `clawboo` again.
-2. **You set `STUDIO_ACCESS_TOKEN`, and the log has a line containing `Clawboo ready`.** The server is running. The command cannot confirm a server protected by an access token, so it gives up after 45 seconds and exits with an error. Open `http://localhost:<port>/?access_token=<your token>` in your browser; the port is in `~/.clawboo/api-port.txt`.
+2. **On 0.5.0 and older: you set `STUDIO_ACCESS_TOKEN`, and the log has a line containing `Clawboo ready`.** The server is running. Those releases cannot confirm a server protected by an access token, so the command gives up after 45 seconds and exits with an error. Open `http://localhost:<port>/?access_token=<your token>` in your browser; the port is in `~/.clawboo/api-port.txt`. Newer releases use the `STUDIO_ACCESS_TOKEN` from the shell, which the server they start inherits, so they find it.
 3. **No error, on a first start on Windows.** Antivirus software scanning the new files can slow the first start. Run `clawboo` again.
 
-**Prevent it:** start a token-protected server directly or as a service, not with `clawboo`. [Run the Clawboo server](/operating/deployment#start-the-server-directly) and [Reach Clawboo from another machine](/guides/self-host-securely) show how.
+**Prevent it:** on 0.5.0 and older, start a token-protected server directly or as a service, not with `clawboo`. [Run the Clawboo server](/operating/deployment#start-the-server-directly) and [Reach Clawboo from another machine](/guides/self-host-securely) show how.
 
 ### A Clawboo server is running on port N, but it requires an access token.
 
-**What it means:** this install sets `STUDIO_ACCESS_TOKEN`, so the server answers only browsers that carry its access cookie, and the command cannot use it. It does not start a second server.
+**What it means:** this install sets `STUDIO_ACCESS_TOKEN`, so the server answers only requests that carry its access cookie. The shell you ran the command in does not have that token, or has a different one, so the command cannot use the server. It does not start a second server.
 
-**Fix:** open `http://localhost:<port>/?access_token=<your token>` once in your browser, with the port the message names. `clawboo stop` and `clawboo restart` refuse to touch this server too; they print a command that stops it by its port.
+**Fix:** set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo stop` and `clawboo restart` then work too. To open the dashboard, visit `http://localhost:<port>/?access_token=<your token>` once in your browser, with the port the message names. Without the token, `clawboo stop` and `clawboo restart` refuse to touch this server; they print a command that stops it by its port.
 
-**Prevent it:** manage a token-protected server with its own terminal or a service manager. See [Token-gated installs](/reference/cli#token-gated-installs).
+**Prevent it:** run `clawboo` from a shell that has the server's token, or manage the server with its own terminal or a service manager. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 ### Could not find the Clawboo server.
 
@@ -321,9 +321,9 @@ Then send the message or start the task again. A one-off `npx` run cannot load t
 
 ### The Hermes install fails with (from versions: none)
 
-**What it means:** pip found no Hermes release for the Python it used. Hermes needs Python 3.11, 3.12 or 3.13. Clawboo picks the newest Python 3.11 or later that it finds, so a Python 3.14 wins over a 3.12 you also have, and the install fails.
+**What it means:** pip found no Hermes release for the Python it used. Hermes needs Python 3.11, 3.12 or 3.13. Clawboo passes pipx the newest Python from 3.11 to 3.13 that it finds. When it finds none in that range, pipx falls back to its own default Python, which can be 3.14, and the install fails.
 
-**Fix:** install Hermes yourself with a supported Python, then click **Refresh** at the top of **Settings > Runtimes**:
+**Fix:** install Python 3.13 (for example `brew install python@3.13`) and click **Retry**, or install Hermes yourself with a supported Python, then click **Refresh** at the top of **Settings > Runtimes**:
 
 ```bash
 pipx install --python python3.12 'hermes-agent[anthropic]<1'
@@ -351,11 +351,11 @@ pipx install --python python3.12 'hermes-agent[anthropic]<1'
 
 </Accordion>
 
-<Accordion title="Hermes needs Python 3.11 or newer, but the Python on this machine is 3.9">
+<Accordion title="Hermes needs Python 3.11 to 3.13, but Clawboo found only Python 3.9">
 
-**What it means:** the newest Python Clawboo found is too old, and pipx is not installed. On a Mac, Apple's own Python is often 3.9.
+**What it means:** pipx is not installed, and every Python Clawboo found is outside 3.11 to 3.13. The message lists each version it found, too old or too new. On a Mac, Apple's own Python is often 3.9, and the message marks it "(Xcode Command Line Tools)".
 
-**Fix:** install a newer Python (for example `brew install python@3.12`) or pipx (`brew install pipx`), then click **Retry**. If Clawboo finds no Python at all, the message reads "Python 3.11+ (with pip or pipx) not found."; the fix is the same.
+**Fix:** install Python 3.13 (for example `brew install python@3.13`), then click **Retry**. If Clawboo finds no Python at all, the message reads "Python 3.11 to 3.13 (with pip or pipx) not found."; the fix is the same.
 
 </Accordion>
 
@@ -427,7 +427,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 **Fix:**
 
-- **Agent files.** Only OpenClaw reads AGENTS.md, IDENTITY.md and TOOLS.md as instructions, and OpenClaw 2026.9 and later skips TOOLS.md, so put tool notes in AGENTS.md. On the other runtimes the agent follows SOUL.md: all of it on Clawboo Native, the first 4,000 characters on Claude Code, Codex and Hermes. See [Edit the agent files](/using/agents#edit-the-agent-files).
+- **Agent files.** Only OpenClaw reads AGENTS.md and IDENTITY.md as instructions. OpenClaw 2026.9 and later neither loads nor accepts TOOLS.md, so put tool notes in AGENTS.md. On the other runtimes the agent follows SOUL.md: all of it on Clawboo Native, the first 4,000 characters on Claude Code, Codex and Hermes. See [Edit the agent files](/using/agents#edit-the-agent-files).
 - **Files on your computer.** In team chat and in an agent's own chat, a Clawboo Native agent can open files only in its team's folder (`~/.clawboo/workspaces/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
 
 ### More chat messages
@@ -685,9 +685,9 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 <Accordion title="clawboo stop says the server requires an access token">
 
-**What it means:** the command cannot stop a server protected by an access token.
+**What it means:** the server is protected by an access token, and the shell you ran `clawboo stop` in does not have that token, so the command cannot confirm the server.
 
-**Fix:** stop it with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. See [Token-gated installs](/reference/cli#token-gated-installs).
+**Fix:** set `STUDIO_ACCESS_TOKEN` to the server's token in that shell and run `clawboo stop` again. Or stop the server with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 </Accordion>
 

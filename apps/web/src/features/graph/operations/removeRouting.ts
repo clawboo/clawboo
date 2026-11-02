@@ -1,5 +1,4 @@
 import { readAgentFile, writeAgentFile } from '@clawboo/control-client'
-import { useConnectionStore } from '@/stores/connection'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
@@ -14,9 +13,9 @@ export async function removeRouting(
   sourceAgentId: string,
   targetAgentId: string,
 ): Promise<void> {
-  const client = useConnectionStore.getState().client
-  if (!client) return
-
+  // No Gateway gate: readAgentFile / writeAgentFile are REST calls to this
+  // server and work for every runtime. Adding a route (GhostGraph onConnect)
+  // already works without a Gateway; removing one has to as well.
   const agents = useFleetStore.getState().agents
   const targetAgent = agents.find((a) => a.id === targetAgentId)
   const sourceAgent = agents.find((a) => a.id === sourceAgentId)
@@ -30,7 +29,10 @@ export async function removeRouting(
   store.setEdges(prevEdges.filter((e) => e.id !== edgeId))
 
   try {
-    const currentAgentsMd = await readAgentFile(sourceAgentId, 'AGENTS.md').catch(() => null)
+    // A failed read throws into the rollback below: the route may still be in
+    // the file, so reporting it removed would be wrong. An EMPTY file has no
+    // route to remove, so the edge was stale and dropping it is correct.
+    const currentAgentsMd = await readAgentFile(sourceAgentId, 'AGENTS.md')
 
     if (!currentAgentsMd) {
       useToastStore.getState().addToast({

@@ -312,7 +312,7 @@ curl http://localhost:18790/api/agents/registry/health
 
 ## `POST /api/agents/cleanup-ghosts`
 
-A one-shot cleanup the dashboard runs after it loads the Gateway's agent list. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows and its per-agent settings. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
+A cleanup for scripts and manual recovery. The dashboard does not call it: it pushes the Gateway's list to `POST /api/agents/sync`, which archives agents missing from the list and deletes nothing. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows, its per-agent settings and the routines that target it. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
 
 - **Path params**: none.
 - **Query params**:
@@ -414,7 +414,7 @@ curl http://localhost:18790/api/agents/<agent-id>
 
 ## `DELETE /api/agents/:agentId`
 
-Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it. If the Gateway connection is down, the local rows are removed anyway.
+Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it, and deletes every routine that targets the agent (team routines target no agent and stay). If the Gateway connection is down, the local rows are removed anyway, but an OpenClaw agent's routines stay until its Gateway delete settles (see the note below): the Gateway can refuse the delete and bring the agent back.
 
 <Note>
 
@@ -465,7 +465,7 @@ Reads one agent file through the owning source. An OpenClaw agent's files are re
 
 - **Path params**: `agentId`, `name`.
 
-`:name` is one of `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`. The route stores any of them on any agent, but which files actually shape an agent depends on its runtime: see [Agents](/using/agents). OpenClaw 2026.9 and later does not load `TOOLS.md`, so put tool guidance in `AGENTS.md`.
+`:name` is one of `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`, `TOOLS.md`, `HEARTBEAT.md`, `MEMORY.md`. The route stores any of them on any agent, but which files actually shape an agent depends on its runtime: see [Agents](/using/agents). The OpenClaw 2026.9 Gateway refuses to read or write `TOOLS.md` and `HEARTBEAT.md`, so on an OpenClaw agent the route fails for them; put tool guidance in `AGENTS.md`.
 
 - **Request body**: none.
 
@@ -798,15 +798,15 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/screenshot/capture
 Changes the model of a `clawboo-native` or `hermes` agent, and optionally its provider. It needs no Gateway.
 
 - **Native agent:** the stored agent config is rewritten, and the next run uses it. With a `provider`, the provider, model and the key variable it reads (`envVar`) change together, so a model picked from another provider's list never runs against the old provider. Without a `provider`, only the model changes, which is also how you set a custom model id for the current provider. The server checks the provider name but not the model string, so custom ids work.
-- **Hermes agent:** Hermes reaches every model through OpenRouter, so the model is stored as `{ provider: 'openrouter', model }` and any other `provider` is a `400`.
+- **Hermes agent:** the model is stored as `{ provider, model }` in the agent's `execConfig`, where `provider` is `openrouter` (an OpenRouter model id) or `openai-codex` (a ChatGPT subscription model). Without a `provider`, the agent keeps the provider it already has, so a model change never moves a ChatGPT-subscription agent onto OpenRouter. An agent with no provider stored stays unpinned: Hermes runs the model on the provider its keys or ChatGPT sign-in give it. Any other `provider` is a `400`.
 - **Other runtimes** answer `404`. An OpenClaw agent's model is set through `PATCH /api/system/openclaw-config` (see [System API](/reference/rest-api/system)).
 
 - **Path params**: `agentId`.
-- **Request body**: `{ model: string, provider?: string }`. `provider` must be one of `anthropic`, `openai`, `openrouter`, `ollama`, `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`. With `ollama`, which needs no key, the stored `envVar` is `OLLAMA_BASE_URL`.
+- **Request body**: `{ model: string, provider?: string }`. For a native agent, `provider` must be one of `anthropic`, `openai`, `openrouter`, `ollama`, `google`, `xai`, `groq`, `mistral`, `together`, `cerebras`, `moonshot`. With `ollama`, which needs no key, the stored `envVar` is `OLLAMA_BASE_URL`. For a Hermes agent, it must be `openrouter` or `openai-codex`.
 
 ### Responses
 
-**`200 OK`**: the model (and the provider, when sent) was saved. `provider` is echoed only when the request carried one:
+**`200 OK`**: the model (and the provider, when sent) was saved. For a native agent, `provider` is echoed only when the request carried one. A Hermes agent's reply always carries `provider`: the one it is pinned to, or `null` when it has none:
 
 ```json
 { "ok": true, "model": "anthropic/claude-haiku-4.5", "provider": "openrouter" }
@@ -814,12 +814,12 @@ Changes the model of a `clawboo-native` or `hermes` agent, and optionally its pr
 
 **`400 Bad Request`**: one of these messages:
 
-| `error`                                                                              | Cause                                |
-| ------------------------------------------------------------------------------------ | ------------------------------------ |
-| `model (non-empty string) required`                                                  | `model` is missing or blank          |
-| `unknown provider '<provider>'`                                                      | `provider` is not in the list above  |
-| `hermes routes every model via OpenRouter; provider must be 'openrouter' or omitted` | A Hermes agent with another provider |
-| `agentId required`                                                                   | Missing `agentId` segment            |
+| `error`                                                                                         | Cause                                                                     |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `model (non-empty string) required`                                                             | `model` is missing or blank                                               |
+| `unknown provider '<provider>'`                                                                 | `provider` is not in the list above, or `openai-codex` for a native agent |
+| `hermes models run on 'openrouter' or 'openai-codex'; provider must be one of those or omitted` | A Hermes agent with another provider                                      |
+| `agentId required`                                                                              | Missing `agentId` segment                                                 |
 
 **`404 Not Found`**: one of these messages:
 

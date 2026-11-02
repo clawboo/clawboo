@@ -186,7 +186,7 @@ beforeEach(() => {
   // Reset the shared stores so a prior test's deploy can't leak agent/team names
   // into the dedup pass (which would rename "Team Lead" → "Team Lead 2").
   useFleetStore.setState({ agents: [] })
-  useTeamStore.setState({ teams: [] })
+  useTeamStore.setState({ teams: [], selectedTeamId: null })
 })
 afterEach(() => cleanup())
 
@@ -390,6 +390,11 @@ describe('CreateTeamModal deploy', () => {
     // Coder deployed native (the override).
     const memberCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
     expect(memberCall[2]).toBe('clawboo-native')
+
+    // The skill list (TOOLS.md) goes to the OpenClaw member only; the server
+    // moves it into AGENTS.md there. A native agent would only store it unread.
+    expect((leaderCall[1] as { tools?: string }).tools).toBe('# tools')
+    expect((memberCall[1] as { tools?: string }).tools ?? '').toBe('')
   })
 
   it('tolerates one agent failing to create (continues; reports N of M)', async () => {
@@ -724,5 +729,179 @@ describe('CreateTeamModal deploy', () => {
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
     await waitFor(() => expect(overrideBody).toBeDefined())
     expect(overrideBody).toEqual({ agentId: 'id-Content Writer' })
+  })
+})
+
+// A ChatGPT-only install: Codex signed in with a ChatGPT subscription and nothing
+// else (no provider key, no local Ollama, no Gateway). Clawboo Native has nothing
+// to run on there, so a Marketplace deploy must not default to it.
+function chatgptOnlyHandlers() {
+  return [
+    http.get('/api/runtimes', () =>
+      HttpResponse.json({
+        runtimes: [
+          {
+            id: 'clawboo-native',
+            installed: true,
+            hasCredential: false,
+            connectionState: 'needs-auth',
+          },
+          { id: 'codex', installed: true, connectionState: 'ready' },
+        ],
+      }),
+    ),
+    http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
+    http.get('/api/onboarding/native-leader-model', () =>
+      HttpResponse.json({ provider: null, model: null, resolved: null }),
+    ),
+  ]
+}
+
+describe('CreateTeamModal on a ChatGPT-only install', () => {
+  it('defaults every member of a Marketplace team to Codex and deploys them there', async () => {
+    server.use(...chatgptOnlyHandlers(), ...baseHandlers())
+    renderModal()
+    // The OpenClaw suggestion is unavailable; the note names the runtime used instead.
+    await waitFor(() =>
+      expect(screen.getAllByText(/OpenClaw unavailable · using Codex/i)).toHaveLength(2),
+    )
+    for (const trigger of screen.getAllByTestId('member-runtime-trigger')) {
+      expect(trigger).toHaveTextContent('Codex')
+    }
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
+    for (const call of createAgentMock.mock.calls) expect(call[2]).toBe('codex')
+  })
+})
+
+/** Stateful stand-ins for the team create and delete routes. POST refuses an id
+ *  that already exists, as the real insert does (the id is the primary key);
+ *  DELETE removes the row. `rows` is what the server holds, `posted` every id a
+ *  create asked for. */
+function statefulTeamRoutes(opts: { rows: Set<string>; posted: string[]; deleteOk?: boolean }) {
+  return [
+    http.post('/api/teams', async ({ request }) => {
+      const body = (await request.json()) as { id: string; name: string }
+      opts.posted.push(body.id)
+      if (opts.rows.has(body.id)) {
+        return HttpResponse.json(
+          { error: 'SqliteError: UNIQUE constraint failed: teams.id' },
+          { status: 500 },
+        )
+      }
+      opts.rows.add(body.id)
+      return HttpResponse.json({
+        team: {
+          id: body.id,
+          name: body.name,
+          icon: '🧪',
+          color: '#e94560',
+          templateId: null,
+          leaderAgentId: null,
+          isArchived: 0,
+          agentCount: 0,
+          serverOrchestrated: true,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      })
+    }),
+    http.delete('/api/teams/:id', ({ params }) => {
+      if (opts.deleteOk === false) {
+        return HttpResponse.json({ error: 'boom' }, { status: 500 })
+      }
+      opts.rows.delete(String(params['id']))
+      return HttpResponse.json({ ok: true, folderRemoved: true })
+    }),
+  ]
+}
+
+describe('CreateTeamModal retry after a deploy that created no agents', () => {
+  const NO_AGENTS = /No agents could be created/i
+
+  function failNextCreates(n: number) {
+    for (let i = 0; i < n; i++) {
+      createAgentMock.mockImplementationOnce(async () => {
+        throw new Error('runtime not connected')
+      })
+    }
+  }
+
+  it('pressing Deploy again deploys the team instead of failing on the same team id', async () => {
+    const rows = new Set<string>()
+    const posted: string[] = []
+    server.use(...statefulTeamRoutes({ rows, posted }), ...baseHandlers())
+    failNextCreates(2)
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await screen.findByText(NO_AGENTS)
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(4))
+    await screen.findByText(/is ready/i, undefined, { timeout: 5000 })
+    expect(screen.queryByText(/Failed to create team/i)).toBeNull()
+    // Both attempts used the modal's one id, and exactly one team exists at the end.
+    expect(posted).toHaveLength(2)
+    expect(posted[1]).toBe(posted[0])
+    expect([...rows]).toEqual([posted[0]])
+  })
+
+  it('leaves no empty team behind, and gives the sidebar selection back', async () => {
+    const rows = new Set<string>()
+    const posted: string[] = []
+    server.use(...statefulTeamRoutes({ rows, posted }), ...baseHandlers())
+    useTeamStore.setState({
+      teams: [
+        {
+          id: 'other-team',
+          name: 'Other Team',
+          icon: '🧩',
+          color: '#000000',
+          colorCollectionId: null,
+          templateId: null,
+          leaderAgentId: null,
+          isArchived: false,
+          agentCount: 0,
+          serverOrchestrated: true,
+        },
+      ],
+      selectedTeamId: 'other-team',
+    })
+    failNextCreates(2)
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await screen.findByText(NO_AGENTS)
+
+    expect(posted).toHaveLength(1)
+    expect(rows.size).toBe(0)
+    expect(useTeamStore.getState().teams.map((t) => t.id)).toEqual(['other-team'])
+    expect(useTeamStore.getState().selectedTeamId).toBe('other-team')
+  })
+
+  it('when the empty team cannot be removed, the retry uses a fresh team id and still deploys', async () => {
+    const rows = new Set<string>()
+    const posted: string[] = []
+    server.use(...statefulTeamRoutes({ rows, posted, deleteOk: false }), ...baseHandlers())
+    failNextCreates(2)
+    renderModal()
+    await waitFor(() => expect(screen.getAllByTestId('member-runtime-trigger')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await screen.findByText(NO_AGENTS)
+    // The person is told the empty team is still there.
+    expect(
+      screen.getByText(/could not be removed: delete it from the team rail/i),
+    ).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
+    await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(4))
+    await screen.findByText(/is ready/i, undefined, { timeout: 5000 })
+    expect(posted).toHaveLength(2)
+    expect(posted[1]).not.toBe(posted[0])
   })
 })

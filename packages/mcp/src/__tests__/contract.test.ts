@@ -343,20 +343,20 @@ describe('Memory MCP', () => {
 })
 
 describe('Tools MCP', () => {
-  it('hides an unavailable tool from tools/list and reveals it when satisfied', async () => {
-    const hidden = await connectInMemory(
-      createToolsServer(db, { availability: defaultAvailabilityContext({ env: {} }) }),
-    )
-    const hiddenNames = await listToolNames(hidden)
-    expect(hiddenNames).toContain('echo')
-    expect(hiddenNames).not.toContain('web_search')
-
-    const revealed = await connectInMemory(
+  it('serves the real builtins and no stub tools, whatever keys are set', async () => {
+    // `web_search` (offered once TAVILY_API_KEY was set) echoed the query back,
+    // and `delete_path` deleted nothing. Web search comes from the search
+    // connectors now, under grants like any other connector.
+    const client = await connectInMemory(
       createToolsServer(db, {
         availability: defaultAvailabilityContext({ env: { TAVILY_API_KEY: 'x' } }),
       }),
     )
-    expect(await listToolNames(revealed)).toContain('web_search')
+    const names = await listToolNames(client)
+    expect(names).toContain('echo')
+    expect(names).toContain('note')
+    expect(names).not.toContain('web_search')
+    expect(names).not.toContain('delete_path')
   })
 
   it('names the granted broker apps in the description the model reads', async () => {
@@ -550,13 +550,34 @@ describe('Tools MCP', () => {
   })
 
   it('a destructive tool requires approval (resolved via the DB) before it runs', async () => {
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a-del',
+      capabilityKind: 'connector',
+      connectorId: 'conn:connector:clawboo:files',
+      capabilityId: null,
+    })
     const client = await connectInMemory(
       createToolsServer(db, {
+        agentId: 'a-del',
         availability: defaultAvailabilityContext({ env: {} }),
         broker: { approvalPollMs: 10, approvalTimeoutMs: 4000 },
+        connectorTools: [
+          {
+            descriptor: {
+              name: 'mcp__files__delete_path',
+              description: 'a destructive connector tool',
+              inputSchema: z.object({ path: z.string() }),
+              owner: 'mcp',
+              destructive: true,
+              executor: (args) => `would delete: ${String(args['path'] ?? '')}`,
+            },
+            connectorId: 'conn:connector:clawboo:files',
+          },
+        ],
       }),
     )
-    const callPromise = callText(client, 'delete_path', { path: '/tmp/x' })
+    const callPromise = callText(client, 'mcp__files__delete_path', { path: '/tmp/x' })
     let id: string | undefined
     for (let i = 0; i < 300 && !id; i++) {
       const pending = listPendingApprovals(db)

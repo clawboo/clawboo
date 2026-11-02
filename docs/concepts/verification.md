@@ -86,7 +86,7 @@ Clawboo does not know your project's test command. Each new worktree gets an `in
 VERIFY_CMD='echo "[init] configure VERIFY_CMD in init.sh"'
 ```
 
-A placeholder counts as no command, and no command counts as a failure, because a check cannot pass work it never tested. So the first check fails unless the agent has already set a real command. The fix note tells the agent to set `VERIFY_CMD` in `init.sh`. If it does, and that command passes, the second attempt can pass. Otherwise the task ends in **Needs you**.
+A placeholder counts as no command, and no command counts as a failure, because a check cannot pass work it never tested. So the agent is told before it starts: the run's instructions and the worktree's `TASK.md` say to set `VERIFY_CMD` in `init.sh` to the command that proves the work. If it does, and that command passes, the first check can pass. If it does not, the first check fails and the fix note tells it again; a task whose agent never sets a command ends in **Needs you**.
 
 <Tip>
 
@@ -103,8 +103,9 @@ The reviewer runs only after the test command passes, and only when at least one
 - The task was handed out by another agent (it has a parent task).
 - More than 5 files changed.
 - More than 300 lines changed, counting lines added and removed.
+- The task's title or description names a risky action: delete, destroy, drop table, deploy, publish, release, `rm -rf`, prod or production, secret, credential, API key or force push. It is the same word list team chat uses to ask a leader before a risky hand-off.
 
-These thresholds are fixed. A small change on a task nobody handed out is judged by the test command alone.
+These rules are fixed. A small change on a task nobody handed out, whose title and description name none of those words, is judged by the test command alone.
 
 How the reviewer works:
 
@@ -112,7 +113,7 @@ How the reviewer works:
 - **It uses the same model** unless you set `CLAWBOO_REVIEWER_MODEL`, which picks a different model on that runtime.
 - **Only five kinds of finding block:** security, crash, data loss, wrong algorithm, and missing acceptance criteria. Style, performance and other notes are recorded and never block.
 - **It cannot hold the work back by failing.** If the reviewer fails to run, the test command alone decides. A reply Clawboo cannot read becomes one note that does not block.
-- **Its spend is not recorded.** Your provider bills the reviewer's run, but it does not count toward budgets or show in the cost views.
+- **Its spend counts.** The reviewer's run is charged to the same agent, mission and team budgets as the work it reviews, and shows in **Tokens Used** under that agent. A review that reports no cost is charged an estimate. It is not added to the run cost on the task's card, and because it runs after the work has finished, a cap it crosses stops the next run, not this one.
 
 ## What you can do
 
@@ -145,7 +146,7 @@ How the reviewer works:
 - **The command.** The gate reads `VERIFY_CMD='...'` from `init.sh`, then the `- Verify:` line of `VERIFICATION.md`. A command containing `configure VERIFY_CMD` counts as none (`packages/governance/src/verify/commandParser.ts`). It runs through a shell in the worktree with Clawboo's secrets removed from its environment, keeps the last 4,000 characters of output, and refuses a worktree outside the Clawboo folder (`apps/web/server/lib/verification/deterministicGate.ts`).
 - **The stored result.** Statuses are `pass`, `fail` and `completed_with_debt`, which is given at the last attempt. `PATCH /api/board/:taskId` refuses `done` with `409 verification_required` while a stored result blocks it, unless the request sets `humanOverride`, which writes a `verification` audit row. A stored result that cannot be parsed does not block, and `completed_with_debt` over a passing command does not block a later move to Done.
 - **Skipped by Clawboo.** A run that changed nothing, and an OpenClaw Routine completion (an `unverified` audit row), both reach `done` without the gate.
-- **The reviewer trigger.** `shouldRunCritic` in `packages/governance/src/verify/criticTrigger.ts`. It also accepts a `riskFlag`, which nothing sets.
+- **The reviewer trigger.** `shouldRunCritic` in `packages/governance/src/verify/criticTrigger.ts`. Its `riskFlag` comes from `isRiskyDelegation` (`apps/web/server/lib/teamChat/riskyDelegation.ts`) run on the task's title and description, in `verifyTask`.
 - **Clearing.** Any move to `todo` clears the stored result.
 
 See [Executor runner](/internals/executor-runner) and the [Board API](/reference/rest-api/board).

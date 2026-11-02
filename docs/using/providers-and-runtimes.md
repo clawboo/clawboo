@@ -218,34 +218,34 @@ OpenClaw runs its own Gateway on your computer. On the **OpenClaw** row, click *
 
 Removing a key and disconnecting a runtime are different actions:
 
-| You click                                                                  | Where                                                 | What happens                                                                                                                                     |
-| -------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Disconnect** on a provider's row                                         | **Settings** > **Providers**                          | Removes that one key from Clawboo's vault and from OpenClaw's files. No runtime can use it afterwards, unless it is also exported in your shell. |
-| **Disconnect** plus the provider's name, such as **Disconnect OpenRouter** | A provider row in a runtime's **Manage** list         | The same as above, for that one provider.                                                                                                        |
-| **Disconnect Ollama**                                                      | The **Ollama** row in **Clawboo Native** > **Manage** | Clawboo Native stops using Ollama. Your keys stay.                                                                                               |
-| **Disconnect** at the bottom of **Manage**                                 | A runtime's row in **Settings** > **Runtimes**        | Deletes every vault key that runtime reads (see the next table).                                                                                 |
-| **Sign out**                                                               | **Codex** > **Manage**                                | Runs Codex's own `codex logout`. Codex then reads **Needs login**.                                                                               |
-| **Disconnect**                                                             | **OpenClaw** > **Manage**                             | Stops the local OpenClaw Gateway. Nothing is deleted; **Reconnect** starts it again.                                                             |
+| You click                                                                  | Where                                                 | What happens                                                                                                                                      |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Disconnect** on a provider's row                                         | **Settings** > **Providers**                          | Removes that one key from Clawboo's vault and from OpenClaw's files. No runtime can use it afterwards, unless it is also exported in your shell.  |
+| **Disconnect** plus the provider's name, such as **Disconnect OpenRouter** | A provider row in a runtime's **Manage** list         | The same as above, for that one provider.                                                                                                         |
+| **Disconnect Ollama**                                                      | The **Ollama** row in **Clawboo Native** > **Manage** | Clawboo Native stops using Ollama. Your keys stay.                                                                                                |
+| **Disconnect** at the bottom of **Manage**                                 | A runtime's row in **Settings** > **Runtimes**        | That runtime stops using any key. Keys only it reads are deleted from the vault; keys another runtime also reads stay saved (see the next table). |
+| **Sign out**                                                               | **Codex** > **Manage**                                | Runs Codex's own `codex logout`. Codex then reads **Needs login**.                                                                                |
+| **Disconnect**                                                             | **OpenClaw** > **Manage**                             | Stops the local OpenClaw Gateway. Nothing is deleted; **Reconnect** starts it again.                                                              |
 
-<Warning>
+<Note>
 
-A runtime's **Disconnect** deletes keys that other runtimes share. Clawboo keeps one copy of each key in its vault for every runtime. Disconnecting Hermes, for example, also deletes the Anthropic and OpenAI keys that Clawboo Native or Claude Code may run on. The confirmation dialog mentions only one key. To remove a single key, use **Disconnect** on its row under **Settings** > **Providers** instead.
+Clawboo keeps one copy of each key in its vault for every runtime, so a runtime's **Disconnect** keeps any key another runtime also reads. The dialog names each saved key it deletes and each one it keeps. To delete a kept key, use **Disconnect** on its row under **Settings** > **Providers**.
 
-</Warning>
+</Note>
 
-| Runtime        | Its **Disconnect** deletes from the vault                                                                      | Also                                                                                                           |
-| -------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Clawboo Native | All ten provider keys: Anthropic, OpenAI, OpenRouter, Google, xAI, Groq, Mistral, Together, Cerebras, Moonshot | Turns off local Ollama. Connecting a key later does not turn it back on; only **Use** on the Ollama line does. |
-| Claude Code    | Anthropic                                                                                                      |                                                                                                                |
-| Hermes         | OpenRouter, Anthropic, OpenAI                                                                                  | A Hermes ChatGPT sign-in stays, so Hermes can still read **Connected**.                                        |
-| Codex          | Nothing; it has **Sign out** instead                                                                           |                                                                                                                |
-| OpenClaw       | Nothing                                                                                                        | Stops the Gateway.                                                                                             |
+| Runtime        | Its **Disconnect** deletes from the vault                        | Keeps, because another runtime reads it                                        | Also                                                                                                           |
+| -------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | Google, xAI, Groq, Mistral, Together, Cerebras and Moonshot keys | Anthropic (Claude Code, Hermes), OpenAI and OpenRouter (Hermes)                | Turns off local Ollama. Connecting a key later does not turn it back on; only **Use** on the Ollama line does. |
+| Claude Code    | Nothing                                                          | Anthropic (Clawboo Native, Hermes)                                             |                                                                                                                |
+| Hermes         | Nothing                                                          | OpenRouter, Anthropic and OpenAI (Clawboo Native; Claude Code reads Anthropic) | A Hermes ChatGPT sign-in stays, so Hermes can still read **Connected**.                                        |
+| Codex          | Nothing; it has **Sign out** instead                             |                                                                                |                                                                                                                |
+| OpenClaw       | Nothing                                                          |                                                                                | Stops the Gateway.                                                                                             |
 
 After a runtime's **Disconnect**:
 
-- That runtime ignores keys in your shell environment and in `~/.openclaw/.env` until you connect it again, so it reads **Needs key** even if a copy is still there.
-- Other runtimes still find a key in your shell environment or in `~/.openclaw/.env`, where keys saved on the **Providers** page also live. A runtime's **Disconnect** never deletes those copies.
-- To reconnect Clawboo Native without pasting a key again, click **Connect** on its row, then **Use** on a provider whose key is still saved.
+- That runtime uses no key until you connect it again: not a kept one, and not one in your shell environment or in `~/.openclaw/.env`. It reads **Needs key**.
+- Other runtimes keep running on the keys that stayed, and still find a key in your shell environment or in `~/.openclaw/.env`, where keys saved on the **Providers** page also live. A runtime's **Disconnect** never deletes those copies.
+- To connect Claude Code or Hermes again with a key that stayed saved, click **Use saved key** on its row. To reconnect Clawboo Native without pasting a key again, click **Connect** on its row, then **Use** on a provider whose key is still saved.
 
 ## Where keys are stored
 
@@ -259,7 +259,7 @@ Deleting `~/.clawboo` removes the vault but not the plain-text copies, and Clawb
 
 <Accordion title="Under the hood">
 
-- For each runtime, Clawboo looks for a key in this order: the server's environment, the vault, then `~/.openclaw/.env`. A runtime you disconnected reads the vault only until you connect it again; Clawboo records that in `secrets/disconnected-runtimes.json`. The Ollama choice is recorded in `secrets/keyless-providers.json`. Neither file holds a secret.
+- For each runtime, Clawboo looks for a key in this order: the server's environment, the vault, then `~/.openclaw/.env`. A runtime you disconnected uses no key at all until you connect it again; Clawboo records that in `secrets/disconnected-runtimes.json`. The Ollama choice is recorded in `secrets/keyless-providers.json`. Neither file holds a secret.
 - `CLAWBOO_SECRETS_MASTER_KEY` supplies the master key from outside the folder. Move your existing key into it rather than generating a new one, or saved keys stop decrypting. See [Environment variables](/reference/environment-variables).
 - Clawboo never logs a key, returns one from its API, or writes one to its database.
 - The routes behind these screens are `GET /api/providers`, `POST /api/providers/:id/connect` and `/disconnect`, and `POST /api/runtimes/:id/connect`, `/disconnect` and `/logout`. See the [Runtimes API](/reference/rest-api/runtimes).

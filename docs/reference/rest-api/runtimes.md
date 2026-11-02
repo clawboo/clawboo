@@ -17,25 +17,25 @@ An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Reques
 
 ## Routes
 
-| Method | Path                                  | Summary                                                         | Rate tier | Stream? |
-| ------ | ------------------------------------- | --------------------------------------------------------------- | --------- | ------- |
-| GET    | `/api/runtimes`                       | List runtimes with capabilities, health and connection state    | general   | No      |
-| POST   | `/api/runtimes/:id/install`           | Install the runtime's CLI                                       | sensitive | SSE     |
-| POST   | `/api/runtimes/:id/connect`           | Save a key in the vault, reuse one, or record the Ollama choice | sensitive | No      |
-| POST   | `/api/runtimes/:id/disconnect`        | Delete every vault key the runtime reads, or remove Ollama only | sensitive | No      |
-| POST   | `/api/runtimes/:id/logout`            | Sign Codex out with its own CLI                                 | sensitive | No      |
-| POST   | `/api/runtimes/:id/healthcheck`       | Check a provider key or local Ollama (native only, stores none) | general   | No      |
-| POST   | `/api/runtimes/:id/run`               | Run a board task on the runtime and wait for the result         | general   | No      |
-| GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog                                     | general   | No      |
-| POST   | `/api/onboarding/native-leader-model` | Record the default native provider and model                    | general   | No      |
-| GET    | `/api/onboarding/native-leader-model` | The recorded pick and what a new native agent would get         | general   | No      |
-| GET    | `/api/onboarding/state`               | First-run signals in one call                                   | general   | No      |
-| GET    | `/api/providers`                      | The 14 providers and whether each has a key                     | general   | No      |
-| POST   | `/api/providers/:id/connect`          | Save a key in the vault and in OpenClaw's key files             | general   | No      |
-| POST   | `/api/providers/:id/disconnect`       | Remove a key from the vault and from OpenClaw's key files       | general   | No      |
-| GET    | `/api/providers/:id/models`           | Live model list with the stored key (Ollama: its pulled models) | general   | No      |
-| POST   | `/api/providers/:id/models`           | Live model list with a pasted, unsaved key                      | general   | No      |
-| POST   | `/api/auth/cli-login/:tool`           | Run a CLI's own ChatGPT sign-in and relay its output            | sensitive | SSE     |
+| Method | Path                                  | Summary                                                                            | Rate tier | Stream? |
+| ------ | ------------------------------------- | ---------------------------------------------------------------------------------- | --------- | ------- |
+| GET    | `/api/runtimes`                       | List runtimes with capabilities, health and connection state                       | general   | No      |
+| POST   | `/api/runtimes/:id/install`           | Install the runtime's CLI                                                          | sensitive | SSE     |
+| POST   | `/api/runtimes/:id/connect`           | Save a key in the vault, reuse one, or record the Ollama choice                    | sensitive | No      |
+| POST   | `/api/runtimes/:id/disconnect`        | Stop a runtime using keys and delete the ones only it reads, or remove Ollama only | sensitive | No      |
+| POST   | `/api/runtimes/:id/logout`            | Sign Codex out with its own CLI                                                    | sensitive | No      |
+| POST   | `/api/runtimes/:id/healthcheck`       | Check a provider key or local Ollama (native only, stores none)                    | general   | No      |
+| POST   | `/api/runtimes/:id/run`               | Run a board task on the runtime and wait for the result                            | general   | No      |
+| GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog                                                        | general   | No      |
+| POST   | `/api/onboarding/native-leader-model` | Record the default native provider and model                                       | general   | No      |
+| GET    | `/api/onboarding/native-leader-model` | The recorded pick and what a new native agent would get                            | general   | No      |
+| GET    | `/api/onboarding/state`               | First-run signals in one call                                                      | general   | No      |
+| GET    | `/api/providers`                      | The 14 providers and whether each has a key                                        | general   | No      |
+| POST   | `/api/providers/:id/connect`          | Save a key in the vault and in OpenClaw's key files                                | general   | No      |
+| POST   | `/api/providers/:id/disconnect`       | Remove a key from the vault and from OpenClaw's key files                          | general   | No      |
+| GET    | `/api/providers/:id/models`           | Live model list with the stored key (Ollama: its pulled models)                    | general   | No      |
+| POST   | `/api/providers/:id/models`           | Live model list with a pasted, unsaved key                                         | general   | No      |
+| POST   | `/api/auth/cli-login/:tool`           | Run a CLI's own ChatGPT sign-in and relay its output                               | sensitive | SSE     |
 
 <Info>
 
@@ -112,16 +112,17 @@ Lists every runtime with its capabilities, live health, and install and credenti
 
 The status fields:
 
-| Field                | Runtimes       | Meaning                                                                                                                                                                                                                             |
-| -------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `installed`          | all            | Always `true` for the built-in Clawboo Native. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes).                                                          |
-| `binPath`            | CLI runtimes   | The resolved CLI path, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                 |
-| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                              |
-| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect only the vault counts. Hermes also counts a ChatGPT sign-in. |
-| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                        |
-| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                              |
-| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                           |
-| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                         |
+| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                       |
+| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installed`          | all            | Always `true` for the built-in Clawboo Native. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes).                                                                                                                    |
+| `binPath`            | CLI runtimes   | The resolved CLI path, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                           |
+| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                        |
+| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                             |
+| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                  |
+| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                        |
+| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                     |
+| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value. |
+| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                   |
 
 `connectionState` is derived like this:
 
@@ -154,7 +155,7 @@ Installs the runtime's CLI, pinned to a major version:
 
 - Claude Code: `npm install -g @anthropic-ai/claude-code@2`.
 - Codex: `npm install -g @openai/codex@0`.
-- Hermes: `pipx install 'hermes-agent[anthropic]<1'`, with pipx pointed at a Python 3.11 or newer when one is found. Without pipx it runs `python -m pip install --user` with such a Python, and retries once with `--break-system-packages` when pip reports an externally managed environment.
+- Hermes: `pipx install 'hermes-agent[anthropic]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below.
 
 Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, the install process is killed.
 
@@ -182,15 +183,16 @@ Clawboo Native is built in, so it answers **400** before any stream opens. If th
 
 The `error` codes:
 
-| `code`           | Meaning                                                                |
-| ---------------- | ---------------------------------------------------------------------- |
-| `NPM_MISSING`    | `npm` not found (Claude Code, Codex)                                   |
-| `PYTHON_MISSING` | No Python with pip or pipx found (Hermes)                              |
-| `PYTHON_TOO_OLD` | The newest Python found is older than 3.11 (Hermes)                    |
-| `EACCES`         | The npm or pipx error output mentioned `EACCES` or "permission denied" |
-| `SPAWN_THROW`    | The spawn call threw                                                   |
-| `SPAWN_ERROR`    | The child process emitted an error                                     |
-| `EXIT_<code>`    | The process exited with a non-zero code (for example `EXIT_1`)         |
+| `code`               | Meaning                                                                        |
+| -------------------- | ------------------------------------------------------------------------------ |
+| `NPM_MISSING`        | `npm` not found (Claude Code, Codex)                                           |
+| `PYTHON_MISSING`     | No Python with pip or pipx found (Hermes)                                      |
+| `PYTHON_TOO_OLD`     | Every Python found is older than 3.11, and no pipx (Hermes)                    |
+| `PYTHON_UNSUPPORTED` | No Python from 3.11 to 3.13 found, at least one is newer, and no pipx (Hermes) |
+| `EACCES`             | The npm or pipx error output mentioned `EACCES` or "permission denied"         |
+| `SPAWN_THROW`        | The spawn call threw                                                           |
+| `SPAWN_ERROR`        | The child process emitted an error                                             |
+| `EXIT_<code>`        | The process exited with a non-zero code (for example `EXIT_1`)                 |
 
 An `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message suggests the same command with `sudo`. When the install succeeds but the CLI still cannot be found, `complete` carries a `warning` that suggests restarting the server.
 
@@ -220,6 +222,7 @@ Connects a runtime. What it does depends on the runtime:
 - **Claude Code** stores `apiKey` under `ANTHROPIC_API_KEY`.
 - **Hermes** stores `apiKey` under `OPENROUTER_API_KEY`. Hermes also runs on an `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` already stored, or on a ChatGPT sign-in.
 - **Clawboo Native** stores `apiKey` in the slot for `provider` (table below). With `provider: "ollama"` it records that you picked local Ollama and stores nothing. With a `provider` and no `apiKey`, it reuses a key that already exists for that provider.
+- **Claude Code and Hermes** with no `apiKey` and no `provider` reuse a key that already resolves for one of their variables, such as one a disconnect kept because another runtime reads it. With none, or with a `provider`, the answer is `400`.
 
 The key goes into Clawboo's encrypted vault only; it is not copied to OpenClaw's files (`POST /api/providers/:id/connect` does that). Every successful connect clears this runtime's disconnect flag, so keys in the server's environment and in `~/.openclaw/.env` count for it again. The key is never echoed back.
 
@@ -228,7 +231,7 @@ The key goes into Clawboo's encrypted vault only; it is not copied to OpenClaw's
 
 ```ts
 {
-  apiKey?: string   // required, except for Codex, provider 'ollama', or a Clawboo Native key reuse
+  apiKey?: string   // required, except for Codex, provider 'ollama', or a key reuse
   provider?: string // Clawboo Native: which provider the key is for (see the table)
 }
 ```
@@ -317,28 +320,22 @@ curl -X POST http://localhost:18790/api/runtimes/clawboo-native/connect \
 
 ## `POST /api/runtimes/:id/disconnect`
 
-Disconnects a runtime. With no body this is a **full disconnect**: it deletes every vault key the runtime reads and stops the runtime from picking keys up anywhere else. The CLI stays installed. Clawboo Native also takes `{ "provider": "ollama" }`, which removes only the local Ollama choice.
+Disconnects a runtime. With no body this is a **full disconnect**: the runtime stops using any key until it is connected again, and the vault keys only this runtime reads are deleted. The CLI stays installed. Clawboo Native also takes `{ "provider": "ollama" }`, which removes only the local Ollama choice.
 
-<Warning>
+The vault holds a single copy of each key for every runtime, so a full disconnect keeps any key another runtime also reads. `GET /api/runtimes` shows each runtime's `disconnectPlan` beforehand, and the answer lists what was deleted and kept. To delete one provider's key for every runtime, use `POST /api/providers/:id/disconnect`.
 
-A full disconnect deletes every vault key this runtime reads, not one, and the vault holds a single copy of each key. Other runtimes that use the same key lose it too: disconnecting Hermes deletes the Anthropic key that Claude Code and Clawboo Native may run on. To remove one provider's key, use `POST /api/providers/:id/disconnect` instead.
-
-</Warning>
-
-What a full disconnect deletes:
-
-| Runtime          | Vault keys deleted                                                                                                                                                                          | Also                                                                                                                                                                                                      |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `claude-code`    | `ANTHROPIC_API_KEY`                                                                                                                                                                         |                                                                                                                                                                                                           |
-| `hermes`         | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`                                                                                                                                 | A ChatGPT sign-in in Hermes's own `auth.json` is kept, so Hermes can still read `ready`.                                                                                                                  |
-| `clawboo-native` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `CEREBRAS_API_KEY`, `MOONSHOT_API_KEY` | Records local Ollama as removed.                                                                                                                                                                          |
-| `codex`          | none (Codex keeps no key in the vault)                                                                                                                                                      | Its state comes from `codex login status`, so a signed-in Codex stays `ready` in `GET /api/runtimes` (the disconnect answer itself reads `needs-login`). Sign out with `POST /api/runtimes/codex/logout`. |
+| Runtime          | Vault keys deleted                                                                                                             | Vault keys kept, because another runtime reads them         | Also                                                                                                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `claude-code`    | none                                                                                                                           | `ANTHROPIC_API_KEY`                                         |                                                                                                                                                                                                           |
+| `hermes`         | none                                                                                                                           | `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | A ChatGPT sign-in in Hermes's own `auth.json` is kept, so Hermes can still read `ready`.                                                                                                                  |
+| `clawboo-native` | `GEMINI_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `TOGETHER_API_KEY`, `CEREBRAS_API_KEY`, `MOONSHOT_API_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY` | Records local Ollama as removed.                                                                                                                                                                          |
+| `codex`          | none (Codex keeps no key in the vault)                                                                                         |                                                             | Its state comes from `codex login status`, so a signed-in Codex stays `ready` in `GET /api/runtimes` (the disconnect answer itself reads `needs-login`). Sign out with `POST /api/runtimes/codex/logout`. |
 
 A full disconnect also:
 
-- Sets the runtime's disconnect flag. Until you connect this runtime again, it reads keys from the vault only, so a key in the server's environment or in `~/.openclaw/.env` no longer counts for it.
+- Sets the runtime's disconnect flag. Until you connect this runtime again, it resolves no key at all: not a kept vault key, and not one in the server's environment or in `~/.openclaw/.env`.
 - Leaves the copies in `~/.openclaw/.env` and in each OpenClaw agent's `auth-profiles.json` alone. OpenClaw keeps those keys, and other runtimes that are not disconnected still find them there.
-- Stops memory embeddings from using a removed key.
+- Stops memory embeddings from using a deleted key.
 
 For Clawboo Native, neither a later key connect nor `OLLAMA_BASE_URL` turns Ollama back on after a full disconnect; only picking it again (a connect with `provider: "ollama"`) does.
 
@@ -354,7 +351,12 @@ In the dashboard, a runtime's **Manage** > **Disconnect** sends the full form. U
 **`200 OK`**: done; the state re-derived:
 
 ```ts
-{ ok: true, connectionState: 'needs-auth' | 'needs-login' | 'ready' | 'not-installed' }
+{
+  ok: true
+  connectionState: 'needs-auth' | 'needs-login' | 'ready' | 'not-installed'
+  removed?: string[]                                // full disconnect: saved keys deleted
+  kept?: { envVar: string; sharedWith: string[] }[] // full disconnect: saved keys kept
+}
 ```
 
 **`400 Bad Request`**: `provider` was sent but is empty or not a string (it is never treated as a full disconnect):

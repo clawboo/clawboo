@@ -119,7 +119,7 @@ export function GhostGraphPanel({
             <EmptyState
               icon={Ghost}
               title="No agents yet"
-              helper="Connect to a Gateway to see your fleet."
+              helper="Create a Boo or deploy a team from the Marketplace to see it here."
               paddingTop={0}
             />
           </div>

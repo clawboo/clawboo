@@ -75,7 +75,7 @@ The panel loads its figures once, when you open it. Close it and open it again t
 A budget counts spend only from the moment you create it, and only for its own scope:
 
 - **Team chat**, meaning General, rooms, team routines, tasks you give an agent on the Board, and the tasks a leader hands off from there: charged to the agent and the team, and to the mission when the run works on a task.
-- **Agent routines and runs started through the API** on Clawboo Native, Claude Code, Codex or Hermes: charged to the agent, the mission and the team. A run that reports no cost is charged an estimate when it ends.
+- **Agent routines and runs started through the API** on Clawboo Native, Claude Code, Codex or Hermes: charged to the agent, the mission and the team. A run that reports no cost is charged an estimate when it ends. When a reviewer checks the work, its run is charged the same way, to the same agent.
 - **OpenClaw agent routines**: charged to the agent, the mission and the team, from an estimate when the run ends, whether it succeeded, failed, timed out or was stopped.
 - **One-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent**: charged to that agent only.
 - **One-to-one chat with an OpenClaw agent**: shows on **Tokens Used**, but no budget is charged.

@@ -768,9 +768,16 @@ async function runTaskInner(
     : 'Report a concise summary when done.'
   const degrNotes = describeDegradations(degr)
   const memoryGuidance = buildMemoryGuidance(runtimeId, Boolean(input.mcpBaseUrl))
+  // A worktree run is checked when it ends, by the VERIFY_CMD in its init.sh,
+  // which starts as a placeholder that fails the check. Say so up front, or the
+  // first check always fails and spends an attempt.
+  const worktreeNote = cwd
+    ? "You are working in this task's own git worktree. Read `TASK.md` there first. When you finish, Clawboo checks the work by running `VERIFY_CMD` from `init.sh`, and the placeholder it starts with counts as a failed check, so set it to the command that proves the work (for example `npm test`) before you finish."
+    : ''
   const baseContext = [
     resumeCtx,
     mcpNote,
+    worktreeNote,
     memoryGuidance,
     degrNotes.length ? `Degradations applied: ${degrNotes.join('; ')}.` : '',
   ]
@@ -1795,6 +1802,42 @@ async function runTaskInner(
           makeReviewerAdapter: input.makeAdapter,
           reviewerModel,
           mcpBaseUrl: input.mcpBaseUrl,
+          // The review is paid work done for this task, so it is charged to the
+          // same agent, mission and team budgets and shows in Tokens Used. A
+          // review that reported nothing is priced like an unreported pass. Its
+          // run has ended, so a cap it crosses refuses the next run at pre-flight.
+          onReviewerSpend: (spend) => {
+            let usd = spend.usd
+            let inputTokens = spend.inputTokens
+            let outputTokens = spend.outputTokens
+            if (usd == null) {
+              const nativeConfig =
+                !reviewerModel && runtimeId === 'clawboo-native'
+                  ? loadAgentConfig(db, assigneeAgentId)
+                  : null
+              const pricedModel = reviewerModel || nativeConfig?.primaryModel || null
+              usd = isLocalModel(pricedModel, nativeConfig?.primaryProvider)
+                ? 0
+                : estimateRunCostUsd({
+                    model: pricedModel,
+                    inputChars: spend.inputChars,
+                    outputChars: spend.outputChars,
+                  })
+              inputTokens = estimateTokensFromChars(spend.inputChars)
+              outputTokens = estimateTokensFromChars(spend.outputChars)
+            }
+            if (usd > 0) chargeBudgets(usd)
+            recordRunTokens(db, {
+              agentId: assigneeAgentId,
+              runtime: spend.runtime,
+              model: spend.model || reviewerModel || null,
+              inputTokens,
+              outputTokens,
+              costUsd: usd,
+              runId: null,
+              sessionKey: spend.sessionKey,
+            })
+          },
         })
         status =
           r.ok && r.action === 'complete'

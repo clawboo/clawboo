@@ -133,6 +133,9 @@ describe('GET /api/team-chat', () => {
         ;(this as { _json?: unknown })._json = body
         return this
       },
+      on() {
+        return this
+      },
     }
     return res as unknown as Response & { _json?: unknown; _status: number }
   }

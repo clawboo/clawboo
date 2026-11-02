@@ -31,11 +31,13 @@ import type { DiffStat, Worktree } from '@clawboo/worktrees'
 import { commitWorktreeWork } from '@clawboo/worktrees'
 
 import type { RuntimeRunContext } from '../runtimes'
-import { runCritic } from './critic'
+import { isRiskyDelegation } from '../teamChat/riskyDelegation'
+import { runCritic, type ReviewerSpend } from './critic'
 import { runDeterministicGate } from './deterministicGate'
 
 export { runDeterministicGate } from './deterministicGate'
 export { runCritic } from './critic'
+export type { ReviewerSpend } from './critic'
 
 const CRITIC_NOT_RUN: CriticVerdict = {
   ran: false,
@@ -60,7 +62,11 @@ export interface VerifyTaskInput {
   mcpBaseUrl?: string | null
   maxFixCycles?: number
   verifyTimeoutMs?: number
+  /** Force the reviewer. Absent, a task whose title or description names a risky
+   *  action (the same keyword test team chat uses for risky hand-offs) gets it. */
   riskFlag?: boolean
+  /** Told what the reviewer's run cost, so the caller can charge it. */
+  onReviewerSpend?: (spend: ReviewerSpend) => void
 }
 
 function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): StructuredError {
@@ -150,8 +156,11 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
         makeReviewerAdapter: input.makeReviewerAdapter,
         reviewerModel: input.reviewerModel,
         mcpBaseUrl: input.mcpBaseUrl,
-        riskFlag: input.riskFlag,
+        riskFlag:
+          input.riskFlag ??
+          isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` }),
         reviewRootDir: input.reviewRootDir,
+        onSpend: input.onReviewerSpend,
       })
     } catch {
       // A critic failure must never block (or crash) the deterministic verdict.

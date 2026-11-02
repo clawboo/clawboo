@@ -22,13 +22,12 @@ The same steps work for a research team. Pick **Research Lab** instead of **Mark
 ## Before you begin
 
 - Clawboo is installed and onboarding is done, with one way to run agents connected: an API key, **Sign in with ChatGPT**, or a local Ollama model. See the [Quickstart](/getting-started/quickstart), or [Run Clawboo without an API key](/guides/no-api-key).
-- If you only signed in with ChatGPT (no API key and no Ollama), you will set every member to **Codex** in step 1.
 
 ## What this team can and cannot do
 
 Read this before you rely on the team. What an agent can do depends on its runtime, the engine it runs on:
 
-- **Clawboo Native** runs a marketplace team when no OpenClaw Gateway is connected. Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read and write files only in the team's own folder, and they cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
+- **Clawboo Native** runs a member when no OpenClaw Gateway is connected and you have an API key or Ollama (with only a ChatGPT sign-in, members start on Codex instead). Its agents plan, write and review using the model's own knowledge and whatever you give them. They read the team's board and share a team memory. In team chat they can read and write files only in the team's own folder, and they cannot browse the web, open your other files, or send and post anything. [Connectors](/using/connectors) add those abilities.
 - **OpenClaw** agents use the tools your OpenClaw Gateway gives them.
 - **Claude Code, Codex and Hermes** agents bring their own tools for commands and files, and run with their own approval prompts turned off. Read [What agents can do](/concepts/permissions) before you put one on a team.
 
@@ -49,7 +48,7 @@ Nobody checks writing work automatically. A task that finishes in team chat goes
 
 You should see **Team deployed!**, and then the team's **General** chat opens.
 
-With no OpenClaw Gateway connected, each row reads **OpenClaw unavailable · using Clawboo Native**. That is expected: the team runs on Clawboo Native. If you only signed in with ChatGPT, set every row to **Codex** before you click **Deploy team**, because Clawboo Native needs an API key or Ollama. A member's runtime cannot be changed after the deploy.
+With no OpenClaw Gateway connected, each row reads **OpenClaw unavailable · using** and names the runtime it uses instead: Clawboo Native when you have an API key or Ollama, or **Codex** if you only signed in with ChatGPT. That is expected. A member's runtime cannot be changed after the deploy.
 
 <Frame caption="The Teams tab of the Marketplace. Marketing Squad and Research Lab are built in, so they are there even offline.">
   ![The Marketplace Teams tab with team cards, each with Details and Deploy buttons](/images/team-gallery.png)
@@ -176,11 +175,11 @@ To copy a result, select the text and copy it (`Cmd/Ctrl + C`). There is no expo
 
 <AccordionGroup>
 
-<Accordion title="Every member reads OpenClaw unavailable · using Clawboo Native">
+<Accordion title="Every member reads OpenClaw unavailable">
 
-**What it means:** a marketplace team suggests OpenClaw, and no OpenClaw Gateway is connected, so each member falls back to Clawboo Native.
+**What it means:** a marketplace team suggests OpenClaw, and no OpenClaw Gateway is connected, so each member uses the first runtime you have connected instead: Clawboo Native, Claude Code, Codex or Hermes, in that order.
 
-**Fix:** nothing, if Clawboo Native is what you want. To run the members on OpenClaw, set up OpenClaw first (see [OpenClaw](/runtimes/openclaw)), then deploy the team.
+**Fix:** nothing, if that runtime is what you want. To run the members on OpenClaw, set up OpenClaw first (see [OpenClaw](/runtimes/openclaw)), then deploy the team.
 
 </Accordion>
 

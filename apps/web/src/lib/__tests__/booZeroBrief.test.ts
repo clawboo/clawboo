@@ -1,10 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import {
-  buildTeamBrief,
-  buildGlobalBrief,
-  type TeamBriefMember,
-  type GlobalBriefTeam,
-} from '../booZeroBrief'
+import { buildTeamBrief, type TeamBriefMember } from '../booZeroBrief'
 
 describe('buildTeamBrief', () => {
   const baseTeam = {
@@ -172,63 +167,5 @@ describe('buildTeamBrief', () => {
     const out1 = buildTeamBrief({ team: baseTeam, members })
     const out2 = buildTeamBrief({ team: baseTeam, members })
     expect(out1).toBe(out2)
-  })
-})
-
-describe('buildGlobalBrief', () => {
-  const teams: GlobalBriefTeam[] = [
-    { name: 'Dev Team', icon: '👾', description: 'Code review and bug hunting.' },
-    { name: 'Marketing Boos', icon: '📣', description: 'Content + campaigns.' },
-  ]
-
-  it('renders role, required-behavior rules block, teams index, delegation protocol, mention syntax, pitfalls, notes', () => {
-    const out = buildGlobalBrief({ teams })
-    expect(out).toContain('# Boo Zero — Universal Team Leader')
-    expect(out).toContain('## Role')
-    // Phase C: prompt is now written in second-person ("You are…") and uses
-    // imperative DO / DO NOT lists instead of first-person responsibilities.
-    expect(out).toContain('You are the universal leader')
-    expect(out).toContain('## Required behavior')
-    // Cascade-fix: the required-behavior section now embeds the
-    // canonical rules block from `lib/booZeroRules.ts` so brief and per-
-    // turn injection share one source of truth.
-    expect(out).toContain('[Your Rules — authoritative]')
-    expect(out).toContain('[End Your Rules]')
-    expect(out).toContain('<delegate to="@AgentName">')
-    expect(out).toContain('## Additional verification guidance')
-    expect(out).toContain('## Available teams')
-    expect(out).toContain('- **Dev Team** 👾: Code review and bug hunting.')
-    expect(out).toContain('- **Marketing Boos** 📣: Content + campaigns.')
-    expect(out).toContain('## Delegation protocol')
-    expect(out).toContain('<delegate to="@Teammate Name">')
-    expect(out).toContain('## @-mention syntax in my individual chat')
-    expect(out).toContain('`@TeamName`')
-    expect(out).toContain('## Common pitfalls')
-    expect(out).toContain('## Notes')
-  })
-
-  it('renders "no teams deployed" placeholder when empty', () => {
-    const out = buildGlobalBrief({ teams: [] })
-    expect(out).toContain('_No teams deployed yet.')
-  })
-
-  it('uses "No description." when team description is missing', () => {
-    const out = buildGlobalBrief({
-      teams: [{ name: 'Mystery', icon: '🎃' }],
-    })
-    expect(out).toContain('- **Mystery** 🎃: No description.')
-  })
-
-  it('collapses newlines in team descriptions to single spaces', () => {
-    const out = buildGlobalBrief({
-      teams: [{ name: 'Multi', icon: '🌀', description: 'Line one.\n\nLine two.' }],
-    })
-    expect(out).toContain('- **Multi** 🌀: Line one. Line two.')
-  })
-
-  it('produces deterministic output', () => {
-    const a = buildGlobalBrief({ teams })
-    const b = buildGlobalBrief({ teams })
-    expect(a).toBe(b)
   })
 })

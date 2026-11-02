@@ -103,13 +103,13 @@ Only deleting the agent removes its chat history.
 
 The model control sits in the top-right corner of the **Graph** card, beside the agent's runtime icon.
 
-| Runtime        | What you can change                                                                                                                                                                                                                              |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Clawboo Native | Pick a model. It saves at once and needs no Gateway.                                                                                                                                                                                             |
-| OpenClaw       | Pick a model. Clawboo saves the choice in OpenClaw's own config for this agent.                                                                                                                                                                  |
-| Hermes         | Pick an OpenRouter model. The agent then runs it through OpenRouter, even if it ran on a ChatGPT subscription model before. A **ChatGPT subscription** model can be picked only when you deploy the team, once Hermes is signed in with ChatGPT. |
-| Claude Code    | Nothing: the control reads **Claude Code default**, the model Claude Code picks.                                                                                                                                                                 |
-| Codex          | Nothing: the control reads **Codex default**, the model of your Codex account. Change it with the Codex CLI.                                                                                                                                     |
+| Runtime        | What you can change                                                                                                                                                                                                                                                                                    |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Clawboo Native | Pick a model. It saves at once and needs no Gateway.                                                                                                                                                                                                                                                   |
+| OpenClaw       | Pick a model. Clawboo saves the choice in OpenClaw's own config for this agent.                                                                                                                                                                                                                        |
+| Hermes         | Pick a model from the **OpenRouter** group, and the agent runs on OpenRouter. A custom model id keeps the agent on the provider it already has. An agent on your ChatGPT plan shows its model with **ChatGPT plan** and cannot be changed here, because the plan's models are not listed on this page. |
+| Claude Code    | Nothing: the control reads **Claude Code default**, the model Claude Code picks.                                                                                                                                                                                                                       |
+| Codex          | Nothing: the control reads **Codex default**, the model of your Codex account. Change it with the Codex CLI.                                                                                                                                                                                           |
 
 For a team's members, you can also pick models when you deploy the team. See [Choose a runtime and model for each member](/using/teams#choose-a-runtime-and-model-for-each-member).
 
@@ -137,24 +137,21 @@ Clawboo writes the personality into the agent's SOUL.md, below the role text. Ev
 
 Click **Use Custom Instructions** to write the personality yourself. Your text replaces the slider text, **Limits** included. It saves when you click away from the box or press `Cmd/Ctrl+S`. **Switch to Sliders** clears your text and goes back to the sliders.
 
-<Warning>
-
-While custom instructions are on, the SOUL tab under **Agent Files** still shows the slider personality, not your text. If you edit and save SOUL.md there, the slider text replaces your custom instructions in the file the agent follows. While custom instructions are on, change the personality only here. If it happens, click in your custom instructions and press `Cmd/Ctrl+S` to write them back.
-
-</Warning>
+While custom instructions are on, the SOUL tab under **Agent Files** shows your text below the role, and saving SOUL.md there keeps it.
 
 ## Edit the agent files
 
 Open **Details > Agent Files**. Each file has a tab. Which tabs you see, and what each file does, depends on the agent's runtime.
 
-| Runtime                    | Tabs                          | What the agent follows                                                                                                                              |
-| -------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OpenClaw                   | SOUL, IDENTITY, TOOLS, AGENTS | The OpenClaw Gateway loads SOUL.md, IDENTITY.md and AGENTS.md. OpenClaw 2026.9 and later does not load TOOLS.md, so put tool guidance in AGENTS.md. |
-| Clawboo Native             | SOUL, AGENTS                  | SOUL.md is the agent's whole set of instructions. Saving it changes what the agent runs on.                                                         |
-| Claude Code, Codex, Hermes | SOUL, AGENTS                  | Clawboo adds the first 4,000 characters of SOUL.md to each turn as the agent's persona.                                                             |
+| Runtime                    | Tabs                   | What the agent follows                                                                                                                                          |
+| -------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OpenClaw                   | SOUL, IDENTITY, AGENTS | The OpenClaw Gateway loads SOUL.md, IDENTITY.md and AGENTS.md. OpenClaw 2026.9 and later neither loads nor accepts TOOLS.md, so put tool guidance in AGENTS.md. |
+| Clawboo Native             | SOUL, AGENTS           | SOUL.md is the agent's whole set of instructions. Saving it changes what the agent runs on.                                                                     |
+| Claude Code, Codex, Hermes | SOUL, AGENTS           | Clawboo adds the first 4,000 characters of SOUL.md to each turn as the agent's persona.                                                                         |
 
 - On every runtime, the @mentions in AGENTS.md draw the agent's links on the Org chart and team graphs. Only OpenClaw also reads AGENTS.md as instructions.
-- A file that already has text keeps its tab on any runtime. That is why agents made with **Create Boo** or from the Marketplace also show IDENTITY and TOOLS: those files are saved, but only OpenClaw reads them.
+- A file that already has text keeps its tab on any runtime. That is why agents made with **Create Boo** or from the Marketplace also show IDENTITY: the file is saved, but only OpenClaw reads it. Agents made by an earlier version of Clawboo may also show TOOLS; only an OpenClaw Gateway older than 2026.9 reads that file.
+- A Marketplace member on OpenClaw gets its skill list in AGENTS.md, under a **Tools** heading, instead of in TOOLS.md.
 - Clawboo never creates or reads USER.md, HEARTBEAT.md or MEMORY.md. Their tabs appear only when the file already has text, for example one your OpenClaw Gateway wrote.
 
 On Clawboo Native, an agent from a team template has Clawboo's team-lead or specialist instructions at the end of its SOUL.md. They tell the agent how to hand off or report work, so keep them unless you mean to change how it works with its team. An empty SOUL.md falls back to Clawboo's default instructions.
@@ -201,7 +198,7 @@ Claude Code, Codex and Hermes agents have no **Permissions** section. Clawboo ru
 - **On the Org chart or a team graph:** right-click the agent's Boo, then **Delete**. It deletes at once, with no confirmation.
 - **In the all-agents list:** right-click Boo Zero's mascot and choose **Show all agents**. Hover the agent's row, click the trash icon, then confirm. The prompt warns **This cannot be undone.**
 
-Deleting removes the agent, its files, its personality and its own chat history. It works without the OpenClaw Gateway. An OpenClaw agent leaves Clawboo at once, and leaves the Gateway at once too, or the next time Clawboo connects if the Gateway is offline. If the Gateway refuses the delete (it will not delete its only agent), the agent comes back.
+Deleting removes the agent, its files, its personality, its own chat history and the routines that send work to it. Team routines stay. It works without the OpenClaw Gateway. An OpenClaw agent leaves Clawboo at once, and leaves the Gateway at once too, or the next time Clawboo connects if the Gateway is offline. If the Gateway refuses the delete (it will not delete its only agent), the agent comes back. That is why an OpenClaw agent deleted while the Gateway is offline keeps its routines until the Gateway confirms the delete.
 
 ## Troubleshooting
 
@@ -239,17 +236,11 @@ The page header reads **Disconnected** or **No provider key**: Clawboo Native ha
 
 </Accordion>
 
-<Accordion title="The SOUL tab does not show my custom instructions">
-
-This is expected while **Use Custom Instructions** is on. See the warning under [Use your own instructions instead](#use-your-own-instructions-instead).
-
-</Accordion>
-
 </AccordionGroup>
 
 <Accordion title="Under the hood">
 
-- Clawboo stores the slider values and any custom instructions in its database, and writes the generated text into SOUL.md below a `---` line and a `clawboo:personality` marker comment. When **Agent Files** loads, it rebuilds that block from the saved slider values.
+- Clawboo stores the slider values and any custom instructions in its database, and writes the generated text into SOUL.md below a `---` line and a `clawboo:personality` marker comment (`clawboo:personality-custom` for custom instructions). When **Agent Files** loads, it rebuilds that block from the saved custom instructions, or from the slider values when there are none.
 - File routes: `GET` and `PUT /api/agents/:agentId/files/:name`, where the name is one of the seven agent files (any other name returns 400 `invalid file name`). Personality: `POST /api/personality`. Model: `PATCH /api/agents/:agentId/model`.
 - `DELETE /api/agents/:agentId` answers `upstreamDeletePending: true` when an OpenClaw agent's Gateway is offline. Until the Gateway confirms, `GET /api/agents` lists that agent in `pendingDeleteIds`.
 - See the [Agents API reference](/reference/rest-api/agents) for every field.

@@ -39,8 +39,16 @@ test.describe('Native onboarding on a local Ollama', () => {
 
     // Start keyless: an earlier spec stores a native key in this shared server's
     // vault, and with one present the run would never exercise the Ollama path.
-    // A full native disconnect clears every native slot (and records Ollama as
-    // removed); the Ollama connect below picks it again and lifts the disconnect.
+    // A runtime's disconnect keeps the keys another runtime also reads (Anthropic
+    // for Claude Code; Anthropic, OpenAI and OpenRouter for Hermes), and the
+    // Ollama connect below would bring them back for Clawboo Native. So delete
+    // those keys for every runtime first, the way Settings > Providers does. The
+    // full native disconnect then clears the slots only it reads and records
+    // Ollama as removed; the Ollama connect picks it again and lifts the disconnect.
+    for (const provider of ['anthropic', 'openai', 'openrouter']) {
+      const removed = await request.post(`${API_BASE}/api/providers/${provider}/disconnect`)
+      expect(removed.ok()).toBe(true)
+    }
     await request.post(`${API_BASE}/api/runtimes/clawboo-native/disconnect`)
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {

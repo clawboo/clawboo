@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, getSetting, teams } from '@clawboo/db'
+import { agents, getScheduledRun, getSetting, registerScheduledRun, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -189,6 +189,77 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect((list.body() as { pendingDeleteIds: string[] }).pendingDeleteIds).toEqual([])
   })
 
+  it("DELETE /api/agents/:id removes the agent's routines once the delete is done, and leaves other routines alone", async () => {
+    const db = getDb()
+    const routineFor = (agentId: string) => {
+      const r = registerScheduledRun(db, {
+        agentId,
+        teamId: 't1',
+        cronSpec: '0 9 * * *',
+        taskTemplate: JSON.stringify({ title: 'Daily report', kind: 'research', priority: 0 }),
+        nextRunAt: Date.now() + 60_000,
+      })
+      if (!r.ok) throw new Error(r.reason)
+      return r.run.id
+    }
+
+    const create = mockRes()
+    await agentsCreatePOST(
+      req({ body: { name: 'Routine Owner', sourceId: 'clawboo-native' } }),
+      create.res,
+    )
+    const nativeId = (create.body() as { agent: { id: string } }).agent.id
+    const nativeRoutine = routineFor(nativeId)
+    const openClawRoutine = routineFor('a1')
+    const teamRoutine = routineFor('')
+
+    // The source's own hard delete.
+    const delNative = mockRes()
+    await agentsDELETE(req({ params: { agentId: nativeId } }), delNative.res)
+    expect(delNative.status()).toBe(200)
+    expect(getScheduledRun(db, nativeRoutine)).toBeNull()
+    expect(getScheduledRun(db, openClawRoutine)).not.toBeNull()
+
+    // With the Gateway down the delete is only owed. A Gateway that refuses it
+    // brings the agent back, so its routines stay until the delete settles.
+    const delOpenClaw = mockRes()
+    await agentsDELETE(req({ params: { agentId: 'a1' } }), delOpenClaw.res)
+    expect(delOpenClaw.body()).toMatchObject({
+      upstreamDeleted: false,
+      upstreamDeletePending: true,
+    })
+    expect(getScheduledRun(db, openClawRoutine)).not.toBeNull()
+
+    // The Gateway's list comes back without it: settled, and the routines go.
+    const sync = mockRes()
+    await agentsSyncPOST(
+      req({ body: { defaultId: 'main', mainKey: 'main', agents: [{ id: 'main' }] } }),
+      sync.res,
+    )
+    expect(sync.status()).toBe(200)
+    expect(getScheduledRun(db, openClawRoutine)).toBeNull()
+
+    // A team routine targets no agent and survives both.
+    expect(getScheduledRun(db, teamRoutine)).not.toBeNull()
+  })
+
+  it("cleanup-ghosts removes a swept agent's routines", async () => {
+    const db = getDb()
+    const r = registerScheduledRun(db, {
+      agentId: 'a1',
+      teamId: 't1',
+      cronSpec: '0 9 * * *',
+      taskTemplate: JSON.stringify({ title: 'Daily report', kind: 'research', priority: 0 }),
+      nextRunAt: Date.now() + 60_000,
+    })
+    if (!r.ok) throw new Error(r.reason)
+
+    const sweep = mockRes()
+    agentsCleanupPOST(req({ body: { liveAgentIds: ['main'] } }), sweep.res)
+    expect((sweep.body() as { deleted: number }).deleted).toBe(1)
+    expect(getScheduledRun(db, r.run.id)).toBeNull()
+  })
+
   it('GET /api/agents/registry/health always 200 (reports disconnected)', async () => {
     const r = mockRes()
     await agentsRegistryHealthGET(req(), r.res)
@@ -355,14 +426,14 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
     expect(loadAgentConfig(db, id)?.primaryProvider).toBe('ollama')
   })
 
-  it('PATCH /api/agents/:id/model on hermes accepts only openrouter (or no) provider', async () => {
+  it('PATCH /api/agents/:id/model on hermes accepts only openrouter, openai-codex or no provider', async () => {
     const create = mockRes()
     await agentsCreatePOST(req({ body: { name: 'Hermes Peer', sourceId: 'hermes' } }), create.res)
     const id = (create.body() as { agent: { id: string } }).agent.id
     expect(id).toBeTruthy()
 
-    // Hermes routes every model via OpenRouter; another provider is a 400, not
-    // a silent drop.
+    // A Hermes model runs on OpenRouter or the ChatGPT subscription; another
+    // provider is a 400, not a silent drop.
     const wrong = mockRes()
     await agentModelPATCH(
       req({
@@ -387,6 +458,101 @@ describe('agents REST (registry disconnected → reads SQLite, writes 503)', () 
       model: 'openai/gpt-4o-mini',
       provider: 'openrouter',
     })
+  })
+
+  it('PATCH /api/agents/:id/model leaves a hermes agent with no provider unpinned', async () => {
+    // A member deployed on Default stores no provider, and its runs take the
+    // provider its keys or ChatGPT sign-in give it. A model change that names no
+    // provider (a typed id) must not pin openrouter: on a setup with no OpenRouter
+    // key the driver would drop that pick and its model.
+    const create = mockRes()
+    await agentsCreatePOST(req({ body: { name: 'Free Hermes', sourceId: 'hermes' } }), create.res)
+    const id = (create.body() as { agent: { id: string } }).agent.id
+
+    const typed = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'vendor/custom-model' } }),
+      typed.res,
+    )
+    expect(typed.status()).toBe(200)
+    expect(typed.body()).toEqual({ ok: true, model: 'vendor/custom-model', provider: null })
+    const row = getDb()
+      .select()
+      .from(agents)
+      .all()
+      .find((a) => a.id === id)
+    expect(JSON.parse(row!.execConfig!)).toEqual({ model: 'vendor/custom-model' })
+  })
+
+  it('PATCH /api/agents/:id/model keeps a ChatGPT-subscription hermes agent on its provider', async () => {
+    // Deployed from team setup with a subscription model: execConfig carries
+    // provider openai-codex. A model change that names no provider must leave the
+    // agent on the subscription, never move it onto OpenRouter.
+    const create = mockRes()
+    await agentsCreatePOST(
+      req({
+        body: {
+          name: 'Plan Hermes',
+          sourceId: 'hermes',
+          execConfig: { provider: 'openai-codex', model: 'plan-model-a' },
+        },
+      }),
+      create.res,
+    )
+    const id = (create.body() as { agent: { id: string } }).agent.id
+    const execOf = (): unknown => {
+      const row = getDb()
+        .select()
+        .from(agents)
+        .all()
+        .find((a) => a.id === id)
+      return row?.execConfig ? JSON.parse(row.execConfig) : null
+    }
+
+    const modelOnly = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'plan-model-b' } }),
+      modelOnly.res,
+    )
+    expect(modelOnly.status()).toBe(200)
+    expect(execOf()).toEqual({ provider: 'openai-codex', model: 'plan-model-b' })
+
+    // An explicit subscription provider is accepted too (a pick from its group).
+    const explicit = mockRes()
+    await agentModelPATCH(
+      req({ params: { agentId: id }, body: { model: 'plan-model-a', provider: 'openai-codex' } }),
+      explicit.res,
+    )
+    expect(explicit.status()).toBe(200)
+    expect(execOf()).toEqual({ provider: 'openai-codex', model: 'plan-model-a' })
+
+    // Moving to OpenRouter takes an explicit provider (a pick from its group).
+    const move = mockRes()
+    await agentModelPATCH(
+      req({
+        params: { agentId: id },
+        body: { model: 'openai/gpt-4o-mini', provider: 'openrouter' },
+      }),
+      move.res,
+    )
+    expect(execOf()).toEqual({ provider: 'openrouter', model: 'openai/gpt-4o-mini' })
+
+    // openai-codex is a Hermes provider only; a native agent refuses it.
+    const nativeCreate = mockRes()
+    await agentsCreatePOST(
+      req({ body: { name: 'Native Peer', sourceId: 'clawboo-native' } }),
+      nativeCreate.res,
+    )
+    const nativeId = (nativeCreate.body() as { agent: { id: string } }).agent.id
+    const nativeCodex = mockRes()
+    await agentModelPATCH(
+      req({
+        params: { agentId: nativeId },
+        body: { model: 'plan-model-a', provider: 'openai-codex' },
+      }),
+      nativeCodex.res,
+    )
+    expect(nativeCodex.status()).toBe(400)
   })
 
   it('POST /api/agents 400s an unknown sourceId', async () => {

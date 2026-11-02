@@ -35,6 +35,7 @@ import {
 import { Button, IconButton } from '@/features/shared/Button'
 import { FormattedAlert } from '@/features/shared/FormattedAlert'
 import { ChatGptSignIn } from './ChatGptSignIn'
+import { runtimeDisconnectMessage } from './disconnectCopy'
 import { InstalledAck } from './InstalledAck'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { Spinner } from '@/features/shared/Spinner'
@@ -245,12 +246,28 @@ export function RuntimeConnectionCard({
     }, 400)
   }
 
+  /** Connect again with the key a Disconnect kept because another runtime also
+   *  uses it: a keyless connect, which the server satisfies from the saved key. */
+  async function handleUseSavedKey(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    const r = await connectRuntime(entry.id, '')
+    if (!r.ok) {
+      setBusy(false)
+      setError(r.error ?? 'Failed to connect')
+      return
+    }
+    await onChanged?.()
+    setBusy(false)
+  }
+
   async function handleDisconnect(): Promise<void> {
     if (
       !(await confirm({
         title: `Disconnect ${entry.name}?`,
-        message:
-          "This removes its saved API key from the encrypted vault. You'll need to re-enter it to reconnect.",
+        message: runtimeDisconnectMessage(entry.name, status?.disconnectPlan, {
+          ollama: status?.ollamaConnected === true,
+        }),
         confirmLabel: 'Disconnect',
         tone: 'danger',
       }))
@@ -468,6 +485,17 @@ export function RuntimeConnectionCard({
 
         {/* Native's connect actions live INSIDE the provider manager (per-row
             Connect / Use) — a global Connect here would be a dead button. */}
+        {display === 'needs-auth' && !isNative && status?.hasVaultCredential === true && (
+          <ActionButton
+            testid={`runtime-${entry.id}-use-saved-key`}
+            primary={variant === 'panel'}
+            busy={busy}
+            onClick={handleUseSavedKey}
+            icon={<Plug2 size={13} />}
+          >
+            Use saved key
+          </ActionButton>
+        )}
         {display === 'needs-auth' && !isNative && (
           <ActionButton
             testid={`runtime-${entry.id}-connect`}

@@ -53,7 +53,7 @@ Every route here is on the general [rate limit](/reference/rest-api/index#rate-l
 
 ## `GET /api/tools`
 
-Lists every built-in tool with an availability verdict worked out from the server's environment. A tool that needs something not set up reads `available: false`, with `diagnostics` saying why; the dashboard greys it out, and the Tools MCP server leaves it out of `tools/list`. The four built-in tools are `echo` and `note` (risk `safe`), `web_search` (`external`, hidden until `TAVILY_API_KEY` is set or a Tavily sign-in exists) and `delete_path` (`destructive`).
+Lists every built-in tool with an availability verdict worked out from the server's environment. A tool that needs something not set up reads `available: false`, with `diagnostics` saying why; the dashboard greys it out, and the Tools MCP server leaves it out of `tools/list`. The two built-in tools are `echo` and `note`, both risk `safe` and always available. There is no built-in web search: connect a search connector, such as Exa Search, and grant it to the agents that need it.
 
 - **Path/query params**: none.
 - **Request body**: none.
@@ -284,7 +284,7 @@ The tool-call audit log: one row before and one after each brokered call, newest
 ### Example
 
 ```bash
-curl 'http://localhost:18790/api/tools/audit?toolName=web_search&limit=20'
+curl 'http://localhost:18790/api/tools/audit?toolName=note&limit=20'
 ```
 
 ---

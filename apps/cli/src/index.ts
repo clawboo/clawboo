@@ -33,7 +33,8 @@ import { shouldOfferRestart } from './versionCheck'
 import {
   discoverDashboard,
   fetchServerVersion,
-  probeClawbooDashboard,
+  launcherAccessToken,
+  probeDashboard,
   probePort,
   readRuntimePort,
   removeRuntimePortFile,
@@ -160,24 +161,41 @@ function describeStopFailure(outcome: StopOutcome): string {
 }
 
 /**
- * A Clawboo dashboard is running but its access gate is turned on, so every
- * `/api/*` call from here 401s. Say so instead of behaving as if nothing were
- * running — which would fork a second server onto the same database, fail its
- * readiness poll, and leave the first one orphaned.
+ * A Clawboo dashboard is running but its access gate is turned on, and this
+ * launcher holds no token it accepts, so every `/api/*` call from here 401s. Say
+ * so instead of behaving as if nothing were running, which would fork a second
+ * server onto the same database, fail its readiness poll, and leave the first
+ * one orphaned.
  */
 function printGatedNotice(port: number): void {
   p.log.warn(
     chalk.yellow(`A Clawboo server is running on port ${port}, but it requires an access token.`),
   )
   p.log.info(
-    chalk.gray('This install sets ') +
-      chalk.white('STUDIO_ACCESS_TOKEN') +
-      chalk.gray(', so every /api/* route needs a cookie the launcher does not have.'),
+    chalk.gray(
+      launcherAccessToken() === null
+        ? "Set STUDIO_ACCESS_TOKEN to the server's token in this shell and run the command again."
+        : "The STUDIO_ACCESS_TOKEN in this shell is not the server's token.",
+    ),
   )
   p.log.info(
     chalk.gray('Open ') +
       chalk.cyan.underline(`http://localhost:${port}${uiPath()}?access_token=<token>`) +
       chalk.gray(' once to set it in your browser, or unset the variable and restart the server.'),
+  )
+}
+
+/**
+ * The launcher reaches a token-gated server with its own STUDIO_ACCESS_TOKEN,
+ * but the browser it opens needs the access cookie too, and the token is never
+ * put in a URL or command line from here. Say how to set it.
+ */
+function printBrowserTokenHint(port: number): void {
+  if (launcherAccessToken() === null) return
+  p.log.info(
+    chalk.gray('STUDIO_ACCESS_TOKEN is set. If the dashboard does not load, open ') +
+      chalk.cyan.underline(`http://localhost:${port}${uiPath()}?access_token=<token>`) +
+      chalk.gray(' once in this browser.'),
   )
 }
 
@@ -354,6 +372,7 @@ async function run(opts: LaunchOptions): Promise<void> {
 
   // ── 4. Open browser ────────────────────────────────────────────────────────
 
+  printBrowserTokenHint(dashboardPort)
   const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
   await openBrowser(dashboardUrl)
   browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(dashboardUrl))
@@ -412,8 +431,10 @@ async function runStop(): Promise<void> {
     // recorded port is dead". `CLAWBOO_API_PORT` short-circuits discovery to a
     // single port, so a live instance on a different one would still be named
     // by the file. Probe the recorded port before deleting the only record of it.
+    // A token-gated server there is alive too, so only a port with no Clawboo
+    // answer at all counts as dead.
     const recorded = readRuntimePort()
-    if (recorded !== null && !(await probeClawbooDashboard('localhost', recorded, 1_500))) {
+    if (recorded !== null && (await probeDashboard('localhost', recorded, 1_500)) === 'none') {
       removeRuntimePortFile()
     }
     p.log.info(chalk.gray('No Clawboo server is running.'))
@@ -485,6 +506,7 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
 
   const url = `http://localhost:${started}${uiPath()}`
   if (opts.open) {
+    printBrowserTokenHint(started)
     const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
     await openBrowser(url)
     browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(url))

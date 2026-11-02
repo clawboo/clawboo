@@ -171,23 +171,43 @@ export interface PythonCandidate {
   version: string
 }
 
+/** The Python 3 minor versions a package installs on, both ends included:
+ *  `>=3.11,<3.14` is `{ minMinor: 11, maxMinor: 13 }`. A `maxMinor` of
+ *  `Infinity` means no upper bound. */
+export interface PythonRange {
+  minMinor: number
+  maxMinor: number
+}
+
 /**
- * PURE: from the discovered interpreters, pick the newest that satisfies
- * `minMinor` (Python >= 3.<minMinor>), plus the newest found overall (so a
- * caller can render a precise "Python X is too old" error when none qualify).
- * Exported for tests.
+ * PURE: from the discovered interpreters, pick the newest one inside `range`, or
+ * null when none is. Newest overall would let a 3.14 beat a 3.12, and
+ * `hermes-agent` does not install on 3.14. Exported for tests.
  */
-export function pickPython(
-  found: PythonCandidate[],
-  minMinor: number,
-): { compatible: PythonCandidate | null; best: PythonCandidate | null } {
-  let best: PythonCandidate | null = null
+export function pickPython(found: PythonCandidate[], range: PythonRange): PythonCandidate | null {
   let compatible: PythonCandidate | null = null
   for (const c of found) {
-    if (!best || c.minor > best.minor) best = c
-    if (c.minor >= minMinor && (!compatible || c.minor > compatible.minor)) compatible = c
+    const inRange = c.minor >= range.minMinor && c.minor <= range.maxMinor
+    if (inRange && (!compatible || c.minor > compatible.minor)) compatible = c
   }
-  return { compatible, best }
+  return compatible
+}
+
+/**
+ * PURE: the interpreter names to probe, newest first. The version-specific names
+ * cover the range plus one step past each end, so an error can name the
+ * out-of-range Python a user really has (a 3.14 or a 3.10). The bare `python3` and
+ * `python` come last. With no upper bound, only the bare names are probed.
+ * Exported for tests.
+ */
+export function pythonCandidateNames(range: PythonRange): string[] {
+  const versioned: string[] = []
+  if (Number.isFinite(range.maxMinor)) {
+    for (let m = range.maxMinor + 1; m >= Math.max(range.minMinor - 1, 0); m--) {
+      versioned.push(`python3.${m}`)
+    }
+  }
+  return [...versioned, 'python3', 'python']
 }
 
 function pythonMinorOf(bin: string): number | null {
@@ -207,27 +227,28 @@ function pythonMinorOf(bin: string): number | null {
 }
 
 /**
- * Resolve a Python 3 interpreter, preferring version-specific binaries
- * (python3.13 / 3.12 / 3.11) over the bare `python3`. This is the fix for the
- * fresh-macOS case where `python3` is the Xcode Command Line Tools interpreter
- * (Python 3.9) — too old for Hermes (`hermes-agent` requires >=3.11,<3.14) —
- * even though a newer Homebrew/pyenv Python is installed under a versioned name.
- * Returns the newest COMPATIBLE interpreter (>= 3.<minMinor>) plus the newest
- * found overall. Spawns `which` + a bounded `<py> -c ...` per candidate.
+ * Resolve a Python 3 interpreter inside `range`, probing version-specific
+ * binaries (python3.14 down to python3.10 for Hermes) before the bare `python3`.
+ * That covers two cases: a fresh macOS whose `python3` is the Xcode Command Line
+ * Tools Python 3.9, and a machine whose newest Python (say 3.14) is past the top
+ * of the range while a 3.12 is also installed. `hermes-agent` requires
+ * >=3.11,<3.14. Returns the newest interpreter inside the range (null when none
+ * is) and every interpreter found, newest first, so the caller can name them in
+ * its error. Spawns `which` + a bounded `<py> -c ...` per candidate.
  */
-export function resolvePython(minMinor: number): {
+export function resolvePython(range: PythonRange): {
   compatible: PythonCandidate | null
-  best: PythonCandidate | null
+  found: PythonCandidate[]
 } {
-  const names = ['python3.13', 'python3.12', 'python3.11', 'python3', 'python']
   const found: PythonCandidate[] = []
   const seen = new Set<string>()
-  for (const name of names) {
+  for (const name of pythonCandidateNames(range)) {
     const bin = resolveRuntimeBin(name)
     if (!bin || seen.has(bin)) continue
     seen.add(bin)
     const minor = pythonMinorOf(bin)
     if (minor !== null) found.push({ bin, minor, version: `3.${minor}` })
   }
-  return pickPython(found, minMinor)
+  found.sort((a, b) => b.minor - a.minor)
+  return { compatible: pickPython(found, range), found }
 }

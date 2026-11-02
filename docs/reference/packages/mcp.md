@@ -38,7 +38,7 @@ is why the connector client lives here too.
 | ----------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tasks (`clawboo-tasks`)       | `createTasksServer(db, opts)`         | `list_tasks`, `get_task`, `create_task`, `create_subtask`, `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `unblock_task`, `add_comment`, `link_task` |
 | Memory (`clawboo-memory`)     | `createMemoryServer(db, embed, opts)` | `memory_save`, `memory_search`, `memory_browse`, `memory_feedback`                                                                                                                     |
-| Tools (`clawboo-tools`)       | `createToolsServer(db, opts)`         | the built-ins (`echo`, `note`, `web_search`, `delete_path`), plus the tools of each connected connector and the app toolkits an agent has been granted                                 |
+| Tools (`clawboo-tools`)       | `createToolsServer(db, opts)`         | the built-ins (`echo`, `note`), plus the tools of each connected connector and the app toolkits an agent has been granted                                                              |
 | TeamChat (`clawboo-teamchat`) | `createTeamChatServer(db, opts)`      | `team_chat_post`, `team_chat_subscribe`, and `team_delegate` when the binding grants delegation                                                                                        |
 
 Each server is a thin layer over `@clawboo/db`: the handlers call its repository functions. A few behaviors matter

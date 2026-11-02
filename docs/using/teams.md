@@ -88,7 +88,7 @@ Members on Claude Code or Codex run on that tool's own default model, so they ha
 Which runtime a row starts on:
 
 - A Marketplace template suggests OpenClaw for every member. A team from scratch suggests Clawboo Native. During first-time setup, every member starts on the runtime you connected in setup.
-- When the suggested runtime is not connected, the row falls back to Clawboo Native and says so, for example **OpenClaw unavailable · using Clawboo Native**.
+- When the suggested runtime is not connected, the row starts on the first runtime that is, in this order: Clawboo Native (with an API key or a local Ollama), OpenClaw, Claude Code, Codex, Hermes. The row says so, for example **OpenClaw unavailable · using Codex** when you only signed in with ChatGPT. With nothing connected, the row stays on Clawboo Native.
 - You can pick OpenClaw only while the OpenClaw Gateway is connected, and Claude Code, Codex or Hermes only once you have connected them. Clicking a greyed-out runtime closes this dialog and opens **Settings > Runtimes** so you can connect it.
 
 Clawboo Native needs a provider to answer. Without one, the team still deploys, but its Clawboo Native agents cannot reply until you connect a provider. The chat tells you why.
@@ -96,7 +96,7 @@ Clawboo Native needs a provider to answer. Without one, the team still deploys, 
 ### What happens when you deploy
 
 - **Clashing names get a number.** If agents or a team with the same names already exist, Clawboo gives the new ones the next free number, for example **Code Reviewer Boo 2**. It also updates who hands work to whom to match.
-- **One failed agent does not stop the rest.** Clawboo keeps going, then lists any failures in a message such as **2 of 3 agents created (Writer Boo failed)**. If no agent can be created, you return to the customize step with **No agents could be created. Check that the runtime is connected, then retry.** The empty team stays, so you can retry or delete it.
+- **One failed agent does not stop the rest.** Clawboo keeps going, then lists any failures in a message such as **2 of 3 agents created (Writer Boo failed)**. If no agent can be created, you return to the customize step with **No agents could be created. Check that the runtime is connected, then retry.** Clawboo removes the empty team it made, so you can click **Deploy team** again. If it cannot, the message says so: delete that team from the team rail, or the next try adds a second team.
 - **OpenClaw members need the Gateway.** If you put a member on OpenClaw while the Gateway is offline, the deploy stops with **Connect an OpenClaw Gateway to deploy the OpenClaw members, or switch them to another runtime.**
 - **The team gets a brief.** Clawboo writes a starting [team brief](#team-brief) that you can edit.
 
@@ -207,9 +207,9 @@ Deleting a team cannot be undone, and the files in its folder go with it. **Dele
 
 <Accordion title="No agents could be created">
 
-**What it means:** no agent in the template could be created. The empty team stays in the team rail.
+**What it means:** no agent in the template could be created. Clawboo removes the empty team it made for this deploy.
 
-**Fix:** open **Settings > Runtimes**, check that the runtimes you picked are connected, then deploy again. Delete the empty team if you do not need it.
+**Fix:** open **Settings > Runtimes**, check that the runtimes you picked are connected, then deploy again. If Clawboo could not remove the empty team, the message says so and the team stays in the team rail. Delete it there, or the next deploy adds a second team.
 
 </Accordion>
 
@@ -241,7 +241,7 @@ Rules apply from the next turn in the team's chats, not to replies already sent.
 
 <Accordion title="Under the hood">
 
-- **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, a TOOLS.md, and an AGENTS.md that lists the teammates and how to hand them work. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
+- **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, and an AGENTS.md that lists the teammates and how to hand them work. On an OpenClaw member, AGENTS.md also carries the catalog's tool notes. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
 - **OpenClaw config.** If any member's routing names a teammate, Clawboo turns on agent-to-agent messaging in the OpenClaw Gateway's config.
 - **API calls.** `PATCH /api/teams/:id` renames a team, changes its Leader, or brings back an archived team. It takes any of `name`, `icon`, `color`, `colorCollectionId`, `leaderAgentId` (an agent id, or `null` for no Leader) and `isArchived`. To find an archived team's id, call `GET /api/teams?includeArchived=true`. An unarchived team returns to the team rail after you reload the page.
 

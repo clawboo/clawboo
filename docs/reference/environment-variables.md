@@ -44,7 +44,6 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OPENROUTER_API_KEY`                   | unset                             | Hermes, Clawboo Native (OpenRouter)                          |
 | `GEMINI_API_KEY` and six more          | unset                             | Clawboo Native through OpenAI-compatible providers           |
 | `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup         |
-| `TAVILY_API_KEY`                       | unset                             | Shows the `web_search` built-in tool                         |
 | `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                       |
 | **Runs and verification**              |                                   |                                                              |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                         |
@@ -83,7 +82,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_ENABLE_MOCK_RUNTIME`          | unset                             | `1` adds a fault-injection test runtime                      |
 | `CLAWBOO_SERVER_PATH`                  | found automatically               | Source checkout the CLI starts in development                |
 
-`HOSTNAME`, `OPENCLAW_CONFIG_PATH`, `CLAWBOO_API_URL` and `GATEWAY_AUTH_TOKEN` (outside a `${...}` template) are not read. Variables Clawboo sets on the processes it starts are listed under [Set by Clawboo](#set-by-clawboo).
+`HOSTNAME`, `OPENCLAW_CONFIG_PATH`, `CLAWBOO_API_URL` and `GATEWAY_AUTH_TOKEN` (outside a `${...}` template) are not read. `TAVILY_API_KEY` is no longer used: Clawboo has no built-in web search, so connect a search connector such as Exa Search instead. Variables Clawboo sets on the processes it starts are listed under [Set by Clawboo](#set-by-clawboo).
 
 ## Access and network
 
@@ -109,7 +108,7 @@ A shared secret that turns on the access gate.
 
 With a token set, every `/api/*` request and the Gateway WebSocket need the `clawboo_access` cookie. Open `http://<host>:<port>/?access_token=<token>` once to get it: the right token sets an HttpOnly cookie (scoped to your `CLAWBOO_BASE_PATH`, `SameSite=Lax`, and `Secure` when the request arrives with `X-Forwarded-Proto: https`) and redirects to the same address without the token. A wrong token answers 401 `Invalid Clawboo access token.` and a missing cookie answers 401 `Clawboo access token required. Open /?access_token=<token> once to set a cookie.` The page shell and its static files load without the cookie.
 
-Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI cannot use a gated server; see [CLI reference](/reference/cli).
+Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI reaches a gated server with the `STUDIO_ACCESS_TOKEN` from its own shell; see [Token-gated installs](/reference/cli#token-gated-installs).
 
 <Warning>
 Use only letters, digits, `.`, `_`, `~` and `-`. With any other character, such as the `+`, `/` or `=` in a base64 token, the server logs `SECURITY: refusing to start` with the character and the allowed set, and exits with code 1, on every bind. `CLAWBOO_ALLOW_INSECURE=1` does not skip this. On 0.5.0 and older, such a token turns the gate off with only a warning, which behind a reverse proxy on the same machine leaves every `/api/*` route open.
@@ -313,14 +312,6 @@ The address of an Ollama server, for keyless local models.
 Clawboo Native sends Ollama requests here and lists your pulled models from the same server. You do not need it to use a local Ollama: picking Ollama in onboarding or in Clawboo Native's providers list records that choice. With no recorded choice, setting this variable also counts as Ollama being set up. After you remove Ollama (**Disconnect Ollama**) or disconnect Clawboo Native, the variable no longer turns Ollama on; only picking Ollama again does.
 
 OpenClaw does not read this variable, so when Clawboo sets up OpenClaw on Ollama it writes the same address (without `/v1`) into `openclaw.json`. Memory embeddings ignore it and always look for Ollama at `http://localhost:11434`; with a remote Ollama, memory search stays keyword-only unless a local Ollama or an allowed OpenAI key provides embeddings.
-
-### TAVILY_API_KEY
-
-- Type: string
-- Default: unset
-- Example: `TAVILY_API_KEY=tvly-...`
-
-When set in the server's environment (or the tools stdio bin's), the built-in `web_search` tool becomes available to agents.
 
 ### COMPOSIO_BASE_URL
 
