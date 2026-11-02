@@ -170,9 +170,13 @@ Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no O
 
 ## Archive a team
 
-Right-click the team's icon in the team rail and choose **Archive**. The team leaves the team rail, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats, tasks and the files in its team folder stay in Clawboo.
+Right-click the team's icon in the team rail and choose **Archive**. The team leaves the list of teams for the rail's **Archived** group, which also puts its chats and its Home out of reach. Nothing is deleted: its agents, chats, tasks and the files in its team folder stay in Clawboo.
 
-**You cannot undo this from the dashboard.** **Unarchive** appears only on an archived team's icon, and the team rail does not show archived teams. To bring a team back, use the API call under **Under the hood** at the end of this page.
+To bring a team back:
+
+1. At the end of the team icons, click **Archived** (an archive icon with the number of archived teams). It appears only while a team is archived.
+2. The archived teams show dimmed, each named with **(archived)** after it. Click the team, or right-click it.
+3. Choose **Unarchive**. The team returns to the team rail.
 
 ## Delete a team
 
@@ -227,7 +231,7 @@ Refresh Protocol needs the OpenClaw Gateway connected, even for a team with no O
 
 <Accordion title="A team disappeared from the team rail">
 
-The team was archived. Its agents, chats and tasks are still in Clawboo. The dashboard cannot unarchive it; use the API call under **Under the hood** below.
+The team was archived. Its agents, chats and tasks are still in Clawboo. Click **Archived** at the end of the team icons, click the team, and choose **Unarchive**. See [Archive a team](#archive-a-team).
 
 </Accordion>
 
@@ -243,13 +247,13 @@ Rules apply from the next turn in the team's chats, not to replies already sent.
 
 - **Files a deploy writes.** Each member gets a SOUL.md (its persona plus the default House Style personality), an IDENTITY.md, and an AGENTS.md that lists the teammates and how to hand them work. On an OpenClaw member, AGENTS.md also carries the catalog's tool notes. Which runtime reads which file is on [Agents](/using/agents#edit-the-agent-files).
 - **OpenClaw config.** If any member's routing names a teammate, Clawboo turns on agent-to-agent messaging in the OpenClaw Gateway's config.
-- **API calls.** `PATCH /api/teams/:id` renames a team, changes its Leader, or brings back an archived team. It takes any of `name`, `icon`, `color`, `colorCollectionId`, `leaderAgentId` (an agent id, or `null` for no Leader) and `isArchived`. To find an archived team's id, call `GET /api/teams?includeArchived=true`. An unarchived team returns to the team rail after you reload the page.
+- **API calls.** `PATCH /api/teams/:id` renames a team or changes its Leader. It takes any of `name`, `icon`, `color`, `colorCollectionId`, `leaderAgentId` (an agent id, or `null` for no Leader) and `isArchived`. **Archive** and **Unarchive** in the team rail send `isArchived` through this same call.
 
 ```http
 PATCH /api/teams/<team-id>
 Content-Type: application/json
 
-{ "isArchived": false }
+{ "name": "Growth" }
 ```
 
 See the [Teams API reference](/reference/rest-api/teams) for every field, and the [REST API overview](/reference/rest-api/index) for how to call the API.
@@ -259,7 +263,7 @@ See the [Teams API reference](/reference/rest-api/teams) for every field, and th
 ## Next steps
 
 - [Team chat](/using/team-chat): talk to your team, add rooms, and introduce yourself.
-- [Agents](/using/agents): change one member's model, personality or files.
+- [Agents](/using/agents): change one member's model, personality or files, or move it to another team.
 - [Boo Zero](/using/boo-zero): how your team leader is chosen and what it reads.
 - [Marketplace](/using/marketplace): find more teams and agents to deploy.
 - [Teams API reference](/reference/rest-api/teams): every team route and field.

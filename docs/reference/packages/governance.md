@@ -160,7 +160,9 @@ for a destructive tool or a mutating tool with external effects.
 </Steps>
 
 The broker's grant gate in `@clawboo/db` calls `decideGrant` for every call to a connector tool, and charges the
-hourly window in the same synchronous step as the decision. Clawboo's built-in tools are never grant-governed. Every
+hourly window in the same synchronous step as the decision. The broker's own risk check runs after it: a call that a
+standing allow rule let through skips that check's prompt for an external change, but a destructive tool asks every
+time, rule or not, and its prompt is never remembered. Clawboo's built-in tools are never grant-governed. Every
 decision is recorded as a `grant_decision` event. How users attach a connector to an agent is on
 [Connect tools to your agents](/using/connectors).
 

@@ -135,7 +135,7 @@ With the checklist in [Troubleshooting](/help/troubleshooting#when-an-agent-is-n
 
 ### Why can't my agent use the app I connected?
 
-Connecting an app under **Connectors** makes it available, but gives no agent access. Give it to each agent that needs it on a graph, such as the Org chart or a team graph: drag the connector onto the agent's Boo. The agent then has write access, and risky calls ask you first. Every agent already has the two browser connectors, Playwright and Chrome DevTools. OpenClaw agents cannot use connectors you share with them; they reach apps through Composio, and every such call asks you first. See [Connectors](/using/connectors).
+Connecting an app under **Connectors** makes it available, but gives no agent access. Give it to each agent that needs it: tick the agents under **Who can use it?** on the connector's detail pane and press **Give access**, or drag the connector onto the agent's Boo on a graph, such as the Org chart or a team graph. The agent then has write access, and risky calls ask you first. Every agent already has the two browser connectors, Playwright and Chrome DevTools. OpenClaw agents cannot use connectors you share with them; they reach apps through Composio, and every such call asks you first. See [Connectors](/using/connectors).
 
 ### How do agents on different runtimes work together?
 

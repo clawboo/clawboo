@@ -174,23 +174,6 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 ## Teams and Boo Zero
 
-### Archived teams cannot be restored from the dashboard
-
-**What you see:** an archived team disappears from the team rail and every other view, and no screen lists archived teams.
-
-**What it affects:** the team's agents, chats and tasks are kept, but the dashboard offers no way back to them.
-
-**What to do:** restore the team through the API, then reload the dashboard. Find its id, then clear the archive flag (use your port if it is not 18790):
-
-```bash
-curl 'http://localhost:18790/api/teams?includeArchived=true'
-curl -X PATCH 'http://localhost:18790/api/teams/TEAM_ID' -H 'Content-Type: application/json' -d '{"isArchived": 0}'
-```
-
-With an access token set, send your access cookie too. See [Teams](/using/teams).
-
-**Status:** open.
-
 ### Refresh Protocol needs an OpenClaw Gateway, even without OpenClaw agents
 
 **What you see:** **Refresh Protocol** on a team reports **Not connected to Gateway**.
@@ -329,7 +312,11 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Deleting an agent leaves its routines behind, and each one fails with `agent ... not found`                                                                                                           | Routines    |
 | Removing a route on the Org chart does nothing without an OpenClaw Gateway, and the empty Org chart says to connect one                                                                               | Org chart   |
 | **System Health** reads degraded on an install that never set up OpenClaw, and says "OTel exporter active" when nothing is exported                                                                   | Health      |
+| Connecting a connector, even from an agent's request for it, gives no agent access unless you draw it on the graph                                                                                    | Connectors  |
+| The default browser access can only read pages, because Playwright marks navigate and click as destructive                                                                                            | Connectors  |
+| "Do not ask again for this for 30 days" on a connector call never stops the next prompt                                                                                                               | Connectors  |
 | Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools       |
+| Archived teams cannot be restored from the dashboard, and an agent cannot move to another team                                                                                                        | Teams       |
 | Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero    |
 
 ## Related

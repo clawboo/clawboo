@@ -59,7 +59,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Codex**: OpenAI's coding agent, one of the runtimes Clawboo can run agents on. You connect it with **Sign in with ChatGPT**, not an API key. See [Codex](/runtimes/codex).
 
-**Connector**: a link to an outside app or tool, such as GitHub, Gmail, a folder or a web browser, that agents use through Clawboo. Connecting one gives no agent access until you share it with that agent on the graph. The two browser connectors are the exception: every new agent gets them. See [Connectors](/using/connectors).
+**Connector**: a link to an outside app or tool, such as GitHub, Gmail, a folder or a web browser, that agents use through Clawboo. Connecting one gives no agent access until you share it with that agent, under **Who can use it?** in the connector's detail pane or on the graph. The two browser connectors are the exception: every new agent gets them. See [Connectors](/using/connectors).
 
 **Cost estimate**: a cost Clawboo works out itself when a runtime reports none, marked **est.** on task cards. Models Clawboo has no price for are estimated at a default rate. A model your own Ollama serves is not estimated: it costs nothing, so its runs read **free**. See [Budgets and spend](/using/budgets-and-spend).
 
@@ -141,7 +141,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Settings**: one window with three groups. **Workspace** holds Providers, Runtimes, Memory, Capabilities and Routines; **Insights** holds Fleet, Tokens Used, Observability and Governance; **System** holds System and System Health. Open it from the sidebar or with `Cmd/Ctrl + ,`. See [Tour the dashboard](/getting-started/dashboard-tour).
 
-**Share**: to give an agent a connector on the graph. Pull a thread off its Boo and pick the connector, or drop a connector tile onto the Boo. Dragging a tile from another agent's ring asks for **Read**, **Write** or **Admin** access. **Stop sharing** takes it back from one agent. See [Connectors](/using/connectors).
+**Share**: to give an agent a connector. Pick it under **Who can use it?** in the connector's detail pane, or on the graph pull a thread off its Boo and pick the connector, or drop a connector tile onto the Boo. Dragging a tile from another agent's ring asks for **Read**, **Write** or **Admin** access. **Stop sharing** takes it back from one agent. See [Connectors](/using/connectors).
 
 **Sign in with ChatGPT**: connects Codex to your ChatGPT plan instead of an API key. Hermes and OpenClaw can use the plan too, each with its own sign-in. Clawboo Native cannot. See [Connect providers and runtimes](/using/providers-and-runtimes).
 

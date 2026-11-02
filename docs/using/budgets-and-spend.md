@@ -82,6 +82,8 @@ A budget counts spend only from the moment you create it, and only for its own s
 
 A **mission** is one chain of hand-offs, counted on its top task: the first task in the chain.
 
+An agent's budget is set on the agent, so it follows the agent when you [move it to another team](/using/agents#move-an-agent-to-another-team). A team's budget stays with its team.
+
 ## Set a budget
 
 ### Create the budget

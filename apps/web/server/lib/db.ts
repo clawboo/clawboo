@@ -16,7 +16,12 @@
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
-import { ensureSchema, openDb, type ClawbooDb } from '@clawboo/db'
+import {
+  ensureSchema,
+  openDb,
+  retireRulesFromBeforeRememberedChanges,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { retireFleetWideConnectorGrants } from './connectors/retireFleetWideGrants'
 
@@ -71,6 +76,15 @@ export function getDb(): ClawbooDb {
       log.info(
         { count: retired },
         'Retired fleet-wide connector grants: connectors are now granted per agent',
+      )
+    }
+    // Same rule for remembered approvals: an Always saved when it could not
+    // stop the prompt on an external change must not start stopping it now.
+    const rules = retireRulesFromBeforeRememberedChanges(db)
+    if (rules > 0) {
+      log.info(
+        { count: rules },
+        'Cleared remembered approvals saved before they could cover external changes',
       )
     }
   } catch (err) {

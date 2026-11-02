@@ -103,9 +103,9 @@ Clawboo also denies OpenClaw's own sub-agent tools (`sessions_spawn`, `sessions_
 
 A connector links an outside app or tool, such as GitHub or a web browser. Every call to one goes through Clawboo, whatever runtime the agent uses:
 
-- **An agent reaches a connector only after you share it.** Drag the connector onto the agent on the [Org chart](/using/org-chart) or a team graph, and pick **Read**, **Write** or **Admin**. Connecting a connector gives no agent access by itself.
+- **An agent reaches a connector only after you share it.** Pick the agent under **Who can use it?** on the connector's detail pane in [Connectors](/using/connectors), or drag the connector onto the agent on the [Org chart](/using/org-chart) or a team graph. Both give **Write**; sharing from another agent's tile on a graph lets you pick **Read**, **Write** or **Admin**. Connecting a connector gives no agent access by itself.
 - **Every new agent gets the two built-in browser connectors** (Playwright and Chrome DevTools) at **Write**. You can stop sharing them on the graph.
-- **With Write, risky calls ask first.** For a connector that can reach the internet, any call that changes something asks you. When the card offers **Do not ask again for this for 30 days**, ticking it allows that tool for 30 days.
+- **With Write, risky calls ask first.** For a connector that can reach the internet, any call that changes something asks you. When the card offers **Do not ask again for this for 30 days**, ticking it allows that tool for 30 days. A destructive tool needs **Admin**, never offers the box, and asks every time.
 - **A run that might leak data always asks.** Once a run has read private data and taken in untrusted content, every connector call that can send data out asks you, and the card offers no way to skip it next time.
 - **OpenClaw agents call connectors without an agent identity.** Connectors you share with an agent do not reach them, and their calls to apps through Composio ask you each time.
 

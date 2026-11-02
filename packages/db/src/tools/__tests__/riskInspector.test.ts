@@ -17,6 +17,7 @@
 // layer up: `packages/governance/src/grants/decide.ts` prompts on every call,
 // read or write, once a chain arms all three trifecta legs.
 
+import { requiredMode } from '@clawboo/governance'
 import { describe, expect, it } from 'vitest'
 
 import { buildConnectorDescriptor } from '../connectorDescriptor'
@@ -100,5 +101,62 @@ describe('the carve-out cannot be reached by an untrusted server', () => {
     const d = buildConnectorDescriptor(facts, { ...opts, trustAnnotations: false })
     expect(d.readOnly).toBeUndefined()
     expect(await kindOf(d)).toBe('require_approval')
+  })
+})
+
+describe("the catalog's destructive list replaces the server's own marking", () => {
+  // Playwright 0.0.79 marks navigate, click and type destructive. A destructive
+  // tool needs an admin grant, so the default write grant could only read the
+  // page. A catalog `destructiveTools` list is the authority instead.
+  const PLAYWRIGHT_DESTRUCTIVE = ['browser_run_code_unsafe', 'browser_evaluate']
+  const build = (name: string) =>
+    buildConnectorDescriptor(
+      {
+        name,
+        description: '',
+        inputSchema: {},
+        annotations: { readOnlyHint: false, destructiveHint: true },
+      },
+      {
+        name: `mcp__playwright__${name}`,
+        trustAnnotations: true,
+        destructiveTools: PLAYWRIGHT_DESTRUCTIVE,
+        trifecta: BROWSER,
+        executor: () => '',
+      },
+    )
+
+  it('a tool the server marks destructive but the catalog does not list is a plain write', async () => {
+    const d = build('browser_click')
+    expect(d.destructive).toBeUndefined()
+    expect(d.readOnly).toBeUndefined()
+    // A write grant reaches it; it used to need admin.
+    expect(requiredMode(d)).toBe('write')
+    // Still asks under the default "risk" policy: it is external and it acts.
+    expect(await kindOf(d)).toBe('require_approval')
+  })
+
+  it('a listed tool stays destructive', async () => {
+    const d = build('browser_evaluate')
+    expect(d.destructive).toBe(true)
+    expect(requiredMode(d)).toBe('admin')
+  })
+
+  it("without a list, the server's own marking still counts", () => {
+    const d = buildConnectorDescriptor(
+      {
+        name: 'browser_click',
+        description: '',
+        inputSchema: {},
+        annotations: { destructiveHint: true },
+      },
+      {
+        name: 'mcp__x__browser_click',
+        trustAnnotations: true,
+        trifecta: BROWSER,
+        executor: () => '',
+      },
+    )
+    expect(d.destructive).toBe(true)
   })
 })

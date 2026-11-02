@@ -90,7 +90,7 @@ export const argClampInspector: Inspector = (call): InspectorDecision => {
 
 /** RISK — destructive/external tools require human approval (risk-classified, so
  *  only these prompt — safe tools run unattended). */
-export const riskClassifierInspector: Inspector = (_call, descriptor): InspectorDecision => {
+export const riskClassifierInspector: Inspector = (_call, descriptor, ctx): InspectorDecision => {
   // An explicit destructive annotation prompts whatever the connector-level
   // risk floor says, and outranks a contradictory `readOnly` on the same tool.
   if (descriptor.risk === 'destructive' || descriptor.destructive === true) {
@@ -106,7 +106,15 @@ export const riskClassifierInspector: Inspector = (_call, descriptor): Inspector
   // "side effects", which a read-only tool does not have, and the practical
   // result was an agent waiting on an approval nobody was watching for and then
   // reporting the timeout as a service outage.
-  if (descriptor.risk === 'external' && descriptor.readOnly !== true) {
+  //
+  // A standing "Always" rule answers this one. The operator was shown this
+  // external change and asked not to be asked again; asking anyway made the
+  // card's 30-day box do nothing. Destructive calls above never get this pass.
+  if (
+    descriptor.risk === 'external' &&
+    descriptor.readOnly !== true &&
+    ctx?.rememberedAllow !== true
+  ) {
     return {
       kind: 'require_approval',
       message: `"${descriptor.name}" has external side effects and needs approval.`,
@@ -115,7 +123,75 @@ export const riskClassifierInspector: Inspector = (_call, descriptor): Inspector
   return { kind: 'allow' }
 }
 
+// ─── The dashboard ───────────────────────────────────────────────────────────
+
+let dashboardPorts: ReadonlySet<number> = new Set()
+
+/** The ports the Clawboo dashboard listens on. The server sets them at boot. */
+export function setDashboardPorts(ports: readonly number[]): void {
+  dashboardPorts = new Set(ports)
+}
+
+const isLoopbackHost = (host: string): boolean => {
+  const h = host.toLowerCase().replace(/\.$/, '')
+  return (
+    h === 'localhost' ||
+    h.endsWith('.localhost') ||
+    /^127\./.test(h) ||
+    h === '0.0.0.0' ||
+    h === '[::1]' ||
+    h === '[::]' ||
+    /^\[::ffff:(127\.|7f)/.test(h)
+  )
+}
+
+// A host with an explicit port, with or without a scheme in front of it. A match
+// may only start where a host can start (the lookbehind), so a long run of host
+// characters with no port is read in linear time. The host is not length-capped:
+// a cap would let an over-long `*.localhost` name slip past unmatched.
+const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})/gi
+
+/** Whether a string names a dashboard address. The host is parsed the way a
+ *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. */
+function namesDashboard(text: string): boolean {
+  for (const m of text.matchAll(HOST_PORT)) {
+    if (!dashboardPorts.has(Number(m[1]))) continue
+    try {
+      const url = new URL(`http://${m[0]}`)
+      if (isLoopbackHost(url.hostname)) return true
+    } catch {
+      // Not a host this browser could open.
+    }
+  }
+  return false
+}
+
+function argsNameDashboard(value: unknown, depth = 0): boolean {
+  if (depth > 6) return false
+  if (typeof value === 'string') return namesDashboard(value)
+  if (Array.isArray(value)) return value.some((v) => argsNameDashboard(v, depth + 1))
+  if (value && typeof value === 'object')
+    return Object.values(value).some((v) => argsNameDashboard(v, depth + 1))
+  return false
+}
+
+/**
+ * DENY a call that points at the Clawboo dashboard on this machine.
+ *
+ * The dashboard has no access check on loopback, so an agent driving a browser
+ * there could approve its own requests or give itself connectors. The browser
+ * connectors are launched with the dashboard blocked as well; this refuses the
+ * call before it reaches them, and covers any other tool that takes a URL.
+ * Not an approval: no person should be asked to let an agent operate the
+ * dashboard, so there is nothing to remember either.
+ */
+export const dashboardInspector: Inspector = (call): InspectorDecision =>
+  dashboardPorts.size > 0 && argsNameDashboard(call.args)
+    ? { kind: 'deny', reason: 'dashboard:agents may not open the Clawboo dashboard' }
+    : { kind: 'allow' }
+
 export const defaultInspectors: Inspector[] = [
+  dashboardInspector,
   securityInspector,
   scopeInspector,
   argClampInspector,

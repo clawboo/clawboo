@@ -355,6 +355,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       launch: { transport: 'streamable-http', url: def.launch.url },
       egressAllow: def.egressAllow,
       trifecta: def.trifecta,
+      ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
     }
   }
   return {
@@ -372,9 +373,11 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
       ...(def.launch.perAgentProfileFlag
         ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
         : {}),
+      ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,
+    ...(def.destructiveTools ? { destructiveTools: def.destructiveTools } : {}),
     authInputs: def.auth.inputs,
   }
 }

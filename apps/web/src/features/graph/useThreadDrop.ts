@@ -193,7 +193,7 @@ export function useThreadDrop({
               // grant would therefore be a grant that denies almost every call,
               // which looks exactly like the connector being broken. Still not
               // `admin`: a gesture with no dialog cannot consent to destructive
-              // tools, and those keep asking.
+              // tools, so those stay unavailable to this agent.
               mode: 'write',
               approvalPolicy: 'risk',
             },

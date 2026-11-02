@@ -43,6 +43,7 @@ import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
 import { ConnectorMark, hasBrandMark } from '@/features/connectors/ConnectorMark'
 import { BrokeredAppsBand } from './BrokeredAppsBand'
+import { ConnectorAccessPicker } from './ConnectorAccessPicker'
 import { CollapsiblePillRow, type PillOption } from './CollapsiblePillRow'
 import { wantsCommunityBand } from './communityBand'
 import { useToastStore } from '@/stores/toast'
@@ -1016,8 +1017,8 @@ function ConnectAction({
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
               {connected
                 ? remote
-                  ? 'Its tools are available to your agents. Disconnecting closes the connection; your sign-in is kept until you sign out.'
-                  : 'Its tools are available to your agents. Disconnecting stops the process.'
+                  ? 'Only the agents you give it to can use its tools. Disconnecting closes the connection; your sign-in is kept until you sign out.'
+                  : 'Only the agents you give it to can use its tools. Disconnecting stops the process.'
                 : remote
                   ? `clawboo opens an authenticated connection to ${def.launch.transport === 'streamable-http' ? def.launch.url : ''} and lists its tools. Nothing runs on your machine.`
                   : 'clawboo starts this server as a local process and lists its tools. The first run downloads the pinned package.'}
@@ -1194,7 +1195,7 @@ function ConnectedTools({ def, connected }: { def: ConnectorDefinition; connecte
   return (
     <section className="rounded-xl border border-border bg-surface-subtle p-4">
       <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {row.toolCount} {row.toolCount === 1 ? 'tool' : 'tools'} your agents can call
+        {row.toolCount} {row.toolCount === 1 ? 'tool' : 'tools'} it offers
       </h3>
       <p className="mt-2 break-words text-xs leading-relaxed text-foreground">
         {row.tools.map((name) => name.replace(/^mcp__[^_]+__/, '')).join(', ')}
@@ -1212,11 +1213,14 @@ function ConnectedTools({ def, connected }: { def: ConnectorDefinition; connecte
 function ConnectorDetail({
   def,
   connected,
+  askFor = null,
   onConnected,
   onClose,
 }: {
   def: ConnectorDefinition
   connected: boolean
+  /** The agent whose ask card opened this page, for this connector only. */
+  askFor?: { agentId: string; agentName: string } | null
   onConnected: () => void
   onClose: () => void
 }) {
@@ -1261,6 +1265,9 @@ function ConnectorDetail({
           because running it here is now the primary verb; pasting a config into
           your own runtime is the fallback for everything clawboo cannot run. */}
       <ConnectAction def={def} connected={connected} onChanged={onConnected} cfg={cfg} />
+
+      {/* Right under Connect, because connecting gives it to nobody. */}
+      <ConnectorAccessPicker def={def} connected={connected} askFor={askFor} />
 
       {/* WHAT IT CAN DO, in sentences. This replaces the `3/3 risk` chip, and
           prose beats a chip here for one reason: the fact being communicated is
@@ -1461,10 +1468,21 @@ export function ConnectorsBrowser() {
   // later lands on the shelf rather than re-opening whatever was last linked.
   const openSlug = useMarketplaceStore((s) => s.openConnectorSlug)
   const setOpenSlug = useMarketplaceStore((s) => s.setOpenConnectorSlug)
+  // The agent whose ask card opened this connector. Read before the slug is
+  // cleared, which clears it in the store too, and kept until the detail closes.
+  const [askFor, setAskFor] = useState<{
+    slug: string
+    agentId: string
+    agentName: string
+  } | null>(null)
   useEffect(() => {
     if (!openSlug) return
     const def = connectorBySlug(openSlug) ?? custom.find((c) => c.slug === openSlug) ?? null
-    if (def) setSelected(def)
+    if (def) {
+      setSelected(def)
+      const asker = useMarketplaceStore.getState().connectorAskFor
+      setAskFor(asker ? { slug: def.slug, ...asker } : null)
+    }
     setOpenSlug(null)
   }, [openSlug, custom, setOpenSlug])
 
@@ -1650,8 +1668,14 @@ export function ConnectorsBrowser() {
       <ConnectorDetail
         def={selected}
         connected={shelf.costOf(selected) === 'on'}
+        // Only for the connector it was asked for: opening another one later
+        // must not preselect, or grant, the agent that asked for the first.
+        askFor={askFor?.slug === selected.slug ? askFor : null}
         onConnected={shelf.refresh}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null)
+          setAskFor(null)
+        }}
       />
     )
   }

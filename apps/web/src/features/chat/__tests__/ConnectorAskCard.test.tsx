@@ -12,10 +12,14 @@
 
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { connectorAskBody } from '@clawboo/connector-catalog'
 
+import { server } from '@/__vitest__/mswServer'
 import { MetaMessageCard } from '../chatComponents'
+import type { AgentState } from '@/stores/fleet'
+import { useFleetStore } from '@/stores/fleet'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { useViewStore } from '@/stores/view'
 
@@ -39,7 +43,25 @@ afterEach(cleanup)
 beforeEach(() => {
   useMarketplaceStore.getState().setOpenConnectorSlug(null)
   useViewStore.getState().navigateTo('graph')
+  // The agent that asked: `agent:a:team:t` above.
+  useFleetStore.setState({ agents: [{ id: 'a', name: 'Scout', teamId: 't' } as AgentState] })
+  // Nothing live, nothing configured, nothing shared, unless a test says so.
+  server.use(
+    http.get('/api/connectors', () => HttpResponse.json({ connectors: [] })),
+    http.get('/api/connectors/configured', () => HttpResponse.json({ slugs: [] })),
+    http.get('/api/grants', () => HttpResponse.json({ grants: [] })),
+  )
 })
+
+/** A live row the way GET /api/connectors sends it, with the id grants key on. */
+const liveRow = (slug: string) => ({ slug, connectorId: `conn:${slug}`, tools: [] })
+
+/** GET /api/grants answering with grants on these connector slugs. */
+const grantsFor = (slugs: string[]) =>
+  new Response(
+    JSON.stringify({ grants: slugs.map((s) => ({ connectorId: `conn:${s}`, revokedAt: null })) }),
+    { status: 200 },
+  )
 
 describe('ConnectorAskCard', () => {
   it('renders the stored sentence rather than rebuilding one from the slugs', () => {
@@ -61,6 +83,12 @@ describe('ConnectorAskCard', () => {
     await user.click(screen.getByRole('button', { name: /Add key Notion/ }))
 
     expect(useMarketplaceStore.getState().openConnectorSlug).toBe('notion')
+    // THE ASKING AGENT TRAVELS WITH IT, so the connector page can give it access
+    // once Notion is connected. Connecting from here used to grant nobody.
+    expect(useMarketplaceStore.getState().connectorAskFor).toEqual({
+      agentId: 'a',
+      agentName: 'Scout',
+    })
     // ITS OWN DESTINATION now, not a tab inside the Marketplace. The slug is
     // what makes this a deep link rather than a signpost: the reader lands on
     // Notion's own pane, not on a list to search again.
@@ -89,9 +117,14 @@ describe('ConnectorAskCard reflects live state', () => {
     globalThis.fetch = realFetch
   })
 
-  function stubConnectorApis(opts: { live?: string[]; configured?: string[] }): void {
+  function stubConnectorApis(opts: {
+    live?: string[]
+    configured?: string[]
+    shared?: string[]
+  }): void {
     globalThis.fetch = ((input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/api/grants')) return Promise.resolve(grantsFor(opts.shared ?? []))
       if (url.includes('/api/connectors/configured')) {
         return Promise.resolve(
           new Response(JSON.stringify({ slugs: opts.configured ?? [] }), { status: 200 }),
@@ -99,10 +132,9 @@ describe('ConnectorAskCard reflects live state', () => {
       }
       if (url.includes('/api/connectors')) {
         return Promise.resolve(
-          new Response(
-            JSON.stringify({ connectors: (opts.live ?? []).map((slug) => ({ slug, tools: [] })) }),
-            { status: 200 },
-          ),
+          new Response(JSON.stringify({ connectors: (opts.live ?? []).map(liveRow) }), {
+            status: 200,
+          }),
         )
       }
       return Promise.resolve(new Response('{}', { status: 200 }))
@@ -110,13 +142,27 @@ describe('ConnectorAskCard reflects live state', () => {
   }
 
   it('says a connector is connected instead of offering to connect it again', async () => {
-    stubConnectorApis({ live: ['linear'] })
+    stubConnectorApis({ live: ['linear'], shared: ['linear'] })
     render(<MetaMessageCard entry={metaEntry(connectorAskBody(['linear']))} />)
 
     await waitFor(() => {
       expect(screen.getByText(/Linear connected/)).toBeInTheDocument()
     })
     expect(screen.queryByRole('button', { name: /Connect Linear/ })).toBeNull()
+  })
+
+  it('offers to share a live connector the asking agent has no access to', async () => {
+    // Connected is not usable: an agent with no grant gets no tools, which is
+    // often exactly why it asked. The card used to read "Linear connected" here
+    // and offer Continue, which woke an agent that still could not reach it.
+    stubConnectorApis({ live: ['linear'], shared: [] })
+    render(<MetaMessageCard entry={metaEntry(connectorAskBody(['linear']))} />)
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Share Linear with Scout' })).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/Linear connected/)).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
   })
 
   it('prices a connector whose key is already stored as ready, not as needing a key', async () => {
@@ -142,12 +188,13 @@ describe('ConnectorAskCard closes the loop after connecting', () => {
     // and then nothing happened. They had to come back and retype the request.
     globalThis.fetch = ((input: RequestInfo | URL) => {
       const url = String(input)
+      if (url.includes('/api/grants')) return Promise.resolve(grantsFor(['linear']))
       if (url.includes('/api/connectors/configured')) {
         return Promise.resolve(new Response(JSON.stringify({ slugs: [] }), { status: 200 }))
       }
       if (url.includes('/api/connectors')) {
         return Promise.resolve(
-          new Response(JSON.stringify({ connectors: [{ slug: 'linear', tools: [] }] }), {
+          new Response(JSON.stringify({ connectors: [liveRow('linear')] }), {
             status: 200,
           }),
         )

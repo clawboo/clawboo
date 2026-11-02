@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowRightLeft, MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
 
 import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -12,13 +12,15 @@ interface GraphContextMenuProps {
   agentName: string
   onClose: () => void
   onChat: () => void
+  /** Absent hides the row (Boo Zero leads every team and joins none). */
+  onMove?: () => void
   onDelete: () => void
 }
 
 interface MenuItemConfig {
   label: string
   icon: LucideIcon
-  action: 'chat' | 'delete'
+  action: 'chat' | 'move' | 'delete'
 }
 
 // Emoji glyphs replaced with Lucide icons to
@@ -36,8 +38,9 @@ interface MenuItemConfig {
 // No "select in sidebar" row. The sidebar marks only the agent whose page is
 // open, and shows one team's faces at a time, so a select that stays on the
 // canvas has nothing there to light up. Open agent is what marks it.
-const items: MenuItemConfig[] = [
+const ALL_ITEMS: MenuItemConfig[] = [
   { label: 'Open agent', icon: MessageSquare, action: 'chat' },
+  { label: 'Move to team', icon: ArrowRightLeft, action: 'move' },
   { label: 'Delete', icon: Trash2, action: 'delete' },
 ]
 
@@ -47,9 +50,11 @@ export function GraphContextMenu({
   agentName,
   onClose,
   onChat,
+  onMove,
   onDelete,
 }: GraphContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
+  const items = onMove ? ALL_ITEMS : ALL_ITEMS.filter((i) => i.action !== 'move')
   const { itemProps, menuKeyDown } = useMenuKeyboard(items.length, onClose)
 
   // Escape and outside-press are arbitrated by the shared layer stack: only the
@@ -70,6 +75,7 @@ export function GraphContextMenu({
 
   const handlers: Record<MenuItemConfig['action'], () => void> = {
     chat: onChat,
+    move: () => onMove?.(),
     delete: onDelete,
   }
 
