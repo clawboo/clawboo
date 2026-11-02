@@ -253,7 +253,7 @@ curl -X POST http://127.0.0.1:18790/api/schedules \
   }'
 ```
 
-For an agent routine, send `"target": "agent"` (the default) and an `agentId` instead of the `teamId`. The routine is filed on the agent's own team. A team or agent that does not exist or is archived, or a `teamId` that is not the agent's team, is refused with `400` and `code: "invalid_routine_target"`. A schedule Clawboo cannot read is refused with `400` and `code: "invalid_body"`, with the reason in `error`. Unlike the dialog, the API accepts a `once@` time in the past; that routine reads **finished** straight away.
+For an agent routine, send `"target": "agent"` (the default) and an `agentId` instead of the `teamId`. The routine is filed on the agent's own team. A team or agent that does not exist or is archived, or a `teamId` that is not the agent's team, is refused with `400` and `code: "invalid_routine_target"`. A schedule Clawboo cannot read is refused with `400` and `code: "invalid_cron_spec"`, with the reason in `error`. Unlike the dialog, the API accepts a `once@` time in the past; that routine reads **finished** straight away.
 
 The task template takes fields the dialog does not offer:
 

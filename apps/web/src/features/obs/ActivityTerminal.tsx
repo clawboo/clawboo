@@ -3,7 +3,7 @@
 // One reusable surface, mounted at three scopes (per-task, per-agent, global).
 // Reads the durable obs event log via `useObsStream` (backfill + SSE live-tail),
 // so it shows tool calls / results / errors / cost / lifecycle for EVERY runtime
-// uniformly — including the OpenClaw in-browser path (mirrored via /api/obs/ingest).
+// uniformly.
 //
 // Premium per the design system: theme-aware console surface, `.font-data` mono
 // rows, tabular-nums timestamps, StatusPill kind badges, expandable tool I/O, a

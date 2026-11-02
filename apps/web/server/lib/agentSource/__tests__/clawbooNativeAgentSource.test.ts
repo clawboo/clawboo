@@ -374,7 +374,7 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
     expect(await source.sync()).toMatchObject({ upserted: 0, archived: 0 })
   })
 
-  // ── Multi-tenant seam (SaaS-readiness) ──────────────────────────────────────
+  // ── The tenantId seam ───────────────────────────────────────────────────────
 
   it('carries an explicit tenantId onto the row, the AgentConfig, and the budget', async () => {
     const a = await source.createAgent({

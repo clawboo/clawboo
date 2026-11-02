@@ -118,6 +118,21 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     expect(detectOauthProfileProviders('/nonexistent')).toEqual(new Set())
   })
 
+  // ── the api-key profile scan ────────────────────────────────────────────────
+  it('reads api-key profiles from every agent, not just the first one with a key', async () => {
+    writeProfiles(stateDir, 'a-main', {
+      'anthropic:default': { type: 'api_key', provider: 'anthropic', key: 'sk-x' },
+    })
+    writeProfiles(stateDir, 'b-writer', {
+      'openai:default': { type: 'api_key', provider: 'openai', key: 'sk-y' },
+    })
+    const r = mockRes()
+    await openclawConfigGET(req(), r.res)
+    const env = (r.body() as { env: Record<string, boolean> }).env
+    expect(env['hasAnthropicKey']).toBe(true)
+    expect(env['hasOpenAIKey']).toBe(true)
+  })
+
   // ── configure: the keyless carve-out ────────────────────────────────────────
   it('configure accepts keyless openai-codex: model default set, NO key line in .env', async () => {
     const r = mockRes()

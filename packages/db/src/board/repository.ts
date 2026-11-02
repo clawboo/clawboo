@@ -1,8 +1,8 @@
 // ─── Board repository (data-access layer) ───────────────────────────────────
 // The ONLY place that reads/writes board tables. Keeps raw Drizzle out of the
-// app (apps/web calls these) and is the single seam a future SQLite→Postgres /
-// multi-tenant swap targets. Every read that could be tenant-scoped accepts an
-// optional `scope` (dormant in v0.x — no filtering unless a tenantId is passed).
+// app (apps/web calls these) and is the single seam for any change of storage.
+// Every read that could be tenant-scoped accepts an optional `scope` (no
+// filtering unless a tenantId is passed).
 
 import { randomUUID } from 'node:crypto'
 

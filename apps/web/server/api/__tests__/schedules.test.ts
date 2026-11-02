@@ -187,6 +187,9 @@ describe('schedules REST (gateway disconnected)', () => {
       badSpec.res,
     )
     expect(badSpec.status()).toBe(400)
+    // Its own code, so a client can tell a bad spec from a missing field.
+    expect((badSpec.body() as { code: string }).code).toBe('invalid_cron_spec')
+    expect((bad.body() as { code: string }).code).toBe('invalid_body')
 
     const missing = mockRes()
     await schedulesUpdatePATCH(
@@ -208,7 +211,9 @@ describe('schedules REST (gateway disconnected)', () => {
     const pause = mockRes()
     await schedulesUpdatePATCH(req({ params: { id }, body: { action: 'pause' } }), pause.res)
     expect(pause.status()).toBe(200)
-    expect((pause.body() as { schedule: { status: string } }).schedule.status).toBe('paused')
+    expect(pause.body()).toMatchObject({
+      schedule: { status: 'paused', nextRunAt: null, agentName: 'A1' },
+    })
 
     // A paused routine can't be force-fired — 409 illegal transition.
     const runPaused = mockRes()
@@ -242,10 +247,14 @@ describe('schedules REST (gateway disconnected)', () => {
       create.res,
     )
     expect(create.status()).toBe(201)
+    // The create answer names the team and its lead the same way the list does.
     expect((create.body() as { schedule: unknown }).schedule).toMatchObject({
       target: 'team',
       agentId: '',
       teamId: 't1',
+      teamName: 'Research',
+      agentName: 'Lead',
+      runtime: 'claude-code',
     })
 
     const list = mockRes()

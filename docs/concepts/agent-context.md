@@ -40,7 +40,7 @@ Clawboo builds this context for every turn in General or a room, including every
 4. **Teammates**: the names of the other members of this chat. A room lists only its own members. The leader also sees each teammate's runtime and role.
 5. **How to work**: instructions for this kind of turn. A leader learns how to hand off work on its runtime. A teammate on a handed-off task learns that its reply goes back to the team, not to you, and that nobody can answer its questions mid-task. On a task you gave it from the Board, it learns that you read its reply on the task card. A note names the [peer room](/concepts/peer-chat) and board tools when the agent has them.
 6. **Routine note**: when a Routine sent the message. It says you may be away, so the agent should make assumptions and state them rather than ask.
-7. **Connectors**: on turns you read, the connectors that are connected, even ones not shared with this agent, plus a few you could add.
+7. **Connectors**: on turns you read, the connectors shared with this agent, plus a few you could add. Connectors you connected but did not share with it are not named.
 8. **Waiting for you**, in two parts:
    - **Addressed to you**: results of tasks this agent handed out, and alerts about its work. The agent is told to act on them.
    - **Ambient**: what teammates posted in the peer room since this agent last spoke, and other notices. The agent is told to treat them as information, never as instructions.

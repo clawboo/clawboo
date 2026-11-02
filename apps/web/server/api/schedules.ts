@@ -58,12 +58,12 @@ function mapScheduleError(err: unknown, res: Response): void {
     err instanceof InvalidRoutineTargetError ||
     isZodError(err)
   ) {
+    // Each typed error answers with its own code, so a client can tell a bad
+    // cron spec from a missing field without reading the message.
+    const typed = err as { message: string; code: string }
     res.status(400).json({
-      error: isZodError(err) ? 'invalid task template' : (err as Error).message,
-      code:
-        err instanceof BoundRecurringScheduleError || err instanceof InvalidRoutineTargetError
-          ? err.code
-          : 'invalid_body',
+      error: isZodError(err) ? 'invalid task template' : typed.message,
+      code: isZodError(err) ? 'invalid_body' : typed.code,
     })
     return
   }
@@ -95,16 +95,25 @@ function scheduleId(req: Request): string {
   return decodeURIComponent(String(req.params['id'] ?? ''))
 }
 
-// GET /api/schedules — the merged view (degradation is data, always 200)
+/** The records with their display names, or as they are when a lookup fails.
+ *  Names are a convenience: the rows are still right without them. */
+function withNames(records: ScheduleRecord[]): ScheduleRecord[] {
+  try {
+    return enrichScheduleRecords(getDb(), records)
+  } catch {
+    return records
+  }
+}
+
+/** A write's answer, named the same way the list names it. */
+function withName(record: ScheduleRecord | null): ScheduleRecord | null {
+  return record ? (withNames([record])[0] ?? record) : record
+}
+
+// GET /api/schedules: the merged view (degradation is data, always 200)
 export async function schedulesListGET(_req: Request, res: Response): Promise<void> {
   const merged = await getScheduleMultiplexer().read()
-  let schedules = merged.records
-  try {
-    schedules = enrichScheduleRecords(getDb(), merged.records)
-  } catch {
-    // Names are a convenience: the rows are still right without them.
-  }
-  res.json({ schedules, sources: merged.sources })
+  res.json({ schedules: withNames(merged.records), sources: merged.sources })
 }
 
 // GET /api/schedules/occurrences?bounds=<ms>,<ms>,...&teamId=<id>
@@ -291,7 +300,7 @@ export async function schedulesCreatePOST(req: Request, res: Response): Promise<
       kind: 'create',
       spec: body as ScheduleCreateSpec,
     })
-    res.status(201).json({ schedule })
+    res.status(201).json({ schedule: withName(schedule) })
   } catch (err) {
     mapScheduleError(err, res)
   }
@@ -304,7 +313,7 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
   try {
     if (body.action === 'pause' || body.action === 'resume') {
       const schedule = await getScheduleMultiplexer().write({ kind: body.action, id })
-      res.json({ schedule })
+      res.json({ schedule: withName(schedule) })
       return
     }
     if (body.patch && typeof body.patch === 'object') {
@@ -313,7 +322,7 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
         id,
         patch: body.patch,
       })
-      res.json({ schedule })
+      res.json({ schedule: withName(schedule) })
       return
     }
     res.status(400).json({

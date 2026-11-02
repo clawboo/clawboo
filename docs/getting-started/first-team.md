@@ -33,7 +33,7 @@ Click the team's icon on the left rail to open its Home, then click **General** 
 The first time you open a team's chat, a one-time introduction comes first:
 
 1. **Meet your team** shows the agents and the leader. Click **Get Started**.
-2. **Introduce yourself:** write who you are and what you're working on (at least 5 characters), then click **Continue to Team Space**. Clawboo saves it to the team's context.
+2. **Introduce yourself:** write who you are and what you're working on (at least 5 characters), then click **Continue to team chat**. Clawboo saves it to the team's context.
 
 A team you deployed during setup skips the first screen. [Team chat](/using/team-chat) covers this screen, rooms and clearing a chat.
 

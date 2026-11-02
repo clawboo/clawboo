@@ -18,20 +18,19 @@ declare global {
 }
 
 /**
- * The ONE user-resolution site (sibling of getTenantId). Single implicit user
- * today → `null`. Future: extract from the verified identity in `attachIdentity`.
+ * The ONE user-resolution site (sibling of getTenantId). Single implicit user,
+ * so always `null`.
  */
 export function getUserId(_req: Request): string | null {
   return null
 }
 
 /**
- * No-op pass-through identity middleware — the single chokepoint a future SaaS
- * build flips on. Today it populates `req.tenantId` / `req.userId` (both null) and
- * always calls `next()`; it NEVER blocks a request. When multi-tenancy activates,
- * this is where real auth verification lands (validate the bearer token / session,
- * extract the authenticated tenant + user). It pairs with @clawboo/control-client's
- * `setRequestHeaderProvider` (the client half — dormant today).
+ * Pass-through identity middleware. It populates `req.tenantId` / `req.userId`
+ * (both null) and always calls `next()`; it NEVER blocks a request. Access control
+ * is the access gate's job, which runs before this. It pairs with
+ * @clawboo/control-client's `setRequestHeaderProvider`, which the dashboard does
+ * not call.
  */
 export function attachIdentity(req: Request, _res: Response, next: NextFunction): void {
   req.tenantId = getTenantId(req)

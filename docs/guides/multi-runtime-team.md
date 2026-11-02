@@ -76,7 +76,7 @@ You should see **Team deployed!**, and then the team's **General** chat opens. A
 
 <Step title="Meet the team and hand it work">
 
-On the **Meet your team** card, click **Get Started**, introduce yourself, and click **Continue to Team Space**. Then ask for work that needs each member, for example:
+On the **Meet your team** card, click **Get Started**, introduce yourself, and click **Continue to team chat**. Then ask for work that needs each member, for example:
 
 ```text
 In ~/code/my-app, fix the failing date test, have the fix reviewed, and write a two-line changelog entry.

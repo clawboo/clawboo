@@ -579,6 +579,26 @@ describe('runtimes install/connect REST', () => {
     expect(codex['connectionState']).toBe('needs-login')
   })
 
+  it('the run route drives the mock runtime only with its flag on', async () => {
+    const off = mockRes()
+    await runtimesRunPOST(req({ params: { id: 'clawboo-mock' }, body: { taskId: 't-m' } }), off.res)
+    expect(off.statusCode()).toBe(404)
+    expect(runnerState.lastInput).toBeNull()
+
+    process.env['CLAWBOO_ENABLE_MOCK_RUNTIME'] = '1'
+    try {
+      const on = mockRes()
+      await runtimesRunPOST(
+        req({ params: { id: 'clawboo-mock' }, body: { taskId: 't-m' } }),
+        on.res,
+      )
+      expect(on.statusCode()).not.toBe(404)
+      expect(runnerState.lastInput?.['taskId']).toBe('t-m')
+    } finally {
+      delete process.env['CLAWBOO_ENABLE_MOCK_RUNTIME']
+    }
+  })
+
   // ── apiKeyEnv wiring into the run path ──────────────────────────────────────
   it('run path injects the connected key into apiKeyEnv (hermes); codex stays empty', async () => {
     platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
@@ -680,6 +700,18 @@ describe('runtimes install/connect REST', () => {
     // The key lands in the Groq slot — never the default Anthropic slot.
     expect(hasRuntimeSecret('GROQ_API_KEY')).toBe(true)
     expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
+  })
+
+  it('native connect refuses a provider it cannot drive instead of filing the key as Anthropic', async () => {
+    const m = mockRes()
+    await runtimesConnectPOST(
+      req({ params: { id: 'clawboo-native' }, body: { apiKey: 'mm-key', provider: 'minimax' } }),
+      m.res,
+    )
+    expect(m.statusCode()).toBe(400)
+    expect(m.body()).toEqual({ error: "unknown provider 'minimax'" })
+    expect(hasRuntimeSecret('ANTHROPIC_API_KEY')).toBe(false)
+    expect(hasRuntimeSecret('MINIMAX_API_KEY')).toBe(false)
   })
 
   it('a Groq key alone satisfies the native credential check (expanded altEnvVars)', async () => {

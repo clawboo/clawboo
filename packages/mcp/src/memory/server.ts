@@ -176,7 +176,7 @@ export function createMemoryServer(
     {
       name: 'memory_search',
       description:
-        'Search saved facts. mode: fts (default) | vector | hybrid. Results cite a fact id and may carry a learning status (preferred/tentative/contested/dead_end) from teammate feedback.',
+        'Search saved facts. mode: hybrid | vector | fts. The default is hybrid when an embedding provider is set up, otherwise fts, and vector or hybrid fall back to fts without one. Results cite a fact id and may carry a learning status (preferred/tentative/contested/dead_end) from teammate feedback.',
       inputSchema: z.object({
         query: z.string(),
         mode: z.enum(['fts', 'vector', 'hybrid']).optional(),

@@ -17,7 +17,7 @@ The executor runner, `runTaskOnRuntime` in `apps/web/server/lib/executorRunner.t
 
 It is one of two execution paths, and not the default one:
 
-- **The executor runner** serves `POST /api/runtimes/:id/run` and agent Routine fires on Clawboo Native, Claude Code, Codex and Hermes. With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, Routine fires on `clawboo-mock` use it too; the run route accepts only the four real runtimes.
+- **The executor runner** serves `POST /api/runtimes/:id/run` and agent Routine fires on Clawboo Native, Claude Code, Codex and Hermes. With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, the run route and Routine fires on `clawboo-mock` use it too.
 - **The team engine** (`serverDeliver`, driven by the team orchestrator) runs every team-chat turn, every delegation, and every board task a person starts. It provisions no worktree, passes the team's folder (`<CLAWBOO_HOME>/workspaces/<teamId>`, from `teamWorkdirFor`) as the working directory for Claude Code, Codex, Hermes and Clawboo Native, and has no verification, memory auto-injection or circuit breakers. See [How a team works](/intro/how-it-works).
 
 Use this page when you change how a task runs on a spawned runtime, or need to know what a run through the runtime run API does.

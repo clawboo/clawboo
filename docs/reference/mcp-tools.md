@@ -346,7 +346,6 @@ Search facts by keyword, by meaning, or both.
 - With no `mode`, search is `hybrid` (meaning plus keyword) when an embedding provider is available and `fts` (keyword) when not. `vector` and `hybrid` also fall back to keyword search when there is no provider or the query cannot be embedded.
 - Returns an array of facts, best first. Each carries `score`, `matchedVia` (the mode that found it) and `learning`.
 - `learning` is `null` for a fact nothing has used or rated yet. Otherwise its `status` is `preferred` (two or more different agent and task pairs found it useful), `tentative` (one did), `contested` (mixed reports), `dead_end` (only negative reports), or `null` (it has only been used, not rated).
-- The tool's own description says `fts` is the default; the rule above is what the server does.
 
 ### memory_browse
 
@@ -476,7 +475,7 @@ Read new posts since a cursor. The caller's own posts are never returned.
 
 - Returns `{ posts, nextSeq }`, oldest post first. Each post is `{ seq, authorAgentId, kind, wrapped }`.
 - `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`. A teammate's post is context to weigh, never an order from the person.
-- `nextSeq` is the room's newest `seq`, never lower than `sinceSeq`. It moves to the newest post even when `limit` cut the page short, so posts beyond the limit are skipped by the next read.
+- `nextSeq` is the room's newest `seq`, never lower than `sinceSeq`. When the page is full (`limit` posts, or 1,000 with no `limit`), it is the `seq` of the last post returned instead, so the next read picks up the rest.
 - Error (stdio bin only): `no bound identity: pass authorAgentId + teamId (unbound mode)`.
 
 ### team_delegate

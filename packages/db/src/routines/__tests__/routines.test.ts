@@ -138,6 +138,13 @@ describe('the fire path', () => {
     expect(queueDueRuns(db, 5_000)).toHaveLength(0)
   })
 
+  it('a pause clears nextRunAt, so a paused Routine shows no next run', () => {
+    const run = register({ nextRunAt: 9_000 })
+    const paused = setScheduledRunStatus(db, run.id, 'paused', { nextRunAt: 9_000 })
+    expect(paused.ok && paused.run.nextRunAt).toBeNull()
+    expect(getScheduledRun(db, run.id)?.nextRunAt).toBeNull()
+  })
+
   it('ATOMIC CLAIM: the second claim of one queued row returns null (data, never retried)', () => {
     const run = register({ nextRunAt: 1_000 })
     queueDueRuns(db, 2_000)

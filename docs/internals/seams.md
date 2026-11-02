@@ -138,10 +138,10 @@ Every scheduling error carries a `readonly code` so callers branch on structure,
 
 | Error                                                            | Status | Meaning                                                                                                                        |
 | ---------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `InvalidCronSpecError`, a zod error                              | `400`  | A malformed spec or task template. The body's `code` is `invalid_body`.                                                        |
+| `InvalidCronSpecError` (`invalid_cron_spec`), a zod error        | `400`  | A malformed spec, or a malformed task template (whose body `code` is `invalid_body`).                                          |
 | `BoundRecurringScheduleError` (`bound_recurring_schedule`)       | `400`  | A recurring routine bound to an already-claimable task.                                                                        |
 | `InvalidRoutineTargetError` (`invalid_routine_target`)           | `400`  | A team routine with no team, an agent routine with no agent, an agent not on the paired team, or a target that does not exist. |
-| `UnknownScheduleError` (`unknown_schedule`)                      | `404`  | An unknown composite id or source.                                                                                             |
+| `UnknownScheduleError` (`unknown_schedule`)                      | `404`  | An unknown composite id or source, or a Gateway job the Gateway does not have.                                                 |
 | `DuplicateFiringOwnerError`, `IllegalScheduleTransitionError`    | `409`  | The one-firing-owner refusal, or an illegal routine status change. Never retried.                                              |
 | `TeamTaskDomainViolationError` (`team_task_domain_violation`)    | `422`  | A team-task create aimed at a runtime-own-life source.                                                                         |
 | `UnsupportedScheduleWriteError` (`unsupported_schedule_write`)   | `403`  | A write against an `observe-only` source.                                                                                      |

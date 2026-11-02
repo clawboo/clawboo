@@ -32,6 +32,7 @@ import {
   connectorAskEntryId,
   extractConnectorAsk,
 } from '@clawboo/connector-catalog'
+import { connectorsForAgent } from '../connectors/agentConnectors'
 import { listLiveConnectors } from '../connectors/supervisor'
 import { buildConnectorAwareness } from './connectorAwareness'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
@@ -192,7 +193,7 @@ export async function dispatchChatTurn(
   // telling it not to. An exchange turn is user-triggered and lands in a room
   // the user is watching, so it is user-facing by construction.
   const connectorsBlock = buildConnectorAwareness({
-    connected: listLiveConnectors().map((c) => c.slug),
+    ...connectorsForAgent(db, listLiveConnectors(), { agentId, teamId }),
     isUserFacing: true,
   })
   const context = [

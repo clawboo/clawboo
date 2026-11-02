@@ -152,7 +152,7 @@ export const ATTENTION_META: Record<
   unstarted: {
     label: 'Not started',
     tone: 'warning',
-    hint: 'It was moved to In progress by hand, which starts no run. Retry it or give it to an agent.',
+    hint: 'It is marked In progress, but no agent has it and nothing is running. Retry it or give it to an agent.',
   },
 }
 

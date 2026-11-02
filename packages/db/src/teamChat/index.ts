@@ -1,8 +1,8 @@
 // ─── team_chat room substrate (data-access) ──────────────────────────────────
 // The ONLY place that reads/writes the `team_chat` table — the durable
 // group-chat room where every team member posts as a NAMED PEER. Mirrors the
-// board / sessions repository convention (raw Drizzle stays behind this module;
-// the single seam a future SQLite→Postgres / multi-tenant swap targets).
+// board / sessions repository convention (raw Drizzle stays behind this module,
+// the single seam for any change of storage).
 //
 // Invariants:
 //  - `seq` is per-room monotonic, assigned `MAX(seq)+1 WHERE room_id=?` inside a
@@ -87,6 +87,9 @@ export function postToRoom(db: ClawbooDb, input: PostToRoomInput): DbTeamChat {
   })
 }
 
+/** How many posts `readRoom` returns when the caller names no limit. */
+export const READ_ROOM_DEFAULT_LIMIT = 1000
+
 /**
  * Cursor read of a room in `seq` order. With `excludeAuthorId` set, the poster's
  * OWN posts are filtered out — the per-(roomId, authorAgentId) echo guard that
@@ -101,7 +104,7 @@ export function readRoom(db: ClawbooDb, input: ReadRoomInput): DbTeamChat[] {
     .from(teamChat)
     .where(and(...conds))
     .orderBy(asc(teamChat.seq))
-    .limit(input.limit && input.limit > 0 ? input.limit : 1000)
+    .limit(input.limit && input.limit > 0 ? input.limit : READ_ROOM_DEFAULT_LIMIT)
     .all()
 }
 

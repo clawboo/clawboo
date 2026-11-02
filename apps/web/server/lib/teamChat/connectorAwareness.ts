@@ -33,8 +33,16 @@ import {
 const PER_TIER = 2
 
 export interface ConnectorAwarenessInput {
-  /** Slugs live right now. These are usable, and their tools are already listed. */
+  /** Slugs live right now AND shared with this agent. These are usable, and
+   *  their tools are already listed. */
   connected: readonly string[]
+  /**
+   * Slugs live for the install but NOT shared with this agent. Never named: an
+   * agent is not told which apps the user connected for someone else. They are
+   * only kept out of the offers, where each would be a Connect button for an app
+   * that is already connected.
+   */
+  unshared?: readonly string[]
   /** Whether this turn's reply reaches a human who could act on a suggestion. */
   isUserFacing: boolean
 }
@@ -49,7 +57,7 @@ export interface ConnectorAwarenessInput {
 export function buildConnectorAwareness(input: ConnectorAwarenessInput): string | null {
   if (!input.isUserFacing) return null
 
-  const live = new Set(input.connected)
+  const live = new Set([...input.connected, ...(input.unshared ?? [])])
   const candidates = CURATED_CONNECTORS.filter((d) => !live.has(d.slug))
     .map((d) => ({ def: d, cost: connectorCost(d) }))
     .filter((e) => e.cost === 'ready' || e.cost === 'one-click' || e.cost === 'needs-key')

@@ -172,6 +172,8 @@ describe('ClawbooRoutineScheduleSource', () => {
 
     const paused = await source.write({ kind: 'pause', id })
     expect(paused?.status).toBe('paused')
+    // A paused Routine has no next run to show.
+    expect(paused?.nextRunAt).toBeNull()
     // Paused rows can't be force-fired.
     await expect(source.write({ kind: 'run', id })).rejects.toBeInstanceOf(
       IllegalScheduleTransitionError,

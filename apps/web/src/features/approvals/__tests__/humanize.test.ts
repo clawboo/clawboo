@@ -143,6 +143,34 @@ describe('humanizeApproval, everything else', () => {
   })
 })
 
+describe('humanizeApproval, a risky hand-off', () => {
+  it('names the teammate and shows the task, never the scope name', () => {
+    const h = humanizeApproval({
+      toolName: 'delegate:code',
+      argsSummary: JSON.stringify({ task: 'Deploy the site to prod', targetAgentName: 'Coder' }),
+      agentName: 'Boo Zero',
+    })
+    expect(h.headline).toBe('Boo Zero wants to hand a task to Coder.')
+    expect(h.headline).not.toContain('Delegate')
+    expect(h.decisive).toEqual([
+      { label: 'Teammate', value: 'Coder' },
+      { label: 'Task', value: 'Deploy the site to prod' },
+    ])
+    expect(h.remainder).toEqual([])
+    expect(h.confident).toBe(true)
+  })
+
+  it('does not invent a teammate it was not told', () => {
+    const h = humanizeApproval({
+      toolName: 'delegate:code',
+      argsSummary: JSON.stringify({ task: 'Delete the old branch' }),
+      agentName: 'Boo Zero',
+    })
+    expect(h.headline).toBe('Boo Zero wants to hand a task to a teammate.')
+    expect(h.decisive).toEqual([{ label: 'Task', value: 'Delete the old branch' }])
+  })
+})
+
 describe('the verb is read from the operation, not scanned for keywords', () => {
   // A fetch was classed as a send because `EMAIL` sat in the send-verb list and
   // the match was a substring test, so `GMAIL_FETCH_EMAILS` contained it. The
