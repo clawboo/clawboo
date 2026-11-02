@@ -29,6 +29,7 @@ import type { StartOpts, Usage } from '@clawboo/executor'
 
 import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
+import { codexFailureMessage } from './codexFailure'
 import { killProcessTree } from './killTree'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import type { RuntimeRunContext } from './types'
@@ -146,6 +147,17 @@ export function createCodexAppServerDriver(
   // What the run has produced so far.
   let lastAgentText = ''
   let lastError: string | null = null
+  /** No model unless the agent pins one: the CLI then runs the account's own
+   *  default, which the backend chooses. A refused model reads differently for a
+   *  pinned run (see codexFailureMessage). */
+  const pinnedModel = ctx.model ?? opts.model
+  const failure = (runError: string | null | undefined, fallbackText: string): string =>
+    codexFailureMessage({
+      streamError: runError,
+      stderr: '',
+      fallback: fallbackText,
+      modelPinned: Boolean(pinnedModel),
+    })
   const agentTextItems = new Set<string>()
   let usageBaseline: TokenBreakdown | null = null
   let usageTotal: TokenBreakdown | null = null
@@ -302,8 +314,10 @@ export function createCodexAppServerDriver(
           finish({
             ok: false,
             summary: lastAgentText,
-            errorMessage:
-              asStr(err?.['message']) ?? lastError ?? `codex turn ended: ${status ?? 'unknown'}`,
+            errorMessage: failure(
+              asStr(err?.['message']) ?? lastError,
+              `codex turn ended: ${status ?? 'unknown'}`,
+            ),
           })
         }
         return
@@ -394,8 +408,12 @@ export function createCodexAppServerDriver(
         finish({
           ok: false,
           summary: lastAgentText,
-          errorMessage:
-            lastError ?? (stderrTail.trim() || 'codex app-server exited before the turn finished'),
+          errorMessage: codexFailureMessage({
+            streamError: lastError,
+            stderr: stderrTail,
+            fallback: 'codex app-server exited before the turn finished',
+            modelPinned: Boolean(pinnedModel),
+          }),
         })
     })
     return true
@@ -458,7 +476,7 @@ export function createCodexAppServerDriver(
         cwd: ctx.cwd ?? null,
         approvalPolicy: 'never',
         sandbox: 'danger-full-access',
-        ...((ctx.model ?? opts.model) ? { model: ctx.model ?? opts.model } : {}),
+        ...(pinnedModel ? { model: pinnedModel } : {}),
       }
       // A prior thread id continues that thread (the managed home keeps it); the
       // caller clears a pointer whose resume fails, exactly as for `exec resume`.
@@ -479,12 +497,10 @@ export function createCodexAppServerDriver(
       resolveTurn(turnId)
     } catch (err) {
       if (abortRequested) finish({ ok: true, aborted: true, summary: '' })
-      else
-        finish({
-          ok: false,
-          summary: '',
-          errorMessage: err instanceof Error ? err.message : String(err),
-        })
+      else {
+        const message = err instanceof Error ? err.message : String(err)
+        finish({ ok: false, summary: '', errorMessage: failure(message, message) })
+      }
     }
   }
 

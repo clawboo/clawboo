@@ -34,6 +34,7 @@ import {
   writeOpenclawProviderKeys,
 } from '../lib/openclawEnv'
 import { isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import { codexSubscriptionModelRef } from '../lib/runtimes/codexModels'
 import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
 import { OLLAMA_FALLBACK_MODEL } from '../lib/runtimes/native/ollamaModels'
 import {
@@ -73,12 +74,22 @@ const OPENCLAW_MODEL_MAP: Record<string, string> = {
   venice: 'venice/llama-3.3-70b',
   // Only the preference: configure swaps it for a model this Ollama has pulled.
   ollama: `ollama/${OLLAMA_FALLBACK_MODEL}`,
-  // The ChatGPT subscription (Codex OAuth). `openai-codex/*` is what validates
-  // on its own, so it stays the ref clawboo writes. `openclaw doctor --fix`
-  // migrates it forward to the canonical `openai/*` AND enables the `openai` +
-  // `codex` plugin entries that form requires; writing `openai/*` here without
-  // those entries stops the OpenClaw CLI, so the two halves cannot be split.
-  'openai-codex': 'openai-codex/gpt-5.5',
+  // The ChatGPT subscription (`openai-codex`) has no entry: which models a plan may
+  // use is the backend's call and it changes (the id once here is now refused).
+  // See openclawModelFor.
+}
+
+/**
+ * The OpenClaw default-model ref to write for a provider, or null to write none.
+ * The ChatGPT subscription takes the plan's own default from the live list
+ * (`openai-codex/<model>`: that form validates on its own, and `openclaw doctor
+ * --fix` migrates it to `openai/*` together with the `openai` + `codex` plugin
+ * entries that form needs; writing `openai/*` without them stops the OpenClaw CLI).
+ * With the list unknown it writes none, so OpenClaw applies its own default.
+ */
+async function openclawModelFor(provider: string): Promise<string | null> {
+  if (provider === 'openai-codex') return codexSubscriptionModelRef()
+  return OPENCLAW_MODEL_MAP[provider] ?? `${provider}/default`
 }
 
 /** Providers that authenticate WITHOUT a pasted key: ollama is local, and
@@ -667,14 +678,15 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
     const gatewayToken = crypto.randomBytes(32).toString('hex')
 
     // Resolve model from provider
-    const MODEL_MAP = OPENCLAW_MODEL_MAP
+    // Null only for the ChatGPT subscription with its plan's list unknown: the
+    // config then names no default model and OpenClaw applies its own.
     let resolvedModel =
-      typeof model === 'string' && model
-        ? model
-        : (MODEL_MAP[provider] ?? `${provider}/${model ?? 'default'}`)
+      typeof model === 'string' && model ? model : await openclawModelFor(provider)
     // Ollama runs only a model it has pulled, so the choice is checked against it.
     const ollamaProvider = provider === 'ollama' ? openclawOllamaProviderConfig() : null
-    if (provider === 'ollama') resolvedModel = await resolveOpenclawOllamaModel(resolvedModel)
+    if (provider === 'ollama') {
+      resolvedModel = await resolveOpenclawOllamaModel(resolvedModel ?? undefined)
+    }
 
     // Write openclaw.json
     const openclawConfig = {
@@ -684,9 +696,7 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
         auth: { mode: 'token', token: '${GATEWAY_AUTH_TOKEN}' },
       },
       agents: {
-        defaults: {
-          model: { primary: resolvedModel },
-        },
+        defaults: resolvedModel ? { model: { primary: resolvedModel } } : {},
       },
       tools: {
         agentToAgent: { enabled: true },
@@ -849,10 +859,13 @@ export async function autoConfigureOpenclawPOST(_req: Request, res: Response): P
     if (!modelObj['primary']) {
       pickedOllamaModel = provider === 'ollama'
       // Ollama runs only a model it has pulled, so its default is checked against it.
-      modelObj['primary'] =
+      // The ChatGPT subscription with its plan's list unknown writes none, so
+      // OpenClaw applies its own default.
+      const picked =
         provider === 'ollama'
           ? await resolveOpenclawOllamaModel()
-          : (OPENCLAW_MODEL_MAP[provider] ?? `${provider}/default`)
+          : await openclawModelFor(provider)
+      if (picked) modelObj['primary'] = picked
     }
     // OpenClaw never reads OLLAMA_BASE_URL, so an override becomes its own Ollama
     // provider entry. An entry the user already has is left alone.

@@ -17,8 +17,11 @@
 // slug, so a generic first-slash split would misroute it; the specific prefix
 // cannot collide because `openai-codex` is not an OpenRouter vendor). The group
 // is offered only when a hermes ChatGPT login is detected (`RuntimeStatus.codexAuth`).
+// It names no model of its own: the plan's models come from the live list
+// (`useCodexModels`), and its first entry is the plan default, a pick that pins
+// the provider and leaves the model to Hermes, which asks the backend itself.
 
-import type { ModelGroup } from './modelCatalog'
+import type { ModelGroup, ModelOption } from './modelCatalog'
 
 export const HERMES_OPENROUTER_GROUP_NAME = 'OpenRouter'
 export const HERMES_CODEX_GROUP_NAME = 'ChatGPT subscription'
@@ -37,21 +40,21 @@ const HERMES_OPENROUTER_FALLBACK: { id: string; label: string }[] = [
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
 ]
 
-/** The ChatGPT-subscription (openai-codex) models — hermes 0.15.2's own codex-backend
- *  defaults. Bare backend ids behind the routing prefix; Spark is a Pro-plan model
- *  (labeled, not hidden — a Plus user picking it gets the provider's own plan error). */
-export const HERMES_CODEX_MODELS: { id: string; label: string }[] = [
-  { id: 'openai-codex/gpt-5.5', label: 'GPT-5.5' },
-  { id: 'openai-codex/gpt-5.4', label: 'GPT-5.4' },
-  { id: 'openai-codex/gpt-5.4-mini', label: 'GPT-5.4 mini' },
-  { id: 'openai-codex/gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-  { id: 'openai-codex/gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark · Pro plan' },
-]
+/** The subscription pick that names no model: the bare routing prefix. Hermes then
+ *  runs the first model the backend lists for the account. */
+export const HERMES_CODEX_PLAN_DEFAULT_ID = CODEX_PREFIX
 
-/** The conditional subscription group (offer only when hermes codex auth is present). */
-export const HERMES_CODEX_GROUP: ModelGroup = {
-  provider: HERMES_CODEX_GROUP_NAME,
-  models: HERMES_CODEX_MODELS,
+/** The conditional subscription group (offer only when hermes codex auth is present):
+ *  the plan default first, then the plan's live models (bare backend ids from
+ *  `/api/runtimes/codex/models`) behind the routing prefix. */
+export function hermesCodexGroup(liveModels: ModelOption[]): ModelGroup {
+  return {
+    provider: HERMES_CODEX_GROUP_NAME,
+    models: [
+      { id: HERMES_CODEX_PLAN_DEFAULT_ID, label: 'Plan default' },
+      ...liveModels.map((m) => ({ id: `${CODEX_PREFIX}${m.id}`, label: m.label })),
+    ],
+  }
 }
 
 /** Static fallback groups — a single OpenRouter group. `useHermesModelGroups` swaps in
@@ -62,14 +65,15 @@ export const HERMES_MODEL_GROUPS: ModelGroup[] = [
 ]
 
 /** Turn a picked Hermes model id into an execConfig override. Subscription picks carry
- *  the `openai-codex/` routing prefix (stripped — the backend wants the bare id); every
- *  other id is an OpenRouter slug and pins `--provider openrouter` (the slug rides
- *  whole, slashes intact). Returns null for an empty id (the caller keeps the
- *  key-derived default). */
-export function hermesModelExec(id: string): { provider: string; model: string } | null {
+ *  the `openai-codex/` routing prefix (stripped: the backend wants the bare id), and
+ *  the plan default carries no model at all; every other id is an OpenRouter slug and
+ *  pins `--provider openrouter` (the slug rides whole, slashes intact). Returns null
+ *  for an empty id (the caller keeps the key-derived default). */
+export function hermesModelExec(id: string): { provider: string; model?: string } | null {
   if (!id) return null
   if (id.startsWith(CODEX_PREFIX)) {
-    return { provider: 'openai-codex', model: id.slice(CODEX_PREFIX.length) }
+    const model = id.slice(CODEX_PREFIX.length)
+    return model ? { provider: 'openai-codex', model } : { provider: 'openai-codex' }
   }
   return { provider: 'openrouter', model: id }
 }
@@ -106,6 +110,10 @@ export function hermesModelSave(
   fromGroup: boolean,
 ): { model: string; provider?: string } | null {
   if (!id) return null
-  if (fromGroup || id.startsWith(CODEX_PREFIX)) return hermesModelExec(id)
+  if (fromGroup || id.startsWith(CODEX_PREFIX)) {
+    const exec = hermesModelExec(id)
+    // The plan default names no model, and the model route saves one.
+    return exec?.model ? { model: exec.model, provider: exec.provider } : null
+  }
   return { model: id }
 }

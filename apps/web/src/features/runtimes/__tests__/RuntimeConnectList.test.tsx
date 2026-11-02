@@ -3,12 +3,14 @@
 // (the ChatGPT-subscription option, Disconnect, Details). Prop-driven (no fetch
 // on render); RTL + jest-dom + userEvent.
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { RuntimeStatus } from '@clawboo/control-client'
 
+import { server } from '../../../__vitest__/mswServer'
 import { RuntimeConnectList, type OpenClawTabConfig } from '../RuntimeConnectList'
 
 afterEach(() => cleanup())
@@ -95,6 +97,65 @@ describe('RuntimeConnectList: native on local Ollama', () => {
       />,
     )
     expect(await screen.findByTestId('native-provider-row-ollama')).toHaveTextContent('Connected')
+  })
+})
+
+describe('RuntimeConnectList: a Codex CLI too old for the plan', () => {
+  function renderCodex(status: RuntimeStatus, onChanged = vi.fn()) {
+    return render(
+      <RuntimeConnectList
+        runtimeIds={['codex']}
+        statuses={[status]}
+        loaded
+        variant="panel"
+        onChanged={onChanged}
+        openclaw={OPENCLAW_OFF}
+      />,
+    )
+  }
+
+  it('reads "Update needed" (not Connected), and its toggle reveals the notice', async () => {
+    renderCodex({
+      id: 'codex',
+      connectionState: 'ready',
+      updateRequired: true,
+      cliVersion: '0.136.0',
+    })
+    expect(screen.getByText('Update needed')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+    const toggle = screen.getByTestId('runtime-list-row-codex-toggle')
+    expect(toggle).toHaveTextContent(/Update/i)
+    await userEvent.click(toggle)
+    expect(screen.getByTestId('runtime-codex-update-required')).toHaveTextContent(
+      /Codex CLI \(0\.136\.0\) is too old/,
+    )
+    // Sign out + Re-check stay available beside it.
+    expect(screen.getByTestId('runtime-codex-disconnect')).toBeInTheDocument()
+  })
+
+  it('Update Codex runs the install stream, then re-reads the status', async () => {
+    let installs = 0
+    server.use(
+      http.post('/api/runtimes/codex/install', () => {
+        installs += 1
+        return new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }),
+    )
+    const onChanged = vi.fn()
+    renderCodex({ id: 'codex', connectionState: 'ready', updateRequired: true }, onChanged)
+    await userEvent.click(screen.getByTestId('runtime-list-row-codex-toggle'))
+    await userEvent.click(screen.getByTestId('runtime-codex-update'))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(installs).toBe(1)
+  })
+
+  it('a current Codex reads Connected with Manage and no notice', () => {
+    renderCodex({ id: 'codex', connectionState: 'ready', updateRequired: false })
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-codex-toggle')).toHaveTextContent(/Manage/i)
+    expect(screen.queryByTestId('runtime-codex-update-required')).not.toBeInTheDocument()
   })
 })
 

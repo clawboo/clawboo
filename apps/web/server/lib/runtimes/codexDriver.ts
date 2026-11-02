@@ -44,6 +44,7 @@ import type { StartOpts } from '@clawboo/executor'
 import { resolveRuntimeBin } from '../platform'
 import { userCodexAuthPath } from './codexAuth'
 import { createCodexAppServerDriver, type CodexAppServerDeps } from './codexAppServerDriver'
+import { backendErrorText, codexFailureMessage } from './codexFailure'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -137,7 +138,12 @@ interface CodexRunState {
   lastText: string
   usage: { inputTokens: number; outputTokens: number }
   sawResult: boolean
+  /** The failed turn's own reason, from the JSON stream (see codexFailureMessage). */
+  streamError?: string
 }
+
+// Re-exported for the driver tests, which reach every exec-path helper here.
+export { codexFailureMessage }
 
 /** Best-effort translate of one Codex JSON event. Tolerant of shape drift. */
 export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNativeEvent[] {
@@ -200,6 +206,14 @@ export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNa
     const id =
       asStr(inner['call_id']) ?? asStr(inner['id']) ?? `${name}-${state.usage.outputTokens}`
     return [{ type: 'tool-call', id, name, input: inner['arguments'] ?? inner['input'] ?? {} }]
+  }
+
+  // A failed turn: top-level `{ type:'error', message }`, then `{ type:'turn.failed',
+  // error:{ message } }`. Kept for the close-synthesized terminal (codex exits non-zero).
+  if (type === 'error' || type === 'turn.failed') {
+    const raw = asStr(j['message']) ?? asStr(asRecord(j['error'])?.['message'])
+    if (raw) state.streamError = backendErrorText(raw)
+    return []
   }
 
   // Usage accumulation (carried into the terminal cost event).
@@ -299,12 +313,16 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
     usage: { inputTokens: 0, outputTokens: 0 },
     sawResult: false,
   }
+  let modelPinned = false
 
   return createSpawnDriver<CodexNativeEvent>({
     async resolve() {
       const { codexHome, managed } = await prepareCodexHome(ctx)
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
+      // No model unless the agent pins one: the CLI then runs the account's own
+      // default, which the backend chooses, so it cannot go stale here.
       const model = ctx.model ?? opts.model
+      modelPinned = Boolean(model)
       // Headless: emit JSONL events; the worktree is our isolation, so bypass
       // Codex's own sandbox/approval prompts; the worktree is already a git repo.
       // A prior thread id (ctx.resume) continues that session via `exec resume` —
@@ -354,7 +372,14 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
           ...(state.threadId ? { threadId: state.threadId } : {}),
           ...(ok || aborted
             ? {}
-            : { errorMessage: stderr.trim() || `codex exited with code ${code}` }),
+            : {
+                errorMessage: codexFailureMessage({
+                  streamError: state.streamError,
+                  stderr,
+                  code,
+                  modelPinned,
+                }),
+              }),
         },
       ]
     },

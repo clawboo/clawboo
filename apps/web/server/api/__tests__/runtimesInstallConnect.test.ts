@@ -54,6 +54,26 @@ vi.mock('../../lib/runtimes/codexAuth', () => ({
   invalidateCodexAuthCache: () => {},
 }))
 
+// ── Mock the subscription model probe (real impl spawns `codex app-server`). ──
+const codexModelsState = vi.hoisted(() => ({
+  list: {
+    models: [] as { id: string; label: string }[],
+    defaultModel: null as string | null,
+    source: null as 'cli' | 'cache' | null,
+    updateRequired: false,
+    cliVersion: null as string | null,
+  },
+  peeked: false,
+  invalidated: 0,
+}))
+vi.mock('../../lib/runtimes/codexModels', () => ({
+  getCodexModels: () => Promise.resolve(codexModelsState.list),
+  peekCodexModels: () => (codexModelsState.peeked ? codexModelsState.list : null),
+  invalidateCodexModelsCache: () => {
+    codexModelsState.invalidated += 1
+  },
+}))
+
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
 interface FakeChild {
   killed: boolean
@@ -116,6 +136,7 @@ vi.mock('../../lib/executorRunner', () => ({
 }))
 
 import {
+  runtimesCodexModelsGET,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
   runtimesHealthcheckPOST,
@@ -267,6 +288,21 @@ describe('runtimes install/connect REST', () => {
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
   })
 
+  it('installing codex (also how it is updated) drops the cached model probe', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    platformState.bins['codex'] = '/usr/bin/codex'
+    const before = codexModelsState.invalidated
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
+    expect(spawnState.calls[0]).toEqual({
+      cmd: 'npm',
+      args: ['install', '-g', '@openai/codex@0'],
+    })
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    await m.ended
+    expect(codexModelsState.invalidated).toBe(before + 1)
+  })
+
   it('install reports NPM_MISSING when npm is absent (no spawn)', async () => {
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
@@ -414,6 +450,52 @@ describe('runtimes install/connect REST', () => {
     const c = mockRes()
     await runtimesConnectPOST(req({ params: { id: 'codex' }, body: {} }), c.res)
     expect((c.body() as { connectionState: string }).connectionState).toBe('ready')
+  })
+
+  it('codex: a signed-in CLI too old for the plan reads updateRequired on its status', async () => {
+    platformState.bins['codex'] = '/usr/bin/codex'
+    codexAuthState.loggedIn = true
+    const codexStatus = async (): Promise<Record<string, unknown>> => {
+      const list = mockRes()
+      await runtimesListGET(req(), list.res)
+      return (list.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+        (r) => r['id'] === 'codex',
+      )!
+    }
+    // No probe result yet: nothing claimed either way.
+    codexModelsState.peeked = false
+    expect('updateRequired' in (await codexStatus())).toBe(false)
+
+    codexModelsState.peeked = true
+    codexModelsState.list = {
+      models: [],
+      defaultModel: null,
+      source: null,
+      updateRequired: true,
+      cliVersion: '0.136.0',
+    }
+    const codex = await codexStatus()
+    expect(codex['updateRequired']).toBe(true)
+    expect(codex['cliVersion']).toBe('0.136.0')
+    codexModelsState.peeked = false
+  })
+
+  it('GET /api/runtimes/codex/models returns the live list without the source detail', async () => {
+    codexModelsState.list = {
+      models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }],
+      defaultModel: 'gpt-6-sol',
+      source: 'cli',
+      updateRequired: false,
+      cliVersion: '0.163.0',
+    }
+    const m = mockRes()
+    await runtimesCodexModelsGET(req(), m.res)
+    expect(m.body()).toEqual({
+      models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }],
+      defaultModel: 'gpt-6-sol',
+      updateRequired: false,
+      cliVersion: '0.163.0',
+    })
   })
 
   it('disconnect stops the runtime and keeps a key another runtime also reads', () => {

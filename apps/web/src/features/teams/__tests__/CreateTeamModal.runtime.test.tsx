@@ -38,6 +38,7 @@ vi.mock('@/lib/hydrateTeams', () => ({ hydrateTeams: vi.fn(async () => {}) }))
 
 // Import AFTER the mocks so the modal picks up the mocked createAgent.
 const { CreateTeamModal } = await import('../CreateTeamModal')
+const { resetCodexModelsCache } = await import('@/lib/useCodexModels')
 
 const PROFILE: ProfileLike = {
   id: 'test-team',
@@ -582,11 +583,23 @@ describe('CreateTeamModal deploy', () => {
     expect(screen.queryByTestId('model-provider-chatgptsubscription')).toBeNull()
     first.unmount()
 
-    // WITH codexAuth (a detected `hermes auth add openai-codex`) → offered;
-    // the pick lands in execConfig as the openai-codex provider + the BARE model id.
+    // WITH codexAuth (a detected `hermes auth add openai-codex`) → offered, with the
+    // plan's LIVE models; the pick lands in execConfig as the openai-codex provider +
+    // the BARE model id.
+    resetCodexModelsCache()
     server.use(
       http.get('/api/runtimes', () =>
         HttpResponse.json({ runtimes: [{ ...hermesReady, codexAuth: true }] }),
+      ),
+      http.get('/api/runtimes/codex/models', () =>
+        HttpResponse.json({
+          models: [
+            { id: 'gpt-6-astra', label: 'GPT-6-Astra' },
+            { id: 'gpt-5.6-luna', label: 'GPT-5.6-Luna' },
+          ],
+          defaultModel: 'gpt-6-astra',
+          updateRequired: false,
+        }),
       ),
       ...baseHandlers(),
     )
@@ -598,13 +611,13 @@ describe('CreateTeamModal deploy', () => {
     // With codexAuth → the ChatGPT-subscription provider column appears; pick a model.
     await userEvent.click(screen.getAllByTestId('member-model-trigger')[1])
     await userEvent.click(await screen.findByTestId('model-provider-chatgptsubscription'))
-    await userEvent.click(screen.getByRole('option', { name: /^GPT-5\.3 Codex$/i }))
+    await userEvent.click(await screen.findByRole('option', { name: /^GPT-5\.6-Luna$/i }))
 
     await userEvent.click(screen.getByRole('button', { name: /deploy team/i }))
     await waitFor(() => expect(createAgentMock).toHaveBeenCalledTimes(2))
     const coderCall = createAgentMock.mock.calls.find((c) => c[0] === 'Coder')!
     expect(coderCall[2]).toBe('hermes')
-    expect(coderCall[3]).toEqual({ provider: 'openai-codex', model: 'gpt-5.3-codex' })
+    expect(coderCall[3]).toEqual({ provider: 'openai-codex', model: 'gpt-5.6-luna' })
   })
 
   it('a team with no genuine leadership role deploys leaderless (no badge, leaderAgentId null, all specialists)', async () => {

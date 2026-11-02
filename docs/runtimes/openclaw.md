@@ -110,7 +110,7 @@ OpenClaw can run on a ChatGPT subscription instead of an API key, through its ow
 - During setup, or later under **Manage > ChatGPT subscription**, click **Sign in with ChatGPT**. This needs Codex connected first; until then the row reads "Connect Codex first".
 - Or run OpenClaw's own login in a terminal: `openclaw models auth login --provider openai-codex`. Use it rather than `openclaw onboard`, which can reset your channels, memory and cron jobs.
 
-With the sign-in in place, the setup writes no key, and sets OpenClaw's default model to `openai-codex/gpt-5.5` if none is set. OpenClaw agents, Codex agents, Hermes on a ChatGPT sign-in and your own Codex use all share your plan's limits.
+With the sign-in in place, the setup writes no key, and if OpenClaw has no default model yet it sets your plan's own default, read from your Codex CLI. OpenAI decides which models each ChatGPT plan may use, so Clawboo names none of its own: if it cannot read your plan's models, it sets none and OpenClaw uses its own default. OpenClaw agents, Codex agents, Hermes on a ChatGPT sign-in and your own Codex use all share your plan's limits.
 
 ## Default models
 
@@ -133,9 +133,9 @@ When OpenClaw has no default model yet, the setup picks one for the provider it 
 | Cerebras        | `cerebras/zai-glm-4.7`                                           |
 | Venice          | `venice/llama-3.3-70b`                                           |
 | Local Ollama    | `ollama/` plus a model your Ollama has pulled (`llama3.2` first) |
-| ChatGPT sign-in | `openai-codex/gpt-5.5`                                           |
+| ChatGPT sign-in | `openai-codex/` plus your plan's own default, read from Codex    |
 
-Change it under **Manage > Default model**, which every OpenClaw agent uses unless it has its own model. An agent's own model is set on its page. For OpenClaw's model settings, see [Model providers](https://docs.openclaw.ai/concepts/model-providers) and, for Ollama, [Ollama](https://docs.openclaw.ai/providers/ollama).
+Change it under **Manage > Default model**, which every OpenClaw agent uses unless it has its own model. An agent's own model is set on its page. In both pickers, the **OpenAI Codex** group lists the models your ChatGPT plan can run, read from your Codex CLI; it is left out while Clawboo cannot read them. For OpenClaw's model settings, see [Model providers](https://docs.openclaw.ai/concepts/model-providers) and, for Ollama, [Ollama](https://docs.openclaw.ai/providers/ollama).
 
 ## What a new Boo is allowed to run
 
@@ -364,6 +364,7 @@ Deploy a team from the **Marketplace**. While the Gateway is connected, a market
 - **The connections.** The browser connects to `/api/gateway/ws` on the Clawboo server, which adds the token and signs the device before passing it on. The server's own connection is an operator client (client id `cli`) that sends the Gateway host as its Origin and declares the `tool-events` and `exec-approvals` capabilities. Clawboo supports Gateway connect protocols 3 and 4.
 - **Write budget.** The Gateway allows three configuration writes per 60 seconds, so the MCP registration skips its write when nothing has changed.
 - **`configure-openclaw`.** The dashboard never calls `POST /api/system/configure-openclaw`. It writes a fresh `openclaw.json` and `.env`, replacing what is there, and makes a new Gateway token on every call, so use it only on a fresh OpenClaw. **Set up OpenClaw** uses `POST /api/system/auto-configure-openclaw`, which fills in only what is missing. See the [System API](/reference/rest-api/system).
+- **The model list.** The pickers read `openclaw models list --all --json`. OpenClaw 2026.9 refuses it when several agents are configured and none is named the owner, so Clawboo then asks again with `--agent` (the agent marked default, else `main`, else the first). See `GET /api/system/models` in the [System API](/reference/rest-api/system).
 - **Model refs.** Clawboo writes the ChatGPT model as `openai-codex/<model>`. `openclaw doctor --fix` later rewrites it to `openai/<model>` and turns on the plugins that form needs.
 - **The pin.** `openclaw@~2026.9` holds OpenClaw's configuration format (the agent roster under `agents.entries`, and stricter `config.patch` rules), not the connect protocol.
 - **More detail:** [Gateway and events](/internals/gateway-and-events) and [Agent sources](/internals/agent-source).

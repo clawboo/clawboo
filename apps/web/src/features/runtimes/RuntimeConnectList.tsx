@@ -36,6 +36,7 @@ import type { RuntimeStatus } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
+import { CodexUpdateNotice } from './CodexUpdateNotice'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { OpenClawGatewaySection } from './OpenClawGatewaySection'
 import { OpenClawDefaultModel } from './OpenClawDefaultModel'
@@ -250,18 +251,23 @@ function RuntimeRow({
 
   // Connected → a small "Connected" (top-right) + a Manage footer button that
   // expands the inline management body (subscription + Re-check + Disconnect +
-  // Details). The ChatGPT-subscription option lives inside Manage now.
+  // Details). The ChatGPT-subscription option lives inside Manage now. A Codex
+  // signed in but too old for the plan's models is not really connected: every
+  // run fails, so the row says so and leads with the update.
   if (shown === 'ready') {
+    const needsUpdate = entry.id === 'codex' && status?.updateRequired === true
     return (
       <AccordionRow
         {...rowProps}
-        status={<StatusChip state="ready" />}
+        status={
+          needsUpdate ? <AmberStatusChip label="Update needed" /> : <StatusChip state="ready" />
+        }
         footer={
           <CtaToggle
             expanded={userExpanded}
             onToggle={() => setUserExpanded((v) => !v)}
             bodyId={`${testId}-body`}
-            cta={MANAGE_CTA}
+            cta={needsUpdate ? UPDATE_CTA : MANAGE_CTA}
             name={entry.name}
             testId={testId}
           />
@@ -279,7 +285,9 @@ function RuntimeRow({
           // subscription as a peer row) — for the runtimes whose keys live in the
           // Providers hub.
           extra={
-            entry.id === 'clawboo-native' ? (
+            needsUpdate ? (
+              <CodexUpdateNotice cliVersion={status?.cliVersion} onChanged={onChanged} />
+            ) : entry.id === 'clawboo-native' ? (
               <RuntimeProvidersBody
                 nativeReady
                 ollamaConnected={status?.ollamaConnected === true}
@@ -436,7 +444,9 @@ function OpenClawRow({
   return (
     <AccordionRow
       {...rowProps}
-      status={wasConfigured ? <OpenClawOfflineChip /> : <StatusChip state="unknown" />}
+      status={
+        wasConfigured ? <AmberStatusChip label="Disconnected" /> : <StatusChip state="unknown" />
+      }
       footer={footer}
       expanded={expanded}
     >
@@ -468,9 +478,11 @@ function OpenClawRow({
   )
 }
 
-/** OpenClaw's "set up before, gateway offline" status — an amber dot + a calm
- *  "Disconnected" (distinct from a pristine, never-configured row). */
-function OpenClawOfflineChip() {
+/** An amber dot + a calm label: a runtime that was set up but cannot run right
+ *  now. OpenClaw's "set up before, gateway offline" reads "Disconnected"
+ *  (distinct from a pristine, never-configured row); a Codex CLI too old for the
+ *  plan reads "Update needed". */
+function AmberStatusChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
       <span
@@ -485,7 +497,7 @@ function OpenClawOfflineChip() {
         }}
       />
       <span className="text-[11.5px] font-medium" style={{ color: muted(0.62) }}>
-        Disconnected
+        {label}
       </span>
     </span>
   )
@@ -552,6 +564,10 @@ function InProgressChip({ label }: { label: string }) {
 /** The Manage footer CTA for a connected runtime (opens the inline management
  *  body: subscription + Re-check + Disconnect + Details). */
 const MANAGE_CTA = { label: 'Manage', icon: <Settings2 size={13} /> }
+
+/** The same toggle for a connected Codex whose CLI must be updated before it can
+ *  run: the body leads with the update notice and its action. */
+const UPDATE_CTA = { label: 'Update', icon: <Download size={13} /> }
 
 /** Small muted labels for the top-right status of an UNCONNECTED runtime (the
  *  footer button carries the action). In-progress states show nothing here (the

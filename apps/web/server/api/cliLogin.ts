@@ -29,6 +29,7 @@ import {
   userCodexAuthPath,
 } from '../lib/runtimes/codexAuth'
 import { hasUsableCodexAuth } from '../lib/runtimes/codexDriver'
+import { invalidateCodexModelsCache } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { buildCmdShimPlan, needsCmdShim } from '../lib/runtimes/winSpawn'
 import { killProcessTree } from '../lib/runtimes/killTree'
@@ -56,6 +57,8 @@ const inFlight = new Map<CliLoginTool, ChildProcess>()
 async function probeLoggedIn(tool: CliLoginTool): Promise<boolean> {
   if (tool === 'codex') {
     invalidateCodexAuthCache()
+    // A new sign-in can be a different ChatGPT plan, with different models.
+    invalidateCodexModelsCache()
     return isCodexLoggedIn()
   }
   if (tool === 'hermes') return isHermesCodexAuthPresent()
