@@ -480,6 +480,32 @@ describe('verification gate (real board + real git worktree)', () => {
   )
 
   it(
+    'ignores a git replace ref the builder plants over the scaffold commit',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const wt = worktree.worktreePath
+      // Commit the builder's init.sh and make it stand in for the scaffold commit.
+      await git(wt, ['add', 'init.sh'])
+      await git(wt, ['commit', '--no-verify', '-m', 'builder init.sh'])
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: wt })
+      await git(wt, ['replace', '-f', worktree.baseCommit, stdout.trim()])
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+      })
+      expect(verdict.attempts[0]!.deterministic).toMatchObject({
+        command: 'exit 0',
+        commandSource: 'agent',
+      })
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
     "runs the team's verify command over the worktree's, and scaffolds it into init.sh",
     async () => {
       const db = getDb()

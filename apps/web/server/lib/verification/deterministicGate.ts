@@ -8,7 +8,9 @@
 // command came from is recorded with it (`commandSource`). A check the person set
 // for the team is passed in and always wins. Without one, the worktree's command
 // counts as clawboo's only while it matches the init.sh of the task's scaffold
-// commit, which the builder cannot rewrite; anything else is the builder's own.
+// commit, read from the repository itself; anything else is the builder's own.
+// This tells a cooperative builder's choice apart from clawboo's. It is not a
+// security boundary against an agent that runs as the same user.
 
 import { spawn } from 'node:child_process'
 import { appendFile, readFile } from 'node:fs/promises'
@@ -40,6 +42,9 @@ export interface DeterministicGateInput {
   /** The task's scaffold commit (`Worktree.baseCommit`), whose init.sh is the
    *  one clawboo wrote. Absent, a worktree command is attributed to the agent. */
   scaffoldCommit?: string | null
+  /** The task's repository. The scaffold commit is read from here rather than
+   *  through the worktree, whose `.git` pointer the builder can edit. */
+  repoPath?: string | null
   timeoutMs?: number
   /**
    * Injectable env (tests); defaults to a SCRUBBED child env (`buildChildEnv()` —
@@ -69,15 +74,18 @@ async function worktreeVerifyCommand(worktreePath: string): Promise<string | nul
 }
 
 /** The VERIFY_CMD in init.sh as committed at `commit`, or null (none, the
- *  placeholder, or an unreadable commit). */
+ *  placeholder, or an unreadable commit). `--no-replace-objects` keeps a
+ *  `refs/replace/<commit>` the builder created from standing in for it. */
 export async function scaffoldVerifyCommand(
-  worktreePath: string,
+  gitDir: string,
   commit: string,
 ): Promise<string | null> {
   // A commit id only: anything else must never reach git's argv.
   if (!/^[0-9a-f]{7,64}$/i.test(commit)) return null
   try {
-    return parseVerifyCommand(await execGit(worktreePath, ['show', `${commit}:${SOR_FILES.init}`]))
+    return parseVerifyCommand(
+      await execGit(gitDir, ['--no-replace-objects', 'show', `${commit}:${SOR_FILES.init}`]),
+    )
   } catch {
     return null
   }
@@ -87,12 +95,13 @@ export async function resolveVerifyCommand(
   worktreePath: string,
   trusted?: string | null,
   scaffoldCommit?: string | null,
+  repoPath?: string | null,
 ): Promise<{ command: string | null; source: VerifyCommandSource }> {
   if (trusted && trusted.trim()) return { command: trusted.trim(), source: 'configured' }
   const command = await worktreeVerifyCommand(worktreePath)
   if (!command) return { command: null, source: 'none' }
   const scaffolded = scaffoldCommit
-    ? await scaffoldVerifyCommand(worktreePath, scaffoldCommit)
+    ? await scaffoldVerifyCommand(repoPath ?? worktreePath, scaffoldCommit)
     : null
   return { command, source: scaffolded !== null && scaffolded === command ? 'scaffold' : 'agent' }
 }
@@ -163,6 +172,7 @@ export async function runDeterministicGate(
     worktreePath,
     input.verifyCommand,
     input.scaffoldCommit,
+    input.repoPath,
   )
   if (!command) {
     return deterministicResultSchema.parse({

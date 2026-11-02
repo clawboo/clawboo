@@ -39,8 +39,8 @@ export type Finding = z.infer<typeof findingSchema>
 /** Result of the deterministic gate — the strongest signal (an exit code, not a
  *  judgement). `passed` is the gate's truth; the tails are scrubbed evidence. */
 /**
- * Where the gate's command came from. `configured`: a check the person set for
- * the team, passed in by clawboo. `scaffold`: the command clawboo wrote into the
+ * Where the gate's command came from. `configured`: the team's verify command
+ * setting, passed in by clawboo. `scaffold`: the command clawboo wrote into the
  * task's init.sh when it set up the worktree, unchanged since. `agent`: a command
  * the builder wrote or edited in its own worktree (it differs from the scaffold
  * commit's), so the builder chose what it is judged by. `none`: no command.

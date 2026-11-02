@@ -144,6 +144,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     worktreePath: input.worktree.worktreePath,
     verifyCommand: input.verifyCommand,
     scaffoldCommit: input.worktree.baseCommit,
+    repoPath: input.repoPath,
     timeoutMs: input.verifyTimeoutMs,
   })
 

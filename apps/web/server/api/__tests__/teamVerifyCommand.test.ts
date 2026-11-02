@@ -7,6 +7,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import { teamVerifyCommandGET, teamVerifyCommandPUT } from '../teamVerifyCommand'
@@ -41,6 +42,10 @@ describe('team verify command API', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    getDb()
+      .insert(teams)
+      .values({ id: 'team-1', name: 'Team', icon: 'x', color: '#000', createdAt: 1, updatedAt: 1 })
+      .run()
   })
   afterEach(async () => {
     resetDb()
@@ -71,5 +76,12 @@ describe('team verify command API', () => {
       expect(r.status()).toBe(400)
     }
     expect(readTeamVerifyCommand(getDb(), 'team-1')).toBeNull()
+  })
+
+  it('refuses a team that does not exist', () => {
+    const r = fakeRes()
+    teamVerifyCommandPUT(req('no-such-team', { command: 'pnpm test' }), r.res)
+    expect(r.status()).toBe(404)
+    expect(readTeamVerifyCommand(getDb(), 'no-such-team')).toBeNull()
   })
 })
