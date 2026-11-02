@@ -20,6 +20,7 @@
 // it and reports ONE terminal for the whole run. Verified against the SDK 0.3.268
 // types and its bundled CLI.
 
+import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -30,8 +31,10 @@ import type { ClaudeCodeDriver, ClaudeNativeEvent } from '@clawboo/adapter-claud
 import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/mcp'
 import type { StartOpts, SteerOptions } from '@clawboo/executor'
 
+import { redactValue } from '../redact'
 import { buildChildEnv } from './childEnv'
 import { CLAUDE_CODE_ISOLATION_ENV, claudeCodeIsolation } from './claudeCodeIsolation'
+import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
 // Minimal structural shapes for the SDK objects we read — deliberately decoupled
@@ -81,6 +84,71 @@ export interface SdkModule {
 export interface ClaudeCodeDriverDeps {
   /** Test seam: a scripted SDK in place of the lazily imported real one. */
   loadSdk?: () => Promise<SdkModule>
+}
+
+/** What the SDK passes `spawnClaudeCodeProcess` (its `SpawnOptions`). */
+export interface SdkSpawnOptions {
+  command: string
+  args: string[]
+  cwd?: string
+  env: Record<string, string | undefined>
+  /** The SDK's forwarded abort: it fires only after the CLI was given stdin EOF
+   *  and a short grace to shut down by itself. */
+  signal?: AbortSignal
+}
+
+/**
+ * Spawn the Claude Code CLI as a runtime child this engine knows about.
+ *
+ * By default the SDK spawns the CLI itself and never exposes the pid, so a
+ * Claude Code run was invisible to both the shutdown reap and the durable pid
+ * record: an engine that died hard left it running. `spawnClaudeCodeProcess` is
+ * the SDK's documented hook for supplying the process, so the driver supplies
+ * one and registers it like every other runtime child.
+ *
+ * The options are the SDK's own default spawn's: piped stdio, its forwarded
+ * abort signal, a hidden window, and NOT detached. The CLI stays in the
+ * engine's process group, as before, so a signal to that group (a terminal
+ * Ctrl-C, the desktop app stopping the engine) still reaches it.
+ *
+ * The SDK reads only stdin and stdout from a process it did not spawn, so stderr
+ * is drained here into `onStderr`. Left unread, the pipe would fill and stall
+ * the CLI.
+ */
+export function spawnTrackedClaudeProcess(
+  opts: SdkSpawnOptions,
+  onStderr: (chunk: string) => void,
+): ChildProcess {
+  const child = spawn(opts.command, opts.args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  })
+  registerRuntimeChild(child)
+  child.once('close', () => unregisterRuntimeChild(child))
+  child.stderr?.setEncoding('utf8')
+  child.stderr?.on('data', (chunk: string) => onStderr(chunk))
+  return child
+}
+
+/** How much of the CLI's stderr an exit error carries (the SDK's own limit). */
+const STDERR_TAIL_CHARS = 2048
+
+/**
+ * Put the CLI's stderr back on an exit error.
+ *
+ * The SDK appends it only for a process it spawned itself, and for a run that
+ * fails at startup (a bad key, a broken install) it is the only diagnostic
+ * there is. Redacted, as the SDK redacts its own, because stderr can echo a
+ * credential.
+ */
+export function withStderrTail(message: string, stderrTail: string): string {
+  const tail = stderrTail.trim()
+  if (!tail || message.includes('stderr:')) return message
+  if (!/Claude Code process (?:exited with code|terminated by signal)/.test(message)) return message
+  return `${message}. stderr: ${String(redactValue(tail))}`
 }
 
 /** The prompt of a streaming-input query: messages pushed in order, read by the
@@ -318,6 +386,8 @@ export function createClaudeCodeDriver(
   let started = false
   const abort = new AbortController()
   const input = createInputStream()
+  /** The end of the CLI's stderr, for an exit error (see `withStderrTail`). */
+  let stderrTail = ''
   /** Set once the run's single terminal has been pushed. */
   let finished = false
   /** Steers pushed and not yet seen consumed, by uuid -> settle. */
@@ -393,6 +463,12 @@ export function createClaudeCodeDriver(
       // etc. When the key is absent (Keychain/OAuth user), apiKeyEnv is empty and the
       // SDK falls back to the logged-in CLI's own auth (not env-based).
       options['env'] = { ...buildChildEnv(ctx.apiKeyEnv ?? {}), ...CLAUDE_CODE_ISOLATION_ENV }
+      // Spawn the CLI ourselves so its pid is known: shutdown reaps it, and the
+      // next boot reaps it if this engine dies without one.
+      options['spawnClaudeCodeProcess'] = (spawnOpts: SdkSpawnOptions) =>
+        spawnTrackedClaudeProcess(spawnOpts, (chunk) => {
+          stderrTail = (stderrTail + chunk).slice(-STDERR_TAIL_CHARS)
+        })
       for await (const msg of mod.query({ prompt: input.stream, options })) {
         if (finished) break
         if (msg.type === 'assistant') noteConsumed(msg)
@@ -445,7 +521,7 @@ export function createClaudeCodeDriver(
         type: 'result',
         ok: false,
         summary: '',
-        errorMessage: err instanceof Error ? err.message : String(err),
+        errorMessage: withStderrTail(err instanceof Error ? err.message : String(err), stderrTail),
       })
     }
   }

@@ -25,6 +25,7 @@ import { carriesAttachToken, redactAttachCredentials } from './api/mcp'
 import { attachIdentity } from './lib/auth'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
+import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
@@ -402,6 +403,29 @@ async function main() {
   } catch (err) {
     log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
   }
+
+  // ── Orphaned runtime children ───────────────────────────────────────────────
+  // An agent run outlives an engine that dies hard: a crash, a force-quit from
+  // the desktop app or an update restart runs no shutdown hook, and most runtime
+  // children are their own process group, so they keep running. Reconciliation
+  // below would then hand their tasks to new runs while the old ones still edit
+  // the same worktrees. So the children of every engine that is gone are killed
+  // FIRST, and only then does this engine start recording its own (nothing has
+  // been able to spawn one yet). An engine still running on this state dir keeps
+  // its runs.
+  safeStart('runtime-reap', () => {
+    const report = reapOrphanedRuntimeChildren()
+    if (report.killed > 0 || report.expired > 0) {
+      log.info(report, 'Runtimes: reaped agent processes left by a previous engine')
+    }
+    if (report.unverified > 0) {
+      log.warn(
+        report,
+        'Runtimes: left processes from a previous engine running; this host could not confirm they are ours',
+      )
+    }
+  })
+  safeStart('runtime-pid-record', () => startRuntimePidRecord())
 
   // ── Durable board: orphan reconciliation ────────────────────────────────────
   // Liveness-aware: only a `running` execution that has STOPPED heartbeating
