@@ -337,7 +337,7 @@ How long a run may go without producing any event before Clawboo stops it. Every
 - Default: `600000` (10 minutes)
 - Example: `CLAWBOO_HOME_MUTEX_ACQUIRE_MS=900000`
 
-How long a run waits for the same agent's previous run to finish before it gives up. It bounds the wait, never the run.
+How long a run waits for the same agent's previous run to finish before it gives up. It bounds the wait, never the run. Time the computer spends asleep does not count.
 
 ### CLAWBOO_MAX_FIX_CYCLES
 
@@ -447,7 +447,7 @@ At most this many agent browsers run at once; each takes roughly 400 MB. A brows
 - Default: `600000` (10 minutes)
 - Example: `CLAWBOO_AGENT_BROWSER_IDLE_MS=300000`
 
-An agent browser nobody has used for this long is closed.
+An agent browser nobody has used for this long is closed. Time the computer spends asleep does not count.
 
 ### CLAWBOO_OPENCLAW_CDP_PORT
 

@@ -9,7 +9,7 @@ This page lists every number Clawboo builds in that changes what you see: caps, 
 
 Some limits apply to only one of the two ways work runs. **Team chat** covers every chat turn, delegated task and team Routine. **Task runner** covers agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started with `POST /api/runtimes/:id/run`. [How a team works](/intro/how-it-works) explains both.
 
-Limits on running work count only the time the computer is awake. When a laptop sleeps, Clawboo sees the gap when it wakes and leaves it out, so closing the lid does not use up a delegated task's quiet time, a run's 30 minutes of silence, a running task's heartbeat window or an OpenClaw Routine run's 10 minutes. Clawboo notices a sleep only as a gap of more than two of its own checks, a minute or two depending on the limit, so a shorter sleep still counts against the limit, and a longer stall of the server while the computer stays awake is left out as if it were sleep. Approval windows count clock time, asleep or not.
+Limits on running work count only the time the computer is awake. When a laptop sleeps, Clawboo sees the gap when it wakes and leaves it out, so closing the lid does not use up a delegated task's quiet time, a run's 30 minutes of silence, a running task's heartbeat window, an OpenClaw Routine run's 10 minutes, the wait for an agent's previous run, the verify command's 10 minutes, an approved command's 5 minutes or an agent browser's idle time. Clawboo notices a sleep only as a gap of more than two of its own checks, a minute or two depending on the limit, so a shorter sleep still counts against the limit, and a longer stall of the server while the computer stays awake is left out as if it were sleep. Approval windows count clock time, asleep or not.
 
 | Area                                              | What it covers                                                  |
 | ------------------------------------------------- | --------------------------------------------------------------- |
@@ -66,8 +66,8 @@ Checks run only for task-runner work in a git worktree with changes; [How work i
 | Limit                                                | Value                                                       | Change it                | Source                                                     |
 | ---------------------------------------------------- | ----------------------------------------------------------- | ------------------------ | ---------------------------------------------------------- |
 | Attempts before a failing task goes to **Needs you** | 2 (one fix cycle)                                           | `CLAWBOO_MAX_FIX_CYCLES` | `apps/web/server/lib/verification/index.ts:109`            |
-| Time limit for the verify command                    | 10 minutes                                                  | No                       | `apps/web/server/lib/verification/deterministicGate.ts:36` |
-| Command output kept as evidence                      | The last 4,000 characters                                   | No                       | `apps/web/server/lib/verification/deterministicGate.ts:37` |
+| Time limit for the verify command                    | 10 minutes                                                  | No                       | `apps/web/server/lib/verification/deterministicGate.ts:37` |
+| Command output kept as evidence                      | The last 4,000 characters                                   | No                       | `apps/web/server/lib/verification/deterministicGate.ts:38` |
 | A reviewer also checks the work when                 | It was delegated, or changes over 5 files or over 300 lines | No                       | `packages/governance/src/verify/criticTrigger.ts:21-30`    |
 | Length of a team verify command                      | 2,000 characters, one line                                  | No                       | `apps/web/server/api/teamVerifyCommand.ts:19`              |
 
@@ -85,7 +85,7 @@ Checks run only for task-runner work in a git worktree with changes; [How work i
 | Wait for a reply to reach a running task before it reads as queued             | 2.5 seconds                                  | No                                        | `apps/web/server/lib/teamChat/personReply.ts:81`      |
 | Room name length                                                               | 80 characters                                | No                                        | `packages/db/src/board/rooms.ts:24`                   |
 | Worktree cleanup at startup                                                    | Older than 72 hours, or beyond the newest 25 | No                                        | `packages/worktrees/src/lifecycle.ts:60-61`           |
-| Time limit for each git command                                                | 60 seconds                                   | No                                        | `packages/worktrees/src/git.ts:16`                    |
+| Time limit for each git command                                                | 60 seconds                                   | No                                        | `packages/worktrees/src/git.ts:18`                    |
 | Routines: how far ahead the scheduler sleeps at most                           | 60 seconds                                   | No                                        | `apps/web/server/lib/routines/ticker.ts:32`           |
 | Routines: wait for an OpenClaw agent's run                                     | 10 minutes                                   | `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`     | `apps/web/server/lib/routines/openclawDispatch.ts:46` |
 
@@ -139,9 +139,9 @@ A budget set to hard cap pauses work at 100% of its limit; the default mode only
 
 | Limit                                     | Value                                | Change it                       | Source                                               |
 | ----------------------------------------- | ------------------------------------ | ------------------------------- | ---------------------------------------------------- |
-| Agent browsers open at once               | 4                                    | `CLAWBOO_MAX_AGENT_BROWSERS`    | `apps/web/server/lib/connectors/agentBrowsers.ts:59` |
-| Idle time before an agent browser closes  | 10 minutes                           | `CLAWBOO_AGENT_BROWSER_IDLE_MS` | `apps/web/server/lib/connectors/agentBrowsers.ts:62` |
-| Wait for a free browser when all are busy | 60 seconds                           | No                              | `apps/web/server/lib/connectors/agentBrowsers.ts:65` |
+| Agent browsers open at once               | 4                                    | `CLAWBOO_MAX_AGENT_BROWSERS`    | `apps/web/server/lib/connectors/agentBrowsers.ts:61` |
+| Idle time before an agent browser closes  | 10 minutes                           | `CLAWBOO_AGENT_BROWSER_IDLE_MS` | `apps/web/server/lib/connectors/agentBrowsers.ts:66` |
+| Wait for a free browser when all are busy | 60 seconds                           | No                              | `apps/web/server/lib/connectors/agentBrowsers.ts:69` |
 | Saved browser screenshots kept in memory  | 24 MiB in total; the oldest go first | No                              | `apps/web/server/lib/screenshotBus.ts:49`            |
 
 ## Network and HTTP
