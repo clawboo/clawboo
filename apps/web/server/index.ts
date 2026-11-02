@@ -334,10 +334,9 @@ async function main() {
     next()
   })
 
-  // Identity middleware — the single SaaS-readiness chokepoint. No-op pass-through
-  // today (populates req.tenantId / req.userId with the single implicit tenant, both
-  // null); the place a future hosted build verifies the request identity. Runs after
-  // the access gate so unauthenticated requests are rejected before identity work.
+  // Identity middleware. A pass-through: it sets req.tenantId and req.userId to
+  // the single implicit tenant and user (both null). Runs after the access gate,
+  // so unauthenticated requests are rejected before it.
   app.use(attachIdentity)
 
   // Per-request logging

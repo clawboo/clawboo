@@ -151,8 +151,8 @@ function CommandApprovalDefault() {
       </div>
       <p className="mt-2 text-[12px] leading-relaxed text-foreground/45">{selected.description}</p>
       <p className="mt-2 text-[12px] leading-relaxed text-foreground/40">
-        Default for all agents — individual agents can override this in their settings (Personality
-        tab → Execution Permissions).
+        Default for all OpenClaw agents. To change one agent, open its page and go to Details &gt;
+        Permissions.
       </p>
     </SectionCard>
   )

@@ -48,6 +48,26 @@ export function sessionTargetFor(payload: unknown): 'main' | 'isolated' {
   return kind === 'systemEvent' ? 'main' : 'isolated'
 }
 
+/**
+ * Whether the Gateway answered that no cron job has this id.
+ *
+ * OpenClaw 2026.9 answers an unknown id with `details.code: CRON_JOB_NOT_FOUND`
+ * on an INVALID_REQUEST error. The message forms cover a job removed between the
+ * Gateway's own check and its write, which it reports as "unknown cron job id".
+ */
+export function isUnknownCronJob(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const details = (err as { details?: unknown }).details
+  if (
+    details &&
+    typeof details === 'object' &&
+    (details as { code?: unknown }).code === 'CRON_JOB_NOT_FOUND'
+  ) {
+    return true
+  }
+  return /\b(cron job not found|automation not found|unknown cron job id)\b/i.test(err.message)
+}
+
 /** The operator slice this source needs (the OpenClawAgentSource satisfies it). */
 export interface OperatorCronClientLike {
   isConnected(): boolean
@@ -202,7 +222,7 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
       }
       case 'update': {
         const id = this.rawId(action.id)
-        await this.client.operatorCall('cron.update', {
+        await this.callFor(action.id, 'cron.update', {
           id,
           patch: {
             ...(action.patch.label !== undefined ? { name: action.patch.label } : {}),
@@ -223,21 +243,31 @@ export class OpenClawGatewayCronScheduleSource implements ScheduleSource {
       case 'resume': {
         const id = this.rawId(action.id)
         // No separate enable/disable method: `cron.update {id, patch: {enabled}}`.
-        await this.client.operatorCall('cron.update', {
+        await this.callFor(action.id, 'cron.update', {
           id,
           patch: { enabled: action.kind === 'resume' },
         })
         return this.readBack(id)
       }
       case 'remove': {
-        await this.client.operatorCall('cron.remove', { id: this.rawId(action.id) })
+        await this.callFor(action.id, 'cron.remove', { id: this.rawId(action.id) })
         return null
       }
       case 'run': {
         // Enqueue-style: the Gateway acks; completion is polled via cron.runs.
-        await this.client.operatorCall('cron.run', { id: this.rawId(action.id), mode: 'force' })
+        await this.callFor(action.id, 'cron.run', { id: this.rawId(action.id), mode: 'force' })
         return null
       }
+    }
+  }
+
+  /** An operator call on one existing job: an unknown id is a 404, not a 500. */
+  private async callFor(scheduleId: string, method: string, params: unknown): Promise<void> {
+    try {
+      await this.client.operatorCall(method, params)
+    } catch (err) {
+      if (isUnknownCronJob(err)) throw new UnknownScheduleError(scheduleId)
+      throw err
     }
   }
 

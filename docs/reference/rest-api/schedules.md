@@ -44,15 +44,15 @@ Both sources describe their schedules in one shape. It is the element type of `s
   agentId: string            // the agent a run uses; '' for a team routine
   target?: 'team' | 'agent'  // Routines: who a run goes to
   teamId?: string | null     // Routines: the team whose chat or board receives a run
-  teamName?: string          // display names, filled in by GET /api/schedules and the occurrences
-  agentName?: string         //   route only; for a team routine, agentName (and runtime) are the lead's
+  teamName?: string          // display names, filled in wherever a schedule is returned;
+  agentName?: string         //   for a team routine, agentName (and runtime) are the lead's
   teamTaskId?: string        // only for a Routine bound to an existing board task
   label?: string
   description?: string       // Routines: the instructions each run carries
   cronSpec: string           // a cron expression, `once@<iso>`, `every:<ms>[@anchor:<ms>]` or `at:<iso>`;
                              //   a Gateway cron expression with a time zone reads `<expr>@tz:<zone>`
-  nextRunAt: number | null   // epoch ms of the next run; null when none is scheduled. A paused Routine
-                             //   keeps the value it had when paused, but does not run until resumed
+  nextRunAt: number | null   // epoch ms of the next run; null when none is scheduled, which
+                             //   includes a paused Routine
   lastRunAt?: number
   lastError?: string
   status: 'queued' | 'claimed' | 'running' | 'idle' | 'paused' | 'error'
@@ -64,7 +64,7 @@ Both sources describe their schedules in one shape. It is the element type of `s
 
 `domain` says what a schedule is for: `team-task` is team work that Clawboo schedules (Routines), and `runtime-own-life` is an OpenClaw agent's own job in the Gateway's cron. `manageability` says who owns it: `managed` means Clawboo owns and runs it, `external-write` means the Gateway owns and runs it and Clawboo changes it through the Gateway, and `observe-only` (no source uses it today) would be read-only.
 
-A team routine stores no agent (`agentId` is `''`). `GET /api/schedules` and the occurrences route fill in `teamName` and `agentName`, and for a team routine they take `agentName` and `runtime` from the team's current lead. The `schedule` in a create, change, pause or resume answer has no names, and a team routine there reads `runtime: 'unknown'`. An agent routine whose agent is gone reads `runtime: 'unknown'` everywhere.
+A team routine stores no agent (`agentId` is `''`). Every answer that returns a schedule (the list, the occurrences route, and a create, change, pause or resume) fills in `teamName` and `agentName`, and for a team routine takes `agentName` and `runtime` from the team's current lead. An agent routine whose agent is gone reads `runtime: 'unknown'`.
 
 | `source`                | `domain`           | `manageability`  | `owner`    | Backed by                                                    |
 | ----------------------- | ------------------ | ---------------- | ---------- | ------------------------------------------------------------ |
@@ -155,7 +155,7 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
 }
 ```
 
-**`400 Bad Request`**: a required field is missing, `source`, `domain` or `target` is unknown, or a source check failed. `code` is `invalid_body` for the shape check, a cron spec that does not parse, or an invalid task template; `invalid_routine_target` for a target that does not check out; and `bound_recurring_schedule` for a recurring spec bound to an existing task. Messages on this page that contain an em dash show it as the JSON escape `\u2014`:
+**`400 Bad Request`**: a required field is missing, `source`, `domain` or `target` is unknown, or a source check failed. `code` is `invalid_body` for the shape check or an invalid task template; `invalid_cron_spec` for a cron spec that does not parse; `invalid_routine_target` for a target that does not check out; and `bound_recurring_schedule` for a recurring spec bound to an existing task. Messages on this page that contain an em dash show it as the JSON escape `\u2014`:
 
 ```json
 {
@@ -165,7 +165,7 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
 ```
 
 ```json
-{ "error": "Invalid cron spec \"* * *\": <detail>", "code": "invalid_body" }
+{ "error": "Invalid cron spec \"* * *\": <detail>", "code": "invalid_cron_spec" }
 ```
 
 ```json
@@ -271,11 +271,11 @@ For a Routine:
 - **A change to `target`, `agentId` or `teamId`** points the Routine somewhere else, and the new target is checked exactly as on create. A `target` inside `taskTemplate` counts as one too.
 - **A `teamTaskId` inside a template change** is ignored: a Routine binds to a board task only when it is created, where the check for another engine runs.
 
-| Action   | Allowed when the Routine is                   | Result                                                    |
-| -------- | --------------------------------------------- | --------------------------------------------------------- |
-| `pause`  | `idle`, `queued`, `error` or already `paused` | `paused`; it does not run until resumed                   |
-| `resume` | `paused`, `error` or already `idle`           | `idle`, a newly computed `nextRunAt`, `lastError` cleared |
-| either   | `claimed` or `running`                        | **409**: the run in progress settles it                   |
+| Action   | Allowed when the Routine is                   | Result                                                       |
+| -------- | --------------------------------------------- | ------------------------------------------------------------ |
+| `pause`  | `idle`, `queued`, `error` or already `paused` | `paused`, `nextRunAt` cleared; it does not run until resumed |
+| `resume` | `paused`, `error` or already `idle`           | `idle`, a newly computed `nextRunAt`, `lastError` cleared    |
+| either   | `claimed` or `running`                        | **409**: the run in progress settles it                      |
 
 Pausing a paused Routine changes nothing, and resuming an idle one only recomputes its `nextRunAt`; both answer **200**. Resuming a `queued` Routine is a **409**.
 
@@ -283,7 +283,7 @@ For a Gateway cron job:
 
 - **Pause and resume** become the Gateway's `cron.update { id, patch: { enabled } }` (the Gateway has no separate enable method).
 - **A change** becomes `cron.update { id, patch }` with the changed `label` (as the job's name), `cronSpec` and `payload`; the Routine-only fields are ignored. A changed `payload` carries the session target it needs, as on create.
-- **The job id is not checked by Clawboo.** It goes to the Gateway as is, and a Gateway error (for example an unknown job) answers **500** with the Gateway's message, not **404**. The same holds for delete and run.
+- **The job id is not checked by Clawboo.** It goes to the Gateway as is. When the Gateway has no job with that id, the answer is **404** `unknown_schedule`; any other Gateway error answers **500** with the Gateway's message. The same holds for delete and run.
 
 - **Path params**: `id` (composite schedule id).
 - **Request body**: one of:
@@ -318,14 +318,14 @@ For a Gateway cron job:
 }
 ```
 
-**`400 Bad Request`**: the body is neither a valid `action` nor a `patch` object, a changed `cronSpec` does not parse, the template is invalid, or a changed target does not check out (`invalid_routine_target`):
+**`400 Bad Request`**: the body is neither a valid `action` nor a `patch` object, a changed `cronSpec` does not parse (`invalid_cron_spec`), the template is invalid, or a changed target does not check out (`invalid_routine_target`):
 
 ```json
 { "error": "body needs { action: 'pause' | 'resume' } or { patch }", "code": "invalid_body" }
 ```
 
 ```json
-{ "error": "Invalid cron spec \"0 99 * * *\": <detail>", "code": "invalid_body" }
+{ "error": "Invalid cron spec \"0 99 * * *\": <detail>", "code": "invalid_cron_spec" }
 ```
 
 **`403 Forbidden`**: the target source is `observe-only`:
@@ -337,7 +337,7 @@ For a Gateway cron job:
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine that does not exist (an unknown Gateway job id is a **500**, see above):
+**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
@@ -406,7 +406,7 @@ Removes a schedule: a Routine is deleted from Clawboo's database, and a Gateway 
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine that does not exist (an unknown Gateway job id is a **500**, see PATCH):
+**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
@@ -456,7 +456,7 @@ Runs a schedule now. The answer only says the run was queued; it does not wait f
 }
 ```
 
-**`404 Not Found`**: `:id` matches no source, or names a Routine that does not exist (an unknown Gateway job id is a **500**, see PATCH):
+**`404 Not Found`**: `:id` matches no source, or names a Routine or Gateway job that does not exist:
 
 ```json
 { "error": "Unknown schedule \"<id>\"", "code": "unknown_schedule" }
@@ -605,21 +605,22 @@ curl 'http://localhost:18790/api/schedules/occurrences?bounds=1791777600000,1791
 
 Every error here is `{ "error": string, "code"?: string }`. Branch on `code`, never on the message:
 
-| `code`                        | Status | Meaning                                                                                   |
-| ----------------------------- | ------ | ----------------------------------------------------------------------------------------- |
-| `invalid_body`                | 400    | The body failed the shape check, the cron spec does not parse, or the template is invalid |
-| `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing board task (one-shot specs only)                |
-| `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match                         |
-| `invalid_bounds`              | 400    | The occurrence windows are missing, out of order, too many, or too wide                   |
-| `unsupported_schedule_write`  | 403    | The source is read-only (`observe-only`) for that action                                  |
-| `unknown_schedule`            | 404    | The composite id matched no source or no Routine, or a bound task does not exist          |
-| `duplicate_firing_owner`      | 409    | The bound board task is already scheduled by another engine; do not retry                 |
-| `illegal_schedule_transition` | 409    | The pause, resume or run is not allowed from the current status                           |
-| `team_task_domain_violation`  | 422    | A `team-task` create was aimed at the Gateway cron                                        |
-| `schedule_source_unavailable` | 503    | A write hit the Gateway cron while Clawboo's Gateway connection is down                   |
-| _(none)_                      | 500    | Any other error                                                                           |
+| `code`                        | Status | Meaning                                                                          |
+| ----------------------------- | ------ | -------------------------------------------------------------------------------- |
+| `invalid_body`                | 400    | The body failed the shape check, or the template is invalid                      |
+| `invalid_cron_spec`           | 400    | The cron spec does not parse                                                     |
+| `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing board task (one-shot specs only)       |
+| `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match                |
+| `invalid_bounds`              | 400    | The occurrence windows are missing, out of order, too many, or too wide          |
+| `unsupported_schedule_write`  | 403    | The source is read-only (`observe-only`) for that action                         |
+| `unknown_schedule`            | 404    | The id matched no source, Routine or Gateway job, or a bound task does not exist |
+| `duplicate_firing_owner`      | 409    | The bound board task is already scheduled by another engine; do not retry        |
+| `illegal_schedule_transition` | 409    | The pause, resume or run is not allowed from the current status                  |
+| `team_task_domain_violation`  | 422    | A `team-task` create was aimed at the Gateway cron                               |
+| `schedule_source_unavailable` | 503    | A write hit the Gateway cron while Clawboo's Gateway connection is down          |
+| _(none)_                      | 500    | Any other error                                                                  |
 
-A cron spec that does not parse answers `code: "invalid_body"` with a message that starts `Invalid cron spec`. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
+A cron spec that does not parse answers `code: "invalid_cron_spec"` with a message that starts `Invalid cron spec`. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
 
 **Source of truth:** `apps/web/server/api/schedules.ts`; the two sources in `apps/web/server/lib/scheduleSource/`; error classes in `packages/scheduler/src/errors.ts`; Routine states in `packages/db/src/routines/state-machine.ts`.
 

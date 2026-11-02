@@ -28,12 +28,12 @@ You can also start from a runtime: on the **Runtimes** page, open a runtime's di
 
 Rows are grouped by runtime, in this order: Clawboo Native, OpenClaw, Claude Code, Codex, Hermes. When more than one runtime has rows, pills above the list (**All runtimes**, then one per runtime) narrow it to one group. Each row's icon shows its kind: a puzzle piece for a skill, a wrench for a tool, a plug for a connector.
 
-| Pill             | Meaning                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------ |
-| **Ready**        | Available and on                                                                           |
-| **Disabled**     | Available but switched off                                                                 |
-| **Pending auth** | Listed but waiting on a sign-in. Only Codex rows show it, and they cannot be switched here |
-| **Unavailable**  | Something it needs is missing, such as a key. The row is greyed out                        |
+| Pill             | Meaning                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| **Ready**        | Available and on                                                           |
+| **Disabled**     | Available but switched off                                                 |
+| **Pending auth** | Waiting on a sign-in. Only Codex rows show it, until you run `codex login` |
+| **Unavailable**  | Something it needs is missing, such as a key. The row is greyed out        |
 
 A row with no button reads **built-in, managed by** and the runtime's name: Clawboo can read it but not change it.
 
@@ -44,7 +44,7 @@ A row with no button reads **built-in, managed by** and the runtime's name: Claw
 | Clawboo Native | Clawboo's own built-in tools; for each Clawboo Native agent, its **memory MCP**, **tasks MCP** and **tools MCP** servers; every connector you connected, and each app reached through Composio | The built-in tools and the per-agent servers, yes. Connectors, no: use [Connectors](/using/connectors) or the graph |
 | OpenClaw       | The tools on the OpenClaw Gateway's allow and deny lists, the Gateway's MCP servers and plugins, the Clawboo servers registered there, and one **Built-in tools** row                          | Only the Gateway's tools, and only while the Gateway is connected                                                   |
 | Claude Code    | The four Clawboo servers attached to every Claude Code run, and one **Built-in tools** row                                                                                                     | No                                                                                                                  |
-| Codex          | The same four servers, marked **Pending auth**, and one **Built-in tools** row                                                                                                                 | No                                                                                                                  |
+| Codex          | The same four servers, **Ready** once Codex is signed in and **Pending auth** before, and one **Built-in tools** row                                                                           | No                                                                                                                  |
 | Hermes         | The skills each Hermes agent wrote for itself, the servers Clawboo attaches to its runs, and one **Built-in tools** row                                                                        | No                                                                                                                  |
 
 Skills you add to an agent are listed in the group of that agent's runtime. The panel does not say which agent a per-agent row belongs to; to see or change one agent's skills and connectors, open its ring on the [Org chart](/using/org-chart) or its page.
@@ -100,12 +100,12 @@ Hermes is the exception in this list: the skills under the Hermes group are skil
 
 Every row has a manageability tier that decides whether Clawboo may change it:
 
-| Tier                        | Who owns it                                                             | Switch in the panel                                                     |
-| --------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Managed                     | Clawboo (its built-in tools, the per-agent servers, skills)             | Yes                                                                     |
-| Written through the runtime | The runtime's own files, which Clawboo would edit on its behalf (Codex) | No: Clawboo makes no Codex changes, so these rows stay **Pending auth** |
-| Runtime of record           | The runtime, which Clawboo asks to make the change (OpenClaw)           | Only where Clawboo can make that request: the Gateway's tools           |
-| Observe only                | The runtime or a running connector                                      | Never                                                                   |
+| Tier                        | Who owns it                                                             | Switch in the panel                                           |
+| --------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Managed                     | Clawboo (its built-in tools, the per-agent servers, skills)             | Yes                                                           |
+| Written through the runtime | The runtime's own files, which Clawboo would edit on its behalf (Codex) | No: Clawboo makes no Codex changes                            |
+| Runtime of record           | The runtime, which Clawboo asks to make the change (OpenClaw)           | Only where Clawboo can make that request: the Gateway's tools |
+| Observe only                | The runtime or a running connector                                      | Never                                                         |
 
 The panel reads `GET /api/capabilities` and switches rows with `POST /api/capabilities/enable` or `/disable`, which refuse a row its tier forbids with `422`. When a runtime cannot be read, the server serves the rows it last read for it. The model behind the tiers is in [Capabilities](/concepts/capabilities), and the request shapes are in the [capabilities API reference](/reference/rest-api/capabilities).
 
@@ -123,7 +123,7 @@ Something the capability needs is missing, such as an API key or a setting. Prov
 
 <Accordion title="Codex rows read Pending auth and Enable is greyed out">
 
-Clawboo lists Codex's servers so you can see them, but it makes no changes to Codex. The button's hint suggests running `codex login`; signing in does not change these rows.
+Codex is not signed in. Run `codex login` in a terminal, then press **Refresh**: the rows read **Ready**. Clawboo attaches these servers to every Codex run, so a ready row has no button.
 
 </Accordion>
 

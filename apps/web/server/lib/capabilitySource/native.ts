@@ -27,6 +27,7 @@ import {
   setToolEnabled,
   skills,
   type ClawbooDb,
+  type InjectionFinding,
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
@@ -35,6 +36,15 @@ import { loadAgentConfigOrDefault, saveAgentConfig } from '../runtimes/native/ag
 import { buildRecord, okStatus } from './helpers'
 
 const NATIVE_MCP_SERVERS = ['memory', 'tasks', 'tools'] as const
+
+/** An install the injection scan refused (REST 422, with what it found). */
+export class CapabilityInstallBlockedError extends Error {
+  readonly code = 'capability_blocked' as const
+  constructor(readonly findings: InjectionFinding[]) {
+    super('capability blocked: injection / supply-chain finding')
+    this.name = 'CapabilityInstallBlockedError'
+  }
+}
 
 function slugify(s: string): string {
   return s
@@ -249,7 +259,7 @@ export class NativeCapabilitySource implements CapabilitySource {
           findings: injectionAuditSummary([...prose.block, ...spawn.block]),
         },
       })
-      throw new Error('capability blocked: injection / supply-chain finding')
+      throw new CapabilityInstallBlockedError([...prose.block, ...spawn.block])
     }
     const skillId = `cap:${slugify(spec.name)}`
     const existing = db.select().from(skills).where(eq(skills.id, skillId)).get()

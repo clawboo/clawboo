@@ -58,7 +58,7 @@ With no OpenClaw Gateway connected, each row reads **OpenClaw unavailable · usi
 
 <Step title="Meet your team and introduce yourself">
 
-On the **Meet your team** card, click **Get Started**. Then write a few lines about you and the work: your company, your audience, the voice you want, and what you need help with. Click **Continue to Team Space**.
+On the **Meet your team** card, click **Get Started**. Then write a few lines about you and the work: your company, your audience, the voice you want, and what you need help with. Click **Continue to team chat**.
 
 You should see the **General** chat, with the **Team graph** and **Tasks** cards beside it. Your introduction is saved with the team and goes into every turn its agents take.
 

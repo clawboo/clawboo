@@ -118,10 +118,18 @@ export async function execAllowlistRevokePOST(req: Request, res: Response): Prom
     }
 
     const source = getRegistry().source
-    const outcome = await revokeExecAllowlistEntries(
-      { call: (method, params) => source.operatorCall(method, params) },
-      { agentId: row.sourceAgentId, keys: parsed.keys },
-    )
+    let outcome: Awaited<ReturnType<typeof revokeExecAllowlistEntries>>
+    try {
+      outcome = await revokeExecAllowlistEntries(
+        { call: (method, params) => source.operatorCall(method, params) },
+        { agentId: row.sourceAgentId, keys: parsed.keys },
+      )
+    } catch (err) {
+      // The Gateway's own words, passed through. An operator retrying forever
+      // against a permanent refusal is the cost of a generic message here.
+      res.status(502).json({ state: 'failed', error: redactValue(String(err)) })
+      return
+    }
 
     // EVERY OUTCOME GETS ITS OWN STATUS. A bare `ok` would let the panel show a
     // checkmark for work the Gateway did not do, which is the failure this whole
@@ -150,8 +158,7 @@ export async function execAllowlistRevokePOST(req: Request, res: Response): Prom
         return
     }
   } catch (err) {
-    // The Gateway's own words, passed through. An operator retrying forever
-    // against a permanent refusal is the cost of a generic message here.
-    res.status(502).json({ state: 'failed', error: redactValue(String(err)) })
+    // Only the Gateway call above is a 502; anything else failed here.
+    res.status(500).json({ error: redactValue(String(err)) })
   }
 }

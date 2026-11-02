@@ -846,6 +846,12 @@ The route tries each browser connector Clawboo runs (Playwright's `browser_take_
 { "ok": false, "error": "agentId is required" }
 ```
 
+**`500 Internal Server Error`**: the capture itself failed. The message is redacted:
+
+```json
+{ "ok": false, "error": "<message>" }
+```
+
 ### Example
 
 ```bash

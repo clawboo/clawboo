@@ -83,8 +83,25 @@ describe('providerKeys', () => {
     const st = providerStatus()
     const anthropic = st.find((p) => p.id === 'anthropic')
     expect(anthropic?.connected).toBe(true)
-    expect(anthropic?.poweredRuntimes).toEqual(['Clawboo Native', 'Claude Code', 'OpenClaw'])
+    expect(anthropic?.poweredRuntimes).toEqual([
+      'Claude Code',
+      'Hermes',
+      'Clawboo Native',
+      'OpenClaw',
+    ])
     expect(st.find((p) => p.id === 'xai')?.connected).toBe(false)
+  })
+
+  it('poweredRuntimes follows the env vars each runtime reads', () => {
+    const powered = (id: string) => providerStatus().find((p) => p.id === id)?.poweredRuntimes
+    // Clawboo Native drives Google, xAI and the rest directly, not only the big three.
+    expect(powered('google')).toEqual(['Clawboo Native', 'OpenClaw'])
+    expect(powered('xai')).toEqual(['Clawboo Native', 'OpenClaw'])
+    // Hermes reads OpenAI and Anthropic keys as well as OpenRouter.
+    expect(powered('openai')).toEqual(['Hermes', 'Clawboo Native', 'OpenClaw'])
+    expect(powered('openrouter')).toEqual(['Hermes', 'Clawboo Native', 'OpenClaw'])
+    // A provider only OpenClaw reads.
+    expect(powered('minimax')).toEqual(['OpenClaw'])
   })
 
   it('status is connected when only the OpenClaw .env has the key (vault empty)', () => {

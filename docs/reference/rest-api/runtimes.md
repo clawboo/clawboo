@@ -133,7 +133,7 @@ The status fields:
 | `authKind: 'oauth'` (Codex)      | `ready` when `loggedIn`, else `needs-login`                                            |
 | `authKind: 'api-key'` (the rest) | `ready` when `hasCredential` (Clawboo Native: or `ollamaConnected`), else `needs-auth` |
 
-With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, `runtimes[]` also lists a `clawboo-mock` fault-injection runtime for development. It is not in `available[]`, and the `:id` routes answer **404** for it.
+With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, `runtimes[]` also lists a `clawboo-mock` fault-injection runtime for development. It is not in `available[]`. `POST /api/runtimes/clawboo-mock/run` runs a task on it; the other `:id` routes answer **404** for it.
 
 **`500 Internal Server Error`**: a failure building an adapter or probing health:
 
@@ -252,7 +252,7 @@ How Clawboo Native maps `provider` to a vault slot:
 | `moonshot`         | `MOONSHOT_API_KEY`   |
 | `ollama`           | none (keyless)       |
 
-Any other value falls back to `ANTHROPIC_API_KEY`. That includes `minimax`, `nvidia`, `huggingface` and `venice`, which the Providers routes accept but Clawboo Native cannot run on, so check the spelling before you send a key.
+Any other value is refused with **400** and nothing is stored. That includes `minimax`, `nvidia`, `huggingface` and `venice`, which the Providers routes accept but Clawboo Native cannot run on.
 
 **Key reuse.** A Clawboo Native request with a `provider` and no `apiKey` reconnects with a key that already resolves for that provider, from the server's environment, the vault or `~/.openclaw/.env`. Nothing is stored. The dashboard's **Use** button on a provider row (in **Settings > Runtimes**, under Clawboo Native's **Manage**) sends this request after it checks the stored key with `POST /api/runtimes/clawboo-native/healthcheck`.
 
@@ -284,6 +284,12 @@ Any other value falls back to `ANTHROPIC_API_KEY`. That includes `minimax`, `nvi
 
 ```json
 { "error": "no existing key found for openai \u2014 paste one to connect" }
+```
+
+**`400 Bad Request`** (Clawboo Native): `provider` names a provider Clawboo Native cannot run on:
+
+```json
+{ "error": "unknown provider 'minimax'" }
 ```
 
 ### Example
@@ -695,12 +701,12 @@ Every provider and whether it has a key:
   providers: Array<{
     id: string // one of the 14 ids above, in that order
     connected: boolean // a key is in the vault or in ~/.openclaw/.env (a shell variable alone does not count)
-    poweredRuntimes: string[] // a fixed display list per provider, e.g. ["Clawboo Native", "Claude Code", "OpenClaw"] for anthropic
+    poweredRuntimes: string[] // the runtimes that read this key, e.g. ["Claude Code", "Hermes", "Clawboo Native", "OpenClaw"] for anthropic
   }>
 }
 ```
 
-`poweredRuntimes` is a fixed label list, not a live check: `Clawboo Native` for `anthropic`, `openai` and `openrouter`, `Claude Code` for `anthropic`, `Hermes` for `openrouter`, and `OpenClaw` for every provider. Clawboo Native also runs on the other keyed providers in the connect table, and Hermes also reads an Anthropic or OpenAI key, even though the list leaves them out.
+`poweredRuntimes` names every runtime that reads this provider's key: a runtime is listed when the key's variable is one it reads (the variables in the disconnect table above), and `OpenClaw` is listed for every provider. It says which runtimes can use the key, not that they are installed or connected.
 
 ### `POST /api/providers/:id/connect`
 

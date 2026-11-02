@@ -113,7 +113,7 @@ The **Create a team** window opens by itself. If you close it, **Browse teams** 
 
 <Step title="Introduce yourself">
 
-Click **Open my dashboard**. Your team's chat, **General**, opens on a one-time introduction screen. Write a line about who you are and what you're working on (at least 5 characters), then click **Continue to Team Space**. Clawboo saves it to the team's context.
+Click **Open my dashboard**. Your team's chat, **General**, opens on a one-time introduction screen. Write a line about who you are and what you're working on (at least 5 characters), then click **Continue to team chat**. Clawboo saves it to the team's context.
 
 **You should see** the team chat, with your introduction and a short acknowledgement from Boo Zero. The first time, a tour may offer to show you around; **Skip tour** closes it.
 

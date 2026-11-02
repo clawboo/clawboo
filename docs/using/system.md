@@ -132,7 +132,7 @@ Pick an option from the **Default:** list. You should see "Default command appro
 
 This is a fallback, not an override. Every OpenClaw agent Clawboo creates gets its own setting, **Ask for Unknown**, and follows that instead. So the default mostly affects OpenClaw agents created outside Clawboo. When `openclaw.json` sets no default, the list shows **Run Freely**, which is also what OpenClaw does for an agent with no setting.
 
-To change one agent, open its page and go to **Details** > **Permissions**; the hint under the list mentions a Personality tab, but the setting is on **Permissions**. [Command permissions](/using/command-permissions) covers per-agent settings and the commands an agent may run without asking. The default does not affect Clawboo Native, Claude Code, Codex or Hermes agents; [What agents can do](/concepts/permissions) explains what they may run.
+To change one agent, open its page and go to **Details** > **Permissions**. [Command permissions](/using/command-permissions) covers per-agent settings and the commands an agent may run without asking. The default does not affect Clawboo Native, Claude Code, Codex or Hermes agents; [What agents can do](/concepts/permissions) explains what they may run.
 
 ## Backups and logs
 

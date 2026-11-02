@@ -1,11 +1,11 @@
 ---
 title: 'Observability API'
 sidebarTitle: 'Observability'
-description: 'REST reference for the event log: the feed, traces, errors, agent health, the task graph, a live stream, event ingest, and the eval smoke run.'
+description: 'REST reference for the event log: the feed, traces, errors, agent health, the task graph, a live stream, and the eval smoke run.'
 keywords: ['observability', 'events', 'traces', 'event log', 'sse', 'fleet health', 'evals']
 ---
 
-These routes read the server's event log, the durable record of what happened on the board and in runs: tasks created and claimed, status changes, runs, tool calls, costs, approvals and errors. They return the raw feed, one trace with its totals, the error feed, each agent's health, the task-delegation graph, and a live stream; one route accepts events from outside processes. `POST /api/eval/smoke` runs the built-in eval suite. The fleet summary (`GET /api/fleet/summary`) is on the [Costs API](/reference/rest-api/costs) page.
+These routes read the server's event log, the durable record of what happened on the board and in runs: tasks created and claimed, status changes, runs, tool calls, costs, approvals and errors. They return the raw feed, one trace with its totals, the error feed, each agent's health, the task-delegation graph, and a live stream. They only read: every event is written by the server itself, and no route adds events from outside. `POST /api/eval/smoke` runs the built-in eval suite. The fleet summary (`GET /api/fleet/summary`) is on the [Costs API](/reference/rest-api/costs) page.
 
 Observability is always on: there is no switch, and every route here answers. A trace is all events that share a `traceId`; the graph, metrics, error list and agent health are all worked out from the same rows. Every route is on the general rate tier (see [rate limits](/reference/rest-api/index#rate-limits)).
 
@@ -25,7 +25,6 @@ Every response that carries event payloads masks credential-shaped keys and valu
 | GET    | `/api/obs/health`          | Each agent's state: working, idle, stalled or zombie | No      |
 | GET    | `/api/obs/graph`           | The task and delegation graph, built from the log    | No      |
 | GET    | `/api/obs/stream`          | SSE live-tail of the log, scoped by team/task/agent  | SSE     |
-| POST   | `/api/obs/ingest`          | Add events an outside process observed to the log    | No      |
 | POST   | `/api/eval/smoke`          | Run the built-in eval smoke suite (no model calls)   | No      |
 
 ---
@@ -362,64 +361,6 @@ curl -N "http://localhost:18790/api/obs/stream?taskId=<task-uuid>&since=4187"
 
 ---
 
-## `POST /api/obs/ingest`
-
-Adds events that a process outside the server observed to the log. Nothing in the dashboard calls it: the server records its own runs' tool calls, results and errors itself. Because any process that can reach the API may call it, only five kinds are accepted: `tool_call`, `tool_result`, `error`, `grant_decision` and `connector_health`. Board events (`task_created`, `status_changed`, `execution_started` and the rest) come only from the server and are never accepted here. A malformed event is skipped without failing the batch.
-
-The first three kinds store `data` as sent (it is masked when read). For `connector_health` and `grant_decision` the server rebuilds `data` from a fixed shape and drops every other field:
-
-| Kind               | Kept fields                                                                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `connector_health` | `connectorId`, `health` (`unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`; anything else becomes `unknown`), `detail`, `failures` |
-| `grant_decision`   | `decision` (`allow`, `require_approval` or `deny`; anything else becomes `deny`), `reason`, `grantId`, `connectorId`, `toolName`, `ruleId`     |
-
-In those two kinds, `detail` is masked for secrets and cut to 200 characters, and the other text fields are masked and cut to 120.
-
-- **Path/query params**: none.
-- **Request body**:
-
-```ts
-{
-  events?: Array<{
-    kind: 'tool_call' | 'tool_result' | 'error' | 'grant_decision' | 'connector_health' // others are skipped
-    ts?: number              // must be within [now - 24h, now + 60s], else server time is used
-    teamId?: string | null
-    taskId?: string | null
-    agentId?: string | null
-    runtime?: string | null   // defaults to 'openclaw' when omitted
-    data?: Record<string, unknown>  // a non-object is stored as {}; for tool_call, tool_result and error an array is stored as sent
-  }>
-}
-```
-
-A missing or non-array `events` counts as empty. At most 200 events are taken per call; the rest are ignored. An event whose `kind` is missing or not one of the five is skipped.
-
-A `ts` more than 60 seconds ahead of the server clock, or more than 24 hours behind it, is replaced with the server's time. Agent health is worked out from `ts`, so a future timestamp would keep an agent `working` and hide a real `zombie`.
-
-### Responses
-
-**`200 OK`**: how many events were added:
-
-```json
-{ "ok": true, "count": 3 }
-```
-
-**`400 Bad Request`**: an unexpected failure while adding events (the message is masked):
-
-```json
-{ "error": "<message>" }
-```
-
-### Example
-
-```bash
-curl -X POST http://localhost:18790/api/obs/ingest \
-  -H 'Content-Type: application/json' \
-  -d '{"events":[{"kind":"tool_call","taskId":"<task-uuid>","agentId":"<agent-id>","data":{"toolName":"note"}}]}'
-```
-
----
-
 ## `POST /api/eval/smoke`
 
 Runs the smoke subset of Clawboo's built-in eval suite (`SMOKE_TASKS`) and returns its report. It calls no model, needs no provider key, starts no runtime and uses no network. Each trial runs on its own throwaway board in a temporary SQLite file, never your `clawboo.db`, and the temporary files are removed afterwards. The ablation self-test runs only in the repository's manual `evals.yml` workflow, never from this route.
@@ -480,7 +421,7 @@ curl -X POST http://localhost:18790/api/eval/smoke \
 
 ## Error envelope
 
-Most error bodies are `{ "error": "<message>" }`; on the `/api/obs/*` routes the message is masked before it is sent. Two success shapes differ from the rest: `POST /api/obs/ingest` answers `{ "ok": true, "count": n }`, and `POST /api/eval/smoke` answers the bare suite report.
+Most error bodies are `{ "error": "<message>" }`; on the `/api/obs/*` routes the message is masked before it is sent. `POST /api/eval/smoke` answers the bare suite report rather than an object around it.
 
 ## Related
 

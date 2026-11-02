@@ -205,8 +205,8 @@ function detectAuthProfileKeys(stateDir: string): Set<string> {
       } catch {
         // Skip agents without auth-profiles
       }
-      // Only need to check one agent — keys are typically shared
-      if (providers.size > 0) break
+      // Every agent, not just the first with a key: OpenClaw keeps a profile
+      // file per agent, so a key held only by a later agent is still configured.
     }
   } catch {
     // Non-fatal

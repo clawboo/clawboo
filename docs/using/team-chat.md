@@ -71,7 +71,7 @@ A **Meet your team** card shows the team's agents and says the team is led by Bo
 
 <Step title="Introduce yourself">
 
-Write a few words about who you are and what you are working on (at least 5 characters). Click **Continue to Team Space**.
+Write a few words about who you are and what you are working on (at least 5 characters). Click **Continue to team chat**.
 
 </Step>
 

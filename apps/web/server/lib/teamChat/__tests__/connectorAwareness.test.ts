@@ -40,6 +40,24 @@ describe('buildConnectorAwareness', () => {
     expect(offered).not.toMatch(/Knowledge Graph Memory/)
   })
 
+  it('never names a connector that is live but not shared with this agent', () => {
+    // Connected for the install, never given to this agent: naming it would tell
+    // the agent it can use tools it cannot see, and which apps the user connected
+    // for someone else. Nor is it offered: a Connect card for an app that is
+    // already connected goes nowhere.
+    const before = buildConnectorAwareness({ connected: [], isUserFacing: true })!
+    const offeredSlug = /\[([a-z0-9-]+)\]/.exec(before)?.[1]
+    expect(offeredSlug).toBeTruthy()
+
+    const block = buildConnectorAwareness({
+      connected: [],
+      unshared: [offeredSlug!],
+      isUserFacing: true,
+    })!
+    expect(block).not.toMatch(/Connected and usable right now/)
+    expect(block).not.toContain(`[${offeredSlug}]`)
+  })
+
   it('names a connected CUSTOM connector instead of an empty list', () => {
     // The names came from filtering the catalog by the live slugs, so a connector
     // the operator added themselves matched nothing and the sentence rendered as

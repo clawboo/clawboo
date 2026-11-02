@@ -133,7 +133,7 @@ curl 'http://localhost:18790/api/capabilities?runtime=hermes&kind=connector'
 
 ## `POST /api/capabilities/:action`
 
-One route for four actions, chosen by the `:action` segment. `install` adds a curated skill or connector to an agent; `enable` and `disable` turn an existing manageable capability on or off by its `id`; `approve` answers a pending tool-call approval. `install`, `enable` and `disable` go to the source that owns the capability, which also writes the audit record. `approve` updates the approval row directly.
+One route for four actions, chosen by the `:action` segment. `install` adds a curated skill or connector to an agent; `enable` and `disable` turn an existing manageable capability on or off by its `id`; `approve` answers a pending tool-call approval. `install`, `enable` and `disable` go to the source that owns the capability, which also writes the audit record. `approve` answers exactly as `POST /api/tools/approvals/:id/resolve` does.
 
 - **Path params**: `action` (one of `install` \| `enable` \| `disable` \| `approve`; any other value returns **400**).
 - **Request body**: shape depends on `:action` (below).
@@ -158,7 +158,15 @@ Installs a skill or connector on an agent. Send the install spec as the body, or
 }
 ```
 
-With `via: 'native'`, `name` and `skillContent` are scanned for prompt injection, and any `mcpServer` command, arguments and environment are scanned more strictly. A blocked install writes an `install` audit row and answers **500** with `Error: capability blocked: injection / supply-chain finding`.
+With `via: 'native'`, `name` and `skillContent` are scanned for prompt injection, and any `mcpServer` command, arguments and environment are scanned more strictly. A blocked install writes an `install` audit row and answers **422**:
+
+```ts
+{
+  ok: false
+  error: 'capability blocked: injection / supply-chain finding'
+  findings: InjectionFinding[] // pattern, severity, intent, message, line, excerpt, fingerprint
+}
+```
 
 **`400 Bad Request`**: the body is not a valid install spec (`via`, `agentId`, `runtime`, `kind` or `name` missing or not a string):
 
@@ -244,7 +252,7 @@ Answers a pending tool-call approval: the same `tool_call_approvals` rows the ap
 
 An `allow_always` on an approval tied to a connector grant also saves a standing rule that allows that tool, with any arguments, for 30 days, unless the prompt marked the call as one that cannot be remembered (`neverRemember`). A call to a destructive tool is always marked that way.
 
-This action only updates the row. An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding) is not released by it; answer those with `POST /api/tools/approvals/:id/resolve` (see [Tools and MCP](/reference/rest-api/tools-and-mcp)), which also tells the Gateway.
+An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding) is answered through the Gateway, exactly as `POST /api/tools/approvals/:id/resolve` does (see [Tools and MCP](/reference/rest-api/tools-and-mcp)): it answers `200 { ok: true, kind: 'exec', alreadyResolved }`, or `502 { "error": "the Gateway did not accept that decision" }` when the Gateway does not take the answer, and the command then stays held.
 
 **Request body**:
 
@@ -267,7 +275,7 @@ This action only updates the row. An approval of `kind: 'exec'` (an OpenClaw she
 { "error": "approval not found" }
 ```
 
-**`200 OK`**: the approval was resolved; the row is returned:
+**`200 OK`** (`kind: 'tool'`): the approval was resolved; the row is returned:
 
 ```ts
 {
@@ -315,6 +323,8 @@ This action only updates the row. An approval of `kind: 'exec'` (an OpenClaw she
 { error: "<message>", manageability: 'managed' | 'external-write' | 'runtime-of-record' | 'observe-only' }
 ```
 
+A blocked `install` is also a **422**, with `findings` (see [Action: `install`](#action-install)).
+
 **`503 Service Unavailable`**: the write needed the OpenClaw Gateway and its connection is down:
 
 ```json
@@ -350,7 +360,7 @@ curl -X POST http://localhost:18790/api/capabilities/approve \
 
 ## Error envelope
 
-Most error bodies are `{ "error": "<message>" }`. The two tier `422`s add `manageability`, and the `enable` and `disable` check also adds `writable`, so a client can show the read-only state without a second lookup. A `503` means the tier allowed the write but the owning source could not reach its runtime: retry after the Gateway reconnects. A `500` message is redacted before it is sent.
+Most error bodies are `{ "error": "<message>" }`. The two tier `422`s add `manageability`, and the `enable` and `disable` check also adds `writable`, so a client can show the read-only state without a second lookup. A blocked install's `422` carries `ok: false` and `findings` instead. A `503` means the tier allowed the write but the owning source could not reach its runtime: retry after the Gateway reconnects. A `500` message is redacted before it is sent.
 
 ## Related
 

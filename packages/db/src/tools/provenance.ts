@@ -1,9 +1,9 @@
 // ─── Tool provenance (the signing SEAM) ─────────────────────────────────────
 // A descriptor may carry an Ed25519 `provenance` signature. Verification is
 // REAL (built on @noble/ed25519, the same primitive device auth uses) but
-// ENFORCEMENT is OFF by default — local-first single-user never needs it; a
-// future multi-tenant deployment flips `enforce: true` + supplies signer keys.
-// This keeps clawboo out of "unsigned forever" without burdening the default.
+// ENFORCEMENT is OFF by default: local-first single-user never needs it. A caller
+// that wants it passes `enforce: true` and supplies signer keys. This keeps
+// clawboo out of "unsigned forever" without burdening the default.
 
 import * as ed from '@noble/ed25519'
 

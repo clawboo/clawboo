@@ -39,13 +39,11 @@
   },
   "dependencies": {
     "@clawboo/logger": "workspace:*",
-    "@noble/ed25519": "^3.2.0",
-    "ws": "^8.21.3"
+    "@noble/ed25519": "^3.2.0"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
     "@types/node": "^26.5.1",
-    "@types/ws": "^8.5.0",
     "tsup": "^8.4.0",
     "typescript": "^6.0.3"
   }

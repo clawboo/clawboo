@@ -108,7 +108,7 @@ describe('saveSettings', () => {
   })
 
   posixOnly('creates settings.json 0600 inside a new 0700 Clawboo folder', () => {
-    saveSettings({ gatewayToken: 'gw-token', studioAccessToken: 'studio-token' }, env())
+    saveSettings({ gatewayToken: 'gw-token' }, env())
     expect(modeOf(path.join(tmp, '.clawboo'))).toBe(0o700)
     expect(modeOf(path.join(tmp, '.clawboo', 'settings.json'))).toBe(0o600)
   })

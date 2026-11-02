@@ -12,21 +12,19 @@ import {
   removeOpenclawProviderKey,
   writeOpenclawProviderKeys,
 } from './openclawEnv'
+import { getDescriptor, NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
 import { deleteRuntimeSecret, hasRuntimeSecret, setRuntimeSecret } from './secretsVault'
 
-// Which runtimes a provider key reaches. The vault serves Clawboo Native (for the
-// providers it drives directly) + Claude Code (ANTHROPIC_API_KEY) + Hermes
-// (OPENROUTER_API_KEY); OpenClaw serves every provider via `.env`. Codex is OAuth
-// (never a pasted key), so it's never listed.
-const NATIVE_PROVIDERS = new Set(['anthropic', 'openai', 'openrouter'])
-
-function poweredRuntimesFor(provider: string): string[] {
-  const runtimes: string[] = []
-  if (NATIVE_PROVIDERS.has(provider)) runtimes.push('Clawboo Native')
-  if (provider === 'anthropic') runtimes.push('Claude Code')
-  if (provider === 'openrouter') runtimes.push('Hermes')
-  runtimes.push('OpenClaw')
-  return runtimes
+// Which runtimes a provider key reaches, read off each runtime's descriptor: a
+// runtime is listed when the key's env var is one it reads (its `envVar` or an
+// `altEnvVars` entry), so this list moves with the runtimes rather than being
+// kept by hand. OpenClaw reads every provider from `.env`. Codex is OAuth (never
+// a pasted key), so it's never listed.
+function poweredRuntimesFor(envVar: string): string[] {
+  const runtimes = NON_OPENCLAW_RUNTIME_IDS.map(getDescriptor)
+    .filter((d) => d.envVar === envVar || (d.altEnvVars ?? []).includes(envVar))
+    .map((d) => d.name)
+  return [...runtimes, 'OpenClaw']
 }
 
 export interface ProviderStatus {
@@ -39,7 +37,7 @@ export interface ProviderStatus {
 export const PROVIDER_METAS = Object.keys(ENV_KEY_MAP).map((id) => ({
   id,
   envVar: ENV_KEY_MAP[id]!,
-  poweredRuntimes: poweredRuntimesFor(id),
+  poweredRuntimes: poweredRuntimesFor(ENV_KEY_MAP[id]!),
 }))
 
 export function isKnownProvider(id: string): boolean {
