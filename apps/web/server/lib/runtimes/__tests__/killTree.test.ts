@@ -6,7 +6,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { killProcessTree } from '../killTree'
+import { killProcessTree, killProcessTreeByPid } from '../killTree'
 import { createSpawnDriver } from '../subprocess'
 
 const isWin = process.platform === 'win32'
@@ -123,6 +123,44 @@ describe.skipIf(isWin)('killProcessTree (spawned runtime abort)', () => {
     expect(pidAlive(pid)).toBe(false) // SIGTERM swallowed → SIGKILL escalation reaped it
   })
 
+  it('stops a child that was not spawned detached, with its grandchild, when it traps SIGTERM', async () => {
+    // The Claude Code CLI is spawned without `detached`, so the group signal
+    // finds no group. Both the child and what it started must still go.
+    const { spawn } = await import('node:child_process')
+    const child = spawn(
+      process.execPath,
+      ['-e', ['process.on("SIGTERM", () => {})', PARENT_SCRIPT].join('\n')],
+      { stdio: ['ignore', 'pipe', 'ignore'] },
+    )
+    const pid = child.pid!
+    const gpid = await new Promise<number>((resolve, reject) => {
+      let buf = ''
+      child.stdout!.on('data', (d: Buffer) => {
+        buf += d.toString()
+        const found = gpidOf(buf.split('\n')[0] ?? '')
+        if (found) resolve(found)
+      })
+      child.once('exit', () => reject(new Error('the child exited before it reported')))
+    })
+    try {
+      killProcessTree(child, { graceMs: 150 })
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && (pidAlive(pid) || pidAlive(gpid))) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      expect(pidAlive(pid)).toBe(false)
+      expect(pidAlive(gpid)).toBe(false)
+    } finally {
+      for (const p of [gpid, pid]) {
+        try {
+          process.kill(p, 'SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+  })
+
   it('reaps a SIGTERM-trapping grandchild when the group LEADER dies on SIGTERM (escalation survives the leader exit)', async () => {
     // The exact case the prior 'exit' early-clear broke (the deterministicGate verify
     // subtree): a shell LEADER that dies on the group SIGTERM (no trap) whose grandchild
@@ -172,3 +210,90 @@ describe.skipIf(isWin)('killProcessTree (spawned runtime abort)', () => {
     expect(pidAlive(gpid!)).toBe(false) // leader died on SIGTERM, grandchild trapped it → SIGKILL still reaped it
   })
 })
+
+describe.skipIf(isWin)(
+  'killProcessTreeByPid: the group option (boot reap of a runtime child)',
+  () => {
+    // Leader -> middle -> grandchild. The middle process exits as soon as the
+    // grandchild is up, so the grandchild is re-parented to init: no longer a
+    // descendant of the leader, still in its process group. That is a dev server
+    // an agent's shell tool put in the background. Built so the test's own source
+    // carries no spawn call.
+    const MIDDLE = [
+      'const cp = require("child_" + "process")',
+      'const g = cp.spawn(process.execPath, ["-e", "setInterval(()=>{}, 1e9)"], { stdio: "ignore" })',
+      'process.stdout.write("GPID " + g.pid + "\\n", () => process.exit(0))',
+    ].join('\n')
+    const LEADER_SCRIPT = [
+      'const cp = require("child_" + "process")',
+      `const m = cp.spawn(process.execPath, ["-e", ${JSON.stringify(MIDDLE)}], { stdio: ["ignore", "pipe", "ignore"] })`,
+      'm.stdout.on("data", (d) => process.stdout.write(d))',
+      'm.on("exit", () => process.stdout.write("MIDDLE GONE\\n"))',
+      'setInterval(() => {}, 1e9)',
+    ].join('\n')
+
+    async function spawnOrphaningLeader(): Promise<{ leader: number; gpid: number }> {
+      const { spawn } = await import('node:child_process')
+      const child = spawn(process.execPath, ['-e', LEADER_SCRIPT], {
+        detached: true,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+      let buf = ''
+      child.stdout!.on('data', (d: Buffer) => {
+        buf += d.toString()
+      })
+      const deadline = Date.now() + 5000
+      while (
+        Date.now() < deadline &&
+        !(gpidOf(buf.split('\n')[0] ?? '') && buf.includes('MIDDLE GONE'))
+      ) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+      const gpid = gpidOf(buf.split('\n')[0] ?? '')
+      expect(gpid).not.toBeNull()
+      expect(buf).toContain('MIDDLE GONE')
+      return { leader: child.pid!, gpid: gpid! }
+    }
+
+    const waitDead = async (pid: number): Promise<void> => {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline && pidAlive(pid)) {
+        await new Promise((r) => setTimeout(r, 25))
+      }
+    }
+
+    it('the walk alone misses a re-parented grandchild', async () => {
+      const { leader, gpid } = await spawnOrphaningLeader()
+      try {
+        killProcessTreeByPid(leader, { graceMs: 100 })
+        await waitDead(leader)
+        await new Promise((r) => setTimeout(r, 300))
+        expect(pidAlive(leader)).toBe(false)
+        expect(pidAlive(gpid)).toBe(true)
+      } finally {
+        try {
+          process.kill(-leader, 'SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }
+    })
+
+    it('with group, the leader and the re-parented grandchild both die', async () => {
+      const { leader, gpid } = await spawnOrphaningLeader()
+      try {
+        killProcessTreeByPid(leader, { group: true, graceMs: 100 })
+        await waitDead(leader)
+        await waitDead(gpid)
+        expect(pidAlive(leader)).toBe(false)
+        expect(pidAlive(gpid)).toBe(false)
+      } finally {
+        try {
+          process.kill(-leader, 'SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }
+    })
+  },
+)
