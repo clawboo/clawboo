@@ -118,7 +118,7 @@ Approve a command only when you understand it. An approved command runs on this 
 - **Every field at once.** A request card shows the deciding fields first. The rest, and any note from the agent, are behind **Show N more details**.
 - **Secrets.** Values that look like passwords or keys are masked.
 - **An exact countdown.** The seconds left are worked out when the card is drawn, so treat them as approximate.
-- **Past answers.** The dashboard keeps no list of requests you already answered. The audit log in **Governance** records risky hand-off decisions.
+- **Past answers.** The dashboard keeps no list of requests you already answered, but the **Activity** feeds show each request and its answer by tool name. The audit log in **Governance** records risky hand-off decisions.
 
 ## Check that it worked
 
@@ -182,6 +182,7 @@ Set the board's team filter to **All teams**, or open the **Approval queue** in 
 - **Clawboo's own requests.** Connector calls, Clawboo Native commands and risky hand-offs are rows in the same table, and the dashboard checks for new ones every 3 seconds. Clawboo records answers as `allow_once`, `allow_always` and `deny`; OpenClaw's words are `allow-once`, `allow-always` and `deny`.
 - **Remembered answers.** A connector **Always** writes a standing rule bound to the access you shared, expiring after 30 days, and stopping the share deletes its rules. A risky hand-off is filed per leader under the scope `delegate:code` and marked never-remember, so every one raises a card.
 - **Cleanup.** Once an hour, Clawboo expires any request still pending after `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default). That cleanup does not lengthen the waits on this page.
+- **Event log.** Every request writes an `approval_requested` event and its answer or expiry an `approval_resolved`, without the arguments or the command. See [Approval events](/reference/events-and-errors#approval-events).
 - **History.** `GET /api/approvals?agentId=<id>` lists the OpenClaw command decisions made from tabs with a Gateway connection, newest first.
 - Shapes and codes: [Governance API](/reference/rest-api/governance) and [Tools and MCP API](/reference/rest-api/tools-and-mcp). Every waiting time is in [Limits and defaults](/reference/limits-and-defaults).
 

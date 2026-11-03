@@ -247,6 +247,7 @@ export async function executeBrokeredCall(
       // naming conventions someone hard-coded and to nothing else.
       toolClass: toolClassOf(descriptor),
       toolSummary: toolSummaryOf(descriptor.description),
+      teamId: ctx.teamId,
     })
     const resolution = await waitForApproval(db, approval.id, {
       timeoutMs: opts.approvalTimeoutMs,

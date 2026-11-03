@@ -30,6 +30,7 @@ vi.mock('../../lib/agentSource', () => ({
 }))
 
 const { toolsApprovalResolvePOST } = await import('../tools')
+const { obsEventsGET } = await import('../obs')
 
 function mockRes(): { res: Response; done: Promise<{ code: number; body: unknown }> } {
   let code = 200
@@ -65,6 +66,28 @@ function seed(id: string, kind: 'exec' | 'tool'): void {
       expiresAt: Date.now() + 600_000,
     })
     .run()
+}
+
+/** The approval events, read back through GET /api/obs/events. */
+function approvalEventsFromApi(): { kind: string; data: Record<string, unknown> }[] {
+  let body: { events: { kind: string; data: string }[] } = { events: [] }
+  const res = {
+    status() {
+      return this
+    },
+    json(b: typeof body) {
+      body = b
+      return this
+    },
+  } as unknown as Response
+  obsEventsGET(
+    { query: { kinds: 'approval_requested,approval_resolved' } } as unknown as Request,
+    res,
+  )
+  return body.events.map((e) => ({
+    kind: e.kind,
+    data: JSON.parse(e.data) as Record<string, unknown>,
+  }))
 }
 
 const statusOf = (id: string): string | undefined =>
@@ -126,6 +149,53 @@ describe('POST /api/tools/approvals/:id/resolve', () => {
     expect((await done).code).toBe(200)
     expect(calls).toEqual([])
     expect(statusOf('ap-tool')).toBe('allow_once')
+  })
+
+  it('announces a decision on a tool card in the event log, once', async () => {
+    // A decision that lands only on the row never reaches the Activity feeds or
+    // anything else that follows the event log.
+    seed('ap-tool-ev', 'tool')
+    const first = mockRes()
+    toolsApprovalResolvePOST(req('ap-tool-ev', 'allow_always'), first.res)
+    await first.done
+    const again = mockRes()
+    toolsApprovalResolvePOST(req('ap-tool-ev', 'deny'), again.res)
+    await again.done
+
+    expect(approvalEventsFromApi()).toEqual([
+      {
+        kind: 'approval_resolved',
+        data: {
+          approvalId: 'ap-tool-ev',
+          decision: 'allow_always',
+          kind: 'tool',
+          toolName: 'mcp__memory__save',
+        },
+      },
+    ])
+  })
+
+  it('announces a decision on an exec card once the Gateway accepts it', async () => {
+    seed('ap-exec-ev', 'exec')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(req('ap-exec-ev', 'deny'), res)
+    await done
+
+    expect(approvalEventsFromApi()).toEqual([
+      {
+        kind: 'approval_resolved',
+        data: { approvalId: 'ap-exec-ev', decision: 'deny', kind: 'exec', toolName: 'exec' },
+      },
+    ])
+  })
+
+  it('announces nothing when the Gateway refuses the decision', async () => {
+    failWith = 'gateway is down'
+    seed('ap-exec-down', 'exec')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(req('ap-exec-down', 'allow_once'), res)
+    await done
+    expect(approvalEventsFromApi()).toEqual([])
   })
 
   it('404s an id it has no card for instead of calling the Gateway', async () => {

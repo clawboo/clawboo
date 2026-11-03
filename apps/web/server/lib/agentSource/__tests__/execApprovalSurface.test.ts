@@ -17,7 +17,7 @@
 //     Gateway fans it out to every surface. Losing that race is expected, not an
 //     error to show the operator.
 
-import { createDb, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
+import { agents, createDb, listEvents, teams, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let db: ClawbooDb
@@ -321,5 +321,134 @@ describe('resolveExecApproval, recording the answer', () => {
       payload: { id: 'ap-fanout', decision: 'allow-always' },
     })
     expect(rows()[0]?.status).toBe('allow_always')
+  })
+})
+
+// ─── The event log ─────────────────────────────────────────────────────────
+//
+// Whatever follows the event log learns about approvals only from it, so a
+// mirrored shell prompt the log never mentions is invisible to all of it. The
+// command text is exactly what must never ride along.
+describe('the event log', () => {
+  const approvalEvents = () =>
+    listEvents(db, { kinds: ['approval_requested', 'approval_resolved'] }).map((e) => ({
+      kind: e.kind,
+      agentId: e.agentId,
+      teamId: e.teamId,
+      raw: e.data,
+      data: JSON.parse(e.data) as Record<string, unknown>,
+    }))
+  const decisions = () =>
+    approvalEvents()
+      .filter((e) => e.kind === 'approval_resolved')
+      .map((e) => e.data['decision'])
+
+  it('announces a mirrored request once, on its team, without the command', () => {
+    const now = Date.now()
+    db.insert(teams)
+      .values({
+        id: 'team-1',
+        name: 'Ops',
+        icon: 'x',
+        color: '#000',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    db.insert(agents)
+      .values({
+        id: 'clawboo-row-1',
+        name: 'Doc writer',
+        gatewayId: 'doc-writer-boo',
+        status: 'idle',
+        teamId: 'team-1',
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'clawboo-row-1')
+    h.frame(requestFrame('ap-ev-1', 'scp secrets.env backup-host:'))
+    h.frame(requestFrame('ap-ev-1', 'scp secrets.env backup-host:')) // redelivery
+
+    const events = approvalEvents()
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      kind: 'approval_requested',
+      agentId: 'clawboo-row-1',
+      teamId: 'team-1',
+      data: { approvalId: 'ap-ev-1', kind: 'exec', toolName: 'exec', toolClass: 'destructive' },
+    })
+    expect(events[0]?.raw).not.toContain('secrets.env')
+  })
+
+  it('announces a card the Gateway stopped waiting on as expired, once', () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame({
+      event: 'exec.approval.requested',
+      payload: {
+        id: 'ap-ev-old',
+        expiresAtMs: Date.now() - 1_000,
+        request: { command: 'rm -rf /', agentId: 'doc-writer-boo' },
+      },
+    })
+    expireStaleExecApprovals(db)
+    expireStaleExecApprovals(db)
+    expect(approvalEvents().filter((e) => e.kind === 'approval_resolved')).toMatchObject([
+      { data: { approvalId: 'ap-ev-old', decision: 'expired', kind: 'exec', toolName: 'exec' } },
+    ])
+  })
+
+  it('announces an answer from another surface once', () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-ev-2'))
+    const resolved = {
+      event: 'exec.approval.resolved',
+      payload: { id: 'ap-ev-2', decision: 'deny' },
+    }
+    h.frame(resolved)
+    h.frame(resolved) // the Gateway fans out to every surface, and may repeat
+    expect(decisions()).toEqual(['deny'])
+  })
+
+  it('announces an answer given here once, though the Gateway echoes it back', async () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-ev-3'))
+    await resolveExecApproval(h.source, 'ap-ev-3', 'allow-always')
+    h.frame({
+      event: 'exec.approval.resolved',
+      payload: { id: 'ap-ev-3', decision: 'allow-always' },
+    })
+    expect(decisions()).toEqual(['allow_always'])
+  })
+
+  it('announces it once when the echo arrives before the reply', async () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-ev-4'))
+    h.frame({ event: 'exec.approval.resolved', payload: { id: 'ap-ev-4', decision: 'allow-once' } })
+    await resolveExecApproval(h.source, 'ap-ev-4', 'allow-once')
+    expect(decisions()).toEqual(['allow_once'])
+  })
+
+  it('never lets a frame with no decision overwrite a recorded answer', async () => {
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-ev-5'))
+    await resolveExecApproval(h.source, 'ap-ev-5', 'deny')
+    h.frame({ event: 'exec.approval.resolved', payload: { id: 'ap-ev-5' } })
+    expect(rows()[0]?.status).toBe('deny')
+    expect(decisions()).toEqual(['deny'])
+  })
+
+  it('announces nothing when the Gateway refuses the answer', async () => {
+    const h = makeSource({ failWith: 'gateway exploded' })
+    startExecApprovalSurface(h.source, () => 'a1')
+    h.frame(requestFrame('ap-ev-6'))
+    await resolveExecApproval(h.source, 'ap-ev-6', 'deny')
+    expect(decisions()).toEqual([])
   })
 })

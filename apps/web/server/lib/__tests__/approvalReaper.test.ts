@@ -1,6 +1,6 @@
 // Durable approval-TTL reaper. Against an in-memory board + the shared approvals
 // table: a stale pending approval linked to a blocked task is expired, the task is
-// unblocked, an 'approval' audit row + an approval_resolved obs event are written,
+// unblocked, an 'approval' audit row + one approval_resolved obs event are written,
 // and a second pass is a no-op (idempotent).
 
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -43,16 +43,20 @@ describe('approval-TTL reaper', () => {
     expect(r1.unblocked).toEqual([task.id])
     expect(getTask(db, task.id)?.status).toBe('todo') // unblocked → resumable
     expect(listGovernanceAudit(db, { eventType: 'approval' })).toHaveLength(1)
-    const obs = listEvents(db, { kinds: ['approval_resolved'] })
-    expect(
-      obs.some((e) => (JSON.parse(e.data) as { decision?: string }).decision === 'expired'),
-    ).toBe(true)
+    // Exactly one event per expiry, naming the call it settled, so a reader of
+    // the log can drop the card it was showing.
+    const resolvedData = () =>
+      listEvents(db, { kinds: ['approval_resolved'] }).map((e) => JSON.parse(e.data) as unknown)
+    expect(resolvedData()).toEqual([
+      { approvalId: approval.id, decision: 'expired', kind: 'tool', toolName: 'delegate:code' },
+    ])
 
     // Second pass: nothing pending → a no-op (no new audit, task stays unblocked).
     const r2 = reapStaleApprovals(db, { ttlMs: 5 })
     expect(r2.expired).toEqual([])
     expect(r2.unblocked).toEqual([])
     expect(listGovernanceAudit(db, { eventType: 'approval' })).toHaveLength(1)
+    expect(resolvedData()).toHaveLength(1)
     expect(getTask(db, task.id)?.status).toBe('todo')
   })
 

@@ -13,7 +13,13 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createApproval, listPendingApprovals, resolveApproval, type ClawbooDb } from '@clawboo/db'
+import {
+  createApproval,
+  listEvents,
+  listPendingApprovals,
+  resolveApproval,
+  type ClawbooDb,
+} from '@clawboo/db'
 
 import { resolveDelegationApproval } from '../../../api/delegationApproval'
 import { getDb, resetDb } from '../../db'
@@ -114,6 +120,57 @@ describe('resolveDelegationApproval', () => {
     expect(open).toHaveLength(1)
     resolveApproval(db, open[0]!.id, 'deny')
     expect(await pending).toBe('deny')
+  })
+
+  it('announces the hand-off and the leader decision in the event log', async () => {
+    // Whatever follows the event log can see a risky hand-off waiting on the
+    // leader, and how it was answered. The task text never rides along.
+    const pending = resolveDelegationApproval(db, {
+      leaderAgentId: 'L',
+      targetAgentName: 'Ops',
+      task: 'deploy the payroll export to production',
+      taskId: 'task-3',
+    })
+    const [open] = listPendingApprovals(db)
+    resolveApproval(db, open!.id, 'allow_once')
+    expect(await pending).toBe('allow_once')
+
+    const events = listEvents(db, { kinds: ['approval_requested', 'approval_resolved'] })
+    expect(
+      events.map((e) => ({
+        kind: e.kind,
+        agentId: e.agentId,
+        taskId: e.taskId,
+        data: JSON.parse(e.data) as unknown,
+      })),
+    ).toEqual([
+      {
+        kind: 'approval_requested',
+        agentId: 'L',
+        taskId: 'task-3',
+        data: {
+          approvalId: open!.id,
+          kind: 'tool',
+          toolName: 'delegate:code',
+          toolClass: null,
+          grantId: null,
+          connectorId: null,
+          expiresAt: open!.expiresAt,
+        },
+      },
+      {
+        kind: 'approval_resolved',
+        agentId: 'L',
+        taskId: 'task-3',
+        data: {
+          approvalId: open!.id,
+          decision: 'allow_once',
+          kind: 'tool',
+          toolName: 'delegate:code',
+        },
+      },
+    ])
+    for (const e of events) expect(e.data).not.toContain('payroll')
   })
 
   it('is FAIL-CLOSED: a transport error resolves to timeout (never auto-run)', async () => {

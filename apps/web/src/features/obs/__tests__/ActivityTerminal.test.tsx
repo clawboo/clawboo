@@ -57,6 +57,25 @@ describe('presentEvent', () => {
     ).toBe('idle')
   })
 
+  it('names the tool an approval is for', () => {
+    // The event carries the tool's name and never its arguments, so the name is
+    // the only thing that tells two pending approvals apart in the feed.
+    expect(
+      presentEvent(
+        parsed(5, 'approval_requested', { approvalId: 'ap1', kind: 'tool', toolName: 'gh_write' }),
+      ),
+    ).toMatchObject({ tone: 'warning', badge: 'approval', label: 'gh_write', body: 'requested' })
+    expect(
+      presentEvent(
+        parsed(6, 'approval_resolved', {
+          approvalId: 'ap1',
+          decision: 'deny',
+          toolName: 'gh_write',
+        }),
+      ),
+    ).toMatchObject({ tone: 'idle', badge: 'approval', label: 'gh_write', body: 'deny' })
+  })
+
   it('renders connector health with its detail', () => {
     const row = presentEvent(
       parsed(4, 'connector_health', {

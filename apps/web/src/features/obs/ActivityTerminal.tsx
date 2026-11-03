@@ -130,11 +130,17 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
       return { tone: 'warning', badge: 'cost', body: [usd, tok].filter(Boolean).join('  ·  ') }
     }
     case 'approval_requested':
-      return { tone: 'warning', badge: 'approval', body: asStr(d['summary'] ?? 'requested') }
+      return {
+        tone: 'warning',
+        badge: 'approval',
+        label: asStr(d['toolName']),
+        body: asStr(d['summary'] ?? 'requested'),
+      }
     case 'approval_resolved':
       return {
         tone: 'idle',
         badge: 'approval',
+        label: asStr(d['toolName']),
         body: asStr(d['decision'] ?? d['resolution'] ?? 'resolved'),
       }
     default:

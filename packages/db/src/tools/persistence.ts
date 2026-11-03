@@ -20,6 +20,7 @@ import {
   type DbToolRegistry,
 } from '../schema'
 import { mintStandingRule } from '../grants/repository'
+import { recordApprovalEvent } from './approvalEvents'
 import { createBuiltinRegistry } from './registry'
 import { scrubArgsSummary, scrubResultSummary } from './scrub'
 import type { ToolDescriptor } from './types'
@@ -169,6 +170,9 @@ export interface CreateApprovalInput {
    */
   toolClass?: ToolClass | null
   toolSummary?: string | null
+  /** The agent's team, for the `approval_requested` event only: the row has no
+   *  team column. Omitted means the event reads it from the agent's row. */
+  teamId?: string | null
 }
 
 export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToolCallApproval {
@@ -197,6 +201,7 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
     resolvedAt: null,
   }
   withWriteRetry(() => db.insert(toolCallApprovals).values(row).run())
+  recordApprovalEvent(db, 'approval_requested', row, { teamId: input.teamId })
   return row
 }
 
@@ -274,6 +279,8 @@ export function resolveApproval(
       createdFromApprovalId: row.id,
     })
   }
+  // Same guard as the mint: only the call that did the resolving announces it.
+  if (changed > 0 && row) recordApprovalEvent(db, 'approval_resolved', row)
   return row
 }
 
@@ -305,7 +312,8 @@ export async function waitForApproval(
  * created more than `olderThanMs` ago that no one ever resolved (distinct from the
  * per-call `expiresAt` waiter deadline). Sets `status='expired'` + `resolvedAt` and
  * returns ONLY the rows expired by THIS call (the `status='pending'` guard +
- * RETURNING make a second pass a no-op). The caller audits + unblocks each task.
+ * RETURNING make a second pass a no-op), each announced as `approval_resolved`.
+ * The caller audits + unblocks each task.
  */
 export function expireStaleApprovals(
   db: ClawbooDb,
@@ -313,7 +321,7 @@ export function expireStaleApprovals(
 ): DbToolCallApproval[] {
   const now = Date.now()
   const cutoff = now - Math.max(0, opts.olderThanMs)
-  return withWriteRetry(
+  const expired = withWriteRetry(
     () =>
       db
         .update(toolCallApprovals)
@@ -324,6 +332,8 @@ export function expireStaleApprovals(
         .returning()
         .all() as DbToolCallApproval[],
   )
+  for (const row of expired) recordApprovalEvent(db, 'approval_resolved', row)
+  return expired
 }
 
 // ─── Registry metadata (light) ────────────────────────────────────────────────
