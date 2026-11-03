@@ -199,7 +199,10 @@ beforeEach(() => {
   useFinishPromptStore.setState({ open: false, request: null, resolver: null })
   resetBoardStorage()
 })
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.useRealTimers()
+})
 
 describe('finishing a card by hand', () => {
   it('asks which day a card from an earlier day finished, and puts it on the day picked', async () => {
@@ -274,6 +277,11 @@ describe('finishing a card by hand', () => {
   })
 
   it('offers another day from a small calendar, and finishes the card on it', async () => {
+    // The small calendar shows one month, and this test reads a day five days
+    // back in it. In the first days of a month that day is in the month before,
+    // so pin a mid-month day.
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
+    vi.setSystemTime(new Date(2026, 5, 17, 12))
     const now = Date.now()
     const added = addDays(now, -3) + HOUR
     const yesterday = addDays(now, -1)
