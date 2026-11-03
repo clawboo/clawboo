@@ -2,7 +2,8 @@
 // pending approval — its waiter died, or no one ever resolved it — would otherwise
 // sit `pending` forever. This is the background timeout-watcher: it expires
 // abandoned pending rows after a configurable window (default 24h), unblocks any
-// linked task, and audits + emits obs. Idempotent (a second pass expires nothing).
+// linked task, and audits. `expireStaleApprovals` writes the approval_resolved
+// event for each row. Idempotent (a second pass expires nothing).
 //
 // Best-effort + non-blocking, mirroring the orphan-reconciliation / worktree-GC
 // boot blocks in server/index.ts: a one-shot pass at boot + a singleton interval
@@ -21,7 +22,6 @@ import {
 import { isVerdictPromotable } from '@clawboo/governance'
 
 import { getDb } from './db'
-import { emitEvent } from './obs'
 
 const DEFAULT_TTL_MS = 24 * 60 * 60_000 // 24h
 // Stored tool results outlive their run on purpose: an operator reading an audit
@@ -51,7 +51,7 @@ export interface ReapResult {
 }
 
 /** One reaper pass: expire stale pending approvals, unblock any linked blocked
- *  task, audit + emit obs per row. Returns only the rows expired by THIS pass. */
+ *  task, audit per row. Returns only the rows expired by THIS pass. */
 export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {}): ReapResult {
   const ttlMs = opts.ttlMs ?? envMs('CLAWBOO_APPROVAL_TTL_MS', DEFAULT_TTL_MS)
 
@@ -81,12 +81,6 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
       taskId: row.taskId,
       tenantId: row.tenantId,
       summary: { approvalId: row.id, toolName: row.toolName, resolution: 'expired' },
-    })
-    emitEvent(db, {
-      kind: 'approval_resolved',
-      taskId: row.taskId,
-      agentId: row.agentId,
-      data: { approvalId: row.id, decision: 'expired' },
     })
     if (row.taskId) {
       const task = getTask(db, row.taskId)

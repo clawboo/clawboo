@@ -98,6 +98,7 @@ export {
 } from './persistence'
 
 export { executeBrokeredCall, type BrokeredResult, type BrokerOptions } from './broker'
+export { approvalEvent, type ApprovalEventKind } from './approvalEvents'
 
 export {
   listToolsQuery,

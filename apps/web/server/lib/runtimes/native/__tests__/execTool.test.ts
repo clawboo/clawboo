@@ -9,6 +9,7 @@
 import {
   createDb,
   getApproval,
+  listEvents,
   listPendingApprovals,
   resolveApproval,
   toolCallApprovals,
@@ -170,6 +171,78 @@ onPosix('a run that is stopped', () => {
     await p
     // The human's answer is still the answer of record.
     expect(listPendingApprovals(db)).toHaveLength(0)
+  })
+})
+
+onPosix('the event log', () => {
+  // A card the log never mentions is invisible to whatever follows the log, and
+  // the command itself must never ride along.
+  const approvalEvents = () =>
+    listEvents(db, { kinds: ['approval_requested', 'approval_resolved'] }).map((e) => ({
+      kind: e.kind,
+      agentId: e.agentId,
+      taskId: e.taskId,
+      raw: e.data,
+      data: JSON.parse(e.data) as Record<string, unknown>,
+    }))
+
+  it('announces the card and the answer, without the command', async () => {
+    const t = tool({ taskId: 'task-7' })
+    const p = t?.run(
+      { argv: ['echo', 'launch-codes'], why: 'print launch-codes' },
+      { signal: never },
+    )
+    await answerWhenAsked('allow_once')
+    await p
+
+    const events = approvalEvents()
+    expect(events.map((e) => [e.kind, e.data['decision'] ?? null])).toEqual([
+      ['approval_requested', null],
+      ['approval_resolved', 'allow_once'],
+    ])
+    expect(events[0]).toMatchObject({
+      agentId: 'boo-1',
+      taskId: 'task-7',
+      data: { kind: 'tool', toolName: 'run_command', toolClass: 'destructive' },
+    })
+    for (const e of events) expect(e.raw).not.toContain('launch-codes')
+  })
+
+  /** Poll until the card is up. Resolving the program is real file I/O, so a
+   *  fixed sleep loses the race on a loaded machine. */
+  async function cardWhenAsked(): Promise<string> {
+    for (let i = 0; i < 200; i += 1) {
+      const [row] = listPendingApprovals(db)
+      if (row) return row.id
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    throw new Error('no approval was ever raised')
+  }
+
+  it('announces a card retired by a stopped run as expired, once', async () => {
+    const controller = new AbortController()
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
+    const cardId = await cardWhenAsked()
+    controller.abort()
+    await p
+
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data)).toEqual([
+      { approvalId: cardId, decision: 'expired', kind: 'tool', toolName: 'run_command' },
+    ])
+  })
+
+  it('announces only the human answer when it beats the abort', async () => {
+    const controller = new AbortController()
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
+    resolveApproval(db, await cardWhenAsked(), 'deny')
+    controller.abort()
+    await p
+
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data['decision'])).toEqual(['deny'])
   })
 })
 
