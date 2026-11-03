@@ -26,6 +26,10 @@ export async function initRepo(): Promise<string> {
   await git(dir, ['init', '-b', 'main'])
   await git(dir, ['config', 'user.name', 'test'])
   await git(dir, ['config', 'user.email', 'test@example.com'])
+  // Windows runners set core.autocrlf, which turns LF into CRLF on checkout, so a
+  // file that goes through a commit and back would not read as it was written.
+  // Files keep exactly the bytes the tests wrote.
+  await git(dir, ['config', 'core.autocrlf', 'false'])
   await writeFile(path.join(dir, 'README.md'), '# repo\n')
   await git(dir, ['add', '-A'])
   await git(dir, ['commit', '--no-verify', '-m', 'init'])
