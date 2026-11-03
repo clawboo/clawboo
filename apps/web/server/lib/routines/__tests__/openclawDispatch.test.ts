@@ -324,8 +324,19 @@ describe('dispatchConnectedSubstrate', () => {
       await vi.advanceTimersByTimeAsync(2 * 60_000)
       expect(getTask(db, taskId)?.status).toBe('in_progress')
 
-      // An hour asleep, then the run speaks again on wake and finishes.
-      vi.setSystemTime(Date.now() + 60 * 60_000)
+      // An hour asleep. `jump` is how a macOS sleep looks to timers: the clock
+      // moves on and every timer that came due fires once, on wake, so the
+      // overdue watchdog check runs BEFORE the run's next event. (`setSystemTime`
+      // would move the pending timers along with the clock, and a watchdog with
+      // one fixed deadline would pass too.)
+      ;(globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(
+        60 * 60_000,
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(aborted).toBe(0)
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+
+      // The run speaks again on wake and finishes.
       const base = { runId: 'run-1', sessionId: 'sk', ts: 1, seq: 1 }
       queue.push({ ...base, kind: 'text-delta', text: 'still going' } as RuntimeEvent)
       await vi.advanceTimersByTimeAsync(0)

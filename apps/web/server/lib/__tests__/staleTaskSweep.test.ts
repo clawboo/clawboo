@@ -74,4 +74,30 @@ describe('createStaleTaskSweep', () => {
     h.awake(INTERVAL)
     expect(h.cutoffs.at(-1)).toBe(TTL + 50 * MIN)
   })
+
+  it('a second sleep that starts near the end of the window still adds to the first', () => {
+    const h = harness()
+    h.boot()
+    h.awake(2 * MIN)
+    h.sleep(20 * MIN)
+    // The pass on wake, then one more: the second sleep starts with one
+    // interval of the window left.
+    h.awake(2 * INTERVAL)
+    h.sleep(30 * MIN)
+    h.awake(INTERVAL)
+    expect(h.cutoffs.at(-1)).toBe(TTL + 50 * MIN)
+  })
+
+  it('a second sleep after the window has closed starts a fresh allowance', () => {
+    // A full TTL awake after the first sleep: a row from before it that has not
+    // beaten since is stale, so the first sleep no longer counts.
+    const h = harness()
+    h.boot()
+    h.awake(2 * MIN)
+    h.sleep(20 * MIN)
+    h.awake(TTL + INTERVAL)
+    h.sleep(30 * MIN)
+    h.awake(INTERVAL)
+    expect(h.cutoffs.at(-1)).toBe(TTL + 30 * MIN)
+  })
 })
