@@ -1191,7 +1191,8 @@ describe('TaskDetailDrawer: review fixes', () => {
 
   it('lists no open issues once a later attempt passes', async () => {
     // Moved back to In progress after a pass with debt (a move to To do would clear
-    // the verdict), then checked again: the passing verdict still carries the notes.
+    // the verdict), then checked again by an older Clawboo, which kept the notes on
+    // the passing verdict.
     server.use(
       ...stubTask('t1', {
         title: 'Ship it',

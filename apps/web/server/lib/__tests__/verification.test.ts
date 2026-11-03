@@ -31,6 +31,7 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
+import type { DebtNote } from '@clawboo/governance'
 import type { DiffStat, Worktree } from '@clawboo/worktrees'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -241,6 +242,124 @@ describe('verification gate (real board + real git worktree)', () => {
       })
       expect(verdict.status).toBe('completed_with_debt')
       expect(verdict.debtNotes.length).toBeGreaterThan(0)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  const TOKEN_NOTE: DebtNote = {
+    criterion: 'Token logged in plain text',
+    severity: 'security',
+    justification: 'unresolved at cycle exhaustion',
+  }
+
+  /** The pass with debt a task still carries when it goes from blocked back to
+   *  in_progress (a move to todo would clear it). */
+  function seedPassWithDebt(taskId: string): void {
+    setTaskVerification(getDb(), taskId, {
+      status: 'completed_with_debt',
+      attempts: [
+        {
+          attempt: 1,
+          at: 0,
+          deterministic: {
+            command: 'exit 0',
+            exitCode: 0,
+            passed: true,
+            stdoutTail: '',
+            stderrTail: '',
+            durationMs: 1,
+            timedOut: false,
+          },
+          critic: {
+            ran: true,
+            outcome: 'reviewed',
+            findings: [
+              {
+                severity: 'security',
+                title: TOKEN_NOTE.criterion,
+                body: '',
+                filePath: null,
+                startLine: null,
+                confidence: 0.9,
+              },
+            ],
+            reviewerRuntime: 'fake-reviewer',
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'completed_with_debt',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [TOKEN_NOTE],
+      updatedAt: 0,
+    })
+  }
+
+  it(
+    'a pass after a pass with debt carries no open items and keeps the history',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      seedPassWithDebt(taskId)
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+      })
+      expect(verdict.status).toBe('pass')
+      expect(verdict.debtNotes).toEqual([])
+      expect(getTaskVerification(db, taskId)?.debtNotes).toEqual([])
+      expect(verdict.attempts.map((a) => a.status)).toEqual(['completed_with_debt', 'pass'])
+      expect(verdict.attempts[0]?.critic.findings[0]?.title).toBe(TOKEN_NOTE.criterion)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a pass with debt after a pass with debt adds to the open items',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 1')
+      seedPassWithDebt(taskId)
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        maxFixCycles: 1,
+      })
+      expect(verdict.status).toBe('completed_with_debt')
+      expect(verdict.debtNotes.map((d) => d.criterion)).toEqual([
+        TOKEN_NOTE.criterion,
+        'deterministic gate',
+      ])
+      expect(getTaskVerification(db, taskId)?.debtNotes).toHaveLength(2)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a fail after a pass with debt keeps the open items it has not fixed',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 1')
+      seedPassWithDebt(taskId)
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        maxFixCycles: 5, // a raised budget, so this attempt fails instead of ending in debt
+      })
+      expect(verdict.status).toBe('fail')
+      expect(verdict.debtNotes).toEqual([TOKEN_NOTE])
     },
     WORKTREE_TIMEOUT_MS,
   )

@@ -5,7 +5,8 @@
 // a STRUCTURED {what,why,howToFix} so the leader routes a real fix back — not just
 // "FAIL". The fix loop is bounded across re-completions (the attempts array IS the
 // loop history); on exhaustion the task is marked `completed_with_debt` and the
-// open issues are recorded — never a deadlock. The independent evaluator is permanent.
+// open issues are recorded (never a deadlock); a later pass clears them. The
+// independent evaluator is permanent.
 
 import {
   addComment,
@@ -187,7 +188,11 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   const attemptNumber = priorAttempts.length + 1
   let status: VerificationResult['status'] = attemptStatus
   let structuredError: StructuredError | null = null
-  const debtNotes: DebtNote[] = [...(prior?.debtNotes ?? [])]
+  // A pass resolves the open items recorded so far, so it carries none. A fail or
+  // another pass with debt keeps them: a failing attempt has not shown they are
+  // fixed (on a red gate the critic does not even run). `attempts` keeps every
+  // attempt's own record either way.
+  const debtNotes: DebtNote[] = attemptStatus === 'pass' ? [] : [...(prior?.debtNotes ?? [])]
 
   if (attemptStatus === 'fail') {
     structuredError = structuredErrorFor(det, critic)
