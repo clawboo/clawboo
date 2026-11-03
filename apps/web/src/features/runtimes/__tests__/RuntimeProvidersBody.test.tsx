@@ -149,6 +149,43 @@ describe('RuntimeProvidersBody', () => {
     )
   })
 
+  it('clears the "model saved" timer when it unmounts', async () => {
+    // Left running, the timer fired after the test environment was torn down
+    // and failed the whole run with "window is not defined".
+    hub(['openrouter'])
+    server.use(
+      http.get('/api/onboarding/native-leader-model', () =>
+        HttpResponse.json({ provider: 'openrouter', model: 'anthropic/claude-haiku-4.5' }),
+      ),
+      http.post('/api/onboarding/native-leader-model', () => HttpResponse.json({ ok: true })),
+      http.get('/api/providers/openrouter/models', () =>
+        HttpResponse.json({
+          models: [
+            { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku' },
+            { id: 'minimax/minimax-m2.5', label: 'MiniMax: MiniMax M2.5' },
+          ],
+        }),
+      ),
+    )
+    const { unmount } = render(<RuntimeProvidersBody nativeReady />)
+    await screen.findByTestId('native-provider-row-openrouter')
+    await userEvent.click(screen.getByTestId('native-provider-toggle-openrouter'))
+    await userEvent.click(await screen.findByTestId('native-provider-model-openrouter'))
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout')
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+    try {
+      await userEvent.click(await screen.findByText('MiniMax: MiniMax M2.5'))
+      await waitFor(() => expect(setTimeoutSpy.mock.calls.some((c) => c[1] === 1600)).toBe(true))
+      const call = setTimeoutSpy.mock.calls.findIndex((c) => c[1] === 1600)
+      const savedTimer = setTimeoutSpy.mock.results[call]?.value
+      unmount()
+      expect(clearTimeoutSpy).toHaveBeenCalledWith(savedTimer)
+    } finally {
+      setTimeoutSpy.mockRestore()
+      clearTimeoutSpy.mockRestore()
+    }
+  })
+
   it('READY native: a connected NON-default row offers Make default', async () => {
     hub(['openrouter', 'anthropic'])
     const saved: unknown[] = []

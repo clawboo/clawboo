@@ -30,7 +30,7 @@
 // them. Not set up, the settings variant offers it as a single "Use" line,
 // verified against the local daemon first.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, Check } from 'lucide-react'
 
 import {
@@ -166,6 +166,15 @@ export function RuntimeProvidersBody({
   // failure the user can deliberately override.
   const [verifyFailedId, setVerifyFailedId] = useState<string | null>(null)
   const [modelSaved, setModelSaved] = useState(false)
+  // Hides the "saved" note again; cleared on unmount so it never fires into a
+  // component (or a test environment) that is already gone.
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+    },
+    [],
+  )
   // Live per-provider model lists (fetched with the STORED key on expand).
   const [liveModels, setLiveModels] = useState<Record<string, ProviderModelOption[]>>({})
   // Ollama's pulled models, asked for whenever its row is opened (a pull since
@@ -317,7 +326,8 @@ export function RuntimeProvidersBody({
     const ok = await setNativeLeaderModel(p.id, model)
     if (ok) {
       setModelSaved(true)
-      setTimeout(() => setModelSaved(false), 1600)
+      if (savedTimer.current) clearTimeout(savedTimer.current)
+      savedTimer.current = setTimeout(() => setModelSaved(false), 1600)
     } else {
       setError('Could not save the default model')
     }
