@@ -412,7 +412,15 @@ jobs:
       # regression gate for v0.1.4's Windows-compat fixes (npm.cmd resolution,
       # which→where shim, netstat-based findProcessByPort); macOS is a primary
       # user OS that CI did not cover before.
+      #
+      # TMPDIR: the gate installs under os.tmpdir(), and Node cannot load
+      # better-sqlite3's native binding from a /tmp mounted noexec. That broke
+      # this job when ubuntu-latest moved to 26.04 (every database route
+      # answered 500), so the install goes in the runner's own temp dir. Node
+      # reads TEMP, not TMPDIR, on Windows, so this changes nothing there.
       - run: pnpm test:clean-install
+        env:
+          TMPDIR: ${{ runner.temp }}
 
   e2e:
     needs: [filter]

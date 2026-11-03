@@ -168,6 +168,25 @@ function fail(msg) {
   process.exitCode = 1
 }
 
+// The dashboard keeps serving when a subsystem fails at boot, so the assertion
+// that trips (a 500 in the browser, say) can be far from the cause. Print the
+// server's own errors before cleanup deletes its log with the temp dir.
+async function printServerErrors() {
+  if (!tmpDir) return
+  const logFile = path.join(tmpDir, '.clawboo', 'server.log')
+  let text
+  try {
+    text = await fs.readFile(logFile, 'utf8')
+  } catch {
+    return
+  }
+  // pino levels: 50 is error, 60 is fatal.
+  const errors = text.split('\n').filter((line) => /"level":(50|60),/.test(line))
+  if (errors.length === 0) return
+  console.error(`[clean-install] server errors from ${logFile}:`)
+  for (const line of errors.slice(-20)) console.error(`  ${line}`)
+}
+
 // ─── State for cleanup ───────────────────────────────────────────────────────
 
 let fakeService = null
@@ -1672,6 +1691,7 @@ if (succeeded) {
   console.log('[clean-install] ✓ All checks passed.')
 } else {
   console.error('[clean-install] One or more assertions failed.')
+  await printServerErrors()
 }
 
 // Cleanup runs as a fire-and-forget detached chain, capped at 15s — enough to
