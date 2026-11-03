@@ -252,9 +252,16 @@ describe('verification gate (real board + real git worktree)', () => {
     justification: 'unresolved at cycle exhaustion',
   }
 
+  /** The item a red gate leaves, as `verifyTask` writes it. */
+  const GATE_NOTE: DebtNote = {
+    criterion: 'deterministic gate',
+    severity: 'crash',
+    justification: 'The deterministic gate failed: `exit 1` exited 1.',
+  }
+
   /** The pass with debt a task still carries when it goes from blocked back to
    *  in_progress (a move to todo would clear it). */
-  function seedPassWithDebt(taskId: string): void {
+  function seedPassWithDebt(taskId: string, debtNotes: DebtNote[] = [TOKEN_NOTE]): void {
     setTaskVerification(getDb(), taskId, {
       status: 'completed_with_debt',
       attempts: [
@@ -291,17 +298,44 @@ describe('verification gate (real board + real git worktree)', () => {
           structuredError: null,
         },
       ],
-      debtNotes: [TOKEN_NOTE],
+      debtNotes,
       updatedAt: 0,
     })
   }
 
   it(
-    'a pass after a pass with debt carries no open items and keeps the history',
+    'a pass with a completed review after a pass with debt carries no open items and keeps the history',
     async () => {
       const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
-      seedPassWithDebt(taskId)
+      seedPassWithDebt(taskId, [TOKEN_NOTE, GATE_NOTE])
       const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        makeReviewerAdapter: () => new FakeReviewerAdapter('{"findings":[]}'),
+      })
+      expect(verdict.status).toBe('pass')
+      expect(verdict.attempts[1]?.critic).toMatchObject({ ran: true, outcome: 'reviewed' })
+      expect(verdict.debtNotes).toEqual([])
+      expect(getTaskVerification(db, taskId)?.debtNotes).toEqual([])
+      expect(verdict.attempts.map((a) => a.status)).toEqual(['completed_with_debt', 'pass'])
+      expect(verdict.attempts[0]?.critic.findings[0]?.title).toBe(TOKEN_NOTE.criterion)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    "a pass with no review keeps the reviewer's open items and drops the gate's",
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      seedPassWithDebt(taskId, [TOKEN_NOTE, GATE_NOTE])
+      const db = getDb()
+      // No reviewer, as on the workspace route: only the command ran, and it passed.
       const verdict = await verifyTask({
         db,
         taskId,
@@ -311,10 +345,40 @@ describe('verification gate (real board + real git worktree)', () => {
         reviewRootDir: path.join(home, 'reviews'),
       })
       expect(verdict.status).toBe('pass')
-      expect(verdict.debtNotes).toEqual([])
-      expect(getTaskVerification(db, taskId)?.debtNotes).toEqual([])
-      expect(verdict.attempts.map((a) => a.status)).toEqual(['completed_with_debt', 'pass'])
-      expect(verdict.attempts[0]?.critic.findings[0]?.title).toBe(TOKEN_NOTE.criterion)
+      expect(verdict.attempts[1]?.critic.ran).toBe(false)
+      expect(verdict.debtNotes).toEqual([TOKEN_NOTE])
+      expect(getTaskVerification(db, taskId)?.debtNotes).toEqual([TOKEN_NOTE])
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it.each([
+    [
+      'errored',
+      [
+        { kind: 'error', code: 'authentication_failed', message: 'Invalid API key', fatal: true },
+        { kind: 'done', reason: 'error', summary: 'Invalid API key' },
+      ],
+    ],
+    ['empty', [{ kind: 'done', reason: 'success', summary: '' }]],
+  ])(
+    "a pass whose review came back %s keeps the reviewer's open items",
+    async (outcome, script) => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      seedPassWithDebt(taskId)
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        makeReviewerAdapter: () => new ScriptedReviewerAdapter(script),
+      })
+      expect(verdict.status).toBe('pass')
+      expect(verdict.attempts[1]?.critic).toMatchObject({ ran: true, outcome })
+      expect(verdict.debtNotes).toEqual([TOKEN_NOTE])
     },
     WORKTREE_TIMEOUT_MS,
   )
