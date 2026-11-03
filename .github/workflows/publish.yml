@@ -91,10 +91,7 @@ jobs:
       # (Unauthorized via port collision) shipped broken on. Belt-and-suspenders
       # even if the same test ran on the PR - race conditions or
       # upstream-changed lockfiles could cause divergence.
-      # TMPDIR keeps the install off a noexec /tmp; see the same step in ci.yml.
       - run: pnpm test:clean-install
-        env:
-          TMPDIR: ${{ runner.temp }}
 
       # Pinned to a commit, not to @v2. There is no v2 TAG in changesets/action,
       # only a moving v2 BRANCH, and this is the step that holds NPM_TOKEN and

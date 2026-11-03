@@ -1147,7 +1147,12 @@ async function main() {
   if (useShadowPath) {
     shadowBinDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-shadow-bin-'))
     const allowedBins = ['node', 'npm', 'pnpm', 'which', 'ls']
-    for (const dir of ['/usr/bin', '/bin', '/usr/local/bin', path.dirname(process.execPath)]) {
+    // The first match wins, so the Node running this script comes first. The
+    // `npm install` above built better-sqlite3's native binding for the Node on
+    // this script's PATH, which in CI is this one. A system Node found first
+    // (the ubuntu-26.04 runner image ships Node 24 in /usr/local/bin) cannot
+    // load that binding, and every database route answers 500.
+    for (const dir of [path.dirname(process.execPath), '/usr/bin', '/bin', '/usr/local/bin']) {
       for (const bin of allowedBins) {
         const src = path.join(dir, bin)
         try {
