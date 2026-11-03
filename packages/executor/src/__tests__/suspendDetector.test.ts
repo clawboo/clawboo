@@ -84,6 +84,20 @@ describe('setAwakeTimeout', () => {
     expect(fn).toHaveBeenCalledTimes(1)
   })
 
+  it('a sleep during the last, short wait does not fire it on wake either', () => {
+    const fn = vi.fn()
+    setAwakeTimeout(fn, MIN + 10_000)
+    // 65 s awake: the last wait, 10 s long, is half done.
+    vi.advanceTimersByTime(MIN + 5_000)
+
+    sleepFor(60 * MIN)
+    expect(fn).not.toHaveBeenCalled()
+
+    // At most the cut wait runs again, so it fires that much late.
+    vi.advanceTimersByTime(10_000)
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
   it('clear stops it', () => {
     const fn = vi.fn()
     const t = setAwakeTimeout(fn, 10 * MIN)

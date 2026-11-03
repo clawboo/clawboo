@@ -54,8 +54,11 @@ export interface AwakeTimer {
 /**
  * `setTimeout` for a watchdog: `fn` runs after `ms` of time the process was
  * awake. Instead of one long timer it checks every `AWAKE_TIMER_TICK_MS` and
- * moves its deadline past any suspension it sees, so a sleep longer than `ms`
- * does not fire it on wake. The timer never holds a Node process open.
+ * moves its deadline past any suspension it sees, so a sleep does not fire it
+ * on wake. A wait that a suspension cut into counts as asleep in full, since
+ * the part before the sleep cannot be told from the rest: after a sleep `fn`
+ * can run up to one tick late, never at the moment the machine wakes. The
+ * timer never holds a Node process open.
  *
  * It reads the wall clock. A clock set back delays `fn` by the size of the
  * step. A clock set forward by up to one tick makes it that much early, and a
@@ -73,10 +76,13 @@ export function setAwakeTimeout(
   if (!(tickMs > 0)) throw new RangeError(`setAwakeTimeout: tickMs must be positive, got ${tickMs}`)
   const start = now()
   let deadline = start + ms
-  const suspendedFor = createSuspendDetector(tickMs, start)
+  /** When the last check ran, and how long the wait since then was meant to be. */
+  let lastAt = start
+  let waitMs = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   const schedule = (delay: number): void => {
-    timer = setTimeout(check, Math.max(0, Math.min(delay, tickMs)))
+    waitMs = Math.max(0, Math.min(delay, tickMs))
+    timer = setTimeout(check, waitMs)
     // Under Node the handle is a Timeout carrying `unref`; the probe keeps this
     // browser-safe.
     const handle = timer as unknown as { unref?: () => void }
@@ -84,7 +90,12 @@ export function setAwakeTimeout(
   }
   const check = (): void => {
     const at = now()
-    deadline += suspendedFor(at)
+    const gap = at - lastAt
+    lastAt = at
+    // More than a tick past what the wait asked for: the process was suspended
+    // during it. Counting any of it as awake is what fired the timer on wake
+    // when less than a tick of its allowance was left.
+    if (gap > waitMs + tickMs) deadline += gap
     if (at < deadline) return schedule(deadline - at)
     timer = undefined
     fn()
