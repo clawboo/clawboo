@@ -248,6 +248,9 @@ export interface WorktreeDetail {
   workspace?: DbWorkspace
   /** SoR file contents (TASK.md / task-progress.md / DECISIONS.json / VERIFICATION.md / AGENT_HANDOFF.json). */
   sorFiles?: Record<string, string>
+  /** Names of the task files cut at the 256 KB read limit; their `sorFiles`
+   *  entry holds only the start. */
+  sorFilesTruncated?: string[]
   diffStat?: DiffStat | null
   /** Unified diff (baseline vs working tree), SoR bookkeeping files excluded. */
   diff?: string
@@ -261,13 +264,17 @@ export async function readWorktreeDetail(taskId: string): Promise<WorktreeDetail
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
   const wtPath = ws.worktreePath
   const sorFiles: Record<string, string> = {}
+  const sorFilesTruncated: string[] = []
   for (const name of Object.values(SOR_FILES)) {
     // The agent writes these files, so it can also replace one with a link to
     // any file the server can read. Read through the Workspace tab's confined
     // reader, which refuses links and anything outside the worktree.
     try {
       const file = await readFileAt(wtPath, name)
-      if (!file.binary) sorFiles[name] = file.content
+      if (!file.binary) {
+        sorFiles[name] = file.content
+        if (file.truncated) sorFilesTruncated.push(name)
+      }
     } catch {
       /* missing, a link, or not a regular file: left out */
     }
@@ -282,7 +289,7 @@ export async function readWorktreeDetail(taskId: string): Promise<WorktreeDetail
   } catch {
     /* worktree paused-away / git unavailable → diff stays empty */
   }
-  return { ok: true, workspace: ws, sorFiles, diffStat: stat, diff }
+  return { ok: true, workspace: ws, sorFiles, sorFilesTruncated, diffStat: stat, diff }
 }
 
 /** Write the clock-out `AGENT_HANDOFF.json` into a task's worktree. */

@@ -371,10 +371,11 @@ async function acquireWorkspace(
     // reaped checkout (stale row / dir gone / not git-registered) and rebuild it
     // from the retained branch before use; fall through to a fresh provision
     // only if the rebuild can't run (no repoPath / branch gone).
-    const gone = existing.workspace.status === 'stale' || !existsSync(wtPath)
-    const registration = !gone && repoPath ? await worktreeRegistration(repoPath, wtPath) : null
-    // The rebuild replaces the folder, so a failed `git worktree list` must not
-    // read as "reaped": it says nothing about a checkout that may be live.
+    const onDisk = existsSync(wtPath)
+    // Probed whenever the folder is there, a `stale` row included: the rebuild
+    // may replace the folder, so a failed `git worktree list` must not read as
+    // "reaped". It says nothing about a checkout that may be live.
+    const registration = onDisk && repoPath ? await worktreeRegistration(repoPath, wtPath) : null
     if (registration === 'unknown') {
       return {
         ok: false,
@@ -382,7 +383,8 @@ async function acquireWorkspace(
         reason: `Could not check the worktree at ${wtPath} against ${repoPath ?? 'its repository'} (git did not answer), so nothing was changed. The task can run again.`,
       }
     }
-    const reaped = gone || registration === 'unregistered'
+    const reaped =
+      existing.workspace.status === 'stale' || !onDisk || registration === 'unregistered'
     if (!reaped) return { ok: true, cwd: wtPath, resume: existing.resume }
     if (repoPath) {
       const resumed = await resumeTaskWorkspace(taskId, { repoPath })

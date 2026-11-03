@@ -1072,6 +1072,7 @@ export async function boardWorkspacePreviewGET(req: Request, res: Response): Pro
     res.on('close', () => stream.destroy())
     stream.pipe(res)
   } catch (err) {
+    log.error({ err }, 'serving a preview file failed')
     res.status(500).json({ error: String(err) })
   }
 }

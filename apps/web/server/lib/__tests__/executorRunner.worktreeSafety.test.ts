@@ -15,7 +15,13 @@ import { promisify } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createTask, getComments, getTask, getWorkspaceForTask } from '@clawboo/db'
+import {
+  createTask,
+  getComments,
+  getTask,
+  getWorkspaceForTask,
+  updateWorkspaceStatus,
+} from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -205,6 +211,34 @@ describe('executor runner: a rebuild never discards uncommitted work', () => {
     expect(again.ok).toBe(true)
     expect(third.startCount).toBe(1)
     expect(await readFile(path.join(t.wtPath, 'notes.txt'), 'utf8')).toBe('only here\n')
+  })
+
+  it('a stale row whose folder is still there is checked too, and a failed check stops the run', async () => {
+    const t = await taskWithUncommittedWork()
+    // The folder is clean again (its work committed), and the row says stale.
+    await git(t.wtPath, ['add', '-A'])
+    await git(t.wtPath, ['-c', 'user.name=t', '-c', 'user.email=t@e', 'commit', '-m', 'saved'])
+    const tip = (await git(repo, ['rev-parse', t.branch])).trim()
+    const ws = getWorkspaceForTask(getDb(), t.taskId)
+    updateWorkspaceStatus(getDb(), ws?.id ?? '', 'stale')
+    const second = new CountingAdapter('codex')
+    probe.failures = 1
+
+    const r = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => second,
+      taskId: t.taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      disableMemoryAutoInject: true,
+    })
+
+    expect(r).toEqual({ ok: false, reason: 'workspace_unavailable' })
+    expect(second.startCount).toBe(0)
+    expect(getTask(getDb(), t.taskId)?.status).toBe('todo')
+    expect((await git(repo, ['rev-parse', t.branch])).trim()).toBe(tip)
+    const note = getComments(getDb(), t.taskId).find((c) => c.body.includes(t.wtPath))
+    expect(note?.body).toMatch(/^\[not started: worktree unchecked\]/)
   })
 
   it('a checkout git cannot read stops the run, names the folder, and waits for a person', async () => {

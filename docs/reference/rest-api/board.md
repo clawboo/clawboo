@@ -1121,7 +1121,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out.
+The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out, and a longer one holds only its first 256 KB and is named in `sorFilesTruncated`.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -1141,6 +1141,7 @@ The task drawer's workspace view: the contents of the task files that exist (`TA
   ok: true
   workspace: DbWorkspace        // shape as in GET .../workspace
   sorFiles: Record<string, string>   // task file contents, keyed by file name
+  sorFilesTruncated: string[]        // names of the files cut at 256 KB
   diffStat: { filesChanged: number, insertions: number, deletions: number, dirty: boolean } | null
   diff: string                  // unified diff without the task files; '' when unavailable
 }
@@ -1164,7 +1165,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace/detail
 
 Four read-only routes behind an agent's **Workspace** tab. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
 
-The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. The agent can change the worktree while it is read, so a file is opened without following a link, and checked again after the open to be the same file inside the worktree: a file or folder swapped for a link after the first check is refused too. A file with more than one hard link is refused as well, since a hard link can give a file outside the worktree a name inside it; a git checkout never makes one, though a package manager's store can. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
+The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. The agent can change the worktree while it is read, so a file is opened without following a link, and checked again after the open: its path must still resolve to itself and name the same file, with one name. A file or folder swapped for a link after the first check is refused too. On Linux the check after the open also asks the kernel where the open file is, which a folder swapped back and forth during the check cannot fool; on macOS and Windows that last case is a race the server can lose. A file with more than one hard link is refused as well, since a hard link can give a file outside the worktree a name inside it; a git checkout never makes one, though a package manager's store can. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
 
 When the workspace itself cannot be read, all four answer `{ "ok": false, "error": "<message>", "reason": "<reason>" }`:
 
@@ -1218,7 +1219,7 @@ curl 'http://localhost:18790/api/board/<task-id>/workspace/file?path=src/index.t
 Serves the files in a task's worktree as a static website, so the task drawer's **Preview** can show the page an agent built next to the diff. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
 
 - `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>` serve the same tree. A folder (including the bare route) serves its `index.html`. A folder URL without a trailing slash answers `302` to the same URL with a `/` added (the base path and query are kept), so the page's relative links resolve.
-- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters.
+- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters. Leading slashes are dropped, so `preview//index.html` is the worktree's `index.html`, never a path from the root of the disk.
 - `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
 - Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
 - Every response, redirects and errors included, carries `Content-Security-Policy: sandbox allow-same-origin`.
@@ -1242,7 +1243,7 @@ The page is served from the dashboard's own origin, so a script in it could call
 
 **`413 Payload Too Large`**: a file over 8 MB: `{ "ok": false, "error": "That file is too large to preview." }`
 
-**`500 Internal Server Error`**: `{ "error": "<message>" }` (or `preview read failed` when the file cannot be read).
+**`500 Internal Server Error`**: `{ "error": "<message>" }`, including when a file that is there cannot be opened (no permission, no file descriptors left), or `preview read failed` when reading it fails partway.
 
 ### Example
 

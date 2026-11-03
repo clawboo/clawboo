@@ -241,15 +241,47 @@ export async function isWorktreeRegistered(
 /**
  * What replacing the folder at `worktreePath` would lose:
  * - `'missing'` / `'empty'`: nothing;
- * - `'clean'`: nothing that is not on its branch already (a checkout of its
- *   own whose `git status` is empty);
+ * - `'clean'`: nothing that is not in `repoPath` already (a checkout of that
+ *   repository, on a branch or at a commit a branch holds, with an empty
+ *   `git status --ignored`);
+ * - `'ignored'`: files git ignores and so never commits, such as `.env` or
+ *   build output, and nothing else;
  * - `'dirty'`: uncommitted changes;
+ * - `'unbranched'`: a detached checkout at a commit no branch holds;
+ * - `'foreign'`: a separate repository, whose commits live only in this folder;
  * - `'unreadable'`: git cannot read it as a checkout of its own (a lost admin
  *   folder, a folder that is not a checkout), so what it holds is unknown.
  */
-export type CheckoutContents = 'missing' | 'empty' | 'clean' | 'dirty' | 'unreadable'
+export type CheckoutContents =
+  'missing' | 'empty' | 'clean' | 'ignored' | 'dirty' | 'unbranched' | 'foreign' | 'unreadable'
 
-export async function checkoutContents(worktreePath: string): Promise<CheckoutContents> {
+/** The repository's shared git folder as seen from `dir`, canonical. */
+async function commonGitDir(dir: string): Promise<string> {
+  const out = (await execGit(dir, ['rev-parse', '--git-common-dir'])).trim()
+  return canonical(path.resolve(dir, out))
+}
+
+/** True when HEAD is a branch, or a commit some local branch contains. */
+async function headIsOnABranch(dir: string): Promise<boolean> {
+  try {
+    await execGit(dir, ['symbolic-ref', '-q', 'HEAD'])
+    return true
+  } catch {
+    const holders = await execGit(dir, [
+      'for-each-ref',
+      '--count=1',
+      '--contains',
+      'HEAD',
+      'refs/heads',
+    ])
+    return holders.trim().length > 0
+  }
+}
+
+export async function checkoutContents(
+  repoPath: string,
+  worktreePath: string,
+): Promise<CheckoutContents> {
   let entries: string[]
   try {
     entries = await readdir(worktreePath)
@@ -263,7 +295,16 @@ export async function checkoutContents(worktreePath: string): Promise<CheckoutCo
     // before the status is believed.
     const top = (await execGit(worktreePath, ['rev-parse', '--show-toplevel'])).trim()
     if ((await canonical(top)) !== (await canonical(worktreePath))) return 'unreadable'
-    return (await hasUncommittedChanges(worktreePath)) ? 'dirty' : 'clean'
+    // Removing the folder removes its `.git` too: fine for a checkout of the
+    // task's repository, whose objects live there, and a loss for anything else.
+    if ((await commonGitDir(worktreePath)) !== (await commonGitDir(repoPath))) return 'foreign'
+    // `--ignored`, because `.env` files and the like never show in a plain
+    // status and would go with the folder.
+    const status = await execGit(worktreePath, ['status', '--porcelain', '--ignored'])
+    const lines = status.split('\n').filter((l) => l.trim().length > 0)
+    if (lines.some((l) => !l.startsWith('!!'))) return 'dirty'
+    if (!(await headIsOnABranch(worktreePath))) return 'unbranched'
+    return lines.length > 0 ? 'ignored' : 'clean'
   } catch {
     return 'unreadable'
   }

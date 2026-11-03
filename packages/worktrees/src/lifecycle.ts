@@ -15,10 +15,12 @@ import {
   branchNameForTask,
   checkoutContents,
   commitAll,
+  execGit,
   deleteBranch,
   diffStat,
   findScaffoldCommit,
   hasUncommittedChanges,
+  isDetached,
   isGitRepo,
   isWorktreeRegistered,
   pruneWorktrees,
@@ -30,6 +32,7 @@ import {
   worktreeRootFor,
 } from './git'
 import { SOR_FILES, writeScaffold } from './scaffold'
+import type { CheckoutContents } from './git'
 import type { DiffStat, TaskScaffoldInput, Worktree } from './types'
 
 /**
@@ -53,9 +56,9 @@ function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: string
 
 /**
  * Thrown instead of replacing a checkout that may hold work found nowhere else:
- * uncommitted changes, or a folder git cannot read as a checkout, so what it
- * holds is unknown. The folder is left exactly as it was, for a person to save
- * or remove.
+ * uncommitted changes, files git ignores, a commit no branch holds, a separate
+ * repository, or a folder git cannot read as a checkout, so what it holds is
+ * unknown. The folder is left exactly as it was, for a person to save or remove.
  */
 export class UnsafeWorktreeError extends Error {
   readonly worktreePath: string
@@ -69,23 +72,47 @@ export class UnsafeWorktreeError extends Error {
   }
 }
 
+/** Why a folder with these contents cannot be replaced, or null when it can. */
+function whyNotReplaceable(contents: CheckoutContents, repoPath: string): string | null {
+  switch (contents) {
+    case 'missing':
+    case 'empty':
+    case 'clean':
+      return null
+    case 'dirty':
+      return 'it has uncommitted changes'
+    case 'ignored':
+      return 'it holds files git ignores, such as an .env file, which a rebuild would delete'
+    case 'unbranched':
+      return 'its checked-out commit is on no branch, so removing it would lose that commit'
+    case 'foreign':
+      return `it is a separate git repository, not a checkout of ${repoPath}`
+    case 'unreadable':
+      return 'git cannot read it as a checkout, so it may hold work that is nowhere else'
+  }
+}
+
 /**
  * Throw {@link UnsafeWorktreeError} unless the folder at `worktreePath` can be
- * deleted without losing anything: it is missing, empty, or a checkout of its
- * own with a clean `git status` (its commits are on the branch). Every path
- * that removes a task checkout in order to put another one there runs this
- * first, because the removal itself (`worktree remove --force`, then a
- * recursive delete) takes uncommitted work with it.
+ * deleted without losing anything: it is missing, empty, or a checkout of
+ * `repoPath` whose commits a branch holds and whose `git status --ignored` is
+ * empty. Every path that removes a task checkout in order to put another one
+ * there runs this first, because the removal itself (`worktree remove
+ * --force`, then a recursive delete) takes the folder's `.git` and every file
+ * in it, ignored ones included.
  */
-async function assertReplaceable(worktreePath: string): Promise<void> {
-  const contents = await checkoutContents(worktreePath)
-  if (contents === 'dirty')
-    throw new UnsafeWorktreeError(worktreePath, 'it has uncommitted changes')
-  if (contents === 'unreadable') {
-    throw new UnsafeWorktreeError(
-      worktreePath,
-      'git cannot read it as a checkout, so it may hold work that is nowhere else',
-    )
+async function assertReplaceable(repoPath: string, worktreePath: string): Promise<void> {
+  const why = whyNotReplaceable(await checkoutContents(repoPath, worktreePath), repoPath)
+  if (why !== null) throw new UnsafeWorktreeError(worktreePath, why)
+}
+
+/** True when the checkout at `worktreePath` has `branch` checked out. */
+async function isOnBranch(worktreePath: string, branch: string): Promise<boolean> {
+  try {
+    const head = (await execGit(worktreePath, ['symbolic-ref', '-q', 'HEAD'])).trim()
+    return head === `refs/heads/${branch}`
+  } catch {
+    return false
   }
 }
 
@@ -151,7 +178,7 @@ export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktre
     await mkdir(root, { recursive: true })
     // Checked once, before either pass below: after it, anything at the path is
     // this provision's own (a failed first attempt), safe for the retry to clear.
-    await assertReplaceable(worktreePath)
+    await assertReplaceable(opts.repoPath, worktreePath)
 
     const attempt = async (): Promise<void> => {
       // Orphan-resilient pre-clean.
@@ -224,8 +251,10 @@ export interface ResumeOptions {
  * at its current tip. `baseCommit` is recovered as the SoR-scaffold commit so a
  * later `completeWorktree` diffs against the right baseline.
  *
- * A folder already at the path is replaced only when that loses nothing;
- * otherwise this throws {@link UnsafeWorktreeError} and leaves it alone.
+ * A registered checkout of the task branch with no changes is kept as it is,
+ * files git ignores included. Any other folder at the path is replaced only
+ * when that loses nothing; otherwise this throws {@link UnsafeWorktreeError}
+ * and leaves it alone.
  */
 export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
   const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
@@ -235,7 +264,19 @@ export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
     if (!(await branchExists(opts.repoPath, branch))) {
       throw new Error(`cannot resume: branch ${branch} no longer exists`)
     }
-    await assertReplaceable(worktreePath)
+    const contents = await checkoutContents(opts.repoPath, worktreePath)
+    // Already the task's own checkout, at the branch, with nothing uncommitted:
+    // re-adding it would give the same files and delete the ignored ones.
+    if (
+      (contents === 'clean' || contents === 'ignored') &&
+      (await isOnBranch(worktreePath, branch)) &&
+      (await worktreeRegistration(opts.repoPath, worktreePath)) === 'registered'
+    ) {
+      const baseCommit = await findScaffoldCommit(opts.repoPath, branch, opts.taskId)
+      return { taskId: opts.taskId, worktreePath, branch, baseCommit, detached: false }
+    }
+    const why = whyNotReplaceable(contents, opts.repoPath)
+    if (why !== null) throw new UnsafeWorktreeError(worktreePath, why)
     await removeWorktree(opts.repoPath, worktreePath)
     await rm(worktreePath, { recursive: true, force: true })
     // Attach the existing branch — no -b/-B, so prior commits are preserved.
@@ -422,8 +463,11 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
           return false
         }
         // Commit-before-drop so reaping can never eat uncommitted work. Only a
-        // checkout git lists can be autosaved; anything else is reaped only when
-        // it holds nothing, and skipped when git could not even say which it is.
+        // checkout git lists, on a branch, can be autosaved; anything else is
+        // reaped only when it holds nothing, and skipped when git could not even
+        // say which it is. Files git ignores are not work: a registered
+        // checkout is reaped with them, which is what keeps build output from
+        // filling the disk.
         const registration = await worktreeRegistration(opts.repoPath, info.worktreePath)
         if (registration === 'unknown') {
           result.skipped.push({
@@ -432,18 +476,19 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
           })
           return false
         }
-        if (registration === 'registered') {
-          if (await hasUncommittedChanges(info.worktreePath)) {
-            await commitAll(info.worktreePath, `clawboo: gc autosave task ${info.taskId}`)
+        const contents = await checkoutContents(opts.repoPath, info.worktreePath)
+        const skip = (why: string): false => {
+          result.skipped.push({ taskId: info.taskId, reason: `kept ${info.worktreePath}: ${why}` })
+          return false
+        }
+        if (registration === 'registered' && contents === 'dirty') {
+          if (await isDetached(info.worktreePath)) {
+            return skip('it has uncommitted changes and no branch to save them on')
           }
-        } else {
-          try {
-            await assertReplaceable(info.worktreePath)
-          } catch (err) {
-            if (!(err instanceof UnsafeWorktreeError)) throw err
-            result.skipped.push({ taskId: info.taskId, reason: err.message })
-            return false
-          }
+          await commitAll(info.worktreePath, `clawboo: gc autosave task ${info.taskId}`)
+        } else if (!(registration === 'registered' && contents === 'ignored')) {
+          const why = whyNotReplaceable(contents, opts.repoPath)
+          if (why !== null) return skip(why)
         }
         await removeWorktree(opts.repoPath, info.worktreePath) // keep the branch
         await rm(info.worktreePath, { recursive: true, force: true })

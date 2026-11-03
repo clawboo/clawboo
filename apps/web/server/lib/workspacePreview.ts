@@ -130,7 +130,11 @@ export async function resolvePreviewFile(
     ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.'))
   } catch (err) {
     if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
-    return { ok: false, status: 404, error: 'No such file in the workspace.' }
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { ok: false, status: 404, error: 'No such file in the workspace.' }
+    }
+    throw err
   }
 
   let st = await stat(abs)
@@ -181,8 +185,13 @@ export type PreviewStream =
  * Opened through `openConfinedFile`, which checks the open from the handle's
  * side: the agent can replace the file, or a folder above it, with a link
  * between `resolvePreviewFile` and this call. The stream reads from that
- * checked handle and stops at the size read from it, so what is sent always
- * matches the Content-Length.
+ * checked handle and stops at the size read from it, so it never sends more
+ * than the Content-Length. A file the agent shrinks while it streams ends the
+ * body early, shorter than the Content-Length said.
+ *
+ * A file that went away answers 404. Any other failure to open it (no
+ * permission, no file descriptors left) is thrown, for the route to answer
+ * 500 with the error rather than call an existing file missing.
  */
 export async function openPreviewStream(
   file: Pick<Extract<PreviewResolution, { ok: true }>, 'absPath' | 'realRoot'>,
@@ -192,7 +201,11 @@ export async function openPreviewStream(
     opened = await openConfinedFile(file.realRoot, file.absPath)
   } catch (err) {
     if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
-    return { ok: false, status: 404, error: 'No such file in the workspace.' }
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      return { ok: false, status: 404, error: 'No such file in the workspace.' }
+    }
+    throw err
   }
   const { handle, size } = opened
   if (size > MAX_PREVIEW_BYTES) {

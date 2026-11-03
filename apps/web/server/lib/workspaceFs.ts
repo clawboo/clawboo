@@ -21,7 +21,7 @@
 //      which re-checks the open from the handle's side.
 
 import { constants as fsConstants, existsSync } from 'node:fs'
-import { lstat, open, readdir, realpath, stat, type FileHandle } from 'node:fs/promises'
+import { lstat, open, readdir, readlink, realpath, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
@@ -158,13 +158,19 @@ export interface ConfinedFile {
  * or any folder above it, for a link to anywhere on disk. The open is therefore
  * checked from the handle's side:
  *   1. `O_NOFOLLOW` refuses a link as the last component, where the flag exists
- *      (it does not on Windows).
+ *      (it does not on Windows), and `O_NONBLOCK` keeps a named pipe swapped in
+ *      from blocking the open until something writes to it.
  *   2. The handle must hold a regular file with one name: a hard link is the
  *      same file as its target, so no later check can tell it apart.
- *   3. AFTER the open, the path must still resolve inside the root and name the
- *      very file the handle holds (same device and inode). A folder swapped for
- *      a link fails this, a folder swapped and swapped back fails it, and so
- *      does a linked file opened where `O_NOFOLLOW` does not exist.
+ *   3. On Linux, the kernel's own name for the open file
+ *      (`/proc/self/fd/<fd>`) must be `abs`. It describes the handle, not a
+ *      fresh lookup, so no swap during the checks can change it.
+ *   4. Everywhere, AFTER the open, `abs` must still resolve to itself, with no
+ *      link anywhere on the way, and name the very file the handle holds (same
+ *      device and inode, still one name). This catches a folder or file swapped
+ *      for a link, and one swapped and swapped back. Off Linux it is a second
+ *      lookup by path, so an agent that keeps swapping a folder above the file
+ *      can still race it.
  */
 export async function openConfinedFile(realRoot: string, abs: string): Promise<ConfinedFile> {
   const sinkPrefix = rootPrefixOf(realRoot)
@@ -173,7 +179,10 @@ export async function openConfinedFile(realRoot: string, abs: string): Promise<C
   }
   let handle: FileHandle
   try {
-    handle = await open(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+    handle = await open(
+      abs,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    )
   } catch (err) {
     // ELOOP on Linux and macOS, EMLINK on FreeBSD: the last component is a link.
     const code = (err as NodeJS.ErrnoException).code
@@ -189,18 +198,36 @@ export async function openConfinedFile(realRoot: string, abs: string): Promise<C
     // check below cannot tell one that leads outside the tree. A checkout never
     // makes them; refuse every file with more than one name.
     if (held.nlink > 1) throw new WorkspacePathError('Hard-linked files are not served.')
-    const real = await realpath(abs)
-    if (!real.startsWith(sinkPrefix)) {
-      throw new WorkspacePathError('The path resolves outside the workspace.')
+    if (process.platform === 'linux') {
+      const opened = await kernelPathOf(handle)
+      if (opened !== null && opened !== abs) {
+        throw new WorkspacePathError('The file changed while it was being opened.')
+      }
     }
-    const named = await stat(real)
-    if (named.dev !== held.dev || named.ino !== held.ino) {
+    const real = await realpath(abs)
+    if (real !== abs) {
       throw new WorkspacePathError('The file changed while it was being opened.')
     }
+    const named = await lstat(abs)
+    if (named.isSymbolicLink() || named.dev !== held.dev || named.ino !== held.ino) {
+      throw new WorkspacePathError('The file changed while it was being opened.')
+    }
+    // Read again here: a second name made after the first check would let the
+    // name check above match a file that lives outside the tree.
+    if (named.nlink > 1) throw new WorkspacePathError('Hard-linked files are not served.')
     return { handle, size: held.size }
   } catch (err) {
     await handle.close()
     throw err
+  }
+}
+
+/** Where the kernel says an open file is (Linux), or null when it cannot say. */
+async function kernelPathOf(handle: FileHandle): Promise<string | null> {
+  try {
+    return await readlink(`/proc/self/fd/${handle.fd}`)
+  } catch {
+    return null
   }
 }
 
@@ -313,17 +340,19 @@ export async function readFileAt(
     if (sniffLen > 0) ({ bytesRead: sniffRead } = await handle.read(sniff, 0, sniffLen, 0))
     if (sniff.subarray(0, sniffRead).includes(0)) return { binary: true, size }
 
-    const readLen = Math.min(maxBytes, size)
-    const buf = Buffer.alloc(readLen)
-    let bytesRead = 0
-    if (readLen > 0) ({ bytesRead } = await handle.read(buf, 0, readLen, 0))
+    // One byte past what is shown, so `truncated` says whether more was there
+    // when it was read, not when it was opened: a file that shrank in between
+    // and was read whole is not cut.
+    const shownLen = Math.min(maxBytes, size)
+    const buf = Buffer.alloc(shownLen + 1)
+    const { bytesRead } = await handle.read(buf, 0, shownLen + 1, 0)
     return {
       binary: false,
       size,
       // Decoded through a StringDecoder so a cut landing mid-codepoint holds
       // the partial sequence back instead of emitting a replacement char.
-      content: decodeUtf8(buf.subarray(0, bytesRead)),
-      truncated: size > maxBytes,
+      content: decodeUtf8(buf.subarray(0, Math.min(bytesRead, shownLen))),
+      truncated: bytesRead > shownLen,
     }
   } finally {
     await handle.close()
