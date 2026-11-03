@@ -11,6 +11,7 @@ import { MemoryGraphView } from './graph/MemoryGraphView'
 import { useMemoryGraphStore } from './graph/store'
 import { countLabel } from './graph/types'
 import { MemoryPanel } from './MemoryPanel'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── MemorySurface — the NAV_PANELS['memory'] renderer ───────────────────────
 //
@@ -27,7 +28,7 @@ const MODE_KEY = 'clawboo.memory.mode'
 
 function loadMode(): MemoryMode {
   try {
-    return localStorage.getItem(MODE_KEY) === 'list' ? 'list' : 'graph'
+    return scopedLocalStorage.getItem(MODE_KEY) === 'list' ? 'list' : 'graph'
   } catch {
     return 'graph'
   }
@@ -40,7 +41,7 @@ export function MemorySurface() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(MODE_KEY, memoryMode)
+      scopedLocalStorage.setItem(MODE_KEY, memoryMode)
     } catch {
       // localStorage unavailable — mode just won't persist
     }

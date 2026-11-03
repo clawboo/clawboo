@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── ViewMode ────────────────────────────────────────────────────────────────
 // Discriminated union replacing the old flat View type.
@@ -105,21 +106,9 @@ export function clampSidebarWidth(width: number): number {
   return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)))
 }
 
-function readStored(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function writeStored(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    // Private mode / blocked storage: the layout still works, it just isn't remembered.
-  }
-}
+// Private mode / blocked storage: the layout still works, it just isn't remembered.
+const readStored = (key: string): string | null => scopedLocalStorage.getItem(key)
+const writeStored = (key: string, value: string): void => scopedLocalStorage.setItem(key, value)
 
 function initialSidebarWidth(): number {
   const n = Number(readStored(SIDEBAR_WIDTH_KEY))

@@ -21,6 +21,7 @@ import {
   migratePersonalityValues,
   stripPersonalityBlock,
 } from '@/lib/soulPersonality'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -45,7 +46,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   // preference rather than part of the personality.
   const [showPrompts, setShowPrompts] = useState<boolean>(() => {
     try {
-      return window.localStorage.getItem(SHOW_PROMPTS_KEY) === 'true'
+      return scopedLocalStorage.getItem(SHOW_PROMPTS_KEY) === 'true'
     } catch {
       return false
     }
@@ -53,7 +54,7 @@ export function PersonalitySliders({ agentId: propAgentId }: { agentId?: string 
   const toggleShowPrompts = useCallback((next: boolean) => {
     setShowPrompts(next)
     try {
-      window.localStorage.setItem(SHOW_PROMPTS_KEY, String(next))
+      scopedLocalStorage.setItem(SHOW_PROMPTS_KEY, String(next))
     } catch {
       /* private mode / storage disabled: the toggle still works for this session */
     }

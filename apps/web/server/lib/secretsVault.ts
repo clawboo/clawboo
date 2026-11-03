@@ -31,7 +31,8 @@
 // SECURITY INVARIANTS (load-bearing; covered by secretsVault.test.ts):
 //   - A secret VALUE is NEVER logged, NEVER returned in an HTTP response body,
 //     NEVER written to SQLite / audit / obs. It flows ONLY into a spawned
-//     process's env (the runtime drivers).
+//     process's env (the runtime drivers) and, inside this process, to the
+//     storage scrub that masks it (see "Saved values for the storage scrub").
 //   - The vault file holds ciphertext only (safe to read); the master-key file
 //     is 0600 inside a 0700 dir.
 //   - A wrong/rotated/lost master key fails CLOSED (returns null), never throws
@@ -42,6 +43,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import path from 'node:path'
 
 import { readOpenclawEnvVar, resolveClawbooDir } from '@clawboo/config'
+import { MIN_KNOWN_SECRET_LENGTH, registerKnownSecretSource } from '@clawboo/db'
 
 interface EncryptedValue {
   iv: string
@@ -188,12 +190,75 @@ function writeVault(vault: Vault): void {
   }
 }
 
+// ─── Saved values for the storage scrub ──────────────────────────────────────
+// The storage scrub in @clawboo/db masks credentials by shape, and a supported
+// key of another shape (Groq's `gsk_…`, a Mistral key, xAI's `xai-…`) matches
+// none of its patterns. This module knows the exact values, so it lends them:
+// ONE in-memory set, decrypted from the vault on first use and dropped on every
+// write or removal so the next scrub rebuilds it. The set leaves this module only
+// through the source registered below, which the scrub compares against; it is
+// never logged, returned by a route, or written anywhere. Values shorter than
+// the scrub's minimum are left out of it entirely.
+//
+// Holding the values in memory changes nothing against the threat model above:
+// a process that can read this one's memory can already read the master key.
+
+let lentValues: { vault: string; values: ReadonlySet<string> } | null = null
+
+// An OAuth slot holds a JSON object. Only its token and secret fields are
+// credentials; the client id and the redirect address are ordinary text that
+// has to stay readable wherever it is quoted.
+const SECRET_FIELD_RE = /token|secret|password|key/i
+
+function secretMaterialOf(plain: string): string[] {
+  if (!plain.startsWith('{')) return [plain]
+  try {
+    const parsed = JSON.parse(plain) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return [plain]
+    const out: string[] = []
+    for (const [field, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === 'string' && SECRET_FIELD_RE.test(field)) out.push(v)
+    }
+    return out
+  } catch {
+    return [plain]
+  }
+}
+
+function savedSecretValues(): ReadonlySet<string> {
+  const file = vaultPath()
+  if (lentValues?.vault === file) return lentValues.values
+  const values = new Set<string>()
+  const entries = Object.entries(readVault())
+  if (entries.length > 0) {
+    try {
+      const masterKey = loadOrCreateMasterKey()
+      for (const [, material] of entries) {
+        try {
+          for (const v of secretMaterialOf(decryptValue(masterKey, material))) {
+            if (v.length >= MIN_KNOWN_SECRET_LENGTH) values.add(v)
+          }
+        } catch {
+          /* undecryptable entry: nothing to lend */
+        }
+      }
+    } catch {
+      /* unreadable master key: lend nothing; the shape patterns still run */
+    }
+  }
+  lentValues = { vault: file, values }
+  return values
+}
+
+registerKnownSecretSource(savedSecretValues)
+
 /** Encrypt + persist a runtime secret keyed by its env-var name. */
 export function setRuntimeSecret(name: string, value: string): void {
   const masterKey = loadOrCreateMasterKey()
   const vault = readVault()
   vault[name] = encryptValue(masterKey, value)
   writeVault(vault)
+  lentValues = null
 }
 
 /** Decrypt + return a runtime secret, or null if absent / undecryptable. */
@@ -233,6 +298,7 @@ export function deleteRuntimeSecret(name: string): void {
   if (!(name in vault)) return
   delete vault[name]
   writeVault(vault)
+  lentValues = null
 }
 
 /**

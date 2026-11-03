@@ -455,7 +455,7 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 - On a team chat run the team engine claims and moves the task itself, so the agent gets no claim or status tools there except `block_task` on its own task. An OpenClaw agent gets none at all, since its tools cannot tell one agent from another. Cancelling a task with `update_task_status` cancels the plan steps waiting on it, as **Dismiss** does.
 - **Retry**, **Assign**, and a reply that would start the task again, refuse a task still filed under a deleted chat room (`room_archived`) instead of saying it started; restarting Clawboo moves it to General. A task whose team was deleted is refused the same way (`no_team`), and nothing can run it.
 - A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
-- The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`.
+- The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`. Under a path prefix (`CLAWBOO_BASE_PATH`), each key starts with the prefix, such as `/clawboo:clawboo.board.calendar`.
 - Full request and response shapes are in the [Board API](/reference/rest-api/board). How the board stores tasks and recovers stuck work is in [Board internals](/internals/board-internals).
 
 </Accordion>

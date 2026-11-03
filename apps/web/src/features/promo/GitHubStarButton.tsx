@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Github, Star } from 'lucide-react'
 import { useInSettingsModal } from '@/features/settings/settingsModalContext'
 import { useRefreshOnVisible } from '@/lib/useVisiblePolling'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // GitHub star button — dograh-style outline pill rendered in each view's
 // header. Drives traffic to the repo for stars.
@@ -37,7 +38,7 @@ interface CachedStars {
 function readCache(): CachedStars | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(CACHE_KEY)
+    const raw = scopedLocalStorage.getItem(CACHE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as CachedStars
     if (typeof parsed.count !== 'number' || typeof parsed.fetchedAt !== 'number') return null
@@ -51,7 +52,7 @@ function readCache(): CachedStars | null {
 function writeCache(count: number) {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify({ count, fetchedAt: Date.now() }))
+    scopedLocalStorage.setItem(CACHE_KEY, JSON.stringify({ count, fetchedAt: Date.now() }))
   } catch {
     /* localStorage unavailable in some browsing contexts — fall through */
   }

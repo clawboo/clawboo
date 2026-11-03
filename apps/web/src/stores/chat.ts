@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { TranscriptEntry } from '@clawboo/protocol'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 /**
  * How far back layer-2 dedup (see `appendTranscript`) looks. A duplicate frame
@@ -175,7 +176,7 @@ export const useChatStore = create<ChatStore>((set) => ({
       if (
         typeof window !== 'undefined' &&
         droppedByContent.length > 0 &&
-        window.localStorage?.getItem('clawboo:debug-triple-render') === 'true'
+        scopedLocalStorage.getItem('clawboo:debug-triple-render') === 'true'
       ) {
         console.warn('[clawboo:triple-render] dropped content-equivalent entries', {
           sessionKey,

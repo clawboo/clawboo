@@ -18,12 +18,13 @@ import {
   type SeenRecord,
   type SeenSummary,
 } from './seenModel'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 const KEY_PREFIX = 'clawboo.board.seen.'
 
 function load(team: string): SeenRecord | null {
   try {
-    return readSeen(window.localStorage.getItem(KEY_PREFIX + team))
+    return readSeen(scopedLocalStorage.getItem(KEY_PREFIX + team))
   } catch {
     return null
   }
@@ -31,7 +32,7 @@ function load(team: string): SeenRecord | null {
 
 function save(team: string, rec: SeenRecord): void {
   try {
-    window.localStorage.setItem(KEY_PREFIX + team, JSON.stringify(rec))
+    scopedLocalStorage.setItem(KEY_PREFIX + team, JSON.stringify(rec))
   } catch {
     // Private mode or a full store: the board still works, it just forgets.
   }
@@ -41,9 +42,8 @@ function save(team: string, rec: SeenRecord): void {
 function storedTeams(): string[] {
   try {
     const teams: string[] = []
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i)
-      if (key?.startsWith(KEY_PREFIX)) teams.push(key.slice(KEY_PREFIX.length))
+    for (const key of scopedLocalStorage.keys()) {
+      if (key.startsWith(KEY_PREFIX)) teams.push(key.slice(KEY_PREFIX.length))
     }
     return teams
   } catch {

@@ -218,10 +218,12 @@ When Clawboo connects to an OpenClaw Gateway, its server signs the handshake wit
 
 Clawboo masks credential-looking text at two points:
 
-- **Before saving.** Tool-call records, memory facts, governance audit entries and observability events have recognized secrets replaced with `[REDACTED]` before they are written. The command text of an OpenClaw command approval is stored as written.
+- **Before saving.** Tool-call records, memory facts, governance audit entries, observability events, run summaries and the verify gate's output have recognized secrets replaced with `[REDACTED]` before they are written. The command text of an OpenClaw command approval is stored as written.
 - **Before showing or logging.** Observability, audit, tool-call and System Health data is masked with `••••` before it is sent to the browser. So are the structured fields of every server log line.
 
-The masking covers values under keys that contain words such as `token`, `secret`, `password`, `auth`, `credential` or `cookie`, though token counts are kept. It also covers strings shaped like common API keys, `Bearer` headers, JWTs, private-key blocks and `NAME_KEY=value` lines. It is a safety net built on known formats, so a key in a new format can slip through.
+The masking covers values under keys that contain words such as `token`, `secret`, `password`, `auth`, `credential` or `cookie`, though token counts are kept. It also covers strings shaped like common API keys, `Bearer` headers, JWTs, private-key blocks and `NAME_KEY=value` lines.
+
+Before saving, Clawboo also masks the exact values of the keys saved in its vault, whatever their format: provider keys (a Groq, Mistral or xAI key included), connector credentials and connector sign-in tokens. It catches them as written, inside JSON text and inside URLs. Values shorter than 12 characters are left alone, so a short password cannot wipe ordinary words out of the record. A key Clawboo never saved, such as one exported in your shell or kept only in `~/.openclaw/.env`, is masked only when it has a known format, and so is anything shown or logged without being saved first.
 
 ## Rate limits
 

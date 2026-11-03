@@ -97,6 +97,23 @@ const ROOT_ABSOLUTE_ASSET_JSX =
 const ROOT_ABSOLUTE_ASSET_MESSAGE =
   'Use a RELATIVE asset path (e.g. "logo.svg", not "/logo.svg"). clawboo can be served under a path prefix (CLAWBOO_BASE_PATH); a root-absolute reference escapes the mount and 404s. Relative paths resolve against the <base href> the server injects, which is correct at the root too.'
 
+// Direct browser storage in the SPA. localStorage and sessionStorage belong to the
+// ORIGIN, so two instances served under different base paths (CLAWBOO_BASE_PATH)
+// behind one proxy read each other's keys. `apps/web/src/lib/clientStorage.ts`
+// prefixes every key with the base path (and never throws); like the API URL rule
+// above, a direct call looks fine on a default install, where the two spellings
+// coincide, so it needs a rule rather than review attention.
+const DIRECT_STORAGE_MESSAGE =
+  "Use scopedLocalStorage / scopedSessionStorage from '@/lib/clientStorage'. Browser storage belongs to the origin, so two clawboo instances served under different base paths (CLAWBOO_BASE_PATH) would share this key; the helper scopes it to this instance and is identity at the root."
+const DIRECT_STORAGE_GLOBALS = ['localStorage', 'sessionStorage'].map((name) => ({
+  name,
+  message: DIRECT_STORAGE_MESSAGE,
+}))
+const DIRECT_STORAGE_PROPERTIES = ['localStorage', 'sessionStorage'].map((property) => ({
+  property,
+  message: DIRECT_STORAGE_MESSAGE,
+}))
+
 const ROOT_ABSOLUTE_API_MESSAGE =
   "Use apiFetch()/apiUrl() from '@clawboo/control-client' instead of a root-absolute '/api/...' URL. clawboo can be served under a path prefix (CLAWBOO_BASE_PATH), and a hardcoded root path skips it and 404s. Both helpers are identity at the root, so the default install is unchanged."
 
@@ -188,6 +205,20 @@ export default tseslint.config(
         { selector: ROOT_ABSOLUTE_API_EVENTSOURCE_TEMPLATE, message: ROOT_ABSOLUTE_API_MESSAGE },
         { selector: ROOT_ABSOLUTE_ASSET_JSX, message: ROOT_ABSOLUTE_ASSET_MESSAGE },
       ],
+    },
+  },
+  // Browser storage in the SPA goes through the scoped helper (see
+  // DIRECT_STORAGE_MESSAGE). Tests seed and inspect the real stores directly.
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}'],
+    ignores: [
+      'apps/web/src/lib/clientStorage.ts',
+      'apps/web/src/**/__tests__/**',
+      'apps/web/src/**/*.test.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-globals': ['error', ...DIRECT_STORAGE_GLOBALS],
+      'no-restricted-properties': ['error', ...DIRECT_STORAGE_PROPERTIES],
     },
   },
   // Boundary: packages are the shared layer — they may not depend on apps.

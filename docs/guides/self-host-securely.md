@@ -320,7 +320,7 @@ location = /clawboo {
 
 With a trailing slash after the port, nginx strips the prefix, Clawboo redirects the page back to the prefix, and the browser loops until it gives up. Sign in at `https://apps.example.com/clawboo/?access_token=<your-token>`.
 
-Under a prefix, the dashboard, the API, the live streams and the Gateway WebSocket all live below it, and the prebuilt package needs no rebuild. The access cookie's path is the prefix, so other apps on the same host never receive it. The value may use only letters, digits, `.`, `_`, `~` and `-` between slashes, and its first part must not be `api`. An invalid value stops the server at startup with `SECURITY/CONFIG: CLAWBOO_BASE_PATH is invalid`.
+Under a prefix, the dashboard, the API, the live streams and the Gateway WebSocket all live below it, and the prebuilt package needs no rebuild. The access cookie's path is the prefix, so other apps on the same host never receive it, and the dashboard's own browser storage is kept per prefix, so two Clawboo instances on one hostname keep separate themes, layouts and onboarding progress. The value may use only letters, digits, `.`, `_`, `~` and `-` between slashes, and its first part must not be `api`. An invalid value stops the server at startup with `SECURITY/CONFIG: CLAWBOO_BASE_PATH is invalid`.
 
 ## Check that it worked
 

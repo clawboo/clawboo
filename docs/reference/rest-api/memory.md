@@ -43,7 +43,7 @@ The `GET` routes check their query string as strictly as the `POST` routes check
 
 <Info>
 
-Saving runs a fact's `title` and `content`, and a procedure's `content`, through a secret scrubber before anything is embedded or stored. Text that looks like a credential (API keys, tokens, `NAME_KEY=value` pairs, PEM blocks) is replaced with `[REDACTED]`. The scrubber matches patterns, so a secret in an unusual shape can still get through: keep secrets out of memory.
+Saving runs a fact's `title` and `content`, and a procedure's `content`, through a secret scrubber before anything is embedded or stored. Text that looks like a credential (API keys, tokens, `NAME_KEY=value` pairs, PEM blocks) is replaced with `[REDACTED]`, and so is any key saved in Clawboo's vault, whatever its shape. A secret Clawboo never saved is caught only when it matches a known pattern: keep secrets out of memory.
 
 </Info>
 

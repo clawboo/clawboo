@@ -60,7 +60,14 @@ export {
   type ProvenanceVerifyOpts,
 } from './provenance'
 
-export { scrubArgsSummary, scrubResultSummary, scrubSecrets } from './scrub'
+export {
+  MIN_KNOWN_SECRET_LENGTH,
+  registerKnownSecretSource,
+  scrubArgsSummary,
+  scrubResultSummary,
+  scrubSecrets,
+  type KnownSecretSource,
+} from './scrub'
 
 export {
   buildConnectorDescriptor,
