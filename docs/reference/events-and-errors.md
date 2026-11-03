@@ -326,7 +326,7 @@ A second answer to the same card changes nothing and writes nothing.
 }
 ```
 
-A connector call, Native command or hand-off that nobody answers stops waiting at `expiresAt` without writing an event. Its row stays pending until the reaper expires it, so treat a card past its `expiresAt` as closed.
+A connector call, Native command or hand-off that nobody answers stops waiting at `expiresAt` without writing an event. Its row stays pending, and its `approval_resolved` arrives only when the reaper expires it: 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. Treat a card past its `expiresAt` as closed.
 
 ## Error events
 

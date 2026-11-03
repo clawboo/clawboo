@@ -250,6 +250,10 @@ export function resolveApproval(
         .run().changes,
   )
   const row = getApproval(db, id)
+  // Announced BEFORE the mint below. Only the call that did the resolving gets
+  // here with `changed > 0`, so if the mint threw after the row was settled, a
+  // retry could never announce it.
+  if (changed > 0 && row) recordApprovalEvent(db, 'approval_resolved', row)
 
   // "ALWAYS" HAS TO MINT SOMETHING, or it is a relabelled "Allow once". Nothing
   // else writes `approval_rules`, so without this the whole standing-rule path
@@ -279,8 +283,6 @@ export function resolveApproval(
       createdFromApprovalId: row.id,
     })
   }
-  // Same guard as the mint: only the call that did the resolving announces it.
-  if (changed > 0 && row) recordApprovalEvent(db, 'approval_resolved', row)
   return row
 }
 

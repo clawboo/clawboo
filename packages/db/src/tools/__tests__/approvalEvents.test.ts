@@ -151,6 +151,24 @@ describe('resolveApproval', () => {
     })
   }
 
+  it('announces an Always even when minting its rule fails', () => {
+    // The row is settled before the mint, and a second resolve changes nothing,
+    // so an event skipped here could never be written later.
+    const a = createApproval(db, {
+      toolName: 'gh_comment',
+      agentId: 'boo-1',
+      args: {},
+      grantId: 'g-1',
+    })
+    db.$client.exec('DROP TABLE approval_rules')
+    expect(() => resolveApproval(db, a.id, 'allow_always')).toThrow()
+
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data)).toEqual([
+      { approvalId: a.id, decision: 'allow_always', kind: 'tool', toolName: 'gh_comment' },
+    ])
+  })
+
   it('announces nothing for an id that has no row', () => {
     resolveApproval(db, 'nope', 'deny')
     expect(approvalEvents()).toEqual([])
