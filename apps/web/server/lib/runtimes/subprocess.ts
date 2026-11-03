@@ -17,6 +17,7 @@ import path from 'node:path'
 import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree, killProcessTreeByPid } from './killTree'
+import { recordRuntimePid } from './runtimePidFile'
 import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
 
 /**
@@ -46,6 +47,22 @@ const liveChildren = new Set<ChildProcess>()
 const liveConnectorPids = new Set<number>()
 
 /**
+ * Also write a runtime child into the durable pid record until it closes.
+ *
+ * Both registries above live in memory, so they only help a shutdown that gets
+ * to run. An engine that is force-killed or crashes leaves its children running,
+ * and the record (`runtimePidFile.ts`) is how the next boot finds and reaps them.
+ */
+function recordUntilClose(child: ChildProcess): void {
+  if (!child.pid) return
+  const forget = recordRuntimePid(
+    child.pid,
+    child.spawnfile ? path.basename(child.spawnfile) : undefined,
+  )
+  child.once('close', forget)
+}
+
+/**
  * Track a child spawned by a LOCAL TOOL so shutdown reaps its whole tree.
  *
  * `liveChildren` is module-private, and every existing writer is a runtime
@@ -60,6 +77,9 @@ const liveConnectorPids = new Set<number>()
  * pid-only path is unnecessary.
  */
 export function registerRuntimeChild(child: ChildProcess): void {
+  // Before the shutdown check: a late registrant is only signalled below, and if
+  // it outlives this process the next boot still has its pid.
+  recordUntilClose(child)
   // Shutdown has already taken its snapshot, so a late registrant would outlive
   // the server. Kill it on arrival, exactly as a late connector pid is.
   if (shuttingDown) {
@@ -372,6 +392,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     // Track it so a server shutdown can reap it instead of orphaning it.
     // (Deregistered in the 'close' handler below.)
     liveChildren.add(spawned)
+    recordUntilClose(spawned)
     if (shuttingDown) {
       // Spawned after shutdown began — it missed the snapshot, so signal it now
       // rather than let it run on past process exit.
