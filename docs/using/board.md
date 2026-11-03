@@ -305,7 +305,7 @@ For a task with a worktree, the section shows:
 - a live view of the worktree's files, with change badges and what the agent touched last, when the task has an agent;
 - a **Preview** of the page the agent built.
 
-The **Preview** shows the worktree's `index.html` once the agent writes one, served as static files. Scripts do not run in the preview, so an app that needs JavaScript shows only its static shell. **Open** shows the page in a new tab. The preview checks for changes every 10 seconds while it is on screen.
+The **Preview** shows the worktree's `index.html` once the agent writes one, served as static files. Scripts do not run in the preview, so an app that needs JavaScript shows only its static shell. **Open** shows the page in a new tab, where its scripts stay off too. The preview checks for changes every 10 seconds while it is on screen.
 
 Clawboo does not merge the branch. Review it and merge it yourself.
 

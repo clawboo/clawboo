@@ -30,6 +30,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
+import { setAwakeTimeout, type AwakeTimer } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
 import {
   connectorChildEnv,
@@ -59,7 +60,9 @@ const log = createLogger('agent-browsers')
  */
 const MAX_AGENT_BROWSERS = Number(process.env['CLAWBOO_MAX_AGENT_BROWSERS']) || 4
 
-/** How long an untouched browser is kept before it is closed. */
+/** How long an untouched browser is kept before it is closed, in time the machine
+ *  was awake. Time asleep is not idleness, and closing on wake for it would lose
+ *  the page the agent was working on. */
 const IDLE_TTL_MS = Number(process.env['CLAWBOO_AGENT_BROWSER_IDLE_MS']) || 10 * 60_000
 
 /** How long a queued call waits for a slot before giving the model an answer. */
@@ -82,7 +85,7 @@ interface AgentBrowser {
   /** In-flight calls. A browser with none is QUIESCENT and may be evicted. */
   calls: number
   lastUsedAt: number
-  idleTimer: NodeJS.Timeout | null
+  idleTimer: AwakeTimer | null
 }
 
 /** connectorId then agentId. */
@@ -197,7 +200,7 @@ export async function closeAgentBrowser(connectorId: string, agentId: string): P
   if (!perAgent || !browser) return
   perAgent.delete(agentId)
   if (perAgent.size === 0) browsers.delete(connectorId)
-  if (browser.idleTimer) clearTimeout(browser.idleTimer)
+  browser.idleTimer?.clear()
   await browser.session.close().catch(() => {})
   if (typeof browser.pid === 'number') {
     killProcessTreeByPid(browser.pid)
@@ -287,8 +290,9 @@ async function waitForSlot(): Promise<void> {
 }
 
 function armIdleTimer(connectorId: string, agentId: string, browser: AgentBrowser): void {
-  if (browser.idleTimer) clearTimeout(browser.idleTimer)
-  const timer = setTimeout(() => {
+  browser.idleTimer?.clear()
+  // Never holds the process open, so an idle browser cannot block shutdown.
+  browser.idleTimer = setAwakeTimeout(() => {
     // Re-checked rather than trusted: a call may have started since the timer
     // was armed, and closing mid-navigation would fail it.
     if (browser.calls > 0) {
@@ -297,9 +301,6 @@ function armIdleTimer(connectorId: string, agentId: string, browser: AgentBrowse
     }
     void closeAgentBrowser(connectorId, agentId)
   }, IDLE_TTL_MS)
-  // Unref'd so an idle browser never holds the process open at shutdown.
-  timer.unref()
-  browser.idleTimer = timer
 }
 
 async function spawnFor(
@@ -410,7 +411,7 @@ async function spawnReservedBrowser(
       perAgent.delete(agentId)
       if (perAgent.size === 0) browsers.delete(connectorId)
     }
-    if (browser.idleTimer) clearTimeout(browser.idleTimer)
+    browser.idleTimer?.clear()
     if (typeof browser.pid === 'number') {
       unregisterConnectorPid(browser.pid)
       forgetConnectorPid(browser.pid)

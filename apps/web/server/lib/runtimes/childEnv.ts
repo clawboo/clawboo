@@ -24,6 +24,13 @@
 // clawboo runtime authenticates with, plus PATH / HOME / PYTHONUSERBASE / proxy / AWS_REGION
 // (infra config, not secrets) always survive.
 //
+// A third family is not a secret store but an identity: the variables a Claude Code
+// session sets for the processes it starts (CLAUDECODE, CLAUDE_CODE_SESSION_ID, the
+// messaging socket and its token, ...). A server started from a terminal inside Claude
+// Code has them, and a child that inherits them would take that session for its own
+// parent and could talk to it. Claude Code's CONFIGURATION (CLAUDE_CODE_USE_BEDROCK and
+// the like) is a different thing and passes through.
+//
 // This is BEST-EFFORT by name, NOT a sandbox: the child still runs un-sandboxed and can read
 // on-disk credentials (~/.aws/credentials, ~/.config/gh/hosts.yml, project .env files). It
 // closes the single most trivial vector (the `env` dump) and the env-only secrets — CI-
@@ -95,6 +102,17 @@ const THIRD_PARTY_SECRET_ENV_KEYS = new Set([
   'DOCKER_PASSWORD',
 ])
 
+// The identity of a parent Claude Code session (see the header). Exact names only, so the
+// CLAUDE_CODE_* settings a run legitimately uses are kept.
+const PARENT_SESSION_ENV_KEYS = new Set([
+  'CLAUDECODE',
+  'CLAUDE_CODE_ENTRYPOINT',
+  'CLAUDE_CODE_SESSION_ID',
+  'CLAUDE_CODE_SESSION_ATTENDED',
+  'CLAUDE_CODE_MESSAGING_SOCKET',
+  'CLAUDE_CODE_MESSAGING_TOKEN',
+])
+
 // AWS access keys are BOTH a headline operator secret AND the auth for a Claude Code
 // "Amazon Bedrock" run. Strip them by default; keep them ONLY when the operator has
 // explicitly enabled that backend (CLAUDE_CODE_USE_BEDROCK is truthy) — the signal a
@@ -148,22 +166,24 @@ function isTruthyFlag(v: string | undefined): boolean {
   return s !== '' && s !== '0' && s !== 'false'
 }
 
-function isScrubbedSecret(key: string, opts: { keepAwsCreds: boolean }): boolean {
+function isScrubbedKey(key: string, opts: { keepAwsCreds: boolean }): boolean {
   const upper = key.toUpperCase()
   if (CLAWBOO_SECRET_ENV_KEYS.has(upper)) return true
   if (upper.startsWith('BETTER_AUTH')) return true
   if (THIRD_PARTY_SECRET_ENV_KEYS.has(upper)) return true
+  if (PARENT_SESSION_ENV_KEYS.has(upper)) return true
   if (!opts.keepAwsCreds && AWS_CRED_ENV_KEYS.has(upper)) return true
   return false
 }
 
 /**
- * Build a child-process env from the server env minus clawboo's own server secrets AND a
- * curated set of the operator's third-party shell secrets, then merge the caller's explicit
- * grant (provider keys / isolated HOME) on top — so a granted key is always restored even if
- * a same-named key was scrubbed. Infra config (PATH/HOME/PYTHONUSERBASE/proxy/AWS_REGION) and
- * the ambient provider-auth the CLIs read (OPENAI_API_KEY / GEMINI_API_KEY / …) are preserved;
- * a configured proxy additionally gets loopback added to NO_PROXY (see keepLoopbackOffProxy).
+ * Build a child-process env from the server env minus clawboo's own server secrets, a
+ * curated set of the operator's third-party shell secrets AND a parent Claude Code
+ * session's identity, then merge the caller's explicit grant (provider keys / isolated
+ * HOME) on top, so a granted key is always restored even if a same-named key was scrubbed.
+ * Infra config (PATH/HOME/PYTHONUSERBASE/proxy/AWS_REGION) and the ambient provider-auth the
+ * CLIs read (OPENAI_API_KEY / GEMINI_API_KEY / …) are preserved; a configured proxy
+ * additionally gets loopback added to NO_PROXY (see keepLoopbackOffProxy).
  */
 export function buildChildEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   // Keep AWS creds only when the operator explicitly runs Claude Code against Bedrock.
@@ -171,7 +191,7 @@ export function buildChildEnv(extra: Record<string, string | undefined> = {}): N
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue
-    if (isScrubbedSecret(key, { keepAwsCreds })) continue
+    if (isScrubbedKey(key, { keepAwsCreds })) continue
     env[key] = value
   }
   for (const [key, value] of Object.entries(extra)) {

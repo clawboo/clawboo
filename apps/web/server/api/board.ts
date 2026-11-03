@@ -55,6 +55,7 @@ import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { getDb } from '../lib/db'
+import { isDashboardRequest } from '../lib/dashboardRequest'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
 import {
@@ -560,25 +561,27 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const comment = addComment(
-      db,
-      taskId,
-      parsed.data.body,
-      parsed.data.authorType,
-      parsed.data.authorAgentId,
-    )
+    // A person's comment goes into the assignee's live run as the person
+    // steering it, so 'user' is honoured only when the dashboard's own page sent
+    // it. Any other caller gets an agent comment, which steers nothing. A speed
+    // bump, not a boundary: see isDashboardRequest.
+    const authorType =
+      parsed.data.authorType === 'user' && !isDashboardRequest(req)
+        ? 'agent'
+        : parsed.data.authorType
+    const comment = addComment(db, taskId, parsed.data.body, authorType, parsed.data.authorAgentId)
     emitEvent(db, {
       kind: 'comment_added',
       taskId,
       agentId: parsed.data.authorAgentId ?? null,
-      data: { authorType: parsed.data.authorType, body: parsed.data.body },
+      data: { authorType, body: parsed.data.body },
     })
     // Narrate the comment into the team room so every peer sees it, not just the
     // leader (best-effort, AFTER the canonical write; never a write path back).
     const task = getTask(db, taskId)
     let delivery: ReplyDelivery | null = null
     if (task) {
-      const author = parsed.data.authorAgentId ?? parsed.data.authorType
+      const author = parsed.data.authorAgentId ?? authorType
       reflectToRoom(
         db,
         task.teamId,
@@ -587,7 +590,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       // A person's comment is a reply to the agent the task belongs to: deliver
       // it, starting the task again when it waits on the person, and say where
       // it went (see personReply).
-      if (parsed.data.authorType === 'user') {
+      if (authorType === 'user') {
         const mcpBaseUrl = loopbackMcpBaseUrl(req)
         try {
           /** The run the reply would start: through the runner, as Retry does,
@@ -981,7 +984,22 @@ export async function boardWorkspaceFileGET(req: Request, res: Response): Promis
 // gate, and stays same-origin with the dashboard, so the gate's host-only
 // SameSite=Lax cookie is actually sent. A `{port}.localhost` proxy origin would
 // receive no cookie at all and 401 on every asset.
+//
+// Same-origin is also what makes agent-written script dangerous here: a page that
+// ran it would act with the dashboard's own authority. The drawer's iframe is
+// sandboxed, but its "Open" link, or anyone pasting the URL, loads the page top
+// level, where an iframe attribute does nothing. So every response carries the
+// iframe's exact sandbox as a CSP, which a browser applies to a top-level page
+// too: no script runs, stylesheets and images still load. `allow-same-origin`
+// stays, because an opaque origin makes the page's own asset requests
+// cross-site, and the origin guard refuses every one of them. Never
+// `allow-scripts`: next to `allow-same-origin` it hands the page the dashboard's
+// authority again.
+export const PREVIEW_CSP = 'sandbox allow-same-origin'
+
 export async function boardWorkspacePreviewGET(req: Request, res: Response): Promise<void> {
+  // First, so the redirect and the error replies carry it as well.
+  res.setHeader('Content-Security-Policy', PREVIEW_CSP)
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     // Everything after `/preview/`. A `*splat` route gives the segments as an

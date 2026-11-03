@@ -98,6 +98,20 @@ describe('setAwakeTimeout', () => {
     expect(fn).toHaveBeenCalledTimes(1)
   })
 
+  it('a clock set back during a wait does not delay it', () => {
+    const fn = vi.fn()
+    let stepBack = 0
+    setAwakeTimeout(fn, 10 * MIN, { now: () => Date.now() - stepBack })
+    vi.advanceTimersByTime(4 * MIN)
+
+    // The wall clock goes back an hour while the timers keep their pace.
+    stepBack = 60 * MIN
+    vi.advanceTimersByTime(6 * MIN - 1)
+    expect(fn).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(fn).toHaveBeenCalledTimes(1)
+  })
+
   it('clear stops it', () => {
     const fn = vi.fn()
     const t = setAwakeTimeout(fn, 10 * MIN)

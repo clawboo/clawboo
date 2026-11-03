@@ -81,6 +81,9 @@ export function WorkspacePreview({ taskId }: { taskId: string }) {
         <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
           Preview
         </span>
+        {/* Opens the page top level, where the iframe's sandbox below does not
+            apply. The server sends the same sandbox as a CSP on every preview
+            response, so the page is just as inert here. */}
         <a
           href={apiUrl(previewPath(taskId))}
           target="_blank"
