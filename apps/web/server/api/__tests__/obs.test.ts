@@ -7,9 +7,9 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { appendEvent } from '@clawboo/db'
+import { agents, appendEvent, createApproval, resolveApproval, teams } from '@clawboo/db'
 import type { Request, Response } from 'express'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import {
@@ -41,7 +41,10 @@ const req = (query: Record<string, string> = {}, params: Record<string, string> 
   ({ query, params, body: {} }) as unknown as Request
 
 /** A mock SSE req/res that captures writes + the close handler (so timers stop). */
-function mockSse(query: Record<string, string> = {}): {
+function mockSse(
+  query: Record<string, string> = {},
+  headers: Record<string, string> = {},
+): {
   req: Request
   res: Response
   writes: () => string
@@ -65,12 +68,38 @@ function mockSse(query: Record<string, string> = {}): {
   const reqObj = {
     query,
     params: {},
-    headers: {},
+    headers,
     on(ev: string, cb: () => void) {
       if (ev === 'close') closeHandler = cb
     },
   } as unknown as Request
   return { req: reqObj, res, writes: () => chunks.join(''), close: () => closeHandler?.() }
+}
+
+interface StreamFrame {
+  id: number
+  row: {
+    seq: number
+    kind: string
+    agentId: string | null
+    teamId: string | null
+    taskId: string | null
+    data: string
+  }
+}
+
+/** The `id:` + `data:` event frames in a captured stream, comments skipped. */
+function frames(out: string): StreamFrame[] {
+  return out
+    .split('\n\n')
+    .filter((block) => block.startsWith('id: '))
+    .map((block) => {
+      const [idLine, dataLine] = block.split('\n')
+      return {
+        id: Number(idLine!.slice('id: '.length)),
+        row: JSON.parse(dataLine!.slice('data: '.length)) as StreamFrame['row'],
+      }
+    })
 }
 
 function seed(): void {
@@ -471,6 +500,207 @@ describe('observability REST', () => {
       // completion would be seen first (clamped to 0) and the start would leave
       // the counter open, reporting a finished agent as still `working`.
       expect(body.agents.find((a) => a.agentId === 'a1')!.status).toBe('idle')
+    })
+  })
+
+  // ─── The approval lifecycle on the stream ──────────────────────────────────
+  // What a client that stops polling the approval queue relies on: the desktop's
+  // notifier and mirror, a link sidecar, a phone's push trigger. The events come
+  // from the real approval writers in @clawboo/db, not from seeded rows.
+  describe('GET /api/obs/stream: approval events', () => {
+    const SECRET = 'quarterly-layoffs-draft.txt'
+    const APPROVAL_KINDS = 'approval_requested,approval_resolved'
+
+    beforeEach(() => {
+      const db = getDb()
+      const now = Date.now()
+      db.insert(teams)
+        .values({
+          id: 'team-A',
+          name: 'Ops',
+          icon: 'x',
+          color: '#000',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      db.insert(agents)
+        .values({
+          id: 'boo-A',
+          name: 'Boo',
+          gatewayId: 'boo-A',
+          status: 'idle',
+          teamId: 'team-A',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    const ask = () =>
+      createApproval(getDb(), {
+        toolName: 'files_delete',
+        agentId: 'boo-A',
+        args: { path: SECRET },
+        reason: `wants to delete ${SECRET}`,
+        taskId: 'task-9',
+      })
+
+    /** Unrelated traffic from the same agent, the kind a narrowed client skips. */
+    const chatter = (n: number): void => {
+      for (let i = 0; i < n; i++)
+        appendEvent(getDb(), {
+          kind: 'tool_call',
+          agentId: 'boo-A',
+          teamId: 'team-A',
+          data: { toolCallId: `tc-${i}`, name: 'read_file' },
+        })
+    }
+
+    /** The newest `seq`: the cursor a client takes to watch only new events. */
+    const head = (): number => {
+      const res = mockRes()
+      obsEventsGET(req({ order: 'desc', limit: '1' }), res.res)
+      return (res.body() as { events: { seq: number }[] }).events[0]?.seq ?? 0
+    }
+
+    const open = (query: Record<string, string> = {}, headers: Record<string, string> = {}) => {
+      const s = mockSse(query, headers)
+      obsStreamGET(s.req, s.res)
+      return s
+    }
+
+    const kindsOf = (out: string): string[] => frames(out).map((f) => f.row.kind)
+
+    it('delivers both events live to an unscoped client, in order, with the agent and team', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      seed() // history from before the client connected, which it does not ask for
+      const s = open({ since: String(head()) })
+      expect(frames(s.writes())).toEqual([])
+
+      const a = ask()
+      vi.advanceTimersByTime(750)
+      expect(kindsOf(s.writes())).toEqual(['approval_requested'])
+      resolveApproval(getDb(), a.id, 'allow_once')
+      vi.advanceTimersByTime(750)
+      s.close()
+
+      const got = frames(s.writes())
+      expect(got.map((f) => f.row.kind)).toEqual(['approval_requested', 'approval_resolved'])
+      expect(got[0]!.id).toBeLessThan(got[1]!.id)
+      for (const f of got) {
+        expect(f.id).toBe(f.row.seq)
+        expect(f.row).toMatchObject({ agentId: 'boo-A', teamId: 'team-A', taskId: 'task-9' })
+        expect(JSON.parse(f.row.data)).toMatchObject({
+          approvalId: a.id,
+          kind: 'tool',
+          toolName: 'files_delete',
+        })
+      }
+      expect(JSON.parse(got[1]!.row.data)).toMatchObject({ decision: 'allow_once' })
+      expect(s.writes(), 'the arguments and the reason never ride along').not.toContain(SECRET)
+    })
+
+    it('resumes after Last-Event-ID: a client that saw the request gets only the answer', () => {
+      const a = ask()
+      const first = open()
+      first.close()
+      const seen = frames(first.writes())
+      expect(seen.map((f) => f.row.kind)).toEqual(['approval_requested'])
+
+      resolveApproval(getDb(), a.id, 'deny') // answered while the client was away
+      const again = open({}, { 'last-event-id': String(seen.at(-1)!.id) })
+      again.close()
+      const resumed = frames(again.writes())
+      expect(resumed.map((f) => f.row.kind)).toEqual(['approval_resolved'])
+      expect(JSON.parse(resumed[0]!.row.data)).toMatchObject({ approvalId: a.id, decision: 'deny' })
+    })
+
+    it('kinds narrows the stream to the approval lifecycle', () => {
+      seed()
+      chatter(3)
+      const a = ask()
+      chatter(3)
+      resolveApproval(getDb(), a.id, 'allow_once')
+      chatter(3)
+
+      const s = open({ kinds: APPROVAL_KINDS })
+      s.close()
+      const got = frames(s.writes())
+      expect(got.map((f) => f.row.kind)).toEqual(['approval_requested', 'approval_resolved'])
+      expect(got.map((f) => (JSON.parse(f.row.data) as { approvalId: string }).approvalId)).toEqual(
+        [a.id, a.id],
+      )
+    })
+
+    it('a narrowed client that reconnects behind other traffic gets the answer on its first read', () => {
+      const a = ask()
+      const first = open({ kinds: APPROVAL_KINDS })
+      first.close()
+      const lastSeen = frames(first.writes()).at(-1)!.id
+
+      // More than one read's worth (500 rows) of other events before the answer.
+      // Filtered on the client instead, the answer would wait behind them.
+      chatter(600)
+      resolveApproval(getDb(), a.id, 'allow_once')
+
+      const again = open({ kinds: APPROVAL_KINDS }, { 'last-event-id': String(lastSeen) })
+      again.close()
+      expect(kindsOf(again.writes())).toEqual(['approval_resolved'])
+    })
+
+    it('a narrowed, team-scoped client loses nothing while it skips past other traffic', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      const s = open({ teamId: 'team-A', kinds: APPROVAL_KINDS, afterSeq: String(head()) })
+      chatter(5)
+      vi.advanceTimersByTime(750) // nothing matches: the cursor moves past the chatter
+      const a = ask()
+      chatter(5)
+      vi.advanceTimersByTime(750)
+      resolveApproval(getDb(), a.id, 'deny')
+      vi.advanceTimersByTime(750)
+      s.close()
+      expect(kindsOf(s.writes())).toEqual(['approval_requested', 'approval_resolved'])
+    })
+
+    it('a full read does not skip ahead: the rest arrives on the next poll', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      chatter(600)
+      const s = open()
+      expect(frames(s.writes())).toHaveLength(500)
+      vi.advanceTimersByTime(750)
+      s.close()
+      const got = frames(s.writes())
+      expect(got).toHaveLength(600)
+      expect(new Set(got.map((f) => f.id)).size).toBe(600)
+    })
+
+    it('takes afterSeq as the cursor, the name /api/obs/events uses', () => {
+      const a = ask()
+      const requested = head()
+      resolveApproval(getDb(), a.id, 'allow_once')
+
+      const s = open({ afterSeq: String(requested) })
+      s.close()
+      expect(kindsOf(s.writes())).toEqual(['approval_resolved'])
+
+      // A browser reconnects to the same URL with the last id it saw, which wins.
+      const resumed = open({ afterSeq: '0' }, { 'last-event-id': String(head()) })
+      resumed.close()
+      expect(frames(resumed.writes())).toEqual([])
+    })
+
+    it('a malformed Last-Event-ID falls back to the query cursor instead of replaying from 0', () => {
+      const a = ask()
+      const requested = head()
+      resolveApproval(getDb(), a.id, 'allow_once')
+
+      const s = open({ since: String(requested) }, { 'last-event-id': 'not-a-seq' })
+      s.close()
+      expect(kindsOf(s.writes())).toEqual(['approval_resolved'])
     })
   })
 })

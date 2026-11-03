@@ -293,6 +293,8 @@ Every approval card is a row in the `tool_call_approvals` table, shown under **N
 
 The envelope carries the agent that asked, its team when Clawboo has a row for that agent, the task the approval gates when known, and the tenant.
 
+To follow approvals as they happen instead of polling the queue, open `GET /api/obs/stream?kinds=approval_requested,approval_resolved`. See [Following approvals](/reference/rest-api/observability#following-approvals).
+
 ### approval_requested
 
 An approval card opened: a connector call the tool broker paused, a [Clawboo Native command](/using/command-permissions), a risky hand-off, or an OpenClaw command the server copied from the Gateway. A request the Gateway delivers twice writes one event.
