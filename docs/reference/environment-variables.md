@@ -329,7 +329,7 @@ The Composio API address for brokered apps. The Composio key itself is saved in 
 - Default: `1800000` (30 minutes)
 - Example: `CLAWBOO_RUN_SILENT_TIMEOUT_MS=3600000`
 
-How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines), to agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and to one-to-one chat with those agents. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults).
+How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines), to agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and to one-to-one chat with those agents. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults). Time the computer spends asleep does not count.
 
 ### CLAWBOO_HOME_MUTEX_ACQUIRE_MS
 
@@ -361,7 +361,7 @@ The model for the verification reviewer. The reviewer runs on the same runtime a
 - Default: `600000` (10 minutes)
 - Example: `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS=1200000`
 
-How long a Routine that runs an OpenClaw agent waits for that agent to finish. Past it, Clawboo stops waiting and returns the task to **To do**.
+How long a Routine that runs an OpenClaw agent waits for that agent to finish. Past it, Clawboo stops waiting and returns the task to **To do**. Time the computer spends asleep does not count.
 
 ## Board timing
 
@@ -371,7 +371,7 @@ How long a Routine that runs an OpenClaw agent waits for that agent to finish. P
 - Default: `180000` (3 minutes)
 - Example: `CLAWBOO_BOARD_STALE_TTL_MS=240000`
 
-A running task proves it is alive with a heartbeat every 30 seconds. A task in **In progress** that misses heartbeats for this long is marked timed out and returned to **To do**. At startup the same value decides which runs a previous server left behind. Keep it well above 30 seconds, and keep it plus `CLAWBOO_BOARD_STALE_SWEEP_MS` under 8 minutes, the fixed delegation watchdog, or that watchdog fails the task first.
+A running task proves it is alive with a heartbeat every 30 seconds. A task in **In progress** that misses heartbeats for this long is marked timed out and returned to **To do**. Time the computer spends asleep does not count. At startup the same value decides which runs a previous server left behind. Keep it well above 30 seconds, and keep it plus `CLAWBOO_BOARD_STALE_SWEEP_MS` under 8 minutes, the fixed delegation watchdog, or that watchdog fails the task first.
 
 ### CLAWBOO_BOARD_STALE_SWEEP_MS
 

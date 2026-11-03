@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { withIdleTimeout } from '../idleTimeout'
 
@@ -110,6 +110,48 @@ describe('withIdleTimeout', () => {
   })
 })
 
+/** A macOS sleep under fake timers: the wall clock jumps and every timer whose
+ *  delay passed fires once, on wake. (`vi.setSystemTime` would move the pending
+ *  timers along with the clock, so a plain setTimeout would pass too.) */
+const sleepFor = (ms: number): void =>
+  (globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
+
+describe('withIdleTimeout across a machine sleep', () => {
+  it('a sleep longer than the ceiling does not abort the run on wake', async () => {
+    vi.useFakeTimers()
+    try {
+      const MIN = 60_000
+      const src = manualSource<string>()
+      const seen: string[] = []
+      let idled = false
+      const consume = (async () => {
+        for await (const v of withIdleTimeout(src.iterable, {
+          idleMs: 30 * MIN,
+          onIdle: () => {
+            idled = true
+          },
+        }))
+          seen.push(v)
+      })()
+      src.push('working')
+      await vi.advanceTimersByTimeAsync(5 * MIN)
+
+      sleepFor(120 * MIN)
+      await vi.advanceTimersByTimeAsync(0)
+      expect(idled).toBe(false)
+
+      // The run carries on and finishes normally.
+      src.push('done')
+      src.end()
+      await consume
+      expect(seen).toEqual(['working', 'done'])
+      expect(idled).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
 describe('releasing the source cannot leave a floating rejection', () => {
   it('a rejecting return() is caught, not left unhandled', async () => {
     // The `finally` releases the source with `void it.return?.(undefined)`. A
@@ -139,6 +181,28 @@ describe('releasing the source cannot leave a floating rejection', () => {
       expect(unhandled).toEqual([])
     } finally {
       process.off('unhandledRejection', onUnhandled)
+    }
+  })
+})
+
+describe('a source that fails', () => {
+  it('leaves no timer running after its pull rejects', async () => {
+    // The pull rejects inside the race, which throws past the loop's own clear.
+    vi.useFakeTimers()
+    try {
+      const src: AsyncIterable<number> = {
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(new Error('the run broke')),
+        }),
+      }
+      const consume = async (): Promise<void> => {
+        for await (const v of withIdleTimeout(src, { idleMs: 30 * 60_000, onIdle: () => {} }))
+          void v
+      }
+      await expect(consume()).rejects.toThrow('the run broke')
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
     }
   })
 })
