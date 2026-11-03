@@ -83,6 +83,8 @@ type TaskBody = {
 
 const TEAM = 'T'
 const OTHER_TEAM = 'U'
+/** Sent from the dashboard page: only that counts as the person replying. */
+const DASHBOARD_HEADERS = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 
 describe('board: handing a task to one agent', () => {
   let home: string
@@ -370,6 +372,8 @@ describe('board: handing a task to one agent', () => {
           req({
             params: { taskId: t.id },
             body: { body: 'try the other branch', authorType: 'user' },
+            // Sent from the dashboard page: only that counts as the person.
+            headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
           }),
           r.res,
         )
@@ -522,7 +526,11 @@ describe('board: handing a task to one agent', () => {
       const id = archivedRoomTask()
       const r = mockRes()
       await boardCommentPOST(
-        req({ params: { taskId: id }, body: { body: 'try again please', authorType: 'user' } }),
+        req({
+          params: { taskId: id },
+          body: { body: 'try again please', authorType: 'user' },
+          headers: DASHBOARD_HEADERS,
+        }),
         r.res,
       )
       expect(r.body()).toMatchObject({
@@ -588,7 +596,11 @@ describe('board: handing a task to one agent', () => {
       const id = deletedTeamTask()
       const r = mockRes()
       await boardCommentPOST(
-        req({ params: { taskId: id }, body: { body: 'still need this', authorType: 'user' } }),
+        req({
+          params: { taskId: id },
+          body: { body: 'still need this', authorType: 'user' },
+          headers: DASHBOARD_HEADERS,
+        }),
         r.res,
       )
       expect(r.body()).toMatchObject({
@@ -615,7 +627,11 @@ describe('board: handing a task to one agent', () => {
     updateStatus(db, t.id, 'blocked')
     const r = mockRes()
     await boardCommentPOST(
-      req({ params: { taskId: t.id }, body: { body: 'try again', authorType: 'user' } }),
+      req({
+        params: { taskId: t.id },
+        body: { body: 'try again', authorType: 'user' },
+        headers: DASHBOARD_HEADERS,
+      }),
       r.res,
     )
     expect(r.body()).toMatchObject({ delivery: { status: 'woke-agent', agentId: 'builder' } })

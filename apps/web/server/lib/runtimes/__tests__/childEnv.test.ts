@@ -127,6 +127,38 @@ describe('buildChildEnv', () => {
   })
 })
 
+describe('buildChildEnv: a parent Claude Code session stays out of the child', () => {
+  const SESSION_VARS = [
+    'CLAUDECODE',
+    'CLAUDE_CODE_ENTRYPOINT',
+    'CLAUDE_CODE_SESSION_ID',
+    'CLAUDE_CODE_SESSION_ATTENDED',
+    'CLAUDE_CODE_MESSAGING_SOCKET',
+    'CLAUDE_CODE_MESSAGING_TOKEN',
+  ] as const
+  // The suite itself may run inside a Claude Code session, which sets these.
+  const KEYS = [...SESSION_VARS, 'CLAUDE_CODE_USE_BEDROCK'] as const
+  const prev: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    for (const k of KEYS) prev[k] = process.env[k]
+  })
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (prev[k] === undefined) delete process.env[k]
+      else process.env[k] = prev[k]
+    }
+  })
+
+  it("drops the session's identity and keeps Claude Code's configuration", () => {
+    for (const k of SESSION_VARS) process.env[k] = `parent-${k}`
+    process.env['CLAUDE_CODE_USE_BEDROCK'] = '0'
+    const env = buildChildEnv()
+    for (const k of SESSION_VARS) expect(env[k], k).toBeUndefined()
+    expect(env['CLAUDE_CODE_USE_BEDROCK']).toBe('0')
+    expect(JSON.stringify(env)).not.toContain('parent-')
+  })
+})
+
 describe('buildChildEnv: a configured proxy never carries loopback traffic', () => {
   // A runtime's MCP attach URLs point at http://127.0.0.1:<port> and carry the attach
   // token. Through a proxy the token reaches a third party, and a proxy that adds

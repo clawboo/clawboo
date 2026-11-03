@@ -79,7 +79,7 @@ Where they start depends on the path:
 
 Clawboo creates the team's folder the first time a run needs it, readable only by your user account. If it cannot create the folder, the run does not start. The folder only sets where these runtimes start; it fences nothing in.
 
-Before starting them, Clawboo removes its own secrets from the environment it passes on: the dashboard access token, the OpenClaw Gateway token and the key that unlocks Clawboo's saved keys. It also removes a list of common cloud and code-hosting tokens. This works by name and is best effort. A runtime can still read credential files on disk, such as `~/.openclaw/.env`, where keys saved on the **Providers** page are copied in plain text.
+Before starting them, Clawboo removes its own secrets from the environment it passes on: the dashboard access token, the OpenClaw Gateway token and the key that unlocks Clawboo's saved keys. It also removes a list of common cloud and code-hosting tokens, and the variables that tie a process to a Claude Code session, such as `CLAUDECODE` and `CLAUDE_CODE_SESSION_ID`, so a Clawboo started from a terminal inside Claude Code does not hand that session to its agents. This works by name and is best effort. A runtime can still read credential files on disk, such as `~/.openclaw/.env`, where keys saved on the **Providers** page are copied in plain text.
 
 Claude Code starts without your own Claude Code setup: your `~/.claude` settings, plugins, hooks, MCP servers and memory do not apply. It still loads the Claude Code files of the folder it starts in, such as a repository's `CLAUDE.md` and `.claude/settings.json`. Leaving your setup out is not a sandbox: Claude Code can still read any file your user account can, `~/.claude` included.
 
@@ -141,6 +141,16 @@ Only task-runner runs have circuit breakers. Such a run stops after more than 30
 
 Team chat has its own limits instead. A turn can hand off at most 8 tasks, and hand-offs go at most three levels deep. Clawboo stops handing a task to a teammate that failed it 3 times, and stops a teammate that goes silent for 8 minutes. [Limits and defaults](/reference/limits-and-defaults) lists every number.
 
+### Comments as you
+
+A comment you post on a task reaches the agent doing it, and steers its run as you. So Clawboo accepts a comment as yours only from the dashboard's own page. It checks the headers your browser adds to every request the page makes. A comment that claims to be yours from anywhere else, such as a command an agent runs, is saved as an agent's comment and reaches no one.
+
+This is a speed bump, not a security boundary. A program running as you can send the same headers, or write Clawboo's database directly.
+
+### Previews of agent pages
+
+The task drawer's **Preview** shows the page an agent built, served from the dashboard's own address. A script in that page could use the dashboard as you, so no script in it runs, in the drawer or in the tab **Open** shows. Its styles and images still load.
+
 ### Images in agent text
 
 An image in an agent's markdown never loads on its own. In chat, a task's report and its comments, it shows as a link named after its alt text, and it opens only when you click it. That way an agent steered by something it read cannot send data out in an image's address without your click.
@@ -167,6 +177,8 @@ An image in an agent's markdown never loads on its own. In chat, a task's report
 - **Task-runner isolation.** Task kinds `research` and `review` get no worktree. Any other kind needs a `repoPath`, or the run fails with `workspace_unavailable` (`apps/web/server/lib/executorRunner.ts`, `packages/worktrees/src/isolation.ts`).
 - **Native tools.** `buildFileTools` and `buildExecTool` return no tools when the run has no `cwd` (`apps/web/server/lib/runtimes/native/`). The file tools refuse a path that is a symlink, or that resolves outside the `cwd` once every symlink above it is followed (`resolveJailedOnDisk` in `fileTools.ts`).
 - **Environment scrubbing.** `apps/web/server/lib/runtimes/childEnv.ts` lists the removed variables.
+- **Comments as you.** `POST /api/board/:taskId/comments` keeps `authorType: 'user'` only when `isDashboardRequest` (`apps/web/server/lib/dashboardRequest.ts`) sees `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`; otherwise the comment is saved as `agent`. The `add_comment` MCP tool writes the row and delivers nothing.
+- **Preview sandbox.** Every response from `GET /api/board/:taskId/preview` and the paths under it carries `Content-Security-Policy: sandbox allow-same-origin` (`PREVIEW_CSP` in `apps/web/server/api/board.ts`), the same flags as the drawer's frame.
 - **Connector decisions.** `decideGrant` in `packages/governance/src/grants/decide.ts`; a new grant's approval policy defaults to `risk`.
 - **Risky hand-offs.** The word list is in `apps/web/server/lib/teamChat/riskyDelegation.ts`. Each risky hand-off opens its own approval under the scope `delegate:code`, marked never-remember (`apps/web/server/api/delegationApproval.ts`).
 - **No hidden approval layer.** The task runner's `routeApprovalsThroughClawboo` flag only adds a note to the prompt (`apps/web/server/lib/degradation.ts`).

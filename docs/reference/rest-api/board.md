@@ -483,7 +483,9 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The route writes a `comment_added` event and posts the first 160 characters to the team's peer room. An unknown `taskId` is not checked first: the insert fails the database's foreign key and the route answers **500** (`FOREIGN KEY constraint failed`).
 
-A `user` comment is a person's reply. After the comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
+A `user` comment is a person's reply, and only the dashboard's own page can post one. The route checks the fetch metadata a browser adds to the page's requests: `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`. From any other caller, such as `curl` or a command an agent runs, a `user` comment is saved as an `agent` comment, answers with no `delivery`, and reaches no agent. This is a speed bump, not a security boundary: a program running as you can send the same headers, or write Clawboo's database directly.
+
+After a person's comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
 
 1. **The mailbox**, always first. The agent's inbox gets `A person commented on your task "<title>": ...` with the comment's first 1000 characters. Every run reads the inbox when it starts.
 2. **Then by status:**
@@ -500,7 +502,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
 {
   body: string                          // required, 1 to 20000 chars
   authorAgentId?: string
-  authorType?: 'agent' | 'user' | 'system'   // default 'agent'
+  authorType?: 'agent' | 'user' | 'system'   // default 'agent'; 'user' only from the dashboard page
 }
 ```
 
@@ -570,7 +572,8 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Blocked on the upstream schema.","authorType":"agent","authorAgentId":"native-leader-abc"}'
 
-# A person's reply, which answers with `delivery`
+# From curl, "authorType":"user" is saved as an agent comment and reaches no agent.
+# A person's reply comes from the task drawer.
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Use the v2 schema; it landed this morning.","authorType":"user"}'
@@ -1212,9 +1215,10 @@ Serves the files in a task's worktree as a static website, so the task drawer's 
 - Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, backslashes or control characters, and at most 1024 characters.
 - `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
 - Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
+- Every response, redirects and errors included, carries `Content-Security-Policy: sandbox allow-same-origin`.
 - The routes sit under `/api`, so the same-origin guard and the access gate apply, and the dashboard's access cookie reaches the preview frame.
 
-The drawer shows the page in a frame that runs no scripts, so a script-driven page appears as its static shell. The **Open** link shows the same URL in a new tab without that restriction: there the page's scripts run in the dashboard's origin and can call this API, so open it only for work you trust.
+The page is served from the dashboard's own origin, so a script in it could call this API as you. No script runs: the drawer shows the page in a frame sandboxed with `allow-same-origin` only, and the `Content-Security-Policy` header applies the same sandbox when the **Open** link, or anyone with the URL, loads the page in a tab of its own. Styles and images load, and a script-driven page appears as its static shell. `allow-same-origin` stays because without it the page's own requests for its styles and images count as cross-site, and the same-origin guard refuses them.
 
 ### Responses
 
