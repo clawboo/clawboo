@@ -19,6 +19,7 @@ import {
   X,
 } from 'lucide-react'
 import { delegationTargetOf } from '@clawboo/board-core'
+import type { DebtNote } from '@clawboo/governance'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import {
@@ -76,7 +77,7 @@ interface Verdict {
       reviewerModel?: string | null
     }
   }[]
-  debtNotes?: string[]
+  debtNotes?: DebtNote[]
 }
 
 /** Where the gate's command came from, in the drawer's words. */
@@ -84,6 +85,22 @@ const COMMAND_SOURCE_LABEL: Record<'configured' | 'scaffold' | 'agent', string> 
   configured: 'set for the team',
   scaffold: 'from the task setup',
   agent: 'written by the agent',
+}
+
+/**
+ * The mark beside a warning in the Verification section. Amber clears the 3:1 an
+ * icon needs but not the 4.5:1 small text needs, so the words stay in the text
+ * color and this mark carries the amber.
+ */
+function WarnMark() {
+  return (
+    <AlertTriangle
+      size={11}
+      strokeWidth={2}
+      aria-hidden
+      className="mr-1 inline align-[-1px] text-amber"
+    />
+  )
 }
 
 /** The reviewer line for a critic that ran: who reviewed, or why no review happened. */
@@ -101,6 +118,11 @@ function reviewerLine(
   if (critic.outcome === 'empty')
     return { text: `Review returned nothing${who ? ` (${who})` : ''}`, warn: true }
   return who ? { text: `Reviewed by ${who}`, warn: false } : null
+}
+
+/** An open item a pass with debt left: its severity, what it is, and why it stayed open. */
+function debtLine(note: DebtNote): string {
+  return `[${note.severity}] ${note.criterion}: ${note.justification}`
 }
 
 function parseVerification(v: unknown): Verdict | null {
@@ -717,23 +739,32 @@ export function TaskDetailDrawer({
                           <div className="text-xs text-muted-foreground">
                             Check: <code className="font-mono">{det.command}</code>
                             {source ? (
-                              <span className={source === 'agent' ? 'text-amber' : undefined}>
-                                {` · ${COMMAND_SOURCE_LABEL[source]}`}
-                              </span>
+                              <>
+                                {' · '}
+                                <span
+                                  className={
+                                    source === 'agent' ? 'font-medium text-foreground' : undefined
+                                  }
+                                >
+                                  {source === 'agent' ? <WarnMark /> : null}
+                                  {COMMAND_SOURCE_LABEL[source]}
+                                </span>
+                              </>
                             ) : null}
                           </div>
                         ) : null}
                         {line ? (
                           <div
-                            className={`text-xs ${line.warn ? 'text-amber' : 'text-muted-foreground'}`}
+                            className={`text-xs ${line.warn ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
                           >
+                            {line.warn ? <WarnMark /> : null}
                             {line.text}
                           </div>
                         ) : null}
                         {(verdict.debtNotes ?? []).length > 0 && (
                           <ul className="board-reason list-disc pl-4 text-xs">
                             {verdict.debtNotes!.map((d, i) => (
-                              <li key={i}>{d}</li>
+                              <li key={i}>{debtLine(d)}</li>
                             ))}
                           </ul>
                         )}
