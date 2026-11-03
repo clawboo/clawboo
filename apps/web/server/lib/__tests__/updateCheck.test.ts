@@ -4,6 +4,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { buildEngineCapabilities } from '../engineCapabilities'
 import {
   buildUpdateCommand,
   computeSelfVersion,
@@ -246,6 +247,20 @@ describe('an install that must not update itself', () => {
     expect(info.updateAvailable).toBe(false)
     expect(info.checkedAt).toBeNull()
     expect(info.applyable).toBe(false)
+  })
+
+  it('the capabilities flag gives the same answer as applyable', async () => {
+    globalInstall()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: false })),
+    )
+    expect((await computeSelfVersion()).applyable).toBe(true)
+    expect(buildEngineCapabilities().features['system.selfUpdate']).toBe(true)
+
+    vi.stubEnv('CLAWBOO_DISABLE_SELF_UPDATE', '1')
+    expect((await computeSelfVersion()).applyable).toBe(false)
+    expect(buildEngineCapabilities().features['system.selfUpdate']).toBe(false)
   })
 
   it('the operator file turns it off the same way', async () => {

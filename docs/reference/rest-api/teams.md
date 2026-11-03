@@ -1093,20 +1093,21 @@ Connection: keep-alive
 X-Accel-Buffering: no
 ```
 
-then emits a `: connected` comment frame, flushes any rows already past the cursor, and replays the team's last-known agent status per agent.
+then emits a `: connected` comment frame, a `cursor` event with the row id it starts from, flushes any rows already past the cursor, and replays the team's last-known agent status per agent.
 
 ### Event catalog
 
 | Frame           | When                                                                                                                             | Shape                                                                                                             |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `: connected`   | Immediately on open                                                                                                              | SSE comment (ignored by `EventSource`)                                                                            |
+| `event: cursor` | Once, right after `: connected`                                                                                                  | `id: <row id>` line + `{ cursor }`: where this connection starts                                                  |
 | _(unnamed)_     | Per committed transcript row (poll every 750 ms)                                                                                 | `id: <row id>` line + `data: <TranscriptEntry json>` line                                                         |
 | `event: delta`  | Per live assistant-text delta in this chat                                                                                       | `{ sessionKey, runId, text }`; `text` is the FULL running text so far (replace, not append)                       |
 | `event: board`  | Per board change on this team, from any source (team chat, the task runner, a Tasks MCP tool, the stale-task sweep, a REST call) | `{ id, title?, status?, assigneeAgentId?, parentTaskId?, createdAt?, updatedAt?, summary?, attention?, roomId? }` |
 | `event: status` | Per run boundary, plus a snapshot on connect                                                                                     | `{ agentId, status: 'running' \| 'idle' \| 'error', roomId? }`                                                    |
 | `: keepalive`   | Every 20 s while open                                                                                                            | SSE comment (keeps the connection warm)                                                                           |
 
-Only the unnamed frames carry an `id:`, so only they move the resume cursor. A client reconciles any board change it missed across a reconnect with a `GET /api/board` reload.
+Only the unnamed frames and the `cursor` event carry an `id:`, so only they move the resume cursor. The `cursor` event gives an `EventSource` a resume point before any row arrives: a connection that drops first still reconnects from where it started instead of the newest row at that moment. It is a named event with data because Safari keeps no `id:` that arrives without data; a client needs no listener for it. A client reconciles any board change it missed across a reconnect with a `GET /api/board` reload.
 
 Deltas belong to this chat alone: a stream never forwards another chat's deltas, so General's stream skips every room's, and a room's stream skips General's and the other rooms'. Board and status frames are team-wide, so every stream of the team receives them, each tagged with the chat it came from so a client can keep each chat's task cards and busy state to its own. A board frame's `roomId` is the task's room (`null` = General; left out if the task could not be read), and it carries `attention` (why the task now needs a person, or `null`) only when the change moved the task's status. A run-boundary status frame's `roomId` is the room the run belongs to (`null` = General); the snapshot replayed on connect carries none.
 
@@ -1114,6 +1115,10 @@ Example frames:
 
 ```text
 : connected
+
+event: cursor
+id: 8120
+data: {"cursor":8120}
 
 id: 8121
 data: {"entryId":"...","role":"user","kind":"user","text":"Plan the launch checklist.","sessionKey":"agent:<id>:team:<team-id>","runId":null,"source":"local-send","timestampMs":1718450000000,"sequenceKey":1,"confirmed":true,"fingerprint":"..."}

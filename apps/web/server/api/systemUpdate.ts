@@ -191,7 +191,8 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
     sendEvent(res, { type: 'installed', version: versionAfter })
     finish({ type: 'restarting', port, version: versionAfter })
     // Launch the successor on the same port and exit so it can bind. The browser
-    // is already polling /api/settings and reloads once the successor answers.
+    // polls /api/system/capabilities and reloads once an engine on the new
+    // version answers.
     restartIntoLatest(port)
   })
 
