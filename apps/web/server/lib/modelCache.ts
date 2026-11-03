@@ -1,5 +1,9 @@
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { promisify } from 'node:util'
+
+import { resolveStateDir } from '@clawboo/config'
 
 import { isWindows, resolveShimName } from './platform'
 
@@ -68,11 +72,82 @@ function transformCliModels(models: CliModel[]): ModelGroup[] {
   return groups
 }
 
-export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
-  const now = Date.now()
-  if (cachedGroups && now - cacheTime < CACHE_TTL) return cachedGroups
+const asRecord = (v: unknown): Record<string, unknown> | null =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 
+/**
+ * The agent `agents.defaults.systemAgent.agentId` names, or null. OpenClaw lists
+ * models as that agent without being told, so it settles which agent's view a
+ * listing takes. Pure.
+ */
+export function configuredSystemAgent(config: unknown): string | null {
+  const defaults = asRecord(asRecord(asRecord(config)?.['agents'])?.['defaults'])
+  const id = asRecord(defaults?.['systemAgent'])?.['agentId']
+  return typeof id === 'string' && id.trim() ? id.trim() : null
+}
+
+/**
+ * The agent whose view a model listing takes on a multi-agent OpenClaw. The view
+ * differs per agent (it follows that agent's auth: on a live install `main` listed
+ * OpenRouter models a team agent without that key did not), so this prefers the
+ * configured system agent, then the agent a person would call the default: an
+ * entry marked `default: true`, then `main`, then the first.
+ * Reads either roster shape (2026.9's keyed `agents.entries`, or the legacy
+ * `agents.list` array). Null when the config names no agent. Pure.
+ */
+export function pickModelInspectionAgent(config: unknown): string | null {
+  const system = configuredSystemAgent(config)
+  if (system) return system
+  const record = asRecord
+  const agents = record(record(config)?.['agents'])
+  const entries = record(agents?.['entries'])
+  const rows: { id: string; isDefault: boolean }[] = entries
+    ? Object.entries(entries).map(([id, e]) => ({ id, isDefault: record(e)?.['default'] === true }))
+    : (Array.isArray(agents?.['list']) ? (agents['list'] as unknown[]) : []).flatMap((e) => {
+        const id = record(e)?.['id']
+        return typeof id === 'string' && id
+          ? [{ id, isDefault: record(e)?.['default'] === true }]
+          : []
+      })
+  const marked = rows.filter((r) => r.isDefault)
+  if (marked.length === 1) return marked[0]!.id
+  if (rows.some((r) => r.id === 'main')) return 'main'
+  return rows[0]?.id ?? null
+}
+
+/** OpenClaw 2026.9 refuses a model listing on a multi-agent install that names
+ *  no owner: "Multiple agents are configured, but model inspection has no
+ *  explicit owner. Pass --agent <id> or set agents.defaults.systemAgent.agentId."
+ *  It exits 1, with that message in the JSON on stdout and again on stderr. */
+const NO_OWNER_RE = /has no explicit owner/
+
+function refusedForNoOwner(err: unknown): boolean {
+  const e = err as { stdout?: unknown; stderr?: unknown; message?: unknown } | null
+  return [e?.stdout, e?.stderr, e?.message].some(
+    (t) => typeof t === 'string' && NO_OWNER_RE.test(t),
+  )
+}
+
+function readOpenClawConfig(): unknown {
   try {
+    return JSON.parse(readFileSync(path.join(resolveStateDir(), 'openclaw.json'), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+/** Set once this install refused a listing for want of an owner, so later
+ *  refreshes pass `--agent` straight away instead of spawning twice. */
+let listingNeedsOwner = false
+
+/**
+ * `openclaw models list --all --json`, with `--agent` only when OpenClaw asks for
+ * it. The flag is never sent unprompted: an install that lists fine without it
+ * (one agent, a configured system agent, or a version that predates the rule)
+ * runs exactly the command it always did.
+ */
+async function runModelList(): Promise<string> {
+  const run = async (agent: string | null): Promise<string> => {
     // On Windows, bare 'openclaw' is openclaw.cmd — Node spawn won't resolve
     // the .cmd extension by itself, so use the platform-aware shim name.
     // `shell: isWindows` — Node 18.20.2+ / 20.12.2+ / 22+ refuse to spawn
@@ -81,7 +156,7 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
     // otherwise flash in front of the dashboard on each model-list refresh.
     const { stdout } = await execFileAsync(
       resolveShimName('openclaw'),
-      ['models', 'list', '--all', '--json'],
+      ['models', 'list', '--all', '--json', ...(agent ? ['--agent', agent] : [])],
       {
         timeout: 15_000,
         env: { ...process.env },
@@ -89,6 +164,38 @@ export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
         windowsHide: isWindows,
       },
     )
+    return stdout
+  }
+
+  // Picked from the current config each time: the remembered fact is that an
+  // owner is needed, not which agent, since agents come and go. A system agent
+  // configured since the refusal answers it: OpenClaw then lists as that agent
+  // by itself, so the plain command runs again.
+  const config = listingNeedsOwner ? readOpenClawConfig() : null
+  if (listingNeedsOwner && configuredSystemAgent(config)) listingNeedsOwner = false
+  const owner = listingNeedsOwner ? pickModelInspectionAgent(config) : null
+  try {
+    return await run(owner)
+  } catch (err) {
+    if (owner) {
+      // The flagged call failed for another reason; ask plainly next time.
+      listingNeedsOwner = false
+      throw err
+    }
+    if (!refusedForNoOwner(err)) throw err
+    const picked = pickModelInspectionAgent(readOpenClawConfig())
+    if (!picked) throw err
+    listingNeedsOwner = true
+    return run(picked)
+  }
+}
+
+export async function getModelsFromCli(): Promise<ModelGroup[] | null> {
+  const now = Date.now()
+  if (cachedGroups && now - cacheTime < CACHE_TTL) return cachedGroups
+
+  try {
+    const stdout = await runModelList()
     const parsed = JSON.parse(stdout) as CliOutput | CliModel[]
     const models = Array.isArray(parsed) ? parsed : parsed.models
     if (!Array.isArray(models) || models.length === 0) return cachedGroups

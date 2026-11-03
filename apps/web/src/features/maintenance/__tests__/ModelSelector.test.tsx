@@ -14,7 +14,10 @@ import { ModelSelector } from '../ModelSelector'
 vi.mock('@/lib/useModelCatalog', () => ({
   useModelCatalog: () => ({
     groups: [
-      { provider: 'OpenAI Codex', models: [{ id: 'openai-codex/gpt-5.5', label: 'GPT-5.5' }] },
+      {
+        provider: 'OpenAI Codex',
+        models: [{ id: 'openai-codex/plan-model-a', label: 'Plan model A' }],
+      },
       {
         provider: 'Anthropic',
         models: [{ id: 'anthropic/claude-sonnet-4-5', label: 'Claude Sonnet 4.5' }],

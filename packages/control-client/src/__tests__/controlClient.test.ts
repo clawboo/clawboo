@@ -5,6 +5,7 @@ import {
   apiUrl,
   connectRuntime,
   disconnectRuntime,
+  fetchCodexModels,
   fetchNativeLeaderModel,
   fetchOllamaModels,
   fetchOnboardingState,
@@ -92,6 +93,35 @@ describe('runtimes client', () => {
       throw new Error('network down')
     })
     expect(await fetchRuntimes()).toEqual([])
+  })
+
+  it('fetchCodexModels reads the live subscription list from its route', async () => {
+    const fetchFn = stubFetch(async () =>
+      jsonResponse({
+        models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }],
+        defaultModel: 'gpt-6-sol',
+        updateRequired: false,
+        cliVersion: '0.163.0',
+      }),
+    )
+    expect(await fetchCodexModels()).toEqual({
+      models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }],
+      defaultModel: 'gpt-6-sol',
+      updateRequired: false,
+    })
+    expect(fetchFn.mock.calls[0]?.[0]).toBe('/api/runtimes/codex/models')
+  })
+
+  it('fetchCodexModels is empty (never throws) on a failure or a malformed body', async () => {
+    const empty = { models: [], defaultModel: null, updateRequired: false }
+    stubFetch(async () => jsonResponse({}, { ok: false, status: 500 }))
+    expect(await fetchCodexModels()).toEqual(empty)
+    stubFetch(async () => jsonResponse({ models: 'x', defaultModel: 3, updateRequired: 'yes' }))
+    expect(await fetchCodexModels()).toEqual(empty)
+    stubFetch(async () => {
+      throw new Error('network down')
+    })
+    expect(await fetchCodexModels()).toEqual(empty)
   })
 
   it('connectRuntime POSTs to the runtime connect path and returns ok', async () => {

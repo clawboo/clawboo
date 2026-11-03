@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 
 import {
   MODEL_GROUPS,
+  OPENAI_CODEX_GROUP_NAME,
   findModelLabel,
   findProviderForModel,
   formatProviderName,
@@ -67,7 +68,10 @@ describe('findModelLabel', () => {
 describe('findProviderForModel', () => {
   it('returns the owning provider group for a known model id', () => {
     expect(findProviderForModel('anthropic/claude-opus-4-6')).toBe('Anthropic')
-    expect(findProviderForModel('openai-codex/gpt-5.5')).toBe('OpenAI Codex')
+  })
+
+  it('reads a subscription model by its prefix: that group is only ever filled live', () => {
+    expect(findProviderForModel('openai-codex/gpt-6-sol')).toBe('openai-codex')
   })
 
   it('falls back to the id prefix for an unknown model', () => {
@@ -80,11 +84,18 @@ describe('findProviderForModel', () => {
 })
 
 describe('MODEL_GROUPS invariants', () => {
-  it('has no empty provider groups', () => {
+  it('has no empty provider groups, except the live-only subscription group', () => {
     for (const group of MODEL_GROUPS) {
       expect(group.provider.length, 'empty provider name').toBeGreaterThan(0)
+      if (group.provider === OPENAI_CODEX_GROUP_NAME) continue
       expect(group.models.length, `${group.provider} has no models`).toBeGreaterThan(0)
     }
+  })
+
+  it('names no ChatGPT-subscription model: the backend decides those per account', () => {
+    const codex = MODEL_GROUPS.find((g) => g.provider === OPENAI_CODEX_GROUP_NAME)
+    expect(codex?.models).toEqual([])
+    expect(providerSlug(OPENAI_CODEX_GROUP_NAME)).toBe('openaicodex')
   })
 
   it('has globally unique model ids', () => {

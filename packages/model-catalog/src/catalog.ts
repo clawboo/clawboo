@@ -12,6 +12,9 @@ export interface ModelGroup {
   models: ModelOption[]
 }
 
+/** The ChatGPT-subscription group: the one group whose models are only ever live. */
+export const OPENAI_CODEX_GROUP_NAME = 'OpenAI Codex'
+
 export const MODEL_GROUPS: ModelGroup[] = [
   {
     provider: 'Anthropic',
@@ -42,15 +45,12 @@ export const MODEL_GROUPS: ModelGroup[] = [
     // OpenClaw CLI outright. The display name must slug to
     // `openaicodex` so the live CLI's lowercase `openai-codex` group canonicalizes
     // onto this one (see providerSlug).
-    provider: 'OpenAI Codex',
-    models: [
-      { id: 'openai-codex/gpt-5.5', label: 'GPT-5.5' },
-      { id: 'openai-codex/gpt-5.5-pro', label: 'GPT-5.5 Pro · Pro plan' },
-      { id: 'openai-codex/gpt-5.4', label: 'GPT-5.4' },
-      { id: 'openai-codex/gpt-5.4-mini', label: 'GPT-5.4 mini' },
-      { id: 'openai-codex/gpt-5.3-codex', label: 'GPT-5.3 Codex' },
-      { id: 'openai-codex/gpt-5.3-codex-spark', label: 'GPT-5.3 Codex Spark · Pro plan' },
-    ],
+    //
+    // No models here: which ones a ChatGPT account may use is the backend's call
+    // and it changes (the ids once listed here are now refused). The pickers fill
+    // this group from the account's live list (`/api/runtimes/codex/models`).
+    provider: OPENAI_CODEX_GROUP_NAME,
+    models: [],
   },
   {
     provider: 'Google',

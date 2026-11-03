@@ -29,6 +29,7 @@ import {
   userCodexAuthPath,
 } from '../lib/runtimes/codexAuth'
 import { hasUsableCodexAuth } from '../lib/runtimes/codexDriver'
+import { invalidateCodexModelsCache } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { buildCmdShimPlan, needsCmdShim } from '../lib/runtimes/winSpawn'
 import { killProcessTree } from '../lib/runtimes/killTree'
@@ -56,6 +57,8 @@ const inFlight = new Map<CliLoginTool, ChildProcess>()
 async function probeLoggedIn(tool: CliLoginTool): Promise<boolean> {
   if (tool === 'codex') {
     invalidateCodexAuthCache()
+    // A new sign-in can be a different ChatGPT plan, with different models.
+    invalidateCodexModelsCache()
     return isCodexLoggedIn()
   }
   if (tool === 'hermes') return isHermesCodexAuthPresent()
@@ -64,12 +67,17 @@ async function probeLoggedIn(tool: CliLoginTool): Promise<boolean> {
 
 /** The cheap per-tick variant for the store watcher — pure file reads (the
  *  codex CLI probe would spawn a process every tick). Invalidates the codex
- *  cache so the host's follow-up re-check sees fresh truth. */
+ *  caches so the host's follow-up re-check sees fresh truth. The watcher usually
+ *  ends the stream before the child exits, so probeLoggedIn never runs. */
 function watchTickLoggedIn(tool: CliLoginTool): boolean {
   try {
     if (tool === 'codex') {
       const present = hasUsableCodexAuth(userCodexAuthPath())
-      if (present) invalidateCodexAuthCache()
+      if (present) {
+        invalidateCodexAuthCache()
+        // A new sign-in can be a different ChatGPT plan, with different models.
+        invalidateCodexModelsCache()
+      }
       return present
     }
     if (tool === 'hermes') return isHermesCodexAuthPresent()

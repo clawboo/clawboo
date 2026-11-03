@@ -11,6 +11,7 @@
 
 export {
   MODEL_GROUPS,
+  OPENAI_CODEX_GROUP_NAME,
   findModelLabel,
   findProviderForModel,
   formatProviderName,

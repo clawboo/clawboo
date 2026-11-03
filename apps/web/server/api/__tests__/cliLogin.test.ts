@@ -21,6 +21,12 @@ const probeState = vi.hoisted(() => ({
   hermesAuth: false,
   openclawProfile: false,
   codexCacheInvalidated: 0,
+  codexModelsInvalidated: 0,
+}))
+vi.mock('../../lib/runtimes/codexModels', () => ({
+  invalidateCodexModelsCache: () => {
+    probeState.codexModelsInvalidated += 1
+  },
 }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
   isCodexLoggedIn: () => Promise.resolve(probeState.codexLoggedIn),
@@ -166,6 +172,7 @@ describe('POST /api/auth/cli-login/:tool', () => {
     probeState.hermesAuth = false
     probeState.openclawProfile = false
     probeState.codexCacheInvalidated = 0
+    probeState.codexModelsInvalidated = 0
     spawnState.calls = []
     spawnState.children = []
     killState.killed = []
@@ -299,6 +306,23 @@ describe('POST /api/auth/cli-login/:tool', () => {
       }
     },
   )
+
+  it('codex: a sign-in the store WATCHER completes drops the cached plan models too', async () => {
+    // The usual path: the watcher sees auth.json land, ends the stream and reaps the
+    // child, so the close handler (and its probe) never runs. A new sign-in can be
+    // another ChatGPT plan, so the model list must be read again.
+    vi.useFakeTimers()
+    try {
+      const m = sseRes()
+      cliLoginPOST(req('codex'), m.res)
+      probeState.codexLoggedIn = true // auth.json lands mid-flow
+      await vi.advanceTimersByTimeAsync(3_100)
+      expect(m.events()).toContainEqual({ type: 'complete', success: true, loggedIn: true })
+      expect(probeState.codexModelsInvalidated).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 
   it('client disconnect (Cancel) kills the child TREE', () => {
     const m = sseRes()
