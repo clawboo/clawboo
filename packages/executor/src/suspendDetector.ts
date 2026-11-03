@@ -62,6 +62,9 @@ export function setAwakeTimeout(
 ): AwakeTimer {
   const now = opts.now ?? (() => Date.now())
   const tickMs = opts.tickMs ?? AWAKE_TIMER_TICK_MS
+  // Without a positive tick the check would re-arm at once until the deadline,
+  // and the suspend detector would be off.
+  if (!(tickMs > 0)) throw new RangeError(`setAwakeTimeout: tickMs must be positive, got ${tickMs}`)
   const start = now()
   let deadline = start + ms
   const suspendedFor = createSuspendDetector(tickMs, start)

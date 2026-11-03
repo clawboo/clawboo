@@ -92,4 +92,12 @@ describe('setAwakeTimeout', () => {
     vi.advanceTimersByTime(60 * MIN)
     expect(fn).not.toHaveBeenCalled()
   })
+
+  it('refuses a tick that is not positive', () => {
+    // A zero tick would re-arm the check at once, over and over, and turn off
+    // the suspend detector.
+    expect(() => setAwakeTimeout(() => {}, MIN, { tickMs: 0 })).toThrow(RangeError)
+    expect(() => setAwakeTimeout(() => {}, MIN, { tickMs: -5 })).toThrow(RangeError)
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })
