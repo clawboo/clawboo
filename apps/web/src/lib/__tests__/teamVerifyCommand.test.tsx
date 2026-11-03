@@ -71,4 +71,29 @@ describe('saveTeamVerifyCommand', () => {
     )
     expect(await saveTeamVerifyCommand('gone', 'npm test')).toBeNull()
   })
+
+  it('makes a read wait for a save of the same team still in flight', async () => {
+    let stored = 'npm test'
+    let releasePut: () => void = () => {}
+    const putArrived = new Promise<void>((arrived) => {
+      server.use(
+        http.get('/api/team-verify-command/:teamId', () => HttpResponse.json({ command: stored })),
+        http.put('/api/team-verify-command/:teamId', async ({ request }) => {
+          const body = (await request.json()) as { command: string }
+          arrived()
+          await new Promise<void>((release) => (releasePut = release))
+          stored = body.command
+          return HttpResponse.json({ command: stored })
+        }),
+      )
+    })
+    const save = saveTeamVerifyCommand('t1', 'pnpm test')
+    await putArrived
+    const read = fetchTeamVerifyCommand('t1')
+    // Land the save well after the read was sent: a read that did not wait
+    // would be answered with the old command first.
+    setTimeout(releasePut, 50)
+    expect(await save).toBe('pnpm test')
+    expect(await read).toBe('pnpm test')
+  })
 })

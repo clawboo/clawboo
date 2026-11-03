@@ -10,8 +10,13 @@ import { apiFetch } from '@clawboo/control-client'
 /** The server's cap. It also refuses line breaks: init.sh stores one line. */
 export const TEAM_VERIFY_COMMAND_MAX_CHARS = 2000
 
+// Saves still in flight, per team. The settings sheet can close while one is
+// pending, and a read started before it lands would show the old command.
+const pendingSaves = new Map<string, Promise<string | null>>()
+
 /** The team's verify command ('' when none is set), or null when it could not be read. */
 export async function fetchTeamVerifyCommand(teamId: string): Promise<string | null> {
+  await pendingSaves.get(teamId)
   try {
     const res = await apiFetch(`/api/team-verify-command/${encodeURIComponent(teamId)}`)
     if (!res.ok) return null
@@ -26,10 +31,15 @@ export async function fetchTeamVerifyCommand(teamId: string): Promise<string | n
  * Set the team's verify command; an empty string clears it. Returns the stored
  * command (the server trims it), or null when the save failed.
  */
-export async function saveTeamVerifyCommand(
-  teamId: string,
-  command: string,
-): Promise<string | null> {
+export function saveTeamVerifyCommand(teamId: string, command: string): Promise<string | null> {
+  const save = putTeamVerifyCommand(teamId, command).finally(() => {
+    if (pendingSaves.get(teamId) === save) pendingSaves.delete(teamId)
+  })
+  pendingSaves.set(teamId, save)
+  return save
+}
+
+async function putTeamVerifyCommand(teamId: string, command: string): Promise<string | null> {
   try {
     const res = await apiFetch(`/api/team-verify-command/${encodeURIComponent(teamId)}`, {
       method: 'PUT',

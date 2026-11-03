@@ -162,11 +162,11 @@ Boo Zero reads a team's brief only when you start a message in Boo Zero's own ch
 
 ### Work check
 
-The work check is the command Clawboo runs to check an agent's work on the team's tasks, such as `npm test`. When Clawboo checks a task, it runs this command in the task's folder, and the task reaches **Done** only if the command succeeds. Clawboo checks work only in some cases; see [When work is checked](/using/board#when-work-is-checked).
+The work check is the command Clawboo runs to check an agent's work on the team's tasks, such as `npm test`. Only a task-runner task that changed files is checked: Clawboo runs this command in the task's folder, and the task reaches **Done** only if the command succeeds. Work handed out in team chat, tasks you give on the Board and routines you create in the app are never checked, so the work check does not apply to them. See [When work is checked](/using/board#when-work-is-checked).
 
-In the team's settings, type the command in **Work check**, then click **Save check** or press Enter. You should see **Work check saved.** To remove it, empty the box and save; you should see **Work check cleared.** The command is one line of up to 2,000 characters. If a save fails, you see **Could not save the work check.** and your edit stays in the box.
+In the team's settings, type the command in **Work check**, then click **Save check** or press Enter. You should see **Work check saved.** To remove it, empty the box and save; you should see **Work check cleared.** The command is one line of up to 2,000 characters. Pasting text that spans lines is refused with **The work check is one line.**, so two commands are never joined into one; put `&&` between them instead. If a save fails, you see **Could not save the work check.** and your edit stays in the box.
 
-Above the box, **Active check** says which check runs now:
+Above the box, **Active check** says which check runs now. It reads the team's command again when you come back to the window, so it also shows a change made elsewhere, for example through the API:
 
 - **The command, set for the team**: every check of the team's tasks runs it from the next check on, and each new task folder starts with it. The task's **Verification** section shows it as **set for the team**. An agent cannot change it by editing its own files.
 - **Each agent's own, written by the agent in its task folder**: no work check is set, so each agent writes its own check in its task folder's `init.sh`, and the task shows it as **written by the agent**. An agent that writes no check fails the check.

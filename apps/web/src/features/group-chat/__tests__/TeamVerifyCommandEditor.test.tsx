@@ -1,7 +1,7 @@
 // TeamVerifyCommandEditor: the team's work check in the team settings sheet.
 // Reads and writes /api/team-verify-command/:teamId; an empty save clears it.
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -39,7 +39,9 @@ describe('TeamVerifyCommandEditor', () => {
     serveCommand('')
     render(<TeamVerifyCommandEditor teamId="t1" />)
     expect(await screen.findByRole('textbox', { name: 'Work check command' })).toHaveValue('')
-    expect(screen.getByText(/A task reaches Done only when the command succeeds/)).toBeVisible()
+    // Most work is never checked, so the copy must not promise every task is.
+    expect(screen.getByText(/Only task-runner tasks that changed files are checked/)).toBeVisible()
+    expect(screen.getByText(/tasks given on the Board are never checked/)).toBeVisible()
     expect(screen.getByTestId('work-check-active')).toHaveTextContent(
       "Active check: each agent's own, written by the agent in its task folder.",
     )
@@ -195,5 +197,107 @@ describe('TeamVerifyCommandEditor', () => {
     const { container } = render(<TeamVerifyCommandEditor teamId="t1" />)
     await screen.findByRole('textbox', { name: 'Work check command' })
     expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('shows a save that was still in flight when the sheet closed, once it reopens', async () => {
+    const user = userEvent.setup()
+    let stored = 'npm test'
+    let releasePut: () => void = () => {}
+    let putArrived = false
+    server.use(
+      http.get('/api/team-verify-command/:teamId', () => HttpResponse.json({ command: stored })),
+      http.put('/api/team-verify-command/:teamId', async ({ request }) => {
+        const body = (await request.json()) as { command: string }
+        putArrived = true
+        await new Promise<void>((release) => (releasePut = release))
+        stored = body.command
+        return HttpResponse.json({ command: stored })
+      }),
+    )
+    const first = render(<TeamVerifyCommandEditor teamId="t1" />)
+    const input = await screen.findByRole('textbox', { name: 'Work check command' })
+    await user.clear(input)
+    await user.type(input, 'pnpm test{Enter}')
+    await waitFor(() => expect(putArrived).toBe(true))
+    first.unmount()
+
+    render(<TeamVerifyCommandEditor teamId="t1" />)
+    // The save lands well after the reopened sheet sent its read.
+    setTimeout(releasePut, 50)
+    expect(await screen.findByRole('textbox', { name: 'Work check command' })).toHaveValue(
+      'pnpm test',
+    )
+    expect(screen.getByTestId('work-check-active')).toHaveTextContent(
+      'Active check: pnpm test, set for the team.',
+    )
+  })
+
+  it('reads the command again when the window regains focus', async () => {
+    let stored = 'npm test'
+    server.use(
+      http.get('/api/team-verify-command/:teamId', () => HttpResponse.json({ command: stored })),
+    )
+    render(<TeamVerifyCommandEditor teamId="t1" />)
+    await screen.findByRole('textbox', { name: 'Work check command' })
+    stored = 'pnpm lint'
+    fireEvent.focus(window)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('work-check-active')).toHaveTextContent(
+        'Active check: pnpm lint, set for the team.',
+      ),
+    )
+    expect(screen.getByRole('textbox', { name: 'Work check command' })).toHaveValue('pnpm lint')
+  })
+
+  it('keeps an unsaved draft when a focus re-read finds a new command', async () => {
+    const user = userEvent.setup()
+    let stored = 'npm test'
+    server.use(
+      http.get('/api/team-verify-command/:teamId', () => HttpResponse.json({ command: stored })),
+    )
+    render(<TeamVerifyCommandEditor teamId="t1" />)
+    const input = await screen.findByRole('textbox', { name: 'Work check command' })
+    await user.clear(input)
+    await user.type(input, 'yarn test')
+    stored = 'pnpm lint'
+    fireEvent.focus(window)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('work-check-active')).toHaveTextContent(
+        'Active check: pnpm lint, set for the team.',
+      ),
+    )
+    expect(input).toHaveValue('yarn test')
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
+  })
+
+  it('refuses a paste with a line break instead of joining two commands', async () => {
+    const user = userEvent.setup()
+    const puts = serveCommand('')
+    render(<TeamVerifyCommandEditor teamId="t1" />)
+    const input = await screen.findByRole('textbox', { name: 'Work check command' })
+    await user.click(input)
+    await user.paste('npm test\npnpm lint')
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The work check is one line.')
+    expect(input).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Save check' })).toBeDisabled()
+    expect(puts).toEqual([])
+
+    await user.type(input, 'npm test')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('accepts a one-line paste', async () => {
+    const user = userEvent.setup()
+    serveCommand('')
+    render(<TeamVerifyCommandEditor teamId="t1" />)
+    const input = await screen.findByRole('textbox', { name: 'Work check command' })
+    await user.click(input)
+    await user.paste('npm test && pnpm lint')
+
+    expect(input).toHaveValue('npm test && pnpm lint')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 })
