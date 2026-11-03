@@ -484,6 +484,9 @@ export const executionProcesses = sqliteTable(
     summary: text('summary'),
     runReason: text('run_reason'),
     error: text('error'),
+    // The class the failure was filed under (`classifyError` in @clawboo/obs).
+    // Null for a run that did not fail, or one closed without a class.
+    errorClass: text('error_class'),
     recoveryTombstone: integer('recovery_tombstone').notNull().default(0),
     tenantId: text('tenant_id'),
     createdAt: integer('created_at').notNull(),
@@ -516,6 +519,9 @@ export const scheduledRuns = sqliteTable(
     // Open-set firing owner; this engine writes 'clawboo'.
     scheduledBy: text('scheduled_by').notNull().default('clawboo'),
     lastError: text('last_error'),
+    // Failed fires in a row. A routine keeps its schedule through failures that
+    // may pass (rate limit, timeout, provider outage) until this reaches the cap.
+    failureStreak: integer('failure_streak').notNull().default(0),
     tenantId: text('tenant_id'), // dormant multi-tenant seam
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),

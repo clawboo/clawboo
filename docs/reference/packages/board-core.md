@@ -71,13 +71,14 @@ The board view shows **Needs you** and then five status columns (**Backlog**, **
 `ledgerAllowsAutoFire(execs)` reads a task's run ledger, oldest run first, and decides whether the ready-pump may
 start it again. The team engine's pump and the server's scan both call it, so they agree on what will run.
 
-| The ledger                                             | Result                      |
-| ------------------------------------------------------ | --------------------------- |
-| empty (never delivered)                                | fire                        |
-| last run still `running`                               | leave it, someone owns it   |
-| last run `cancelled` (a person pressed Stop)           | never fire again on its own |
-| `MAX_AUTO_FIRES` unsuccessful runs in a row at the end | park it for a person        |
-| anything else (timed out, failed, orphaned)            | fire again                  |
+| The ledger                                                        | Result                      |
+| ----------------------------------------------------------------- | --------------------------- |
+| empty (never delivered)                                           | fire                        |
+| last run still `running`                                          | leave it, someone owns it   |
+| last run `cancelled` (a person pressed Stop)                      | never fire again on its own |
+| last run failed on the account (`errorClass` `Auth` or `Billing`) | park it for a person        |
+| `MAX_AUTO_FIRES` unsuccessful runs in a row at the end            | park it for a person        |
+| anything else (timed out, failed, orphaned)                       | fire again                  |
 
 `trailingFailedRuns` counts the runs at the end of the ledger that ended neither `succeeded` nor `cancelled`. A
 task's `sourceDelegationId` records who it is bound to: `delegationTargetOf` reads the agent out of it, and
@@ -97,7 +98,11 @@ board view puts every task with a reason in **Needs you**.
 | any other     | none                                                                                                               |
 
 The result carries the reason, the number of trailing failed runs, and a `detail` taken from the last run's error
-(trimmed to a short excerpt).
+(trimmed to a short excerpt). When the provider refused the account on the last run, it also carries `cause`
+(`sign_in` or `billing`) and `runtime`, the runtime whose sign-in to fix; the board shows **Fix sign-in** for it.
+`accountFailureOf(run)` makes that call for one ledger run. It reads the run's `errorClass`, which spells the
+`Auth` and `Billing` classes of the error taxonomy in `@clawboo/obs`; this package imports nothing, so a test in
+`@clawboo/db` holds the two spellings together.
 
 ## Run cost
 

@@ -31,11 +31,11 @@ Some limits apply to only one of the two ways work runs. **Team chat** covers ev
 | Delegations one turn can start (team chat); the rest are skipped with a note         | 8                | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:56`         |
 | Subtasks under one parent task, finished ones included (Tasks MCP)                   | 24               | No        | `packages/governance/src/caps/predicates.ts:19`               |
 | New top-level tasks an agent can create (Tasks MCP)                                  | 30 per 5 minutes | No        | `packages/governance/src/caps/predicates.ts:28-29`            |
-| Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:104`   |
-| Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:62`    |
-| The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:89,96` |
+| Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:106`   |
+| Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:64`    |
+| The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:91,98` |
 | How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:57`         |
-| Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:52`    |
+| Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:54`    |
 
 The board's own REST API (`POST /api/board`) is not subject to the Tasks MCP caps. [Governance](/concepts/governance) explains the caps and when each applies.
 
@@ -71,21 +71,22 @@ Checks run only for task-runner work in a git worktree with changes; [How work i
 
 ## Board and Routines
 
-| Limit                                                                          | Value                                        | Change it                                 | Source                                                |
-| ------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------------- | ----------------------------------------------------- |
-| Heartbeat from a running task                                                  | Every 30 seconds                             | No                                        | `packages/db/src/board/repository.ts:427`             |
-| Missed heartbeats before an **In progress** task returns to **To do**          | 3 minutes                                    | `CLAWBOO_BOARD_STALE_TTL_MS`              | `apps/web/server/index.ts:557`                        |
-| How often that check runs                                                      | Every minute, and once at startup            | `CLAWBOO_BOARD_STALE_SWEEP_MS`            | `apps/web/server/index.ts:558`                        |
-| Waking delegated work that is ready to run                                     | 10 seconds after startup, then every minute  | `CLAWBOO_DISPATCH_PUMP_MS` (the interval) | `apps/web/server/index.ts:584,623`                    |
-| Failed or timed-out runs in a row before a task stops being retried on its own | 3 (a Stop is never retried)                  | No                                        | `packages/board-core/src/dispatch.ts:33`              |
-| Text of your comment passed to the agent working on the task                   | The first 1,000 characters                   | No                                        | `apps/web/server/lib/teamChat/taskSteer.ts:27`        |
-| Replies to a waiting task that start one run between them                      | Sent within 15 seconds of each other         | No                                        | `apps/web/server/lib/teamChat/personReply.ts:53`      |
-| Wait for a reply to reach a running task before it reads as queued             | 2.5 seconds                                  | No                                        | `apps/web/server/lib/teamChat/personReply.ts:81`      |
-| Room name length                                                               | 80 characters                                | No                                        | `packages/db/src/board/rooms.ts:24`                   |
-| Worktree cleanup at startup                                                    | Older than 72 hours, or beyond the newest 25 | No                                        | `packages/worktrees/src/lifecycle.ts:60-61`           |
-| Time limit for each git command                                                | 60 seconds                                   | No                                        | `packages/worktrees/src/git.ts:16`                    |
-| Routines: how far ahead the scheduler sleeps at most                           | 60 seconds                                   | No                                        | `apps/web/server/lib/routines/ticker.ts:32`           |
-| Routines: wait for an OpenClaw agent's run                                     | 10 minutes                                   | `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`     | `apps/web/server/lib/routines/openclawDispatch.ts:46` |
+| Limit                                                                                                    | Value                                                         | Change it                                 | Source                                                |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------- |
+| Heartbeat from a running task                                                                            | Every 30 seconds                                              | No                                        | `packages/db/src/board/repository.ts:427`             |
+| Missed heartbeats before an **In progress** task returns to **To do**                                    | 3 minutes                                                     | `CLAWBOO_BOARD_STALE_TTL_MS`              | `apps/web/server/index.ts:557`                        |
+| How often that check runs                                                                                | Every minute, and once at startup                             | `CLAWBOO_BOARD_STALE_SWEEP_MS`            | `apps/web/server/index.ts:558`                        |
+| Waking delegated work that is ready to run                                                               | 10 seconds after startup, then every minute                   | `CLAWBOO_DISPATCH_PUMP_MS` (the interval) | `apps/web/server/index.ts:584,623`                    |
+| Failed or timed-out runs in a row before a task stops being retried on its own                           | 3 (a Stop, or a refused sign-in or account, is never retried) | No                                        | `packages/board-core/src/dispatch.ts:57`              |
+| Routines: failures in a row that may pass (rate limit, timeout, provider error) before the routine stops | 3 (any other failure stops it at once)                        | No                                        | `packages/db/src/routines/repository.ts:212`          |
+| Text of your comment passed to the agent working on the task                                             | The first 1,000 characters                                    | No                                        | `apps/web/server/lib/teamChat/taskSteer.ts:27`        |
+| Replies to a waiting task that start one run between them                                                | Sent within 15 seconds of each other                          | No                                        | `apps/web/server/lib/teamChat/personReply.ts:53`      |
+| Wait for a reply to reach a running task before it reads as queued                                       | 2.5 seconds                                                   | No                                        | `apps/web/server/lib/teamChat/personReply.ts:81`      |
+| Room name length                                                                                         | 80 characters                                                 | No                                        | `packages/db/src/board/rooms.ts:24`                   |
+| Worktree cleanup at startup                                                                              | Older than 72 hours, or beyond the newest 25                  | No                                        | `packages/worktrees/src/lifecycle.ts:60-61`           |
+| Time limit for each git command                                                                          | 60 seconds                                                    | No                                        | `packages/worktrees/src/git.ts:16`                    |
+| Routines: how far ahead the scheduler sleeps at most                                                     | 60 seconds                                                    | No                                        | `apps/web/server/lib/routines/ticker.ts:32`           |
+| Routines: wait for an OpenClaw agent's run                                                               | 10 minutes                                                    | `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`     | `apps/web/server/lib/routines/openclawDispatch.ts:46` |
 
 Cleanup commits a worktree's changes before removing it and keeps its branch.
 

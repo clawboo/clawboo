@@ -10,7 +10,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createTask, listEvents } from '@clawboo/db'
+import { createTask, listEvents, listExecutions } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -235,5 +235,97 @@ describe('executor runner → observability', () => {
     }
     expect(data.errorClass).toBe('Timeout')
     expect(data.harnessBug).toBe(false)
+  })
+
+  it('files a refused sign-in under Auth from its typed code, on the ledger and the result', async () => {
+    const taskId = newTask()
+    // The message alone says nothing the taxonomy knows: the code decides.
+    const adapter = new ScriptedAdapter('claude-code', (base) => [
+      {
+        ...base(),
+        kind: 'error',
+        code: 'oauth_org_not_allowed',
+        message: 'Your organization does not allow this login',
+        fatal: true,
+      },
+      {
+        ...base(),
+        kind: 'done',
+        reason: 'error',
+        summary: 'Your organization does not allow this login',
+      },
+    ])
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'a1',
+    })
+    expect(result).toMatchObject({ ok: true, doneReason: 'error', errorClass: 'Auth' })
+    expect(listExecutions(getDb(), taskId).at(-1)).toMatchObject({
+      status: 'failed',
+      errorClass: 'Auth',
+    })
+    const terminal = listEvents(getDb(), { kinds: ['error'] })
+      .map((e) => JSON.parse(e.data) as { code: string | null; errorClass: string })
+      .filter((d) => d.code === 'oauth_org_not_allowed')
+    expect(terminal.length).toBeGreaterThanOrEqual(1)
+    expect(terminal.every((d) => d.errorClass === 'Auth')).toBe(true)
+  })
+
+  it("classifies the runtime's error, never the agent's prose about a 401", async () => {
+    const taskId = newTask()
+    const prose = 'I added a /login route that returns 401 when the token is missing.'
+    const adapter = new ScriptedAdapter('codex', (base) => [
+      { ...base(), kind: 'text-delta', text: prose, channel: 'assistant' },
+      {
+        ...base(),
+        kind: 'error',
+        code: 'overloaded',
+        message: 'Overloaded (HTTP 529)',
+        fatal: true,
+      },
+      { ...base(), kind: 'done', reason: 'error', summary: prose },
+    ])
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'a1',
+    })
+    expect(result).toMatchObject({ doneReason: 'error', errorClass: 'ProviderError' })
+    expect(listExecutions(getDb(), taskId).at(-1)?.errorClass).toBe('ProviderError')
+  })
+
+  it('files a run the idle guard ended as a Timeout, whatever its summary says', async () => {
+    const taskId = newTask()
+    const prev = process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+    process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = '50'
+    let release: () => void = () => undefined
+    const stopped = new Promise<void>((resolve) => (release = resolve))
+    // A wedged runtime: says nothing, and ends its stream only once aborted.
+    const adapter = new ScriptedAdapter('hermes', () => [])
+    adapter.events = () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<RuntimeEvent>> => {
+          await stopped
+          return { done: true, value: undefined }
+        },
+      }),
+    })
+    adapter.abort = async () => release()
+    try {
+      const result = await runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: () => adapter,
+        taskId,
+        assigneeAgentId: 'a1',
+      })
+      expect(result).toMatchObject({ doneReason: 'error', errorClass: 'Timeout' })
+      expect(listExecutions(getDb(), taskId).at(-1)?.errorClass).toBe('Timeout')
+    } finally {
+      if (prev === undefined) delete process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']
+      else process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS'] = prev
+    }
   })
 })

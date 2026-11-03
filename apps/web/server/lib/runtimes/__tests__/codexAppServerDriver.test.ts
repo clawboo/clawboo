@@ -68,6 +68,17 @@ process.stdin.on('data', (d) => {
       send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
       notify('error', { threadId, turnId: 'turn-1', willRetry: false, error: { message: body } })
       notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'failed', error: { message: body }, items: [] } })
+    } else if (m.method === 'turn/start' && scenario === 'unauthorized') {
+      // A revoked login: the app-server types the cause in codexErrorInfo.
+      const error = { message: 'unexpected status 401 Unauthorized', codexErrorInfo: 'unauthorized', additionalDetails: null }
+      send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
+      notify('error', { threadId, turnId: 'turn-1', willRetry: false, error })
+      notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'failed', error, items: [] } })
+    } else if (m.method === 'turn/start' && scenario === 'dropped') {
+      // Only the error notification types the cause; the turn's own error is bare.
+      send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
+      notify('error', { threadId, turnId: 'turn-1', willRetry: false, error: { message: 'stream disconnected before completion', codexErrorInfo: { responseStreamDisconnected: { httpStatusCode: null } }, additionalDetails: null } })
+      notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'failed', error: null, items: [] } })
     } else if (m.method === 'turn/start') {
       send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
       notify('turn/started', { threadId, turn: { id: 'turn-1', status: 'inProgress', items: [] } })
@@ -255,6 +266,28 @@ describe('createCodexAppServerDriver', () => {
     // No model was named to the app-server: the CLI runs the account's own default.
     const start = (await received()).find((m) => m['method'] === 'thread/start')
     expect(start?.['params']).not.toHaveProperty('model')
+  })
+
+  it("carries the app-server's typed cause as the error code", async () => {
+    const { driver, seen } = driverFor('unauthorized')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    expect(seen.find((e) => e.type === 'result')).toMatchObject({
+      ok: false,
+      errorMessage: 'unexpected status 401 Unauthorized',
+      errorCode: 'authentication_failed',
+    })
+  })
+
+  it('keeps the cause the error notification typed when the turn error is bare', async () => {
+    const { driver, seen } = driverFor('dropped')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    expect(seen.find((e) => e.type === 'result')).toMatchObject({
+      ok: false,
+      errorMessage: 'stream disconnected before completion',
+      errorCode: 'stream_disconnected',
+    })
   })
 
   it('a refused PINNED model points at the model, not the CLI', async () => {

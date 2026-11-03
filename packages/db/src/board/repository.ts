@@ -1141,6 +1141,7 @@ export function createExecutionProcess(db: ClawbooDb, input: CreateExecInput): D
     summary: null,
     runReason: input.runReason ?? null,
     error: null,
+    errorClass: null,
     recoveryTombstone: 0,
     tenantId: null,
     createdAt: now,
@@ -1153,6 +1154,8 @@ export interface CompleteExecOutcome {
   status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
   summary?: string | null
   error?: string | null
+  /** The class the failure was filed under (`classifyError` in @clawboo/obs). */
+  errorClass?: string | null
   afterCommit?: string | null
   inputTokens?: number | null
   outputTokens?: number | null
@@ -1193,6 +1196,7 @@ export function completeExecutionProcess(
         completedAt: now,
         summary: outcome.summary ?? null,
         error: outcome.error ?? null,
+        errorClass: outcome.errorClass ?? null,
         afterCommit: outcome.afterCommit ?? null,
         // The engine closes its rows without a cost, and the drain records the cost
         // on the row separately (recordExecutionUsage), so a close must not erase

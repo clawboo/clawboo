@@ -14,6 +14,7 @@ import { createTask, getTask } from '../../board/repository'
 import { appendEvent } from '../../events/appendEvent'
 import { listRoutineFires } from '../history'
 import {
+  MAX_ROUTINE_TRANSIENT_FAILURES,
   claimScheduledRun,
   deleteScheduledRun,
   deleteScheduledRunsForAgent,
@@ -48,6 +49,13 @@ function register(overrides: Partial<Parameters<typeof registerScheduledRun>[1]>
   })
   if (!result.ok) throw new Error(`register failed: ${result.reason}`)
   return result.run
+}
+
+/** Take a registered routine through due → claimed → running at `at`. */
+function fire(id: string, at: number): void {
+  queueDueRuns(db, at)
+  claimScheduledRun(db, id, at)
+  if (!markRunRunning(db, id, at)) throw new Error('fire: not claimed')
 }
 
 beforeEach(() => {
@@ -213,6 +221,92 @@ describe('the fire path', () => {
     expect(queueDueRuns(db, 6_000)).toHaveLength(1)
   })
 
+  it('a failure that may pass keeps the routine armed, recording the error and the streak', () => {
+    const run = register({ nextRunAt: 1_000 })
+    fire(run.id, 2_000)
+    expect(
+      recordRunOutcome(
+        db,
+        run.id,
+        { ok: false, error: 'rate limited', transient: true },
+        99_000,
+        2_000,
+      ),
+    ).toBe('idle')
+    expect(getScheduledRun(db, run.id)).toMatchObject({
+      status: 'idle',
+      lastRunAt: 2_000,
+      lastError: 'rate limited',
+      nextRunAt: 99_000,
+      failureStreak: 1,
+    })
+    // The next due-pass fires it as usual.
+    expect(queueDueRuns(db, 99_000)).toHaveLength(1)
+  })
+
+  it(`stops after ${MAX_ROUTINE_TRANSIENT_FAILURES} such failures in a row, so nothing retries forever`, () => {
+    const run = register({ nextRunAt: 1_000 })
+    let at = 2_000
+    for (let i = 1; i < MAX_ROUTINE_TRANSIENT_FAILURES; i++) {
+      fire(run.id, at)
+      expect(
+        recordRunOutcome(
+          db,
+          run.id,
+          { ok: false, error: `blip ${i}`, transient: true },
+          at + 1_000,
+          at,
+        ),
+      ).toBe('idle')
+      at += 1_000
+    }
+    fire(run.id, at)
+    expect(
+      recordRunOutcome(
+        db,
+        run.id,
+        { ok: false, error: 'blip last', transient: true },
+        at + 1_000,
+        at,
+      ),
+    ).toBe('error')
+    expect(getScheduledRun(db, run.id)).toMatchObject({
+      status: 'error',
+      lastError: 'blip last',
+      nextRunAt: null,
+      failureStreak: MAX_ROUTINE_TRANSIENT_FAILURES,
+    })
+    // Resuming starts the count again.
+    setScheduledRunStatus(db, run.id, 'idle', { nextRunAt: 50_000 })
+    expect(getScheduledRun(db, run.id)?.failureStreak).toBe(0)
+  })
+
+  it('a success clears the streak and the error', () => {
+    const run = register({ nextRunAt: 1_000 })
+    fire(run.id, 2_000)
+    recordRunOutcome(db, run.id, { ok: false, error: 'blip', transient: true }, 3_000, 2_000)
+    fire(run.id, 3_000)
+    expect(recordRunOutcome(db, run.id, { ok: true }, 4_000, 3_000)).toBe('idle')
+    expect(getScheduledRun(db, run.id)).toMatchObject({ lastError: null, failureStreak: 0 })
+  })
+
+  it('a failure a person must fix stops it at once, even with a next run to arm', () => {
+    const run = register({ nextRunAt: 1_000 })
+    fire(run.id, 2_000)
+    expect(
+      recordRunOutcome(db, run.id, { ok: false, error: 'invalid api key' }, 99_000, 2_000),
+    ).toBe('error')
+    expect(getScheduledRun(db, run.id)).toMatchObject({ status: 'error', nextRunAt: null })
+  })
+
+  it('a passing failure with nothing left to arm (a spent once@) stops', () => {
+    const run = register({ cronSpec: 'once@2026-07-01T09:00:00Z', nextRunAt: 1_000 })
+    fire(run.id, 2_000)
+    expect(
+      recordRunOutcome(db, run.id, { ok: false, error: 'blip', transient: true }, null, 2_000),
+    ).toBe('error')
+  })
+
   it('queueRunNow force-fires an idle row and minNextRunAt tracks the arm key', () => {
     const a = register({ nextRunAt: 9_000 })
     register({ nextRunAt: 5_000 })
@@ -262,7 +356,7 @@ describe('user-driven transitions + updates', () => {
 
   it('an outcome lands only on a row still running', () => {
     const run = register({ nextRunAt: 1_000 })
-    recordRunOutcome(db, run.id, { ok: false, error: 'late' }, null, 2_000)
+    expect(recordRunOutcome(db, run.id, { ok: false, error: 'late' }, null, 2_000)).toBeNull()
     expect(getScheduledRun(db, run.id)).toMatchObject({
       status: 'idle',
       lastError: null,

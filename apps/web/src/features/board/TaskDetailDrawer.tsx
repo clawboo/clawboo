@@ -15,6 +15,7 @@ import {
   CircleDashed,
   FileQuestion,
   FileText,
+  KeyRound,
   RotateCcw,
   X,
 } from 'lucide-react'
@@ -50,7 +51,9 @@ import { ReplyReceipt } from './ReplyReceipt'
 import { TaskComments } from './TaskComments'
 import { TaskReplyBox } from './TaskReplyBox'
 import {
+  ACCOUNT_FAILURE_META,
   ATTENTION_META,
+  FIX_SIGN_IN,
   attentionLabel,
   boardColumnOf,
   statusLabel,
@@ -248,9 +251,10 @@ function NeedsYouBanner({
   // Retry hands it back to its agent; with no agent bound, someone has to be
   // picked. A bound task can also be handed to someone else.
   const canRetry = attention.reason !== 'unassigned' && !!teamId && !!bound
-  const { retry, dismiss } = useTaskActions()
+  const { retry, dismiss, fixSignIn } = useTaskActions()
   const meta = ATTENTION_META[attention.reason]
   const broke = attention.reason === 'failed' || attention.reason === 'timed_out'
+  const hint = attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint
   return (
     <div
       data-testid="task-needs-you"
@@ -266,14 +270,20 @@ function NeedsYouBanner({
         </span>
       </div>
       <p className="mt-1.5 whitespace-pre-wrap break-words text-compact text-foreground">
-        {attention.detail ?? meta.hint}
+        {attention.detail ?? hint}
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        {attention.cause && (
+          <Button size="sm" variant="secondary" onClick={() => fixSignIn(attention.runtime)}>
+            <KeyRound size={14} strokeWidth={2} />
+            {FIX_SIGN_IN}
+          </Button>
+        )}
         {canRetry && (
           <Button
             size="sm"
-            variant="secondary"
-            onClick={() => void retry(taskId).then((ok) => ok && onChanged())}
+            variant={attention.cause ? 'ghost' : 'secondary'}
+            onClick={() => void retry(taskId, attention).then((ok) => ok && onChanged())}
           >
             <RotateCcw size={14} strokeWidth={2} />
             Retry

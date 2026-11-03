@@ -153,3 +153,35 @@ describe('mapCodexEvent', () => {
     })
   })
 })
+
+describe('mapCodexEvent: a failed run', () => {
+  it("carries the driver's typed cause onto the fatal error event", () => {
+    let seq = 0
+    const out = mapCodexEvent(
+      {
+        type: 'result',
+        ok: false,
+        summary: '',
+        errorMessage: 'Incorrect API key provided',
+        errorCode: 'invalid_api_key',
+      },
+      { runId: 'r1', sessionId: null },
+      () => ++seq,
+    )
+    expect(out.find((e) => e.kind === 'error')).toMatchObject({
+      code: 'invalid_api_key',
+      message: 'Incorrect API key provided',
+      fatal: true,
+    })
+  })
+
+  it('leaves the code null when the driver named none', () => {
+    let seq = 0
+    const out = mapCodexEvent(
+      { type: 'result', ok: false, summary: '', errorMessage: 'exited with code 1' },
+      { runId: 'r1', sessionId: null },
+      () => ++seq,
+    )
+    expect(out.find((e) => e.kind === 'error')).toMatchObject({ code: null })
+  })
+})

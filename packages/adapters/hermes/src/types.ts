@@ -30,6 +30,9 @@ export type HermesNativeEvent =
       sessionId?: string
       aborted?: boolean
       errorMessage?: string
+      /** The provider's typed cause, read from the error body Hermes printed
+       *  (`invalid_api_key`, `authentication_error`, `insufficient_quota`, ...). */
+      errorCode?: string
     }
 
 /**

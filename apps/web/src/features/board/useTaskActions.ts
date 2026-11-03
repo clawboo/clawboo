@@ -10,8 +10,10 @@ import { useCallback } from 'react'
 
 import { assignTask, retryTask, updateStatusResult } from '@/lib/boardClient'
 import { confirm } from '@/stores/confirm'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 
+import type { TaskAttention } from './boardStatus'
 import { countLabel } from './calendar/calendarFormat'
 
 const NUMBER_WORDS = 'Zero One Two Three Four Five Six Seven Eight Nine'.split(' ')
@@ -67,13 +69,38 @@ const ASSIGN_REFUSED: Record<string, string> = {
   room_archived: ROOM_ARCHIVED,
 }
 
+/** What has to be fixed before an account refusal can run, as the confirm says it. */
+const ACCOUNT_FIX: Record<NonNullable<TaskAttention['cause']>, string> = {
+  sign_in: 'the sign-in',
+  billing: 'the billing',
+}
+
+/**
+ * Before retrying a run the provider refused for the account: say why it failed
+ * and that it will fail the same way. Resolves true to go ahead. Any other
+ * failure retries without asking.
+ */
+async function confirmAccountRetry(attention: TaskAttention | undefined, n = 1): Promise<boolean> {
+  if (!attention?.cause) return true
+  const fix = ACCOUNT_FIX[attention.cause]
+  return confirm({
+    title: `Retry before fixing ${fix}?`,
+    message: `${attention.detail ? `${n === 1 ? 'The last run' : 'Each last run'} failed: ${attention.detail.replace(/\.$/, '')}. ` : ''}${n === 1 ? 'It fails' : 'They fail'} the same way until ${fix} is fixed.`,
+    confirmLabel: 'Retry anyway',
+  })
+}
+
 export interface TaskActions {
-  retry: (taskId: string) => Promise<boolean>
+  /** Hand the task back to its agent. For a run the provider refused for the
+   *  account, asks first (`attention` is the card's needs-you state). */
+  retry: (taskId: string, attention?: TaskAttention) => Promise<boolean>
   assign: (taskId: string, agentId: string, agentName: string) => Promise<boolean>
   dismiss: (taskId: string) => Promise<boolean>
   /** Retry every task at once, with one summary toast. Resolves to how many
-   *  went back to their agents. */
-  retryMany: (taskIds: readonly string[]) => Promise<number>
+   *  went back to their agents. Asks first, like `retry`, for an account refusal. */
+  retryMany: (taskIds: readonly string[], attention?: TaskAttention) => Promise<number>
+  /** Open Settings at the runtime whose sign-in or billing a run was refused for. */
+  fixSignIn: (runtime?: string) => void
   /** Dismiss every task after one confirm naming the count, with one summary
    *  toast. Resolves to how many moved to Cancelled (0 when the person backs out). */
   dismissMany: (taskIds: readonly string[]) => Promise<number>
@@ -83,7 +110,8 @@ export function useTaskActions(): TaskActions {
   const addToast = useToastStore((s) => s.addToast)
 
   const retry = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, attention?: TaskAttention) => {
+      if (!(await confirmAccountRetry(attention))) return false
       const res = await retryTask(taskId)
       if (res.ok) {
         addToast({ type: 'success', message: 'Retrying. The task is back with its agent.' })
@@ -141,9 +169,10 @@ export function useTaskActions(): TaskActions {
   )
 
   const retryMany = useCallback(
-    async (taskIds: readonly string[]) => {
+    async (taskIds: readonly string[], attention?: TaskAttention) => {
       const n = taskIds.length
       if (n === 0) return 0
+      if (!(await confirmAccountRetry(attention, n))) return 0
       const { ok, reasons } = await settleAll(taskIds, retryTask)
       if (ok === n) {
         addToast({ type: 'success', message: `Retrying ${countLabel(n, 'task')}.` })
@@ -190,5 +219,11 @@ export function useTaskActions(): TaskActions {
     [addToast],
   )
 
-  return { retry, assign, dismiss, retryMany, dismissMany }
+  const openSettings = useSettingsModalStore((s) => s.openSettings)
+  const fixSignIn = useCallback(
+    (runtime?: string) => openSettings('runtimes', runtime ? { focusRuntime: runtime } : undefined),
+    [openSettings],
+  )
+
+  return { retry, assign, dismiss, retryMany, dismissMany, fixSignIn }
 }

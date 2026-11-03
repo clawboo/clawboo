@@ -61,19 +61,26 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 
 Every failure an `error` event records is sorted into one class by matching its code and message. Anything that matches no class is `Unknown`, which Clawboo treats as a **harness bug**: a failure its run machinery could not explain, worth a look rather than routine noise.
 
-| Class             | Meaning                                          | Matches, for example (case-insensitive)                                                                                                                                                         | Harness bug |
-| ----------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `RateLimited`     | The provider throttled the request               | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                                                                                         | No          |
-| `UserAborted`     | A person or Clawboo stopped the run              | `abort`, `aborted`, `cancel`, `cancelled`, `sigint`, `sigterm`                                                                                                                                  | No          |
-| `Timeout`         | Something took too long                          | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                                                        | No          |
-| `UnexpectedEnv`   | The machine, or its login, was missing something | `enoent`, `eacces`, `eperm`, `command not found`, `permission denied`, `not installed`, `cannot find module`, `authentication failed`, `invalid api key`, `unauthorized`                        | No          |
-| `ContextOverflow` | The prompt was too long for the model            | `context length`, `context window`, `prompt is too long`, `maximum context`, `too many tokens`                                                                                                  | No          |
-| `InvalidArgs`     | The request was malformed                        | `400`, `422`, `invalid argument`, `bad request`, `validation`, `missing required`, `schema`, `malformed`, `model not found`                                                                     | No          |
-| `ProviderError`   | The provider failed, or refused the account      | `500`, `502`, `503`, `504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `server error`, `api error`, `billing error`, `account on hold`, `credit balance` | No          |
-| `Unknown`         | Nothing matched, or the error had no text        | Anything else                                                                                                                                                                                   | Yes         |
-| `PolicyDenied`    | A guardrail refused a call (expected)            | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                                                                                        | No          |
+| Class             | Meaning                                                                             | Matches, for example (case-insensitive)                                                                                                                                                                                                              | Harness bug |
+| ----------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `Billing`         | The provider refused the account: billing, credit, a hold or a pending verification | `billing error`, `account on hold`, `verification required`, `credit balance`, `insufficient quota`, `insufficient credits`, `payment required`, `402`                                                                                               | No          |
+| `Auth`            | The runtime's sign-in was refused: a missing, revoked or expired key or login       | `401`, `403`, `authentication failed`, `authentication error`, `permission error`, `invalid api key`, `incorrect api key`, `unauthorized`, `not logged in`, `run /login`, `token has expired`, `sign in again`                                       | No          |
+| `RateLimited`     | The provider throttled the request                                                  | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`, `usage limit`                                                                                                                                                               | No          |
+| `UserAborted`     | A person or Clawboo stopped the run                                                 | `abort`, `aborted`, `cancel`, `cancelled`, `sigint`, `sigterm`                                                                                                                                                                                       | No          |
+| `Timeout`         | Something took too long                                                             | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                                                                                                             | No          |
+| `UnexpectedEnv`   | The machine was missing something                                                   | `enoent`, `eacces`, `eperm`, `command not found`, `permission denied`, `not installed`, `cannot find module`, `sandbox error`                                                                                                                        | No          |
+| `ContextOverflow` | The prompt was too long for the model                                               | `context length`, `context window`, `prompt is too long`, `maximum context`, `too many tokens`                                                                                                                                                       | No          |
+| `InvalidArgs`     | The request was malformed or refused by a policy                                    | `400`, `422`, `invalid argument`, `bad request`, `validation`, `missing required`, `schema`, `malformed`, `model not found`, `content policy`                                                                                                        | No          |
+| `ProviderError`   | The provider failed or could not be reached                                         | `500`, `502`, `503`, `504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `server error`, `api error`, `econnreset`, `econnrefused`, `fetch failed`, `network error`, `connection failed`, `stream disconnected` | No          |
+| `Unknown`         | Nothing matched, or the error had no text                                           | Anything else                                                                                                                                                                                                                                        | Yes         |
+| `PolicyDenied`    | A guardrail refused a call (expected)                                               | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                                                                                                                                             | No          |
 
-Login and account words are checked before `InvalidArgs`, so the causes Claude Code names for an API error (`authentication_failed`, `billing_error` and the like) land in `UnexpectedEnv` or `ProviderError` even when the message carries an HTTP 400 or 401.
+The classes are tried in the order of the table. `Billing` and `Auth` come first: a provider can send an empty balance as a 429 that names its quota, a revoked key as a 400, and an account on hold as a 403. A code in snake_case is also read word by word, so `rate_limit_error` matches `rate limit`. The runtimes put the cause they know on the error's code: Claude Code the SDK's (`authentication_failed`, `billing_error`, `rate_limit`, ...), Codex the app-server's, in the same words where they mean the same thing, and Hermes the `code` or `type` of the provider error it printed.
+
+Two groups of classes change what happens next:
+
+- **Account failures** (`Auth`, `Billing`): a retry fails the same way until a person fixes the sign-in or the account. The task runner never refires the task, the team engine tells the delegator not to hand it out again, and the board shows **Fix sign-in** on the task in **Needs you**. The class is stored on the run's ledger row (`execution_processes.error_class`).
+- **Failures that may pass** (`RateLimited`, `Timeout`, `ProviderError`): a routine keeps its schedule through up to three of these in a row. See [Routines](/using/routines#when-a-routine-stops).
 
 ### PolicyDenied
 
@@ -382,10 +389,16 @@ The fire succeeded and the routine re-armed.
 
 ### routine_error
 
-The fire failed. The routine stops in an error state until someone resumes it.
+The fire failed. A failure that may pass by itself (a run that failed as `RateLimited`, `Timeout` or `ProviderError`) leaves the routine on its schedule, up to three in a row; any other failure stops it in an error state until someone resumes it. `stopped` says which happened.
 
 ```ts
-{ scheduledRunId: string; code?: string | null; message: string } // code is declared but not written
+{
+  scheduledRunId: string
+  code?: string | null // declared but not written
+  message: string
+  errorClass?: string // the failure's class, when the fire ran far enough to have one
+  stopped?: boolean // true when the routine stopped on this failure
+}
 ```
 
 | `message`, for example                             | Meaning                                                                                                                     |

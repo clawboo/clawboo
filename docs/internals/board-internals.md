@@ -173,13 +173,14 @@ The team engine, the REST board and the evals harness create their tasks, parent
 
 The dispatch pump starts ready tasks and re-fires released work, and `ledgerAllowsAutoFire` in `@clawboo/board-core` (`dispatch.ts`) decides whether a ready task may fire, from its execution ledger:
 
-| Last runs in the ledger                                       | Fires? | Why                                                  |
-| ------------------------------------------------------------- | ------ | ---------------------------------------------------- |
-| none                                                          | yes    | Never delivered (fresh, deferred or newly assigned). |
-| last run `running`                                            | no     | Something owns it.                                   |
-| last run `cancelled`                                          | no     | A person stopped it; only a person re-queues it.     |
-| `MAX_AUTO_FIRES` (3) unsuccessful runs in a row at the end    | no     | Parked in Needs you instead of being fed forever.    |
-| otherwise (`failed`, `timed_out`, an orphan reaped as failed) | yes    | Infrastructure death, not intent.                    |
+| Last runs in the ledger                                       | Fires? | Why                                                                                     |
+| ------------------------------------------------------------- | ------ | --------------------------------------------------------------------------------------- |
+| none                                                          | yes    | Never delivered (fresh, deferred or newly assigned).                                    |
+| last run `running`                                            | no     | Something owns it.                                                                      |
+| last run `cancelled`                                          | no     | A person stopped it; only a person re-queues it.                                        |
+| last run failed with `errorClass` `Auth` or `Billing`         | no     | The provider refused the account; every try fails the same way until a person fixes it. |
+| `MAX_AUTO_FIRES` (3) unsuccessful runs in a row at the end    | no     | Parked in Needs you instead of being fed forever.                                       |
+| otherwise (`failed`, `timed_out`, an orphan reaped as failed) | yes    | Infrastructure death, not intent.                                                       |
 
 A success or a `cancelled` run resets the streak (`trailingFailedRuns`). The ledger is the counter, so the cap survives a restart. The repository re-exports the rule as `isLedgerAutoFireable`, and `listRoomsWithFireableDelegations` (with `listTeamsWithFireableDelegations` on top) tells the server's dispatch pump which (team, room) engines have a ready task bound to an agent whose ledger allows a fire. A task's bound agent is the `:agent:<id>` segment of its `sourceDelegationId` (`delegationTargetOf`), written by every engine delegation and by a person assigning a task on the board.
 

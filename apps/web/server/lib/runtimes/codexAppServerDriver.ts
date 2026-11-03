@@ -29,7 +29,7 @@ import type { StartOpts, Usage } from '@clawboo/executor'
 
 import { isWindows, resolveRuntimeBin } from '../platform'
 import { buildChildEnv } from './childEnv'
-import { codexFailureMessage } from './codexFailure'
+import { codexErrorCode, codexFailureMessage } from './codexFailure'
 import { killProcessTree } from './killTree'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
 import type { RuntimeRunContext } from './types'
@@ -147,6 +147,8 @@ export function createCodexAppServerDriver(
   // What the run has produced so far.
   let lastAgentText = ''
   let lastError: string | null = null
+  /** The typed cause the last non-retried error carried, as an error code. */
+  let lastErrorCode: string | null = null
   /** No model unless the agent pins one: the CLI then runs the account's own
    *  default, which the backend chooses. A refused model reads differently for a
    *  pinned run (see codexFailureMessage). */
@@ -298,7 +300,10 @@ export function createCodexAppServerDriver(
       }
       case 'error': {
         const err = asRecord(params['error'])
-        if (params['willRetry'] !== true && err) lastError = asStr(err['message']) ?? lastError
+        if (params['willRetry'] !== true && err) {
+          lastError = asStr(err['message']) ?? lastError
+          lastErrorCode = codexErrorCode(err['codexErrorInfo']) ?? lastErrorCode
+        }
         return
       }
       case 'turn/completed': {
@@ -311,6 +316,7 @@ export function createCodexAppServerDriver(
           finish({ ok: true, aborted: true, summary: lastAgentText })
         } else {
           const err = asRecord(turn['error'])
+          const errorCode = codexErrorCode(err?.['codexErrorInfo']) ?? lastErrorCode
           finish({
             ok: false,
             summary: lastAgentText,
@@ -318,6 +324,7 @@ export function createCodexAppServerDriver(
               asStr(err?.['message']) ?? lastError,
               `codex turn ended: ${status ?? 'unknown'}`,
             ),
+            ...(errorCode ? { errorCode } : {}),
           })
         }
         return

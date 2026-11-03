@@ -83,6 +83,36 @@ export const HERMES_HEARTBEAT_MAX_MS = 2 * 60 * 60_000
  *  tolerate `Session ID:` / `session-id:` casing variants. */
 export const HERMES_SESSION_LINE = /^\s*session[\s_-]?id\s*:\s*(\S+)\s*$/i
 
+/** Where a provider's error body starts in Hermes's output: its `error` object,
+ *  printed as a Python dict or as JSON. */
+const ERROR_BODY_RE = /['"]error['"]\s*:\s*\{/
+/** A string-valued `code` or `type` field in that body. */
+const ERROR_FIELD_RE = /['"](code|type)['"]\s*:\s*['"]([A-Za-z][\w.-]*)['"]/g
+
+/**
+ * The cause a provider named in the error body Hermes printed, or null. The
+ * OpenAI style puts the specific cause in `code` (`invalid_api_key`,
+ * `insufficient_quota`) under a broader `type`; the Anthropic style has only
+ * `type` (`authentication_error`). Only the error object is read, so other JSON
+ * on the same output cannot pose as the cause.
+ */
+export function hermesErrorCode(text: string): string | null {
+  const start = text.search(ERROR_BODY_RE)
+  if (start < 0) return null
+  let type: string | null = null
+  for (const [, field, value] of text.slice(start).matchAll(ERROR_FIELD_RE)) {
+    if (field === 'code') return value!
+    if (!type && value !== 'error') type = value!
+  }
+  return type
+}
+
+/** A failed run's message, with the provider's typed cause when it named one. */
+function failureOf(message: string): { errorMessage: string; errorCode?: string } {
+  const errorCode = hermesErrorCode(message)
+  return { errorMessage: message, ...(errorCode ? { errorCode } : {}) }
+}
+
 /** The clawboo MCP servers for a Hermes run, written into the home's
  *  config.yaml by provisionHermesHome. The shared Memory server's URL carries
  *  the run's scope (see buildAttachConfig). */
@@ -379,9 +409,7 @@ export function createHermesDriver(
           ...(aborted ? { aborted: true } : {}),
           summary: stripSessionInfo(state.lastText) || stripSessionInfo(stdout),
           ...(state.sessionId ? { sessionId: state.sessionId } : {}),
-          ...(ok || aborted
-            ? {}
-            : { errorMessage: stderr.trim() || `hermes exited with code ${code}` }),
+          ...(ok || aborted ? {} : failureOf(stderr.trim() || `hermes exited with code ${code}`)),
         },
       ]
     },

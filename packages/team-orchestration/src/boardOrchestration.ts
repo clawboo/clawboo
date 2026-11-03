@@ -24,6 +24,7 @@ import {
 } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
+import { classifyError, isAccountError } from '@clawboo/obs'
 
 import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
 import { DeliveryRefusedError } from './deliveryRefused'
@@ -137,6 +138,23 @@ const FAIL_EXEC_STATUS: Record<FailReason, CompleteExecutionOutcome['status']> =
   aborted: 'failed',
   max_turns: 'failed',
   timeout: 'timed_out',
+}
+
+/** A run the provider refused for the account: what the board note and the
+ *  failure report say instead of the generic label. Re-delegating cannot help,
+ *  since every agent on the same runtime and key fails the same way, so the
+ *  report tells the delegator to stop and hand it to a person. */
+const ACCOUNT_FAILURE: Record<'Auth' | 'Billing', { note: string; report: string }> = {
+  Auth: {
+    note: "Run failed because the runtime's sign-in was refused. Fix the sign-in in Settings, Runtimes, then retry",
+    report:
+      "This is a sign-in failure: the runtime's key or login was refused, so it fails the same way until a person fixes it. Do not re-delegate or retry it. Tell the user it needs them to fix the sign-in in Settings.",
+  },
+  Billing: {
+    note: 'Run failed because the provider refused the account (billing or credit). Fix the billing, then retry',
+    report:
+      'This is a billing failure: the provider refused the account (billing or credit), so it fails the same way until a person fixes it. Do not re-delegate or retry it. Tell the user it needs them to fix the billing.',
+  },
 }
 
 /** A status as a person reads it on the board, for the notes the engine writes. */
@@ -1662,6 +1680,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sessionKey: string,
     reason: FailReason,
     detail: string,
+    /** Set when the run ended on the runtime's own fatal error (`detail` is then its
+     *  message): its typed cause, if any. */
+    fromError: { code: string | null } | null = null,
   ): Promise<void> {
     const taskId = sessionToTask.get(sessionKey)
     if (!taskId) return // not a tracked delegation (e.g. the leader's own turn)
@@ -1702,8 +1723,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       taskTitle.delete(taskId)
       return
     }
+    // A runtime error is filed under its class: the ledger row carries it, and an
+    // account refusal (sign-in or billing) changes what the delegator is told. Only
+    // the runtime's own error is classified (`fromError`), never a run's summary,
+    // which can be the agent's prose about anything.
+    const errorClass = fromError ? classifyError(fromError.code, detailTrim) : null
+    const account = errorClass && isAccountError(errorClass) ? ACCOUNT_FAILURE[errorClass] : null
     // Loop breaker: record this (agent, task) failure so a persistently-failing
-    // re-delegation is eventually refused in `spawn`.
+    // re-delegation is eventually refused in `spawn`. An account refusal counts the
+    // same way: the report tells the delegator not to re-delegate, and a person who
+    // fixed the sign-in can still say "try again" in chat.
     if (agentId && title) noteFailure(agentId, title)
     await deps.board.updateStatus(taskId, 'blocked')
     const execId = taskToExec.get(taskId)
@@ -1712,11 +1741,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await deps.board.completeExecution(execId, {
         status: FAIL_EXEC_STATUS[reason],
         error: detailTrim || FAIL_REASON_LABEL[reason],
+        ...(errorClass ? { errorClass } : {}),
       })
     }
     await deps.board.addComment(
       taskId,
-      `${FAIL_REASON_LABEL[reason]}: ${detailTrim || '(no output)'}`,
+      `${account?.note ?? FAIL_REASON_LABEL[reason]}: ${detailTrim || '(no output)'}`,
       'system',
     )
     emit({ id: taskId, status: 'blocked', updatedAt: now() })
@@ -1743,7 +1773,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         toAgentId: reflectTo,
         by,
         title,
-        summary: (detailTrim || FAIL_REASON_LABEL[reason]) + chainNote,
+        summary:
+          (detailTrim || FAIL_REASON_LABEL[reason]) +
+          (account ? ` ${account.report}` : '') +
+          chainNote,
         outcome: reason,
         taskId,
         ...(scope ? { forTaskId: scope } : {}),
@@ -2009,7 +2042,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     } else if (event.kind === 'error' && event.fatal) {
       // A fatal runtime error ends the delegate; non-fatal errors keep waiting
       // (the run may recover) and surface in the activity terminal, not the chat.
-      await failForSession(sessionKey, 'error', event.message)
+      await failForSession(sessionKey, 'error', event.message, { code: event.code })
       return
     }
 

@@ -70,22 +70,25 @@ On OpenClaw, the Gateway must be connected, or the fire fails. A finished OpenCl
 
 The Routines dialog sets who a routine goes to, its schedule, its name and its instructions. The other task template fields are set only through the [Schedules API](/reference/rest-api/schedules): a repository path (`repoPath`), the task kind, the model, the priority, a per-run cost cap (`maxNodeCents`) and an existing task to bind to (`teamTaskId`). An agent routine made in the dashboard therefore has no repository. It runs as a research task without a worktree, the same way the agent works in team chat: see [What agents can do](/concepts/permissions) for where Claude Code, Codex and Hermes start in that case.
 
-## When a fire fails, the routine stops
+## When a fire fails
 
-A routine whose fire fails stops itself. Its dialog shows **Stopped after a failed run.** with the error, and it does not run again until you press **Resume**. Common causes:
+A routine keeps its schedule through a run that failed for a reason that may pass by itself: a rate limit, a timeout, a provider error or a dropped connection (the `RateLimited`, `Timeout` and `ProviderError` classes in [Events and errors](/reference/events-and-errors#error-classes)). It records the error and runs at its next time; a success clears the error. The third such failure in a row stops it, and so does any failure of a one-time routine.
+
+Any other failure stops the routine at once. Its dialog shows **Stopped after a failed run.** with the error, and it does not run again until you press **Resume**, which also starts the count of failures again. Common causes:
 
 - an agent routine's run is refused before it starts, because a hard-cap budget for the agent, the team or the task's delegation tree is already paused;
 - a team routine's message is refused the same way, because a hard-cap budget for the team or the agent it goes to is already paused;
 - a circuit breaker or a hard cap stopped an agent routine's run while it was still working (a Claude Code or Codex run whose last cost report crosses a hard cap keeps its result, and the paused budget refuses the routine's next run instead);
-- the run itself failed or timed out;
+- the runtime's sign-in or the provider account was refused, which shows as **Fix sign-in** on the set-aside task;
+- the run itself failed in a way that does not pass by waiting, or ran out of room;
 - the OpenClaw Gateway was not connected (OpenClaw agents only);
 - the agent was removed, or the team was deleted or archived.
 
-The task that a failed agent fire created is moved to Blocked, so it waits in **Needs you**, with a comment saying the scheduled run failed and the task was set aside. The routine files a fresh task on its next run. A task the routine is bound to is left as the run left it.
+The task that a failed agent fire created is moved to Blocked, so it waits in **Needs you**, with a comment saying the scheduled run failed, whether the routine runs again, and that the task was set aside. The routine files a fresh task on its next run. A task the routine is bound to is left as the run left it.
 
 Two outcomes are not failures. If another agent had already claimed the task, the work is happening, and the fire counts as done. If a person moved the task's card, their move is the outcome. Both leave the routine on its schedule.
 
-Routines stop instead of retrying on purpose. A routine that failed on every fire and kept going would spend money and fill the board with copies of the same failure. Stopping it once puts the cause in front of you.
+Routines stop on a lasting failure on purpose. A routine that failed on every fire and kept going would spend money and fill the board with copies of the same failure. Stopping it puts the cause in front of you. A daily routine that hit one rate limit is a different case, which is why it keeps its schedule.
 
 ## One scheduler per task
 

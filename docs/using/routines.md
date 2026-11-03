@@ -156,7 +156,9 @@ A greyed-out button says why when you hover it, for example "resume it first" or
 
 ## When a routine stops
 
-A routine whose run fails stops itself, on purpose: a routine that kept retrying a broken run would spend money and fill the board without getting anywhere. Its pill reads **failed**, the row shows the error, and the open routine says **Stopped after a failed run.** It does not run again until you resume it.
+A routine keeps its schedule through a failure that may pass by itself: a rate limit, a timeout, a provider outage or a dropped connection. The row shows the error and the routine runs at its next time as usual; a run that succeeds clears the error. Three such failures in a row stop it, so a failure that never clears does not run forever. A one-time routine has no next time, so any failure stops it.
+
+Any other failure stops the routine at once, on purpose: a refused sign-in, a billing problem, a removed agent or a paused budget fails the same way on every run, and a routine that kept retrying it would spend money and fill the board without getting anywhere. Its pill reads **failed**, the row shows the error, and the open routine says **Stopped after a failed run.** It does not run again until you resume it.
 
 <Steps>
 
@@ -180,7 +182,7 @@ Press **Resume**. The pill returns to **on**, and the routine runs at its next s
 
 </Steps>
 
-When an agent task's run fails, its task is set aside in **Needs you** on the board with a note naming the agent and the error, so it does not sit in **To do** looking like waiting work. The routine files a new task on its next run, so you can dismiss the old one or hand it to an agent yourself.
+When an agent task's run fails, its task is set aside in **Needs you** on the board with a note naming the agent and the error, and saying whether the routine runs again, so it does not sit in **To do** looking like waiting work. The routine files a new task on its next run, so you can dismiss the old one or hand it to an agent yourself. When the run's sign-in or billing was refused, the task shows **Fix sign-in**, which opens **Settings** > **Runtimes** at that runtime.
 
 Two outcomes are not failures and leave the routine running: another agent had already claimed the task, or you moved the task's card on the board while the agent worked on it.
 
@@ -193,6 +195,7 @@ Two outcomes are not failures and leave the routine running: another agent had a
 | The team this routine posts to no longer exists.                                         | The team was deleted                                                                                         | Edit the routine to send it somewhere else, or delete it                                                                 |
 | The team "..." is archived.                                                              | The team was archived                                                                                        | Edit the routine to send it to another team, or delete it                                                                |
 | `agent ... not found`, or The agent "..." was removed.                                   | The agent was removed from the OpenClaw Gateway outside Clawboo, or deleted by an earlier version of Clawboo | Edit the routine to send it to another agent, or delete it                                                               |
+| Starts with `run error:` and names a refused key, login or account                       | The runtime's sign-in or the provider account was refused                                                    | Press **Fix sign-in** on the task in **Needs you**, fix the sign-in or the account, then resume the routine              |
 | Starts with `run`                                                                        | The agent's run itself failed or timed out                                                                   | Open the task (**View task** in **Recent runs**) to see what went wrong                                                  |
 
 An OpenClaw cron job is different: the Gateway owns it, so a failed run shows **failed** but the job stays enabled.

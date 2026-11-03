@@ -86,6 +86,7 @@ export function registerScheduledRun(
       nextRunAt: input.nextRunAt,
       scheduledBy: owner,
       lastError: null,
+      failureStreak: 0,
       tenantId: input.tenantId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -202,14 +203,43 @@ export function markRunRunning(db: ClawbooDb, id: string, now = Date.now()): boo
   })
 }
 
-export type RunOutcome = { ok: true } | { ok: false; error: string }
+/**
+ * Failed fires in a row a routine rides out before it stops. Only failures that
+ * may pass by themselves count toward it; any other failure stops the routine at
+ * once. Three keeps a daily routine alive through a bad morning without letting a
+ * failure that never clears re-fire forever.
+ */
+export const MAX_ROUTINE_TRANSIENT_FAILURES = 3
+
+/** A fire's outcome. `transient` marks a failure that may pass by itself (a rate
+ *  limit, a timeout, a provider outage): the routine keeps its schedule for it. */
+export type RunOutcome = { ok: true } | { ok: false; error: string; transient?: boolean }
+
+/**
+ * Whether a routine keeps its schedule after a failed fire: the failure may pass
+ * by itself, there is a next run to arm (a spent once@ has none), and it is not
+ * the MAX_ROUTINE_TRANSIENT_FAILURES-th failure in a row. `failureStreak` is the
+ * count before this failure.
+ */
+export function routineSurvivesFailure(input: {
+  transient: boolean
+  failureStreak: number
+  hasNextRun: boolean
+}): boolean {
+  return (
+    input.transient && input.hasNextRun && input.failureStreak + 1 < MAX_ROUTINE_TRANSIENT_FAILURES
+  )
+}
 
 /**
  * Record a fire's outcome. Success: → idle, lastRunAt stamped, re-armed at
- * `nextRunAt` (null for a spent once@ — self-disabled). Failure: → error,
- * disarmed (next_run_at NULL) until a human resumes — no silent retry-burn.
+ * `nextRunAt` (null for a spent once@, which self-disables), streak cleared.
+ * A failure that may pass (see `routineSurvivesFailure`): → idle and re-armed,
+ * with the error kept and the streak counted. Any other failure: → error,
+ * disarmed (next_run_at NULL) until a person resumes it, so nothing retries silently.
  * Only a row still `running` takes it: one that moved on while the fire was in
  * flight (healed by another process's boot-resume, or deleted) keeps its state.
+ * Returns the status the row landed in, or null when no running row took it.
  */
 export function recordRunOutcome(
   db: ClawbooDb,
@@ -217,24 +247,46 @@ export function recordRunOutcome(
   outcome: RunOutcome,
   nextRunAt: number | null,
   now = Date.now(),
-): void {
-  withWriteRetry(() =>
-    db
-      .update(scheduledRuns)
-      .set(
-        outcome.ok
-          ? { status: 'idle', lastRunAt: now, lastError: null, nextRunAt, updatedAt: now }
-          : {
-              status: 'error',
-              lastRunAt: now,
-              lastError: outcome.error,
-              nextRunAt: null,
-              updatedAt: now,
-            },
-      )
+): 'idle' | 'error' | null {
+  return immediateWrite(db, (tx) => {
+    const row = tx
+      .select({ status: scheduledRuns.status, failureStreak: scheduledRuns.failureStreak })
+      .from(scheduledRuns)
+      .where(eq(scheduledRuns.id, id))
+      .get()
+    if (row?.status !== 'running') return null
+    if (outcome.ok) {
+      tx.update(scheduledRuns)
+        .set({
+          status: 'idle',
+          lastRunAt: now,
+          lastError: null,
+          failureStreak: 0,
+          nextRunAt,
+          updatedAt: now,
+        })
+        .where(and(eq(scheduledRuns.id, id), eq(scheduledRuns.status, 'running')))
+        .run()
+      return 'idle'
+    }
+    const survives = routineSurvivesFailure({
+      transient: outcome.transient === true,
+      failureStreak: row.failureStreak,
+      hasNextRun: nextRunAt != null,
+    })
+    tx.update(scheduledRuns)
+      .set({
+        status: survives ? 'idle' : 'error',
+        lastRunAt: now,
+        lastError: outcome.error,
+        failureStreak: row.failureStreak + 1,
+        nextRunAt: survives ? nextRunAt : null,
+        updatedAt: now,
+      })
       .where(and(eq(scheduledRuns.id, id), eq(scheduledRuns.status, 'running')))
-      .run(),
-  )
+      .run()
+    return survives ? 'idle' : 'error'
+  })
 }
 
 // ─── User-driven transitions (pause / resume / force-fire) ──────────────────
@@ -273,7 +325,7 @@ export function setScheduledRunStatus(
           : opts.nextRunAt !== undefined
             ? { nextRunAt: opts.nextRunAt }
             : {}),
-        ...(to === 'idle' ? { lastError: null } : {}),
+        ...(to === 'idle' ? { lastError: null, failureStreak: 0 } : {}),
       })
       .where(eq(scheduledRuns.id, id))
       .returning()

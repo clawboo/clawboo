@@ -13,6 +13,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  MAX_ROUTINE_TRANSIENT_FAILURES,
   agents,
   createDb,
   createTask,
@@ -349,6 +350,111 @@ describe('dispatchRoutine', () => {
   })
 })
 
+describe('dispatchRoutine: why a fire failed', () => {
+  const failedRun = (summary: string, errorClass?: string) => async () => ({
+    ...SUCCESS,
+    doneReason: 'error' as const,
+    status: 'todo',
+    summary,
+    ...(errorClass ? { errorClass: errorClass as never } : {}),
+  })
+
+  it('a refused sign-in stops the routine: never transient, filed under Auth', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const run = seedRoutine('agent-cc')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: failedRun('Invalid API key · Fix external API key (HTTP 401)', 'Auth'),
+    })
+    expect(outcome).toMatchObject({ ok: false, errorClass: 'Auth', transient: false })
+    expect(
+      getComments(db, outcome.taskId!)
+        .map((c) => c.body)
+        .join('\n'),
+    ).toMatch(/The routine is stopped until you resume it/)
+  })
+
+  it('a rate limit may pass: transient, and the note says the routine runs again', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const run = seedRoutine('agent-cc')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: failedRun('Request rejected (HTTP 429)', 'RateLimited'),
+    })
+    expect(outcome).toMatchObject({ ok: false, errorClass: 'RateLimited', transient: true })
+    expect(getTask(db, outcome.taskId!)?.status).toBe('blocked')
+    expect(
+      getComments(db, outcome.taskId!)
+        .map((c) => c.body)
+        .join('\n'),
+    ).toMatch(/files a new task on its next run/)
+  })
+
+  it('classifies the text when the runner reported no class (a thrown dispatch)', async () => {
+    seedAgent('agent-oc', 'openclaw')
+    const run = seedRoutine('agent-oc')
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      getOperatorClient: () => ({}) as never,
+      dispatchConnected: async () => {
+        throw new Error('read ECONNRESET')
+      },
+    })
+    expect(outcome).toMatchObject({ ok: false, errorClass: 'ProviderError', transient: true })
+  })
+
+  it('the last allowed failure in a row stops it, and the note says so', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const run = { ...seedRoutine('agent-cc'), failureStreak: MAX_ROUTINE_TRANSIENT_FAILURES - 1 }
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: failedRun('Overloaded (HTTP 529)', 'ProviderError'),
+    })
+    // Still transient: the ledger, not the bridge, applies the cap.
+    expect(outcome).toMatchObject({ ok: false, transient: true })
+    expect(
+      getComments(db, outcome.taskId!)
+        .map((c) => c.body)
+        .join('\n'),
+    ).toMatch(/The routine is stopped until you resume it/)
+  })
+
+  it('a one-shot routine has no next run, so even a passing failure stops it', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const once = registerScheduledRun(db, {
+      agentId: 'agent-cc',
+      teamId: 'team-1',
+      cronSpec: 'once@2026-07-01T09:00:00Z',
+      taskTemplate: JSON.stringify({ title: 'One time', kind: 'research', priority: 1 }),
+      nextRunAt: 1_000,
+      tenantId: null,
+    })
+    if (!once.ok) throw new Error('register failed')
+    const outcome = await dispatchRoutine(once.run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: failedRun('Request rejected (HTTP 429)', 'RateLimited'),
+    })
+    expect(
+      getComments(db, outcome.taskId!)
+        .map((c) => c.body)
+        .join('\n'),
+    ).toMatch(/The routine is stopped until you resume it/)
+  })
+
+  it('a dispatch refused before any run (an archived team, a removed agent) is not transient', async () => {
+    seedAgent('agent-gone', 'clawboo-native')
+    db.update(agents).set({ archivedAt: Date.now() }).where(eq(agents.id, 'agent-gone')).run()
+    const outcome = await dispatchRoutine(seedRoutine('agent-gone'), { db, mcpBaseUrl: null })
+    expect(outcome.ok).toBe(false)
+    expect(outcome.transient).not.toBe(true)
+  })
+})
+
 describe('runKindFor', () => {
   it('runs a worktree kind with no repository without a worktree', () => {
     expect(runKindFor({ kind: 'code', repoPath: null })).toBe('research')
@@ -443,8 +549,9 @@ describe('dispatchRoutine: agent routines', () => {
     expect(outcome.ok).toBe(false)
     const task = getTask(db, outcome.taskId!)
     expect(task?.status).toBe('blocked')
+    // An unrecognized failure stops the routine, and the note says so.
     expect(getComments(db, outcome.taskId!).map((c) => c.body)).toContain(
-      "agent-native's scheduled run failed: run error: boom. The routine files a new task on its next run, so this one was set aside.",
+      "agent-native's scheduled run failed: run error: boom. The routine is stopped until you resume it, so this one was set aside.",
     )
   })
 
