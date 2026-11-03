@@ -737,7 +737,9 @@ async function runBrowserSmoke(url) {
 // tool names. Proves an external runtime can spawn the packaged bin + call a tool.
 function mcpStdioListTools(binPath, dbDir) {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', [binPath], {
+    // The Node the install built better-sqlite3 for; a bare `node` from PATH
+    // may be another one, and the bin opens the database.
+    const child = spawn(process.execPath, [binPath], {
       env: {
         ...process.env,
         HOME: dbDir,
