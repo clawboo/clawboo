@@ -121,7 +121,7 @@ A persistent-home runtime also gets `homeDir`, `<Clawboo state dir>/runtimes/<ru
 - **`tool-call`** (settled calls only, not each streaming-input delta), **`tool-result`** and **`error`**: emitted as observability events and fed to the circuit breaker. An `error` goes through the error taxonomy: an unknown class is a harness bug and raises an alert; a recognized policy denial is expected governance, not a bug.
 - **`done`**: captures the reason and summary and ends the pass.
 
-The idle guard aborts a run that is silent for 30 minutes of awake time (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`), then allows 5 seconds for the adapter's own terminal. Time the machine spends asleep is left out. A silent timeout is recorded as a failure with the cause stated ("runtime silent: no events for N minutes"), never as a clean abort and never as a reason to rotate. A pass that finishes without reporting any usage logs a `spend_unreported` warning, because budgets then under-count that run.
+The idle guard aborts a run that is silent for 30 minutes of awake time (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`), then allows 5 seconds for the adapter's own terminal. Time the machine spends asleep is left out, except a sleep of under about a minute. A silent timeout is recorded as a failure with the cause stated ("runtime silent: no events for N minutes"), never as a clean abort and never as a reason to rotate. A pass that finishes without reporting any usage logs a `spend_unreported` warning, because budgets then under-count that run.
 
 An external `abortSignal` (the REST handler wires it to the response's `close`) aborts the current run, even across a rotation, and forces the aborted terminal.
 

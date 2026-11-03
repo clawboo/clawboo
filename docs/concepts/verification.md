@@ -46,7 +46,7 @@ A task with no check result reaches **Done** normally. Unchecked is not the same
 ## What happens during a check
 
 1. The agent's run ends. On the [Board](/using/board) the card stays in **In progress** with a **Verifying** badge.
-2. Clawboo runs the team's verify command if the team has one, otherwise the one named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes, not counting time the computer spends asleep.
+2. Clawboo runs the team's verify command if the team has one, otherwise the one named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes. Time the computer spends asleep does not count, except a sleep of under about a minute.
 3. If the command passes and the change is large or was handed off, a reviewer agent reads the committed change.
 4. Clawboo stores the result on the task and moves the card to match.
 

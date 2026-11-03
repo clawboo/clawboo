@@ -46,10 +46,14 @@ function sleepMachine(ms: number): void {
 
 let stateDir: string
 let prevHome: string | undefined
+let prevIdle: string | undefined
 let mod: typeof import('../agentBrowsers')
 
 beforeEach(async () => {
   prevHome = process.env['CLAWBOO_HOME']
+  // The module reads the idle limit at import, and these tests expect the default.
+  prevIdle = process.env['CLAWBOO_AGENT_BROWSER_IDLE_MS']
+  delete process.env['CLAWBOO_AGENT_BROWSER_IDLE_MS']
   stateDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-idle-'))
   process.env['CLAWBOO_HOME'] = stateDir
   vi.resetModules()
@@ -62,6 +66,8 @@ afterEach(async () => {
   await mod.closeAllAgentBrowsers()
   if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
   else process.env['CLAWBOO_HOME'] = prevHome
+  if (prevIdle === undefined) delete process.env['CLAWBOO_AGENT_BROWSER_IDLE_MS']
+  else process.env['CLAWBOO_AGENT_BROWSER_IDLE_MS'] = prevIdle
   await rm(stateDir, { recursive: true, force: true })
 })
 

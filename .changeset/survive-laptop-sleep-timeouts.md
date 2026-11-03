@@ -10,4 +10,4 @@ Five more of Clawboo's time limits now count only time the machine was awake, so
 - An agent's browser is no longer closed as idle (10 minutes) on wake, so the page it was working on survives.
 - A message steered into an OpenClaw run before the sleep can no longer end that run when the Gateway confirms it after the wake.
 
-Each limit still applies at its usual length, counted in time the machine was awake.
+Each limit still applies at its usual length, counted in time the machine was awake. A sleep of under about a minute can still count.
