@@ -55,3 +55,72 @@ describe('a failed catalog refresh', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
+
+// Which index a build reads. A release used to read main's, so every install
+// got whatever main held that day, content written for a newer version included,
+// and one push to main changed every install at once.
+describe('where the catalog index comes from', () => {
+  const fetchMock = vi.fn()
+  const MAIN =
+    'https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json'
+  const TAG_050 =
+    'https://raw.githubusercontent.com/clawboo/clawboo/refs/tags/clawboo%400.5.0/catalog/dist/v1/index.json'
+  const emptyIndex = () =>
+    new Response(JSON.stringify({ schemaVersion: 1, packs: [] }), { status: 200 })
+  const urls = () => fetchMock.mock.calls.map((c) => String(c[0]))
+
+  beforeEach(() => {
+    resetCatalogCache()
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+    resetCatalogCache()
+  })
+
+  it("a release reads its own release tag's index", async () => {
+    vi.stubEnv('CLAWBOO_VERSION', '0.5.0')
+    fetchMock.mockResolvedValue(emptyIndex())
+
+    await getCatalogSnapshot()
+    expect(urls()).toEqual([TAG_050])
+  })
+
+  it("falls back to main's index when the release has no tag", async () => {
+    vi.stubEnv('CLAWBOO_VERSION', '0.5.0')
+    fetchMock
+      .mockResolvedValueOnce(new Response('404: Not Found', { status: 404 }))
+      .mockResolvedValueOnce(emptyIndex())
+
+    await getCatalogSnapshot()
+    expect(urls()).toEqual([TAG_050, MAIN])
+  })
+
+  it('does not fall back when the network is down, which main cannot fix', async () => {
+    vi.stubEnv('CLAWBOO_VERSION', '0.5.0')
+    fetchMock.mockRejectedValue(new Error('offline'))
+
+    await getCatalogSnapshot()
+    expect(urls()).toEqual([TAG_050])
+  })
+
+  it.each(['0.0.0-dev', '0.0.0'])('a development build (%s) keeps reading main', async (v) => {
+    vi.stubEnv('CLAWBOO_VERSION', v)
+    fetchMock.mockResolvedValue(emptyIndex())
+
+    await getCatalogSnapshot()
+    expect(urls()).toEqual([MAIN])
+  })
+
+  it('CLAWBOO_CATALOG_INDEX_URL still overrides, with no fallback', async () => {
+    vi.stubEnv('CLAWBOO_VERSION', '0.5.0')
+    vi.stubEnv('CLAWBOO_CATALOG_INDEX_URL', 'https://mirror.example.com/catalog/v1/index.json')
+    fetchMock.mockResolvedValue(new Response('', { status: 404 }))
+
+    await getCatalogSnapshot()
+    expect(urls()).toEqual(['https://mirror.example.com/catalog/v1/index.json'])
+  })
+})

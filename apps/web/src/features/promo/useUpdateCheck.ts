@@ -12,6 +12,11 @@ import { apiFetch } from '@clawboo/control-client'
 // fail-silent), so the client cache here is just to avoid a fetch on every
 // mount. Dismiss is keyed to the LATEST version, so a dismissed chip reappears
 // only when a newer version ships.
+//
+// The chip shows only from an answer this page load received. A cached "update
+// available" can predate an administrator turning in-app updates off, or the
+// update having been applied, so a cache that would show the chip is checked
+// again first.
 
 export interface SelfVersionInfo {
   current: string
@@ -88,6 +93,7 @@ export interface UseUpdateCheck {
 export function useUpdateCheck(): UseUpdateCheck {
   const [info, setInfo] = useState<SelfVersionInfo | null>(() => readCache())
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => readDismissed())
+  const [checked, setChecked] = useState(false)
   // Prevents mount + focus + recheck from racing into concurrent fetches.
   const inflight = useRef(false)
 
@@ -102,6 +108,7 @@ export function useUpdateCheck(): UseUpdateCheck {
       if (typeof data.current !== 'string') return
       setInfo(data)
       writeCache(data)
+      setChecked(true)
     } catch {
       /* offline / endpoint absent — keep whatever we have, never nag */
     } finally {
@@ -110,7 +117,7 @@ export function useUpdateCheck(): UseUpdateCheck {
   }, [])
 
   useEffect(() => {
-    void fetchInfo()
+    void fetchInfo(readCache()?.updateAvailable === true)
   }, [fetchInfo])
 
   // Refetch when the tab regains focus — catches "a new version shipped while I
@@ -128,7 +135,7 @@ export function useUpdateCheck(): UseUpdateCheck {
   }, [fetchInfo])
 
   const shouldShow = Boolean(
-    info?.updateAvailable && info.latest && info.latest !== dismissedVersion,
+    checked && info?.updateAvailable && info.latest && info.latest !== dismissedVersion,
   )
 
   return { info, shouldShow, dismiss, recheck }

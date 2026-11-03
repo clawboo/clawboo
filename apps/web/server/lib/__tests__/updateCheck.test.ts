@@ -1,4 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   buildUpdateCommand,
@@ -190,5 +194,97 @@ describe('computeSelfVersion', () => {
     expect(info.latest).toBeNull()
     // `checkedAt` describes when `latest` was fetched; we aren't returning one.
     expect(info.checkedAt).toBeNull()
+  })
+})
+
+// An install that someone else manages: a container image, a distro or Homebrew
+// package, or a global prefix owned by root. Updating it from inside is either a
+// permission error or a copy that no longer matches what installed it.
+describe('an install that must not update itself', () => {
+  let root: string
+  const entry = process.argv[1]
+
+  beforeEach(() => {
+    root = mkdtempSync(path.join(os.tmpdir(), 'clawboo-update-'))
+    vi.stubEnv('CLAWBOO_HOME', root)
+    process.env['CLAWBOO_VERSION'] = '0.3.0'
+  })
+  afterEach(() => {
+    process.argv[1] = entry
+    vi.unstubAllEnvs()
+    chmodSync(root, 0o755)
+    for (const dir of [path.join(root, 'lib'), path.join(root, 'lib', 'node_modules')]) {
+      try {
+        chmodSync(dir, 0o755)
+      } catch {
+        // not created by this test
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  /** A global install laid out the way npm lays one out, under `root`. */
+  function globalInstall(): string {
+    const dist = path.join(root, 'lib', 'node_modules', 'clawboo', 'dist')
+    mkdirSync(dist, { recursive: true })
+    const server = path.join(dist, 'server.js')
+    writeFileSync(server, '')
+    process.argv[1] = server
+    return server
+  }
+
+  it('CLAWBOO_DISABLE_SELF_UPDATE=1 answers as ?local=1 does, with nothing to apply', async () => {
+    globalInstall()
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    vi.stubEnv('CLAWBOO_DISABLE_SELF_UPDATE', '1')
+
+    const info = await computeSelfVersion()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(info.current).toBe('0.3.0')
+    expect(info.latest).toBeNull()
+    expect(info.updateAvailable).toBe(false)
+    expect(info.checkedAt).toBeNull()
+    expect(info.applyable).toBe(false)
+  })
+
+  it('the operator file turns it off the same way', async () => {
+    globalInstall()
+    const fetchSpy = vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    writeFileSync(path.join(root, 'operator.json'), JSON.stringify({ disableSelfUpdate: true }))
+
+    const info = await computeSelfVersion()
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(info.updateAvailable).toBe(false)
+    expect(info.applyable).toBe(false)
+  })
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a global install this user cannot write is not offered the in-app update',
+    async () => {
+      globalInstall()
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) })),
+      )
+      chmodSync(path.join(root, 'lib', 'node_modules'), 0o555)
+
+      const info = await computeSelfVersion()
+      expect(info.installMethod).toBe('global')
+      // Still told a newer version exists, but never offered the one-click path.
+      expect(info.updateAvailable).toBe(true)
+      expect(info.applyable).toBe(false)
+    },
+  )
+
+  it('a global install this user owns is still offered it', async () => {
+    globalInstall()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) })),
+    )
+    const info = await computeSelfVersion()
+    expect(info.applyable).toBe(true)
   })
 })

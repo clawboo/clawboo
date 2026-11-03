@@ -10,12 +10,18 @@
 //      file, it is used verbatim. That is what makes a repo checkout, a fresh
 //      branch, and a `pnpm dev` work with no network at all - including on a
 //      branch whose catalog has never been pushed anywhere.
-//   1. `CLAWBOO_CATALOG_INDEX_URL`. NOT A FEATURE FLAG (`README.md` says there
-//      are none, and that stays true). It is an ENDPOINT OVERRIDE, the same
-//      class of setting as `CLAWBOO_ALLOWED_ORIGINS`: both tiers serve the
-//      identical generated file, so there is no behavioural fork to reason
-//      about, only a different host.
-//   2. The default URL below.
+//   1. `CLAWBOO_CATALOG_INDEX_URL`, or `catalogIndexUrl` in the operator
+//      settings file. NOT A FEATURE FLAG (`README.md` says there are none, and
+//      that stays true). It is an ENDPOINT OVERRIDE, the same class of setting
+//      as `CLAWBOO_ALLOWED_ORIGINS`: both tiers serve the identical generated
+//      file, so there is no behavioural fork to reason about, only a different
+//      host.
+//   2. The default: the index as it was at THIS RELEASE's tag. A release used to
+//      read main's, so every install got whatever main held that day, content
+//      written for a newer version included, and one push to main changed every
+//      install at once. A development build has no tag and reads main. A release
+//      whose tag is missing (published moments before its tag was pushed, or a
+//      build from a fork) falls back to main rather than to the seed alone.
 //
 // NOTHING HERE THROWS. Offline, firewalled, 404, corrupt bytes - every one of
 // them returns the seed, because `SelectTeamStep` renders with
@@ -39,6 +45,8 @@ import { resolveClawbooDir } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import { agentBodyV1, parseAgentPack, teamBodyV1, type AgentPack } from '@clawboo/pack-format'
 
+import { effectiveSetting } from './operatorSettings'
+import { getCurrentVersion } from './updateCheck'
 import {
   SEED_AGENT_BODIES,
   SEED_INDEX,
@@ -53,17 +61,46 @@ import {
 
 const log = createLogger('catalog')
 
-/**
- * The zero-infrastructure default, verified live: 200, `cache-control:
- * max-age=300`, an ETag, and `access-control-allow-origin: *`. A CDN in front of
- * the same generated directory is a drop-in replacement - point
- * `CLAWBOO_CATALOG_INDEX_URL` at it, or change this constant.
- */
-const DEFAULT_INDEX_URL =
-  'https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json'
-
 /** The dist channel directory name, matching `catalog/catalog.config.json`. */
 const CHANNEL = 'v1'
+
+/**
+ * The zero-infrastructure default, verified live for a branch and a tag alike:
+ * 200, `cache-control: max-age=300`, an ETag, and
+ * `access-control-allow-origin: *`. A CDN in front of the same generated
+ * directory is a drop-in replacement: point `CLAWBOO_CATALOG_INDEX_URL` at it.
+ */
+function indexUrlAt(ref: string): string {
+  return `https://raw.githubusercontent.com/clawboo/clawboo/${ref}/catalog/dist/${CHANNEL}/index.json`
+}
+
+const MAIN_INDEX_URL = indexUrlAt('refs/heads/main')
+
+/**
+ * The git tag a published version was cut from, or null for a build that has
+ * none. Changesets tags each release `<package>@<version>` (`clawboo@0.5.0`),
+ * and a development build reads as `0.0.0*`.
+ */
+export function releaseTagFor(version: string): string | null {
+  if (version.startsWith('0.0.0')) return null
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)) return null
+  return `clawboo@${version}`
+}
+
+/**
+ * Where this build reads the index from, and where it falls back to when that
+ * answers 404. An override has no fallback: it is the administrator's choice.
+ */
+export function catalogIndexSource(version: string = getCurrentVersion()): {
+  url: string
+  fallback: string | null
+} {
+  const override = effectiveSetting('catalogIndexUrl').value
+  if (override) return { url: override, fallback: null }
+  const tag = releaseTagFor(version)
+  if (!tag) return { url: MAIN_INDEX_URL, fallback: null }
+  return { url: indexUrlAt(`refs/tags/${encodeURIComponent(tag)}`), fallback: MAIN_INDEX_URL }
+}
 
 const FETCH_TIMEOUT_MS = 5_000
 /**
@@ -174,6 +211,8 @@ interface FetchResult {
   text: string | null
   etag: string | null
   notModified: boolean
+  /** The index is not at this address, as opposed to unreachable. */
+  notFound: boolean
 }
 
 async function fetchText(url: string, etag: string | null): Promise<FetchResult> {
@@ -186,12 +225,17 @@ async function fetchText(url: string, etag: string | null): Promise<FetchResult>
         ...(etag ? { 'If-None-Match': etag } : {}),
       },
     })
-    if (res.status === 304) return { text: null, etag, notModified: true }
-    if (!res.ok) return { text: null, etag: null, notModified: false }
-    return { text: await res.text(), etag: res.headers.get('etag'), notModified: false }
+    if (res.status === 304) return { text: null, etag, notModified: true, notFound: false }
+    if (!res.ok) return { text: null, etag: null, notModified: false, notFound: res.status === 404 }
+    return {
+      text: await res.text(),
+      etag: res.headers.get('etag'),
+      notModified: false,
+      notFound: false,
+    }
   } catch {
     // Offline, DNS failure, TLS failure, timeout. Never fatal.
-    return { text: null, etag: null, notModified: false }
+    return { text: null, etag: null, notModified: false, notFound: false }
   }
 }
 
@@ -334,30 +378,43 @@ async function bundleBytes(
 }
 
 // The 6h snapshot cache, plus the conditional-request state the index fetch
-// carries between calls. Declared here because `buildSnapshot` reads them.
+// carries between calls. Declared here because `buildSnapshot` reads them. The
+// conditional state names its URL, so a tag's ETag is never sent to main.
 let cache: { snapshot: CatalogSnapshot; at: number } | null = null
 let inFlight: Promise<CatalogSnapshot> | null = null
-let etagCache: string | null = null
-let bodyCache: string | null = null
+let conditional: { url: string; etag: string | null; body: string } | null = null
+
+/** The index text at `url`, reusing the last body on a 304. */
+async function fetchIndex(url: string): Promise<{ text: string | null; notFound: boolean }> {
+  const prior = conditional?.url === url ? conditional : null
+  const result = await fetchText(url, prior?.etag ?? null)
+  if (result.notModified && prior) return { text: prior.body, notFound: false }
+  if (result.text !== null) {
+    conditional = { url, etag: result.etag, body: result.text }
+    return { text: result.text, notFound: false }
+  }
+  return { text: null, notFound: result.notFound }
+}
 
 async function buildSnapshot(): Promise<CatalogSnapshot> {
   const snapshot = seedSnapshot()
 
   const local = localDistDir()
-  const url = process.env['CLAWBOO_CATALOG_INDEX_URL']?.trim() || DEFAULT_INDEX_URL
   let directoryText: string | null = null
   let root: URL | null = null
 
   if (local) {
     directoryText = readFileSync(path.join(local, 'index.json'), 'utf8')
   } else {
-    const result = await fetchText(url, etagCache)
-    if (result.etag) etagCache = result.etag
-    if (result.notModified && bodyCache) directoryText = bodyCache
-    else if (result.text !== null) {
-      directoryText = result.text
-      bodyCache = result.text
+    const source = catalogIndexSource()
+    let url = source.url
+    let result = await fetchIndex(url)
+    if (result.notFound && source.fallback) {
+      log.warn({ url }, "this release's catalog index was not found; reading main's instead")
+      url = source.fallback
+      result = await fetchIndex(url)
     }
+    directoryText = result.text
     try {
       root = new URL('../', url)
     } catch {
@@ -444,6 +501,5 @@ export async function getCatalogSnapshot(now: number = Date.now()): Promise<Cata
 export function resetCatalogCache(): void {
   cache = null
   inFlight = null
-  etagCache = null
-  bodyCache = null
+  conditional = null
 }

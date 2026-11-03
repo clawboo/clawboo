@@ -121,6 +121,14 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - Connecting OpenClaw with a Google key sets `google/gemini-3.6-flash` as the default model, and the OpenClaw model picker lists Gemini 3.6 Flash in place of Gemini 2.0 Flash. A default an earlier version set is kept: change it under **Manage > Default model**. See [OpenClaw](/runtimes/openclaw).
 - A team can have a verify command that every check runs, set under **Work check** in the team's settings or with `PUT /api/team-verify-command/:teamId`, and each check records where its command came from: the task drawer flags one the agent wrote itself. A review that failed or returned nothing reads **Review did not complete** or **Review returned nothing** instead of **Reviewed by**. See [How work is checked](/concepts/verification#the-verify-command-in-practice).
 
+**Running Clawboo for a team**
+
+- **Pin settings for everyone.** Admins who deploy Clawboo for a team can pin settings in one file, `~/.clawboo/operator.json` or the file `CLAWBOO_OPERATOR_SETTINGS` names, or with each key's environment variable. **Settings** > **System** > **Deployment** shows a pinned setting as "Set by your administrator". A file Clawboo cannot trust stops the server at startup, and the file never holds secrets. See [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone).
+- **Turn the dashboard's updates off.** `CLAWBOO_DISABLE_SELF_UPDATE=1` removes the update chip, stops the npm check and refuses the in-app update. Without it, a global install the server's user cannot write, such as a root-owned `/usr/local`, is no longer offered the one-click update, which could only fail there.
+- **Keep the browsers from starting.** `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`, or the switch in **Settings** > **System** > **Deployment**, stops Playwright and Chrome DevTools starting on a new install. When the pinned version is already installed, each browser now starts from that copy instead of through `npx`, which kept an `npm exec` process running beside it and asked the registry on every start. Chrome DevTools runs with its usage statistics and update check off.
+- **A release reads its own catalog.** The Marketplace catalog comes from the release's tag on GitHub instead of the `main` branch, so content written for a newer version no longer reaches an older install. A development build still reads `main`.
+- **Updates keep node options.** After an update from the chip, the server restarts with the node options it was started with, such as `--max-old-space-size`.
+
 </Update>
 
 <Update label="0.5.0" description="2026-10-21">

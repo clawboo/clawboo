@@ -147,7 +147,7 @@ Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME`
 
 <Tab title="In the dashboard">
 
-When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, restarts the server on the same port and reloads the page. For an `npx` run or a source checkout, the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
+When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, restarts the server on the same port and reloads the page. The restarted server keeps the node options the old one started with, such as `--max-old-space-size`. For an `npx` run, a source checkout, or a global install whose folders the server's user cannot write (such as a root-owned `/usr/local`), the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
 
 </Tab>
 
@@ -171,13 +171,41 @@ npm install -g clawboo@latest
 systemctl --user restart clawboo
 ```
 
-Skip the in-app update here. It replaces the server process itself, outside the service manager's control.
+Skip the in-app update here. It replaces the server process itself, outside the service manager's control. Set `CLAWBOO_DISABLE_SELF_UPDATE=1` in the service's environment to remove the chip.
 
 </Tab>
 
 </Tabs>
 
-To find updates, the server asks `registry.npmjs.org` for the latest version and keeps a successful answer for 6 hours.
+To find updates, the server asks `registry.npmjs.org` for the latest version and keeps a successful answer for 6 hours. With `CLAWBOO_DISABLE_SELF_UPDATE=1` it never asks, and the dashboard offers no update.
+
+## Pin settings for everyone
+
+Admins who deploy Clawboo for a team can pin settings in one file. A pinned setting applies to everyone who uses the install, and **Settings** > **System** > **Deployment** shows it as "Set by your administrator" with no way to change it.
+
+Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere with `CLAWBOO_OPERATOR_SETTINGS` pointing at it:
+
+```json
+{
+  "disableSelfUpdate": true,
+  "disableBrowserAutostart": true,
+  "catalogIndexUrl": "https://mirror.example.com/catalog/v1/index.json"
+}
+```
+
+| Key                       | What it pins                                                 | Same as                             |
+| ------------------------- | ------------------------------------------------------------ | ----------------------------------- |
+| `disableSelfUpdate`       | No update chip, no update from the dashboard, no npm check   | `CLAWBOO_DISABLE_SELF_UPDATE`       |
+| `disableBrowserAutostart` | Playwright and Chrome DevTools do not start on a new install | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
+| `catalogIndexUrl`         | Where the Marketplace catalog comes from, such as a mirror   | `CLAWBOO_CATALOG_INDEX_URL`         |
+
+- Every key also has an environment variable, and the variable wins over the file.
+- Clawboo reads the file once at startup, so run `clawboo restart` after a change. It never writes the file.
+- A file it cannot trust stops the server at startup with `CONFIG: refusing to start.` and the reason: invalid JSON, an unknown key, a value of the wrong type, a file any user can write, or a `CLAWBOO_OPERATOR_SETTINGS` that names a missing file. Starting anyway would drop the pins you rely on.
+- The file holds no secrets: a key whose name looks like a credential, or a URL with a password or token in it, is refused. Keep keys in the vault or the environment.
+- Agents run as the same user as the server. On a shared machine, keep the file where that user can read it but not change it, such as a root-owned `/etc/clawboo/operator.json`.
+
+[Environment variables](/reference/environment-variables#pinned-by-an-administrator) has each key's details.
 
 ## Behind a reverse proxy or on another machine
 

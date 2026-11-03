@@ -107,6 +107,9 @@ When a newer version is on npm, an **Update available** chip appears at the bott
 
 - **Global install:** click the chip (**Click to update**). Clawboo installs the new version, restarts the server and reloads the page.
 - **npx run:** click the chip (**Copy command**) to copy `npx clawboo@latest`, then run it in a terminal. It notices the older server still running and offers to restart it.
+- **A global install your user cannot write** (such as a root-owned `/usr/local`): the chip copies the command too. Run it with `sudo`, or update Clawboo the way it was installed.
+
+An administrator can turn the chip off for everyone with `CLAWBOO_DISABLE_SELF_UPDATE=1` (see [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone)).
 
 To update a global install from a terminal instead:
 

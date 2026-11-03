@@ -13,7 +13,7 @@ keywords:
   ]
 ---
 
-Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last two routes, `self-version` and `self-update`, are about Clawboo itself: which release this server runs, and installing a newer one.
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs, installing a newer one (`self-version`, `self-update`), and the settings an administrator can pin (`operator-settings`).
 
 <Note>
 
@@ -25,19 +25,21 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 
 ## Routes
 
-| Method | Path                                  | Summary                                                        | Rate tier | Stream?                   |
-| ------ | ------------------------------------- | -------------------------------------------------------------- | --------- | ------------------------- |
-| GET    | `/api/system/status`                  | Node, OpenClaw and Gateway status                              | general   | No                        |
-| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI with `npm install -g`                 | sensitive | SSE                       |
-| POST   | `/api/system/configure-openclaw`      | Replace `openclaw.json` and `.env` for one provider (API only) | sensitive | No                        |
-| POST   | `/api/system/auto-configure-openclaw` | Set up OpenClaw from a credential you already connected        | sensitive | No                        |
-| POST   | `/api/system/gateway`                 | Gateway control: `start`, `stop`, `restart`, `status`          | sensitive | SSE for `start`/`restart` |
-| GET    | `/api/system/openclaw-config`         | Read `openclaw.json`, key flags and the ChatGPT sign-in state  | general   | No                        |
-| PATCH  | `/api/system/openclaw-config`         | Change parts of `openclaw.json` (model, port, keys, exec, a2a) | sensitive | No                        |
-| POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request              | sensitive | No                        |
-| GET    | `/api/system/models`                  | Model catalog (from the OpenClaw CLI, else the built-in list)  | general   | No                        |
-| GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists | general   | No                        |
-| POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it        | sensitive | SSE                       |
+| Method | Path                                  | Summary                                                         | Rate tier | Stream?                   |
+| ------ | ------------------------------------- | --------------------------------------------------------------- | --------- | ------------------------- |
+| GET    | `/api/system/status`                  | Node, OpenClaw and Gateway status                               | general   | No                        |
+| POST   | `/api/system/install-openclaw`        | Install the OpenClaw CLI with `npm install -g`                  | sensitive | SSE                       |
+| POST   | `/api/system/configure-openclaw`      | Replace `openclaw.json` and `.env` for one provider (API only)  | sensitive | No                        |
+| POST   | `/api/system/auto-configure-openclaw` | Set up OpenClaw from a credential you already connected         | sensitive | No                        |
+| POST   | `/api/system/gateway`                 | Gateway control: `start`, `stop`, `restart`, `status`           | sensitive | SSE for `start`/`restart` |
+| GET    | `/api/system/openclaw-config`         | Read `openclaw.json`, key flags and the ChatGPT sign-in state   | general   | No                        |
+| PATCH  | `/api/system/openclaw-config`         | Change parts of `openclaw.json` (model, port, keys, exec, a2a)  | sensitive | No                        |
+| POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request               | sensitive | No                        |
+| GET    | `/api/system/models`                  | Model catalog (from the OpenClaw CLI, else the built-in list)   | general   | No                        |
+| GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists  | general   | No                        |
+| POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it         | sensitive | SSE                       |
+| GET    | `/api/system/operator-settings`       | Settings an administrator can pin, and where each value is from | general   | No                        |
+| PUT    | `/api/system/operator-settings/:key`  | Save a person's own value for a setting nobody pinned           | sensitive | No                        |
 
 ---
 
@@ -634,22 +636,24 @@ Which Clawboo this server runs, how it was installed, and whether a newer releas
 | ------- | ------ | ------------------------------------------------------------------------------------------------------------------------- |
 | `local` | `1`    | Skip the npm-registry probe. `latest` and `checkedAt` come back `null` and `updateAvailable` `false`, i.e. "not checked". |
 
+With `CLAWBOO_DISABLE_SELF_UPDATE=1`, or `disableSelfUpdate` in the operator settings file, every request answers as `?local=1` does, and `applyable` is `false`.
+
 `?local=1` is for the CLI, which reads this route each time it attaches to a running server only to compare versions. The registry check is capped at 5 seconds and a failed check is not cached, so without it an offline machine would wait on every launch.
 
 ### Responses
 
 Always `200`. An unreachable registry is a `null` `latest`, never an error status.
 
-| Field             | Type                         | Notes                                                                                                                  |
-| ----------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `current`         | `string`                     | The running version. `CLAWBOO_VERSION` if set (the CLI injects it), else the shipped `package.json`, else `0.0.0-dev`. |
-| `latest`          | `string \| null`             | npm's `latest` for `clawboo`. `null` when unreachable or skipped. Cached ~6 h.                                         |
-| `updateAvailable` | `boolean`                    | True only for a real (non-`0.0.0*`) `current` with a strictly greater `latest`.                                        |
-| `updateCommand`   | `string`                     | `npx clawboo@latest` for an npx run, `npm install -g clawboo@latest` otherwise.                                        |
-| `installMethod`   | `'global' \| 'npx' \| 'dev'` | Derived from the running entry path.                                                                                   |
-| `applyable`       | `boolean`                    | Whether `POST /api/system/self-update` can succeed here, i.e. `installMethod === 'global'`.                            |
-| `isDeprecated`    | `boolean`                    | `current` is on the npm-deprecated `0.1.x` line.                                                                       |
-| `checkedAt`       | `number \| null`             | Epoch ms of the last registry fetch, `null` when `latest` is `null`.                                                   |
+| Field             | Type                         | Notes                                                                                                                                                    |
+| ----------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `current`         | `string`                     | The running version. `CLAWBOO_VERSION` if set (the CLI injects it), else the shipped `package.json`, else `0.0.0-dev`.                                   |
+| `latest`          | `string \| null`             | npm's `latest` for `clawboo`. `null` when unreachable or skipped. Cached ~6 h.                                                                           |
+| `updateAvailable` | `boolean`                    | True only for a real (non-`0.0.0*`) `current` with a strictly greater `latest`.                                                                          |
+| `updateCommand`   | `string`                     | `npx clawboo@latest` for an npx run, `npm install -g clawboo@latest` otherwise.                                                                          |
+| `installMethod`   | `'global' \| 'npx' \| 'dev'` | Derived from the running entry path.                                                                                                                     |
+| `applyable`       | `boolean`                    | Whether `POST /api/system/self-update` would run here: a `global` install whose folders the server's user can write, with in-app updates not turned off. |
+| `isDeprecated`    | `boolean`                    | `current` is on the npm-deprecated `0.1.x` line.                                                                                                         |
+| `checkedAt`       | `number \| null`             | Epoch ms of the last registry fetch, `null` when `latest` is `null`.                                                                                     |
 
 <Note>
 
@@ -673,13 +677,20 @@ curl 'http://localhost:18790/api/system/self-version?local=1'
 
 Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
 
-Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. Both get an `unsupported` event with the command to run instead (the chip hides its button in those cases anyway).
+Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. A global install whose package folder, or the folder holding it, the server's user cannot write is refused too, as is any install whose administrator turned in-app updates off. Each gets one `unsupported` event naming the reason and the command to run instead (the chip hides its button in those cases anyway).
+
+| `reason`       | Why                                                                                   |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `disabled`     | `CLAWBOO_DISABLE_SELF_UPDATE` or the operator settings file turned in-app updates off |
+| `npx`          | An npx run                                                                            |
+| `dev`          | A source checkout                                                                     |
+| `not-writable` | The server's user cannot write the install, so `npm install -g` would fail or diverge |
 
 ### Event stream
 
 | `type`                | When                                                                            | Payload fields                                                    |
 | --------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `unsupported`         | `installMethod` is not `global`                                                 | `method`, `command`, `message`                                    |
+| `unsupported`         | The update cannot run here (see `reason` above)                                 | `method`, `reason`, `command`, `message`                          |
 | `progress`            | Install start                                                                   | `step: 'installing'`, `message`                                   |
 | `output`              | Each non-empty line of npm output                                               | `line`                                                            |
 | `error`               | A spawn failure, or npm exits non-zero; at most one per stream                  | `code`, `message`, and on a non-zero exit `exitCode` and `detail` |
@@ -699,7 +710,7 @@ On a non-zero exit, `detail` is npm's own reason in one line (the `Error:` line,
 
 npm runs in a working directory that exists, because npm exits with code 7 when its working directory has been deleted.
 
-After `restarting`, the server starts a new server on the same port (`CLAWBOO_API_PORT`), told to wait until that port is free (`CLAWBOO_AWAIT_PORT`), and then exits so the new one can bind. The new server starts in a working directory that exists, and a server that does start in a deleted directory moves into the Clawboo directory before it loads anything. `CLAWBOO_VERSION` is removed from its environment, so it reads its version from the newly installed package. The browser keeps polling the same address and reloads when the new server answers.
+After `restarting`, the server starts a new server on the same port (`CLAWBOO_API_PORT`), told to wait until that port is free (`CLAWBOO_AWAIT_PORT`), and then exits so the new one can bind. The new server starts in a working directory that exists, and a server that does start in a deleted directory moves into the Clawboo directory before it loads anything. `CLAWBOO_VERSION` is removed from its environment, so it reads its version from the newly installed package. It starts with the old server's node options (`process.execArgv`, such as `--max-old-space-size=4096`), except the inspector's, whose port the old server still holds. The browser keeps polling the same address and reloads when the new server answers.
 
 <Note>
 
@@ -717,11 +728,59 @@ curl -N -X POST http://localhost:18790/api/system/self-update
 
 ---
 
+## `GET /api/system/operator-settings`
+
+The settings an administrator can pin for everyone on this install, with the value in force and where it comes from. The **Deployment** card in **Settings** > **System** reads it. [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone) explains the file.
+
+### Responses
+
+`200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`.
+
+| Field          | Type                                             | Notes                                                                                                |
+| -------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `key`          | `string`                                         | The operator settings file key                                                                       |
+| `value`        | `boolean \| string \| null`                      | The value in force. `catalogIndexUrl` is `null` when the default applies                             |
+| `source`       | `'environment' \| 'file' \| 'user' \| 'default'` | Where the value comes from: the key's variable, the operator file, a person's choice, or the default |
+| `pinned`       | `boolean`                                        | `true` when `source` is `environment` or `file`. The dashboard shows "Set by your administrator"     |
+| `userEditable` | `boolean`                                        | Whether `PUT` accepts a value for this key while it is not pinned                                    |
+| `env`          | `string`                                         | The key's environment variable                                                                       |
+
+### Example
+
+```bash
+curl http://localhost:18790/api/system/operator-settings
+```
+
+---
+
+## `PUT /api/system/operator-settings/:key`
+
+Saves a person's own value for a key the dashboard offers, today only `disableBrowserAutostart`. It never writes the operator file. Body: `{ "value": true }` or `{ "value": false }`.
+
+### Responses
+
+| Status | When                                                                      | Body                                                                     |
+| ------ | ------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `200`  | Saved                                                                     | `{ "setting": <entry> }`, the value now in force                         |
+| `400`  | `value` is not a boolean                                                  | `{ "error": "value must be true or false." }`                            |
+| `403`  | A key only an administrator sets (`disableSelfUpdate`, `catalogIndexUrl`) | `{ "error": "This setting can only be set by an administrator." }`       |
+| `404`  | An unknown key                                                            | `{ "error": "Unknown setting." }`                                        |
+| `409`  | The key is pinned by its variable or the operator file                    | `{ "error": "<key> is set by your administrator.", "setting": <entry> }` |
+
+### Example
+
+```bash
+curl -X PUT http://localhost:18790/api/system/operator-settings/disableBrowserAutostart \
+  -H 'Content-Type: application/json' -d '{"value": true}'
+```
+
+---
+
 ## Error envelope
 
 Errors use the standard `{ "error": string }` body. `approve-device` adds `details` on its 404 and `requestId` on the 500 from the approval command. `GET /api/system/models` never returns an error status; it falls back to a `200` with a `null` catalog. The SSE routes report failures as `error` frames once the stream is open. Going over a rate limit answers **429** with `{ "error": "Too many requests. Wait a moment and retry." }` (general) or `{ "error": "Too many requests for this operation. Wait a moment and retry." }` (sensitive), plus a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/system.ts` and `systemUpdate.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
+**Source of truth:** `apps/web/server/api/system.ts`, `systemUpdate.ts` and `operatorSettings.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; pinned settings in `apps/web/server/lib/operatorSettings.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
 
 ## Related
 

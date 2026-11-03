@@ -78,7 +78,7 @@ The Express server serves the built SPA and every `/api/*` route from the same o
 
 An optional access token, `STUDIO_ACCESS_TOKEN`, gates `/api/*` and the Gateway WebSocket. A non-loopback bind without a token refuses to start unless `CLAWBOO_ALLOW_INSECURE=1` is set. [Security](/operating/security) has the full model; the entry point is `apps/web/server/index.ts`.
 
-Prompts go only to the providers and apps you connect, and Clawboo itself sends no telemetry. The server makes three calls of its own. It fetches the marketplace catalog index from GitHub (`catalogIndex.ts`, overridable with `CLAWBOO_CATALOG_INDEX_URL`) and checks npm for a newer `clawboo` (`updateCheck.ts`), each cached for 6 hours. When a model picker opens, it also reads OpenRouter's public model list without a key (`openrouterModels.ts`, cached for 30 minutes).
+Prompts go only to the providers and apps you connect, and Clawboo itself sends no telemetry. The server makes three calls of its own. It fetches the marketplace catalog index for its own release tag from GitHub (`catalogIndex.ts`, overridable with `CLAWBOO_CATALOG_INDEX_URL`) and checks npm for a newer `clawboo` (`updateCheck.ts`, off with `CLAWBOO_DISABLE_SELF_UPDATE`), each cached for 6 hours. When a model picker opens, it also reads OpenRouter's public model list without a key (`openrouterModels.ts`, cached for 30 minutes).
 
 ### SQLite holds the state
 

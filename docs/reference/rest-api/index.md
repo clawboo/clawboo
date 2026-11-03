@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 203 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 206 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -110,7 +110,7 @@ Two ceilings apply. Both count requests in memory, per client address, over a 60
 | Tier      | Limit                                                    | Applies to                                          | `429` body                                                                      |
 | --------- | -------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
 | General   | 3,000 requests a minute                                  | Every `/api/*` request                              | `{ "error": "Too many requests. Wait a moment and retry." }`                    |
-| Sensitive | 60 requests a minute, one budget shared by all 26 routes | The routes listed below, on top of the general tier | `{ "error": "Too many requests for this operation. Wait a moment and retry." }` |
+| Sensitive | 60 requests a minute, one budget shared by all 28 routes | The routes listed below, on top of the general tier | `{ "error": "Too many requests for this operation. Wait a moment and retry." }` |
 
 Responses carry `RateLimit-Policy`, `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (IETF draft 6). A `429` also carries `Retry-After` in seconds. On a sensitive route these headers describe the sensitive budget. The dashboard's page and asset files have their own ceiling and do not count against the API.
 
@@ -121,10 +121,11 @@ The sensitive tier covers the routes that install software, rewrite runtime conf
 | Page                                                 | Sensitive routes                                                                                                                                                                                                                                                                                                                              |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Agents](/reference/rest-api/agents)                 | `POST /api/agents/:agentId/shell`                                                                                                                                                                                                                                                                                                             |
+| [Teams](/reference/rest-api/teams)                   | `PUT /api/team-verify-command/:teamId`                                                                                                                                                                                                                                                                                                        |
 | [Memory](/reference/rest-api/memory)                 | `POST /api/memory/embedding/reindex`, `POST /api/memory/embedding/install`                                                                                                                                                                                                                                                                    |
 | [Connectors](/reference/rest-api/connectors)         | `POST /api/connectors/connect`; `PUT` and `DELETE /api/connectors/composio/key`; `POST /api/connectors/composio/apps/:slug/authorize`; `POST /api/connectors/custom`; `DELETE /api/connectors/custom/:slug`; `POST /api/connectors/:slug/disconnect`; `POST` and `DELETE /api/connectors/:slug/authorize`; `PUT /api/connectors/:slug/config` |
 | [Runtimes](/reference/rest-api/runtimes)             | `POST /api/auth/cli-login/:tool`; `POST /api/runtimes/:id/install`, `/connect`, `/disconnect`, `/logout`                                                                                                                                                                                                                                      |
-| [System](/reference/rest-api/system)                 | `POST /api/system/install-openclaw`, `/configure-openclaw`, `/auto-configure-openclaw`, `/gateway`, `/approve-device`, `/self-update`; `PATCH /api/system/openclaw-config`                                                                                                                                                                    |
+| [System](/reference/rest-api/system)                 | `POST /api/system/install-openclaw`, `/configure-openclaw`, `/auto-configure-openclaw`, `/gateway`, `/approve-device`, `/self-update`; `PATCH /api/system/openclaw-config`; `PUT /api/system/operator-settings/:key`                                                                                                                          |
 | [Agent settings](/reference/rest-api/agent-settings) | `POST /api/exec-allowlist/revoke`                                                                                                                                                                                                                                                                                                             |
 
 Every other route is on the general tier, including routes that start work, such as `POST /api/runtimes/:id/run`, `POST /api/teams/:id/chat` and the MCP transports. For what to do when the dashboard shows "Too many requests", see [Troubleshooting](/help/troubleshooting).
@@ -170,7 +171,7 @@ The same-origin guard runs on the upgrade first (`403 Forbidden` on failure), th
 
 ## Route index
 
-The router registers 203 routes: 92 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
+The router registers 206 routes: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 8 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -181,7 +182,7 @@ The router registers 203 routes: 92 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                                  |
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                             |
 | [Boo Zero](/reference/rest-api/boo-zero)             | 7      | `/api/boo-zero/*`: team briefs, display names, the leader override                                                                                        |
-| [Runtimes](/reference/rest-api/runtimes)             | 17     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                                                     |
+| [Runtimes](/reference/rest-api/runtimes)             | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                                                     |
 | [Schedules](/reference/rest-api/schedules)           | 7      | `/api/schedules*`: Routines and OpenClaw Gateway cron jobs                                                                                                |
 | [Governance](/reference/rest-api/governance)         | 7      | `/api/governance/*` (budgets, audit log, delegation approval), `/api/approvals`                                                                           |
 | [Costs](/reference/rest-api/costs)                   | 4      | `/api/cost-records*`, `/api/fleet/summary`                                                                                                                |
@@ -190,7 +191,7 @@ The router registers 203 routes: 92 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 | [Agent settings](/reference/rest-api/agent-settings) | 10     | `/api/personality`, `/api/exec-settings*`, `/api/exec-allowlist*`, `/api/skills`                                                                          |
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                      |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                      |
-| [System](/reference/rest-api/system)                 | 11     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version and update                                    |
+| [System](/reference/rest-api/system)                 | 13     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version and update, pinned settings                   |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                              |
 
 Source of truth for maintainers: the router `apps/web/server/api/index.ts`, the middleware order in `apps/web/server/index.ts`, `apps/web/server/lib/rateLimit.ts`, and `packages/gateway-proxy/src/access-gate.ts` and `origin-guard.ts`.

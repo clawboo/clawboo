@@ -38,9 +38,12 @@ would write, so a hand-edited artifact cannot ship.
 
 ## Why `dist/` is committed
 
-It is what makes the fallback URL work with no infrastructure at all. A raw
-`githubusercontent.com` URL against `main` serves the same bytes a CDN would,
-so there is no deploy step between merging a pack and it being installable.
+It is what makes the default URL work with no infrastructure at all. A raw
+`githubusercontent.com` URL serves the same bytes a CDN would. A release reads
+the index as it was at its own tag (`clawboo@<version>`), so a merged pack is
+installable from the next release on; a development build reads `main` and sees
+it at once. Content written for a newer version therefore does not reach an
+older release, unless that release's tag is missing and it falls back to `main`.
 
 The bytes are **canonical**: keys sorted, no insignificant whitespace, LF, and
 no trailing newline. Those exact bytes are what gets written, served, and

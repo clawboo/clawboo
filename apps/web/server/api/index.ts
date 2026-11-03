@@ -37,6 +37,7 @@ import {
   approveDevicePOST,
 } from './system'
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
+import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import {
   teamsGET,
   teamsPOST,
@@ -291,6 +292,10 @@ router.post('/api/system/approve-device', sensitiveLimiter, approveDevicePOST)
 // clawboo@latest and restarts into it (global installs only).
 router.get('/api/system/self-version', selfVersionGET)
 router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
+// Settings an administrator can pin (operator file or environment), and a
+// person's own value for the ones the dashboard offers. Pins are read-only here.
+router.get('/api/system/operator-settings', operatorSettingsGET)
+router.put('/api/system/operator-settings/:key', sensitiveLimiter, operatorSettingsPUT)
 
 // Teams
 router.get('/api/teams', teamsGET)

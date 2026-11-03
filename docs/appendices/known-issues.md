@@ -221,9 +221,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** the Marketplace shows only 5 teams and 15 agents.
 
-**What it affects:** Clawboo's server downloads the full catalog from the Clawboo repository on GitHub, and refreshes it at most every 6 hours. Offline, or until the download lands, you see only the built-in pack.
+**What it affects:** Clawboo's server downloads the full catalog published with its version from the Clawboo repository on GitHub, and refreshes it at most every 6 hours. Offline, or until the download lands, you see only the built-in pack.
 
-**What to do:** check that the computer running Clawboo can reach GitHub, then wait for the next refresh. See [Marketplace](/using/marketplace).
+**What to do:** check that the computer running Clawboo can reach GitHub, then wait for the next refresh. On a machine that cannot reach GitHub, serve the catalog files from a mirror and point `CLAWBOO_CATALOG_INDEX_URL` at it. See [Marketplace](/using/marketplace).
 
 **Status:** open, by design.
 
@@ -293,6 +293,10 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Approving this device during OpenClaw setup can stick on "Approved. Reconnecting…" with only **Cancel**                                                                                               | OpenClaw    |
 | The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw    |
 | A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates     |
+| After an update from the chip, the server runs without the node options it was started with, such as `--max-old-space-size`                                                                           | Updates     |
+| The update chip offers **Click to update** on an install the server's user cannot write, such as a container image, and nothing turns it off                                                          | Updates     |
+| Every install reads the Marketplace catalog from the `main` branch, including content written for newer versions                                                                                      | Marketplace |
+| Playwright and Chrome DevTools start through `npx` on every new install with no way to turn that off, each beside a resident `npm exec`, and Chrome DevTools sends usage statistics                   | Connectors  |
 | The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server      |
 | With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart   |
 | With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display     |

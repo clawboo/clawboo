@@ -22,7 +22,7 @@ Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_T
 The server merges a built-in pack with the packs it can fetch:
 
 1. **The built-in pack** (15 agents, 5 teams) is compiled into the server and always included, so first-run onboarding works offline.
-2. **The other packs** come from the first source that exists: a local `catalog/dist/v1/` folder (a repo checkout), then the URL in `CLAWBOO_CATALOG_INDEX_URL`, then `catalog/dist/v1/index.json` on the `main` branch of the `clawboo/clawboo` repository on GitHub.
+2. **The other packs** come from the first source that exists: a local `catalog/dist/v1/` folder (a repo checkout), then the URL in `CLAWBOO_CATALOG_INDEX_URL` (or `catalogIndexUrl` in the operator settings file), then `catalog/dist/v1/index.json` at this release's tag (`clawboo@<version>`) in the `clawboo/clawboo` repository on GitHub. A development build, or a release whose tag answers 404, reads the `main` branch's instead.
 
 Each pack's bytes are checked against the `sha256` digest the index lists before they are parsed, and a pack that fails the check is skipped. A pack this build cannot read is dropped, and an index newer than this build understands (`schemaVersion` above 1) is ignored. Fetched packs are cached on disk under `<clawboo home>/catalog/` and checked again each time they are read.
 

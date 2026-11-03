@@ -1,7 +1,7 @@
 ---
 title: 'Configuration reference'
 sidebarTitle: 'Configuration'
-description: 'Where Clawboo keeps each setting: environment variables, settings.json, the database settings table, your browser, ~/.clawboo files and ~/.openclaw.'
+description: 'Where Clawboo keeps each setting: environment variables, the operator settings file, settings.json, the database settings table, your browser, ~/.clawboo files and ~/.openclaw.'
 keywords:
   [
     'settings.json',
@@ -19,6 +19,7 @@ Clawboo spreads its configuration over a few places. Use this page to find where
 | Where                                           | What it holds                                                     | How you change it                                                                            |
 | ----------------------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Environment variables                           | Bind address, ports, access token, URL prefix, folders, tuning    | Your shell or service manager; see [Environment variables](/reference/environment-variables) |
+| `~/.clawboo/operator.json`                      | Settings an administrator pins for everyone                       | By hand; see [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone)    |
 | `~/.clawboo/settings.json`                      | The OpenClaw Gateway URL and token, and the first-run flag        | The dashboard's Gateway and OpenClaw setup, or by hand                                       |
 | The `settings` table in `~/.clawboo/clawboo.db` | Most dashboard settings, such as the default model and team rules | The dashboard                                                                                |
 | Your browser's local storage                    | View preferences such as the theme and sidebar width              | The dashboard, separately in each browser                                                    |
@@ -71,6 +72,7 @@ Most settings you change in the dashboard are rows in the `settings` table of `c
 | Whether memory may use OpenAI for embeddings              | Memory, when no local Ollama embedding model is available                                      |
 | Custom connectors and connector arguments                 | Connectors                                                                                     |
 | A Clawboo Native agent's model and tool switches          | The agent's page                                                                               |
+| Whether the browsers start on a new install               | **Settings > System > Deployment**, unless an administrator pinned it                          |
 | Agent files for agents that do not run on OpenClaw        | The agent's **Agent Files**                                                                    |
 | Chat state: resume points, Clear chat times, leader state | Set automatically as you chat                                                                  |
 | The secret that signs MCP attach URLs                     | Created automatically; it never leaves the server                                              |
@@ -90,6 +92,7 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | ------------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------- |
 | `clawboo.db`, `-wal`, `-shm`         | The database: agents, teams, board, chats, memory, settings, the event log                    | Yes                             |
 | `settings.json`                      | The Gateway URL and token                                                                     | Yes                             |
+| `operator.json`                      | Settings an administrator pinned, when there is one; Clawboo only reads it                    | No                              |
 | `secrets/master.key`                 | The key that decrypts the vault                                                               | Yes                             |
 | `secrets/runtime-keys.json`          | Encrypted provider keys, connector secrets and sign-in tokens                                 | Encrypted                       |
 | `secrets/disconnected-runtimes.json` | Which runtimes you disconnected                                                               | No                              |
