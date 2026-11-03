@@ -233,6 +233,28 @@ onPosix('the event log', () => {
     ])
   })
 
+  it('expires and announces a card nobody answered as soon as it stops waiting', async () => {
+    // A card left pending here is answerable for nobody, and the log hears
+    // nothing until the reaper finds it a day later.
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'hi'] }, { signal: never })
+    const cardId = await cardWhenAsked()
+    db.update(toolCallApprovals)
+      .set({ expiresAt: Date.now() - 1000 })
+      .where(eq(toolCallApprovals.id, cardId))
+      .run()
+    const out = await p
+
+    expect(out?.output).toMatch(/nobody answered/i)
+    const row = getApproval(db, cardId)
+    expect(row?.status).toBe('expired')
+    expect(row?.resolvedAt).toEqual(expect.any(Number))
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data)).toEqual([
+      { approvalId: cardId, decision: 'expired', kind: 'tool', toolName: 'run_command' },
+    ])
+  })
+
   it('announces only the human answer when it beats the abort', async () => {
     const controller = new AbortController()
     const t = tool()

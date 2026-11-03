@@ -20,6 +20,7 @@ import {
   lastUsedByGrant,
   listCandidateGrants,
   mintStandingRule,
+  pendingApprovalsByGrant,
   reinstateOwnerGrant,
   resumeGrant,
   revokeGrant,
@@ -362,6 +363,18 @@ describe('grant repository', () => {
   it('derives lastUsed from the audit table rather than a hot column', () => {
     const g = agentGrant(db, 'a1')
     expect(lastUsedByGrant(db, [g.id]).size).toBe(0)
+  })
+
+  it('counts only the approvals a person can still answer', () => {
+    // The graph draws this count as a marching edge, so a card past its
+    // expiresAt, which nobody is waiting on, must not keep it marching.
+    const g = agentGrant(db, 'a1')
+    createApproval(db, { toolName: 't', agentId: 'a1', args: {}, grantId: g.id })
+    const lapsed = createApproval(db, { toolName: 't', agentId: 'a1', args: {}, grantId: g.id })
+    db.$client
+      .prepare('UPDATE tool_call_approvals SET expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1_000, lapsed.id)
+    expect(pendingApprovalsByGrant(db, [g.id]).get(g.id)).toBe(1)
   })
 })
 

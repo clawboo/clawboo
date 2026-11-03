@@ -112,7 +112,12 @@ async function awaitDecision(
       if (row.status === 'allow_once' || row.status === 'allow_always') return 'allow'
       return row.status === 'deny' ? 'deny' : 'expired'
     }
-    if (row.expiresAt <= Date.now()) return 'expired'
+    if (row.expiresAt <= Date.now()) {
+      // Close the card now that nothing waits on it, rather than leaving it
+      // pending until the reaper finds it.
+      retirePendingApproval(db, id)
+      return 'expired'
+    }
     await new Promise((r) => setTimeout(r, POLL_MS))
   }
 }
@@ -285,8 +290,8 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
  * Mark an abandoned card as expired, never as denied.
  *
  * The `status = 'pending'` predicate is the whole guard: a decision that landed
- * in the same instant as the abort must win, because it was a real answer from a
- * real person and this is only cleanup.
+ * in the same instant as the abort or the expiry must win, because it was a real
+ * answer from a real person and this is only cleanup.
  */
 export function retirePendingApproval(db: ClawbooDb, id: string): void {
   try {

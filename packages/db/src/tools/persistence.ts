@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, desc, eq, gt, lt } from 'drizzle-orm'
+import { and, desc, eq, gt, lt, lte } from 'drizzle-orm'
 
 import type { ToolClass } from './toolClass'
 import { withWriteRetry } from '../board/contention'
@@ -234,21 +234,31 @@ export function listPendingApprovals(db: ClawbooDb): DbToolCallApproval[] {
  */
 const STANDING_RULE_TTL_MS = 30 * 24 * 60 * 60_000
 
-/** Resolve a still-pending approval. The `status='pending'` guard makes a second
- *  resolve a no-op (idempotent). */
+/** Resolve a still-pending approval before its `expiresAt`. The `status='pending'`
+ *  guard makes a second resolve a no-op (idempotent). An answer after the
+ *  deadline is refused and the card is expired instead: nothing waits on it any
+ *  more, typically because the process holding it stopped. */
 export function resolveApproval(
   db: ClawbooDb,
   id: string,
   decision: ApprovalDecision,
 ): DbToolCallApproval | null {
+  const now = Date.now()
   const changed = withWriteRetry(
     () =>
       db
         .update(toolCallApprovals)
-        .set({ status: decision, resolvedAt: Date.now() })
-        .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
+        .set({ status: decision, resolvedAt: now })
+        .where(
+          and(
+            eq(toolCallApprovals.id, id),
+            eq(toolCallApprovals.status, 'pending'),
+            gt(toolCallApprovals.expiresAt, now),
+          ),
+        )
         .run().changes,
   )
+  if (changed === 0) expirePendingApproval(db, id, { pastDeadlineOnly: true })
   const row = getApproval(db, id)
   // Announced BEFORE the mint below. Only the call that did the resolving gets
   // here with `changed > 0`, so if the mint threw after the row was settled, a
@@ -290,6 +300,9 @@ export function resolveApproval(
  * Poll a pending approval until it's resolved, expires, or the wait times out.
  * Uniform across both transports (in-process Express + stdio bin) — the UI
  * resolves the row via REST and the broker (in whichever process) sees it.
+ *
+ * A wait that gives up expires the row it gave up on, so the card closes when
+ * nobody is waiting on it any more rather than when the reaper finds it.
  */
 export async function waitForApproval(
   db: ClawbooDb,
@@ -303,9 +316,53 @@ export async function waitForApproval(
     const row = getApproval(db, id)
     if (!row) return 'timeout'
     if (row.status !== 'pending') return row.status as ApprovalDecision
-    if (Date.now() > row.expiresAt) return 'expired'
-    if (Date.now() > deadline) return 'timeout'
+    const lapse = Date.now() > row.expiresAt ? 'expired' : Date.now() > deadline ? 'timeout' : null
+    if (lapse) {
+      if (expirePendingApproval(db, id)) return lapse
+      // An answer from another process landed between the read and the write.
+      // The row holds that answer, so the caller acts on it too.
+      const settled = getApproval(db, id)
+      return settled && settled.status !== 'pending'
+        ? (settled.status as ApprovalResolution)
+        : lapse
+    }
     await sleep(pollMs)
+  }
+}
+
+/**
+ * Expire one approval still pending and announce it. Guarded on
+ * `status = 'pending'`, so an answer already on the row stays the answer, and
+ * with `pastDeadlineOnly` also on `expiresAt` having passed. True when this call
+ * expired it. Never throws: the caller is done with the card either way, and
+ * the reaper expires a row this could not.
+ */
+function expirePendingApproval(
+  db: ClawbooDb,
+  id: string,
+  opts: { pastDeadlineOnly?: boolean } = {},
+): boolean {
+  try {
+    const now = Date.now()
+    const expired = withWriteRetry(
+      () =>
+        db
+          .update(toolCallApprovals)
+          .set({ status: 'expired', resolvedAt: now })
+          .where(
+            and(
+              eq(toolCallApprovals.id, id),
+              eq(toolCallApprovals.status, 'pending'),
+              opts.pastDeadlineOnly ? lte(toolCallApprovals.expiresAt, now) : undefined,
+            ),
+          )
+          .returning()
+          .all() as DbToolCallApproval[],
+    )
+    for (const row of expired) recordApprovalEvent(db, 'approval_resolved', row)
+    return expired.length > 0
+  } catch {
+    return false
   }
 }
 
