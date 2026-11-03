@@ -63,7 +63,7 @@ flowchart TD
 
 Everything that can refuse a run without changing the board runs before the claim, so a misrouted or over-budget call never opens an execution row or spawns a process. In order:
 
-1. **Aborted waiter.** A run for a persistent-home runtime waits its turn on a per-agent lock (`homeDispatchMutex`, below). The wait is bounded by `HOME_MUTEX_ACQUIRE_MS` (10 minutes, `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`); past it the run rejects with `MutexAcquireTimeoutError`. If the caller disconnected or a person moved the card while it waited, the runner returns `conflict` without touching the board.
+1. **Aborted waiter.** A run for a persistent-home runtime waits its turn on a per-agent lock (`homeDispatchMutex`, below). The wait is bounded by `HOME_MUTEX_ACQUIRE_MS` (10 minutes of awake time, `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`); past it the run rejects with `MutexAcquireTimeoutError`. If the caller disconnected or a person moved the card while it waited, the runner returns `conflict` without touching the board.
 2. **Task exists**, else `not_found`.
 3. **Depth.** A task with more than `MAX_SPAWN_DEPTH` (2) ancestors is refused with `too_deep`. Creation and dispatch read the same `DEFAULT_MAX_DEPTH` from `@clawboo/governance` but compare differently: a create is refused when the parent is already at the cap, a dispatch only when the task itself is past it. So anything that can be created can also run.
 4. **Connected runtime.** `resolveRuntimeIntegration(caps)` gives OpenClaw a `connected` home, and the runner returns `connected_substrate`.
@@ -121,7 +121,7 @@ A persistent-home runtime also gets `homeDir`, `<Clawboo state dir>/runtimes/<ru
 - **`tool-call`** (settled calls only, not each streaming-input delta), **`tool-result`** and **`error`**: emitted as observability events and fed to the circuit breaker. An `error` goes through the error taxonomy: an unknown class is a harness bug and raises an alert; a recognized policy denial is expected governance, not a bug.
 - **`done`**: captures the reason and summary and ends the pass.
 
-The idle guard aborts a run that is silent for 30 minutes of awake time (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`), then allows 5 seconds for the adapter's own terminal. Time the machine spends asleep is left out. A silent timeout is recorded as a failure with the cause stated ("runtime silent: no events for N minutes"), never as a clean abort and never as a reason to rotate. A pass that finishes without reporting any usage logs a `spend_unreported` warning, because budgets then under-count that run.
+The idle guard aborts a run that is silent for 30 minutes of awake time (`CLAWBOO_RUN_SILENT_TIMEOUT_MS`), then allows 5 seconds for the adapter's own terminal. Time the machine spends asleep is left out, except a sleep of under about a minute. A silent timeout is recorded as a failure with the cause stated ("runtime silent: no events for N minutes"), never as a clean abort and never as a reason to rotate. A pass that finishes without reporting any usage logs a `spend_unreported` warning, because budgets then under-count that run.
 
 An external `abortSignal` (the REST handler wires it to the response's `close`) aborts the current run, even across a rotation, and forces the aborted terminal.
 

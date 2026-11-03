@@ -9,6 +9,8 @@ import { realpath } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import path from 'node:path'
 
+import { setAwakeTimeout, type AwakeTimer } from '@clawboo/executor'
+
 import type { DiffStat } from './types'
 
 const execFileAsync = promisify(execFile)
@@ -356,6 +358,10 @@ export class MutexAcquireTimeoutError extends Error {
  * queueing forever (a hung run used to freeze an agent's identity key — chat,
  * 1:1, and schedules — until restart). Serialization is preserved on timeout:
  * the key stays held until the wedged holder actually settles.
+ *
+ * The wait is counted in time the machine was awake. A waiter queued behind a
+ * healthy run is not behind a wedged holder just because the lid closed, and a
+ * plain timer would fire on wake and fail it.
  */
 export class KeyedMutex {
   private chains = new Map<string, Promise<unknown>>()
@@ -371,15 +377,14 @@ export class KeyedMutex {
       acquireMs === undefined
         ? settled
         : (() => {
-            // Handle held outside so a won race clears it: unref() keeps the
-            // process exitable but retains the timer, and sustained dispatch
+            // Handle held outside so a won race clears it: the timer never holds
+            // the process open but is still retained, and sustained dispatch
             // accumulated one per successful bounded acquire.
-            let t: ReturnType<typeof setTimeout> | undefined
+            let t: AwakeTimer | undefined
             return Promise.race([
-              settled.finally(() => clearTimeout(t)),
+              settled.finally(() => t?.clear()),
               new Promise<'timeout'>((resolve) => {
-                t = setTimeout(() => resolve('timeout'), acquireMs)
-                ;(t as { unref?: () => void }).unref?.()
+                t = setAwakeTimeout(() => resolve('timeout'), acquireMs)
               }),
             ])
           })()

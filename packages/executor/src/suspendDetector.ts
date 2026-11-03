@@ -57,12 +57,15 @@ export interface AwakeTimer {
  * moves its deadline past any suspension it sees, so a sleep does not fire it
  * on wake. A wait that a suspension cut into counts as asleep in full, since
  * the part before the sleep cannot be told from the rest: after a sleep `fn`
- * can run up to one tick late, never at the moment the machine wakes. The
- * timer never holds a Node process open.
+ * can run up to one tick late, never at the moment the machine wakes. Only a
+ * gap longer than the wait plus one tick reads as a suspension, so a sleep of
+ * under about a minute counts as awake time and can still run `fn` on wake.
+ * The timer never holds a Node process open.
  *
- * It reads the wall clock. A clock set back delays `fn` by the size of the
- * step. A clock set forward by up to one tick makes it that much early, and a
- * bigger jump is taken for a suspension.
+ * It reads the wall clock. A wait that took less wall-clock time than it asked
+ * for means the clock was set back, so that wait counts as its full length. A
+ * clock set forward by up to one tick makes it that much early, and a bigger
+ * jump is taken for a suspension.
  */
 export function setAwakeTimeout(
   fn: () => void,
@@ -96,6 +99,10 @@ export function setAwakeTimeout(
     // during it. Counting any of it as awake is what fired the timer on wake
     // when less than a tick of its allowance was left.
     if (gap > waitMs + tickMs) deadline += gap
+    // A wait never takes less time than it asked for, so a shorter gap means
+    // the clock was set back by at least the shortfall. Without this the
+    // deadline stays in the old clock and `fn` runs late by the whole step.
+    else if (gap < waitMs) deadline -= waitMs - gap
     if (at < deadline) return schedule(deadline - at)
     timer = undefined
     fn()

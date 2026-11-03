@@ -1,6 +1,7 @@
 import type { EventFrame } from '@clawboo/gateway-client'
 import {
   createAsyncQueue,
+  setAwakeTimeout,
   type Capabilities,
   type HealthResult,
   type RunHandle,
@@ -55,7 +56,10 @@ const HEALTH_TIMEOUT_MS = 2000
 //     runId cancels a queued turn) and reported as not delivered; the mailbox
 //     still holds the message for the agent's next run.
 
-/** How long a steer's runId stays on the filter list after it is issued. */
+/** How long a steer's runId stays on the filter list after it is issued, in time
+ *  the machine was awake. A steer still waiting for its boundary when the machine
+ *  sleeps closes out after the wake; dropped from the list for the time asleep,
+ *  its final would be read as the run's own and end a run that is still working. */
 const STEER_RUN_ID_TTL_MS = 30 * 60_000
 
 /** Run ids that belong to steers, never to a run. Module-level, not per adapter:
@@ -65,8 +69,7 @@ const steerRunIds = new Set<string>()
 
 function rememberSteerRunId(id: string): void {
   steerRunIds.add(id)
-  const timer = setTimeout(() => steerRunIds.delete(id), STEER_RUN_ID_TTL_MS)
-  ;(timer as { unref?: () => void }).unref?.()
+  setAwakeTimeout(() => steerRunIds.delete(id), STEER_RUN_ID_TTL_MS)
 }
 
 const chatStateOf = (frame: EventFrame): string | undefined => {

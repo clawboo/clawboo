@@ -20,6 +20,7 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import { scrubResultSummary } from '@clawboo/db'
+import { setAwakeTimeout } from '@clawboo/executor'
 import {
   deterministicResultSchema,
   parseVerifyCommand,
@@ -211,7 +212,9 @@ export async function runDeterministicGate(
       detached: !isWindows,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
-    const timer = setTimeout(() => {
+    // Awake time: a sleep with the verify running is not the verify hanging, and a
+    // plain timer would kill it on wake, fail the verdict and spend a fix attempt.
+    const timer = setAwakeTimeout(() => {
       timedOut = true
       // Kill the whole tree (SIGTERM → SIGKILL), not just the shell wrapper.
       killProcessTree(child)
@@ -223,11 +226,11 @@ export async function runDeterministicGate(
       stderr += String(d)
     })
     child.on('error', (err) => {
-      clearTimeout(timer)
+      timer.clear()
       resolve({ exitCode: null, stdout, stderr: `${stderr}\n${String(err)}`, timedOut })
     })
     child.on('close', (code) => {
-      clearTimeout(timer)
+      timer.clear()
       resolve({ exitCode: code, stdout, stderr, timedOut })
     })
   })
