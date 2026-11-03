@@ -530,8 +530,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         // `get_task`. Choosing 'user' also drops the comment out of the drawer's
         // Report section, which filters on 'agent' — so the same argument both
         // forges an authority and hides the forgery from the place a human looks.
-        // Nothing authorizes on this field, so it is a labelling attack rather
-        // than a privilege one, but the label is aimed squarely at the human.
+        // The field also triggers an action: over REST, a 'user' comment is
+        // delivered into the assignee's live run as the person steering it, which
+        // is why that route honours 'user' only from the dashboard's own page.
+        // This tool writes the row directly and delivers nothing, so here the
+        // attack is the label, and the label is aimed squarely at the human.
         const unverified = opts?.unverifiedCaller === true
         return jsonResult(
           addComment(
