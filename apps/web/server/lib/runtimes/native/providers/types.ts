@@ -4,9 +4,27 @@
 // not a translation layer). Stream events are emitted COMPLETE for tool calls
 // (each client assembles its SDK's incremental fragments internally).
 
+/**
+ * Provider-opaque fields a provider attached to a tool call and needs back
+ * verbatim on the next request, tagged with the provider that produced them.
+ * Gemini 3 on the OpenAI-compatible endpoint puts its thought signature at
+ * `tool_calls[].extra_content.google.thought_signature` and rejects a later
+ * request that drops it. Only the producing provider ever sees them again.
+ */
+export interface ProviderToolCallData {
+  provider: string
+  fields: Record<string, unknown>
+}
+
 export type NeutralContentPart =
   | { type: 'text'; text: string }
-  | { type: 'tool-call'; id: string; name: string; input: unknown }
+  | {
+      type: 'tool-call'
+      id: string
+      name: string
+      input: unknown
+      providerData?: ProviderToolCallData
+    }
   | { type: 'tool-result'; id: string; output: string; isError: boolean }
 
 export interface NeutralMessage {
@@ -25,8 +43,23 @@ export interface NeutralToolDef {
 export type ProviderStreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
-  | { type: 'tool-call'; id: string; name: string; input: unknown }
-  | { type: 'usage'; inputTokens: number; outputTokens: number; cachedInputTokens?: number }
+  | {
+      type: 'tool-call'
+      id: string
+      name: string
+      input: unknown
+      providerData?: ProviderToolCallData
+    }
+  | {
+      type: 'usage'
+      /** Every prompt token of the turn, cached or not. */
+      inputTokens: number
+      outputTokens: number
+      /** The share of `inputTokens` read from the provider's prompt cache. */
+      cachedInputTokens?: number
+      /** The share of `inputTokens` written to the provider's prompt cache. */
+      cacheWriteInputTokens?: number
+    }
 
 export interface ProviderTurnParams {
   model: string

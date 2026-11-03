@@ -58,7 +58,8 @@ export const MODEL_DEFAULTS: Record<string, { leader: string; specialist: string
   // The extra OpenAI-compatible providers. Best-guess defaults for the paths that
   // don't pick a model (CreateTeamModal without an override, the lazy Boo Zero) —
   // a native agent that DOES pick a model (onboarding) overrides these.
-  google: { leader: 'gemini-2.0-flash', specialist: 'gemini-2.0-flash' },
+  // Google's named successor to gemini-2.0-flash, shut down on 2026-06-01.
+  google: { leader: 'gemini-3.6-flash', specialist: 'gemini-3.6-flash' },
   xai: { leader: 'grok-2-latest', specialist: 'grok-2-latest' },
   groq: { leader: 'llama-3.3-70b-versatile', specialist: 'llama-3.1-8b-instant' },
   mistral: { leader: 'mistral-large-latest', specialist: 'mistral-small-latest' },

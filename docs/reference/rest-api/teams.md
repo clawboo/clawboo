@@ -15,13 +15,13 @@ keywords:
   ]
 ---
 
-Use these routes to manage teams and everything scoped to one: creating and changing teams, which agents belong to them, the team's chat rooms, the per-team **Know Your Team** intro flags, the team rules, the team chat (send a message, stop, clear, and the live stream) with its activity summary, and the agents' peer-chat room (read it, or start one exchange).
+Use these routes to manage teams and everything scoped to one: creating and changing teams, which agents belong to them, the team's chat rooms, the per-team **Know Your Team** intro flags, the team rules, the team's verify command, the team chat (send a message, stop, clear, and the live stream) with its activity summary, and the agents' peer-chat room (read it, or start one exchange).
 
-Teams are stored in the SQLite `teams` table. An agent's team is the nullable `agents.teamId` column: a team has many agents, and an agent belongs to at most one team. A team's chat rooms are the `rooms` and `room_members` tables. The intro flags and team rules are not tables; they are JSON values in the `settings` table under `team-onboarding:<teamId>` and `team-rules:<teamId>`. The peer-chat room is the `team_chat` table, the one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes.
+Teams are stored in the SQLite `teams` table. An agent's team is the nullable `agents.teamId` column: a team has many agents, and an agent belongs to at most one team. A team's chat rooms are the `rooms` and `room_members` tables. The intro flags, team rules and verify command are not tables; they are JSON values in the `settings` table under `team-onboarding:<teamId>`, `team-rules:<teamId>` and `team-verify-command:<teamId>`. The peer-chat room is the `team_chat` table, the one the [TeamChat MCP server](/reference/rest-api/tools-and-mcp) writes.
 
 <Note>
 
-`DELETE /api/teams/:id` keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
+`DELETE /api/teams/:id` keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, verify command, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
 
 </Note>
 
@@ -31,34 +31,36 @@ Two different things on this page are called rooms. A team's **chat rooms** (`/a
 
 </Note>
 
-Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work. The `curl` examples assume the access gate is off; with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules routes name it `:teamId`. Both are the team id.
+Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work. The `curl` examples assume the access gate is off; with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules and team-verify-command routes name it `:teamId`. Both are the team id.
 
 ## Routes
 
-| Method | Path                              | Summary                                                      | Stream? |
-| ------ | --------------------------------- | ------------------------------------------------------------ | ------- |
-| GET    | `/api/teams`                      | List teams with `agentCount`, plus agent→team assignments    | No      |
-| GET    | `/api/teams/member-roles`         | Each team member's one-line role, for New task suggestions   | No      |
-| POST   | `/api/teams`                      | Create a team (optional client-provided UUID)                | No      |
-| PATCH  | `/api/teams/:id`                  | Update a team (partial)                                      | No      |
-| DELETE | `/api/teams/:id`                  | Delete a team, orphan its agents, clean team-scoped settings | No      |
-| POST   | `/api/teams/:id/agents`           | Assign (upsert) an agent into the team                       | No      |
-| DELETE | `/api/teams/:id/agents/:agentId`  | Remove an agent from a team                                  | No      |
-| GET    | `/api/teams/:id/rooms`            | List the team's chat rooms                                   | No      |
-| POST   | `/api/teams/:id/rooms`            | Create a chat room from a subset of the team's members (201) | No      |
-| PATCH  | `/api/teams/:id/rooms/:roomId`    | Rename a room, replace its members, or pin it                | No      |
-| DELETE | `/api/teams/:id/rooms/:roomId`    | Archive a room: stop its work, keep its conversation         | No      |
-| GET    | `/api/teams/:id/onboarding`       | Read the per-team onboarding flags + user-intro text         | No      |
-| PATCH  | `/api/teams/:id/onboarding`       | Merge-update the onboarding state                            | No      |
-| GET    | `/api/teams/:id/activity-summary` | Short summary of the team's brief, board, memory and chat    | No      |
-| POST   | `/api/teams/:id/chat`             | Send a message to a chat; the reply runs in the background   | No      |
-| POST   | `/api/teams/:id/chat/stop`        | Stop one chat's running turns and release their tasks        | No      |
-| POST   | `/api/teams/:id/chat/clear`       | Clear General or one room's chat (messages set aside)        | No      |
-| GET    | `/api/teams/:id/chat/stream`      | Live tail of one chat (General or a room)                    | SSE     |
-| GET    | `/api/team-rules/:teamId`         | Read the durable team-rules text                             | No      |
-| PUT    | `/api/team-rules/:teamId`         | Replace the team-rules text (4000-char cap)                  | No      |
-| GET    | `/api/team-chat`                  | Read the team's peer-chat room from a cursor                 | No      |
-| POST   | `/api/team-chat/exchange`         | Start one bounded peer-chat exchange                         | No      |
+| Method | Path                               | Summary                                                      | Stream? |
+| ------ | ---------------------------------- | ------------------------------------------------------------ | ------- |
+| GET    | `/api/teams`                       | List teams with `agentCount`, plus agent→team assignments    | No      |
+| GET    | `/api/teams/member-roles`          | Each team member's one-line role, for New task suggestions   | No      |
+| POST   | `/api/teams`                       | Create a team (optional client-provided UUID)                | No      |
+| PATCH  | `/api/teams/:id`                   | Update a team (partial)                                      | No      |
+| DELETE | `/api/teams/:id`                   | Delete a team, orphan its agents, clean team-scoped settings | No      |
+| POST   | `/api/teams/:id/agents`            | Assign (upsert) an agent into the team                       | No      |
+| DELETE | `/api/teams/:id/agents/:agentId`   | Remove an agent from a team                                  | No      |
+| GET    | `/api/teams/:id/rooms`             | List the team's chat rooms                                   | No      |
+| POST   | `/api/teams/:id/rooms`             | Create a chat room from a subset of the team's members (201) | No      |
+| PATCH  | `/api/teams/:id/rooms/:roomId`     | Rename a room, replace its members, or pin it                | No      |
+| DELETE | `/api/teams/:id/rooms/:roomId`     | Archive a room: stop its work, keep its conversation         | No      |
+| GET    | `/api/teams/:id/onboarding`        | Read the per-team onboarding flags + user-intro text         | No      |
+| PATCH  | `/api/teams/:id/onboarding`        | Merge-update the onboarding state                            | No      |
+| GET    | `/api/teams/:id/activity-summary`  | Short summary of the team's brief, board, memory and chat    | No      |
+| POST   | `/api/teams/:id/chat`              | Send a message to a chat; the reply runs in the background   | No      |
+| POST   | `/api/teams/:id/chat/stop`         | Stop one chat's running turns and release their tasks        | No      |
+| POST   | `/api/teams/:id/chat/clear`        | Clear General or one room's chat (messages set aside)        | No      |
+| GET    | `/api/teams/:id/chat/stream`       | Live tail of one chat (General or a room)                    | SSE     |
+| GET    | `/api/team-rules/:teamId`          | Read the durable team-rules text                             | No      |
+| PUT    | `/api/team-rules/:teamId`          | Replace the team-rules text (4000-char cap)                  | No      |
+| GET    | `/api/team-verify-command/:teamId` | Read the command the verification gate runs for the team     | No      |
+| PUT    | `/api/team-verify-command/:teamId` | Set or clear that command                                    | No      |
+| GET    | `/api/team-chat`                   | Read the team's peer-chat room from a cursor                 | No      |
+| POST   | `/api/team-chat/exchange`          | Start one bounded peer-chat exchange                         | No      |
 
 ---
 
@@ -293,7 +295,7 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id> \
 
 ## `DELETE /api/teams/:id`
 
-Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` on every agent in the team, (2) deletes these team-scoped `settings` rows: `team-rules:<teamId>`, `team-onboarding:<teamId>`, General's clear time `team-chat-cleared:<teamId>`, and every member's native resume pointer for the team and for each of its rooms, (3) deletes the team row, and (4) when a team row was deleted, removes the team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>`, with every file in it. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves. The team's board tasks, chat messages and peer-chat posts are not deleted, and neither are the `team-server-orchestrated:<teamId>` setting and each room's clear time.
+Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` on every agent in the team, (2) deletes these team-scoped `settings` rows: `team-rules:<teamId>`, `team-onboarding:<teamId>`, `team-verify-command:<teamId>`, General's clear time `team-chat-cleared:<teamId>`, and every member's native resume pointer for the team and for each of its rooms, (3) deletes the team row, and (4) when a team row was deleted, removes the team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>`, with every file in it. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves. The team's board tasks, chat messages and peer-chat posts are not deleted, and neither are the `team-server-orchestrated:<teamId>` setting and each room's clear time.
 
 - **Path params**: `id` (team id).
 - **Request body**: none.
@@ -1237,6 +1239,75 @@ Replaces the team-rules text. `content` is required and must be a string; it is 
 curl -X PUT http://localhost:18790/api/team-rules/<team-id> \
   -H 'Content-Type: application/json' \
   -d '{"content":"Reply in British English. Ask before you delete any file."}'
+```
+
+---
+
+## `GET /api/team-verify-command/:teamId`
+
+Reads the team's verify command: the check the [verification gate](/concepts/verification) runs for the team's tasks in place of the command in a worktree's `init.sh`.
+
+- **Path params**: `teamId` (team id).
+
+### Responses
+
+**`200 OK`**: the command, or `""` when none is set:
+
+```ts
+{
+  command: string
+}
+```
+
+**`400 Bad Request`**: the `:teamId` segment is missing:
+
+```json
+{ "error": "team id required" }
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/team-verify-command/<team-id>
+```
+
+## `PUT /api/team-verify-command/:teamId`
+
+Sets the team's verify command. The value is trimmed; an empty string clears it. Checks that use it record `commandSource: 'configured'`, and each new worktree for the team's tasks starts with it as `VERIFY_CMD` in `init.sh`. Like every route here, it answers any local caller, an agent's shell included (see [Verification limits](/concepts/verification#limits)).
+
+- **Path params**: `teamId` (team id).
+- **Request body**:
+
+```ts
+{
+  command: string
+} // one line, up to 2000 characters; "" clears it
+```
+
+### Responses
+
+**`200 OK`**: the stored command:
+
+```ts
+{
+  command: string
+}
+```
+
+**`400 Bad Request`**: `command` is absent or not a string (`command (string) required`), longer than 2000 characters (`command exceeds 2000 characters`), or more than one line (`command must be a single line`).
+
+**`404 Not Found`**: no team has this id:
+
+```json
+{ "error": "team not found" }
+```
+
+### Example
+
+```bash
+curl -X PUT http://localhost:18790/api/team-verify-command/<team-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"command":"npm test"}'
 ```
 
 ---

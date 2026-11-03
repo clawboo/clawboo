@@ -22,6 +22,7 @@ import {
   setTaskWorkspaceRefs,
   updateStatus,
   updateWorkspaceStatus,
+  type ClawbooDb,
   type DbTask,
   type DbWorkspace,
 } from '@clawboo/db'
@@ -55,6 +56,7 @@ import {
 import { getDb } from './db'
 import type { RuntimeRunContext } from './runtimes'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
+import { readTeamVerifyCommand } from './verification/teamVerifyCommand'
 import { notifyVerificationParked } from './teamChat/inboxNotices'
 
 /**
@@ -73,12 +75,16 @@ function reviewRootForRepo(repoPath: string): string {
   return path.join(resolveClawbooDir(), 'reviews', hash)
 }
 
-function scaffoldFromTask(task: DbTask): TaskScaffoldInput {
+function scaffoldFromTask(db: ClawbooDb, task: DbTask): TaskScaffoldInput {
+  // The team's verify command goes into init.sh, so the builder sees the check
+  // the gate will hold it to.
+  const verify = readTeamVerifyCommand(db, task.teamId)
   return {
     taskId: task.id,
     title: task.title,
     description: task.description,
     teamName: task.teamId,
+    ...(verify ? { commands: { verify } } : {}),
   }
 }
 
@@ -133,7 +139,7 @@ export async function provisionTaskWorkspace(
     baseSha: input.baseSha,
     baseRef: input.baseRef,
     rootDir,
-    scaffold: scaffoldFromTask(task),
+    scaffold: scaffoldFromTask(db, task),
   })
   let workspaceId: string
   if (existing) {
@@ -368,6 +374,8 @@ export async function actOnTaskWorkspace(
     repoPath: ws.repoPath,
     worktree,
     diffStat: complete.diffStat,
+    // A check the person set for the team outranks whatever init.sh says now.
+    verifyCommand: readTeamVerifyCommand(db, getTask(db, taskId)?.teamId ?? null),
     reviewRootDir: reviewRootForRepo(ws.repoPath),
     makeReviewerAdapter: opts.makeReviewerAdapter,
     reviewerModel: opts.reviewerModel,

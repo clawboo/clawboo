@@ -61,17 +61,19 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 
 Every failure an `error` event records is sorted into one class by matching its code and message. Anything that matches no class is `Unknown`, which Clawboo treats as a **harness bug**: a failure its run machinery could not explain, worth a look rather than routine noise.
 
-| Class             | Meaning                                   | Matches, for example (case-insensitive)                                                                                   | Harness bug |
-| ----------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------- |
-| `RateLimited`     | The provider throttled the request        | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                   | No          |
-| `UserAborted`     | A person or Clawboo stopped the run       | `abort`, `aborted`, `cancel`, `cancelled`, `sigint`, `sigterm`                                                            | No          |
-| `Timeout`         | Something took too long                   | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                  | No          |
-| `UnexpectedEnv`   | The machine was missing something         | `enoent`, `eacces`, `eperm`, `command not found`, `permission denied`, `not installed`, `cannot find module`              | No          |
-| `ContextOverflow` | The prompt was too long for the model     | `context length`, `context window`, `prompt is too long`, `maximum context`, `too many tokens`                            | No          |
-| `InvalidArgs`     | The request was malformed                 | `400`, `422`, `invalid argument`, `bad request`, `validation`, `missing required`, `schema`, `malformed`                  | No          |
-| `ProviderError`   | The provider failed                       | `500`, `502`, `503`, `504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `api error` | No          |
-| `Unknown`         | Nothing matched, or the error had no text | Anything else                                                                                                             | Yes         |
-| `PolicyDenied`    | A guardrail refused a call (expected)     | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                  | No          |
+| Class             | Meaning                                          | Matches, for example (case-insensitive)                                                                                                                                                         | Harness bug |
+| ----------------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
+| `RateLimited`     | The provider throttled the request               | `429`, `rate limit`, `too many requests`, `resource exhausted`, `quota`                                                                                                                         | No          |
+| `UserAborted`     | A person or Clawboo stopped the run              | `abort`, `aborted`, `cancel`, `cancelled`, `sigint`, `sigterm`                                                                                                                                  | No          |
+| `Timeout`         | Something took too long                          | `timeout`, `timed out`, `etimedout`, `deadline exceeded`                                                                                                                                        | No          |
+| `UnexpectedEnv`   | The machine, or its login, was missing something | `enoent`, `eacces`, `eperm`, `command not found`, `permission denied`, `not installed`, `cannot find module`, `authentication failed`, `invalid api key`, `unauthorized`                        | No          |
+| `ContextOverflow` | The prompt was too long for the model            | `context length`, `context window`, `prompt is too long`, `maximum context`, `too many tokens`                                                                                                  | No          |
+| `InvalidArgs`     | The request was malformed                        | `400`, `422`, `invalid argument`, `bad request`, `validation`, `missing required`, `schema`, `malformed`, `model not found`                                                                     | No          |
+| `ProviderError`   | The provider failed, or refused the account      | `500`, `502`, `503`, `504`, `provider error`, `upstream`, `overloaded`, `service unavailable`, `bad gateway`, `server error`, `api error`, `billing error`, `account on hold`, `credit balance` | No          |
+| `Unknown`         | Nothing matched, or the error had no text        | Anything else                                                                                                                                                                                   | Yes         |
+| `PolicyDenied`    | A guardrail refused a call (expected)            | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                                                                                        | No          |
+
+Login and account words are checked before `InvalidArgs`, so the causes Claude Code names for an API error (`authentication_failed`, `billing_error` and the like) land in `UnexpectedEnv` or `ProviderError` even when the message carries an HTTP 400 or 401.
 
 ### PolicyDenied
 

@@ -46,7 +46,7 @@ A task with no check result reaches **Done** normally. Unchecked is not the same
 ## What happens during a check
 
 1. The agent's run ends. On the [Board](/using/board) the card stays in **In progress** with a **Verifying** badge.
-2. Clawboo runs the verify command named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes.
+2. Clawboo runs the team's verify command if the team has one, otherwise the one named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes.
 3. If the command passes and the change is large or was handed off, a reviewer agent reads the committed change.
 4. Clawboo stores the result on the task and moves the card to match.
 
@@ -80,7 +80,9 @@ Each task gets two attempts by default: the first, plus one fix round. The `CLAW
 
 ## The verify command in practice
 
-Clawboo does not know your project's test command. Each new worktree gets an `init.sh` whose verify line is a placeholder:
+Clawboo knows your project's test command only if you set it for the team: `PUT /api/team-verify-command/:teamId` with `{"command": "npm test"}` (see the [Teams API](/reference/rest-api/teams)). The dashboard has no control for it yet. When the team has one, every check runs it, whatever `init.sh` says, and each new worktree's `init.sh` starts with it.
+
+Without one, each new worktree gets an `init.sh` whose verify line is a placeholder:
 
 ```bash
 VERIFY_CMD='echo "[init] configure VERIFY_CMD in init.sh"'
@@ -94,7 +96,7 @@ To get a useful check, say in the task which command proves the work, for exampl
 
 </Tip>
 
-The agent that did the work can edit `init.sh`, so it can also weaken its own check. The reviewer is the independent part.
+The agent that did the work can edit `init.sh`, so without a team verify command it can also weaken its own check. Each check therefore records where its command came from, and the task drawer shows the command with its source: **set for the team**, **from the task setup** (the `init.sh` Clawboo wrote, unchanged), or **written by the agent**, which is flagged. Only **set for the team** is a guarantee: an agent can also write a commit that looks like the setup's, so **from the task setup** means no edit was found, not that none was made. The reviewer is the independent part.
 
 ## When the reviewer runs
 
@@ -112,7 +114,7 @@ How the reviewer works:
 - **It is a second run of the same runtime.** It starts a fresh session, on a separate checkout of the committed change that has no branch to push. It gets none of the first agent's session or runtime home.
 - **It uses the same model** unless you set `CLAWBOO_REVIEWER_MODEL`, which picks a different model on that runtime.
 - **Only five kinds of finding block:** security, crash, data loss, wrong algorithm, and missing acceptance criteria. Style, performance and other notes are recorded and never block.
-- **It cannot hold the work back by failing.** If the reviewer fails to run, the test command alone decides. A reply Clawboo cannot read becomes one note that does not block.
+- **It cannot hold the work back by failing.** If the reviewer fails to run, the test command alone decides. A reply Clawboo cannot read becomes one note that does not block. The task drawer names the reviewer only when it returned a verdict; otherwise it says **Review did not complete** or **Review returned nothing**.
 - **Its spend counts.** The reviewer's run is charged to the same agent, mission and team budgets as the work it reviews, and shows in **Tokens Used** under that agent. A review that reports no cost is charged an estimate. It is not added to the run cost on the task's card, and because it runs after the work has finished, a cap it crosses stops the next run, not this one.
 
 ## What you can do
@@ -124,18 +126,19 @@ How the reviewer works:
 
 ## The failures checks are for
 
-| Failure                                   | What Clawboo does                                               | What you see                                        | What you can do                                    |
-| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------- |
-| The agent says it is done, but tests fail | Runs the verify command itself and trusts only its exit code    | The task goes back for a fix, then to **Needs you** | Read the failure comment on the card               |
-| The agent marks its own work              | A reviewer in a fresh session reads large or handed-off changes | Blocking findings send the work back                | Set `CLAWBOO_REVIEWER_MODEL` for a different model |
-| No test command is set                    | The placeholder counts as a failure                             | **Needs review** after the last attempt             | Name the command in the task                       |
-| A fix loop that never ends                | Two attempts by default, then stop                              | The card waits in **Needs you**                     | Retry, complete it anyway, or dismiss it           |
-| A check that hangs                        | Stops the command after 10 minutes, with everything it started  | Counts as a failure                                 | Make the command finish faster                     |
+| Failure                                   | What Clawboo does                                               | What you see                                        | What you can do                                                |
+| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| The agent says it is done, but tests fail | Runs the verify command itself and trusts only its exit code    | The task goes back for a fix, then to **Needs you** | Read the failure comment on the card                           |
+| The agent marks its own work              | A reviewer in a fresh session reads large or handed-off changes | Blocking findings send the work back                | Set `CLAWBOO_REVIEWER_MODEL` for a different model             |
+| No test command is set                    | The placeholder counts as a failure                             | **Needs review** after the last attempt             | Set the team's verify command, or name the command in the task |
+| A fix loop that never ends                | Two attempts by default, then stop                              | The card waits in **Needs you**                     | Retry, complete it anyway, or dismiss it                       |
+| A check that hangs                        | Stops the command after 10 minutes, with everything it started  | Counts as a failure                                 | Make the command finish faster                                 |
 
 ## Limits
 
 - Only task-runner runs in a worktree are checked, and the dashboard cannot start one.
-- A check is only as strong as its command, and the agent can edit `init.sh`.
+- A check is only as strong as its command, and without a team verify command the agent can edit `init.sh`.
+- The team's verify command can be changed by any local caller of the API, an agent's shell included. It keeps a cooperative agent from choosing its own check; it does not stop one that sets out to.
 - The reviewer runs on the agent's own runtime, with the agent's model unless you set `CLAWBOO_REVIEWER_MODEL`.
 - Checked work stays on its own branch, `clawboo/task-<id>`. Clawboo never merges it; merging is up to you.
 - A check is not continuous integration: it runs one command, once per attempt, with no pipeline, cache or test matrix.
@@ -143,7 +146,7 @@ How the reviewer works:
 <Accordion title="Under the hood">
 
 - **Where it runs.** `verifyTask` (`apps/web/server/lib/verification/index.ts`) is called only from `actOnTaskWorkspace` (`apps/web/server/lib/worktrees.ts`). The task runner calls it with a reviewer when a run completes (`apps/web/server/lib/executorRunner.ts`). `PATCH /api/board/:taskId/workspace` with `{"action": "complete"}` calls it without one, so that route never runs the reviewer.
-- **The command.** The gate reads `VERIFY_CMD='...'` from `init.sh`, then the `- Verify:` line of `VERIFICATION.md`. A command containing `configure VERIFY_CMD` counts as none (`packages/governance/src/verify/commandParser.ts`). It runs through a shell in the worktree with Clawboo's secrets removed from its environment, keeps the last 4,000 characters of output, and refuses a worktree outside the Clawboo folder (`apps/web/server/lib/verification/deterministicGate.ts`).
+- **The command.** The team's verify command (settings key `team-verify-command:<teamId>`) wins and is recorded as `commandSource: 'configured'`. Otherwise the gate reads `VERIFY_CMD='...'` from `init.sh`, then the `- Verify:` line of `VERIFICATION.md`, and records `scaffold` when that command matches the `init.sh` of the task's scaffold commit (read from the repository with `git --no-replace-objects`), else `agent`. A command containing `configure VERIFY_CMD` counts as none (`packages/governance/src/verify/commandParser.ts`). It runs through a shell in the worktree with Clawboo's secrets removed from its environment, keeps the last 4,000 characters of output, and refuses a worktree outside the Clawboo folder (`apps/web/server/lib/verification/deterministicGate.ts`).
 - **The stored result.** Statuses are `pass`, `fail` and `completed_with_debt`, which is given at the last attempt. `PATCH /api/board/:taskId` refuses `done` with `409 verification_required` while a stored result blocks it, unless the request sets `humanOverride`, which writes a `verification` audit row. A stored result that cannot be parsed does not block, and `completed_with_debt` over a passing command does not block a later move to Done.
 - **Skipped by Clawboo.** A run that changed nothing, and an OpenClaw Routine completion (an `unverified` audit row), both reach `done` without the gate.
 - **The reviewer trigger.** `shouldRunCritic` in `packages/governance/src/verify/criticTrigger.ts`. Its `riskFlag` comes from `isRiskyDelegation` (`apps/web/server/lib/teamChat/riskyDelegation.ts`) run on the task's title and description, in `verifyTask`.

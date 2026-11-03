@@ -39,6 +39,9 @@ export function mapHermesEvent(
         { ...base(), kind: 'status', phase: 'init', ...(ev.model ? { model: ev.model } : {}) },
       ]
 
+    case 'status':
+      return [{ ...base(), kind: 'status', phase: ev.phase }]
+
     case 'message': {
       if (!ev.text) return []
       return [{ ...base(), kind: 'text-delta', text: ev.text, channel: ev.channel ?? 'assistant' }]

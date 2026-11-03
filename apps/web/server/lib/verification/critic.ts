@@ -4,10 +4,14 @@
 // with a structured-output instruction, and parses a TYPED verdict. A malformed or
 // failed critic is a soft warn (a single non-blocking `other` finding), never a
 // crash — the deterministic gate is the hard gate.
+//
+// Every verdict that ran records its `outcome`, so a crashed, silent or
+// unreadable review is never shown as a clean one.
 
 import {
   criticOutputSchema,
   shouldRunCritic,
+  type CriticOutcome,
   type CriticVerdict,
   type DiffStat,
   type Finding,
@@ -78,6 +82,33 @@ const unparseable = (text: string): Finding[] => [
   },
 ]
 
+/** The verdict of a review that should have happened and did not complete. Its
+ *  one finding is non-blocking, so the gate still decides. */
+export function criticErrored(input: {
+  why: string
+  reviewerRuntime?: string | null
+  reviewerModel?: string | null
+  reviewedSha?: string | null
+}): CriticVerdict {
+  return {
+    ran: true,
+    outcome: 'errored',
+    findings: [
+      {
+        severity: 'other',
+        title: 'review did not complete',
+        body: input.why.slice(0, 500),
+        filePath: null,
+        startLine: null,
+        confidence: 0,
+      },
+    ],
+    reviewerRuntime: input.reviewerRuntime ?? null,
+    reviewerModel: input.reviewerModel ?? null,
+    reviewedSha: input.reviewedSha ?? null,
+  }
+}
+
 export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
   if (
     !shouldRunCritic({
@@ -89,11 +120,25 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
     return NOT_RUN
   }
 
-  const review = await provisionReviewWorktree({
-    repoPath: input.repoPath,
-    sha: input.reviewSha,
-    rootDir: input.reviewRootDir,
-  })
+  const errored = (reviewerRuntime: string | null, why: string): CriticVerdict =>
+    criticErrored({
+      why,
+      reviewerRuntime,
+      reviewerModel: input.reviewerModel ?? null,
+      reviewedSha: input.reviewSha,
+    })
+
+  let review: Awaited<ReturnType<typeof provisionReviewWorktree>>
+  try {
+    review = await provisionReviewWorktree({
+      repoPath: input.repoPath,
+      sha: input.reviewSha,
+      rootDir: input.reviewRootDir,
+    })
+  } catch (err) {
+    return errored(null, err instanceof Error ? err.message : String(err))
+  }
+  let reviewerRuntime: string | null = null
   try {
     const ctx: RuntimeRunContext = {
       cwd: review.worktreePath,
@@ -103,6 +148,7 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
     const adapter = input.makeReviewerAdapter(ctx)
     const sessionKey = `review:${input.reviewSha.slice(0, 12)}`
     const message = 'Review the changes at this checkout.'
+    reviewerRuntime = adapter.id
     const run = await adapter.start(
       { taskId: null, teamId: null },
       {
@@ -125,8 +171,10 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
 
     // Drain the reviewer's stream to text, then parse a typed verdict with a
     // way-out via the shared judge drive (@clawboo/obs) — the same extract +
-    // parse the eval model-grader uses. empty ⇒ no findings (pass); valid JSON ⇒
-    // findings; anything else ⇒ a single non-blocking soft-warn finding.
+    // parse the eval model-grader uses. A non-fatal error (a tool call that
+    // failed, a policy denial) is part of a working review, so only a fatal one
+    // or a failed terminal ends the drain as a failure.
+    let failure = null as string | null
     const drain = async (): Promise<string> => {
       let text = ''
       for await (const ev of adapter.events(run)) {
@@ -161,8 +209,11 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
             inputTokens = ev.usage.inputTokens
             outputTokens = ev.usage.outputTokens
           }
+          if (ev.reason === 'error' || ev.reason === 'aborted')
+            failure ??= `the reviewer run ended: ${ev.reason}`
           break
-        } else if (ev.kind === 'error') {
+        } else if (ev.kind === 'error' && ev.fatal) {
+          failure = ev.message || 'the reviewer run failed'
           break
         }
       }
@@ -189,6 +240,11 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
           /* best effort */
         }
       })
+    // A parsed verdict is the positive evidence a review needs, even from a run
+    // that failed afterwards. Without one, a failure is the outcome.
+    if (judged.status !== 'parsed' && failure) return errored(adapter.id, failure)
+    const outcome: CriticOutcome =
+      judged.status === 'parsed' ? 'reviewed' : judged.status === 'empty' ? 'empty' : 'errored'
     const findings =
       judged.status === 'parsed' && judged.value
         ? judged.value.findings
@@ -197,11 +253,14 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
           : unparseable(judged.raw)
     return {
       ran: true,
+      outcome,
       findings,
       reviewerRuntime: adapter.id,
       reviewerModel: input.reviewerModel ?? null,
       reviewedSha: input.reviewSha,
     }
+  } catch (err) {
+    return errored(reviewerRuntime, err instanceof Error ? err.message : String(err))
   } finally {
     await removeReviewWorktree(input.repoPath, review, input.reviewRootDir).catch(() => {})
   }
