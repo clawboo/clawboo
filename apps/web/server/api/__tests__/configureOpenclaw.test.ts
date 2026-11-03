@@ -76,6 +76,45 @@ describe('POST /api/system/configure-openclaw — token not echoed', () => {
   })
 })
 
+// OpenClaw's config validation rejects a retired Google model outright
+// (gemini-2.0-flash shut down on 2026-06-01), so the default must be live.
+describe('POST /api/system/configure-openclaw: Google', () => {
+  let home: string
+  let stateDir: string
+  const saved: Record<string, string | undefined> = {}
+
+  beforeEach(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-cfg-google-'))
+    stateDir = path.join(home, '.openclaw')
+    for (const k of ['CLAWBOO_HOME', 'HOME', 'OPENCLAW_STATE_DIR']) saved[k] = process.env[k]
+    process.env['CLAWBOO_HOME'] = home
+    process.env['HOME'] = home
+    process.env['OPENCLAW_STATE_DIR'] = stateDir
+  })
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('defaults a Google key to gemini-3.6-flash', async () => {
+    const r = mockRes()
+    await configureOpenclawPOST(
+      { body: { provider: 'google', apiKey: 'AIza-test-key' } } as unknown as Request,
+      r.res,
+    )
+
+    expect(r.statusCode()).toBe(200)
+    expect((r.body() as Record<string, unknown>)['model']).toBe('google/gemini-3.6-flash')
+    const config = JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as {
+      agents: { defaults: { model: { primary: unknown } } }
+    }
+    expect(config.agents.defaults.model.primary).toBe('google/gemini-3.6-flash')
+  })
+})
+
 // Ollama through OpenClaw: OpenClaw registers its `ollama` provider only with a
 // credential, and runs only a model the daemon has pulled. Without either, every
 // Gateway run failed as "Unknown model: ollama/llama3.2". The daemon is a stubbed

@@ -6,7 +6,7 @@
 //
 // The model-id format varies by runtime:
 //   - native   : provider-native ids, bare (`claude-sonnet-5`, `gpt-4o`,
-//                `gemini-2.0-flash`, `llama3.2`) or OpenRouter `vendor/model`
+//                `gemini-3.6-flash`, `llama3.2`) or OpenRouter `vendor/model`
 //                (`anthropic/claude-haiku-4.5`).
 //   - openclaw : OpenClaw routing ids `provider/model`
 //                (`anthropic/claude-haiku-4-5`), or double-nested OpenRouter

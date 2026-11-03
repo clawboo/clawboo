@@ -56,11 +56,11 @@ export const MODEL_GROUPS: ModelGroup[] = [
     provider: 'Google',
     models: [
       { id: 'google/gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
+      { id: 'google/gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
       { id: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash' },
       { id: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro' },
       { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
       { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
-      { id: 'google/gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
     ],
   },
   {
