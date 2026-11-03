@@ -666,7 +666,9 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id>/rooms/<room-id> \
 
 ## `DELETE /api/teams/:id/rooms/:roomId`
 
-Archives the room; nothing is deleted. In one call it stops the room's work (a clean Stop, as `POST /api/teams/:id/chat/stop` does for this `roomId`: claimed tasks are released to `todo` and nothing is reported as a failure), drops the room's resume pointers (`native-team-session:<agentId>:<teamId>:room:<roomId>`) so no agent resumes the archived conversation, and sets the room's `archived_at`. The conversation stays in `chat_messages` under the room's session keys, the room leaves `GET /api/teams/:id/rooms`, and its tasks stay on the board, where a retry or a reassignment runs them from General. No route removes a room row; deleting the team does (the `rooms` table cascades).
+Archives the room; nothing is deleted. In one call it sets the room's `archived_at` (from then on nothing routes work to it), drops the room's resume pointers (`native-team-session:<agentId>:<teamId>:room:<roomId>`) so no agent resumes the archived conversation, stops the room's work and waits for that Stop to be written (a clean Stop, as `POST /api/teams/:id/chat/stop` does for this `roomId`: claimed tasks are released to `todo`, queued ones are marked stopped, and nothing is reported as a failure), and then moves the room's unfinished tasks to General. The conversation stays in `chat_messages` under the room's session keys and the room leaves `GET /api/teams/:id/rooms`.
+
+The moved tasks stay stopped, as a Stop leaves them. A task still running with no engine to stop it (after a restart the room's engine may not be running) has its run closed as `cancelled` and goes back to `todo`. A task that was ready for an agent gets a stopped (`cancelled`) run. Either way it waits in **Needs you** as **Stopped**, and General does not start it by itself. A plan step still waiting on another step in the room gets none, and runs once that step is retried and done. One waiting on a task outside the room is stopped like a ready one, since that task can finish without anyone retrying it. A task the task runner runs moves but is not stopped, so the runner can still rerun it. A retry or a reassignment runs them from General. Finished tasks keep the room. Clawboo runs the same move each time it starts, for rooms archived before it existed. No route removes a room row; deleting the team does (the `rooms` table cascades).
 
 - **Path params**: `id` (team id), `roomId` (the room).
 - **Request body**: none.
@@ -679,7 +681,7 @@ Archives the room; nothing is deleted. In one call it stops the room's work (a c
 { "error": "team id and room id required" }
 ```
 
-**`404 Not Found`**: no active room with that id in this team (including one already archived):
+**`404 Not Found`**: no room with that id in this team, or one already archived with no unfinished tasks left in it. For an archived room that still holds some (a DELETE that failed after archiving it), the call stops and moves them as above and answers `200`:
 
 ```json
 { "error": "room not found" }

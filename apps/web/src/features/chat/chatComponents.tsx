@@ -901,6 +901,49 @@ export const DelegationCard = memo(function DelegationCard({
   )
 })
 
+// ─── NotHandedOffNote ─────────────────────────────────────────────────────────
+// What a `<delegate>` block becomes in a one-to-one chat. Nothing there acts on
+// the tag (no board, no team engine), so drawing it as "Delegated to @Name"
+// would promise work that never starts. The note says it was not handed off,
+// and where a hand-off does work.
+
+/** How a reply's `<delegate>` blocks are drawn: as the "Delegated to" card in a
+ *  team's chat, where each one starts a task, or as a not-handed-off note in a
+ *  one-to-one chat, where nothing acts on them. */
+export type HandOffDisplay = 'card' | 'not-handed-off'
+
+export const NotHandedOffNote = memo(function NotHandedOffNote({
+  targetName,
+  task,
+}: {
+  targetName: string
+  task: string
+}) {
+  return (
+    <div
+      className="flex flex-col gap-2 rounded-xl border border-dashed border-foreground/15 bg-foreground/[0.02] px-4 py-3"
+      data-testid="not-handed-off-note"
+    >
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-widest text-foreground/45">
+          Not handed off
+        </span>
+        <span className="truncate font-mono text-[11.5px] font-semibold text-foreground/70">
+          @{targetName}
+        </span>
+      </div>
+      {task && (
+        <div className="border-t border-dashed border-foreground/10 pt-2 text-[12px] leading-relaxed whitespace-pre-wrap text-foreground/60">
+          {task}
+        </div>
+      )}
+      <p className="text-[11px] leading-relaxed text-foreground/50">
+        Hand-offs work only in a team’s chat. Ask there to give this to @{targetName}.
+      </p>
+    </div>
+  )
+})
+
 // ─── AssistantTurnCard ────────────────────────────────────────────────────────
 
 export const AssistantTurnCard = memo(function AssistantTurnCard({
@@ -910,6 +953,7 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   streaming,
   teamId: _teamId,
   isFollowup = false,
+  handOffs = 'card',
 }: {
   block: AssistantBlock
   agentId: string
@@ -924,11 +968,19 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
    * a burst of messages from one agent reads as a single section.
    */
   isFollowup?: boolean
+  /** How `<delegate>` blocks are drawn (see {@link HandOffDisplay}). */
+  handOffs?: HandOffDisplay
 }) {
   const isRelay = isTeamUpdateEntry(block.assistant)
   const hasThinking = block.thinking.length > 0
   const hasTools = block.tools.length > 0
   const hasText = Boolean(block.assistant?.text)
+  const rawText = block.assistant?.text ?? ''
+  const shownText = isRelay ? stripRelayPrefix(rawText) : rawText
+  const segments = useMemo(
+    () => (handOffs === 'not-handed-off' ? splitAssistantText(stripPlanBlocks(shownText)) : []),
+    [handOffs, shownText],
+  )
   const charCount = block.assistant?.text?.length ?? 0
   const runId = block.assistant?.runId ?? null
   const tokenUsage = useChatStore((s) => (runId ? (s.lastTokenUsage.get(runId) ?? null) : null))
@@ -989,17 +1041,35 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
       {/* Assistant text — strip relay prefix, then strip the structured
           `<delegate>` / `<plan>` directives to plain prose. Delegations surface
           as durable BoardTaskCards (group chat) — never inline here — so the
-          leader's committed turn renders as clean prose. `max-w-prose` (~65ch)
-          caps line length to the optimal reading measure. */}
+          leader's committed turn renders as clean prose. In a one-to-one chat
+          nothing acts on a `<delegate>`, so each one shows as a not-handed-off
+          note instead of vanishing. `max-w-prose` (~65ch) caps line length to
+          the optimal reading measure. */}
       {hasText && (
         <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-            {stripPlanBlocks(
-              stripDelegationBlocks(
-                isRelay ? stripRelayPrefix(block.assistant!.text) : block.assistant!.text,
+          {handOffs === 'not-handed-off' ? (
+            segments.map((segment, idx) =>
+              segment.kind === 'delegation' ? (
+                <NotHandedOffNote
+                  key={`handoff-${idx}`}
+                  targetName={segment.targetName}
+                  task={segment.task}
+                />
+              ) : (
+                <ReactMarkdown
+                  key={`prose-${idx}`}
+                  remarkPlugins={[remarkGfm]}
+                  components={MD_COMPONENTS}
+                >
+                  {segment.text}
+                </ReactMarkdown>
               ),
-            )}
-          </ReactMarkdown>
+            )
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
+              {stripPlanBlocks(stripDelegationBlocks(shownText))}
+            </ReactMarkdown>
+          )}
         </div>
       )}
 
@@ -1024,10 +1094,14 @@ export const StreamingCard = memo(function StreamingCard({
   text,
   agentId,
   agentName,
+  handOffs = 'card',
 }: {
   text: string
   agentId: string
   agentName: string
+  /** How `<delegate>` blocks are drawn (see {@link HandOffDisplay}). The group
+   *  chat shares this card, so the default stays the "Delegated to" card. */
+  handOffs?: HandOffDisplay
 }) {
   const hasText = Boolean(text.trim())
   // Split out completed `<delegate>` blocks during streaming. A partial /
@@ -1050,11 +1124,19 @@ export const StreamingCard = memo(function StreamingCard({
         <div className="flex max-w-prose flex-col gap-2 text-[13px] leading-relaxed text-foreground opacity-80">
           {segments.map((segment, idx) =>
             segment.kind === 'delegation' ? (
-              <DelegationCard
-                key={`stream-delegation-${idx}`}
-                targetName={segment.targetName}
-                task={segment.task}
-              />
+              handOffs === 'not-handed-off' ? (
+                <NotHandedOffNote
+                  key={`stream-handoff-${idx}`}
+                  targetName={segment.targetName}
+                  task={segment.task}
+                />
+              ) : (
+                <DelegationCard
+                  key={`stream-delegation-${idx}`}
+                  targetName={segment.targetName}
+                  task={segment.task}
+                />
+              )
             ) : (
               // Render streaming prose with the same
               // ReactMarkdown pipeline used by `AssistantTurnCard` so bold /
@@ -1444,6 +1526,8 @@ export function LoadEarlierButton({
   )
 }
 
+/** The one-to-one chat's transcript. Nothing in a 1:1 chat acts on a
+ *  `<delegate>` tag, so its blocks show as not-handed-off notes here. */
 export const MessageList = memo(function MessageList({
   blocks,
   streamingText,
@@ -1552,6 +1636,7 @@ export const MessageList = memo(function MessageList({
                     agentName={agentName}
                     streaming={isRunning && i === blocks.length - 1 && !showLive}
                     isFollowup={isFollowup}
+                    handOffs="not-handed-off"
                   />
                 </div>
               )
@@ -1575,6 +1660,7 @@ export const MessageList = memo(function MessageList({
                       text={streamingText ?? ''}
                       agentId={agentId}
                       agentName={agentName}
+                      handOffs="not-handed-off"
                     />
                   </div>
                 )

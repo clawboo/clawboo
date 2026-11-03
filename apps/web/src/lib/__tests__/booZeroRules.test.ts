@@ -60,6 +60,31 @@ describe('buildBooZeroRulesBlock', () => {
     expect(out).toMatch(/AGENTS\.md|CLAWBOO\.md/i)
   })
 
+  it('in the 1:1 chat, says plainly that hand-offs are off and teaches no routing syntax', () => {
+    // Nothing in the 1:1 chat acts on a `<delegate>` tag: no board, no engine.
+    // Teaching the tag there made Boo Zero promise hand-offs that never started.
+    const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero' })
+    expect(out).toMatch(/hand-offs are off here/i)
+    expect(out).not.toContain('<delegate to=')
+    expect(out).not.toMatch(/ONLY routing mechanism/i)
+    expect(out).not.toContain('<plan><step')
+    // Its read-once files still teach the tag, so the anchor overrides them here.
+    expect(out).toMatch(
+      /overrides the delegation instructions in your `AGENTS\.md` \/ `CLAWBOO\.md`/,
+    )
+    // It sends the person to the team's chat instead.
+    expect(out).toMatch(/that team.s chat/i)
+    // The identity and no-sub-agent rules hold in both chats.
+    expect(out).toContain('You are Boo Zero.')
+    expect(out).toMatch(/never spawn sub-agents/i)
+  })
+
+  it('in a team chat, still teaches the routing syntax', () => {
+    const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero', teamName: 'Demo Team' })
+    expect(out).toContain('<delegate to="@AgentName">')
+    expect(out).not.toMatch(/hand-offs are off/i)
+  })
+
   it('is deterministic — same params produce identical output (prompt cache safe)', () => {
     const a = buildBooZeroRulesBlock({ displayName: 'X', teamName: 'Y' })
     const b = buildBooZeroRulesBlock({ displayName: 'X', teamName: 'Y' })
@@ -72,5 +97,6 @@ describe('buildBooZeroRulesBlock', () => {
       teamName: 'A Sample Team With A Reasonable Length',
     })
     expect(out.length).toBeLessThan(2500)
+    expect(buildBooZeroRulesBlock({ displayName: 'Boo Zero' }).length).toBeLessThan(2500)
   })
 })

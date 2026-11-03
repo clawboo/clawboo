@@ -235,7 +235,7 @@ A runner rerun that does not start (the runner refuses it, for example because a
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), or `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`).
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), or `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`). A task filed under a room that no longer exists gets `no_team`: rooms are removed only with their team, so there is no chat left to run it.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -264,7 +264,7 @@ A task with `runnerInputs` starts through the task runner, on the new agent's ru
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `no_team`, or `not_assignable` (the task is being worked on, finished, cancelled or dropped).
+**`409 Conflict`**: `no_team`, `not_assignable` (the task is being worked on, finished, cancelled or dropped), or `room_archived` (as for `retry`: it would start in team chat but is still filed under an archived chat room). `no_team` also covers a task whose room went with its team. A refusal binds nothing and writes no note.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -491,7 +491,7 @@ A `user` comment is a person's reply. After the comment is saved, the route deli
    - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits in the mailbox. A `todo` task that a reply started less than 15 seconds ago is not dispatched again.
    - `in_review` and `backlog`: the reply waits in the mailbox.
 
-A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run.
+A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run. A reply that would start the task again in team chat (a `blocked` or `todo` task, or a stranded `in_progress` one) is not delivered when the task is still filed under an archived chat room (`not-delivered`, `room_archived`), or under a room that went with its team (`no_team`). The comment stays saved; the mailbox and the task are left as they were.
 
 - **Path params**: `taskId`.
 - **Request body**:
@@ -534,23 +534,25 @@ A task with no team, or one whose move back to `todo` is refused, is not started
     | {
         status: 'not-delivered'
         agentId: string | null
-        reason: 'finished' | 'unassigned' | 'failed'
+        reason: 'finished' | 'unassigned' | 'failed' | 'room_archived' | 'no_team'
       }
 }
 ```
 
 `delivery` says where a person's reply went. `agentId` is the agent the task belongs to.
 
-| `status`        | `reason`     | Meaning                                                                                                                                                        |
-| --------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `steered`       |              | The reply got into the run working on the task                                                                                                                 |
-| `woke-agent`    |              | The task was started again for the reply, or a reply less than 15 seconds earlier already started it                                                           |
-| `queued`        | `next-run`   | The reply is in the mailbox for the agent's next run, for example on a `backlog` task, or on an `in_progress` task whose steer did not land within 2.5 seconds |
-| `queued`        | `in-review`  | The task is `in_review`; the agent reads the reply after the check                                                                                             |
-| `queued`        | `waiting`    | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                      |
-| `not-delivered` | `finished`   | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                           |
-| `not-delivered` | `unassigned` | No agent has the task, and `agentId` is `null`                                                                                                                 |
-| `not-delivered` | `failed`     | Writing to the mailbox or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                     |
+| `status`        | `reason`        | Meaning                                                                                                                                                        |
+| --------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `steered`       |                 | The reply got into the run working on the task                                                                                                                 |
+| `woke-agent`    |                 | The task was started again for the reply, or a reply less than 15 seconds earlier already started it                                                           |
+| `queued`        | `next-run`      | The reply is in the mailbox for the agent's next run, for example on a `backlog` task, or on an `in_progress` task whose steer did not land within 2.5 seconds |
+| `queued`        | `in-review`     | The task is `in_review`; the agent reads the reply after the check                                                                                             |
+| `queued`        | `waiting`       | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                      |
+| `not-delivered` | `finished`      | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                           |
+| `not-delivered` | `unassigned`    | No agent has the task, and `agentId` is `null`                                                                                                                 |
+| `not-delivered` | `failed`        | Writing to the mailbox or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                     |
+| `not-delivered` | `room_archived` | The task would start in team chat but is still filed under an archived chat room, so nothing could run it. The comment is saved and nothing is sent            |
+| `not-delivered` | `no_team`       | The task would start in team chat but its room went with its team, so no chat is left to run it. The comment is saved and nothing is sent                      |
 
 For a `finished` reply, the dashboard offers **Send as a follow-up task**, which calls `POST /api/board` (above) with `title: "Follow up: <title>"`, the reply as `description`, the same `teamId` and `assigneeAgentId`, and the finished task as `parentTaskId`.
 
@@ -1249,7 +1251,7 @@ curl -I http://localhost:18790/api/board/<task-id>/preview/dist/app.css
 Most error bodies are `{ "error": "<message>" }`. The exceptions:
 
 - Validation `400`s add `details` (the zod `flatten()` output): `{ "error": "invalid body", "details": {...} }`, or `invalid handoff` on the handoff route.
-- `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
+- `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`, `room_archived`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
 - The workspace file view adds `reason` to its misses and answers a refused path with `{ "ok": false, "error": "<message>" }`.
 - The preview routes answer `{ "ok": false, "error": "<message>" }` on `400`, `404` and `413`.
 - `GET /api/board/:taskId/workspace` and `/workspace/detail` answer a missing workspace with a bare `{ "error": "workspace not found" }`.

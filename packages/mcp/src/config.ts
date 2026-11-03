@@ -32,6 +32,9 @@ export interface AttachScope {
    * team-scoped but nothing observes delegation there, so exposing the tool on
    * scope alone would let the model "delegate" into a silent no-op (the exact
    * failure the native-LOCAL delegate tool exists to avoid).
+   *
+   * The same run's Tasks URL carries `teamRun=1`: the engine owns that run's
+   * claims and statuses, so the Tasks server withholds those tools.
    */
   delegate?: boolean
   /**
@@ -91,6 +94,12 @@ export function mcpHttpUrl(
   // one, the verification critic's) has none, so it carries the access token
   // alone rather than a signature over nothing.
   const claimsScope = Boolean(scope.teamId || scope.agentId || scope.tenantId)
+  // A run the team engine drives (`teamRun=1`, inside the signature). The Tasks
+  // server withholds the writes the engine owns from such a run. The mark rides
+  // the Memory and Tools URLs too, so no URL a team run holds signs a plain
+  // team-and-agent scope: one that did would verify on the Tasks mount as a run
+  // the engine does not drive, and win back every write.
+  const teamRun = scope.delegate === true
   if (server === 'memory') {
     // Memory: the run's VISIBILITY scope + provenance-only stamps (see
     // AttachScope — prov* never widen visibility).
@@ -104,24 +113,27 @@ export function mcpHttpUrl(
     if (scope.sessionKey) p.set('provSessionKey', scope.sessionKey)
     if (scope.attachSecret && (scope.runtime || scope.taskId || scope.sessionKey))
       p.set('provSig', signAttachProvenance(scope.attachSecret, scope))
+    if (teamRun) p.set('teamRun', '1')
     // The signature covers what THIS URL claims. Memory never carries a
     // `delegate` param, so it signs delegate:false even for an orchestrated run —
     // otherwise the verifier, reconstructing scope from the params, could never
     // match, and a legitimate attach would be silently unbound.
     if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
+      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
   } else if (server === 'tasks') {
     // Tasks: the run's TEAM, so a bare `list_tasks` returns this team's board.
     // An agent is never told its own teamId, so an unbound bare call would hand
     // it every team's tasks — useless for "don't duplicate a teammate's work".
-    // Reads only; the write tools are unaffected. The agentId enables the
-    // mid-run inbox piggyback (undelivered mailbox rows ride tool responses).
+    // The agentId enables the mid-run inbox piggyback (undelivered mailbox rows
+    // ride tool responses) and makes `claim_task` claim as that agent.
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
+    if (teamRun) p.set('teamRun', '1')
     // Tasks never grants delegation, so its signature pins delegate:false — a
     // signed tasks URL replayed onto teamchat with delegate=1 must not verify.
+    // `teamRun` is inside the signature: stripping it would win back the writes.
     if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
+      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
   } else if (server === 'teamchat') {
     // TeamChat: the run's room + AUTHOR IDENTITY (anti-spoof). The URL is
     // clawboo-written config, so the runtime can't post as a peer it isn't.
@@ -145,8 +157,9 @@ export function mcpHttpUrl(
     // so a tools URL replayed onto teamchat with `delegate=1` cannot verify.
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
+    if (teamRun) p.set('teamRun', '1')
     if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false }))
+      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
   }
   // On every server's URL, scoped or not: the access gate refuses a cookieless
   // /api/mcp/* request without it (see `signAttachAccess`).

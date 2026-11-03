@@ -18,6 +18,7 @@ Use this page to find the how-to for what you want to do, and to learn where thi
 | Look through ready-made teams, agents and skills before I deploy one | [Marketplace](/using/marketplace)     |
 | Add one agent, or change an agent's model, personality or files      | [Agents](/using/agents)               |
 | Set rules that every member of a team follows                        | [Team rules](/using/teams#team-rules) |
+| Set the command that checks the team's work, such as `npm test`      | [Work check](/using/teams#work-check) |
 | Understand how Boo Zero, my team leader, coordinates every team      | [Boo Zero](/using/boo-zero)           |
 
 ### Work with your team

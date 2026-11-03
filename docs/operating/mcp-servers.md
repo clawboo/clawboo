@@ -36,7 +36,7 @@ TeamChat serves the team's peer room, where agents talk to each other; the dashb
 | Claude Code, Codex, Hermes | Over HTTP, with URLs Clawboo signs for each run                                        | All four servers, bound to the run's team and agent                                          |
 | OpenClaw                   | Over HTTP, with one set of URLs in the Gateway's config that all OpenClaw agents share | Tasks, Memory and Tools; no TeamChat                                                         |
 
-OpenClaw's URLs carry no agent identity, so OpenClaw agents attach as unsigned callers (see [What an attached agent can do](#what-an-attached-agent-can-do)). They read and save global memory only, cannot use `claim_task` or `assign_task`, and no agent's connector grants apply to them, so their connector calls ask you for approval. Only a Gateway on the same machine gets the attach token; a Gateway on another machine cannot reach these URLs, which point at `127.0.0.1`.
+OpenClaw's URLs carry no agent identity, so OpenClaw agents attach as unsigned callers (see [What an attached agent can do](#what-an-attached-agent-can-do)). They read and save global memory only, cannot claim tasks or change a task's status, and no agent's connector grants apply to them, so their connector calls ask you for approval. Only a Gateway on the same machine gets the attach token; a Gateway on another machine cannot reach these URLs, which point at `127.0.0.1`.
 
 ## Attach an outside agent
 
@@ -128,14 +128,16 @@ Do not sign the URL for the id of an agent Clawboo also runs. The outside agent 
 
 What an agent may do depends on the URL it attaches with. A URL counts as signed only when its `scopeSig` matches the ids in it. A URL without a signature, or with any id edited by hand, is served as unsigned, and so is the default snippet you get without `scopeTeamId` or `scopeAgentId`.
 
-| Server   | Unsigned URL                                                                                                  | Signed for a team                                      | Signed for a team and an agent                                               |
-| -------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------- |
-| Tasks    | Every team's board. Every tool except `claim_task` and `assign_task`; comments post as a plain agent comment. | That team's board only, with every tool.               | The same, and the agent's undelivered team notices arrive with tool results. |
-| Memory   | Global facts only. Saves go to the global tier, with no author recorded.                                      | Team and global facts. Saves are shared with the team. | The same, plus that agent's own facts.                                       |
-| Tools    | Built-in tools. Connectors granted to an agent or a team do not apply.                                        | Adds connectors granted to the team.                   | Adds connectors granted to that agent.                                       |
-| TeamChat | No tools.                                                                                                     | No tools: TeamChat needs an agent too.                 | Posts and reads as that agent in the team's peer room.                       |
+| Server   | Unsigned URL                                                                                                                                                                                  | Signed for a team                                      | Signed for a team and an agent                                                                                   |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Tasks    | Every team's board. No claims and no status writes (`claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `unblock_task`); comments post as a plain agent comment. | That team's board only, with every tool.               | The same, and the agent's undelivered team notices arrive with tool results. `claim_task` claims for that agent. |
+| Memory   | Global facts only. Saves go to the global tier, with no author recorded.                                                                                                                      | Team and global facts. Saves are shared with the team. | The same, plus that agent's own facts.                                                                           |
+| Tools    | Built-in tools. Connectors granted to an agent or a team do not apply.                                                                                                                        | Adds connectors granted to the team.                   | Adds connectors granted to that agent.                                                                           |
+| TeamChat | No tools.                                                                                                                                                                                     | No tools: TeamChat needs an agent too.                 | Posts and reads as that agent in the team's peer room.                                                           |
 
 A stdio bin is different: it runs as you, the operator. Tasks, Memory and TeamChat take the team and agent from each call's arguments, and Tasks offers all of its tools.
+
+The runs Clawboo starts for a team chat (a turn, a hand-off, a plan step) carry one more signed mark, `teamRun=1`, on their Tasks, Memory and Tools URLs. The team engine claims and moves those tasks itself, so those runs get no claims and no status writes except `block_task` on the agent's own task. The mark is inside the signature, and no URL such a run holds is signed without it, so a runtime that edits its own config cannot win the writes back. You cannot mint such a URL from `/api/mcp/config`.
 
 ## The attach token
 
@@ -198,7 +200,7 @@ With a global npm install the bins are on your `PATH` too, so `clawboo-mcp-tasks
 
 ## Check it works
 
-- **List the tools.** In your agent, list the tools `clawboo-tasks` offers. A signed URL offers 12; an unsigned one offers 10, without `claim_task` and `assign_task`.
+- **List the tools.** In your agent, list the tools `clawboo-tasks` offers. A signed URL offers 12; an unsigned one offers 6, without the claim and status tools.
 - **Same board.** Create a task in the dashboard, then have the agent call `list_tasks`. The task should appear. If it does not appear over stdio, check `CLAWBOO_DB_PATH`.
 - **Peer room.** After the agent calls `team_chat_post`, read the peer room with `GET /api/team-chat?teamId=<team-id>`. The post should be there under the agent id you signed. `team_chat_subscribe` never returns an agent's own posts, and it marks teammates' posts `isUser=false` so they read as evidence, not instructions; see [Peer chat](/concepts/peer-chat).
 
@@ -227,7 +229,7 @@ curl -s -X POST "$URL" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-This URL carries no scope, so the list has no `claim_task` or `assign_task`.
+This URL carries no scope, so the list has no claim or status tools.
 
 </Accordion>
 
@@ -262,11 +264,11 @@ This URL carries no scope, so the list has no `claim_task` or `assign_task`.
 **Fix:** open a session with `initialize` first, and send its `mcp-session-id`.
 
 </Accordion>
-<Accordion title="claim_task is missing, or TeamChat lists no tools">
+<Accordion title="claim_task or update_task_status is missing, or TeamChat lists no tools">
 
-**What it means:** the URL is unsigned. TeamChat also stays empty for a URL signed with a team but no agent.
+**What it means:** on a team run, this is by design: the team engine claims and moves the run's task itself, so a team run gets no claim or status tools, only `block_task` for its own task. Otherwise the URL is unsigned. TeamChat also stays empty for a URL signed with a team but no agent.
 
-**Fix:** get the URL from `/api/mcp/config` with `scopeTeamId`, and with `scopeAgentId` for TeamChat. Do not edit the ids in a signed URL.
+**Fix:** nothing to fix on a team run. Otherwise get the URL from `/api/mcp/config` with `scopeTeamId`, and with `scopeAgentId` for TeamChat. Do not edit the ids in a signed URL.
 
 </Accordion>
 <Accordion title="A stdio agent sees an empty board">

@@ -2364,4 +2364,174 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       })
     })
   })
+
+  // ─── A delegate that blocks its own task (K5) ────
+  // On a team run the agent may block the task it is working on, when it cannot
+  // go on without a person. Its run then ends normally. That ending used to fail
+  // the `done` write (blocked to done is illegal) and land in the "released or
+  // reassigned" branch: the run was closed `cancelled`, which the fire policy
+  // reads as a user Stop, and the delegator heard the result arrived too late.
+  describe('createBoardOrchestrator: a delegate that blocked its own task', () => {
+    it('keeps the task blocked and tells the delegator why, as a blocked task', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">fix the parser</delegate>'),
+      )
+      const t1 = idsOf(board)[0]!
+      // Mid-run, the agent's own `block_task`.
+      expect(await board.updateStatus(t1, 'blocked')).toBe(true)
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'I need the API key to go on.'))
+
+      expect(board.statusOf(t1)).toBe('blocked')
+      expect(board.completed).toHaveLength(1)
+      expect(board.completed[0]!.outcome.status).toBe('succeeded')
+      expect(board.comments.some((c) => c.taskId === t1 && c.body.includes('API key'))).toBe(true)
+
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered)
+      expect(refl).toHaveLength(1)
+      expect(refl[0]!.sessionKey).toBe(sk('leader'))
+      expect(refl[0]!.task).toContain('blocked')
+      expect(refl[0]!.task).toContain('I need the API key to go on.')
+      expect(refl[0]!.task).not.toMatch(/released|reassigned/)
+    })
+
+    it('leaves the steps waiting on it queued, so a Retry carries the plan on', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<plan><step to="@Bug Boo">s1</step><step to="@Design Boo">s2</step></plan>',
+        ),
+      )
+      const [s1, s2] = idsOf(board)
+      expect(await board.updateStatus(s1!, 'blocked')).toBe(true)
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Blocked on access.'))
+      expect(board.statusOf(s1!)).toBe('blocked')
+      expect(board.statusOf(s2!)).toBe('todo')
+
+      // The person's Retry: back to To do, run again, done. Step 2 then starts.
+      expect(await board.updateStatus(s1!, 'todo')).toBe(true)
+      expect(await orchestrator.dispatchTask(s1!)).toBe('started')
+      await orchestrator.onEvent(sk('a2'), doneEvent('r3', 'Got access, step one done.'))
+      expect(board.statusOf(s1!)).toBe('done')
+      expect(delivered.at(-1)).toMatchObject({ agentId: 'a3', task: 's2' })
+    })
+  })
+
+  // ─── A hand-off nobody can take (K8) ────
+  // Both delegate tools answer before the engine acts. For a name the engine
+  // could not match to a teammate, or the sender itself, nothing was created and
+  // nothing came back: the sender read its tool's answer and waited forever.
+  describe('createBoardOrchestrator: a hand-off that names no teammate', () => {
+    const calls: Array<[string, Record<string, string>]> = [
+      ['delegate', { assignee: 'Researcher', task: 'find the numbers' }],
+      ['team_delegate', { assignee: 'Researcher', task: 'find the numbers' }],
+      [
+        'mcp__clawboo-teamchat__team_delegate',
+        { assignee: 'Researcher', task: 'find the numbers' },
+      ],
+    ]
+
+    it.each(calls)(
+      'a %s call to an unknown name tells the sender it did not start',
+      async (name, input) => {
+        const { board, delivered, orchestrator } = makeHarness()
+        await orchestrator.onEvent(sk('leader'), toolCallEvent('r1', name, input))
+        expect(board.taskCount()).toBe(0)
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const refl = reflections(delivered)
+        expect(refl).toHaveLength(1)
+        expect(refl[0]!.sessionKey).toBe(sk('leader'))
+        expect(refl[0]!.task).toContain('"Researcher"')
+        expect(refl[0]!.task).toContain('did not start')
+        // It names who the sender can hand work to.
+        expect(refl[0]!.task).toContain('Bug Boo, Design Boo, Test Boo')
+      },
+    )
+
+    it('a sessions_send to no teammate says no board task was made, and leaves the delivery to OpenClaw', async () => {
+      // OpenClaw's own tool answers for itself and may have delivered the message
+      // to a session outside the room, so the note must not say nothing comes back.
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'sessions_send', { label: 'Researcher', message: 'find the numbers' }),
+      )
+      expect(board.taskCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered)
+      expect(refl).toHaveLength(1)
+      expect(refl[0]!.task).toContain('"Researcher"')
+      expect(refl[0]!.task).toContain('no board task was made')
+      expect(refl[0]!.task).toContain('through OpenClaw')
+      expect(refl[0]!.task).toContain('Bug Boo, Design Boo, Test Boo')
+    })
+
+    it('a hand-off to the sender itself tells the sender it did not start', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'delegate', { assignee: 'Boo Zero', task: 'do it' }),
+      )
+      expect(board.taskCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const refl = reflections(delivered)
+      expect(refl).toHaveLength(1)
+      expect(refl[0]!.task).toContain('yourself')
+      expect(refl[0]!.task).toContain('did not start')
+    })
+
+    it('says so once for one call, even when the same event is seen twice', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      const ev = toolCallEvent('r1', 'delegate', { assignee: 'Researcher', task: 'find it' })
+      await orchestrator.onEvent(sk('leader'), ev)
+      await orchestrator.onEvent(sk('leader'), ev)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toHaveLength(1)
+    })
+
+    it('is not told again when a later run repeats the same hand-off (no refusal loop)', async () => {
+      // The refusal arrives as a new turn. A sender that repeats the same bad
+      // hand-off in it is not handed another one.
+      const { delivered, orchestrator } = makeHarness()
+      const call = { assignee: 'Researcher', task: 'find it' }
+      await orchestrator.onEvent(sk('leader'), toolCallEvent('r1', 'delegate', call))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(sk('leader'), toolCallEvent('r2', 'delegate', call))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toHaveLength(1)
+    })
+
+    it('tells the sender about each different task, even when two begin the same way', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      const opening = 'Collect the numbers for the quarterly board report, every region, '.repeat(2)
+      for (const [run, tail] of [
+        ['r1', 'then chart revenue'],
+        ['r2', 'then chart churn'],
+      ] as const)
+        await orchestrator.onEvent(
+          sk('leader'),
+          toolCallEvent(run, 'delegate', { assignee: 'Researcher', task: opening + tail }),
+        )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const told = reflections(delivered)
+        .map((r) => r.task)
+        .join('\n')
+      expect(told.match(/did not start/g)).toHaveLength(2)
+    })
+
+    it('a hand-off to a teammate still starts, with no refusal', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'team_delegate', { assignee: 'Bug Boo', task: 'fix it' }),
+      )
+      expect(board.taskCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toHaveLength(0)
+    })
+  })
 }

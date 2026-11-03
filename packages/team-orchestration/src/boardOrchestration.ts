@@ -161,11 +161,27 @@ export interface DelegationSignal {
   task: string
 }
 
+/** A hand-off tool call that names no one the engine can give the work to. */
+export interface UnroutedHandOff {
+  /** The name (or id, or session key) the call gave, as written. */
+  name: string
+  task: string
+  /** `unknown`: no teammate in the room matches it. `self`: it is the sender. */
+  reason: 'unknown' | 'self'
+  /** Which tool: a Clawboo delegate tool, which only signals the engine, or
+   *  OpenClaw's own `sessions_send`, which may have delivered the message to a
+   *  session outside the room itself. */
+  via: 'delegate' | 'sessions_send'
+}
+
 export interface ExtractedSignals {
   /** Independent delegations — fire all immediately (fan-out = length ≥ 2). */
   parallel: DelegationSignal[]
   /** Ordered plan steps — durable dep chain; the ready-pump fires the next. */
   plan: DelegationSignal[]
+  /** Hand-off tool calls the engine cannot route. The tools answer before the
+   *  engine acts, so the sender is told here or it waits forever. */
+  unrouted: UnroutedHandOff[]
 }
 
 /**
@@ -200,7 +216,7 @@ export interface BoardChange {
  */
 export type NarrationKind = 'reflect' | 'alert'
 
-const EMPTY: ExtractedSignals = { parallel: [], plan: [] }
+const EMPTY: ExtractedSignals = { parallel: [], plan: [], unrouted: [] }
 const SESSIONS_SEND_NAME_RE = /sessions[._]send/i
 // A structured `delegate` tool-call — the native runtime's team-delegation signal
 // (its analog of `sessions_send`, which is OpenClaw-specific). The engine observes
@@ -252,6 +268,33 @@ function paramsFromDelegateInput(input: unknown): SessionsSendParams | null {
   return params
 }
 
+/** One hand-off tool call, resolved against the roster: a delegation to spawn,
+ *  or the reason it cannot be routed. */
+function handOffSignals(
+  params: SessionsSendParams,
+  sourceAgentId: string,
+  known: KnownAgent[],
+  via: UnroutedHandOff['via'],
+): ExtractedSignals {
+  const target = resolveSessionsSendTarget(params, known)
+  if (!target || target.id === sourceAgentId) {
+    const name = (params.label ?? params.agentId ?? params.sessionKey ?? '').trim()
+    // A call that names no one: the tool itself refuses it, so the sender
+    // already knows.
+    if (!target && !name) return EMPTY
+    return {
+      parallel: [],
+      plan: [],
+      unrouted: [{ name, task: params.message, reason: target ? 'self' : 'unknown', via }],
+    }
+  }
+  return {
+    parallel: [{ targetAgentId: target.id, targetAgentName: target.name, task: params.message }],
+    plan: [],
+    unrouted: [],
+  }
+}
+
 /**
  * Read structured delegation signals from a single typed event. NO prose
  * scraping: only a `sessions_send` tool-call (primary) or `<delegate>` / `<plan>`
@@ -265,27 +308,18 @@ export function extractSignals(
   if (event.kind === 'tool-call' && SESSIONS_SEND_NAME_RE.test(event.name)) {
     const params = paramsFromToolInput(event.input)
     if (!params) return EMPTY
-    const target = resolveSessionsSendTarget(params, known)
-    if (!target || target.id === sourceAgentId) return EMPTY
-    return {
-      parallel: [{ targetAgentId: target.id, targetAgentName: target.name, task: params.message }],
-      plan: [],
-    }
+    return handOffSignals(params, sourceAgentId, known, 'sessions_send')
   }
 
   // A native `delegate` tool-call — the trusted, engine-observed delegation signal
   // for native (and any future MCP-`delegate`) runtimes. Same contract as the
-  // sessions_send branch: resolve the target against the roster, skip self /
-  // unknown, and turn it into one parallel delegation the engine spawns.
+  // sessions_send branch: resolve the target against the roster and turn it into
+  // one parallel delegation the engine spawns; an unknown or self target is
+  // reported back to the sender instead.
   if (event.kind === 'tool-call' && DELEGATE_TOOL_NAME_RE.test(event.name)) {
     const params = paramsFromDelegateInput(event.input)
     if (!params) return EMPTY
-    const target = resolveSessionsSendTarget(params, known)
-    if (!target || target.id === sourceAgentId) return EMPTY
-    return {
-      parallel: [{ targetAgentId: target.id, targetAgentName: target.name, task: params.message }],
-      plan: [],
-    }
+    return handOffSignals(params, sourceAgentId, known, 'delegate')
   }
 
   if (event.kind === 'done' && event.summary) {
@@ -302,7 +336,7 @@ export function extractSignals(
             steps.push({ targetAgentId: target.id, targetAgentName: target.name, task: step.task })
         }
       }
-      return { parallel: [], plan: steps }
+      return { parallel: [], plan: steps, unrouted: [] }
     }
     const intents = parseStructuredDelegations(event.summary, sourceAgentId, known)
     return {
@@ -312,6 +346,7 @@ export function extractSignals(
         task: d.taskDescription,
       })),
       plan: [],
+      unrouted: [],
     }
   }
 
@@ -785,6 +820,40 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (sessionToTask.get(sessionKey) !== taskId) return
     if (deps.stopGen() !== startGen) await releaseClaimed(taskId, sessionKey)
     else lastActivityAt.set(sessionKey, now())
+  }
+
+  /** Tell the sender of a hand-off nobody can take that it did not start, and
+   *  who it can hand work to instead. */
+  function reflectUnrouted(
+    handOff: UnroutedHandOff,
+    sourceAgentId: string,
+    delegatorAgentId: string | null,
+    sourceTaskId: string | null,
+  ): void {
+    const mates = deps
+      .known()
+      .filter((a) => a.id !== sourceAgentId)
+      .map((a) => a.name)
+    const instead =
+      mates.length > 0
+        ? `You can hand work to: ${mates.join(', ')}.`
+        : 'There is no one else in this room to hand work to.'
+    // OpenClaw's `sessions_send` answers for itself, and may have delivered the
+    // message to a session outside the room, so its note claims only the board.
+    const summary =
+      handOff.via === 'sessions_send'
+        ? `${handOff.reason === 'self' ? 'You sent this to yourself' : `No teammate in this room is called "${handOff.name}"`}, so no board task was made for it. If OpenClaw delivered it to another session, any answer comes back through OpenClaw, not the board. ${instead}`
+        : handOff.reason === 'self'
+          ? `You handed this to yourself, so the board did not start it. Do it yourself, or hand it to a teammate. ${instead}`
+          : `No teammate here is called "${handOff.name}", so the board did not start this hand-off and nothing will report back to you. ${instead}`
+    enqueueReflection({
+      toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
+      by: handOff.reason === 'self' ? nameOf(sourceAgentId || null) : handOff.name || 'No one',
+      title: handOff.task.slice(0, 80),
+      summary,
+      outcome: 'error',
+      ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+    })
   }
 
   /** Create + claim + open-execution + deliver a single immediate delegation.
@@ -1461,6 +1530,39 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       taskTitle.delete(taskId)
       return
     }
+    // The agent blocked its own task during this run (its `block_task`): it
+    // cannot go on without a person. A person's block reaches the engine first
+    // (`personMovedTask` stops the run and forgets its session), so a task still
+    // mapped here was blocked from inside the run. The run itself ended normally,
+    // so its execution succeeded; the card stays blocked, the result is kept, and
+    // the delegator hears that the task waits on a person. The steps waiting on
+    // it stay queued, so a person's Retry carries the plan on.
+    if ((await deps.board.getTask(taskId))?.task.status === 'blocked') {
+      const execId = taskToExec.get(taskId)
+      if (execId) {
+        taskToExec.delete(taskId)
+        await deps.board.completeExecution(execId, { status: 'succeeded', summary: trimmed })
+      }
+      if (trimmed) await deps.board.addComment(taskId, trimmed, 'agent', agentId ?? undefined)
+      emit({ id: taskId, status: 'blocked', summary: trimmed, updatedAt: now() })
+      if (!stopped && !human) {
+        const to = reflectTargetFor(taskId)
+        const scope = await followUpScopeOf(taskId, to)
+        enqueueReflection({
+          toAgentId: to,
+          by,
+          title,
+          summary: trimmed || `${by} did not say why.`,
+          outcome: 'blocked',
+          taskId,
+          ...(scope ? { forTaskId: scope } : {}),
+        })
+      }
+      taskReflectTo.delete(taskId)
+      taskTitle.delete(taskId)
+      if (!stopped) await pumpReady(sessionKey)
+      return
+    }
     const ok = await deps.board.updateStatus(taskId, 'done')
     if (!ok) {
       // The task was released/reassigned out from under us (e.g. the server stale
@@ -1990,6 +2092,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         processed.set(planId, now())
         await startPlan(signals.plan, sourceTaskId, delegatorAgentId, runId)
       }
+    }
+
+    // A hand-off tool call the engine cannot route. The tool already answered
+    // that the work was queued, so without this the sender waits forever on a
+    // task that was never made. Once per sender, name and task while the dedupe
+    // entry lives, not once per run: the refusal arrives as a new turn, and a
+    // sender that repeats the same bad hand-off in it gets no second one.
+    for (const handOff of signals.unrouted) {
+      const key = `unrouted:${sourceAgentId}:${handOff.name}:${handOff.task}`
+      if (processed.has(key)) continue
+      processed.set(key, now())
+      reflectUnrouted(handOff, sourceAgentId, delegatorAgentId, sourceTaskId)
     }
 
     // Parse-failed-intent: the turn LOOKS like a delegation attempt (a

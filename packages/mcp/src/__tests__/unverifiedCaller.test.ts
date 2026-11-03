@@ -132,14 +132,18 @@ describe('tasks — unverified caller', () => {
     expect(names).not.toContain('assign_task')
   })
 
-  it('KEEPS the anonymous board writes', async () => {
-    // Deliberately narrow. Serving readOnly here would have been the easy call
-    // and would have taken board editing away to close a three-tool hole.
+  it('KEEPS the board writes that move no card', async () => {
+    // Serving readOnly here would have taken creating, commenting and linking
+    // away too. Only the writes that need to know who is calling are withheld:
+    // the claims, and the status writes (see tasks/__tests__/teamRun.test.ts).
     const names = await listToolNames(
       await connectInMemory(createTasksServer(db, { unverifiedCaller: true })),
     )
-    for (const kept of ['list_tasks', 'get_task', 'create_task', 'update_task_status']) {
+    for (const kept of ['list_tasks', 'get_task', 'create_task', 'add_comment', 'link_task']) {
       expect(names).toContain(kept)
+    }
+    for (const withheld of ['update_task_status', 'block_task', 'unblock_task', 'release_task']) {
+      expect(names).not.toContain(withheld)
     }
   })
 

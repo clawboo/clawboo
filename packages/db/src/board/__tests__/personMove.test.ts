@@ -158,6 +158,13 @@ describe('updateStatus: the finish time is written once', () => {
     )
     expect(getTask(db, t.id)?.completedAt).toBe(CREATED_AT + 4 * MIN)
   })
+
+  it('reports the status each write moved the task from', () => {
+    // Read in the write itself, so of two cancels racing only one sees a move.
+    const t = taskCreatedThen(CREATED_AT + MIN)
+    expect(updateStatus(db, t.id, 'cancelled').from).toBe('in_progress')
+    expect(updateStatus(db, t.id, 'cancelled').from).toBe('cancelled')
+  })
 })
 
 describe('updateStatus: who moved the card', () => {

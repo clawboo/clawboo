@@ -45,9 +45,13 @@ Each server is a thin layer over `@clawboo/db`: the handlers call its repository
 to anyone changing them:
 
 - **Tasks.** `readOnly` serves only `list_tasks` and `get_task`; Clawboo Native uses it for an agent whose Tasks
-  access is set to read. A bound team scope forces `list_tasks` to that team and makes `get_task` refuse another
-  team's task. A lost claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep)
-  come back as tool errors the model should not retry.
+  access is set to read. `teamRun` is set for a run the team engine drives (signed `teamRun=1` on its Tasks, Memory and Tools URLs; Clawboo Native sets it in-process):
+  it leaves out `claim_task`, `assign_task`, `release_task`, `update_task_status` and `unblock_task`, and lets
+  `block_task` block only the bound agent's own task. A bound agent's `claim_task` claims for that agent. A bound
+  team scope forces `list_tasks` to that team and makes `get_task` refuse another team's task. Cancelling a task
+  with `update_task_status` cancels the plan steps waiting on it and leaves its delegator a mailbox note. A lost
+  claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep) come back as tool
+  errors the model should not retry.
 - **Tools.** Every call runs through the `@clawboo/db` broker, so a connector tool is checked against the agent's
   grants. A connector tool is listed only to an agent whose grant would allow it.
 - **TeamChat.** `team_delegate` only signals: the team engine sees the tool call and creates the board task.
@@ -93,12 +97,12 @@ registered with a local OpenClaw Gateway, carries the token alone.
 A scope whose signature is missing or wrong counts as no scope at all. Over HTTP that makes the caller unverified,
 and each server narrows what it serves:
 
-| Server   | What an unverified HTTP caller gets                                                                 |
-| -------- | --------------------------------------------------------------------------------------------------- |
-| Tasks    | no `claim_task` or `assign_task`, and `add_comment` drops its author fields; other edits still work |
-| Memory   | global memory only for reads and saves, and no provenance recorded                                  |
-| TeamChat | no tools at all                                                                                     |
-| Tools    | no agent or team identity, so no grant matches and connector tools stay hidden                      |
+| Server   | What an unverified HTTP caller gets                                                                               |
+| -------- | ----------------------------------------------------------------------------------------------------------------- |
+| Tasks    | no claims and no status writes, and `add_comment` drops its author fields; creates, comments and links still work |
+| Memory   | global memory only for reads and saves, and no provenance recorded                                                |
+| TeamChat | no tools at all                                                                                                   |
+| Tools    | no agent or team identity, so no grant matches and connector tools stay hidden                                    |
 
 A stdio caller with no scope is the operator running a bin and is served without these limits. OpenClaw agents are
 always unverified: the Gateway registers Memory, Tasks and Tools once for all its agents, with no per-run

@@ -99,8 +99,11 @@ export interface TeamOrchestrator {
   /** Ingest a user message (202-style fire-and-forget): resolve the target, persist
    *  the user message, then run the target's turn — the engine reacts to its events. */
   enqueueUserMessage(input: EnqueueUserMessageInput): Promise<EnqueueUserMessageResult>
-  /** User Stop: bump the stop generation + abort in-flight runs → clean release. */
-  stop(): void
+  /** User Stop: bump the stop generation + abort in-flight runs → clean release.
+   *  Resolves once the Stop is durable (the engine's `markStopped`: each tracked
+   *  run's execution closed as stopped and its task released, each queued task
+   *  marked stopped). Never rejects. */
+  stop(): Promise<void>
   /** Re-attach durable in-flight work + fire anything ready (the engine's
    *  `resume()`): the server dispatch pump's entry point. Idempotent — tracked
    *  sessions are skipped and the atomic claim-409 arbitrates double-fires. */
@@ -539,7 +542,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         ? { ok: false, error: delivery.failure }
         : { ok: true, targetAgentId: targetId }
     },
-    stop(): void {
+    stop(): Promise<void> {
       // Bump the stop generation SYNCHRONOUSLY before any await — the engine's
       // in-flight work bails at its next checkpoint, and the resulting `done:aborted`
       // events are seen as a clean Stop (release to `todo`, never block / reflect a
@@ -558,10 +561,11 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // Durable Stop: write the cancelled markers NOW, independent of whether the
       // aborts' terminals ever land (a restart mid-stop must not let the pump
       // refire the halted cascade as "infra death").
-      void engine.markStopped().catch((err: unknown) => {
+      const stopped = engine.markStopped().catch((err: unknown) => {
         log.error({ err, teamId }, 'team-orchestrator markStopped failed')
       })
       touch()
+      return stopped
     },
     async pump(): Promise<void> {
       await ready // never race the Boo-Zero bootstrap / initial resume
@@ -715,18 +719,22 @@ export function hasTaskOrchestrator(teamId: string, taskId: string, db?: Clawboo
 
 /** A room was archived: Stop its cascade (a clean release to `todo`, never a
  *  failure reflection) and drop its instance, so nothing keeps running in a
- *  conversation nobody can see. A no-op when the room has no live instance. */
-export function retireRoomOrchestrator(teamId: string, roomId: string): void {
+ *  conversation nobody can see. A no-op when the room has no live instance.
+ *  Resolves once the Stop is written. The teardown forgets every task the engine
+ *  was tracking, so it waits for the Stop: a teardown before the Stop lands leaves
+ *  all but the first running task In progress, with an execution nothing closes. */
+export async function retireRoomOrchestrator(teamId: string, roomId: string): Promise<void> {
   const key = orchestratorKey(teamId, roomId)
   const inst = instances.get(key)
   if (!inst) return
+  // Out of the map first, so nothing reaches the instance while it winds down.
+  instances.delete(key)
   try {
-    inst.orchestrator.stop()
+    await inst.orchestrator.stop()
     inst.dispose()
   } catch (err) {
     log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
   }
-  instances.delete(key)
 }
 
 /** True when `roomId` is one of the team's active rooms (null = the default room,
