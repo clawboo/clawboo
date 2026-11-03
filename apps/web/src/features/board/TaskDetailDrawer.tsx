@@ -761,13 +761,17 @@ export function TaskDetailDrawer({
                             {line.text}
                           </div>
                         ) : null}
-                        {(verdict.debtNotes ?? []).length > 0 && (
-                          <ul className="board-reason list-disc pl-4 text-xs">
-                            {verdict.debtNotes!.map((d, i) => (
-                              <li key={i}>{debtLine(d)}</li>
-                            ))}
-                          </ul>
-                        )}
+                        {/* The server carries debt notes into later attempts, so a
+                            pass after a pass with debt still holds them: they are
+                            open only while the verdict says so. */}
+                        {verdict.status === 'completed_with_debt' &&
+                          (verdict.debtNotes ?? []).length > 0 && (
+                            <ul className="board-reason list-disc pl-4 text-xs">
+                              {verdict.debtNotes!.map((d, i) => (
+                                <li key={i}>{debtLine(d)}</li>
+                              ))}
+                            </ul>
+                          )}
                         {(last?.critic?.findings ?? []).map((fnd, i) => (
                           <div key={i} className="text-xs text-foreground">
                             <span className="font-medium">{fnd.severity}</span>: {fnd.title}

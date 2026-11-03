@@ -1067,11 +1067,14 @@ describe('TaskDetailDrawer: review fixes', () => {
     expect(within(verification).queryByText(/First try: missing test/)).toBeNull()
   })
 
-  /** A verdict that passed with debt, in the shape the server stores it. */
-  function debtVerdict(debtNotes: DebtNote[]): string {
+  /** A verdict carrying these debt notes, in the shape the server stores it. */
+  function debtVerdict(
+    debtNotes: DebtNote[],
+    status: 'pass' | 'completed_with_debt' = 'completed_with_debt',
+  ): string {
     return JSON.stringify(
       verificationResultSchema.parse({
-        status: 'completed_with_debt',
+        status,
         attempts: [
           {
             attempt: 3,
@@ -1079,9 +1082,12 @@ describe('TaskDetailDrawer: review fixes', () => {
             deterministic: { command: 'pnpm test', exitCode: 0, passed: true, durationMs: 10 },
             critic: {
               ran: true,
-              findings: [{ severity: 'security', title: 'Token logged in plain text' }],
+              findings:
+                status === 'pass'
+                  ? []
+                  : [{ severity: 'security', title: 'Token logged in plain text' }],
             },
-            status: 'completed_with_debt',
+            status,
           },
         ],
         debtNotes,
@@ -1140,6 +1146,32 @@ describe('TaskDetailDrawer: review fixes', () => {
       '[security] Token logged in plain text: unresolved at cycle exhaustion',
       '[missing_ac] No test for the empty list: the list view has no empty-state test',
     ])
+  })
+
+  it('lists no open issues once a later attempt passes', async () => {
+    // Moved back to In progress after a pass with debt (a move to To do would clear
+    // the verdict), then checked again: the passing verdict still carries the notes.
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'done',
+        verification: debtVerdict(
+          [
+            {
+              criterion: 'Token logged in plain text',
+              severity: 'security',
+              justification: 'unresolved at cycle exhaustion',
+            },
+          ],
+          'pass',
+        ),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByTestId('task-verdict')).toHaveTextContent(/^Passed$/)
+    expect(within(verification).queryAllByRole('listitem')).toHaveLength(0)
+    expect(within(verification).queryByText(/Token logged in plain text/)).toBeNull()
   })
 
   it('keeps warning words in the text color and puts the amber on a mark', async () => {
