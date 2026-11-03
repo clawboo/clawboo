@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 205 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 206 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -17,7 +17,7 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
-| Routes         | 205: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT` ([index](#route-index))     |
+| Routes         | 206: 94 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT` ([index](#route-index))     |
 
 Check that the server is up (the response carries `"ok": true` when no boot check failed):
 
@@ -25,7 +25,7 @@ Check that the server is up (the response carries `"ok": true` when no boot chec
 curl http://localhost:18790/api/health
 ```
 
-The examples on these pages assume the default port and no access token. With a token set, add the cookie shown under [Authentication](#authentication).
+The examples on these pages assume the default port. Every `/api/*` route needs the access cookie, so add it to each `curl` as shown under [Authentication](#authentication).
 
 ## Base URL
 
@@ -49,30 +49,37 @@ The value must be one or more segments of `A-Z a-z 0-9 . _ ~ -` and must not sta
 
 The server listens on loopback (`127.0.0.1`) by default, so other machines cannot reach it. Set `HOST` to listen on another interface (`HOSTNAME` is ignored).
 
-A non-loopback bind without an access token makes the server refuse to start (`SECURITY: refusing to start`, exit code 1). Set `STUDIO_ACCESS_TOKEN`, or set `CLAWBOO_ALLOW_INSECURE=1` to run open on purpose. [Self-host securely](/guides/self-host-securely) walks through a safe remote setup.
+A non-loopback bind with the access token turned off makes the server refuse to start (`SECURITY: refusing to start`, exit code 1). Keep the token on, or set `CLAWBOO_ALLOW_INSECURE=1` to run open on purpose. [Self-host securely](/guides/self-host-securely) walks through a safe remote setup.
 
 ## Authentication
 
-Clawboo has no user accounts. The only credential is an optional access token, read from the `STUDIO_ACCESS_TOKEN` environment variable at startup.
+Clawboo has no user accounts. The only credential is the access token, which the server picks at startup:
 
-- **No token (the default):** every route answers without credentials. This relies on the loopback bind; the [same-origin guard](#same-origin-guard) still refuses cross-origin browser requests.
-- **Token set:** every `/api/*` request and the WebSocket need a `clawboo_access` cookie whose value is the token.
+- **`STUDIO_ACCESS_TOKEN` set:** that token.
+- **Unset (the default):** the per-install token in `~/.clawboo/access-token` (under `CLAWBOO_HOME`), made on the first start and readable only by your user account.
+- **Set blank (`STUDIO_ACCESS_TOKEN=`):** no token, so every route answers without credentials. This relies on the loopback bind; the [same-origin guard](#same-origin-guard) still refuses cross-origin browser requests.
 
-A browser gets the cookie by opening `http://localhost:18790/?access_token=<token>` once. The server answers `302`, sets the cookie (`HttpOnly`, `SameSite=Lax`, `Path=/` or the base path, plus `Secure` when the request arrived with `X-Forwarded-Proto: https`) and redirects to the same URL without the token.
+With a token, every `/api/*` request and the WebSocket need a `clawboo_access` cookie whose value is the token.
+
+A browser gets the cookie from a one-time sign-in link, which `clawboo`, `clawboo open` and the dashboard's **Open on another device** make, or by opening `http://127.0.0.1:18790/?access_token=<token>` once. The server answers `302`, sets the cookie (`HttpOnly`, `SameSite=Lax`, `Path=/` or the base path, plus `Secure` when the request arrived with `X-Forwarded-Proto: https`) and redirects to the same URL without the code or token.
 
 A script sends the cookie itself. Add `-b` to any example on these pages:
 
 ```bash
-curl -b "clawboo_access=$STUDIO_ACCESS_TOKEN" http://localhost:18790/api/agents
+curl -b "clawboo_access=$(cat ~/.clawboo/access-token)" http://127.0.0.1:18790/api/agents
 ```
+
+With your own token, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`. Send the cookie to `127.0.0.1`, the address Clawboo listens on: `localhost` can resolve to `::1`, where another program could be listening on the same port. On a computer other people use, the token also shows in the process list while `curl` runs.
+
+**One-time sign-in codes.** `POST /api/access/launch-code`, behind the cookie like every other route, answers `{ "gated": true, "code": "…", "expiresAt": <epoch ms>, "expiresInMs": 120000 }`, or `{ "gated": false }` on a server with no token. Loading any page address with `?access_code=<code>` in a browser sets the cookie once, within two minutes; a used, expired or unknown code redirects without it, and so does a request without the page-load headers `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, which leaves the code live. A code is never accepted on an `/api/` path. The route is on the sensitive rate limit.
 
 Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer (or a `401` when the token is wrong) instead of the route's response.
 
-| Request                                  | Status | Body                                                                                              |
-| ---------------------------------------- | ------ | ------------------------------------------------------------------------------------------------- |
-| Wrong token in `?access_token=`          | `401`  | `{ "error": "Invalid Clawboo access token." }`                                                    |
-| `/api/*` without a valid cookie          | `401`  | `{ "error": "Clawboo access token required. Open /?access_token=<token> once to set a cookie." }` |
-| WebSocket upgrade without a valid cookie | none   | The socket is closed                                                                              |
+| Request                                  | Status | Body                                                                                                                                                                                 |
+| ---------------------------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Wrong token in `?access_token=`          | `401`  | `{ "error": "Invalid Clawboo access token." }`                                                                                                                                       |
+| `/api/*` without a valid cookie          | `401`  | ``{ "error": "Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.", "gate": "clawboo-access" }`` |
+| WebSocket upgrade without a valid cookie | none   | The socket is closed                                                                                                                                                                 |
 
 The token may contain only `A-Z a-z 0-9 . _ ~ -`. With any other character the server does not start: it logs `SECURITY: refusing to start` and exits with code 1 on every bind, even with `CLAWBOO_ALLOW_INSECURE=1`. `openssl rand -hex 24` makes a suitable token. The comparison is constant-time, and the `/api/` prefix test ignores letter case.
 
@@ -126,6 +133,7 @@ The sensitive tier covers the routes that install software, rewrite runtime conf
 | [Runtimes](/reference/rest-api/runtimes)             | `POST /api/auth/cli-login/:tool`; `POST /api/runtimes/:id/install`, `/connect`, `/disconnect`, `/logout`                                                                                                                                                                                                                                      |
 | [System](/reference/rest-api/system)                 | `POST /api/system/install-openclaw`, `/configure-openclaw`, `/auto-configure-openclaw`, `/gateway`, `/approve-device`, `/self-update`; `PATCH /api/system/openclaw-config`                                                                                                                                                                    |
 | [Agent settings](/reference/rest-api/agent-settings) | `POST /api/exec-allowlist/revoke`                                                                                                                                                                                                                                                                                                             |
+| [Authentication](#authentication)                    | `POST /api/access/launch-code`                                                                                                                                                                                                                                                                                                                |
 
 Every other route is on the general tier, including routes that start work, such as `POST /api/runtimes/:id/run`, `POST /api/teams/:id/chat` and the MCP transports. For what to do when the dashboard shows "Too many requests", see [Troubleshooting](/help/troubleshooting).
 
@@ -174,7 +182,7 @@ A script or app that talks to more than one Clawboo server should not guess what
 
 ## Route index
 
-The router registers 205 routes: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
+The router registers 206 routes: 94 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -194,6 +202,7 @@ The router registers 205 routes: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 | [Agent settings](/reference/rest-api/agent-settings) | 10     | `/api/personality`, `/api/exec-settings*`, `/api/exec-allowlist*`, `/api/skills`                                                                          |
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                      |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                      |
+| [Authentication](#authentication)                    | 1      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**                                                       |
 | [System](/reference/rest-api/system)                 | 12     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version, capabilities and update                      |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                              |
 

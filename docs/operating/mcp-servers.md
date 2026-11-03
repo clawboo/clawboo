@@ -147,7 +147,7 @@ Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value fo
 - `/api/mcp/config` always needs the cookie, because it signs the identity you ask for. So does `POST /api/mcp/attach-secret/rotate`.
 - Treat an attach URL like a password. Anyone who has it and can reach the loopback port can use the servers as the identity it carries.
 
-With no access token set, the bind is the only boundary: anything that can reach the server's port can use these servers and `/api/mcp/config`.
+With the access token turned off (`STUDIO_ACCESS_TOKEN=` set blank), the bind is the only boundary: anything that can reach the server's port can use these servers and `/api/mcp/config`.
 
 <Note>
 

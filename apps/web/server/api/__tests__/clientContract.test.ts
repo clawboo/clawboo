@@ -97,6 +97,7 @@ const PINNED_FEATURES = [
 const PINNED_ROUTES = [
   'GET /api/settings',
   'POST /api/settings',
+  'POST /api/access/launch-code',
   'GET /api/approvals',
   'POST /api/approvals',
   'GET /api/chat-history',

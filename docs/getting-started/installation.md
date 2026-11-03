@@ -4,7 +4,19 @@ sidebarTitle: 'Install'
 description: 'What Clawboo needs, how to run it with npx or a global npm install, what the clawboo command starts, and how to stop, update or uninstall it.'
 icon: 'download'
 keywords:
-  ['npm', 'npx', 'node', 'update', 'upgrade', 'uninstall', 'port', 'server log', 'Claude Agent SDK']
+  [
+    'npm',
+    'npx',
+    'node',
+    'update',
+    'upgrade',
+    'uninstall',
+    'port',
+    'server log',
+    'access token',
+    'clawboo open',
+    'Claude Agent SDK',
+  ]
 ---
 
 Clawboo installs from npm and runs as a small server on your computer that you use in your browser. This page covers what you need, the two ways to run it, what the `clawboo` command does, and how to stop, update and remove it. To go straight to a working team, follow the [Quickstart](/getting-started/quickstart).
@@ -55,7 +67,7 @@ On a first start the terminal shows:
 
 ```text
 ✔ Dashboard started
-✔ Clawboo opened at http://localhost:18790
+✔ Clawboo opened at http://127.0.0.1:18790
 ```
 
 Your browser opens on the setup wizard. Continue with the [Quickstart](/getting-started/quickstart).
@@ -75,14 +87,17 @@ To check it, run `npm ls -g @anthropic-ai/claude-agent-sdk`: it lists the packag
 1. Checks your Node.js version.
 2. Says whether an OpenClaw Gateway answers on its default port (18789). This is information only; you don't need a Gateway.
 3. Finds the Clawboo server if it is already running, or starts it. If the running server is older than the command you ran, it offers to restart it on the new version.
-4. Opens your browser at the dashboard.
+4. Opens your browser at the dashboard, signed in.
 
 **The server keeps running after you close the terminal.** Run `clawboo` again to reopen the dashboard: it finds the running server instead of starting a second one.
 
+**The dashboard is locked to your computer.** On its first start the server makes an access token and saves it in `~/.clawboo/access-token`, which only your user account can read. Every browser needs a sign-in, and `clawboo` gives yours one: it opens the dashboard with a one-time link that works once, within two minutes. The terminal shows only the plain address. A browser that is not signed in shows "This dashboard is locked to your computer"; run `clawboo open` to open a signed-in one. To open Clawboo in another browser, use **Open on another device** at the bottom of the sidebar. It also shows a QR code for a phone once the phone can reach the server, which takes setup: see [Reach Clawboo from another machine](/guides/self-host-securely). [Security](/operating/security#the-access-token) explains what the token protects, and what it does not.
+
 | Detail          | Value                                                                                   |
 | --------------- | --------------------------------------------------------------------------------------- |
-| Address         | `http://localhost:18790`, or the next free port up to 18809                             |
+| Address         | `http://127.0.0.1:18790`, or the next free port up to 18809                             |
 | Who can connect | Only this computer: the server listens on 127.0.0.1 unless you set `HOST`               |
+| Who can sign in | Browsers you sign in with `clawboo`, `clawboo open` or **Open on another device**       |
 | Server log      | `~/.clawboo/server.log`, which rolls over to `server.log.1` past 5 MB                   |
 | Fixed port      | `CLAWBOO_API_PORT=18800 clawboo` uses exactly that port and fails if something holds it |
 
@@ -97,6 +112,7 @@ clawboo restart
 
 - `clawboo stop` stops the server. Running it when nothing is running is safe.
 - `clawboo restart` stops the server, starts a fresh one on the same port and opens the browser. Add `--no-open` to skip the browser.
+- `clawboo open` opens the running dashboard in your browser, signed in. `clawboo open --print` prints a one-time link instead, for a computer with no browser.
 - `clawboo backup` saves a one-file copy of the database in the folder you run it from, even while the server runs.
 
 If you run Clawboo with npx, use `npx clawboo@latest stop` and so on.
@@ -138,7 +154,7 @@ If you only used npx, there is no global package: run `npx clawboo@latest stop`,
 
 ## Where your data lives
 
-Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the encrypted key vault and the server log. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 
@@ -162,9 +178,21 @@ The installed package is incomplete. Run `npx clawboo@latest`, or reinstall with
 
 </Accordion>
 
+<Accordion title="This dashboard is locked to your computer">
+
+This browser is not signed in: it has no access cookie, or the server's token changed. Run `clawboo open` on the computer running Clawboo to open a signed-in browser. A sign-in link works once, within two minutes, so a link you opened before shows this screen too. On a computer with no browser, `clawboo open --print` prints a link to open yourself.
+
+</Accordion>
+
 <Accordion title="A Clawboo server is running on port N, but it requires an access token.">
 
-You set `STUDIO_ACCESS_TOKEN` to protect the dashboard, and the shell you ran the command in does not have that token, so the command cannot talk to the server. Set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo stop` and `clawboo restart` then work too. To open the dashboard in your browser, visit `http://localhost:18790/?access_token=YOUR_TOKEN` once (use the port the message names). Without the token, `clawboo stop` and `clawboo restart` print a command that stops the server by hand.
+The server was started with a `STUDIO_ACCESS_TOKEN` that the shell you ran the command in does not have, so the command cannot talk to the server. Set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo open`, `clawboo stop` and `clawboo restart` then work too. To open the dashboard in your browser without the CLI, visit `http://localhost:18790/?access_token=YOUR_TOKEN` once (use the port the message names). Without the token, `clawboo stop` and `clawboo restart` print a command that stops the server by hand.
+
+</Accordion>
+
+<Accordion title="Could not open a browser on this computer.">
+
+The computer has no desktop, or no program to open a browser with (`xdg-open` on Linux). The server is running. Run `clawboo open --print` for a one-time sign-in link and open it in a browser that can reach this computer, such as through an SSH tunnel; see [Reach Clawboo from another machine](/guides/self-host-securely).
 
 </Accordion>
 

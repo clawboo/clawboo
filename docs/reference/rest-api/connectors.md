@@ -7,7 +7,7 @@ keywords: ['misc', 'connectors', 'mcp', 'composio', 'custom connectors', 'grants
 
 A connector is an MCP server that Clawboo runs on this machine (a local process) or reaches over HTTP (a remote server). You supply its credentials: an API key, an OAuth sign-in, or a launch argument such as the folder a filesystem server may see. Connectors come from Clawboo's built-in catalog or from custom entries you add, and grants decide which agents may use their tools. Use this page when you script connector setup or audit who can use what.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. Every route is on the general rate limit; the routes marked **sensitive** also count against the stricter sensitive limit (see the [REST API overview](/reference/rest-api/index)). Errors use `{ "error": "<message>" }`; a `400` for a body that fails validation adds `details`, the validator's form and field errors.
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). Every route is on the general rate limit; the routes marked **sensitive** also count against the stricter sensitive limit (see the [REST API overview](/reference/rest-api/index)). Errors use `{ "error": "<message>" }`; a `400` for a body that fails validation adds `details`, the validator's form and field errors.
 
 Local connectors run as child processes of the Clawboo server, as your user, with no sandbox. The server does not tell callers apart: any request that passes the access gate can connect a connector or create a grant. See [Security](/operating/security) before you open Clawboo to other machines.
 

@@ -1,21 +1,25 @@
 // Serving the whole app under a URL path prefix (CLAWBOO_BASE_PATH).
 //
-// Two servers, because the interesting half is the token-gated one: the same
+// Three servers, because the interesting part is the token-gated one: the same
 // -origin guard and the access gate decide what to protect by matching the API
 // path and FAIL OPEN on anything else, so "the API is still guarded once it moves
 // under a prefix" is the property worth proving end to end rather than in a unit.
+// The third starts with no STUDIO_ACCESS_TOKEN at all, the default install, which
+// locks itself with a per-install token that `clawboo open` signs a browser in to.
 //
 // These spawn their own servers rather than using the shared one from
 // playwright.config.ts, since the prefix is a boot-time setting. They reuse the
 // `dist/ui` that config already built, so nothing here rebuilds.
 
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
 import { expect, test } from '@playwright/test'
+
+import { SIGNED_OUT } from './helpers/fixtures'
 
 // Specs load as CommonJS here, so no `import.meta`. Playwright resolves its
 // config from the repo root and runs from there.
@@ -39,6 +43,8 @@ const COREPACK_HOME =
 
 interface Started {
   origin: string
+  /** The sandboxed HOME; its Clawboo home is `<home>/.clawboo`. */
+  home: string
   stop: () => void
 }
 
@@ -77,8 +83,14 @@ async function assertPortFree(port: number): Promise<void> {
   })
 }
 
-/** Boot a sandboxed server under the prefix and wait for it to answer. */
-async function startServer(port: number, extraEnv: Record<string, string> = {}): Promise<Started> {
+/**
+ * Boot a sandboxed server under the prefix and wait for it to answer. An
+ * `undefined` in `extraEnv` removes that variable from the inherited environment.
+ */
+async function startServer(
+  port: number,
+  extraEnv: Record<string, string | undefined> = {},
+): Promise<Started> {
   await assertPortFree(port)
   const home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-e2e-base-'))
   // `detached` puts the server in its own process GROUP. `pnpm exec` is a wrapper
@@ -114,7 +126,7 @@ async function startServer(port: number, extraEnv: Record<string, string> = {}):
     rmSync(home, { recursive: true, force: true })
   }
 
-  const started: Started = { origin: `http://127.0.0.1:${port}`, stop }
+  const started: Started = { origin: `http://127.0.0.1:${port}`, home, stop }
   // Registered BEFORE the wait, so a hook timeout mid-boot still gets cleaned up.
   spawned.push(started)
 
@@ -149,7 +161,10 @@ async function startServer(port: number, extraEnv: Record<string, string> = {}):
 }
 
 /** Boot inside a hook, widening the hook's own timeout to cover a cold start. */
-async function startInHook(port: number, extraEnv?: Record<string, string>): Promise<Started> {
+async function startInHook(
+  port: number,
+  extraEnv?: Record<string, string | undefined>,
+): Promise<Started> {
   // A beforeAll hook inherits the project timeout (30s by default), which is less
   // than a cold server boot, so without this the hook is killed before the
   // readiness loop's own deadline can report anything useful.
@@ -163,7 +178,8 @@ test.describe('served under a path prefix', () => {
   let server: Started
 
   test.beforeAll(async () => {
-    server = await startInHook(19971)
+    // A blank token is the documented way to run with no gate at all.
+    server = await startInHook(19971, { STUDIO_ACCESS_TOKEN: '' })
   })
   test.afterAll(() => server?.stop())
 
@@ -283,5 +299,116 @@ test.describe('the guards still enforce under the prefix', () => {
     // have turned it into an unauthenticated bypass.
     const res = await fetch(`${server.origin}/api/settings`)
     expect(res.status).toBe(401)
+  })
+
+  test('a launch code signs in under the mount, once, and returns to it', async ({
+    playwright,
+  }) => {
+    const minted = await fetch(`${server.origin}${BASE_PATH}/api/access/launch-code`, {
+      method: 'POST',
+      headers: { Cookie: `clawboo_access=${TOKEN}` },
+    })
+    expect(minted.status).toBe(200)
+    const { code } = (await minted.json()) as { code: string }
+
+    // The fetch metadata a browser sends when it loads a page; without it the
+    // code is not spent (a link previewer's fetch). Not Node's fetch, which sends
+    // its own Sec-Fetch-Mode over any given.
+    const pageLoad = { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Dest': 'document' }
+    const bare = await playwright.request.newContext({ storageState: SIGNED_OUT })
+    const url = `${server.origin}${BASE_PATH}/?access_code=${code}`
+    const first = await bare.get(url, { headers: pageLoad, maxRedirects: 0 })
+    expect(first.status()).toBe(302)
+    expect(first.headers()['set-cookie']).toContain(`clawboo_access=${TOKEN}`)
+    expect(first.headers()['set-cookie']).toContain(`Path=${BASE_PATH}`)
+    expect(first.headers()['location']).toBe(`${server.origin}${BASE_PATH}/`)
+
+    const fresh = await playwright.request.newContext({ storageState: SIGNED_OUT })
+    const again = await fresh.get(url, { headers: pageLoad, maxRedirects: 0 })
+    expect(again.status()).toBe(302)
+    expect(again.headers()['set-cookie']).toBeUndefined()
+    await bare.dispose()
+    await fresh.dispose()
+  })
+})
+
+test.describe('a server started with no STUDIO_ACCESS_TOKEN locks itself', () => {
+  let server: Started
+  const PORT = 19973
+
+  test.beforeAll(async () => {
+    // Unset, not blank: the default install.
+    server = await startInHook(PORT, { STUDIO_ACCESS_TOKEN: undefined })
+  })
+  test.afterAll(() => server?.stop())
+
+  test('the API needs the cookie, and the token is in a file only its owner can read', async () => {
+    const res = await fetch(`${server.origin}${BASE_PATH}/api/settings`)
+    expect(res.status).toBe(401)
+    expect(((await res.json()) as { gate?: string }).gate).toBe('clawboo-access')
+
+    const file = path.join(server.home, '.clawboo', 'access-token')
+    expect(readFileSync(file, 'utf8')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600)
+  })
+
+  test('a signed-out browser gets the locked screen, which names clawboo open', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ storageState: SIGNED_OUT })
+    const page = await context.newPage()
+    await page.goto(`${server.origin}${BASE_PATH}/`)
+    await expect(page.getByRole('heading', { name: /locked to your computer/i })).toBeVisible({
+      timeout: 30_000,
+    })
+    await expect(page.getByText('clawboo open', { exact: true })).toBeVisible()
+    await context.close()
+  })
+
+  test('clawboo open --print gives a one-time link that signs one browser in', async ({
+    browser,
+  }) => {
+    // The CLI from source, reading the token file the server wrote.
+    const cli = spawnSync('pnpm', ['exec', 'tsx', '../cli/src/index.ts', 'open', '--print'], {
+      cwd: WEB_DIR,
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: {
+        ...process.env,
+        STUDIO_ACCESS_TOKEN: undefined,
+        HOME: server.home,
+        CLAWBOO_HOME: path.join(server.home, '.clawboo'),
+        CLAWBOO_API_PORT: String(PORT),
+        CLAWBOO_BASE_PATH: BASE_PATH,
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
+        COREPACK_HOME,
+      },
+    })
+    expect(cli.status, cli.stderr).toBe(0)
+    const link = cli.stdout.trim()
+    expect(link).toMatch(
+      new RegExp(`^${server.origin}${BASE_PATH}/\\?access_code=[A-Za-z0-9_-]{32,}$`),
+    )
+    // Nothing secret on the terminal: the token is in neither stream.
+    const token = readFileSync(path.join(server.home, '.clawboo', 'access-token'), 'utf8')
+    expect(cli.stdout + cli.stderr).not.toContain(token)
+
+    // The CLI dials and prints 127.0.0.1, the address this server listens on, so
+    // the link opens as printed.
+    const first = await browser.newContext({ storageState: SIGNED_OUT })
+    const page = await first.newPage()
+    await page.goto(link)
+    await expect(page).toHaveURL(`${server.origin}${BASE_PATH}/`)
+    await expect(page.locator('#root')).not.toBeEmpty({ timeout: 30_000 })
+    await expect(page.getByTestId('access-locked')).toHaveCount(0)
+    expect((await first.cookies()).some((c) => c.name === 'clawboo_access')).toBe(true)
+    await first.close()
+
+    // The same link a second time: spent, so the lock.
+    const second = await browser.newContext({ storageState: SIGNED_OUT })
+    const late = await second.newPage()
+    await late.goto(link)
+    await expect(late.getByTestId('access-locked')).toBeVisible({ timeout: 30_000 })
+    await second.close()
   })
 })

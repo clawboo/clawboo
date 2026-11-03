@@ -58,7 +58,7 @@ import {
   waitForPortFree,
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
-import { accessTokenRefusal } from './lib/accessTokenRefusal'
+import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
@@ -169,16 +169,21 @@ async function main() {
 
   // ── Access gate ───────────────────────────────────────────────────────────
 
-  // Fail-closed: a token the gate cannot use stops the boot on every bind, with or
-  // without CLAWBOO_ALLOW_INSECURE (see accessTokenRefusal).
-  const tokenRefusal = accessTokenRefusal(process.env['STUDIO_ACCESS_TOKEN'])
-  if (tokenRefusal) {
-    log.error({ hostname, port }, tokenRefusal)
+  // STUDIO_ACCESS_TOKEN when set (blank turns the gate off), else the per-install
+  // token in <CLAWBOO_HOME>/access-token, shared with the desktop app and created
+  // on the first start. Fail-closed: a token the gate cannot use, or a token file
+  // that cannot be trusted, stops the boot on every bind, with or without
+  // CLAWBOO_ALLOW_INSECURE (see bootAccessToken). The token is never logged, and
+  // one read from the file never reaches a child: children get the environment.
+  const bootToken = resolveBootAccessToken(process.env)
+  if (!bootToken.ok) {
+    log.error({ hostname, port }, bootToken.message)
     process.exit(1)
   }
+  log.info({ source: bootToken.source }, 'Access gate token source')
 
   const accessGate = createAccessGate({
-    token: process.env['STUDIO_ACCESS_TOKEN'],
+    token: bootToken.token,
     // Scopes the operator cookie to the mount and prefixes the post-exchange
     // redirect, so sharing an origin with another app does not share the cookie.
     basePath,
@@ -290,6 +295,8 @@ async function main() {
   // recover it from the request. Publishing the validated value is how a route
   // rebuilds a Location without reaching for the raw `req.originalUrl`.
   app.locals['basePath'] = basePath
+  // POST /api/access/launch-code mints its one-time sign-in codes from this gate.
+  app.locals['accessGate'] = accessGate
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below decide what to protect with `startsWith('/api/')` and

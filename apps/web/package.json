@@ -76,6 +76,7 @@
     "framer-motion": "^11.0.0",
     "lucide-react": "^0.468.0",
     "openai": "7.15.0",
+    "qrcode.react": "^4.2.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-markdown": "^9.0.0",

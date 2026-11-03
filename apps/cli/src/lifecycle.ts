@@ -17,12 +17,12 @@
  */
 
 import { createConnection } from 'net'
-import { fork, spawn } from 'child_process'
+import { exec, fork, spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
 
-import { resolveClawbooDir } from '@clawboo/config'
+import { readAccessTokenFile, resolveBasePathOrRoot, resolveClawbooDir } from '@clawboo/config'
 
 import { openServerLog } from './server-log'
 
@@ -61,12 +61,12 @@ export function probePort(host: string, port: number, timeoutMs = 2_000): Promis
 
 /**
  * What answered on a port.
- * - `clawboo` — a Clawboo dashboard we can talk to.
- * - `gated`   — a Clawboo dashboard that 401'd us: it is running, but the
- *               install sets `STUDIO_ACCESS_TOKEN` and every `/api/*` route
- *               needs the cookie, and this launcher has no token the server
- *               accepts. We can identify it but not use it.
- * - `none`    — closed, unreachable, or something that isn't Clawboo.
+ * - `clawboo`: a Clawboo dashboard we can talk to.
+ * - `gated`:   a Clawboo dashboard that 401'd us. It is running behind its
+ *              access token and every `/api/*` route needs the cookie, and
+ *              this launcher has no token the server accepts. We can
+ *              identify it but not use it.
+ * - `none`:    closed, unreachable, or something that isn't Clawboo.
  */
 export type DashboardProbe = 'clawboo' | 'gated' | 'none'
 
@@ -74,13 +74,36 @@ export type DashboardProbe = 'clawboo' | 'gated' | 'none'
 const ACCESS_COOKIE = 'clawboo_access'
 
 /**
- * The access token this launcher holds: its own `STUDIO_ACCESS_TOKEN`, trimmed
- * the way the gate trims it. A server this launcher starts inherits this
- * environment, so this is that server's token. Null when unset or blank.
+ * The address the launcher dials, and puts in the links it opens and prints:
+ * the one the server binds unless HOST says otherwise. Not `localhost`, which
+ * can resolve to ::1 first, where another user's program can listen on the very
+ * port the server holds on 127.0.0.1 and imitate the access gate.
+ */
+export const DASHBOARD_HOST = '127.0.0.1'
+
+/**
+ * May the access token go to this port? Only on 127.0.0.1, and only to the port
+ * the server recorded in the private api-port.txt. Any other port answering with
+ * the gate's refusal could be another user's program imitating it, so it never
+ * receives the token. The desktop app follows the same rule.
+ */
+function mayReceiveToken(host: string, port: number): boolean {
+  return host === DASHBOARD_HOST && port === readRuntimePort()
+}
+
+/**
+ * The access token this launcher holds, resolved the way the server resolves its
+ * own, so a server this launcher starts (which inherits this environment) has
+ * the same one:
+ * - `STUDIO_ACCESS_TOKEN`, trimmed the way the gate trims it, when set;
+ * - nothing when it is set blank, which runs the server with no gate;
+ * - otherwise the per-install token in `<CLAWBOO_HOME>/access-token`, which the
+ *   server (or the desktop app) wrote. Read only: the launcher never creates it.
  */
 export function launcherAccessToken(env: NodeJS.ProcessEnv = process.env): string | null {
-  const token = (env['STUDIO_ACCESS_TOKEN'] ?? '').trim()
-  return token || null
+  const fromEnv = env['STUDIO_ACCESS_TOKEN']
+  if (fromEnv !== undefined) return fromEnv.trim() || null
+  return readAccessTokenFile({ env })
 }
 
 interface JsonReply {
@@ -89,14 +112,17 @@ interface JsonReply {
   body: unknown
 }
 
-/** One GET of a JSON route. Null when the request fails or the answer is not JSON. */
+type Method = 'GET' | 'POST'
+
+/** One request to a JSON route. Null when the request fails or the answer is not JSON. */
 async function getJson(
   url: string,
   timeoutMs: number,
   headers: Record<string, string>,
+  method: Method = 'GET',
 ): Promise<JsonReply | null> {
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs), headers })
+    const res = await fetch(url, { method, signal: AbortSignal.timeout(timeoutMs), headers })
     const ct = res.headers.get('content-type') ?? ''
     if (!ct.includes('application/json')) return null
     return { status: res.status, ok: res.ok, body: await res.json() }
@@ -106,22 +132,29 @@ async function getJson(
 }
 
 /**
- * GET a JSON route on a local dashboard. When the access gate refuses the plain
+ * Call a JSON route on a local dashboard. When the access gate refuses the plain
  * request and this launcher holds a token, ask once more with the token as the
  * gate's cookie. The token is sent only to a port that has just answered with
  * the gate's own refusal, so another service listening in the port window
- * (Gateway helper ports, a Chrome debugging port) never receives it.
+ * (Gateway helper ports, a Chrome debugging port) never receives it, and only
+ * to the port `mayReceiveToken` allows.
  */
 async function getDashboardJson(
-  url: string,
+  host: string,
+  port: number,
+  route: string,
   timeoutMs: number,
   headers: Record<string, string> = {},
+  method: Method = 'GET',
 ): Promise<JsonReply | null> {
-  const first = await getJson(url, timeoutMs, headers)
+  const url = `http://${host}:${port}${route}`
+  const first = await getJson(url, timeoutMs, headers, method)
   if (first === null || first.status !== 401 || !isAccessGateError(first.body)) return first
+  if (!mayReceiveToken(host, port)) return first
   const token = launcherAccessToken()
   if (token === null) return first
-  const second = await getJson(url, timeoutMs, { ...headers, Cookie: `${ACCESS_COOKIE}=${token}` })
+  const cookie = { ...headers, Cookie: `${ACCESS_COOKIE}=${token}` }
+  const second = await getJson(url, timeoutMs, cookie, method)
   return second ?? first
 }
 
@@ -153,7 +186,7 @@ export async function probeDashboard(
 ): Promise<DashboardProbe> {
   // Cheap TCP probe first — skip the HTTP cost on closed ports.
   if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return 'none'
-  const reply = await getDashboardJson(`http://${host}:${port}/api/settings`, timeoutMs)
+  const reply = await getDashboardJson(host, port, '/api/settings', timeoutMs)
   if (reply === null) return 'none'
   if (reply.status === 401) return isAccessGateError(reply.body) ? 'gated' : 'none'
   if (!reply.ok || !isRecord(reply.body)) return 'none'
@@ -171,8 +204,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Is this 401 body the Clawboo access gate's? It answers
- * `{ error: 'Clawboo access token required. …' }`. Requiring both markers keeps
- * an unrelated service's JSON 401 from being read as a Clawboo instance.
+ * `{ error: 'Clawboo access token required. …', gate: 'clawboo-access' }`; older
+ * servers send the `error` alone. Requiring both words keeps an unrelated
+ * service's JSON 401 from being read as a Clawboo instance.
  */
 function isAccessGateError(body: unknown): boolean {
   if (!isRecord(body)) return false
@@ -189,6 +223,89 @@ export async function probeClawbooDashboard(
   timeoutMs = 1_500,
 ): Promise<boolean> {
   return (await probeDashboard(host, port, timeoutMs)) === 'clawboo'
+}
+
+// ─── Opening the browser ──────────────────────────────────────────────────────
+
+/** What a launch-code request found. */
+export type LaunchCodeReply =
+  /** The server has no access gate: the plain address opens the dashboard. */
+  | { gated: false }
+  /** A one-time code for `?access_code=`, valid until `expiresAt` (server clock). */
+  | { gated: true; code: string; expiresAt: number }
+
+/** A launch code goes into a shell command line, so only this shape is accepted. */
+const LAUNCH_CODE_RE = /^[A-Za-z0-9_-]{16,256}$/
+
+/**
+ * Ask the dashboard on `port` for a one-time launch code, with this launcher's
+ * token as the cookie (after the gate's own refusal, as every call here does).
+ * Null when it cannot give one: no token the server accepts, a server that
+ * predates launch codes, or an answer that is not one.
+ */
+export async function mintLaunchCode(
+  port: number,
+  timeoutMs = 2_000,
+): Promise<LaunchCodeReply | null> {
+  const reply = await getDashboardJson(
+    DASHBOARD_HOST,
+    port,
+    '/api/access/launch-code',
+    timeoutMs,
+    { Accept: 'application/json' },
+    'POST',
+  )
+  if (reply === null || !reply.ok || !isRecord(reply.body)) return null
+  const body = reply.body
+  if (body['gated'] === false) return { gated: false }
+  const code = body['code']
+  const expiresAt = body['expiresAt']
+  if (body['gated'] !== true || typeof code !== 'string' || !LAUNCH_CODE_RE.test(code)) return null
+  return { gated: true, code, expiresAt: typeof expiresAt === 'number' ? expiresAt : 0 }
+}
+
+/**
+ * The URL prefix the server is mounted under, for the links we print and open,
+ * with the trailing slash the shell's relative assets need. Display only: a
+ * malformed value falls back to the root here and the server refuses to start
+ * with a precise message, so the CLI never dies on a bad setting.
+ */
+export function uiPath(): string {
+  const base = resolveBasePathOrRoot(process.env)
+  return base ? `${base}/` : ''
+}
+
+/**
+ * The dashboard's address on `port`. With a launch code it is the one-time
+ * sign-in link (`?access_code=`); the access token itself never goes in a URL.
+ */
+export function dashboardUrl(port: number, code?: string): string {
+  const base = `http://${DASHBOARD_HOST}:${port}${uiPath()}`
+  if (code === undefined) return base
+  const page = base.endsWith('/') ? base : `${base}/`
+  return `${page}?access_code=${encodeURIComponent(code)}`
+}
+
+/** Runs a shell command and reports how it ended. A seam for tests. */
+export type RunCommand = (command: string, done: (err: Error | null) => void) => void
+
+const runCommand: RunCommand = (command, done) => {
+  exec(command, (err) => done(err))
+}
+
+/**
+ * Open `url` in the default browser. False when that failed: on a server with
+ * no desktop, `xdg-open` is missing or has nothing to open with, and the caller
+ * should say how to get a link instead of failing silently.
+ */
+export function openUrlInBrowser(url: string, run: RunCommand = runCommand): Promise<boolean> {
+  const command =
+    process.platform === 'darwin'
+      ? `open "${url}"`
+      : process.platform === 'win32'
+        ? `start "" "${url}"`
+        : `xdg-open "${url}"`
+  return new Promise((resolve) => run(command, (err) => resolve(err === null)))
 }
 
 // ─── Dashboard port discovery ─────────────────────────────────────────────────
@@ -300,7 +417,7 @@ export interface DashboardDiscovery {
 export async function discoverDashboard(): Promise<DashboardDiscovery> {
   let gatedPort: number | null = null
   for (const candidate of dashboardCandidates()) {
-    const verdict = await probeDashboard('localhost', candidate.port, candidate.timeoutMs)
+    const verdict = await probeDashboard(DASHBOARD_HOST, candidate.port, candidate.timeoutMs)
     if (verdict === 'clawboo') return { port: candidate.port, gatedPort }
     if (verdict === 'gated' && gatedPort === null) gatedPort = candidate.port
   }
@@ -391,7 +508,9 @@ export async function fetchServerVersion(
   timeoutMs = SELF_VERSION_TIMEOUT_MS,
 ): Promise<string | null> {
   const reply = await getDashboardJson(
-    `http://localhost:${port}/api/system/self-version?local=1`,
+    DASHBOARD_HOST,
+    port,
+    '/api/system/self-version?local=1',
     timeoutMs,
     { Accept: 'application/json' },
   )
@@ -584,7 +703,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
     await new Promise((r) => setTimeout(r, 500))
     const found =
       opts.port !== undefined
-        ? (await probeClawbooDashboard('localhost', opts.port, 800))
+        ? (await probeClawbooDashboard(DASHBOARD_HOST, opts.port, 800))
           ? opts.port
           : null
         : await findRunningDashboard()
@@ -651,10 +770,11 @@ function isErrno(err: unknown, code: string): boolean {
  * Gateway — on Windows but not on POSIX.
  */
 export async function stopDashboard(port: number, deps: StopDeps = {}): Promise<StopOutcome> {
-  const isClawboo = deps.isClawboo ?? ((p: number) => probeClawbooDashboard('localhost', p, 1_500))
+  const isClawboo =
+    deps.isClawboo ?? ((p: number) => probeClawbooDashboard(DASHBOARD_HOST, p, 1_500))
   const lookup = deps.findListenerPid ?? findListenerPid
   const kill = deps.kill ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal))
-  const probe = deps.probe ?? ((p: number) => probePort('localhost', p, 500))
+  const probe = deps.probe ?? ((p: number) => probePort(DASHBOARD_HOST, p, 500))
   const readPortFile = deps.readPortFile ?? readRuntimePort
   const unlinkPortFile = deps.unlinkPortFile ?? removeRuntimePortFile
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))

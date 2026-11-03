@@ -7,7 +7,7 @@ keywords: ['misc', 'boo zero', 'team brief', 'global brief', 'display name', 'le
 
 Boo Zero is your team leader: one agent that coordinates every team. These routes store the team briefs written for it, a display name the dashboard shows for it, and the override that decides which agent is Boo Zero. Use this page when you script team setup or move the leader role to another agent.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All seven routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All seven routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
 
 ## Routes
 
