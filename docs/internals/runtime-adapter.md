@@ -29,14 +29,14 @@ The trait is deliberately narrow. Claiming a task, provisioning a worktree, runn
 
 ## The six adapters
 
-| Package                        | Runtime id       | Notes                                                       |
-| ------------------------------ | ---------------- | ----------------------------------------------------------- |
-| `@clawboo/adapter-native`      | `clawboo-native` | Clawboo Native, the in-process harness.                     |
-| `@clawboo/adapter-claude-code` | `claude-code`    | Drives the Claude Agent SDK.                                |
-| `@clawboo/adapter-codex`       | `codex`          | Drives `codex app-server` (falls back to `codex exec`).     |
-| `@clawboo/adapter-hermes`      | `hermes`         | Runs `hermes chat -q`, one process per run.                 |
-| `@clawboo/adapter-openclaw`    | `openclaw`       | Drives an agent over a live OpenClaw Gateway connection.    |
-| `@clawboo/adapter-mock`        | `clawboo-mock`   | Fault-injection runtime for contributors. Executes nothing. |
+| Package                        | Runtime id       | Notes                                                          |
+| ------------------------------ | ---------------- | -------------------------------------------------------------- |
+| `@clawboo/adapter-native`      | `clawboo-native` | Clawboo Native, the in-process harness.                        |
+| `@clawboo/adapter-claude-code` | `claude-code`    | Drives the Claude Agent SDK.                                   |
+| `@clawboo/adapter-codex`       | `codex`          | Drives `codex app-server` (falls back to `codex exec`).        |
+| `@clawboo/adapter-hermes`      | `hermes`         | Runs `hermes acp`, else `hermes chat -q`, one process per run. |
+| `@clawboo/adapter-openclaw`    | `openclaw`       | Drives an agent over a live OpenClaw Gateway connection.       |
+| `@clawboo/adapter-mock`        | `clawboo-mock`   | Fault-injection runtime for contributors. Executes nothing.    |
 
 <Note>
 
@@ -112,14 +112,14 @@ A second group of optional fields tells the host how deeply to integrate the run
 
 What each adapter declares (`packages/adapters/*/src/adapter.ts`):
 
-| Runtime          | Class                 | `nativeHome`                              | Streaming | MCP | Worktrees | Steering           | Preserves      |
-| ---------------- | --------------------- | ----------------------------------------- | --------- | --- | --------- | ------------------ | -------------- |
-| `clawboo-native` | `native`              | per-identity, persist                     | yes       | yes | yes       | `live`             | memory         |
-| `claude-code`    | `wrapped-oneshot`     | none (sessions in the user's `~/.claude`) | yes       | yes | yes       | `live`             | nothing        |
-| `codex`          | `wrapped-oneshot`     | per-identity, persist (`CODEX_HOME`)      | yes       | yes | yes       | `live`             | nothing        |
-| `hermes`         | `wrapped-oneshot`     | per-identity, persist                     | no        | yes | yes       | `interrupt-resume` | skills, memory |
-| `openclaw`       | `connected-substrate` | none (the Gateway owns it)                | yes       | no  | no        | `live`             | skills, memory |
-| `clawboo-mock`   | omitted               | none                                      | yes       | no  | no        | `none`             | nothing        |
+| Runtime          | Class                 | `nativeHome`                              | Streaming             | MCP | Worktrees | Steering                                 | Preserves      |
+| ---------------- | --------------------- | ----------------------------------------- | --------------------- | --- | --------- | ---------------------------------------- | -------------- |
+| `clawboo-native` | `native`              | per-identity, persist                     | yes                   | yes | yes       | `live`                                   | memory         |
+| `claude-code`    | `wrapped-oneshot`     | none (sessions in the user's `~/.claude`) | yes                   | yes | yes       | `live`                                   | nothing        |
+| `codex`          | `wrapped-oneshot`     | per-identity, persist (`CODEX_HOME`)      | yes                   | yes | yes       | `live`                                   | nothing        |
+| `hermes`         | `wrapped-oneshot`     | per-identity, persist                     | yes over ACP, else no | yes | yes       | `live` over ACP, else `interrupt-resume` | skills, memory |
+| `openclaw`       | `connected-substrate` | none (the Gateway owns it)                | yes                   | no  | no        | `live`                                   | skills, memory |
+| `clawboo-mock`   | omitted               | none                                      | yes                   | no  | no        | `none`                                   | nothing        |
 
 Every real adapter declares `resume: true` and `toolApproval: true`; the mock declares both false. Native and Claude Code declare a 200,000-token context window; the others declare none, so the rotation watermark stays off for them.
 
@@ -163,8 +163,8 @@ Adapters subscribe when `events()` is called, not on the first `next()`, so fram
 
 `steer(run, text, opts?)` puts a message in front of the model during the run it is aimed at. It is how a person's comment on a task reaches the agent working on it. The adapter declares how in `capabilities().steering`:
 
-- `'live'`: the runtime takes the message into the turn in progress at its next boundary without stopping anything (Clawboo Native, Claude Code, Codex, OpenClaw).
-- `'interrupt-resume'`: the runtime has no way in mid-run, so the driver stops the process and resumes the same session with the message as the next input (Hermes). The stop is absorbed inside the driver and never surfaces as a terminal event, so the host sees one run that carries on. An aborted terminal would otherwise reach the team engine's failure path.
+- `'live'`: the runtime takes the message into the turn in progress at its next boundary without stopping anything (Clawboo Native, Claude Code, Codex, OpenClaw, and Hermes over ACP).
+- `'interrupt-resume'`: the runtime has no way in mid-run, so the driver stops the process and resumes the same session with the message as the next input (Hermes without ACP). The stop is absorbed inside the driver and never surfaces as a terminal event, so the host sees one run that carries on. An aborted terminal would otherwise reach the team engine's failure path.
 - `'none'` or omitted: no mid-run channel. A host must not call `steer()` on such a run.
 
 `steer()` is optional and never throws. It resolves `{ delivered: true, mode }` when the runtime accepted the message for this run, or `{ delivered: false, reason }` with `reason` one of `no-run`, `run-ended`, `unsupported` or `rejected` (plus an optional `detail`). The server's comment path writes the agent's mailbox first, steers second, and marks the mailbox row delivered only when the steer lands, so a refusal falls back to the next run reading the mailbox.

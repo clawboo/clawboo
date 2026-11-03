@@ -1,12 +1,12 @@
 import type { StartOpts, SteerOptions, Usage } from '@clawboo/executor'
 
 /**
- * A native lifecycle event from a headless Hermes run. Hermes has no live token
- * stream (the adapter's `capabilities().streaming` is false): the real driver
- * derives these structured events from Hermes's run output + its `state.db`
- * (sessions / messages), rather than scraping rendered text. Hermes records
- * token usage but the headless USD is unreliable, so cost is `estimated` (like
- * Codex). `sessionId` is the resume handle (Hermes persists it in `state.db`).
+ * A native lifecycle event from a headless Hermes run. Over ACP the driver reads
+ * these off Hermes's session updates as they stream (text, reasoning, tool calls
+ * and results) and its prompt result (usage); on the quiet one-shot path it has
+ * only the output printed at exit. Hermes's headless USD is unreliable, so cost is
+ * `estimated` from tokens (like Codex). `sessionId` is the resume handle (Hermes
+ * persists it in `state.db`).
  *
  * Board boundary: Hermes ships its OWN kanban — clawboo does NOT sync it. Hermes
  * is driven as a single-task WORKER on clawboo's one board of record (it reaches
@@ -51,6 +51,20 @@ export interface HermesDriver {
    *  the resume could not be started. Optional so a test double without it
    *  simply cannot be steered. */
   steer?(text: string, opts?: SteerOptions): Promise<boolean>
+  /** How THIS run takes a steer. A run keeps the driver it started with, so this,
+   *  not the adapter's process-wide transport, decides whether a passive steer
+   *  may go through. Absent means the adapter's capabilities decide. */
+  steering?(): 'live' | 'interrupt-resume'
 }
 
 export type HermesDriverFactory = (opts: StartOpts) => HermesDriver
+
+/** How the host drives Hermes: `acp` over its Agent Client Protocol mode (streamed
+ *  events, a steer read mid-turn), or `quiet`, the one-shot `hermes chat -Q`. */
+export type HermesTransport = 'acp' | 'quiet'
+
+export interface HermesAdapterOptions {
+  /** The transport runs use now, read on every `capabilities()` call: a Hermes
+   *  found without ACP falls back to `quiet`. Absent means `quiet`. */
+  transport?: () => HermesTransport
+}

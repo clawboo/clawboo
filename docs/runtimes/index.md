@@ -44,10 +44,10 @@ So one agent might run on Clawboo Native with the model `llama3.2` from your loc
 | **Best for**                      | Most teams; nothing to install               | OpenClaw users, messaging channels                          | Coding with Anthropic's agent                 | Teams on a ChatGPT plan     | An open-source agent that keeps its own skills                                    |
 | **You need**                      | A provider key, or a local Ollama            | A key, a ChatGPT sign-in or Ollama, and a supported Node.js | An Anthropic API key and the Claude Agent SDK | A ChatGPT sign-in           | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in; Python 3.11 to 3.13 |
 | **Installed by**                  | Built in                                     | Clawboo (**Set up OpenClaw**)                               | Clawboo (**Install**)                         | Clawboo (**Install**)       | Clawboo (**Install**)                                                             |
-| **Cost you see**                  | Exact for six models, estimated for the rest | Estimated                                                   | Reported by Claude Code                       | Estimated from token counts | Estimated from text length                                                        |
+| **Cost you see**                  | Exact for six models, estimated for the rest | Estimated                                                   | Reported by Claude Code                       | Estimated from token counts | Estimated from token counts (from text length without ACP)                        |
 | **Shared memory**                 | Its team's                                   | Global only                                                 | Its team's                                    | Its team's                  | Its team's                                                                        |
 | **Own git worktree for a task**   | Task runs on a repository                    | Never                                                       | Task runs on a repository                     | Task runs on a repository   | Task runs on a repository                                                         |
-| **A comment on a running task**   | Read before its next step                    | Read before its next step                                   | Read before its next step                     | Read before its next step   | The run pauses, reads it, then resumes                                            |
+| **A comment on a running task**   | Read before its next step                    | Read before its next step                                   | Read before its next step                     | Read before its next step   | Read after its current tool call                                                  |
 | **Agent files it reads**          | `SOUL.md`                                    | `SOUL.md`, `IDENTITY.md`, `AGENTS.md`                       | `SOUL.md`                                     | `SOUL.md`                   | `SOUL.md`                                                                         |
 | **Asks before running a command** | Every time, if you turn commands on          | Per its Gateway policy                                      | No                                            | No                          | No                                                                                |
 
@@ -79,25 +79,25 @@ Steering means getting a message to an agent while it is still working on a task
 
 Unless the task is finished, your comment goes into the agent's mailbox, which every run reads when it starts. If a run is working on the task right now, Clawboo also passes the comment into that run:
 
-| Runtime        | What happens to a comment on a running task                                                                                               | The line beside **Send** in the **Tasks** card |
-| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Clawboo Native | Read at the start of its next turn. A run that was about to finish takes one more turn to read it.                                        | "… gets this now, before its next step."       |
-| OpenClaw       | Joins the running turn at its next step, without stopping a tool that is running.                                                         | "… gets this now, before its next step."       |
-| Claude Code    | Joins the running turn at its next step.                                                                                                  | "… gets this now, before its next step."       |
-| Codex          | Joins the running turn at its next step.                                                                                                  | "… gets this now, before its next step."       |
-| Hermes         | Clawboo stops the run and resumes the same session with your comment. A tool call in progress at that moment is lost; the run carries on. | "… pauses to read this, then carries on."      |
+| Runtime        | What happens to a comment on a running task                                                                                                                         | The line beside **Send** in the **Tasks** card |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| Clawboo Native | Read at the start of its next turn. A run that was about to finish takes one more turn to read it.                                                                  | "… gets this now, before its next step."       |
+| OpenClaw       | Joins the running turn at its next step, without stopping a tool that is running.                                                                                   | "… gets this now, before its next step."       |
+| Claude Code    | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."       |
+| Codex          | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."       |
+| Hermes         | Joins the running turn after the tool call in progress. Without Hermes's `acp` extra, Clawboo stops the run and resumes the same session with your comment instead. | "… gets this now, before its next step."       |
 
 If the comment can't get into the run (the run ended a moment earlier, or the runtime refused it), nothing is lost: the agent reads it from its mailbox at its next run, and the note under the comment says so. When it does land, the mailbox copy is marked as delivered, so the agent doesn't read it twice. A comment on a task that is not running behaves by the task's status: a task that waits on you, or waits in **To do**, starts again for it, and a finished task does not get it at all. Each case is in [Steer a running task](/using/board#steer-a-running-task).
 
 <Accordion title="Under the hood: how each runtime takes a comment">
 
-A person's comment is posted with `POST /api/board/:taskId/comments` and `authorType: 'user'`, and the answer's `delivery` field says where it went (see the [Board API](/reference/rest-api/board)). Each runtime declares how it takes input mid-run in its `steering` capability: `live` (Clawboo Native, OpenClaw, Claude Code and Codex) or `interrupt-resume` (Hermes).
+A person's comment is posted with `POST /api/board/:taskId/comments` and `authorType: 'user'`, and the answer's `delivery` field says where it went (see the [Board API](/reference/rest-api/board)). Each runtime declares how it takes input mid-run in its `steering` capability: `live` (Clawboo Native, OpenClaw, Claude Code, Codex, and Hermes over ACP) or `interrupt-resume` (Hermes without ACP).
 
 - **Clawboo Native** queues the comment into the conversation as a user message for its next turn.
 - **OpenClaw** gets it through `chat.send` with `queueMode: 'steer'` over the server's own Gateway connection. If the run ends with the steer still unread, Clawboo cancels it (`chat.abort`) and the comment waits in the mailbox.
 - **Claude Code** gets a user message pushed into the SDK's streaming input.
 - **Codex** gets `turn/steer` on the app-server's in-progress turn.
-- **Hermes** has no way in once a run starts, so Clawboo stops `hermes chat` and resumes the same session with the comment. The orchestrator sees one run that carries on, so the task stays in progress with the same agent.
+- **Hermes** over ACP gets `/steer <comment>` as a prompt to its running session; Hermes adds it to the result of the tool call in progress. A comment that arrives while Hermes writes its final answer goes in as one more turn. A Hermes without ACP has no way in once a run starts, so Clawboo stops `hermes chat` and resumes the same session with the comment; the orchestrator sees one run that carries on.
 
 Small team notices, such as "a task you delegated just finished", use the same channel but never keep a finishing run going and never stop a run.
 
