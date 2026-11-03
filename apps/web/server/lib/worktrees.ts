@@ -9,7 +9,6 @@
 
 import crypto from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
@@ -40,6 +39,7 @@ import {
   readHandoff,
   resumeWorktree,
   SOR_FILES,
+  UnsafeWorktreeError,
   worktreeDiff,
   writeHandoff,
   type AgentHandoff,
@@ -58,6 +58,7 @@ import type { RuntimeRunContext } from './runtimes'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
 import { readTeamVerifyCommand } from './verification/teamVerifyCommand'
 import { notifyVerificationParked } from './teamChat/inboxNotices'
+import { readFileAt } from './workspaceFs'
 
 /**
  * Worktree root for a repo — under the clawboo state dir, namespaced by a hash
@@ -91,6 +92,14 @@ function scaffoldFromTask(db: ClawbooDb, task: DbTask): TaskScaffoldInput {
 export type ProvisionResult =
   | { ok: true; worktree: Worktree; workspaceId: string; isolation: IsolationLevel }
   | { ok: false; reason: 'not_found' | 'no_isolation'; isolation?: IsolationLevel }
+  /** A checkout is already at the task's path and replacing it could lose work
+   *  (uncommitted changes, or a folder git cannot read). It is left as it was,
+   *  and nothing falls back to a fresh provision over it. */
+  | { ok: false; reason: 'unsafe_to_rebuild'; worktreePath: string; why: string }
+
+function unsafeToRebuild(err: UnsafeWorktreeError): ProvisionResult {
+  return { ok: false, reason: 'unsafe_to_rebuild', worktreePath: err.worktreePath, why: err.why }
+}
 
 export interface ProvisionInput {
   repoPath: string
@@ -133,14 +142,20 @@ export async function provisionTaskWorkspace(
     return { ok: true, worktree, workspaceId: existing.id, isolation }
   }
 
-  const worktree = await provisionWorktree({
-    repoPath: input.repoPath,
-    taskId,
-    baseSha: input.baseSha,
-    baseRef: input.baseRef,
-    rootDir,
-    scaffold: scaffoldFromTask(db, task),
-  })
+  let worktree: Worktree
+  try {
+    worktree = await provisionWorktree({
+      repoPath: input.repoPath,
+      taskId,
+      baseSha: input.baseSha,
+      baseRef: input.baseRef,
+      rootDir,
+      scaffold: scaffoldFromTask(db, task),
+    })
+  } catch (err) {
+    if (err instanceof UnsafeWorktreeError) return unsafeToRebuild(err)
+    throw err
+  }
   let workspaceId: string
   if (existing) {
     // Reuse the prior (stale / reaped) row instead of inserting a duplicate —
@@ -167,7 +182,9 @@ export async function provisionTaskWorkspace(
  * `stale`). Re-attaches the branch into a fresh checkout via `resumeWorktree`
  * and flips the row back to `active`, so a re-dispatched task never runs in a
  * missing `cwd`. Returns `not_found` when there is no recorded workspace or the
- * branch is gone (a genuinely-fresh provision is the caller's fallback).
+ * branch is gone (a genuinely-fresh provision is the caller's fallback), and
+ * `unsafe_to_rebuild` when a folder at the path could hold work that replacing
+ * it would lose (no fallback: a provision would replace it the same way).
  */
 export async function resumeTaskWorkspace(
   taskId: string,
@@ -189,7 +206,8 @@ export async function resumeTaskWorkspace(
       branchRef: worktree.branch,
     })
     return { ok: true, worktree, workspaceId: ws.id, isolation: 'worktree' }
-  } catch {
+  } catch (err) {
+    if (err instanceof UnsafeWorktreeError) return unsafeToRebuild(err)
     // Branch gone / git error — the caller falls back to a fresh provision.
     return { ok: false, reason: 'not_found' }
   }
@@ -244,10 +262,14 @@ export async function readWorktreeDetail(taskId: string): Promise<WorktreeDetail
   const wtPath = ws.worktreePath
   const sorFiles: Record<string, string> = {}
   for (const name of Object.values(SOR_FILES)) {
+    // The agent writes these files, so it can also replace one with a link to
+    // any file the server can read. Read through the Workspace tab's confined
+    // reader, which refuses links and anything outside the worktree.
     try {
-      sorFiles[name] = await readFile(path.join(wtPath, name), 'utf8')
+      const file = await readFileAt(wtPath, name)
+      if (!file.binary) sorFiles[name] = file.content
     } catch {
-      /* file may not exist in this worktree */
+      /* missing, a link, or not a regular file: left out */
     }
   }
   let stat: DiffStat | null = null

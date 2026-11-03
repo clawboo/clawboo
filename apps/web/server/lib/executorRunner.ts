@@ -72,9 +72,9 @@ import { classifyError, isHarnessBug, type RuntimeErrorClass } from '@clawboo/ob
 import { buildTurnEnvelope } from '@clawboo/team-orchestration'
 import {
   isolationForTask,
-  isWorktreeRegistered,
   KeyedMutex,
   reconstructState,
+  worktreeRegistration,
   type AgentHandoffInput,
   type ResumeState,
 } from '@clawboo/worktrees'
@@ -295,9 +295,32 @@ function formatResumeContext(r: ResumeState): string {
  * `ok: false` means isolation was REQUIRED for this task but could not be
  * provided — the caller must fail the run rather than fall back to the server's
  * own working directory, which is what the drivers inherit when `cwd` is null.
+ * `refusal` says which way the task goes: `unsafe_to_rebuild` waits for a
+ * person (running again would refuse the same way), the others go back to
+ * To do.
  */
 type WorkspaceOutcome =
-  { ok: true; cwd: string | null; resume: ResumeState | null } | { ok: false; reason: string }
+  | { ok: true; cwd: string | null; resume: ResumeState | null }
+  | {
+      ok: false
+      refusal: 'no_isolation' | 'registration_unknown' | 'unsafe_to_rebuild'
+      reason: string
+    }
+
+/** The trail comment's tag for each refusal. */
+const REFUSAL_TAG: Record<Extract<WorkspaceOutcome, { ok: false }>['refusal'], string> = {
+  no_isolation: '[blocked: no isolation]',
+  registration_unknown: '[not started: worktree unchecked]',
+  unsafe_to_rebuild: '[blocked: worktree kept]',
+}
+
+function unsafeWorkspace(r: { worktreePath: string; why: string }): WorkspaceOutcome {
+  return {
+    ok: false,
+    refusal: 'unsafe_to_rebuild',
+    reason: `The worktree at ${r.worktreePath} could not be rebuilt without losing work: ${r.why}. Nothing in it was deleted. Commit or copy what you need from that folder, or remove it, then move the task back to To do.`,
+  }
+}
 
 /**
  * Where a run with no worktree starts. `cwd` stays the WORKTREE (null here), since
@@ -348,10 +371,18 @@ async function acquireWorkspace(
     // reaped checkout (stale row / dir gone / not git-registered) and rebuild it
     // from the retained branch before use; fall through to a fresh provision
     // only if the rebuild can't run (no repoPath / branch gone).
-    const reaped =
-      existing.workspace.status === 'stale' ||
-      !existsSync(wtPath) ||
-      (repoPath ? !(await isWorktreeRegistered(repoPath, wtPath)) : false)
+    const gone = existing.workspace.status === 'stale' || !existsSync(wtPath)
+    const registration = !gone && repoPath ? await worktreeRegistration(repoPath, wtPath) : null
+    // The rebuild replaces the folder, so a failed `git worktree list` must not
+    // read as "reaped": it says nothing about a checkout that may be live.
+    if (registration === 'unknown') {
+      return {
+        ok: false,
+        refusal: 'registration_unknown',
+        reason: `Could not check the worktree at ${wtPath} against ${repoPath ?? 'its repository'} (git did not answer), so nothing was changed. The task can run again.`,
+      }
+    }
+    const reaped = gone || registration === 'unregistered'
     if (!reaped) return { ok: true, cwd: wtPath, resume: existing.resume }
     if (repoPath) {
       const resumed = await resumeTaskWorkspace(taskId, { repoPath })
@@ -364,6 +395,8 @@ async function acquireWorkspace(
         }
         return { ok: true, cwd: resumed.worktree.worktreePath, resume }
       }
+      // A fresh provision would replace the folder the same way.
+      if (resumed.reason === 'unsafe_to_rebuild') return unsafeWorkspace(resumed)
     }
   }
 
@@ -377,14 +410,17 @@ async function acquireWorkspace(
   if (!repoPath) {
     return {
       ok: false,
+      refusal: 'no_isolation',
       reason:
         'This task changes files, so it needs an isolated git worktree, but no repository path was provided for it.',
     }
   }
   const prov = await provisionTaskWorkspace(taskId, { repoPath, kind })
   if (!prov.ok) {
+    if (prov.reason === 'unsafe_to_rebuild') return unsafeWorkspace(prov)
     return {
       ok: false,
+      refusal: 'no_isolation',
       reason: `Could not provision an isolated git worktree for this task at ${repoPath}.`,
     }
   }
@@ -698,13 +734,15 @@ async function runTaskInner(
     acquired.ok && acquired.cwd === null
       ? await folderForRun(runtimeId, task.teamId ?? null)
       : ({ ok: true, runDir: null } as const)
-  const workspace: WorkspaceOutcome = runFolder.ok ? acquired : runFolder
+  const workspace: WorkspaceOutcome = runFolder.ok
+    ? acquired
+    : { ...runFolder, refusal: 'no_isolation' }
 
   // Isolation was required but unavailable. Running now would execute the agent
   // in the SERVER's own working directory with permission gates bypassed, so the
   // run is refused and the task released for a human to fix the repo path.
   if (!workspace.ok) {
-    addComment(db, taskId, `[blocked: no isolation] ${workspace.reason}`, 'system')
+    addComment(db, taskId, `${REFUSAL_TAG[workspace.refusal]} ${workspace.reason}`, 'system')
     // BIND the result. `completeExecutionProcess` refuses (returns null) when
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
@@ -723,7 +761,11 @@ async function runTaskInner(
         runtime: runtimeId,
         data: { execId: exec.id, status: 'failed', error: 'workspace_unavailable' },
       })
-    releaseTask(db, taskId)
+    // A checkout that could hold work waits in Needs you: a run released to To
+    // do would start again and refuse the same way, comment after comment.
+    if (workspace.refusal !== 'unsafe_to_rebuild' || !updateStatus(db, taskId, 'blocked').ok) {
+      releaseTask(db, taskId)
+    }
     return { ok: false, reason: 'workspace_unavailable' }
   }
   const { cwd, resume } = workspace

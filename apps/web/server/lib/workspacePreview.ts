@@ -6,21 +6,29 @@
 // the agent authored, and for a built page the two are indistinguishable to a
 // viewer anyway.
 //
-// It reuses `resolveWorkspaceRelPath` verbatim rather than re-deriving path
-// safety, so the confinement rules stay in one place: no absolute paths, no
-// `..`, no NUL or control bytes, no backslashes, no symlinks, and a re-check of
-// containment after `realpath` resolves any symlinked ancestor.
+// It reuses `resolveWorkspaceRelPath` and `openConfinedFile` verbatim rather
+// than re-deriving path safety, so the confinement rules stay in one place: no
+// absolute paths, no `..`, no NUL or control bytes, no backslashes, no
+// symlinks, a re-check of containment after `realpath` resolves any symlinked
+// ancestor, and an open that is checked again from the handle's side, so a file
+// swapped for a link after the check is never served.
 //
 // It does NOT go through `readFileAt`. That path is tuned for the text viewer —
 // a 256 KB ceiling and a binary sniff that refuses anything with a NUL in its
 // first 8 KB — and a preview is mostly images, fonts and bundles. So this reads
 // raw bytes under its own, larger ceiling.
 
-import { createReadStream } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import path from 'node:path'
+import { Readable } from 'node:stream'
 
-import { resolveWorkspaceRelPath, resolveWorkspaceRoot, WorkspacePathError } from './workspaceFs'
+import {
+  openConfinedFile,
+  type ConfinedFile,
+  resolveWorkspaceRelPath,
+  resolveWorkspaceRoot,
+  WorkspacePathError,
+} from './workspaceFs'
 
 /**
  * Drop trailing slashes in LINEAR time.
@@ -88,6 +96,8 @@ export type PreviewResolution =
   | {
       ok: true
       absPath: string
+      /** The real path of the workspace root `absPath` was confined to. */
+      realRoot: string
       contentType: string
       size: number
       /** True when a DIRECTORY was resolved to its `index.html`. The caller must
@@ -115,8 +125,9 @@ export async function resolvePreviewFile(
 
   const wanted = relPath.replace(/^\/+/, '')
   let abs: string
+  let realRoot: string
   try {
-    ;({ abs } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.'))
+    ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, wanted || '.'))
   } catch (err) {
     if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
     return { ok: false, status: 404, error: 'No such file in the workspace.' }
@@ -131,7 +142,7 @@ export async function resolvePreviewFile(
     // confined on exactly the terms every other path is.
     const indexRel = wanted ? `${trimTrailingSlashes(wanted)}/${INDEX_FILE}` : INDEX_FILE
     try {
-      ;({ abs } = await resolveWorkspaceRelPath(rootRes.root, indexRel))
+      ;({ abs, realRoot } = await resolveWorkspaceRelPath(rootRes.root, indexRel))
     } catch {
       return { ok: false, status: 404, error: 'No index.html in that directory.' }
     }
@@ -143,11 +154,55 @@ export async function resolvePreviewFile(
     return { ok: false, status: 413, error: 'That file is too large to preview.' }
   }
 
-  return { ok: true, absPath: abs, contentType: previewContentType(served), size: st.size, isIndex }
+  return {
+    ok: true,
+    absPath: abs,
+    realRoot,
+    contentType: previewContentType(served),
+    size: st.size,
+    isIndex,
+  }
 }
 
-/** A read stream for a resolved preview file. Streamed rather than buffered so
- *  a large asset never sits in this process's heap. */
-export function openPreviewStream(absPath: string): NodeJS.ReadableStream {
-  return createReadStream(absPath)
+export type PreviewStream =
+  | {
+      ok: true
+      stream: Readable
+      /** Bytes the stream yields: the opened file's size, for Content-Length. */
+      size: number
+    }
+  | { ok: false; status: 400 | 404 | 413; error: string }
+
+/**
+ * Open a resolved preview file and stream it, or say what to answer instead.
+ * Streamed rather than buffered so a large asset never sits in this process's
+ * heap.
+ *
+ * Opened through `openConfinedFile`, which checks the open from the handle's
+ * side: the agent can replace the file, or a folder above it, with a link
+ * between `resolvePreviewFile` and this call. The stream reads from that
+ * checked handle and stops at the size read from it, so what is sent always
+ * matches the Content-Length.
+ */
+export async function openPreviewStream(
+  file: Pick<Extract<PreviewResolution, { ok: true }>, 'absPath' | 'realRoot'>,
+): Promise<PreviewStream> {
+  let opened: ConfinedFile
+  try {
+    opened = await openConfinedFile(file.realRoot, file.absPath)
+  } catch (err) {
+    if (err instanceof WorkspacePathError) return { ok: false, status: 400, error: err.message }
+    return { ok: false, status: 404, error: 'No such file in the workspace.' }
+  }
+  const { handle, size } = opened
+  if (size > MAX_PREVIEW_BYTES) {
+    await handle.close()
+    return { ok: false, status: 413, error: 'That file is too large to preview.' }
+  }
+  if (size === 0) {
+    await handle.close()
+    return { ok: true, stream: Readable.from([]), size }
+  }
+  // autoClose (the default) closes the handle when the stream ends or fails.
+  return { ok: true, stream: handle.createReadStream({ start: 0, end: size - 1 }), size }
 }

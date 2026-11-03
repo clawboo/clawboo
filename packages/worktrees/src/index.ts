@@ -45,6 +45,7 @@ export {
   gcWorktrees,
   provisionReviewWorktree,
   removeReviewWorktree,
+  UnsafeWorktreeError,
   type ProvisionOptions,
   type ResumeOptions,
   type LoadOptions,
@@ -76,6 +77,8 @@ export {
   worktreeDiff,
   isDetached,
   isWorktreeRegistered,
+  worktreeRegistration,
+  type WorktreeRegistration,
   KeyedMutex,
   // Exported because callers have to be able to CATCH it. The acquire timeout
   // was added without this, so the one rejection class the mutex can now produce

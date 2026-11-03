@@ -883,6 +883,12 @@ The task `kind` decides whether a worktree is made: `code` (the default) and any
 { ok: false, error: 'no_isolation', isolation: 'none' }
 ```
 
+**`409 Conflict`**: a folder is already at the task's worktree path and replacing it could lose work, because it has uncommitted changes or git cannot read it. The folder is left as it is:
+
+```ts
+{ ok: false, error: 'unsafe_to_rebuild', worktreePath: string, message: string }
+```
+
 **`200 OK`**: the worktree was provisioned (or an existing one reused):
 
 ```ts
@@ -1115,7 +1121,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff.
+The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
@@ -1158,7 +1164,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace/detail
 
 Four read-only routes behind an agent's **Workspace** tab. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
 
-The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
+The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. The agent can change the worktree while it is read, so a file is opened without following a link, and checked again after the open to be the same file inside the worktree: a file or folder swapped for a link after the first check is refused too. A file with more than one hard link is refused as well, since a hard link can give a file outside the worktree a name inside it; a git checkout never makes one, though a package manager's store can. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
 
 When the workspace itself cannot be read, all four answer `{ "ok": false, "error": "<message>", "reason": "<reason>" }`:
 
@@ -1212,7 +1218,7 @@ curl 'http://localhost:18790/api/board/<task-id>/workspace/file?path=src/index.t
 Serves the files in a task's worktree as a static website, so the task drawer's **Preview** can show the page an agent built next to the diff. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
 
 - `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>` serve the same tree. A folder (including the bare route) serves its `index.html`. A folder URL without a trailing slash answers `302` to the same URL with a `/` added (the base path and query are kept), so the page's relative links resolve.
-- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, backslashes or control characters, and at most 1024 characters.
+- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters.
 - `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
 - Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
 - Every response, redirects and errors included, carries `Content-Security-Policy: sandbox allow-same-origin`.

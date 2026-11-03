@@ -13,6 +13,7 @@ import {
   addWorktree,
   branchExists,
   branchNameForTask,
+  checkoutContents,
   commitAll,
   deleteBranch,
   diffStat,
@@ -25,6 +26,7 @@ import {
   resolveBaseSha,
   revParse,
   worktreePathFor,
+  worktreeRegistration,
   worktreeRootFor,
 } from './git'
 import { SOR_FILES, writeScaffold } from './scaffold'
@@ -47,6 +49,44 @@ function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: string
     )
   }
   return expected
+}
+
+/**
+ * Thrown instead of replacing a checkout that may hold work found nowhere else:
+ * uncommitted changes, or a folder git cannot read as a checkout, so what it
+ * holds is unknown. The folder is left exactly as it was, for a person to save
+ * or remove.
+ */
+export class UnsafeWorktreeError extends Error {
+  readonly worktreePath: string
+  /** Why, in words that complete "refusing to replace <path>: ...". */
+  readonly why: string
+  constructor(worktreePath: string, why: string) {
+    super(`refusing to replace ${worktreePath}: ${why}`)
+    this.name = 'UnsafeWorktreeError'
+    this.worktreePath = worktreePath
+    this.why = why
+  }
+}
+
+/**
+ * Throw {@link UnsafeWorktreeError} unless the folder at `worktreePath` can be
+ * deleted without losing anything: it is missing, empty, or a checkout of its
+ * own with a clean `git status` (its commits are on the branch). Every path
+ * that removes a task checkout in order to put another one there runs this
+ * first, because the removal itself (`worktree remove --force`, then a
+ * recursive delete) takes uncommitted work with it.
+ */
+async function assertReplaceable(worktreePath: string): Promise<void> {
+  const contents = await checkoutContents(worktreePath)
+  if (contents === 'dirty')
+    throw new UnsafeWorktreeError(worktreePath, 'it has uncommitted changes')
+  if (contents === 'unreadable') {
+    throw new UnsafeWorktreeError(
+      worktreePath,
+      'git cannot read it as a checkout, so it may hold work that is nowhere else',
+    )
+  }
 }
 
 // The system-of-record bookkeeping files — excluded from the "did the agent do
@@ -79,7 +119,9 @@ export interface ProvisionOptions {
  * - **Branch from a commit SHA, never the dirty working tree** — avoids
  *   inheriting uncommitted state and gives a stable diff baseline.
  * - **Orphan-resilient** — force-remove any stale registration + leftover dir
- *   before `worktree add`.
+ *   before `worktree add`, but only a leftover that holds nothing: one with
+ *   uncommitted changes, or that git cannot read, throws
+ *   {@link UnsafeWorktreeError} and is left in place.
  * - **Branch-collision recovery** — reuse the branch if it already points at the
  *   branch point, else `-B` reset; only fresh provision uses `-b`/`-B`
  *   (re-attach is `resumeWorktree`, which never does, so it can't discard commits).
@@ -107,6 +149,9 @@ export async function provisionWorktree(opts: ProvisionOptions): Promise<Worktre
     const branchPoint =
       opts.baseSha?.trim() || (await resolveBaseSha(opts.repoPath, opts.baseRef ?? 'HEAD'))
     await mkdir(root, { recursive: true })
+    // Checked once, before either pass below: after it, anything at the path is
+    // this provision's own (a failed first attempt), safe for the retry to clear.
+    await assertReplaceable(worktreePath)
 
     const attempt = async (): Promise<void> => {
       // Orphan-resilient pre-clean.
@@ -178,6 +223,9 @@ export interface ResumeOptions {
  * `-b`/`-B` (which would discard the branch's commits) — it attaches the branch
  * at its current tip. `baseCommit` is recovered as the SoR-scaffold commit so a
  * later `completeWorktree` diffs against the right baseline.
+ *
+ * A folder already at the path is replaced only when that loses nothing;
+ * otherwise this throws {@link UnsafeWorktreeError} and leaves it alone.
  */
 export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
   const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
@@ -187,6 +235,7 @@ export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
     if (!(await branchExists(opts.repoPath, branch))) {
       throw new Error(`cannot resume: branch ${branch} no longer exists`)
     }
+    await assertReplaceable(worktreePath)
     await removeWorktree(opts.repoPath, worktreePath)
     await rm(worktreePath, { recursive: true, force: true })
     // Attach the existing branch — no -b/-B, so prior commits are preserved.
@@ -320,7 +369,9 @@ export interface GcResult {
 /**
  * Garbage-collect stale worktrees by age and count. Reaping is **commit-before-
  * drop** (auto-saves any uncommitted work to the branch, then removes only the
- * worktree — the branch is kept, so nothing is lost). Active tasks are skipped;
+ * worktree — the branch is kept, so nothing is lost). A folder that cannot be
+ * autosaved (git does not list it, or could not answer) is reaped only when it
+ * holds nothing, and skipped with a reason otherwise. Active tasks are skipped;
  * failures are collected and do not abort the sweep ("continue on failure").
  * Only ever touches directories under the clawboo worktree root.
  */
@@ -370,12 +421,29 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
           result.skipped.push({ taskId: info.taskId, reason: 'active' })
           return false
         }
-        // Commit-before-drop so reaping can never eat uncommitted work.
-        if (
-          (await isWorktreeRegistered(opts.repoPath, info.worktreePath)) &&
-          (await hasUncommittedChanges(info.worktreePath))
-        ) {
-          await commitAll(info.worktreePath, `clawboo: gc autosave task ${info.taskId}`)
+        // Commit-before-drop so reaping can never eat uncommitted work. Only a
+        // checkout git lists can be autosaved; anything else is reaped only when
+        // it holds nothing, and skipped when git could not even say which it is.
+        const registration = await worktreeRegistration(opts.repoPath, info.worktreePath)
+        if (registration === 'unknown') {
+          result.skipped.push({
+            taskId: info.taskId,
+            reason: 'git could not list the repository worktrees',
+          })
+          return false
+        }
+        if (registration === 'registered') {
+          if (await hasUncommittedChanges(info.worktreePath)) {
+            await commitAll(info.worktreePath, `clawboo: gc autosave task ${info.taskId}`)
+          }
+        } else {
+          try {
+            await assertReplaceable(info.worktreePath)
+          } catch (err) {
+            if (!(err instanceof UnsafeWorktreeError)) throw err
+            result.skipped.push({ taskId: info.taskId, reason: err.message })
+            return false
+          }
         }
         await removeWorktree(opts.repoPath, info.worktreePath) // keep the branch
         await rm(info.worktreePath, { recursive: true, force: true })
