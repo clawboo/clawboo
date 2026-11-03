@@ -74,6 +74,22 @@ vi.mock('../../lib/runtimes/codexModels', () => ({
   },
 }))
 
+// ── Mock `hermes acp --check` (real impl spawns Hermes in a throwaway home). ──
+const acpCheckState = vi.hoisted(() => ({
+  answer: null as boolean | null,
+  calls: 0,
+  /** When set, a check waits for this before it answers. */
+  gate: null as Promise<void> | null,
+}))
+vi.mock('../../lib/runtimes/hermesAcpCheck', () => ({
+  runHermesAcpCheck: async () => {
+    acpCheckState.calls += 1
+    const answer = acpCheckState.answer
+    if (acpCheckState.gate) await acpCheckState.gate
+    return answer
+  },
+}))
+
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
 interface FakeChild {
   killed: boolean
@@ -155,6 +171,12 @@ import {
   canRunNativeProvider,
   isNativeOllamaRemoved,
 } from '../../lib/runtimes/native/nativeProviderDefaults'
+import {
+  checkHermesAcp,
+  hermesTransport,
+  peekHermesAcp,
+  resetHermesTransport,
+} from '../../lib/runtimes/hermesTransport'
 
 interface Mock {
   res: Response
@@ -241,6 +263,10 @@ describe('runtimes install/connect REST', () => {
     spawnState.children = []
     runnerState.lastInput = null
     codexAuthState.loggedIn = false
+    acpCheckState.answer = null
+    acpCheckState.calls = 0
+    acpCheckState.gate = null
+    resetHermesTransport()
     // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours it).
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
@@ -319,7 +345,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/pipx',
-      args: ['install', 'hermes-agent[anthropic,acp]<1'],
+      args: ['install', '--force', 'hermes-agent[anthropic,acp]<1'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
@@ -333,7 +359,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', 'hermes-agent[anthropic,acp]<1'],
+      args: ['-m', 'pip', 'install', '--upgrade', '--user', 'hermes-agent[anthropic,acp]<1'],
     })
     const first = spawnState.children[0] as FakeChild
     first.emitStderr('error: externally-managed-environment')
@@ -344,6 +370,7 @@ describe('runtimes install/connect REST', () => {
         '-m',
         'pip',
         'install',
+        '--upgrade',
         '--user',
         '--break-system-packages',
         'hermes-agent[anthropic,acp]<1',
@@ -352,6 +379,43 @@ describe('runtimes install/connect REST', () => {
     ;(spawnState.children[1] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  it('a Hermes install (also how it is updated) checks for ACP afresh before it reports done', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    acpCheckState.answer = false
+    await checkHermesAcp()
+    expect(hermesTransport()).toBe('quiet')
+
+    acpCheckState.answer = true
+    let release!: () => void
+    acpCheckState.gate = new Promise<void>((r) => (release = r))
+    const before = acpCheckState.calls
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    // The old answer is gone at once, and the new one is read before `complete`.
+    expect(hermesTransport()).toBe('acp')
+    await vi.waitFor(() => expect(acpCheckState.calls).toBe(before + 1))
+    expect(m.events().some((e) => e['type'] === 'complete')).toBe(false)
+    release()
+    await m.ended
+    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+    expect(peekHermesAcp()).toBe(true)
+  })
+
+  it('a failed Hermes install keeps what was known about ACP', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    acpCheckState.answer = false
+    await checkHermesAcp()
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(1)
+    await m.ended
+    expect(peekHermesAcp()).toBe(false)
+    expect(hermesTransport()).toBe('quiet')
   })
 
   it('hermes install reports PYTHON_MISSING when neither pipx nor python exist', async () => {
@@ -478,6 +542,46 @@ describe('runtimes install/connect REST', () => {
     expect(codex['updateRequired']).toBe(true)
     expect(codex['cliVersion']).toBe('0.136.0')
     codexModelsState.peeked = false
+  })
+
+  describe('Hermes without its ACP mode', () => {
+    const hermesStatus = async (): Promise<Record<string, unknown>> => {
+      const list = mockRes()
+      await runtimesListGET(req(), list.res)
+      return (list.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+        (r) => r['id'] === 'hermes',
+      )!
+    }
+
+    it('reads acpMissing once checked, and its steering stops and resumes the run', async () => {
+      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+      acpCheckState.answer = false
+      // The list starts the check and does not wait for it: nothing claimed yet.
+      expect('acpMissing' in (await hermesStatus())).toBe(false)
+      expect(acpCheckState.calls).toBe(1)
+      await checkHermesAcp()
+      const hermes = await hermesStatus()
+      expect(hermes['acpMissing']).toBe(true)
+      expect(hermes['capabilities']).toMatchObject({
+        streaming: false,
+        steering: 'interrupt-resume',
+      })
+    })
+
+    it('a Hermes with ACP reads acpMissing false and live steering', async () => {
+      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+      acpCheckState.answer = true
+      await checkHermesAcp()
+      const hermes = await hermesStatus()
+      expect(hermes['acpMissing']).toBe(false)
+      expect(hermes['capabilities']).toMatchObject({ streaming: true, steering: 'live' })
+    })
+
+    it('a Hermes that is not installed is never checked', async () => {
+      const hermes = await hermesStatus()
+      expect('acpMissing' in hermes).toBe(false)
+      expect(acpCheckState.calls).toBe(0)
+    })
   })
 
   it('GET /api/runtimes/codex/models returns the live list without the source detail', async () => {

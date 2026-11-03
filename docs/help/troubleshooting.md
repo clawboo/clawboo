@@ -359,6 +359,14 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 </Accordion>
 
+<Accordion title="Hermes reads Update available">
+
+**What it means:** this Hermes was installed without its live mode (the `acp` extra). Its agents still run, but a run shows its work only when it finishes, and a comment sent mid-run stops the run and resumes it.
+
+**Fix:** click **Update** on the **Hermes** row, then **Update Hermes**. When the row reads **Connected**, the next run is live. More in [Hermes](/runtimes/hermes).
+
+</Accordion>
+
 <Accordion title="Permission denied. A global install may require elevated permissions.">
 
 **What it means:** npm cannot write to its global folder while installing Claude Code or Codex. For OpenClaw the message reads "Permission denied. Your Node.js installation may require sudo for global installs."

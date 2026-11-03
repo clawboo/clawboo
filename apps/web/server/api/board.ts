@@ -64,6 +64,7 @@ import {
   runnerRerunFor,
   type RunnerRerun,
 } from '../lib/runnerRerun'
+import { taskRunSteering } from '../lib/runSteers'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
@@ -133,6 +134,8 @@ export function boardGetGET(req: Request, res: Response): void {
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
         runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
+        // How the run on it takes a comment right now, for the composer's hint.
+        runSteering: taskRunSteering(taskId),
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),

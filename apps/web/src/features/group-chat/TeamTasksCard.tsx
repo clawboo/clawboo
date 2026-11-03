@@ -14,6 +14,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChevronDown, ChevronRight, KanbanSquare, ListChecks } from 'lucide-react'
 
+import { fetchRuntimes } from '@clawboo/control-client'
+
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalCard } from '@/features/approvals/InlineApprovalCard'
 import { ToolApprovalCard } from '@/features/approvals/ToolApprovalCard'
@@ -270,13 +272,22 @@ function outputOf(task: BoardTaskView, comments: TaskComment[] | null): string |
   return last?.body ?? null
 }
 
-/** How a comment reaches a task that is running now, by the agent's runtime.
- *  `live`: into the running turn at its next step. `resume`: the runtime takes no
- *  input mid-run, so its run is paused and picked back up with the comment.
- *  Anything else reads its mailbox at its next run. Hermes is `live` over its ACP
- *  mode, which Clawboo installs it with; a Hermes installed without that mode
- *  pauses and resumes instead, which this hint cannot see. */
-const MID_RUN_DELIVERY: Record<string, 'live' | 'resume'> = {
+/** How a comment reaches a task that is running now. `live`: into the running
+ *  turn at its next step. `resume`: the run takes no input mid-run, so it is
+ *  paused and picked back up with the comment. Anything else reads its mailbox at
+ *  its next run. */
+type MidRunDelivery = 'live' | 'resume'
+
+/** A runtime's or a run's steering mode, as the server reports it. */
+type Steering = 'live' | 'interrupt-resume' | 'none'
+
+const asSteering = (v: unknown): Steering | null =>
+  v === 'live' || v === 'interrupt-resume' || v === 'none' ? v : null
+
+/** Each runtime's usual way, until the live answer is in (and for OpenClaw, which
+ *  the Runtimes status does not list). Hermes is `live` over its ACP mode, which
+ *  Clawboo installs it with. */
+const MID_RUN_DELIVERY: Record<string, MidRunDelivery> = {
   'clawboo-native': 'live',
   'claude-code': 'live',
   codex: 'live',
@@ -284,11 +295,26 @@ const MID_RUN_DELIVERY: Record<string, 'live' | 'resume'> = {
   hermes: 'live',
 }
 
+/** The run on the task decides when there is one (a Hermes run that fell back to
+ *  its quiet path pauses, whatever new runs would do), then the way the runtime
+ *  takes a comment now, then its usual way. */
+function midRunDelivery(
+  runtime: string | null,
+  runSteering: Steering | null,
+  runtimeSteering: Steering | null,
+): MidRunDelivery | undefined {
+  const steering = runSteering ?? runtimeSteering
+  if (steering === 'live') return 'live'
+  if (steering === 'interrupt-resume') return 'resume'
+  if (steering === 'none') return undefined
+  return runtime ? MID_RUN_DELIVERY[runtime] : undefined
+}
+
 /** What sending does for this task, in the person's words. */
 function composerHint(
   task: BoardTaskView,
   name: string | null,
-  runtime: string | null,
+  delivery: MidRunDelivery | undefined,
   hasAgent: boolean,
 ): string {
   if (task.status === 'done' || task.status === 'cancelled')
@@ -296,7 +322,6 @@ function composerHint(
   if (!hasAgent) return 'No agent is on this task yet. Your comment is saved on it.'
   const who = name ?? 'The agent'
   if (task.status === 'in_progress') {
-    const delivery = runtime ? MID_RUN_DELIVERY[runtime] : undefined
     if (delivery === 'live') return `${who} gets this now, before its next step.`
     if (delivery === 'resume') return `${who} pauses to read this, then carries on.`
     return `${who} sees this the next time it checks in.`
@@ -336,6 +361,26 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
     }
   }, [task.id, task.status, task.updatedAt, reloadKey])
 
+  // How the agent's runtime takes a comment now (Hermes's depends on how it was
+  // installed), read only while the task runs, the one time the hint uses it.
+  const running = task.status === 'in_progress'
+  const [runtimeSteering, setRuntimeSteering] = useState<{
+    runtime: string
+    steering: Steering | null
+  } | null>(null)
+  useEffect(() => {
+    if (!running || !assigneeRuntime || assigneeRuntime === 'openclaw') return
+    let cancelled = false
+    void fetchRuntimes().then((runtimes) => {
+      if (cancelled) return
+      const steering = runtimes.find((r) => r.id === assigneeRuntime)?.capabilities?.steering
+      setRuntimeSteering({ runtime: assigneeRuntime, steering: asSteering(steering) })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [running, assigneeRuntime])
+
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   // The agent the task belongs to: its assignee, or the agent it is bound to
@@ -368,6 +413,11 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
   }
 
   const { tone, label } = toneFor(task)
+  const delivery = midRunDelivery(
+    assigneeRuntime,
+    asSteering(row?.runSteering),
+    runtimeSteering?.runtime === assigneeRuntime ? runtimeSteering.steering : null,
+  )
   const runtime = typeof row?.assigneeRuntime === 'string' ? row.assigneeRuntime : null
   const cost = row ? runCostOf(row) : null
   const description = typeof row?.description === 'string' ? row.description.trim() : ''
@@ -462,7 +512,7 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
           />
           <div className="flex items-center gap-2 px-2 pb-2">
             <span className="min-w-0 flex-1 truncate px-1 text-[11px] text-muted-foreground">
-              {composerHint(task, boundName, assigneeRuntime, boundId != null)}
+              {composerHint(task, boundName, delivery, boundId != null)}
             </span>
             <Button type="submit" size="sm" variant="primary" disabled={!draft.trim() || sending}>
               Send

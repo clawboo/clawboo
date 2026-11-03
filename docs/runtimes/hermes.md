@@ -35,7 +35,7 @@ To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
 Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Hermes** row, click **Install**, then **Install** in the panel that opens.
 
-With pipx, Clawboo runs `pipx install --python <python> 'hermes-agent[anthropic,acp]<1'`, passing the newest Python from 3.11 to 3.13 it finds. A newer Python on the same machine, such as 3.14, is passed over. If Clawboo finds none in that range, pipx uses its own default Python. Without pipx, Clawboo runs `<python> -m pip install --user 'hermes-agent[anthropic,acp]<1'` with that same Python, and retries with `--break-system-packages` on a system that blocks user installs. The `[anthropic]` extra is what lets Hermes run on an Anthropic key. The `[acp]` extra is Hermes's Agent Client Protocol mode, which lets you watch a run as it works and steer it without stopping it.
+With pipx, Clawboo runs `pipx install --force --python <python> 'hermes-agent[anthropic,acp]<1'`, passing the newest Python from 3.11 to 3.13 it finds. A newer Python on the same machine, such as 3.14, is passed over. If Clawboo finds none in that range, pipx uses its own default Python. Without pipx, Clawboo runs `<python> -m pip install --upgrade --user 'hermes-agent[anthropic,acp]<1'` with that same Python, and retries with `--break-system-packages` on a system that blocks user installs. `--force` and `--upgrade` let the same command update a Hermes that is already installed. The `[anthropic]` extra is what lets Hermes run on an Anthropic key. The `[acp]` extra is Hermes's Agent Client Protocol mode, which lets you watch a run as it works and steer it without stopping it.
 
 You should see the row change to **Needs key**, or to **Connected** if a key it can use is already connected.
 
@@ -152,9 +152,9 @@ To remove a single key instead, open **Manage**, click that provider's row, and 
 
 ## Limits
 
-- No live text: a Hermes reply appears when its run finishes.
+- Without the `acp` extra, there is no live text: a Hermes reply appears when its run finishes. The **Hermes** row then reads **Update available**.
 - Hermes reports no cost, so Clawboo's figures for it are estimates.
-- A comment stops the run; the tool call in progress at that moment is lost, and finished work is kept.
+- Without the `acp` extra, a comment stops the run; the tool call in progress at that moment is lost, and finished work is kept.
 - The agent's `config.yaml` is a one-time copy of yours.
 - Python 3.11 to 3.13 only.
 
@@ -198,7 +198,13 @@ This Hermes was installed without the `[anthropic]` extra, so it cannot run on a
 
 <Accordion title="A Hermes run shows nothing until it finishes">
 
-This Hermes has no ACP mode: it was installed without the `[acp]` extra, before Clawboo asked for it. Clawboo then runs it with `hermes chat`, which prints only at the end, and a comment stops and resumes the run. Check with `hermes acp --check`, which says "ACP dependencies not installed" in that case, then reinstall with the extra: `pipx install --force 'hermes-agent[anthropic,acp]<1'`, or `python3 -m pip install --user 'hermes-agent[anthropic,acp]<1'` for a pip install. Clawboo tries ACP again within ten minutes, or at once after a restart.
+This Hermes has no ACP mode: it was installed without the `[acp]` extra, before Clawboo asked for it. Clawboo then runs it with `hermes chat`, which prints only at the end, and a comment stops and resumes the run. The line beside **Send** on its running tasks reads "… pauses to read this, then carries on."
+
+In **Settings** > **Runtimes**, the **Hermes** row reads **Update available**. Click **Update** on the row, then **Update Hermes**. Clawboo reinstalls Hermes with the extra, asks it again once the install finishes, and the next run uses ACP. The row reads **Connected** when it worked.
+
+To do it yourself, check with `hermes acp --check`, which says "ACP dependencies not installed" in that case, then reinstall with the extra: `pipx install --force 'hermes-agent[anthropic,acp]<1'`, or `python3 -m pip install --upgrade --user 'hermes-agent[anthropic,acp]<1'` for a pip install. Clawboo asks again within ten minutes, or at once after a restart.
+
+If the row still reads **Update available** after the update, the `hermes` Clawboo runs is not the one that was updated, for example a pip install in a different Python. Run `hermes acp --check` in a terminal, and reinstall the `hermes` it finds.
 
 </Accordion>
 
@@ -243,7 +249,7 @@ Each agent uses its own copy, made once. Edit `~/.clawboo/runtimes/hermes/<agent
 - Hermes's ACP mode answers a failed turn as a finished one, without its tokens. Clawboo reads a turn that reports no tokens as failed, with the error Hermes logged as the reason.
 - On either path, a failed run's reason is what Hermes printed on stderr. When that holds a provider's error body, its `code` (`invalid_api_key`, `insufficient_quota`, ...) or else its `type` (`authentication_error`, ...) becomes the error's code, so a refused key waits in **Needs you** with **Fix sign-in**; see [Error classes](/reference/events-and-errors#error-classes).
 - **Without ACP** (Hermes installed without the `acp` extra), each run is `hermes chat -q <prompt> -Q --yolo --accept-hooks [-m <model>] [--resume <session id>] [--provider <id>] [--continue]`. While it works, Clawboo marks it alive once a minute, for up to two hours, since `-Q` prints nothing until the run ends. When the task runner picks a task back up, Clawboo resumes the saved session with `--resume` (never in a newly created folder). To take a comment, it stops the run and starts it again with `--resume`, or with `--continue` when it does not know the session id yet.
-- Clawboo falls back to `hermes chat` on its own when `hermes acp` cannot start or its handshake fails or times out (a run that stalls after the handshake does not fall back), and keeps using it for ten minutes. `CLAWBOO_HERMES_TRANSPORT=quiet` always uses `hermes chat`; `acp` always tries ACP first. A provider picked for the agent without a model also runs on `hermes chat`, since ACP pins a provider only together with a model.
+- Clawboo falls back to `hermes chat` on its own when `hermes acp` cannot start or its handshake fails or times out (a run that stalls after the handshake does not fall back), and keeps using it for ten minutes. Reading the runtimes list (the **Runtimes** panel) also asks Hermes with `hermes acp --check`, in a throwaway home it removes afterwards, at most once every ten minutes and without waiting for the answer. A Hermes without ACP stays on `hermes chat` the same way and its status reports `acpMissing`. An install or update from **Settings** > **Runtimes** forgets both answers and asks again before it reports done. `CLAWBOO_HERMES_TRANSPORT=quiet` always uses `hermes chat`; `acp` always tries ACP first. A provider picked for the agent without a model also runs on `hermes chat`, since ACP pins a provider only together with a model.
 - Over ACP, Hermes offers its editor tool set (terminal, files, web, browser, skills, memory, todo, code and delegation) plus Clawboo's MCP servers; its messaging, scheduling and image tools are left out.
 - Hermes has its own task board; Clawboo does not sync it. Hermes works on Clawboo's board through the Tasks tools.
 - Run a board task on Hermes directly with `POST /api/runtimes/hermes/run`; see the [Runtimes API](/reference/rest-api/runtimes).
