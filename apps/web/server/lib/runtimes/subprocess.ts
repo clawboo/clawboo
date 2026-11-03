@@ -274,6 +274,11 @@ export interface SpawnDriverConfig<N> {
     stdout: string,
     stderr: string,
   ) => N[]
+  /** A liveness event pushed every `everyMs` from the first spawn until the run
+   *  ends, for a CLI that prints nothing until it exits. It says the process is
+   *  alive, not that it is making progress, so it stops after `maxMs`: from then
+   *  on the host's silence limits apply again and can stop a hung process. */
+  heartbeat?: { everyMs: number; maxMs: number; event: () => N }
 }
 
 export interface SpawnDriver<N> {
@@ -326,9 +331,27 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     for (const h of [...handlers]) h(ev)
   }
 
+  let beat: ReturnType<typeof setInterval> | null = null
+  const stopHeartbeat = (): void => {
+    if (beat) clearInterval(beat)
+    beat = null
+  }
+  const startHeartbeat = (): void => {
+    if (!cfg.heartbeat || beat || exited) return
+    const { everyMs, maxMs, event } = cfg.heartbeat
+    const until = Date.now() + maxMs
+    beat = setInterval(() => {
+      if (exited || Date.now() > until) stopHeartbeat()
+      else push(event())
+    }, everyMs)
+    // Never let the heartbeat itself hold the event loop open.
+    beat.unref?.()
+  }
+
   /** End the run with the driver's own terminal for a non-exit reason. */
   const endWith = (code: number | null, signal: NodeJS.Signals | null, stderr: string): void => {
     exited = true
+    stopHeartbeat()
     for (const ev of cfg.onClose(code, signal, stdoutAll, stderr)) push(ev)
   }
 
@@ -398,6 +421,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
     })
     spawned.on('error', (err: Error) => {
       if (!current()) return
+      stopHeartbeat()
       for (const ev of cfg.onClose(null, null, stdoutAll, `${stderrAll}\n${err.message}`)) push(ev)
     })
     spawned.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
@@ -406,6 +430,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
       // A relaunched-away process ends silently: the run goes on without it.
       if (!current()) return
       exited = true
+      stopHeartbeat()
       if (buf.trim()) for (const ev of cfg.parseLine(buf)) push(ev)
       // A process we asked to stop is reported as stopped however it went: a CLI
       // that traps SIGTERM exits with a code of its own (hermes -q unwinds via
@@ -427,6 +452,7 @@ export function createSpawnDriver<N>(cfg: SpawnDriverConfig<N>): SpawnDriver<N> 
         return
       }
       launch(resolved)
+      startHeartbeat()
     },
 
     onEvent(handler: (ev: N) => void): () => void {

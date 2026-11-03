@@ -55,13 +55,15 @@ describe('per-runtime native home isolation', () => {
     }
   })
 
-  it('a clawboo-owned mcp.json is written owner-only (0600)', async () => {
+  it('the config.yaml carrying the clawboo MCP block is written owner-only (0600)', async () => {
     if (isWindows) return // POSIX modes are a no-op on Windows
     const agentHome = runtimeIdentityHomePath('hermes', 'native-x-abc123')
-    await provisionHermesHome(agentHome, { mcpJson: '{"mcpServers":{}}' })
-    const mcp = path.join(agentHome, 'mcp.json')
-    expect(existsSync(mcp)).toBe(true)
-    expect((await stat(mcp)).mode & 0o077).toBe(0) // not group/other readable
+    await provisionHermesHome(agentHome, {
+      mcpServers: { 'clawboo-tasks': { url: 'http://localhost:18790/api/mcp/tasks' } },
+    })
+    const config = path.join(agentHome, 'config.yaml')
+    expect(existsSync(config)).toBe(true)
+    expect((await stat(config)).mode & 0o077).toBe(0) // not group/other readable
     expect((await stat(agentHome)).mode & 0o777).toBe(0o700)
   })
 })

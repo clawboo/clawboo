@@ -160,6 +160,12 @@ Anthropic rejected the key. Copy it again from [console.anthropic.com](https://c
 
 </Accordion>
 
+<Accordion title="The run failed: Invalid API key (HTTP 401), or a billing or rate-limit message">
+
+The run reached Anthropic, and Anthropic refused it: a key that is wrong or revoked, an expired sign-in, an account out of credit, or too many requests. The run ends as failed with Anthropic's own message and the HTTP status, and a task it was working on fails rather than counting as done. Fix the key or the account, then send the message or start the task again.
+
+</Accordion>
+
 <Accordion title="Could not reach anthropic (timed out).">
 
 The key check could not reach Anthropic from this computer. Check your network or proxy. If you are sure the key is right, click **Connect anyway** to save it without the check.
@@ -192,6 +198,7 @@ The Clawboo server cannot find npm. Install Node.js 22.12 or newer, restart Claw
 - The SDK starts Claude Code from its own platform package. The `claude` command that **Install** adds is what the Runtimes row checks for. A source build of Clawboo uses SDK version 0.3.268.
 - Run a board task on Claude Code directly with `POST /api/runtimes/claude-code/run`; see the [Runtimes API](/reference/rest-api/runtimes). Such a run falls back to the `claude` CLI's own sign-in when no Anthropic key is available.
 - A run that hits Claude Code's turn limit ends cleanly, and the task runner continues the task in a fresh session with a handoff note.
+- An API error reaches the SDK as an assistant message with an `error` field (`authentication_failed`, `billing_error`, `rate_limit`, ...) and then a `result` with `subtype: 'success'` and `is_error: true`. Clawboo reads that pair as a failed run carrying the `error` value as its code, and does not show the error notice as the agent's reply. Other failed results, such as `error_during_execution`, keep the cause from their `errors` list.
 
 </Accordion>
 

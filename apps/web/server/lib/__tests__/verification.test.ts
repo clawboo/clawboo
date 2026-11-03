@@ -9,7 +9,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -20,6 +20,7 @@ import {
   getComments,
   getTask,
   getTaskVerification,
+  setSetting,
   setTaskVerification,
 } from '@clawboo/db'
 import type {
@@ -35,6 +36,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../db'
 import { verifyTask } from '../verification'
+import {
+  readTeamVerifyCommand,
+  teamVerifyCommandSettingKey,
+} from '../verification/teamVerifyCommand'
 import { actOnTaskWorkspace, provisionTaskWorkspace } from '../worktrees'
 
 const execFileAsync = promisify(execFile)
@@ -111,6 +116,28 @@ class UnpricedReviewerAdapter extends FakeReviewerAdapter {
         model: null,
       } as RuntimeEvent
       yield* inner
+    })()
+  }
+}
+
+/** Fake reviewer that yields a scripted event list (kinds + fields), for the
+ *  critic's outcome: a crash, a silence, a non-fatal hiccup. */
+class ScriptedReviewerAdapter extends FakeReviewerAdapter {
+  constructor(private readonly script: Array<Record<string, unknown>>) {
+    super('')
+  }
+  override events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+    const script = this.script
+    let seq = 0
+    return (async function* () {
+      for (const ev of script)
+        yield {
+          runId: run.sessionKey,
+          sessionId: run.sessionKey,
+          ts: 1,
+          seq: (seq += 1),
+          ...ev,
+        } as RuntimeEvent
     })()
   }
 }
@@ -360,6 +387,162 @@ describe('verification gate (real board + real git worktree)', () => {
       })
       expect(verdict.status).toBe('pass')
       expect(verdict.attempts[0]?.critic.ran).toBe(false)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a reviewer that stops on a fatal error is recorded as errored, never as reviewed',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        makeReviewerAdapter: () =>
+          new ScriptedReviewerAdapter([
+            {
+              kind: 'error',
+              code: 'authentication_failed',
+              message: 'Invalid API key',
+              fatal: true,
+            },
+            { kind: 'done', reason: 'error', summary: 'Invalid API key' },
+          ]),
+      })
+      const critic = verdict.attempts[0]!.critic
+      expect(critic).toMatchObject({ ran: true, outcome: 'errored' })
+      expect(critic.findings[0]).toMatchObject({ severity: 'other', body: 'Invalid API key' })
+      // Still non-blocking: the deterministic gate decides.
+      expect(verdict.status).toBe('pass')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a non-fatal reviewer error does not end the review; silence is recorded as empty',
+    async () => {
+      const db = getDb()
+      const reviewWith = async (script: Array<Record<string, unknown>>) => {
+        const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+        const verdict = await verifyTask({
+          db,
+          taskId,
+          repoPath: repo,
+          worktree,
+          diffStat: DIRTY_SMALL,
+          reviewRootDir: path.join(home, 'reviews'),
+          riskFlag: true,
+          makeReviewerAdapter: () => new ScriptedReviewerAdapter(script),
+        })
+        return verdict.attempts[0]!.critic
+      }
+      const json = '{"findings":[{"severity":"style","title":"long line"}]}'
+      const reviewed = await reviewWith([
+        { kind: 'error', code: 'policy_denied', message: 'denied', fatal: false },
+        { kind: 'text-delta', text: json, channel: 'assistant' },
+        { kind: 'done', reason: 'success', summary: json },
+      ])
+      expect(reviewed).toMatchObject({ outcome: 'reviewed', findings: [{ title: 'long line' }] })
+
+      const silent = await reviewWith([{ kind: 'done', reason: 'success', summary: '' }])
+      expect(silent).toMatchObject({ ran: true, outcome: 'empty', findings: [] })
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'records an init.sh command the builder wrote as agent-sourced',
+    async () => {
+      // provisionForTask rewrites init.sh after the scaffold commit, as a builder would.
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+      })
+      expect(verdict.attempts[0]!.deterministic).toMatchObject({
+        command: 'exit 0',
+        commandSource: 'agent',
+        passed: true,
+      })
+      const evidence = await readFile(path.join(worktree.worktreePath, 'VERIFICATION.md'), 'utf8')
+      expect(evidence).toContain('- Command: `exit 0` (source: agent)')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'ignores a git replace ref the builder plants over the scaffold commit',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      const wt = worktree.worktreePath
+      // Commit the builder's init.sh and make it stand in for the scaffold commit.
+      await git(wt, ['add', 'init.sh'])
+      await git(wt, ['commit', '--no-verify', '-m', 'builder init.sh'])
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: wt })
+      await git(wt, ['replace', '-f', worktree.baseCommit, stdout.trim()])
+      const verdict = await verifyTask({
+        db: getDb(),
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+      })
+      expect(verdict.attempts[0]!.deterministic).toMatchObject({
+        command: 'exit 0',
+        commandSource: 'agent',
+      })
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    "runs the team's verify command over the worktree's, and scaffolds it into init.sh",
+    async () => {
+      const db = getDb()
+      setSetting(db, teamVerifyCommandSettingKey('team1'), JSON.stringify({ command: 'exit 1' }))
+
+      // The builder rewrites init.sh to a check that always passes; the team's wins.
+      const edited = await provisionForTask(repo, 'exit 0')
+      const r = await actOnTaskWorkspace(edited.taskId, 'complete')
+      expect(r.ok && r.action === 'complete' ? r.verified : null).toBe('fail')
+      expect(getTaskVerification(db, edited.taskId)?.attempts[0]?.deterministic).toMatchObject({
+        command: 'exit 1',
+        commandSource: 'configured',
+      })
+
+      // A task whose init.sh still holds what clawboo scaffolded reads as `scaffold`
+      // once the team's command is no longer passed in.
+      const task = createTask(db, { title: 'untouched', teamId: 'team1' })
+      claimTask(db, task.id, 'agent1', 'openclaw')
+      const prov = await provisionTaskWorkspace(task.id, { repoPath: repo, kind: 'code' })
+      if (!prov.ok) throw new Error(prov.reason)
+      const initSh = await readFile(path.join(prov.worktree.worktreePath, 'init.sh'), 'utf8')
+      expect(initSh).toContain("VERIFY_CMD='exit 1'")
+      await writeFile(path.join(prov.worktree.worktreePath, 'feature.txt'), 'work\n', 'utf8')
+      const verdict = await verifyTask({
+        db,
+        taskId: task.id,
+        repoPath: repo,
+        worktree: prov.worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+      })
+      expect(verdict.attempts[0]!.deterministic).toMatchObject({
+        command: 'exit 1',
+        commandSource: 'scaffold',
+      })
+      expect(readTeamVerifyCommand(db, 'team1')).toBe('exit 1')
+      expect(readTeamVerifyCommand(db, 'other-team')).toBeNull()
     },
     WORKTREE_TIMEOUT_MS,
   )

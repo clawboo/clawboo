@@ -18,9 +18,11 @@ import {
 // ── Structural slices of the SDK surface we touch ───────────────────────────
 
 interface AnthropicUsageSlice {
+  /** Uncached prompt tokens only: cache reads and writes are reported apart. */
   input_tokens?: number
   output_tokens?: number
   cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
 }
 export interface AnthropicStreamEventSlice {
   type: string
@@ -87,6 +89,7 @@ export function createAnthropicEventMapper(): AnthropicEventMapper {
   let inputTokens = 0
   let outputTokens = 0
   let cachedInputTokens: number | undefined
+  let cacheWriteInputTokens = 0
 
   return {
     handle(ev: AnthropicStreamEventSlice): ProviderStreamEvent[] {
@@ -94,7 +97,12 @@ export function createAnthropicEventMapper(): AnthropicEventMapper {
         case 'message_start': {
           const u = ev.message?.usage
           if (u) {
-            inputTokens = u.input_tokens ?? 0
+            // `inputTokens` is the whole prompt (as OpenAI's prompt_tokens is):
+            // the context-window watermark reads it, and caching must not make a
+            // full context look empty.
+            cacheWriteInputTokens = u.cache_creation_input_tokens ?? 0
+            inputTokens =
+              (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + cacheWriteInputTokens
             if (u.cache_read_input_tokens != null) cachedInputTokens = u.cache_read_input_tokens
           }
           return []
@@ -146,6 +154,7 @@ export function createAnthropicEventMapper(): AnthropicEventMapper {
           inputTokens,
           outputTokens,
           ...(cachedInputTokens != null ? { cachedInputTokens } : {}),
+          ...(cacheWriteInputTokens > 0 ? { cacheWriteInputTokens } : {}),
         },
       ]
     },
@@ -184,6 +193,11 @@ export function createAnthropicProvider(opts: {
             max_tokens: p.maxOutputTokens,
             messages: toAnthropicMessages(p.messages),
             ...(p.tools.length > 0 ? { tools: toAnthropicTools(p.tools) } : {}),
+            // Automatic prompt caching: the API places the breakpoint on the last
+            // cacheable block and moves it forward as the transcript grows. The
+            // system prompt and the sorted tool list are stable (see
+            // conversation.ts), so every turn after the first reads the prefix.
+            cache_control: { type: 'ephemeral' },
             stream: true,
           },
           { signal: p.signal },

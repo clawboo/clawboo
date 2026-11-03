@@ -12,21 +12,30 @@ import type { Usage } from '@clawboo/executor'
 import { isLocalModel } from '../../costUtils'
 
 interface ModelPrice {
-  /** USD per million input tokens. */
+  /** USD per million uncached input tokens. */
   inPerM: number
   /** USD per million output tokens. */
   outPerM: number
+  /** USD per million input tokens read from the prompt cache (else `inPerM`). */
+  cachedInPerM?: number
+  /** USD per million input tokens written to the prompt cache (else `inPerM`). */
+  cacheWriteInPerM?: number
 }
 
 const PRICES: Record<string, ModelPrice> = {
-  'claude-haiku-4-5': { inPerM: 1, outPerM: 5 },
-  'claude-sonnet-4-6': { inPerM: 3, outPerM: 15 },
-  'gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6 },
-  'gpt-4o': { inPerM: 2.5, outPerM: 10 },
+  'claude-haiku-4-5': { inPerM: 1, outPerM: 5, cachedInPerM: 0.1, cacheWriteInPerM: 1.25 },
+  'claude-sonnet-4-6': { inPerM: 3, outPerM: 15, cachedInPerM: 0.3, cacheWriteInPerM: 3.75 },
+  'gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6, cachedInPerM: 0.075 },
+  'gpt-4o': { inPerM: 2.5, outPerM: 10, cachedInPerM: 1.25 },
   // OpenRouter ids for the same pinned models — list-price passthrough (the
   // common budget path: OpenRouter is the default fallback provider).
-  'openai/gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6 },
-  'anthropic/claude-haiku-4.5': { inPerM: 1, outPerM: 5 },
+  'openai/gpt-4o-mini': { inPerM: 0.15, outPerM: 0.6, cachedInPerM: 0.075 },
+  'anthropic/claude-haiku-4.5': {
+    inPerM: 1,
+    outPerM: 5,
+    cachedInPerM: 0.1,
+    cacheWriteInPerM: 1.25,
+  },
 }
 
 /** Every model id this table prices, so a test can hold costUtils to the same rates. */
@@ -43,12 +52,23 @@ export interface PricedTurn {
   local?: boolean
 }
 
-export function priceTurn(model: string, usage: Usage, provider?: string | null): PricedTurn {
+/** `usage.inputTokens` is the whole prompt; `usage.cachedInputTokens` and
+ *  `cacheWriteTokens` are the shares of it read from and written to the cache. */
+export function priceTurn(
+  model: string,
+  usage: Usage,
+  provider?: string | null,
+  cacheWriteTokens = 0,
+): PricedTurn {
   if (isLocalModel(model, provider)) return { costUsd: 0, estimated: false, local: true }
   const price = PRICES[normalizeModelId(model)]
   if (!price) return { costUsd: null, estimated: true }
+  const cached = usage.cachedInputTokens ?? 0
+  const fresh = Math.max(0, usage.inputTokens - cached - cacheWriteTokens)
   const usd =
-    (usage.inputTokens / 1_000_000) * price.inPerM +
+    (fresh / 1_000_000) * price.inPerM +
+    (cached / 1_000_000) * (price.cachedInPerM ?? price.inPerM) +
+    (cacheWriteTokens / 1_000_000) * (price.cacheWriteInPerM ?? price.inPerM) +
     (usage.outputTokens / 1_000_000) * price.outPerM
   return { costUsd: Math.round(usd * 1e6) / 1e6, estimated: false }
 }

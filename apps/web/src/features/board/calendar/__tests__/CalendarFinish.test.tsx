@@ -277,8 +277,8 @@ describe('finishing a card by hand', () => {
   })
 
   it('offers another day from a small calendar, and finishes the card on it', async () => {
-    // The middle of a month. The calendar shows one month, and in the first
-    // days of a month the earliest day this test names is in the month before.
+    // A mid-month weekday, so the days around the task's life sit in the month
+    // the small calendar shows whatever the real date is.
     vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true })
     vi.setSystemTime(new Date(2026, 9, 14, 12))
     const now = Date.now()

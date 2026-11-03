@@ -35,8 +35,8 @@ export const NATIVE_MORE_PROVIDERS: NativeMoreProvider[] = [
     placeholder: 'AIza…',
     keyUrl: 'https://aistudio.google.com/apikey',
     envVar: 'GEMINI_API_KEY',
-    recommendedModel: 'gemini-2.0-flash',
-    recommendedLabel: 'Gemini 2.0 Flash',
+    recommendedModel: 'gemini-3.6-flash',
+    recommendedLabel: 'Gemini 3.6 Flash',
   },
   {
     id: 'xai',

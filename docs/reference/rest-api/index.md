@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 201 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 203 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -170,12 +170,12 @@ The same-origin guard runs on the upgrade first (`403 Forbidden` on failure), th
 
 ## Route index
 
-The router registers 201 routes: 91 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 6 `PUT`. Each belongs to one page:
+The router registers 203 routes: 92 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Agents](/reference/rest-api/agents)                 | 22     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 agent chats |
-| [Teams](/reference/rest-api/teams)                   | 22     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat), `/api/team-rules/:teamId`, `/api/team-chat*`                                     |
+| [Teams](/reference/rest-api/teams)                   | 24     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat), `/api/team-rules/:teamId`, `/api/team-verify-command/:teamId`, `/api/team-chat*` |
 | [Board](/reference/rest-api/board)                   | 24     | `/api/board*`: tasks, claim, status changes, comments, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview            |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                                 |
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                                  |

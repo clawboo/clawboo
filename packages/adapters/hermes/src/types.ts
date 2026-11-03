@@ -17,6 +17,10 @@ export type HermesNativeEvent =
   | { type: 'message'; text: string; channel?: 'assistant' | 'reasoning' }
   | { type: 'tool-call'; id: string; name: string; input: unknown }
   | { type: 'tool-result'; id: string; name: string; output: string; isError?: boolean }
+  /** The process is still running. A quiet-mode run prints nothing until it
+   *  exits, so this periodic beat is what keeps idle watchdogs from reading a
+   *  long run as a dead one. */
+  | { type: 'status'; phase: 'running' }
   | {
       type: 'result'
       ok: boolean

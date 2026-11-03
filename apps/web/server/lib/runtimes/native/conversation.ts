@@ -41,6 +41,7 @@ import {
   type NeutralContentPart,
   type NeutralMessage,
   type NeutralToolDef,
+  type ProviderToolCallData,
 } from './providers/types'
 import type { RoutedProviderClient } from './routeCall'
 import {
@@ -209,8 +210,14 @@ export class Conversation {
       }
 
       let turnText = ''
-      const calls: Array<{ id: string; name: string; input: unknown }> = []
+      const calls: Array<{
+        id: string
+        name: string
+        input: unknown
+        providerData?: ProviderToolCallData
+      }> = []
       let usage: Usage = { inputTokens: 0, outputTokens: 0 }
+      let cacheWriteTokens = 0
       try {
         for await (const ev of client.streamTurn({
           system,
@@ -225,13 +232,19 @@ export class Conversation {
           } else if (ev.type === 'reasoning') {
             emit({ type: 'text', text: ev.delta, channel: 'reasoning' })
           } else if (ev.type === 'tool-call') {
-            calls.push({ id: ev.id, name: ev.name, input: ev.input })
+            calls.push({
+              id: ev.id,
+              name: ev.name,
+              input: ev.input,
+              ...(ev.providerData ? { providerData: ev.providerData } : {}),
+            })
           } else {
             usage = {
               inputTokens: ev.inputTokens,
               outputTokens: ev.outputTokens,
               ...(ev.cachedInputTokens != null ? { cachedInputTokens: ev.cachedInputTokens } : {}),
             }
+            cacheWriteTokens = ev.cacheWriteInputTokens ?? 0
           }
         }
       } catch (err) {
@@ -264,7 +277,12 @@ export class Conversation {
       // Account the turn + emit its cost DELTA (live budget signal).
       this.lastInputTokens = usage.inputTokens
       this.totalOutputTokens += usage.outputTokens
-      const priced = priceTurn(client.activeModel(), usage, client.activeProvider())
+      const priced = priceTurn(
+        client.activeModel(),
+        usage,
+        client.activeProvider(),
+        cacheWriteTokens,
+      )
       if (priced.costUsd != null) {
         this.totalCostUsd += priced.costUsd
         this.anyPriced = true
@@ -281,8 +299,7 @@ export class Conversation {
       // Commit the assistant turn to the transcript.
       const assistantParts: NeutralContentPart[] = []
       if (turnText) assistantParts.push({ type: 'text', text: turnText })
-      for (const c of calls)
-        assistantParts.push({ type: 'tool-call', id: c.id, name: c.name, input: c.input })
+      for (const c of calls) assistantParts.push({ type: 'tool-call', ...c })
       this.messages.push({ role: 'assistant', content: assistantParts })
 
       if (calls.length === 0) {

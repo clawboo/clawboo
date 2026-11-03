@@ -34,18 +34,18 @@ new one are on [Write a runtime adapter](/reference/packages/executor).
 
 ## At a glance
 
-|                                  | Claude Code                | Codex                                 | Hermes                                | Clawboo Native                                 | OpenClaw                        | Mock           |
-| -------------------------------- | -------------------------- | ------------------------------------- | ------------------------------------- | ---------------------------------------------- | ------------------------------- | -------------- |
-| Package                          | `adapter-claude-code`      | `adapter-codex`                       | `adapter-hermes`                      | `adapter-native`                               | `adapter-openclaw`              | `adapter-mock` |
-| Runtime id                       | `claude-code`              | `codex`                               | `hermes`                              | `clawboo-native`                               | `openclaw`                      | `clawboo-mock` |
-| What runs                        | Claude Agent SDK `query()` | `codex app-server`, else `codex exec` | `hermes chat -q`, one process per run | Clawboo's own loop over the provider API       | the server's Gateway connection | nothing        |
-| Healthy when                     | `claude` is found          | `codex` is found                      | `hermes` is found                     | a provider key or a set-up Ollama is connected | `agents.list()` answers in 2 s  | always         |
-| Steering                         | live                       | live (not on `codex exec`)            | stop and resume                       | live                                           | live                            | none           |
-| Model change mid-run             | no                         | no                                    | no                                    | yes, for later turns                           | yes                             | no             |
-| Cost the adapter reports         | provider USD               | tokens, no price                      | nothing                               | Clawboo's list price, or tokens                | nothing                         | nothing        |
-| Agent state                      | your own home folder       | a managed `CODEX_HOME` per agent      | a managed `HERMES_HOME` per agent     | a managed folder per agent                     | the Gateway's own folders       | none           |
-| Clawboo MCP servers              | HTTP, in the SDK options   | the home's `config.toml`              | the home's `mcp.json`                 | in-process                                     | the Gateway's `mcp.servers`     | none           |
-| Approval prompts in Clawboo runs | off                        | off                                   | off                                   | asked per shell command                        | Gateway exec approvals          | none           |
+|                                  | Claude Code                | Codex                                 | Hermes                                 | Clawboo Native                                 | OpenClaw                        | Mock           |
+| -------------------------------- | -------------------------- | ------------------------------------- | -------------------------------------- | ---------------------------------------------- | ------------------------------- | -------------- |
+| Package                          | `adapter-claude-code`      | `adapter-codex`                       | `adapter-hermes`                       | `adapter-native`                               | `adapter-openclaw`              | `adapter-mock` |
+| Runtime id                       | `claude-code`              | `codex`                               | `hermes`                               | `clawboo-native`                               | `openclaw`                      | `clawboo-mock` |
+| What runs                        | Claude Agent SDK `query()` | `codex app-server`, else `codex exec` | `hermes chat -q`, one process per run  | Clawboo's own loop over the provider API       | the server's Gateway connection | nothing        |
+| Healthy when                     | `claude` is found          | `codex` is found                      | `hermes` is found                      | a provider key or a set-up Ollama is connected | `agents.list()` answers in 2 s  | always         |
+| Steering                         | live                       | live (not on `codex exec`)            | stop and resume                        | live                                           | live                            | none           |
+| Model change mid-run             | no                         | no                                    | no                                     | yes, for later turns                           | yes                             | no             |
+| Cost the adapter reports         | provider USD               | tokens, no price                      | nothing                                | Clawboo's list price, or tokens                | nothing                         | nothing        |
+| Agent state                      | your own home folder       | a managed `CODEX_HOME` per agent      | a managed `HERMES_HOME` per agent      | a managed folder per agent                     | the Gateway's own folders       | none           |
+| Clawboo MCP servers              | HTTP, in the SDK options   | the home's `config.toml`              | the home's `config.yaml` `mcp_servers` | in-process                                     | the Gateway's `mcp.servers`     | none           |
+| Approval prompts in Clawboo runs | off                        | off                                   | off                                    | asked per shell command                        | Gateway exec approvals          | none           |
 
 "Found" means the binary is on `PATH` or in a per-user install folder (for Hermes, the pip and pipx user
 folders). A managed home lives at `<clawboo home>/runtimes/<runtime id>/<agent id>`. A Codex or Hermes run with no
@@ -147,7 +147,7 @@ event.
 Steering is stop and resume (`interrupt-resume`): the driver stops the process and resumes the same session with
 the message as the next input, and the host still sees one run. A passive steer is refused, because it must never
 stop a run. Each agent gets a managed `HERMES_HOME` where its skills and memory persist, and the driver writes all
-four Clawboo MCP servers into that home's `mcp.json`. Hermes ships its own scheduler, but Clawboo never
+four Clawboo MCP servers into a marked `mcp_servers` block of that home's `config.yaml`, the only place Hermes reads them from. Hermes ships its own scheduler, but Clawboo never
 runs it for teammates.
 
 Hermes works one task at a time from Clawboo's board: its own task board is not synced, and Clawboo never starts
