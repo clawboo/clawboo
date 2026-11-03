@@ -80,7 +80,7 @@ Each task gets two attempts by default: the first, plus one fix round. The `CLAW
 
 ## The verify command in practice
 
-Clawboo knows your project's test command only if you set it for the team: `PUT /api/team-verify-command/:teamId` with `{"command": "npm test"}` (see the [Teams API](/reference/rest-api/teams)). The dashboard has no control for it yet. When the team has one, every check runs it, whatever `init.sh` says, and each new worktree's `init.sh` starts with it.
+Clawboo knows your project's test command only if you set it for the team: under **Work check** in the team's settings (see [Teams](/using/teams#work-check)), or with `PUT /api/team-verify-command/:teamId` and `{"command": "npm test"}` (see the [Teams API](/reference/rest-api/teams)). When the team has one, every check runs it, whatever `init.sh` says, and each new worktree's `init.sh` starts with it.
 
 Without one, each new worktree gets an `init.sh` whose verify line is a placeholder:
 

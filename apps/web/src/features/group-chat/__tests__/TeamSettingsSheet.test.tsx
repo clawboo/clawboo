@@ -38,6 +38,7 @@ beforeEach(() => {
   server.use(
     http.get('/api/boo-zero/team-briefs/:teamId', () => HttpResponse.json({ brief: null })),
     http.get('/api/team-rules/:teamId', () => HttpResponse.json({ content: '' })),
+    http.get('/api/team-verify-command/:teamId', () => HttpResponse.json({ command: 'npm test' })),
   )
 })
 
@@ -62,6 +63,14 @@ describe('TeamSettingsSheet', () => {
     // No team-chat turn reads the brief, so neither may the copy say so.
     expect(screen.queryByText(/Brief \+ rules read on every turn/)).toBeNull()
     expect(screen.queryByText(/whenever it operates in/)).toBeNull()
+  })
+
+  it("hosts the team's work check next to the rules", async () => {
+    renderSheet(<TeamSettingsSheet team={TEAM} onClose={noop} />)
+    expect(screen.getByRole('heading', { name: 'Work check' })).toBeInTheDocument()
+    expect(await screen.findByRole('textbox', { name: 'Work check command' })).toHaveValue(
+      'npm test',
+    )
   })
 
   it('closes on Escape', async () => {

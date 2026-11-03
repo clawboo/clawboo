@@ -1,7 +1,7 @@
 ---
 title: 'Create and manage teams'
 sidebarTitle: 'Teams'
-description: 'Create a team from a template or from scratch, choose a runtime and model for each member, set team rules, and archive or delete a team.'
+description: 'Create a team from a template or from scratch, choose a runtime and model for each member, set team rules and a work check, and archive or delete a team.'
 icon: 'users'
 keywords:
   [
@@ -10,6 +10,8 @@ keywords:
     'team rules',
     '/rule',
     'team brief',
+    'work check',
+    'verify command',
     'Leader',
     'archive',
     'delete team',
@@ -21,7 +23,7 @@ keywords:
 
 A team is a group of agents that work on your requests together. Each team has its own chats (**General** plus any rooms you add), its own tasks on the board, a brief, and rules that every member follows. [Boo Zero](/using/boo-zero), your team leader, coordinates every team.
 
-Use this page to create a team, choose each member's runtime and model, set team rules, and archive or delete a team. For a guided first run, follow [Deploy your first team](/getting-started/first-team).
+Use this page to create a team, choose each member's runtime and model, set team rules and a work check, and archive or delete a team. For a guided first run, follow [Deploy your first team](/getting-started/first-team).
 
 ## Before you begin
 
@@ -116,7 +118,7 @@ The dashboard has no control for changing the Leader after you deploy. The API c
 
 Open a team's settings from any of its chats: in **General** or a room, click the gear in the chat header. Its tooltip is the team's name followed by **brief & rules**.
 
-The settings window has five sections: **Icon**, **Accent color**, **Color collection**, **Brief** and **Rules**. Icon and color changes save as you make them.
+The settings window has six sections: **Icon**, **Accent color**, **Color collection**, **Brief**, **Rules** and **Work check**. Icon and color changes save as you make them.
 
 ![The Growth team's settings window: the Brief, with Save and Regenerate, above the Rules box with one rule per line and Save rules](/images/team-brief-rules.png)
 
@@ -157,6 +159,25 @@ Clawboo saves it as a rule instead of sending it to an agent. The chat shows **R
 The brief describes the team: what it is for, who is on it, and how they work together. Clawboo writes one when you deploy a template, and you can edit it in the team's settings. **Regenerate** rebuilds it from the current members; nothing changes until you click **Save**.
 
 Boo Zero reads a team's brief only when you start a message in Boo Zero's own chat with @ and the team's name, and then only its first 900 characters. Team chats do not include the brief, so use rules for anything the team must follow. See [What Boo Zero reads](/using/boo-zero#what-boo-zero-reads).
+
+### Work check
+
+The work check is the command Clawboo runs to check an agent's work on the team's tasks, such as `npm test`. When Clawboo checks a task, it runs this command in the task's folder, and the task reaches **Done** only if the command succeeds. Clawboo checks work only in some cases; see [When work is checked](/using/board#when-work-is-checked).
+
+In the team's settings, type the command in **Work check**, then click **Save check** or press Enter. You should see **Work check saved.** To remove it, empty the box and save; you should see **Work check cleared.** The command is one line of up to 2,000 characters. If a save fails, you see **Could not save the work check.** and your edit stays in the box.
+
+Above the box, **Active check** says which check runs now:
+
+- **The command, set for the team**: every check of the team's tasks runs it from the next check on, and each new task folder starts with it. The task's **Verification** section shows it as **set for the team**. An agent cannot change it by editing its own files.
+- **Each agent's own, written by the agent in its task folder**: no work check is set, so each agent writes its own check in its task folder's `init.sh`, and the task shows it as **written by the agent**. An agent that writes no check fails the check.
+
+<Warning>
+
+The command runs on your computer, in the task's folder, each time a task is checked. Set only a command you would run yourself.
+
+</Warning>
+
+See [How work is checked](/concepts/verification#the-verify-command-in-practice) for how the check runs.
 
 ## Rename a team
 

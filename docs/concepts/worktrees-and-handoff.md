@@ -75,7 +75,7 @@ Each file answers a question that a runtime picking the task up cold needs answe
 
 Clawboo writes the first five when it creates the worktree. `AGENT_HANDOFF.json` appears when the first run in it finishes successfully.
 
-`init.sh` starts with placeholder commands that only print a reminder to set them. Clawboo does not fill them in: the agent, or you, has to replace them with real ones. Until the verify command is set, the verification check cannot pass the task. See [Verification](/concepts/verification) for when that check runs.
+`init.sh` starts with placeholder commands that only print a reminder to set them. The verify command is the exception when the task's team has a [work check](/using/teams#work-check): `init.sh` starts with that command, and the verification check runs the team's command in place of whatever `init.sh` says. Otherwise the agent, or you, has to replace the placeholder with a real command, and until it is set the verification check cannot pass the task. See [Verification](/concepts/verification) for when that check runs.
 
 ## The cross-runtime handoff
 
