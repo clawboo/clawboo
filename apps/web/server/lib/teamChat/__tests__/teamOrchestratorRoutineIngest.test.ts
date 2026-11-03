@@ -139,6 +139,26 @@ describe('team chat ingest from a routine', () => {
     expect(entries[1]?.text).toContain('Could not reach the team')
   })
 
+  it('a delivery the OpenClaw operator could not take, even after a reconnect, may pass', async () => {
+    const { getRegistry } = await import('../../agentSource/registry')
+    const reconnect = vi.spyOn(getRegistry(), 'reconnectAndWaitOperator').mockResolvedValue(false)
+    try {
+      failNextDelivery = new Error('OpenClaw operator client unavailable')
+      const result = await getTeamOrchestrator('T').enqueueUserMessage({
+        stimulus: 'Do the thing.',
+        routine: { id: 'r1', name: 'Chore' },
+      })
+      expect(result).toEqual({
+        ok: false,
+        error: 'Could not reach the OpenClaw Gateway: OpenClaw operator client unavailable',
+        transient: true,
+      })
+      expect(reconnect).toHaveBeenCalledTimes(1)
+    } finally {
+      reconnect.mockRestore()
+    }
+  })
+
   it('a refused delivery is reported with its reason and adds no "could not reach" note', async () => {
     // The refusal's own notice is written by the deliver primitive (faked here).
     const reason =

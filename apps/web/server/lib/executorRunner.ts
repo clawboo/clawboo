@@ -944,6 +944,9 @@ async function runTaskInner(
   // Drive the normalized event stream to its terminal `done`.
   let lastText = ''
   let summary = ''
+  // True when `summary` is the agent's own last text because the terminal event
+  // carried none. A failure is never classified from it: that is prose.
+  let summaryIsAgentText = false
   // The run's cost, summed over every cost event in every rotation pass.
   let costUsd: number | null = null
   // True once any part of `costUsd` was estimated from tokens rather than reported.
@@ -1094,6 +1097,7 @@ async function runTaskInner(
     // CURRENT run); cumulative spend/breaker state above the loop is untouched.
     lastText = ''
     summary = ''
+    summaryIsAgentText = false
     inputTokens = 0
     outputTokens = 0
     doneReason = 'error'
@@ -1329,6 +1333,7 @@ async function runTaskInner(
         sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
+        summaryIsAgentText = !ev.summary && !!lastText
         // A cap the final cost report crossed. An abort here is the grace window's
         // (or the runtime giving up), so it is the stop; any other terminal means
         // the run finished, and its result is kept.
@@ -1906,7 +1911,7 @@ async function runTaskInner(
         ? null
         : silentKill
           ? 'Timeout'
-          : classifyError(fatalErrorCode, fatalErrorText ?? safeSummary)
+          : classifyError(fatalErrorCode, fatalErrorText ?? (summaryIsAgentText ? '' : safeSummary))
     // BIND the result. `completeExecutionProcess` refuses (returns null) when
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.

@@ -246,7 +246,31 @@ describe('dispatchRoutine', () => {
     })
     expect(outcome.ok).toBe(false)
     expect(outcome.error).toContain('gateway_disconnected')
+    // A dropped connection may pass: the routine keeps its schedule.
+    expect(outcome).toMatchObject({ errorClass: 'ProviderError', transient: true })
     expect(listTasks(db)).toHaveLength(0)
+  })
+
+  it('a team routine whose post found the OpenClaw operator down may pass; other refusals do not', async () => {
+    seedTeam('team-oc')
+    const down = await dispatchRoutine(seedTeamRoutine('team-oc'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage: async () => ({
+        ok: false,
+        error: 'Could not reach the OpenClaw Gateway: OpenClaw operator client unavailable',
+        transient: true,
+      }),
+    })
+    expect(down).toMatchObject({ ok: false, errorClass: 'ProviderError', transient: true })
+
+    const refused = await dispatchRoutine(seedTeamRoutine('team-oc'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage: async () => ({ ok: false, error: 'The team has no active members.' }),
+    })
+    expect(refused.ok).toBe(false)
+    expect(refused.transient).not.toBe(true)
   })
 
   it('HUMAN participant: throws the typed NotImplementedError (the humans-in-the-graph seam)', async () => {
@@ -569,7 +593,7 @@ describe('dispatchRoutine: agent routines', () => {
     expect(outcome).toMatchObject({ ok: false, error: 'timed out waiting for the agent home' })
     expect(getTask(db, outcome.taskId!)?.status).toBe('blocked')
     expect(getComments(db, outcome.taskId!).map((c) => c.body)).toContain(
-      "agent-native's scheduled run failed: timed out waiting for the agent home. The routine files a new task on its next run, so this one was set aside.",
+      "agent-native's scheduled run failed: timed out waiting for the agent home. While the routine is scheduled, it files a new task on its next run, so this one was set aside.",
     )
   })
 

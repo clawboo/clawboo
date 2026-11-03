@@ -870,4 +870,40 @@ describe('Needs you when the provider refused the account', () => {
       focusRuntime: 'claude-code',
     })
   })
+
+  it('groups a refused sign-in only with the same refusal on the same runtime', async () => {
+    const delegated = (i: number) => `r${i}:deleg:agent:a1:reflectTo:lead`
+    renderCell([
+      signInTask({ id: 's1', title: 'Claude 1', sourceDelegationId: delegated(1) }),
+      signInTask({ id: 's2', title: 'Claude 2', sourceDelegationId: delegated(2) }),
+      // The same words from another runtime: its Fix sign-in opens another row.
+      signInTask({
+        id: 's3',
+        title: 'Codex',
+        sourceDelegationId: delegated(3),
+        attention: {
+          reason: 'failed',
+          failedRuns: 1,
+          detail: REFUSED,
+          cause: 'sign_in',
+          runtime: 'codex',
+        },
+      }),
+      // The same words with no account cause: Retry all would skip the question.
+      signInTask({
+        id: 's4',
+        title: 'Plain',
+        sourceDelegationId: delegated(4),
+        attention: { reason: 'failed', failedRuns: 1, detail: REFUSED },
+      }),
+    ])
+    const group = await screen.findByTestId('needs-you-group', {}, T)
+    expect(screen.getAllByTestId('needs-you-group')).toHaveLength(1)
+    expect(
+      within(group)
+        .getAllByTestId('needs-you-task')
+        .map((r) => r.textContent),
+    ).toEqual(['Claude 1', 'Claude 2'])
+    expect(screen.getAllByTestId('needs-you-task')).toHaveLength(4)
+  })
 })

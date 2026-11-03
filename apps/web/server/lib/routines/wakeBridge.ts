@@ -165,12 +165,14 @@ function setAsideFailedFireTask(
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
     if (!updateStatus(db, taskId, 'blocked').ok) return
+    // The next run is said as a condition: the routine can be deleted while its
+    // fire runs, and this note is written before the outcome is recorded.
     addComment(
       db,
       taskId,
       `${agentName}'s scheduled run failed${error ? `: ${error}` : ''}. ` +
         (routineContinues
-          ? 'The routine files a new task on its next run, so this one was set aside.'
+          ? 'While the routine is scheduled, it files a new task on its next run, so this one was set aside.'
           : 'The routine is stopped until you resume it, so this one was set aside.'),
       'system',
     )
@@ -212,7 +214,13 @@ async function dispatchTeamRoutine(
     stimulus,
     routine: { id: run.id, name: template.title },
   })
-  if (!result.ok) return { ok: false, error: result.error }
+  // The OpenClaw operator still down after a reconnect is a dropped connection,
+  // which may pass by itself; every other refusal stops the routine as before.
+  if (!result.ok) {
+    return result.transient
+      ? { ok: false, error: result.error, errorClass: 'ProviderError', transient: true }
+      : { ok: false, error: result.error }
+  }
 
   const runtime = loadAgentRow(db, result.targetAgentId)?.runtime ?? null
   emitEvent(db, {
@@ -277,7 +285,13 @@ export async function dispatchRoutine(
       ? deps.getOperatorClient()
       : getRegistry().source.operatorClient()
     if (!operatorClient) {
-      return { ok: false, error: `gateway_disconnected — cannot dispatch runtime '${runtime}'` }
+      // A dropped connection to the Gateway may pass by itself.
+      return {
+        ok: false,
+        error: `gateway_disconnected — cannot dispatch runtime '${runtime}'`,
+        errorClass: 'ProviderError',
+        transient: true,
+      }
     }
     probe = new OpenClawAdapter(operatorClient)
   } else {

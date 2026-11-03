@@ -108,7 +108,9 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     const completedAt = now()
     let nextAt: number | null = null
     // A failure that may pass keeps the schedule, so it needs the next time too.
-    if (outcome.ok || outcome.transient) {
+    // Not for a one-time routine: "Run now" can fire one before its time, and
+    // its only time is then still ahead, but any failure stops it.
+    if (outcome.ok || (outcome.transient && !isOnceSpec(claimed.cronSpec))) {
       try {
         nextAt = nextOccurrence(claimed.cronSpec, completedAt)
       } catch {
@@ -127,6 +129,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
           },
       nextAt,
       completedAt,
+      claimed.cronSpec,
     )
     if (outcome.ok) {
       emitEvent(db, {

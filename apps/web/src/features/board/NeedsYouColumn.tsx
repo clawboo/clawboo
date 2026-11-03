@@ -159,8 +159,13 @@ function causeOf(detail: string): string {
 function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
   const single = (s: StuckItem): StuckEntry => ({ kind: 'task', key: s.task.id, ...s })
   if (!group) return stuck.map(single)
-  const keyOf = (s: StuckItem) =>
-    s.attention.detail ? `${s.attention.reason}:${causeOf(s.attention.detail)}` : null
+  // An account refusal groups only with the same refusal on the same runtime, so
+  // the group's Retry all still asks first and its Fix sign-in opens that runtime.
+  const keyOf = (s: StuckItem) => {
+    const { reason, detail, cause, runtime } = s.attention
+    if (!detail) return null
+    return `${reason}:${causeOf(detail)}${cause ? `|${cause}:${runtime ?? ''}` : ''}`
+  }
   const members = new Map<string, StuckItem[]>()
   for (const s of stuck) {
     const key = keyOf(s)

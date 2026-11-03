@@ -74,6 +74,11 @@ process.stdin.on('data', (d) => {
       send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
       notify('error', { threadId, turnId: 'turn-1', willRetry: false, error })
       notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'failed', error, items: [] } })
+    } else if (m.method === 'turn/start' && scenario === 'exits-after-error') {
+      // A typed account error, then the app-server exits before turn/completed.
+      send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
+      notify('error', { threadId, turnId: 'turn-1', willRetry: false, error: { message: 'something went wrong', codexErrorInfo: 'unauthorized', additionalDetails: null } })
+      setTimeout(() => process.exit(1), 20)
     } else if (m.method === 'turn/start' && scenario === 'dropped') {
       // Only the error notification types the cause; the turn's own error is bare.
       send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
@@ -275,6 +280,16 @@ describe('createCodexAppServerDriver', () => {
     expect(seen.find((e) => e.type === 'result')).toMatchObject({
       ok: false,
       errorMessage: 'unexpected status 401 Unauthorized',
+      errorCode: 'authentication_failed',
+    })
+  })
+
+  it('keeps the typed cause when the app-server exits before the turn completes', async () => {
+    const { driver, seen } = driverFor('exits-after-error')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    expect(seen.find((e) => e.type === 'result')).toMatchObject({
+      ok: false,
       errorCode: 'authentication_failed',
     })
   })

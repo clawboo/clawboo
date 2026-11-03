@@ -421,6 +421,9 @@ export function createCodexAppServerDriver(
             fallback: 'codex app-server exited before the turn finished',
             modelPinned: Boolean(pinnedModel),
           }),
+          // The typed cause of the error it reported before exiting, so an
+          // account refusal is still filed as one.
+          ...(lastErrorCode ? { errorCode: lastErrorCode } : {}),
         })
     })
     return true

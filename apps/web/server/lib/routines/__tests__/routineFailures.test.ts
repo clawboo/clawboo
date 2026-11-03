@@ -146,6 +146,33 @@ describe('a routine and its failures', () => {
     expect((await ticker.tick()).fired).toBe(0)
   })
 
+  it('stops a one-time routine that "Run now" fired early, even on a failure that may pass', async () => {
+    // Its time is still a day ahead, so a re-arm would fire it again then.
+    const result = registerScheduledRun(db, {
+      agentId: 'agent-1',
+      teamId: 'team-1',
+      cronSpec: `once@${new Date(START + 24 * 60 * MINUTE).toISOString()}`,
+      taskTemplate: JSON.stringify({ title: 'Once', kind: 'research', priority: 0 }),
+      nextRunAt: START - 1_000,
+    })
+    if (!result.ok) throw new Error(`register failed: ${result.reason}`)
+    const clock = { now: START }
+    const ticker = tickerWith(
+      [
+        {
+          ok: false,
+          error: 'Request rejected (HTTP 429)',
+          errorClass: 'RateLimited',
+          transient: true,
+        },
+      ],
+      clock,
+    )
+    expect((await ticker.tick()).fired).toBe(1)
+    expect(getScheduledRun(db, result.run.id)).toMatchObject({ status: 'error', nextRunAt: null })
+    expect(routineErrors()).toEqual([expect.objectContaining({ stopped: true })])
+  })
+
   it('stops at once on a failure a person must fix', async () => {
     const run = register()
     const clock = { now: START }

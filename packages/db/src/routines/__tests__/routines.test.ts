@@ -307,6 +307,24 @@ describe('the fire path', () => {
     ).toBe('error')
   })
 
+  it('keeps the next time a schedule edit set while the fire ran, success or failure', () => {
+    for (const outcome of [
+      { ok: true } as const,
+      { ok: false, error: 'blip', transient: true } as const,
+    ]) {
+      const run = register({ cronSpec: '0 9 * * *', nextRunAt: 1_000 })
+      fire(run.id, 2_000)
+      // The person moved it to 18:00 mid-fire; the edit armed it from the new spec.
+      updateScheduledRun(db, run.id, { cronSpec: '0 18 * * *', nextRunAt: 50_000 })
+      // The ticker worked its next time out from the 09:00 spec it claimed.
+      expect(recordRunOutcome(db, run.id, outcome, 30_000, 3_000, '0 9 * * *')).toBe('idle')
+      expect(getScheduledRun(db, run.id)).toMatchObject({
+        cronSpec: '0 18 * * *',
+        nextRunAt: 50_000,
+      })
+    }
+  })
+
   it('queueRunNow force-fires an idle row and minNextRunAt tracks the arm key', () => {
     const a = register({ nextRunAt: 9_000 })
     register({ nextRunAt: 5_000 })

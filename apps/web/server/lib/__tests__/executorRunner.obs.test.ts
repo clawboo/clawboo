@@ -297,6 +297,27 @@ describe('executor runner → observability', () => {
     expect(listExecutions(getDb(), taskId).at(-1)?.errorClass).toBe('ProviderError')
   })
 
+  it("does not classify the agent's last words when the runtime's error says nothing", async () => {
+    // OpenClaw maps an error frame with an empty errorMessage to an error with
+    // no text and a done with no summary, so the run's summary falls back to the
+    // agent's last text.
+    const taskId = newTask()
+    const prose = 'Run /login first: the API answered 401 Unauthorized for my test request.'
+    const adapter = new ScriptedAdapter('openclaw', (base) => [
+      { ...base(), kind: 'text-delta', text: prose, channel: 'assistant' },
+      { ...base(), kind: 'error', code: null, message: '', fatal: true },
+      { ...base(), kind: 'done', reason: 'error', summary: '' },
+    ])
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'a1',
+    })
+    expect(result).toMatchObject({ doneReason: 'error', errorClass: 'Unknown' })
+    expect(listExecutions(getDb(), taskId).at(-1)?.errorClass).toBe('Unknown')
+  })
+
   it('files a run the idle guard ended as a Timeout, whatever its summary says', async () => {
     const taskId = newTask()
     const prev = process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']

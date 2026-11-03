@@ -239,6 +239,11 @@ export function routineSurvivesFailure(input: {
  * disarmed (next_run_at NULL) until a person resumes it, so nothing retries silently.
  * Only a row still `running` takes it: one that moved on while the fire was in
  * flight (healed by another process's boot-resume, or deleted) keeps its state.
+ *
+ * `nextRunAt` was worked out from `claimedCronSpec`, the schedule the fire was
+ * claimed under. An edit that changed the schedule while the fire ran set its
+ * own next time from the new one, and that time stands. The check and the write
+ * are one transaction, so an edit cannot land between them.
  * Returns the status the row landed in, or null when no running row took it.
  */
 export function recordRunOutcome(
@@ -247,14 +252,23 @@ export function recordRunOutcome(
   outcome: RunOutcome,
   nextRunAt: number | null,
   now = Date.now(),
+  claimedCronSpec?: string,
 ): 'idle' | 'error' | null {
   return immediateWrite(db, (tx) => {
     const row = tx
-      .select({ status: scheduledRuns.status, failureStreak: scheduledRuns.failureStreak })
+      .select({
+        status: scheduledRuns.status,
+        failureStreak: scheduledRuns.failureStreak,
+        cronSpec: scheduledRuns.cronSpec,
+        nextRunAt: scheduledRuns.nextRunAt,
+      })
       .from(scheduledRuns)
       .where(eq(scheduledRuns.id, id))
       .get()
     if (row?.status !== 'running') return null
+    if (claimedCronSpec !== undefined && row.cronSpec !== claimedCronSpec) {
+      nextRunAt = row.nextRunAt ?? null
+    }
     if (outcome.ok) {
       tx.update(scheduledRuns)
         .set({
