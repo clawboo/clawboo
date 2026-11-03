@@ -771,9 +771,9 @@ export function TaskDetailDrawer({
                             {line.text}
                           </div>
                         ) : null}
-                        {/* The server carries debt notes into later attempts, so a
-                            pass after a pass with debt still holds them: they are
-                            open only while the verdict says so. */}
+                        {/* Open items show only on a pass with debt. A pass can
+                            carry some too (ones its review did not check again,
+                            or ones an older Clawboo kept), and they stay out. */}
                         {verdict.status === 'completed_with_debt' &&
                           (verdict.debtNotes ?? []).length > 0 && (
                             <ul className="board-reason list-disc pl-4 text-xs">

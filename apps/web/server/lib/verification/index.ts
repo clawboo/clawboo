@@ -5,7 +5,8 @@
 // a STRUCTURED {what,why,howToFix} so the leader routes a real fix back — not just
 // "FAIL". The fix loop is bounded across re-completions (the attempts array IS the
 // loop history); on exhaustion the task is marked `completed_with_debt` and the
-// open issues are recorded — never a deadlock. The independent evaluator is permanent.
+// open issues are recorded (never a deadlock); a later pass that checked them
+// again clears them. The independent evaluator is permanent.
 
 import {
   addComment,
@@ -39,6 +40,9 @@ import { runDeterministicGate } from './deterministicGate'
 export { runDeterministicGate } from './deterministicGate'
 export { runCritic } from './critic'
 export type { ReviewerSpend } from './critic'
+
+/** The `criterion` of the open item a red deterministic gate leaves at exhaustion. */
+const GATE_DEBT_CRITERION = 'deterministic gate'
 
 const CRITIC_NOT_RUN: CriticVerdict = {
   ran: false,
@@ -187,7 +191,20 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   const attemptNumber = priorAttempts.length + 1
   let status: VerificationResult['status'] = attemptStatus
   let structuredError: StructuredError | null = null
-  const debtNotes: DebtNote[] = [...(prior?.debtNotes ?? [])]
+  // An open item stays until a later attempt checks it again and passes. A green
+  // gate checks the gate's own item; only a review that completed checks the
+  // reviewer's, because a skipped, empty or errored review still lets the attempt
+  // pass without looking at anything. A fail or another pass with debt keeps them
+  // all (on a red gate the critic does not even run). `attempts` keeps every
+  // attempt's own record either way.
+  const priorNotes = prior?.debtNotes ?? []
+  const reviewCompleted = critic.ran && critic.outcome === 'reviewed'
+  const debtNotes: DebtNote[] =
+    attemptStatus !== 'pass'
+      ? [...priorNotes]
+      : reviewCompleted
+        ? []
+        : priorNotes.filter((n) => n.criterion !== GATE_DEBT_CRITERION)
 
   if (attemptStatus === 'fail') {
     structuredError = structuredErrorFor(det, critic)
@@ -202,7 +219,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       }
       if (!det.passed)
         debtNotes.push({
-          criterion: 'deterministic gate',
+          criterion: GATE_DEBT_CRITERION,
           severity: 'crash',
           justification: structuredError.what,
         })
