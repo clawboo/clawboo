@@ -70,26 +70,75 @@ export function humanCron(spec: string): string {
   return PRESET_LABEL.get(spec.trim()) ?? formatScheduleLabel(spec)
 }
 
-/** Why a typed cron expression cannot be used, or null when it can. */
-export function cronError(spec: string): string | null {
+/** Why a typed cron expression cannot be used, or null when it can. `timeZone`
+ *  is the zone the server reads cron in (the browser's when not given). */
+export function cronError(spec: string, timeZone?: string): string | null {
   const trimmed = spec.trim()
   if (!trimmed) return 'Enter a cron expression, for example 30 8 * * 1-5.'
   try {
     probeCronSpec(trimmed)
-    if (nextOccurrence(trimmed, Date.now()) == null) return 'This schedule never runs again.'
+    if (nextOccurrence(trimmed, Date.now(), timeZone) == null) {
+      return 'This schedule never runs again.'
+    }
     return null
   } catch {
     return 'That is not a cron expression this can read.'
   }
 }
 
-/** When a spec fires next after `now`, or null (invalid, or never again). */
-export function nextRunPreview(spec: string, now = Date.now()): number | null {
+/** When a spec fires next after `now`, read in `timeZone` (the browser's when
+ *  not given), or null (invalid, or never again). */
+export function nextRunPreview(spec: string, now = Date.now(), timeZone?: string): number | null {
   try {
-    return nextOccurrence(spec.trim(), now)
+    return nextOccurrence(spec.trim(), now, timeZone)
   } catch {
     return null
   }
+}
+
+/** The browser's own zone, or null when it cannot say. */
+export function browserTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null
+  } catch {
+    return null
+  }
+}
+
+/** Whether two names are the same zone. Names are compared through Intl, which
+ *  may report a zone by another alias than the one it was given. */
+export function sameTimeZone(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false
+  if (a === b) return true
+  try {
+    const canonical = (z: string): string =>
+      new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone
+    return canonical(a) === canonical(b)
+  } catch {
+    return false
+  }
+}
+
+/** A zone as a person reads it: the city part of `America/New_York`. */
+export function timeZoneLabel(timeZone: string): string {
+  return (timeZone.split('/').pop() ?? timeZone).replace(/_/g, ' ')
+}
+
+/**
+ * Every zone the routine form offers, sorted, always including UTC (which
+ * `Intl.supportedValuesOf` leaves out) and the zones named in `include`, so a
+ * stored zone is never missing from its own picker.
+ */
+export function timeZoneChoices(include: readonly (string | null | undefined)[] = []): string[] {
+  let zones: string[] = []
+  try {
+    zones = Intl.supportedValuesOf('timeZone')
+  } catch {
+    zones = []
+  }
+  const all = new Set<string>(['UTC', ...zones])
+  for (const z of include) if (z) all.add(z)
+  return [...all].sort((a, b) => a.localeCompare(b))
 }
 
 export function untilLabel(ms: number, now = Date.now()): string {
@@ -104,14 +153,16 @@ export function untilLabel(ms: number, now = Date.now()): string {
   return `in ${Math.floor(h / 24)}d`
 }
 
-/** A timestamp as the person's local weekday, date and time. */
-export function formatWhen(ms: number): string {
+/** A timestamp as a weekday, date and time: in the person's own zone, or in
+ *  `timeZone` when given. */
+export function formatWhen(ms: number, timeZone?: string): string {
   return new Date(ms).toLocaleString(undefined, {
     weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
   })
 }
 

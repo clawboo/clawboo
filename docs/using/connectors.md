@@ -320,7 +320,7 @@ OpenClaw agents reach Clawboo's tools through one setting in the OpenClaw Gatewa
 
 <Warning>
 
-A local connector is a program running under your user account. Clawboo starts it with a short list of ordinary environment variables plus the keys you entered for it, never your AI provider keys, and passes its arguments without a shell. That is not a sandbox: the connector can still read any file your account can, including your SSH keys and Clawboo's database. Connect only servers you would be willing to run yourself.
+A local connector is a program running under your user account. Clawboo starts it with a short list of ordinary environment variables, including npm's prefix and cache settings, plus the keys you entered for it, never your AI provider keys or npm credentials, and passes its arguments without a shell (see [what connectors inherit](/reference/environment-variables#what-connectors-and-approved-commands-inherit)). That is not a sandbox: the connector can still read any file your account can, including your SSH keys and Clawboo's database. Connect only servers you would be willing to run yourself.
 
 </Warning>
 

@@ -135,4 +135,17 @@ describe('occurrencesInWindows', () => {
     const out = occurrencesInWindows('0 9 * * *', bounds, { after: 0, first: day(1) + 9 * HOUR })
     expect(out[0]!.times).toEqual([nextOccurrence('0 9 * * *', day(2) - 1)])
   })
+
+  it('projects in the time zone it is given', () => {
+    // UTC+14 with no daylight saving: 09:00 there is 19:00 UTC the day before.
+    const zone = 'Pacific/Kiritimati'
+    const out = occurrencesInWindows('0 9 * * *', [day(0), day(1), day(2)], {
+      after: 0,
+      timeZone: zone,
+    })
+    expect(out.map((w) => w.times)).toEqual([[day(0) + 19 * HOUR], [day(1) + 19 * HOUR]])
+    for (const w of out) {
+      for (const t of w.times) expect(nextOccurrence('0 9 * * *', t - 1, zone)).toBe(t)
+    }
+  })
 })

@@ -100,9 +100,13 @@ While **Create routine** is disabled, the line beside it says what is missing, s
 | **Weekdays · 9am**           | 9:00 Monday to Friday          | `0 9 * * 1-5`  |
 | **Weekly · Mon 9am**         | 9:00 every Monday              | `0 9 * * 1`    |
 
-**Custom** takes a cron expression: minute, hour, day of month, month and day of week. For example, `30 8 * * 1-5` runs at 8:30 on weekdays. For a single run at a set time, type `once@` followed by a date and time, such as `once@2026-12-01T09:00:00Z`. The `Z` means UTC; leave it off to use the local time of the machine that runs Clawboo. After that run it reads **finished** and never runs again; a time in the past is refused with "This schedule never runs again."
+**Custom** takes a cron expression: minute, hour, day of month, month and day of week. For example, `30 8 * * 1-5` runs at 8:30 on weekdays. For a single run at a set time, type `once@` followed by a date and time, such as `once@2026-12-01T09:00:00Z`. The `Z` means UTC; leave it off to use the local time of the machine that runs Clawboo (not the routine time zone below). After that run it reads **finished** and never runs again; a time in the past is refused with "This schedule never runs again."
 
-Times follow the clock and time zone of the machine that runs Clawboo. If Clawboo was stopped or the computer was asleep when a routine was due, it runs once when Clawboo is back, then carries on with its schedule; missed times are not made up. A routine never runs twice at once: a time that passes while a run is still going is skipped. Routines are saved in Clawboo's database, so they carry on after a restart; a run cut off by the restart shows as **interrupted**.
+If Clawboo was stopped or the computer was asleep when a routine was due, it runs once when Clawboo is back, then carries on with its schedule; missed times are not made up. A routine never runs twice at once: a time that passes while a run is still going is skipped. Routines are saved in Clawboo's database, so they carry on after a restart; a run cut off by the restart shows as **interrupted**.
+
+### The time zone
+
+Routine times are read in one time zone, which the dialog names under **Runs**, for example "Times are in New York." Until you change it, that is the time zone of the machine that runs Clawboo, so on your own computer it is your time. In a container it is usually UTC unless the container sets `TZ`, so a routine for 9:00 would run at 9:00 UTC. Press **Change** to pick another zone, or **The server's zone** to go back. The zone applies to every routine, and each one's next run moves to it at once. **Next run** gives the time in that zone, and in your own time as well when the two differ.
 
 ## What a run does
 

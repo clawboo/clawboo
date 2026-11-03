@@ -13,6 +13,7 @@ import {
   formatDuration,
   fireSummary,
   formatScheduleLabel,
+  formatWhen,
   humanCron,
   NO_TEAM,
   nextRunPreview,
@@ -23,6 +24,8 @@ import {
   runtimeDisplayName,
   statusPill,
   targetSummary,
+  timeZoneChoices,
+  timeZoneLabel,
   toggleBlocker,
   type RoutineFormValues,
 } from '../routineHelpers'
@@ -97,6 +100,40 @@ describe('cron validation', () => {
     expect(cronError('every tuesday')).toMatch(/not a cron expression/)
     expect(cronError('once@2001-01-01T00:00:00.000Z')).toMatch(/never runs again/)
     expect(nextRunPreview('nonsense')).toBeNull()
+  })
+})
+
+describe('the scheduler time zone in the form', () => {
+  // UTC+14 with no daylight saving: 09:00 there is 19:00 UTC the day before.
+  const ZONE = 'Pacific/Kiritimati'
+
+  it('previews the next run on the scheduler zone’s wall clock', () => {
+    const from = Date.UTC(2026, 5, 10, 12, 0)
+    expect(nextRunPreview('0 9 * * *', from, ZONE)).toBe(Date.UTC(2026, 5, 10, 19, 0))
+    expect(cronError('0 9 * * *', ZONE)).toBeNull()
+  })
+
+  it('formats a time in a given zone', () => {
+    const at = Date.UTC(2026, 5, 10, 19, 0)
+    const expected = new Date(at).toLocaleString(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: ZONE,
+    })
+    expect(formatWhen(at, ZONE)).toBe(expected)
+  })
+
+  it('names a zone by its city, and offers UTC and a stored zone in the list', () => {
+    expect(timeZoneLabel('America/New_York')).toBe('New York')
+    expect(timeZoneLabel('UTC')).toBe('UTC')
+    const choices = timeZoneChoices(['Etc/GMT+5'])
+    expect(choices).toContain('UTC')
+    expect(choices).toContain('Etc/GMT+5')
+    expect(choices).toEqual([...choices].sort((a, b) => a.localeCompare(b)))
+    expect(new Set(choices).size).toBe(choices.length)
   })
 })
 

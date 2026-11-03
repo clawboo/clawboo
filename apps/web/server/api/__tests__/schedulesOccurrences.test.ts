@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, scheduledRuns, teams } from '@clawboo/db'
+import { agents, getScheduledRun, scheduledRuns, setSetting, teams } from '@clawboo/db'
 import { nextOccurrence } from '@clawboo/scheduler'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
@@ -248,6 +248,30 @@ describe('GET /api/schedules/occurrences', () => {
     db.update(teams).set({ isArchived: 1 }).where(eq(teams.id, 't2')).run()
     resetOccurrenceCache()
     expect((await ids()).sort()).toEqual([live, gusRoutine].sort())
+  })
+
+  it('works routines out in the scheduler time zone, not the process zone', async () => {
+    // UTC+14, which no process zone matches unless it is that zone itself.
+    const processZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const zone = processZone === 'Pacific/Kiritimati' ? 'Pacific/Pago_Pago' : 'Pacific/Kiritimati'
+    setSetting(getDb(), 'scheduler-time-zone', zone)
+    const clock = (ms: number): string =>
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone: zone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+      }).format(ms)
+
+    const id = await create({ agentId: 'solo', cronSpec: '0 9 * * *', label: 'Daily' })
+    const stored = getScheduledRun(getDb(), id.split(':')[1]!)!
+    expect(clock(stored.nextRunAt!)).toBe('09:00')
+
+    const { body } = await occurrences({ bounds: weekBounds().join(',') })
+    expect((body as unknown as { timeZone: string }).timeZone).toBe(zone)
+    const times = body.routines[0]!.windows.flatMap((w) => w.times)
+    expect(times.length).toBeGreaterThanOrEqual(6)
+    for (const t of times) expect(clock(t)).toBe('09:00')
   })
 
   it('says which time zone the runs were worked out in', async () => {

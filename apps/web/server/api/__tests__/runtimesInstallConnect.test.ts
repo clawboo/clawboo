@@ -45,6 +45,14 @@ vi.mock('../../lib/platform', () => ({
   },
 }))
 
+// ── Mock the Agent SDK binary probe: control whether the SDK's own platform
+// binary is "there" (this checkout really has one, so the default is absent). ─
+const sdkState = vi.hoisted(() => ({ binary: null as string | null }))
+vi.mock('../../lib/runtimes/agentSdkBinary', () => ({
+  AGENT_SDK_PACKAGE: '@anthropic-ai/claude-agent-sdk',
+  resolveAgentSdkBinary: () => sdkState.binary,
+}))
+
 // ── Mock the Codex login probe (real impl shells out to `codex login status`). ─
 const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
@@ -237,6 +245,7 @@ describe('runtimes install/connect REST', () => {
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     platformState.bins = {}
     platformState.pythonOverride = null
+    sdkState.binary = null
     spawnState.calls = []
     spawnState.children = []
     runnerState.lastInput = null
@@ -285,6 +294,62 @@ describe('runtimes install/connect REST', () => {
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
+    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  // ── Claude Code: the CLI or the Agent SDK's own binary ─────────────────────
+  const claudeRow = async (): Promise<Record<string, unknown>> => {
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    return (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'claude-code',
+    )!
+  }
+  const SDK_BIN = '/opt/clawboo/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude'
+
+  it('Claude Code with only the CLI on PATH reads installed from the CLI', async () => {
+    platformState.bins['claude'] = '/usr/local/bin/claude'
+    const row = await claudeRow()
+    expect(row['installed']).toBe(true)
+    expect(row['binPath']).toBe('/usr/local/bin/claude')
+    expect(row['binSource']).toBe('cli')
+    expect(row['connectionState']).toBe('needs-auth')
+    expect(row['health']).toEqual({ ok: true })
+  })
+
+  it('Claude Code with only the Agent SDK’s own binary reads installed, and ready with a key', async () => {
+    sdkState.binary = SDK_BIN
+    let row = await claudeRow()
+    expect(row['installed']).toBe(true)
+    expect(row['binPath']).toBe(SDK_BIN)
+    expect(row['binSource']).toBe('agent-sdk')
+    expect(row['connectionState']).toBe('needs-auth')
+    expect(row['health']).toEqual({ ok: true })
+
+    runtimesConnectPOST(
+      req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-sdk-only' } }),
+      mockRes().res,
+    )
+    row = await claudeRow()
+    expect(row['connectionState']).toBe('ready')
+  })
+
+  it('Claude Code with neither the CLI nor the SDK binary reads not installed', async () => {
+    const row = await claudeRow()
+    expect(row['installed']).toBe(false)
+    expect(row['binPath']).toBeNull()
+    expect(row['binSource']).toBeNull()
+    expect(row['connectionState']).toBe('not-installed')
+    expect((row['health'] as { ok: boolean }).ok).toBe(false)
+  })
+
+  it('Install fetches no second copy when the Agent SDK’s binary is already there', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    sdkState.binary = SDK_BIN
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    await m.ended
+    expect(spawnState.calls).toEqual([])
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
   })
 

@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 205 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 207 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -17,7 +17,7 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
-| Routes         | 205: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT` ([index](#route-index))     |
+| Routes         | 207: 95 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 8 `PUT` ([index](#route-index))     |
 
 Check that the server is up (the response carries `"ok": true` when no boot check failed):
 
@@ -174,7 +174,7 @@ A script or app that talks to more than one Clawboo server should not guess what
 
 ## Route index
 
-The router registers 205 routes: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT`. Each belongs to one page:
+The router registers 207 routes: 95 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 8 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -186,7 +186,7 @@ The router registers 205 routes: 94 `GET`, 80 `POST`, 15 `DELETE`, 9 `PATCH`, 7 
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                             |
 | [Boo Zero](/reference/rest-api/boo-zero)             | 7      | `/api/boo-zero/*`: team briefs, display names, the leader override                                                                                        |
 | [Runtimes](/reference/rest-api/runtimes)             | 18     | `/api/runtimes*`, `/api/providers*`, `/api/onboarding/*`, `/api/auth/cli-login/:tool`                                                                     |
-| [Schedules](/reference/rest-api/schedules)           | 7      | `/api/schedules*`: Routines and OpenClaw Gateway cron jobs                                                                                                |
+| [Schedules](/reference/rest-api/schedules)           | 9      | `/api/schedules*`: Routines and OpenClaw Gateway cron jobs                                                                                                |
 | [Governance](/reference/rest-api/governance)         | 7      | `/api/governance/*` (budgets, audit log, delegation approval), `/api/approvals`                                                                           |
 | [Costs](/reference/rest-api/costs)                   | 4      | `/api/cost-records*`, `/api/fleet/summary`                                                                                                                |
 | [Observability](/reference/rest-api/observability)   | 7      | `/api/obs/*`, `/api/eval/smoke`                                                                                                                           |

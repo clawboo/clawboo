@@ -26,6 +26,8 @@ Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo
 | POST   | `/api/schedules/:id/run`     | Run it now (queued, answered with 202)                                   | No      |
 | GET    | `/api/schedules/:id/runs`    | A Routine's recent runs, newest first                                    | No      |
 | GET    | `/api/schedules/occurrences` | Upcoming Routine runs, counted per time window you name                  | No      |
+| GET    | `/api/schedules/time-zone`   | The time zone Routines are worked out in                                 | No      |
+| PUT    | `/api/schedules/time-zone`   | Set that time zone, or follow the server's own again                     | No      |
 
 ---
 
@@ -539,7 +541,7 @@ curl 'http://localhost:18790/api/schedules/clawboo-routine:<routine-id>/runs?lim
 
 ## `GET /api/schedules/occurrences`
 
-The upcoming runs of Clawboo's own Routines, counted per time window you name. The board's calendar sends the viewer's local midnights, so each window is one day; that keeps a 23- or 25-hour day around a clock change correct. The count is worked out on the server because the scheduler reads cron in the server's time zone, so these are the times it will actually run.
+The upcoming runs of Clawboo's own Routines, counted per time window you name. The board's calendar sends the viewer's local midnights, so each window is one day; that keeps a 23- or 25-hour day around a clock change correct. The count is worked out on the server because the scheduler reads cron in the scheduler time zone (`GET /api/schedules/time-zone`, below), so these are the times it will actually run.
 
 Only runs after now are counted, and only for Routines that will run. These are left out:
 
@@ -563,7 +565,7 @@ For an `idle` Routine, the first run is its stored `nextRunAt`, the time the sch
 ```ts
 {
   now: number // the time the count started from
-  timeZone: string | null // the IANA time zone the scheduler reads cron in
+  timeZone: string // the IANA time zone the scheduler reads cron in
   routines: Array<{
     schedule: ScheduleRecord // with teamName and agentName filled in, as on GET /api/schedules
     windows: Array<{
@@ -575,7 +577,7 @@ For an `idle` Routine, the first run is its stored `nextRunAt`, the time the sch
 }
 ```
 
-Counting stops at 96 (every fifteen minutes for a whole day), so a very frequent Routine costs a bounded amount of work; `more` says the window holds more than that. `timeZone` lets a caller in another time zone tell which zone a Routine's cron spec is read in.
+Counting stops at 96 (every fifteen minutes for a whole day), so a very frequent Routine costs a bounded amount of work; `more` says the window holds more than that. `timeZone` is the scheduler time zone, so a caller in another zone can tell which zone a Routine's cron spec is read in.
 
 **`400 Bad Request`**: `bounds` is missing, has fewer than 2 or more than 64 values, is not strictly ascending integers, or spans more than 62 days:
 
@@ -601,6 +603,62 @@ curl 'http://localhost:18790/api/schedules/occurrences?bounds=1791777600000,1791
 
 ---
 
+## `GET /api/schedules/time-zone`
+
+The time zone Routines are worked out in. A cron spec is wall-clock time, so `0 9 * * *` runs at 9:00 in this zone. Until one is set it is the server's own zone, the zone of the process that runs Clawboo. In a container that is UTC unless `TZ` is set. One-shot `once@` specs are fixed instants and do not use it. OpenClaw Gateway cron jobs keep their own zone.
+
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**:
+
+```ts
+{
+  timeZone: string // the IANA zone Routines are worked out in
+  hostTimeZone: string // the server's own zone, which applies until one is set
+  configured: boolean // true when a zone is set, false when the server's own applies
+}
+```
+
+**`500 Internal Server Error`**: the setting could not be read:
+
+```json
+{ "error": "<message>" }
+```
+
+---
+
+## `PUT /api/schedules/time-zone`
+
+Set the time zone Routines are worked out in, for every Routine on the install. It is stored in Clawboo's database, independent of the server process, so it survives a restart. Each armed Routine's next run moves to the new zone's clock at once; a paused Routine, or one stopped after a failure, takes the new zone when it is resumed, and one that is running takes it when the run ends.
+
+- **Request body**: `{ "timeZone": string | null }`. An IANA zone name such as `America/New_York` sets that zone. The name is kept as given, apart from letter case (`utc` is stored as `UTC`). `null` goes back to the server's own zone.
+
+### Responses
+
+**`200 OK`**: the zone now in force, in the same shape as `GET /api/schedules/time-zone`.
+
+**`400 Bad Request`**: the name is not a time zone (`code: "invalid_time_zone"`), or `timeZone` is missing or neither a string nor `null` (`code: "invalid_body"`):
+
+```json
+{ "error": "not a time zone: Mars/Olympus", "code": "invalid_time_zone" }
+```
+
+### Example
+
+```bash
+# Work Routines out in New York time
+curl -X PUT http://localhost:18790/api/schedules/time-zone \
+  -H 'Content-Type: application/json' -d '{"timeZone":"America/New_York"}'
+
+# Follow the server's own zone again
+curl -X PUT http://localhost:18790/api/schedules/time-zone \
+  -H 'Content-Type: application/json' -d '{"timeZone":null}'
+```
+
+---
+
 ## Error envelope
 
 Every error here is `{ "error": string, "code"?: string }`. Branch on `code`, never on the message:
@@ -612,6 +670,7 @@ Every error here is `{ "error": string, "code"?: string }`. Branch on `code`, ne
 | `bound_recurring_schedule`    | 400    | A recurring spec was bound to an existing board task (one-shot specs only)       |
 | `invalid_routine_target`      | 400    | A Routine's team or agent is missing, archived, or does not match                |
 | `invalid_bounds`              | 400    | The occurrence windows are missing, out of order, too many, or too wide          |
+| `invalid_time_zone`           | 400    | The scheduler time zone is not a time zone name                                  |
 | `unsupported_schedule_write`  | 403    | The source is read-only (`observe-only`) for that action                         |
 | `unknown_schedule`            | 404    | The id matched no source, Routine or Gateway job, or a bound task does not exist |
 | `duplicate_firing_owner`      | 409    | The bound board task is already scheduled by another engine; do not retry        |
@@ -622,7 +681,7 @@ Every error here is `{ "error": string, "code"?: string }`. Branch on `code`, ne
 
 A cron spec that does not parse answers `code: "invalid_cron_spec"` with a message that starts `Invalid cron spec`. A rate-limited request answers **429** `{ "error": "Too many requests. Wait a moment and retry." }` with a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/schedules.ts`; the two sources in `apps/web/server/lib/scheduleSource/`; error classes in `packages/scheduler/src/errors.ts`; Routine states in `packages/db/src/routines/state-machine.ts`.
+**Source of truth:** `apps/web/server/api/schedules.ts`; the two sources in `apps/web/server/lib/scheduleSource/`; the scheduler time zone in `apps/web/server/lib/routines/timeZone.ts`; error classes in `packages/scheduler/src/errors.ts`; Routine states in `packages/db/src/routines/state-machine.ts`.
 
 ## Related
 

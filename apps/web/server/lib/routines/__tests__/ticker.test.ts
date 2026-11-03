@@ -20,11 +20,13 @@ import {
   queueRunNow,
   registerScheduledRun,
   setScheduledRunStatus,
+  setSetting,
   type ClawbooDb,
   type DbScheduledRun,
 } from '@clawboo/db'
 
 import { createRoutinesTicker, type RoutinesTickerDeps } from '../ticker'
+import { SCHEDULER_TIME_ZONE_KEY } from '../timeZone'
 
 let dir: string
 let db: ClawbooDb
@@ -90,6 +92,26 @@ describe('routines ticker', () => {
     const kinds = listEvents(db).map((e) => e.kind)
     expect(kinds).toContain('routine_fired')
     expect(kinds).toContain('routine_completed')
+  })
+
+  it('re-arms a fired routine on the scheduler zone’s wall clock', async () => {
+    const host = Intl.DateTimeFormat().resolvedOptions().timeZone
+    const zone = host === 'Pacific/Kiritimati' ? 'Pacific/Pago_Pago' : 'Pacific/Kiritimati'
+    setSetting(db, SCHEDULER_TIME_ZONE_KEY, zone)
+    const run = register({ cronSpec: '0 9 * * *', nextRunAt: 1_000 })
+    const now = Date.parse('2026-06-10T12:00:30.000Z')
+    const { ticker } = makeTicker({ now: () => now })
+
+    expect((await ticker.tick()).fired).toBe(1)
+    const next = getScheduledRun(db, run.id)!.nextRunAt!
+    const clock = new Intl.DateTimeFormat('en-GB', {
+      timeZone: zone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).format(next)
+    expect(clock).toBe('09:00')
+    expect(next).toBeGreaterThan(now)
   })
 
   it('paused routines never fire even when long overdue', async () => {

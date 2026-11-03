@@ -479,3 +479,43 @@ export function reconcileScheduledRuns(
     return { requeued: requeued.length, rearmed, errored }
   })
 }
+
+// ─── Re-arming after a schedule-wide change ─────────────────────────────────
+
+/**
+ * Recompute the next run of every armed idle routine with `rearm(cronSpec)`, in
+ * one BEGIN IMMEDIATE pass. For a change that moves every routine's next fire at
+ * once, such as the time zone cron is read in. Only `idle` rows holding a next
+ * run are touched: a paused or parked row is disarmed and re-arms on resume, and
+ * a queued, claimed or running row re-arms from its own outcome. A `rearm` that
+ * throws or returns null leaves the row as it was. Returns how many rows moved.
+ */
+export function rearmIdleScheduledRuns(
+  db: ClawbooDb,
+  rearm: (cronSpec: string) => number | null,
+  now = Date.now(),
+): number {
+  return immediateWrite(db, (tx) => {
+    const rows = tx
+      .select()
+      .from(scheduledRuns)
+      .where(and(eq(scheduledRuns.status, 'idle'), isNotNull(scheduledRuns.nextRunAt)))
+      .all() as DbScheduledRun[]
+    let moved = 0
+    for (const row of rows) {
+      let nextRunAt: number | null
+      try {
+        nextRunAt = rearm(row.cronSpec)
+      } catch {
+        nextRunAt = null
+      }
+      if (nextRunAt == null || nextRunAt === row.nextRunAt) continue
+      tx.update(scheduledRuns)
+        .set({ nextRunAt, updatedAt: now })
+        .where(and(eq(scheduledRuns.id, row.id), eq(scheduledRuns.status, 'idle')))
+        .run()
+      moved += 1
+    }
+    return moved
+  })
+}

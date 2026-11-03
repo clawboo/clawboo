@@ -135,7 +135,7 @@ For a task that failed or was stopped, sending a comment starts its agent on it 
 3. Under **What should happen**, write the request, for example "Draft next week's three LinkedIn posts from this week's blog post, and suggest one topic for the next post."
 4. Give it a **Name**, such as "Weekly posts", and pick **Weekly · Mon 9am** under **Runs**. Click **Create routine**.
 
-You should see the routine under **Team routines**. Every Monday at 9:00, in the time zone of the computer running Clawboo, it posts your instructions in **General** as "Routine · Weekly posts", and Boo Zero takes it from there. To try it now, open the routine and click **Run now**.
+You should see the routine under **Team routines**. Every Monday at 9:00, in the routine time zone (the one the dialog names under **Runs**), it posts your instructions in **General** as "Routine · Weekly posts", and Boo Zero takes it from there. To try it now, open the routine and click **Run now**.
 
 Clawboo must be running for a routine to fire. A run that was due while Clawboo was not running fires once when it starts again. A run that fails for a reason that may pass, such as a rate limit, leaves the routine on its schedule; any other failure, or three in a row, stops it until you resume it. See [Routines](/using/routines).
 

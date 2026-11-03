@@ -281,6 +281,8 @@ const PINNED_ROUTES = [
   'POST /api/governance/budgets/:scope/:scopeId/resume',
   'GET /api/schedules',
   'GET /api/schedules/occurrences',
+  'GET /api/schedules/time-zone',
+  'PUT /api/schedules/time-zone',
   'POST /api/schedules',
   'POST /api/schedules/:id/run',
   'GET /api/schedules/:id/runs',

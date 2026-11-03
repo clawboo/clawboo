@@ -31,6 +31,7 @@ import {
   peekCodexModels,
 } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
+import { resolveRuntimeInstall } from '../lib/runtimes/installProbe'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
@@ -100,8 +101,10 @@ function publicDescriptor(d: RuntimeDescriptor): Record<string, unknown> {
 function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<string, unknown> {
   const d = getDescriptor(id)
   // Built-in runtimes ship inside the server: always installed, no binary.
-  const binPath = d.builtIn ? null : d.healthBin ? resolveRuntimeBin(d.healthBin) : null
-  const installed = d.builtIn ? true : Boolean(binPath)
+  // Claude Code is installed by its CLI or by the Agent SDK's own binary.
+  const bin = d.builtIn ? null : resolveRuntimeInstall(d)
+  const binPath = bin?.path ?? null
+  const installed = d.builtIn ? true : Boolean(bin)
   // Presence only — resolveRuntimeKey returns the value but we never expose it.
   // A multi-provider runtime is connected when ANY of its env vars resolves.
   const envVars = [d.envVar, ...(d.altEnvVars ?? [])].filter((v): v is string => Boolean(v))
@@ -132,7 +135,10 @@ function runtimeStatus(id: NonOpenClawRuntimeId, oauthLoggedIn = false): Record<
   return {
     name: d.name,
     installed,
-    binPath: binPath ?? null,
+    binPath,
+    // Additive: where the binary came from, 'cli' or 'agent-sdk' (null when
+    // there is none, and for a built-in runtime).
+    binSource: bin?.source ?? null,
     builtIn: d.builtIn,
     authKind: d.authKind,
     envVar: d.envVar,
@@ -217,6 +223,20 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
+
+  // Runs use the Agent SDK's own binary, so with it present a CLI install would
+  // fetch a second copy that no run starts.
+  const existing = resolveRuntimeInstall(d)
+  if (existing?.source === 'agent-sdk') {
+    sendEvent(res, {
+      type: 'output',
+      line: `${d.name} already runs on the Agent SDK's own binary: ${existing.path}`,
+    })
+    sendEvent(res, { type: 'complete', success: true })
+    res.end()
+    return
+  }
+
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
   // One res.on('close') handler kills whichever child is active (the pip path
@@ -237,7 +257,7 @@ function finishInstall(res: Response, d: RuntimeDescriptor): void {
   if (d.id === 'codex') invalidateCodexModelsCache()
   // No cache to bust — resolveRuntimeBin probes PATH + user-install dirs live
   // (it's what finds Hermes in the Python user-site bin off PATH).
-  if (d.healthBin && resolveRuntimeBin(d.healthBin)) {
+  if (resolveRuntimeInstall(d)) {
     sendEvent(res, { type: 'complete', success: true })
   } else {
     sendEvent(res, {

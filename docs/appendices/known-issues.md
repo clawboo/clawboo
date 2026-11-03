@@ -319,6 +319,9 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools       |
 | Archived teams cannot be restored from the dashboard, and an agent cannot move to another team                                                                                                        | Teams       |
 | Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero    |
+| Claude Code reads **Not installed** with only the Claude Agent SDK installed, though runs use the SDK's own binary, and **Install** downloads a second copy of that binary                            | Runtimes    |
+| Routines run in the server process's time zone, which in a container is UTC unless `TZ` is set, so a 9:00 routine runs at 9:00 UTC                                                                    | Routines    |
+| Connectors and approved shell commands lose npm's prefix, cache and update-check settings, so an approved `npm install -g` can fail with `EACCES`                                                     | Connectors  |
 
 ## Related
 

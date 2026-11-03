@@ -27,6 +27,9 @@ export interface RuntimeStatus {
   name?: string
   installed?: boolean
   binPath?: string | null
+  /** Where `binPath` came from: the runtime's CLI, or (Claude Code) the Agent
+   *  SDK's own binary, which is what a run starts. */
+  binSource?: 'cli' | 'agent-sdk' | null
   authKind?: 'api-key' | 'oauth' | 'none'
   envVar?: string | null
   hasCredential?: boolean

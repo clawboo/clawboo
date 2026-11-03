@@ -89,6 +89,83 @@ describe('connectorChildEnv', () => {
     expect('NOTION_TOKEN' in env).toBe(false)
   })
 
+  it('passes npm’s prefix, cache and update check through, in either spelling', () => {
+    const lower = connectorChildEnv({
+      source: {
+        ...AMBIENT,
+        npm_config_prefix: '/home/dev/.npm-global',
+        npm_config_cache: '/home/dev/.cache/npm',
+        npm_config_update_notifier: 'false',
+      },
+    })
+    expect(lower['npm_config_prefix']).toBe('/home/dev/.npm-global')
+    expect(lower['npm_config_cache']).toBe('/home/dev/.cache/npm')
+    expect(lower['npm_config_update_notifier']).toBe('false')
+
+    const upper = connectorChildEnv({
+      source: {
+        ...AMBIENT,
+        NPM_CONFIG_PREFIX: '/opt/npm',
+        NPM_CONFIG_CACHE: '/var/cache/npm',
+        NPM_CONFIG_UPDATE_NOTIFIER: 'false',
+      },
+    })
+    expect(upper['NPM_CONFIG_PREFIX']).toBe('/opt/npm')
+    expect(upper['NPM_CONFIG_CACHE']).toBe('/var/cache/npm')
+    expect(upper['NPM_CONFIG_UPDATE_NOTIFIER']).toBe('false')
+  })
+
+  it('keeps every other npm setting out, credentials above all', () => {
+    const env = connectorChildEnv({
+      source: {
+        ...AMBIENT,
+        npm_config_prefix: '/home/dev/.npm-global',
+        npm_config__authToken: 'npm_secret_1',
+        NPM_CONFIG__AUTHTOKEN: 'npm_secret_2',
+        npm_config__auth: 'dXNlcjpwYXNz',
+        NPM_CONFIG__AUTH: 'dXNlcjpwYXNz',
+        'npm_config_//registry.npmjs.org/:_authToken': 'npm_secret_3',
+        NPM_CONFIG_TOKEN: 'npm_secret_4',
+        npm_config_auth_type: 'legacy',
+        npm_config_userconfig: '/home/dev/.npmrc',
+        npm_config_registry: 'https://registry.example.test/',
+      },
+    })
+    const npmKeys = Object.keys(env).filter((k) => k.toLowerCase().startsWith('npm_config_'))
+    // Only the prefix, plus the update check a connector launch turns off.
+    expect(npmKeys.sort()).toEqual(['npm_config_prefix', 'npm_config_update_notifier'])
+    expect(JSON.stringify(env)).not.toMatch(/npm_secret|dXNlcjpwYXNz/)
+  })
+
+  it('allows no name that could carry an npm credential', () => {
+    for (const name of CONNECTOR_ENV_ALLOWLIST) {
+      if (!name.toLowerCase().startsWith('npm_config_')) continue
+      expect(name, name).not.toMatch(/auth|token/i)
+    }
+  })
+
+  it('turns npm’s update check off for a connector launch', () => {
+    // A connector starts through `npx`, which otherwise asks the registry for
+    // npm's newest version on its own schedule.
+    const env = connectorChildEnv({ source: AMBIENT })
+    expect(env['npm_config_update_notifier']).toBe('false')
+  })
+
+  it('leaves an update-check setting the operator made alone', () => {
+    const env = connectorChildEnv({
+      source: { ...AMBIENT, NPM_CONFIG_UPDATE_NOTIFIER: 'true' },
+    })
+    expect(env['NPM_CONFIG_UPDATE_NOTIFIER']).toBe('true')
+    expect('npm_config_update_notifier' in env).toBe(false)
+  })
+
+  it('adds no update-check setting when asked to inherit it', () => {
+    const env = connectorChildEnv({ source: AMBIENT, npmUpdateCheck: 'inherit' })
+    expect(Object.keys(env).some((k) => k.toLowerCase() === 'npm_config_update_notifier')).toBe(
+      false,
+    )
+  })
+
   it('carries the Windows variables a child cannot start without', () => {
     // Omit SystemRoot and process creation itself fails, because the loader
     // resolves system DLLs relative to it.

@@ -11,6 +11,7 @@ import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 import { useViewStore } from '@/stores/view'
 import { RoutinesPanel } from '../RoutinesPanel'
+import { formatWhen, nextRunPreview } from '../routineHelpers'
 
 // The design-system confirm() is mocked so the delete flow can be driven without
 // rendering the app-root <ConfirmDialog>.
@@ -599,6 +600,56 @@ describe('RoutinesPanel create', () => {
     expect(within(dialog).queryByRole('alert')).toBeNull()
     expect(within(dialog).getByTestId('routine-next-preview')).toHaveTextContent(/Next run/)
     expect(within(dialog).getByTestId('routine-submit')).toBeEnabled()
+  })
+
+  it('says which time zone a routine’s time is in, and changes it for every routine', async () => {
+    // A zone no test runner is in, so it always differs from the browser's.
+    const SERVER = 'Pacific/Kiritimati'
+    const saved = vi.fn()
+    server.use(
+      http.get('/api/schedules/time-zone', () =>
+        HttpResponse.json({ timeZone: SERVER, hostTimeZone: SERVER, configured: false }),
+      ),
+      http.put('/api/schedules/time-zone', async ({ request }) => {
+        const body = (await request.json()) as { timeZone: string | null }
+        saved(body)
+        return HttpResponse.json({
+          timeZone: body.timeZone,
+          hostTimeZone: SERVER,
+          configured: true,
+        })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<RoutinesPanel />)
+    await user.click(await screen.findByTestId('routine-create-open'))
+    const dialog = await screen.findByTestId('routine-dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Daily · 9am' }))
+
+    const line = await within(dialog).findByTestId('routine-time-zone')
+    expect(line).toHaveTextContent("Times are in Kiritimati (the server's time zone).")
+    // The preview reads the spec on the server zone's clock, and gives it in
+    // the person's own time as well.
+    const next = nextRunPreview('0 9 * * *', Date.now(), SERVER)!
+    const preview = within(dialog).getByTestId('routine-next-preview')
+    expect(preview).toHaveTextContent(formatWhen(next, SERVER))
+    expect(preview).toHaveTextContent(`(${formatWhen(next)} your time)`)
+
+    await user.click(within(dialog).getByTestId('routine-time-zone-change'))
+    await user.click(within(dialog).getByTestId('routine-time-zone-select'))
+    // The list holds every zone; its search box takes the focus when it opens.
+    await user.paste('Bogota')
+    await user.click(await screen.findByRole('option', { name: 'America/Bogota' }))
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ timeZone: 'America/Bogota' }))
+    await waitFor(() =>
+      expect(within(dialog).getByTestId('routine-time-zone')).toHaveTextContent(
+        'Times are in Bogota.',
+      ),
+    )
+    const moved = nextRunPreview('0 9 * * *', Date.now(), 'America/Bogota')!
+    expect(within(dialog).getByTestId('routine-next-preview')).toHaveTextContent(
+      formatWhen(moved, 'America/Bogota'),
+    )
   })
 
   it('a refused create keeps the dialog open with the reason', async () => {

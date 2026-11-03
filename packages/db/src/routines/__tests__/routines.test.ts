@@ -26,6 +26,7 @@ import {
   queueDueRuns,
   queueRunNow,
   reconcileScheduledRuns,
+  rearmIdleScheduledRuns,
   recordRunOutcome,
   registerScheduledRun,
   setScheduledRunStatus,
@@ -542,6 +543,39 @@ describe('boot-resume reconciliation', () => {
     })
     expect(getScheduledRun(db, once.id)).toMatchObject({ status: 'error', nextRunAt: null })
     expect(getScheduledRun(db, untouched.id)).toMatchObject({ status: 'idle', nextRunAt: 50_000 })
+  })
+})
+
+describe('re-arming every armed routine at once', () => {
+  it('moves idle routines only, and leaves a null answer where it was', () => {
+    const idle = register({ nextRunAt: 50_000 })
+    const once = register({ cronSpec: 'once@2026-07-01T09:00:00Z', nextRunAt: 70_000 })
+    const paused = register({ nextRunAt: 50_000 })
+    setScheduledRunStatus(db, paused.id, 'paused')
+    const running = register({ nextRunAt: 1_000 })
+    queueDueRuns(db, 2_000)
+    claimScheduledRun(db, running.id)
+    markRunRunning(db, running.id)
+
+    const moved = rearmIdleScheduledRuns(
+      db,
+      (spec) => (spec.startsWith('once@') ? null : 90_000),
+      10_000,
+    )
+    expect(moved).toBe(1)
+    expect(getScheduledRun(db, idle.id)).toMatchObject({ status: 'idle', nextRunAt: 90_000 })
+    expect(getScheduledRun(db, once.id)).toMatchObject({ status: 'idle', nextRunAt: 70_000 })
+    expect(getScheduledRun(db, paused.id)).toMatchObject({ status: 'paused', nextRunAt: null })
+    expect(getScheduledRun(db, running.id)?.status).toBe('running')
+  })
+
+  it('leaves a row alone when working out its next run throws', () => {
+    const row = register({ nextRunAt: 50_000 })
+    const moved = rearmIdleScheduledRuns(db, () => {
+      throw new Error('bad spec')
+    })
+    expect(moved).toBe(0)
+    expect(getScheduledRun(db, row.id)?.nextRunAt).toBe(50_000)
   })
 })
 

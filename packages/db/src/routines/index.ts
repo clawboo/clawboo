@@ -24,6 +24,7 @@ export {
   deleteScheduledRun,
   deleteScheduledRunsForAgent,
   reconcileScheduledRuns,
+  rearmIdleScheduledRuns,
   type RegisterScheduledRunInput,
   type RegisterScheduledRunResult,
   type ListScheduledRunsFilter,
