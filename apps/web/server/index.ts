@@ -755,6 +755,12 @@ async function main() {
       if (report.killed > 0 || report.expired > 0) {
         log.info(report, 'Connectors: reaped children left by a previous run')
       }
+      if (report.unverified > 0) {
+        log.warn(
+          report,
+          'Connectors: left processes from a previous run running; this host could not report when they started',
+        )
+      }
     })
 
     // ── Connector restore ─────────────────────────────────────────────────────

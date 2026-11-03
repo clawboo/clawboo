@@ -4,10 +4,20 @@
 // some locales turns the reap off for everyone using them.
 
 import { spawn } from 'node:child_process'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { processStartTimes } from '../processIdentity'
+import {
+  currentBootAt,
+  currentBootIdentity,
+  currentInitStart,
+  currentPidNamespace,
+  parseStatStartTime,
+  processStartTimes,
+} from '../processIdentity'
 
 const LOCALE_VARS = ['LC_ALL', 'LC_TIME', 'LANG'] as const
 let saved: Partial<Record<(typeof LOCALE_VARS)[number], string>>
@@ -61,5 +71,58 @@ describe('processStartTimes', () => {
     const probe = processStartTimes([pid])
     expect(probe.ok).toBe(true)
     expect(probe.times.size).toBe(0)
+  })
+
+  it('says why when this host has no tool to ask', () => {
+    // A minimal image can ship without `ps`. The probe then cannot answer, and
+    // the reap that refuses to signal needs the reason for its log.
+    const empty = mkdtempSync(path.join(os.tmpdir(), 'clawboo-no-ps-'))
+    const savedPath = process.env['PATH']
+    process.env['PATH'] = empty
+    try {
+      const probe = processStartTimes([process.pid])
+      expect(probe.ok).toBe(false)
+      expect(probe.error).toMatch(/ENOENT/)
+    } finally {
+      process.env['PATH'] = savedPath
+      rmSync(empty, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('boot identity', () => {
+  it("reads the start time from a stat line whose command name holds spaces and ')'", () => {
+    // Field 2 is the command name in parentheses, and it can contain both, so
+    // the fields have to be counted from the LAST ')'.
+    const fields = ['S', '0', '1', '1', '0', '-1', '4194560', '85322', '6052620', '120', '1757']
+    const rest = ['410', '349', '13780', '5390', '20', '0', '1', '0', '987654', '170356736', '3239']
+    const stat = `1 (a) S 9 (b c) ${[...fields, ...rest].join(' ')}\n`
+    expect(parseStatStartTime(stat)).toBe(987654)
+  })
+
+  it('returns null for a stat line it cannot read', () => {
+    expect(parseStatStartTime('')).toBeNull()
+    expect(parseStatStartTime('1 (init) S 0 1')).toBeNull()
+    expect(parseStatStartTime('1 init S 0 1 1 0 -1 4 8 6 1 1 4 3 1 5 2 0 1 0 6 1 3')).toBeNull()
+  })
+
+  it("reads when this namespace's pid 1 started on Linux, and nothing elsewhere", () => {
+    const initStart = currentInitStart()
+    if (process.platform === 'linux') {
+      expect(Number.isSafeInteger(initStart)).toBe(true)
+      // Stable for as long as that pid 1 runs.
+      expect(currentInitStart()).toBe(initStart)
+    } else {
+      // macOS and Windows have no PID namespaces: today's identity stays as it is.
+      expect(initStart).toBeNull()
+    }
+  })
+
+  it('names the boot, the PID namespace and its pid 1 together', () => {
+    expect(currentBootIdentity()).toEqual({
+      bootAt: currentBootAt(),
+      pidNamespace: currentPidNamespace(),
+      initStart: currentInitStart(),
+    })
   })
 })

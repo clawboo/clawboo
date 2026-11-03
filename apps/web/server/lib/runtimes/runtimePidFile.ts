@@ -17,10 +17,9 @@
 //   must leave a live engine's runs alone. A file per engine lets the reap ask
 //   whether the engine that wrote it is still running, and no engine ever
 //   rewrites another's records.
-// - FAIL CLOSED. A child is signalled only when the boot matches AND the process
-//   holding its pid is shown to have started before our record (within
-//   `CHILD_START_TIME_SLACK_MS`). The connector reap still signals when this host
-//   cannot report start times at all; this one does not: a runtime reap is a
+// - FAIL CLOSED, as the connector reap does. A child is signalled only when the
+//   boot matches AND the process holding its pid is shown to have started before
+//   our record (within `CHILD_START_TIME_SLACK_MS`). A runtime reap is a
 //   whole-tree kill of an agent, so a pid that cannot be shown to still be ours
 //   is left alone and counted.
 //

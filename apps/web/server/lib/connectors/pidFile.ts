@@ -22,11 +22,12 @@ import path from 'node:path'
 import { resolveClawbooDir } from '@clawboo/config'
 
 import {
-  currentBootAt,
+  currentBootIdentity,
   isAlive,
   MAX_TRUSTED_AGE_MS,
   processStartTimes,
   START_TIME_SLACK_MS,
+  type BootIdentity,
 } from '../processIdentity'
 
 export interface ConnectorPidEntry {
@@ -43,6 +44,14 @@ export interface ConnectorPidEntry {
    * number now. Without this the reap would signal it.
    */
   bootAt: number
+  /**
+   * The rest of the boot identity (see `BootIdentity`): inside a container,
+   * `bootAt` is the host's and survives a container restart, and these do not.
+   * Both are absent in a record written before they were, which `sameBoot`
+   * reads as null.
+   */
+  pidNamespace?: string | null
+  initStart?: number | null
   /** The resolved binary, for the log. Identity is decided by boot and start
    *  time, not by this: `ps` reports `node` rather than an absolute path, and an
    *  `npx` launch re-execs into something else entirely. */
@@ -78,10 +87,10 @@ function writeAll(entries: ConnectorPidEntry[]): void {
   }
 }
 
-export type RecordPidInput = Omit<ConnectorPidEntry, 'bootAt'>
+export type RecordPidInput = Omit<ConnectorPidEntry, keyof BootIdentity>
 
 export function recordConnectorPid(input: RecordPidInput): void {
-  const entry: ConnectorPidEntry = { ...input, bootAt: currentBootAt() }
+  const entry: ConnectorPidEntry = { ...input, ...currentBootIdentity() }
   // Replace any entry for the same pid: a recycled pid must not accumulate two
   // records that disagree about which connector it belongs to.
   writeAll([...readAll().filter((e) => e.pid !== entry.pid), entry])
@@ -94,13 +103,37 @@ export function forgetConnectorPid(pid: number): void {
 export interface ReapReport {
   killed: number
   /** Entries dropped UNSIGNALLED because they could not be trusted to still be
-   *  ours: recorded under a different boot, too old, or now running something
-   *  else. Reported separately so a surprising count is visible in the log. */
+   *  ours: recorded under a different boot (or one the record cannot name), too
+   *  old, or now running something else. Reported separately so a surprising
+   *  count is visible in the log. */
   expired: number
-  /** Signalled on boot time, age and liveness ALONE, because this host could not
-   *  report process start times. Not an error, but strictly weaker evidence, so
-   *  it is counted rather than hidden. */
+  /** Alive but NOT signalled, because this host could not report when the
+   *  process holding the pid started. Counted so the log shows the gap. */
   unverified: number
+  /** Why the start times could not be read, when `unverified` is not zero. */
+  unverifiedReason?: string
+}
+
+export interface ConnectorReapDeps {
+  /** Test seam for this process's boot identity (see `currentBootIdentity`). */
+  boot?: BootIdentity
+}
+
+/**
+ * Whether an entry was recorded under this boot identity.
+ *
+ * A record written before the namespace fields existed has them absent, read
+ * as null. On macOS and Windows, which have no PID namespaces, that matches,
+ * so an older record is judged as it always was. On Linux it does not, and the
+ * older record is dropped unsignalled: nothing in it says which run of the
+ * namespace wrote it.
+ */
+function sameBoot(entry: ConnectorPidEntry, here: BootIdentity): boolean {
+  return (
+    entry.bootAt === here.bootAt &&
+    (entry.pidNamespace ?? null) === here.pidNamespace &&
+    (entry.initStart ?? null) === here.initStart
+  )
 }
 
 /**
@@ -109,33 +142,35 @@ export interface ReapReport {
  * Called once at boot, BEFORE anything can connect, so the file it clears is
  * always the previous process's and never this one's.
  */
-export function reapOrphanedConnectors(kill: (pid: number) => void): ReapReport {
+export function reapOrphanedConnectors(
+  kill: (pid: number) => void,
+  deps: ConnectorReapDeps = {},
+): ReapReport {
   const entries = readAll()
   const now = Date.now()
   let killed = 0
   let unverified = 0
   let expired = 0
 
-  const bootAt = currentBootAt()
+  const here = deps.boot ?? currentBootIdentity()
   // ONE probe for the whole reap, over the pids still worth asking about, and
   // ONLY the live ones. A dead or out-of-range pid poisons the whole batch:
   // `ps -p` exits non-zero and prints NOTHING when any id is invalid, so one
-  // stale record would cost every other entry its corroboration and quietly
-  // downgrade the reap to boot-and-liveness. Liveness is a cheap in-process
-  // check, and an entry that fails it is skipped below anyway.
+  // stale record would cost every other entry its start time, and with it the
+  // signal. Liveness is a cheap in-process check, and an entry that fails it is
+  // skipped below anyway.
   const probe = processStartTimes(
     entries
-      .filter(
-        (e) => e.bootAt === bootAt && now - e.startedAt <= MAX_TRUSTED_AGE_MS && isAlive(e.pid),
-      )
+      .filter((e) => sameBoot(e, here) && now - e.startedAt <= MAX_TRUSTED_AGE_MS && isAlive(e.pid))
       .map((e) => e.pid),
   )
 
   for (const entry of entries) {
     // A DIFFERENT BOOT makes the pid meaningless: the kernel has handed those
     // numbers out again, so the process holding it now is somebody else's. This
-    // is the check that stops a reboot turning the reaper into a hazard.
-    if (entry.bootAt !== bootAt) {
+    // is the check that stops a reboot, or a container's restart, turning the
+    // reaper into a hazard.
+    if (!sameBoot(entry, here)) {
       expired += 1
       continue
     }
@@ -151,27 +186,31 @@ export function reapOrphanedConnectors(kill: (pid: number) => void): ReapReport 
     // process holding it started. A recycled pid started after we recorded the
     // original; ours started just before.
     //
-    // THE PROBE RUNNING AND THE PROBE ANSWERING ARE DIFFERENT FACTS, and
-    // conflating them is what broke this. When the probe ran, an id it has no
-    // entry for is not ours and a start time meaningfully later than our record
-    // is somebody else's, so both skip. When the probe could not run AT ALL,
-    // there is nothing to fail closed on: refusing to signal would not be
-    // caution, it would be disabling orphan reaping on that whole platform while
-    // still claiming to do it. Boot time, the age window and liveness still
-    // apply, and the count is reported so an operator can see the difference.
-    if (probe.ok) {
-      const startedAt = probe.times.get(entry.pid)
-      if (startedAt === undefined || startedAt > entry.startedAt + START_TIME_SLACK_MS) {
-        expired += 1
-        continue
-      }
-    } else {
+    // FAIL CLOSED. Without a start time, boot, age and liveness cannot tell our
+    // connector from a process that was handed its number later, so a host
+    // that cannot report start times (no `ps`, or a probe that timed out)
+    // signals nothing. Leaving one connector running is the lesser harm, and
+    // the count and the reason are reported so the log shows it.
+    if (!probe.ok) {
       unverified += 1
+      continue
+    }
+    // The probe ran: an id it has no entry for is not ours any more, and a
+    // start time meaningfully later than our record is somebody else's.
+    const startedAt = probe.times.get(entry.pid)
+    if (startedAt === undefined || startedAt > entry.startedAt + START_TIME_SLACK_MS) {
+      expired += 1
+      continue
     }
     kill(entry.pid)
     killed += 1
   }
 
   writeAll([])
-  return { killed, expired, unverified }
+  return {
+    killed,
+    expired,
+    unverified,
+    ...(unverified > 0 && probe.error ? { unverifiedReason: probe.error } : {}),
+  }
 }

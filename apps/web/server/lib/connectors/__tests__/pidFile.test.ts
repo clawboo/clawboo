@@ -7,12 +7,24 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { currentBootIdentity, type BootIdentity } from '../../processIdentity'
 import {
   connectorPidFilePath,
   forgetConnectorPid,
   reapOrphanedConnectors,
   recordConnectorPid,
 } from '../pidFile'
+
+/** A Linux host's identity, whatever this test runs on. */
+const linuxHost = (): BootIdentity => ({
+  bootAt: currentBootIdentity().bootAt,
+  pidNamespace: 'pid:[4026531836]',
+  initStart: 4_000,
+})
+
+function writeEntries(entries: unknown[]): void {
+  writeFileSync(connectorPidFilePath(), JSON.stringify(entries), 'utf8')
+}
 
 describe('connector pid file', () => {
   let home: string
@@ -85,7 +97,6 @@ describe('connector pid file', () => {
     // Within one boot a pid can still be recycled. A recycled pid necessarily
     // started after we recorded the original; ours started just before.
     const killed: number[] = []
-    const longAgo = Date.now() - 24 * 60 * 60_000
     writeFileSync(
       connectorPidFilePath(),
       JSON.stringify([
@@ -95,12 +106,11 @@ describe('connector pid file', () => {
           pid: process.pid,
           slug: 'memory',
           startedAt: Date.now() - 60 * 60_000,
-          bootAt: Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000,
+          ...currentBootIdentity(),
         },
       ]),
       'utf8',
     )
-    void longAgo
     const report = reapOrphanedConnectors((pid) => killed.push(pid))
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
@@ -132,10 +142,6 @@ describe('connector pid file', () => {
     // The identity probe used to exist only for POSIX, so on Windows every
     // recorded pid was signalled with nothing corroborating that it was still
     // ours, and the signal is a whole-tree SIGKILL.
-    //
-    // What it must NOT do is treat "this host cannot answer" as "do not signal".
-    // That is not caution, it is disabling orphan reaping on a whole platform
-    // while still claiming to do it, which is what the kill test above pins.
     const killed: number[] = []
     writeFileSync(
       connectorPidFilePath(),
@@ -146,7 +152,7 @@ describe('connector pid file', () => {
           // Same boot, inside the age window, but claiming to predate this
           // process. Whatever the host reports, the answer must not be "kill".
           startedAt: Date.now() - 6 * 60 * 60_000,
-          bootAt: Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000,
+          ...currentBootIdentity(),
         },
       ]),
       'utf8',
@@ -158,25 +164,114 @@ describe('connector pid file', () => {
 
   it('one dead record does not cost a live one its corroboration', () => {
     // `ps -p` exits non-zero and prints NOTHING when ANY id in the list is
-    // invalid, so batching the probe made a single stale entry downgrade every
-    // other entry to boot-and-liveness. The probe list is filtered to live pids
-    // for exactly this reason.
+    // invalid, so batching the probe made a single stale entry cost every other
+    // entry its start time, and with it the signal. The probe list is filtered
+    // to live pids for exactly this reason.
     const killed: number[] = []
-    const bootAt = Math.round((Date.now() - os.uptime() * 1000) / 10_000) * 10_000
+    const boot = currentBootIdentity()
     writeFileSync(
       connectorPidFilePath(),
       JSON.stringify([
         // Above every platform's pid_max, so it cannot be live.
-        { pid: 4_194_304, slug: 'context7', startedAt: Date.now(), bootAt },
-        { pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt },
+        { pid: 4_194_304, slug: 'context7', startedAt: Date.now(), ...boot },
+        { pid: process.pid, slug: 'memory', startedAt: Date.now(), ...boot },
       ]),
       'utf8',
     )
     const report = reapOrphanedConnectors((pid) => killed.push(pid))
     expect(killed).toEqual([process.pid])
-    // Corroborated, not waved through: the live entry still had its start time
-    // checked, so nothing was signalled on weaker evidence.
     expect(report.unverified).toBe(0)
+  })
+
+  it('records the PID namespace and when its pid 1 started with each pid', () => {
+    // Inside a container the kernel's boot is the HOST's, so a restarted
+    // container keeps it. The namespace and its pid 1 are what change.
+    recordConnectorPid({ pid: 111, slug: 'memory', startedAt: Date.now() })
+    const [entry] = JSON.parse(readFileSync(connectorPidFilePath(), 'utf8')) as object[]
+    const boot = currentBootIdentity()
+    expect(entry).toHaveProperty('bootAt', boot.bootAt)
+    expect(entry).toHaveProperty('pidNamespace', boot.pidNamespace)
+    expect(entry).toHaveProperty('initStart', boot.initStart)
+  })
+
+  it('NEVER signals a pid recorded in another PID namespace', () => {
+    // Two containers can share one state directory through a volume. The other
+    // one's pid names a process in ITS namespace; the same number here belongs
+    // to somebody else, even one that started before the record.
+    const killed: number[] = []
+    const here = linuxHost()
+    writeEntries([
+      {
+        pid: process.pid,
+        slug: 'memory',
+        startedAt: Date.now(),
+        ...here,
+        pidNamespace: 'pid:[4026532999]',
+      },
+    ])
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    expect(killed).toEqual([])
+    expect(report.expired).toBe(1)
+  })
+
+  it('NEVER signals a pid recorded before this PID namespace started again', () => {
+    // A restarted container keeps the host's boot time, and the kernel can hand
+    // it the namespace id its previous run had. Its pid 1 is new, though.
+    const killed: number[] = []
+    const here = linuxHost()
+    writeEntries([
+      { pid: process.pid, slug: 'memory', startedAt: Date.now(), ...here, initStart: 3_000 },
+    ])
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    expect(killed).toEqual([])
+    expect(report.expired).toBe(1)
+  })
+
+  it('leaves a record from an older version alone where this host has a PID namespace', () => {
+    // An entry written before the namespace was recorded cannot say which run
+    // of the container wrote it, so on Linux it is dropped unsignalled.
+    const killed: number[] = []
+    const here = linuxHost()
+    writeEntries([{ pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt: here.bootAt }])
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    expect(killed).toEqual([])
+    expect(report.expired).toBe(1)
+    expect(JSON.parse(readFileSync(connectorPidFilePath(), 'utf8'))).toEqual([])
+  })
+
+  it('still reaps a record from an older version on a host with no PID namespaces', () => {
+    // macOS and Windows have none to record, so an older entry there carries
+    // everything a new one would, and is judged as it always was.
+    const killed: number[] = []
+    const here: BootIdentity = { ...linuxHost(), pidNamespace: null, initStart: null }
+    writeEntries([{ pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt: here.bootAt }])
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    expect(killed).toEqual([process.pid])
+    expect(report.killed).toBe(1)
+  })
+
+  it('NEVER signals a pid whose start time could not be checked, and says why', () => {
+    // Without a start time, boot, age and liveness cannot tell our connector
+    // from a process that was handed its number later. On a host without `ps`
+    // the reap used to signal it anyway.
+    const killed: number[] = []
+    recordConnectorPid({ pid: process.pid, slug: 'memory', startedAt: Date.now() })
+    const empty = mkdtempSync(path.join(os.tmpdir(), 'clawboo-no-ps-'))
+    const savedPath = process.env['PATH']
+    process.env['PATH'] = empty
+    try {
+      const report = reapOrphanedConnectors((pid) => killed.push(pid))
+      expect(killed).toEqual([])
+      expect(report.killed).toBe(0)
+      expect(report.unverified).toBe(1)
+      expect(report.unverifiedReason).toMatch(/ENOENT/)
+    } finally {
+      process.env['PATH'] = savedPath
+      rmSync(empty, { recursive: true, force: true })
+    }
+    // Cleared all the same: a later start must not try again against a pid the
+    // OS may since have handed to something else.
+    expect(JSON.parse(readFileSync(connectorPidFilePath(), 'utf8'))).toEqual([])
   })
 
   it('treats a corrupt file as empty rather than throwing', () => {
