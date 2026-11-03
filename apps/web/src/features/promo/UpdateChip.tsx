@@ -16,7 +16,7 @@
 import { useCallback, useRef, useState } from 'react'
 import { motion } from 'framer-motion'
 import { AlertCircle, Check, Copy, X } from 'lucide-react'
-import { apiFetch, consumeApiSSE, type SSEEvent } from '@clawboo/control-client'
+import { consumeApiSSE, fetchEngineCapabilities, type SSEEvent } from '@clawboo/control-client'
 
 import { Spinner } from '@/features/shared/Spinner'
 import { useUpdateCheck } from './useUpdateCheck'
@@ -30,25 +30,21 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * After the server signals it's restarting, poll same-origin /api/settings until
- * the successor answers, then hard-reload onto the freshly-installed UI. Gives up
- * after ~90s and surfaces a manual note.
+ * After the server signals it's restarting, poll the engine's capabilities until
+ * an engine on a version other than `fromVersion` answers, then hard-reload onto
+ * the freshly-installed UI. The version is what tells the successor apart from the
+ * server that is still on its way out; any answer at all would not. Gives up after
+ * ~90s and surfaces a manual note.
  */
-async function pollThenReload(onTimeout: () => void): Promise<void> {
+async function pollThenReload(fromVersion: string, onTimeout: () => void): Promise<void> {
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
     await sleep(1000)
-    try {
-      const res = await apiFetch('/api/settings', { cache: 'no-store' })
-      if (res.ok) {
-        const body = (await res.json()) as { gatewayUrl?: unknown }
-        if (typeof body.gatewayUrl === 'string') {
-          window.location.reload()
-          return
-        }
-      }
-    } catch {
-      /* server still restarting — keep polling */
+    // Null while the server is restarting (no answer, or not one yet).
+    const caps = await fetchEngineCapabilities()
+    if (caps && caps.version !== fromVersion) {
+      window.location.reload()
+      return
     }
   }
   onTimeout()
@@ -77,6 +73,7 @@ export function UpdateChip() {
   }, [info])
 
   const startUpdate = useCallback(() => {
+    const fromVersion = info?.current ?? ''
     setPhase('applying')
     setStatusText('')
     consumeApiSSE(
@@ -94,7 +91,7 @@ export function UpdateChip() {
           switch (e.type) {
             case 'restarting':
               setPhase('restarting')
-              void pollThenReload(() => {
+              void pollThenReload(fromVersion, () => {
                 setStatusText('Update installed. Restart Clawboo to finish.')
                 setPhase('manual')
               })
@@ -114,7 +111,7 @@ export function UpdateChip() {
         },
       },
     )
-  }, [])
+  }, [info])
 
   // One click = the whole action. Global install → update in place; otherwise
   // copy the command (the running npx/dev process can't hot-swap itself).

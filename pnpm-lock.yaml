@@ -646,6 +646,9 @@ importers:
       '@clawboo/agent-registry':
         specifier: workspace:*
         version: link:../agent-registry
+      zod:
+        specifier: ^3.25.0
+        version: 3.25.76
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*

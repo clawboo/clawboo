@@ -1,6 +1,6 @@
 ---
 title: 'System API'
-description: 'REST reference for /api/system: OpenClaw status, install, setup, Gateway control, config, device pairing and models, plus Clawboo version and self-update.'
+description: 'REST reference for /api/system: OpenClaw status, install, setup, Gateway control, config, device pairing and models, plus Clawboo version, capabilities and self-update.'
 keywords:
   [
     'openclaw',
@@ -9,15 +9,17 @@ keywords:
     'auto-configure-openclaw',
     'device pairing',
     'self-update',
+    'capabilities',
+    'feature flags',
     'openclaw.json',
   ]
 ---
 
-Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last two routes, `self-version` and `self-update`, are about Clawboo itself: which release this server runs, and installing a newer one.
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last three routes, `self-version`, `capabilities` and `self-update`, are about Clawboo itself: which release this server runs and what it supports, and installing a newer one.
 
 <Note>
 
-Every route here except the two `self-*` routes is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
+Every route here except `self-version`, `capabilities` and `self-update` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
 
 </Note>
 
@@ -37,6 +39,7 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | POST   | `/api/system/approve-device`          | Approve the latest pending device-pairing request              | sensitive | No                        |
 | GET    | `/api/system/models`                  | Model catalog (from the OpenClaw CLI, else the built-in list)  | general   | No                        |
 | GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists | general   | No                        |
+| GET    | `/api/system/capabilities`            | This server's version, API revision and feature flags          | general   | No                        |
 | POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it        | sensitive | SSE                       |
 
 ---
@@ -669,6 +672,101 @@ curl 'http://localhost:18790/api/system/self-version?local=1'
 
 ---
 
+## `GET /api/system/capabilities`
+
+What this server is and which features it has: its Clawboo version, the client API revision, the oldest release whose clients it still serves, and a flat map of feature flags. A client (the dashboard, a desktop shell that bundles the server, a proxy in front of it, or an app on another device) reads it before it uses a feature, instead of calling a route to see whether it answers. The dashboard reads it after an in-app update, to tell the new server from the one that is shutting down.
+
+The answer is built from the running process alone: no database read, no network call, nothing written. It carries no secret and no file path. The route sits behind the same-origin guard and the access token like every other `/api` route. A client that has not signed in gets the `401` described in [Authentication](/reference/rest-api/index#authentication), and that answer already tells it a Clawboo server is there.
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**, with `Cache-Control: no-store` because the answer changes when the server restarts into a new version:
+
+| Field          | Type                      | Notes                                                                                                                                                                                              |
+| -------------- | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `version`      | `string`                  | The running version, from the same source as `self-version`'s `current`: `CLAWBOO_VERSION`, else the shipped `package.json`, else `0.0.0-dev`.                                                     |
+| `apiRevision`  | `number`                  | The client API revision, now `1`. It goes up only when a route, response field or stream event a client may use is removed or renamed. Adding one never changes it.                                |
+| `supportFloor` | `string`                  | The oldest `major.minor` whose clients this server still serves: the previous minor of the same major (`0.5` for `0.6.2`). An `x.0` release starts a new window, so its floor is `x.0`.            |
+| `features`     | `Record<string, boolean>` | Feature flags by name (below). A client treats a flag it does not find as `false`: a server never sends flags newer than itself, and a client should keep flags it does not know rather than fail. |
+
+[Supported versions](/operating/supported-versions) explains the window and how a client checks it.
+
+```json
+{
+  "version": "0.6.0",
+  "apiRevision": 1,
+  "supportFloor": "0.5",
+  "features": {
+    "runtime.openclaw": true,
+    "runtime.clawboo-native": true,
+    "runtime.claude-code": true,
+    "runtime.codex": true,
+    "runtime.hermes": true,
+    "chat.rooms": true,
+    "chat.direct": true,
+    "board.verification": true,
+    "board.steering": true,
+    "workspace.view": true,
+    "workspace.preview": true,
+    "agent.nativeShell": true,
+    "agent.screenshots": true,
+    "routines": true,
+    "memory": true,
+    "memory.embeddings": true,
+    "connectors": true,
+    "connectors.custom": true,
+    "connectors.broker": true,
+    "stream.teamChat.resume": true,
+    "stream.agentChat.resume": true,
+    "stream.events.resume": true,
+    "system.selfUpdate": true
+  }
+}
+```
+
+### Feature flags
+
+A flag's name never changes. A feature that goes away reports `false` until the next API revision. The flags describe what the server can do, not the state of the machine: a runtime flag says the server can run that runtime, not that its CLI is installed.
+
+| Flag                                                                        | On when                                                                                                                                     |
+| --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `runtime.openclaw`                                                          | Always. OpenClaw agents run in an OpenClaw Gateway; whether OpenClaw is installed is in `GET /api/system/status`.                           |
+| `runtime.clawboo-native`                                                    | Always. Clawboo Native is built in.                                                                                                         |
+| `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                    | The server can run that coding agent. Whether its CLI is installed and signed in is in [`GET /api/runtimes`](/reference/rest-api/runtimes). |
+| `chat.rooms`                                                                | Always. Chat rooms inside a team (`/api/teams/:id/rooms`).                                                                                  |
+| `chat.direct`                                                               | Always. The server runs 1:1 chats with Clawboo Native, Claude Code, Codex and Hermes agents itself (`/api/agents/:agentId/chat`).           |
+| `board.verification`                                                        | Always. Finished worktree work is checked before its task can reach `done`.                                                                 |
+| `board.steering`                                                            | Always. A comment on a running task reaches the run, and `POST /api/board/:taskId/comments` answers with how it was delivered.              |
+| `workspace.view`                                                            | Always. The read-only view of a task's worktree: tree, file, diff and status.                                                               |
+| `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                  |
+| `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                    |
+| `agent.screenshots`                                                         | Always. Screenshots of what an agent's browser shows.                                                                                       |
+| `routines`                                                                  | Always. Routines, the scheduler (`/api/schedules`).                                                                                         |
+| `memory`                                                                    | Always. Shared memory: search, save and browse.                                                                                             |
+| `memory.embeddings`                                                         | Similarity search may run: `false` when `CLAWBOO_DISABLE_EMBEDDINGS=1`. Whether a provider is ready is in `GET /api/memory/provider`.       |
+| `connectors`                                                                | Always. Connectors to outside tools and apps.                                                                                               |
+| `connectors.custom`                                                         | Always. Custom connectors that point at a server of your own.                                                                               |
+| `connectors.broker`                                                         | Always. Apps connected through one broker key (`/api/connectors/composio`).                                                                 |
+| `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Always. The team chat stream, the 1:1 chat stream and the event stream each resume from `Last-Event-ID`.                                    |
+| `system.selfUpdate`                                                         | `POST /api/system/self-update` can succeed here, which takes a global npm install. The same answer as `self-version`'s `applyable`.         |
+
+### For client authors
+
+The workspace package `@clawboo/control-client` (in the repository, not published to npm) exports `engineCapabilitiesSchema` (zod), `fetchEngineCapabilities()`, `engineHasFeature()`, `engineSupportsClient()` and `RESUMABLE_STREAMS`, the schema of every event on the three resumable streams. A server older than this route answers `404` in development and the dashboard page (HTML, `200`) once built; `fetchEngineCapabilities()` returns `null` for both.
+
+The contract test `apps/web/server/api/__tests__/clientContract.test.ts` pins this answer, every route and method, and the stream events. It fails when one is removed or renamed without raising `apiRevision`.
+
+### Example
+
+```bash
+curl http://localhost:18790/api/system/capabilities
+```
+
+---
+
 ## `POST /api/system/self-update`
 
 Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
@@ -699,7 +797,7 @@ On a non-zero exit, `detail` is npm's own reason in one line (the `Error:` line,
 
 npm runs in a working directory that exists, because npm exits with code 7 when its working directory has been deleted.
 
-After `restarting`, the server starts a new server on the same port (`CLAWBOO_API_PORT`), told to wait until that port is free (`CLAWBOO_AWAIT_PORT`), and then exits so the new one can bind. The new server starts in a working directory that exists, and a server that does start in a deleted directory moves into the Clawboo directory before it loads anything. `CLAWBOO_VERSION` is removed from its environment, so it reads its version from the newly installed package. The browser keeps polling the same address and reloads when the new server answers.
+After `restarting`, the server starts a new server on the same port (`CLAWBOO_API_PORT`), told to wait until that port is free (`CLAWBOO_AWAIT_PORT`), and then exits so the new one can bind. The new server starts in a working directory that exists, and a server that does start in a deleted directory moves into the Clawboo directory before it loads anything. `CLAWBOO_VERSION` is removed from its environment, so it reads its version from the newly installed package. The browser polls `GET /api/system/capabilities` and reloads once a server on a different version answers.
 
 <Note>
 
@@ -721,7 +819,7 @@ curl -N -X POST http://localhost:18790/api/system/self-update
 
 Errors use the standard `{ "error": string }` body. `approve-device` adds `details` on its 404 and `requestId` on the 500 from the approval command. `GET /api/system/models` never returns an error status; it falls back to a `200` with a `null` catalog. The SSE routes report failures as `error` frames once the stream is open. Going over a rate limit answers **429** with `{ "error": "Too many requests. Wait a moment and retry." }` (general) or `{ "error": "Too many requests for this operation. Wait a moment and retry." }` (sensitive), plus a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/system.ts` and `systemUpdate.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
+**Source of truth:** `apps/web/server/api/system.ts`, `systemUpdate.ts` and `systemCapabilities.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; the feature flags in `apps/web/server/lib/engineCapabilities.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
 
 ## Related
 
