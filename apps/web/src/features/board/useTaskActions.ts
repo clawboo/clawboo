@@ -27,20 +27,44 @@ async function countSucceeded(
   ids: readonly string[],
   run: (id: string) => Promise<{ ok: boolean }>,
 ): Promise<number> {
-  const results = await Promise.allSettled(ids.map((id) => run(id)))
-  return results.filter((r) => r.status === 'fulfilled' && r.value.ok).length
+  return (await settleAll(ids, run)).ok
 }
+
+/** Runs `run` for every id at once: how many went through, and the reasons the
+ *  rest were refused (null for a request that failed without one). */
+async function settleAll<R extends { ok: boolean; reason?: string }>(
+  ids: readonly string[],
+  run: (id: string) => Promise<R>,
+): Promise<{ ok: number; reasons: Array<string | null> }> {
+  const results = await Promise.allSettled(ids.map((id) => run(id)))
+  const reasons: Array<string | null> = []
+  let ok = 0
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value.ok) ok += 1
+    else reasons.push(r.status === 'fulfilled' ? (r.value.reason ?? null) : null)
+  }
+  return { ok, reasons }
+}
+
+/** A task still filed under an archived chat room: nothing can run it there, and
+ *  the pass that moves such tasks to General runs when Clawboo starts. */
+const ROOM_ARCHIVED =
+  'This task’s chat room was archived, so nothing can run it there. Restart Clawboo to move it to General, then try again.'
+const ROOMS_ARCHIVED =
+  'These tasks’ chat rooms were archived, so nothing can run them there. Restart Clawboo to move them to General, then try again.'
 
 const RETRY_REFUSED: Record<string, string> = {
   unassigned: 'Assign an agent to this task first.',
   not_retryable: 'This task is already running or finished.',
   no_team: 'This task has no team, so no agent can run it.',
+  room_archived: ROOM_ARCHIVED,
 }
 
 const ASSIGN_REFUSED: Record<string, string> = {
   agent_not_in_team: 'That agent is not on this task’s team.',
   not_assignable: 'This task is already being worked on or is finished.',
   no_team: 'This task has no team, so no agent can run it.',
+  room_archived: ROOM_ARCHIVED,
 }
 
 export interface TaskActions {
@@ -120,11 +144,14 @@ export function useTaskActions(): TaskActions {
     async (taskIds: readonly string[]) => {
       const n = taskIds.length
       if (n === 0) return 0
-      const ok = await countSucceeded(taskIds, retryTask)
+      const { ok, reasons } = await settleAll(taskIds, retryTask)
       if (ok === n) {
         addToast({ type: 'success', message: `Retrying ${countLabel(n, 'task')}.` })
       } else if (ok > 0) {
         addToast({ type: 'info', message: `Retried ${ok} of ${n}. ${refusedSentence(n - ok)}` })
+      } else if (reasons.every((r) => r === 'room_archived')) {
+        // Trying again changes nothing until Clawboo restarts: say what does.
+        addToast({ type: 'error', message: n === 1 ? ROOM_ARCHIVED : ROOMS_ARCHIVED })
       } else {
         addToast({
           type: 'error',

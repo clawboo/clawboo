@@ -589,6 +589,9 @@ export interface UpdateStatusResult {
   ok: boolean
   task?: DbTask
   reason?: UpdateStatusReason
+  /** The status the write moved the task from, read in the same transaction. Set
+   *  when `ok`. */
+  from?: TaskStatus
 }
 
 /** Status-transition options. Default `{}` ⇒ the intrinsic verification gate
@@ -718,7 +721,7 @@ export function updateStatus(
       .where(eq(tasks.id, taskId))
       .run()
     const updated = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
-    return { ok: true, task: updated }
+    return { ok: true, task: updated, from }
   })
   if (result.ok && result.task)
     emitBoardLifecycle({

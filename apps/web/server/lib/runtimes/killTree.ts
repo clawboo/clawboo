@@ -7,10 +7,10 @@
 // and force-kills the tree. Best-effort throughout: a dead/exited pid is a no-op.
 //
 // SAFETY: the negative-pid signal targets the group whose id == the child pid,
-// which (for a detached spawn) is exactly that child's own group — never the
+// which (for a detached spawn) is exactly that child's own group, never the
 // server's. If the child was NOT spawned detached, `-pid` resolves to a
-// non-existent group (ESRCH) and we fall back to a direct `child.kill`, so this
-// can never signal the parent's process group.
+// non-existent group (ESRCH) and we walk the child's descendants instead, so
+// this can never signal the parent's process group.
 
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 
@@ -84,7 +84,24 @@ function signal(pid: number, sig: NodeJS.Signals): void {
   }
 }
 
-export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {}): void {
+export function killProcessTreeByPid(
+  pid: number,
+  opts: {
+    graceMs?: number
+    /**
+     * Also signal the process GROUP whose id is `pid` (POSIX only).
+     *
+     * The walk only finds descendants still connected to `pid` through living
+     * parents. A runtime child is spawned as its own group leader, and anything
+     * it started whose parent has since exited (a dev server a shell tool put in
+     * the background) has been re-parented to init: out of the walk's reach,
+     * still in the group. Only for a pid the caller has verified as its own
+     * live process: a pid cannot be reused while a group of that id exists, so
+     * the group of a live verified pid is that process's own (or none, ESRCH).
+     */
+    group?: boolean
+  } = {},
+): void {
   if (!pid) return
 
   if (isWindows) {
@@ -100,6 +117,7 @@ export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {
   // re-parented to init and become unfindable by walking down from it.
   const tree = [...descendantsOf(pid), pid]
   for (const target of tree) signal(target, 'SIGTERM')
+  if (opts.group) signal(-pid, 'SIGTERM')
 
   const timer = setTimeout(() => {
     // Escalate against the SAME snapshot, with a liveness probe per pid: a freed
@@ -110,6 +128,18 @@ export function killProcessTreeByPid(pid: number, opts: { graceMs?: number } = {
         process.kill(target, 'SIGKILL')
       } catch {
         /* already exited */
+      }
+    }
+    if (opts.group) {
+      // A group id cannot be reused while any member is alive, so a group that
+      // still answers is the one signalled above (barring the whole group dying
+      // and the number being reissued within the grace window, the same bet
+      // `killProcessTree` makes for its own group escalation).
+      try {
+        process.kill(-pid, 0)
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        /* group already empty */
       }
     }
   }, opts.graceMs ?? DEFAULT_GRACE_MS)
@@ -132,12 +162,13 @@ export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: nu
   try {
     process.kill(-pid, 'SIGTERM')
   } catch {
-    // ESRCH (group gone) — fall back to the direct child (non-detached safety),
-    // which also covers an already-exited process. Never targets another group.
-    try {
-      child?.kill('SIGTERM')
-    } catch {
-      /* gone */
+    // ESRCH: no group with this id, so the child was not spawned detached (the
+    // Claude Code CLI, which the Agent SDK's hook hands us) or has exited. Walk
+    // its descendants and escalate like a group, but only while Node has not
+    // reaped it: until then its pid cannot have been handed to another process.
+    // An exited child needs nothing.
+    if (child && child.exitCode === null && child.signalCode === null) {
+      killProcessTreeByPid(pid, opts)
     }
     return
   }

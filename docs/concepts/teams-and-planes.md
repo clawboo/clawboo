@@ -45,7 +45,7 @@ Solid lines are what every member reaches the same way, whatever its runtime. Do
 
 - **Members.** Agents on any mix of runtimes. An agent is on one team at a time, or on none. Boo Zero leads every team, usually without being a member of any (see [Agents and Boo Zero](/concepts/agent-model)).
 - **General.** The team's main chat, with every member in it. The sidebar shows it as **General (Main Room)**. It is always there: you can clear it, but not rename or delete it.
-- **Rooms.** Extra chats with some of the members, made with **New room**. Each room has its own conversation and its own list of tasks, and Boo Zero leads it too. You can rename, pin, clear or delete a room. Deleting a room archives it: its conversation is kept, its running work stops, and its tasks stay on the board.
+- **Rooms.** Extra chats with some of the members, made with **New room**. Each room has its own conversation and its own list of tasks, and Boo Zero leads it too. You can rename, pin, clear or delete a room. Deleting a room archives it: its conversation is kept, its running work stops, and its tasks stay on the board. The unfinished ones move to General, still stopped, so **Retry** runs them there.
 - **One board.** Every task from every chat of the team. A task remembers which chat it came from, and that chat runs it. If the task's room was deleted, General runs it. See [The board](/concepts/the-board).
 - **Team rules.** Rules you set, such as "always cite sources". Every agent gets them on every turn it takes in the team's chats, in General and in every room, including work handed off there.
 - **Your introduction.** What you write the first time you open a team. It reaches the agents whose replies you read (the lead, or an agent you address directly), not the teammates working on handed-off tasks.
@@ -116,7 +116,7 @@ A team does not have one runtime; each member has its own. Boo Zero leads any mi
 - **Storage.** A team is a row in the `teams` table (name, icon, colours, an optional `leaderAgentId`, `isArchived`). Membership lives on each agent's `teamId`. Rooms are `rooms` and `room_members` rows; General is the implicit room with id `null` and has no row. The visible transcript of every chat is `chat_messages`, keyed by session keys such as `agent:<agentId>:team:<teamId>` and `...:room:<roomId>`.
 - **One engine per chat.** The server keeps one long-lived orchestration engine per chat, keyed `<teamId>` for General and `<teamId>:room:<roomId>` for a room. Its roster is the room's live members plus Boo Zero. An idle engine is dropped after 30 minutes and rebuilt on the next message. See [Executor runner](/internals/executor-runner) for the other run path.
 - **Per-agent homes.** A runtime whose adapter declares a persistent per-identity home gets `<CLAWBOO_HOME>/runtimes/<runtime>/<agentId>`, created with mode `0700`. That is Clawboo Native, Hermes and Codex. Claude Code declares none and OpenClaw's Gateway owns its own state. See [RuntimeAdapter](/internals/runtime-adapter).
-- **OpenClaw identity.** The Gateway registers Clawboo's Memory, Tasks and Tools servers once for every OpenClaw agent, so those sessions carry no verified agent identity. Unverified callers get global-only memory, no `claim_task` or `assign_task`, and no TeamChat tools.
+- **OpenClaw identity.** The Gateway registers Clawboo's Memory, Tasks and Tools servers once for every OpenClaw agent, so those sessions carry no verified agent identity. Unverified callers get global-only memory, no claims and no task status writes, and no TeamChat tools.
 
 </Accordion>
 

@@ -23,8 +23,12 @@ export interface NudgeQueue {
    * immediate send REJECTS to the caller on failure (the session is un-busied).
    */
   deliver(sessionKey: string, send: () => Promise<void>): Promise<void>
-  /** Mark a session busy (call on any non-terminal event of a run). */
-  markBusy(sessionKey: string): void
+  /**
+   * Mark a session busy (call on any non-terminal event of a run). Re-arms the
+   * wedge with `wedgeTimeoutMs` when given, else the queue's own: a run inside one
+   * tool call is silent by design, so the host passes a longer wedge then.
+   */
+  markBusy(sessionKey: string, wedgeTimeoutMs?: number): void
   /** A run is in flight on this session, or a send is queued behind one. */
   isBusy(sessionKey: string): boolean
   /** Mark a session idle (its run ended) and flush one queued send if any. */
@@ -56,7 +60,7 @@ export function createNudgeQueue(opts?: {
    */
   onWedge?: (sessionKey: string) => void | Promise<void>
 }): NudgeQueue {
-  const wedgeMs = opts?.wedgeTimeoutMs ?? DEFAULT_WEDGE_TIMEOUT_MS
+  const defaultWedgeMs = opts?.wedgeTimeoutMs ?? DEFAULT_WEDGE_TIMEOUT_MS
   const busy = new Set<string>()
   const queues = new Map<string, Array<() => Promise<void>>>()
   const wedgeTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -71,7 +75,7 @@ export function createNudgeQueue(opts?: {
     }
   }
 
-  const armWedge = (sessionKey: string): void => {
+  const armWedge = (sessionKey: string, wedgeMs: number = defaultWedgeMs): void => {
     clearWedge(sessionKey)
     const t = setTimeout(() => {
       // The turn boundary was never observed — force-idle so queued sends aren't
@@ -135,9 +139,9 @@ export function createNudgeQueue(opts?: {
         throw err
       }
     },
-    markBusy(sessionKey) {
+    markBusy(sessionKey, wedgeTimeoutMs) {
       busy.add(sessionKey)
-      armWedge(sessionKey)
+      armWedge(sessionKey, wedgeTimeoutMs)
     },
     isBusy(sessionKey) {
       return busy.has(sessionKey) || (queues.get(sessionKey)?.length ?? 0) > 0

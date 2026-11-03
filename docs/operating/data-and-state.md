@@ -33,6 +33,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 ├── server.log, server.log.1    server output, when clawboo started the server
 ├── gateway.log, gateway.pid    an OpenClaw Gateway that Clawboo started
 ├── connector-pids.json         connector processes to clean up after a crash
+├── runtime-pids/               agent processes to clean up after a crash
 ├── proxy-device-identity.json  Clawboo's device key for the Gateway
 ├── secrets/
 │   ├── master.key              the key that decrypts the vault
@@ -56,6 +57,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 | `server.log`, `server.log.1`         | Output of a server that `clawboo` started                                                                                                                                   | Yes                                         | Old log lines.                                                                                   |
 | `gateway.log`, `gateway.pid`         | Output and process id of an OpenClaw Gateway that Clawboo started                                                                                                           | Yes                                         | Old log lines. Clawboo finds the Gateway by its port instead.                                    |
 | `connector-pids.json`                | Connector processes Clawboo started                                                                                                                                         | Yes, with the server stopped                | After a crash, leftover connector processes are not cleaned up at the next start.                |
+| `runtime-pids/`                      | Agent processes each running server started (Codex, Hermes, Claude Code, and commands a Clawboo Native agent runs), one file per server                                     | Yes, with the server stopped                | After a crash, agent runs that outlived the server are not stopped at the next start.            |
 | `proxy-device-identity.json`         | The key pair Clawboo uses to identify itself to the OpenClaw Gateway                                                                                                        | Only if you can pair again                  | Clawboo makes a new identity, so the Gateway may ask you to pair it again.                       |
 | `secrets/master.key`                 | The key that decrypts the vault                                                                                                                                             | No                                          | Every key in the vault: re-enter provider keys and reconnect connectors.                         |
 | `secrets/runtime-keys.json`          | The encrypted vault: provider keys, connector credentials and sign-ins, the Composio key                                                                                    | Only to remove every saved key              | The same as losing the master key.                                                               |

@@ -91,6 +91,58 @@ describe('mcpHttpUrl signing', () => {
   })
 })
 
+describe('the team-run claim on the Tasks URL', () => {
+  const teamRunScope = { teamId: 'T', agentId: 'A', delegate: true, attachSecret: SECRET }
+
+  it('marks a run the team engine drives, inside the signature', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'tasks', teamRunScope))
+    expect(url.searchParams.get('teamRun')).toBe('1')
+    const sig = url.searchParams.get('scopeSig')!
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', teamRun: true }, sig)).toBe(true)
+    // Stripped of the claim, the signature no longer matches what the URL says.
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A' }, sig)).toBe(false)
+  })
+
+  it('is absent from every other run, whose signature is unchanged', () => {
+    const url = new URL(
+      mcpHttpUrl('http://x', 'tasks', { teamId: 'T', agentId: 'A', attachSecret: SECRET }),
+    )
+    expect(url.searchParams.has('teamRun')).toBe(false)
+    expect(url.searchParams.get('scopeSig')).toBe(
+      signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false }),
+    )
+  })
+
+  it('cannot be replayed as the TeamChat delegate signature, nor the reverse', () => {
+    const tasksSig = new URL(mcpHttpUrl('http://x', 'tasks', teamRunScope)).searchParams.get(
+      'scopeSig',
+    )!
+    const teamchatSig = new URL(mcpHttpUrl('http://x', 'teamchat', teamRunScope)).searchParams.get(
+      'scopeSig',
+    )!
+    expect(tasksSig).not.toBe(teamchatSig)
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: true }, tasksSig)).toBe(
+      false,
+    )
+    expect(
+      verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', teamRun: true }, teamchatSig),
+    ).toBe(false)
+  })
+
+  it('rides the Memory and Tools URLs too, so no URL a team run holds signs a plain scope', () => {
+    const plain = signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false })
+    for (const server of ['memory', 'tools'] as const) {
+      const url = new URL(mcpHttpUrl('http://x', server, teamRunScope))
+      expect(url.searchParams.get('teamRun')).toBe('1')
+      expect(url.searchParams.get('scopeSig')).not.toBe(plain)
+    }
+    // TeamChat carries its own `delegate=1` claim instead.
+    expect(
+      new URL(mcpHttpUrl('http://x', 'teamchat', teamRunScope)).searchParams.has('teamRun'),
+    ).toBe(false)
+  })
+})
+
 describe('signAttachAccess / verifyAttachAccess (the control-plane access token)', () => {
   it('round-trips, and is deterministic so configs stay byte-stable', () => {
     const token = signAttachAccess(SECRET)

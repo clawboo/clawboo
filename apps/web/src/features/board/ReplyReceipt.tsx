@@ -26,6 +26,9 @@ export function receiptText(delivery: ReplyDelivery, name: string): string {
     case 'not-delivered':
       if (delivery.reason === 'finished') return 'Not sent: the task is finished'
       if (delivery.reason === 'unassigned') return 'Not sent: no agent has this task'
+      if (delivery.reason === 'room_archived')
+        return 'Not sent: this task’s chat room was archived. Restart Clawboo to move it to General.'
+      if (delivery.reason === 'no_team') return 'Not sent: this task’s team was deleted'
       return 'Not sent: something went wrong'
   }
 }

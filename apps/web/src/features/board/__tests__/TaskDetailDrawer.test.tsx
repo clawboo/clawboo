@@ -3,6 +3,7 @@
 // /executions, and /workspace/detail. The drawer is READ-ONLY — it displays
 // comments but has no compose box, so the user interaction is the Close button.
 
+import { verificationResultSchema, type DebtNote } from '@clawboo/governance'
 import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -1064,6 +1065,143 @@ describe('TaskDetailDrawer: review fixes', () => {
     const verification = await screen.findByTestId('task-verification')
     expect(within(verification).getByText(/Latest: rename a variable/)).toBeInTheDocument()
     expect(within(verification).queryByText(/First try: missing test/)).toBeNull()
+  })
+
+  /** A verdict carrying these debt notes, in the shape the server stores it. */
+  function debtVerdict(
+    debtNotes: DebtNote[],
+    status: 'pass' | 'completed_with_debt' = 'completed_with_debt',
+  ): string {
+    return JSON.stringify(
+      verificationResultSchema.parse({
+        status,
+        attempts: [
+          {
+            attempt: 3,
+            at: 0,
+            deterministic: { command: 'pnpm test', exitCode: 0, passed: true, durationMs: 10 },
+            critic: {
+              ran: true,
+              findings:
+                status === 'pass'
+                  ? []
+                  : [{ severity: 'security', title: 'Token logged in plain text' }],
+            },
+            status,
+          },
+        ],
+        debtNotes,
+        updatedAt: 0,
+      }),
+    )
+  }
+
+  it('shows a verdict that passed with debt', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'blocked',
+        verification: debtVerdict([
+          {
+            criterion: 'Token logged in plain text',
+            severity: 'security',
+            justification: 'unresolved at cycle exhaustion',
+          },
+        ]),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByTestId('task-verdict')).toHaveTextContent(/^Passed with debt$/)
+    expect(within(verification).getByText('pnpm test')).toBeInTheDocument()
+    expect(within(verification).getByText(/: Token logged in plain text$/)).toBeInTheDocument()
+  })
+
+  it('lists each open item of a verdict that passed with debt in words', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'blocked',
+        verification: debtVerdict([
+          {
+            criterion: 'Token logged in plain text',
+            severity: 'security',
+            justification: 'unresolved at cycle exhaustion',
+          },
+          {
+            criterion: 'No test for the empty list',
+            severity: 'missing_ac',
+            justification: 'the list view has no empty-state test',
+          },
+        ]),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(
+      within(verification)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      '[security] Token logged in plain text: unresolved at cycle exhaustion',
+      '[missing_ac] No test for the empty list: the list view has no empty-state test',
+    ])
+  })
+
+  it('lists no open issues once a later attempt passes', async () => {
+    // Moved back to In progress after a pass with debt (a move to To do would clear
+    // the verdict), then checked again: the passing verdict still carries the notes.
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'done',
+        verification: debtVerdict(
+          [
+            {
+              criterion: 'Token logged in plain text',
+              severity: 'security',
+              justification: 'unresolved at cycle exhaustion',
+            },
+          ],
+          'pass',
+        ),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByTestId('task-verdict')).toHaveTextContent(/^Passed$/)
+    expect(within(verification).queryAllByRole('listitem')).toHaveLength(0)
+    expect(within(verification).queryByText(/Token logged in plain text/)).toBeNull()
+  })
+
+  it('keeps warning words in the text color and puts the amber on a mark', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_review',
+        verification: JSON.stringify({
+          status: 'pass',
+          attempts: [
+            {
+              deterministic: { command: 'echo ok', commandSource: 'agent', passed: true },
+              critic: { ran: true, outcome: 'empty', findings: [], reviewerRuntime: 'claude-code' },
+            },
+          ],
+          debtNotes: [],
+        }),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    // Amber is below AA for small text, so only the mark beside each warning wears it.
+    const warnings = [
+      await screen.findByText('Review returned nothing (Claude Code)'),
+      screen.getByText('written by the agent'),
+    ]
+    for (const warning of warnings) {
+      expect(warning).toHaveClass('text-foreground')
+      expect(warning).not.toHaveClass('text-amber')
+      expect(warning.querySelector('svg')).toHaveClass('text-amber')
+    }
   })
 
   it('keeps a late reply for the task it stepped away from off the one it shows', async () => {

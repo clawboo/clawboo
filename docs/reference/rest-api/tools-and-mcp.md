@@ -351,12 +351,12 @@ The provenance stamps have their own signature, `provSig`. They are dropped when
 
 An HTTP session with no binding, or with a signature that does not verify, is an **unverified caller**:
 
-| Server     | Unverified HTTP caller                                                                                                                          |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tasks`    | No `claim_task` or `assign_task`. `add_comment` posts as a plain agent comment with no author id. Reads and writes are not limited to one team. |
-| `memory`   | Reads and saves use the global tier only; scope arguments in tool calls are ignored, and no provenance is recorded.                             |
-| `tools`    | No agent identity, so a grant scoped to an agent or a team never matches its calls.                                                             |
-| `teamchat` | No tools at all.                                                                                                                                |
+| Server     | Unverified HTTP caller                                                                                                                                                                                                                              |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tasks`    | No claims and no status writes: no `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task` or `unblock_task`. `add_comment` posts as a plain agent comment with no author id. Reads and writes are not limited to one team. |
+| `memory`   | Reads and saves use the global tier only; scope arguments in tool calls are ignored, and no provenance is recorded.                                                                                                                                 |
+| `tools`    | No agent identity, so a grant scoped to an agent or a team never matches its calls.                                                                                                                                                                 |
+| `teamchat` | No tools at all.                                                                                                                                                                                                                                    |
 
 **OpenClaw agents are always unverified callers.** The Gateway's MCP config is one entry for the whole Gateway, so it cannot carry a per-agent binding. Clawboo registers `tasks`, `memory` and `tools` for OpenClaw with no binding, and never registers `teamchat`. The URL carries the `attachToken` only when the Gateway runs on this machine; a Gateway on another machine gets the bare URL.
 
@@ -386,7 +386,7 @@ curl -X POST http://localhost:18790/api/mcp/tasks \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
 ```
 
-Without a binding this session is an unverified caller, so its `tools/list` leaves out `claim_task` and `assign_task`. In practice an MCP client library, or the runtime's own MCP support, speaks the protocol for you; get its attach snippet from `GET /api/mcp/config`.
+Without a binding this session is an unverified caller, so its `tools/list` leaves out the claim and status tools. In practice an MCP client library, or the runtime's own MCP support, speaks the protocol for you; get its attach snippet from `GET /api/mcp/config`.
 
 ---
 

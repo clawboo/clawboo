@@ -6,7 +6,7 @@ describe('resolveModelProvider', () => {
   it('resolves native provider-native ids by maker', () => {
     expect(resolveModelProvider('claude-sonnet-5', 'clawboo-native').providerId).toBe('anthropic')
     expect(resolveModelProvider('gpt-4o', 'clawboo-native').providerId).toBe('openai')
-    expect(resolveModelProvider('gemini-2.0-flash', 'clawboo-native').providerId).toBe('google')
+    expect(resolveModelProvider('gemini-3.6-flash', 'clawboo-native').providerId).toBe('google')
     expect(resolveModelProvider('grok-3', 'clawboo-native').providerId).toBe('xai')
   })
 

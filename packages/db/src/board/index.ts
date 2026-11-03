@@ -14,6 +14,7 @@ export {
   RUN_COST_SOURCES,
   TASK_STATUSES,
   canTransition,
+  delegatorOf,
   isLocked,
   isTaskStatus,
   isTerminal,

@@ -99,6 +99,7 @@ Clawboo owns everything in this folder. The bundled server also runs with it as 
 | `server.log`, `server.log.1`         | Output of a server the CLI started                                                            | No                              |
 | `gateway.log`, `gateway.pid`         | Output and process record of an OpenClaw Gateway that Clawboo started                         | No                              |
 | `connector-pids.json`                | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start  | No                              |
+| `runtime-pids/`                      | Agent processes Clawboo started, so leftovers from a crash are stopped at the next start      | No                              |
 | `catalog/`                           | Verified marketplace packs, cached                                                            | No                              |
 | `frames/`                            | Saved screenshots from agents' browsers                                                       | May show private pages          |
 | `browser-profiles/`                  | Each agent's browser profile, including sites it is signed in to                              | Yes                             |

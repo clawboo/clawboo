@@ -13,6 +13,7 @@ import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
+  moveArchivedRoomTasks,
   reapOrphanInbox,
   listRoomsWithFireableDelegations,
   reconcileOrphans,
@@ -27,6 +28,7 @@ import { attachIdentity } from './lib/auth'
 import { reapOrphanedConnectors } from './lib/connectors/pidFile'
 import { setDashboardPort } from './lib/connectors/dashboardGuard'
 import { killProcessTreeByPid } from './lib/runtimes/killTree'
+import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtimes/runtimePidFile'
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
@@ -43,6 +45,7 @@ import {
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { pumpRunnerReruns } from './lib/runnerRerun'
+import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
@@ -411,6 +414,29 @@ async function main() {
     log.error({ err }, 'SQLite: could not open/bootstrap the database — see /api/health')
   }
 
+  // ── Orphaned runtime children ───────────────────────────────────────────────
+  // An agent run outlives an engine that dies hard: a crash, a force-quit from
+  // the desktop app or an update restart runs no shutdown hook, and most runtime
+  // children are their own process group, so they keep running. Reconciliation
+  // below would then hand their tasks to new runs while the old ones still edit
+  // the same worktrees. So the children of every engine that is gone are killed
+  // FIRST, and only then does this engine start recording its own (nothing has
+  // been able to spawn one yet). An engine still running on this state dir keeps
+  // its runs.
+  safeStart('runtime-reap', () => {
+    const report = reapOrphanedRuntimeChildren()
+    if (report.killed > 0 || report.expired > 0) {
+      log.info(report, 'Runtimes: reaped agent processes left by a previous engine')
+    }
+    if (report.unverified > 0) {
+      log.warn(
+        report,
+        'Runtimes: left processes from a previous engine running; this host could not confirm they are ours',
+      )
+    }
+  })
+  safeStart('runtime-pid-record', () => startRuntimePidRecord())
+
   // ── Durable board: orphan reconciliation ────────────────────────────────────
   // Liveness-aware: only a `running` execution that has STOPPED heartbeating
   // (task updatedAt stale past the shared TTL) is reaped — a still-beating run
@@ -428,6 +454,22 @@ async function main() {
     }
   } catch (err) {
     log.error({ err }, 'Board: orphan reconciliation failed (non-fatal)')
+  }
+
+  // ── Archived rooms: their unfinished tasks belong to the team's own chat ────
+  // Archiving a room moves its unfinished tasks to the team's group chat, still
+  // stopped (see moveArchivedRoomTasks). Rooms archived before that existed still
+  // hold theirs, where no engine can see them; this pass moves them. After the
+  // orphan reconciliation, so a task it just released is marked stopped rather
+  // than started by the pump below. Idempotent; best-effort; never blocks boot.
+  try {
+    const db = getDb()
+    const moved = moveArchivedRoomTasks(db, { skip: (t) => runsOnTaskRunner(db, t) })
+    if (moved.length > 0) {
+      log.info({ moved: moved.length }, 'Board: moved unfinished tasks out of archived rooms')
+    }
+  } catch (err) {
+    log.error({ err }, 'Board: moving tasks out of archived rooms failed (non-fatal)')
   }
 
   // ── Worktrees: GC stale worktrees on startup ────────────────────────────────

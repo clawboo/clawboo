@@ -145,6 +145,10 @@ The **More** menu holds what the card's button does not: **Retry**, the team's a
 
 If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself, through the task runner for a task the runner ran. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
 
+Deleting a chat room stops its work the same way. Its unfinished tasks move to **General**: the ones that were queued for an agent wait in **Needs you** as **Stopped**, and **Retry** runs them there.
+
+An agent working on a task in team chat can mark that task blocked when it cannot go on without you. The task then waits in **Needs you** as **Blocked**, with the agent's reply as its comment, and whoever handed out the task is told. Steps of a plan that wait on it stay queued, so a **Retry** carries the plan on.
+
 When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever.
 
 ## Give an agent a task
@@ -251,17 +255,17 @@ To step through the card's column without closing the drawer, press `J` for the 
 
 Each section folds from its heading, and a section with nothing in it is not shown. Top to bottom:
 
-| Section            | What it shows                                                                                                                                                      |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Needs you          | Only for a task that waits on you: why, with **Retry**, **Assign to…** (**Give to someone else…** when an agent is bound to the task) and **Dismiss**              |
-| The agent's report | What the agent reported, with its formatting, titled with its name, for example **Rin's report**                                                                   |
-| **Brief**          | The task's details, when they say more than its title                                                                                                              |
-| **Properties**     | **Status** (which you can change), **Runtime**, **Cost**, when it was **Added** and **Finished**, its **Parent** for a subtask, and the work it is **Part of**     |
-| **Verification**   | After a check: **Passed**, **Failed** or **Passed with debt**, the check command and who chose it, who reviewed the work, and the latest attempt's findings        |
-| **Workspace**      | The task's own git checkout, when it has one. See [Review what an agent built](#review-what-an-agent-built)                                                        |
-| **Run history**    | Every run: its runtime, outcome, time, cost and tokens, and the error when it failed                                                                               |
-| **Comments**       | Your replies and actions (**You**) and the notes Clawboo writes (**Clawboo**), then a box to reply to the agent. See [Steer a running task](#steer-a-running-task) |
-| **Activity**       | The task's live tool calls, results and errors                                                                                                                     |
+| Section            | What it shows                                                                                                                                                                                                                                                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Needs you          | Only for a task that waits on you: why, with **Retry**, **Assign to…** (**Give to someone else…** when an agent is bound to the task) and **Dismiss**                                                                                                                                               |
+| The agent's report | What the agent reported, with its formatting, titled with its name, for example **Rin's report**                                                                                                                                                                                                    |
+| **Brief**          | The task's details, when they say more than its title                                                                                                                                                                                                                                               |
+| **Properties**     | **Status** (which you can change), **Runtime**, **Cost**, when it was **Added** and **Finished**, its **Parent** for a subtask, and the work it is **Part of**                                                                                                                                      |
+| **Verification**   | After a check: **Passed**, **Failed** or **Passed with debt**, the check command and who chose it, who reviewed the work or that the review did not complete or returned nothing, each open issue a pass with debt left with its severity and why it stayed open, and the latest attempt's findings |
+| **Workspace**      | The task's own git checkout, when it has one. See [Review what an agent built](#review-what-an-agent-built)                                                                                                                                                                                         |
+| **Run history**    | Every run: its runtime, outcome, time, cost and tokens, and the error when it failed                                                                                                                                                                                                                |
+| **Comments**       | Your replies and actions (**You**) and the notes Clawboo writes (**Clawboo**), then a box to reply to the agent. See [Steer a running task](#steer-a-running-task)                                                                                                                                  |
+| **Activity**       | The task's live tool calls, results and errors                                                                                                                                                                                                                                                      |
 
 Click the **Parent** to open that task in the drawer. A run that is still going can show OpenClaw as its runtime in **Run history** until it ends. The drawer's cost is the same total as the card's, to four decimal places, or `free` for a task that ran only on a local model.
 
@@ -302,7 +306,7 @@ Clawboo does not merge the branch. Review it and merge it yourself.
 
 ### When work is checked
 
-Clawboo checks an agent's work in one case only: a run in its own git worktree that changed files. The check runs the task's verify command and, for a larger change or a handed-off task, a separate review by a model. Clawboo does not know your project's test command: the check fails until the `VERIFY_CMD` line in the worktree's `init.sh` names one. Work handed out in team chat, tasks you give from the board, and routines you create in the dashboard are not checked. A task with no check result reaches **Done** normally.
+Clawboo checks an agent's work in one case only: a run in its own git worktree that changed files. The check runs the task's verify command and, for a larger change or a handed-off task, a separate review by a model. Clawboo knows your project's test command only if you set the team's [work check](/using/teams#work-check); without one, the check fails until the `VERIFY_CMD` line in the worktree's `init.sh` names one. Work handed out in team chat, tasks you give from the board, and routines you create in the dashboard are not checked. A task with no check result reaches **Done** normally.
 
 While a check runs, the card shows **Verifying**. A pass lands in **Done**, and a failed check sends the work back to the agent for another attempt. When the attempts run out, or the work passes with debt, the task goes to **Needs you**. It shows **Needs review** if its result cannot pass, or **Blocked** if it passed with debt. **Retry** runs the task again and clears the old result. See [Verification](/concepts/verification).
 
@@ -443,6 +447,8 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 
 - The board reads `GET /api/board`, every five seconds while the tab is visible. The drawer reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions` and `GET /api/board/:taskId/workspace/detail`. The preview is served from `GET /api/board/:taskId/preview/`.
 - **New task** is `POST /api/board` with an `assigneeAgentId`. It reads each agent's role from `GET /api/teams/member-roles`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
+- On a team chat run the team engine claims and moves the task itself, so the agent gets no claim or status tools there except `block_task` on its own task. An OpenClaw agent gets none at all, since its tools cannot tell one agent from another. Cancelling a task with `update_task_status` cancels the plan steps waiting on it, as **Dismiss** does.
+- **Retry**, **Assign**, and a reply that would start the task again, refuse a task still filed under a deleted chat room (`room_archived`) instead of saying it started; restarting Clawboo moves it to General. A task whose team was deleted is refused the same way (`no_team`), and nothing can run it.
 - A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
 - The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`.
 - Full request and response shapes are in the [Board API](/reference/rest-api/board). How the board stores tasks and recovers stuck work is in [Board internals](/internals/board-internals).

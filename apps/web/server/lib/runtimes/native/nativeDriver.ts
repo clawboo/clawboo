@@ -130,6 +130,8 @@ export function createNativeDriver(
                 tools: config.tools.tools,
                 teamchat: config.tools.teamchat,
               },
+              // The same team-run test as the `delegate` tool below.
+              teamRun: isTeamSessionKey(opts.sessionKey),
               ...(ctx.memoryScope
                 ? {
                     memoryScope: ctx.memoryScope,

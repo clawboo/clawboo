@@ -168,6 +168,25 @@ function fail(msg) {
   process.exitCode = 1
 }
 
+// The dashboard keeps serving when a subsystem fails at boot, so the assertion
+// that trips (a 500 in the browser, say) can be far from the cause. Print the
+// server's own errors before cleanup deletes its log with the temp dir.
+async function printServerErrors() {
+  if (!tmpDir) return
+  const logFile = path.join(tmpDir, '.clawboo', 'server.log')
+  let text
+  try {
+    text = await fs.readFile(logFile, 'utf8')
+  } catch {
+    return
+  }
+  // pino levels: 50 is error, 60 is fatal.
+  const errors = text.split('\n').filter((line) => /"level":(50|60),/.test(line))
+  if (errors.length === 0) return
+  console.error(`[clean-install] server errors from ${logFile}:`)
+  for (const line of errors.slice(-20)) console.error(`  ${line}`)
+}
+
 // ─── State for cleanup ───────────────────────────────────────────────────────
 
 let fakeService = null
@@ -341,7 +360,7 @@ function shellQuote(value) {
  * Run a build/packaging tool to completion. Resolves `{ code, stdout, stderr }`
  * — never rejects on a non-zero exit, so the caller reports a readable failure.
  */
-function runTool(cmd, args, { cwd, timeoutMs = 120_000 } = {}) {
+function runTool(cmd, args, { cwd, timeoutMs = 120_000, env = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(
       IS_WINDOWS ? shellQuote(cmd) : cmd,
@@ -351,7 +370,7 @@ function runTool(cmd, args, { cwd, timeoutMs = 120_000 } = {}) {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: IS_WINDOWS,
         windowsHide: IS_WINDOWS,
-        env: { ...process.env, npm_config_yes: 'true' },
+        env: { ...process.env, npm_config_yes: 'true', ...env },
       },
     )
     let stdout = ''
@@ -718,7 +737,9 @@ async function runBrowserSmoke(url) {
 // tool names. Proves an external runtime can spawn the packaged bin + call a tool.
 function mcpStdioListTools(binPath, dbDir) {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', [binPath], {
+    // The Node the install built better-sqlite3 for; a bare `node` from PATH
+    // may be another one, and the bin opens the database.
+    const child = spawn(process.execPath, [binPath], {
       env: {
         ...process.env,
         HOME: dbDir,
@@ -836,7 +857,16 @@ async function packAndInstall() {
   const installed = await runTool(
     'npm',
     ['install', tarball, '--no-audit', '--no-fund', '--loglevel', 'error'],
-    { cwd: installDir, timeoutMs: INSTALL_TIMEOUT_MS },
+    {
+      cwd: installDir,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      // This script's Node first, so npm builds better-sqlite3's native binding
+      // for the Node the CLI runs on below. Windows names the variable `Path`
+      // and boots the CLI on its own PATH, so it is left as it is there.
+      env: IS_WINDOWS
+        ? {}
+        : { PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}` },
+    },
   )
   if (installed.code !== 0) {
     fail(`npm install of the tarball failed (exit ${installed.code})\n${installed.stderr}`)
@@ -1128,7 +1158,12 @@ async function main() {
   if (useShadowPath) {
     shadowBinDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-shadow-bin-'))
     const allowedBins = ['node', 'npm', 'pnpm', 'which', 'ls']
-    for (const dir of ['/usr/bin', '/bin', '/usr/local/bin', path.dirname(process.execPath)]) {
+    // The first match wins, so the Node running this script comes first: the
+    // `npm install` above built better-sqlite3's native binding for it. A system
+    // Node found first (the ubuntu-26.04 runner image ships Node 24 in
+    // /usr/local/bin) cannot load that binding, and every database route
+    // answers 500.
+    for (const dir of [path.dirname(process.execPath), '/usr/bin', '/bin', '/usr/local/bin']) {
       for (const bin of allowedBins) {
         const src = path.join(dir, bin)
         try {
@@ -1672,6 +1707,7 @@ if (succeeded) {
   console.log('[clean-install] ✓ All checks passed.')
 } else {
   console.error('[clean-install] One or more assertions failed.')
+  await printServerErrors()
 }
 
 // Cleanup runs as a fire-and-forget detached chain, capped at 15s — enough to

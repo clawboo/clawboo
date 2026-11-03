@@ -120,7 +120,7 @@ When OpenClaw has no default model yet, the setup picks one for the provider it 
 | --------------- | ---------------------------------------------------------------- |
 | Anthropic       | `anthropic/claude-sonnet-4-5`                                    |
 | OpenAI          | `openai/gpt-5.4`                                                 |
-| Google          | `google/gemini-2.0-flash`                                        |
+| Google          | `google/gemini-3.6-flash`                                        |
 | OpenRouter      | `openrouter/anthropic/claude-sonnet-4-5`                         |
 | xAI             | `xai/grok-3`                                                     |
 | Groq            | `groq/llama-3.3-70b-versatile`                                   |
@@ -136,6 +136,8 @@ When OpenClaw has no default model yet, the setup picks one for the provider it 
 | ChatGPT sign-in | `openai-codex/` plus your plan's own default, read from Codex    |
 
 Change it under **Manage > Default model**, which every OpenClaw agent uses unless it has its own model. An agent's own model is set on its page. In both pickers, the **OpenAI Codex** group lists the models your ChatGPT plan can run, read from your Codex CLI; it is left out while Clawboo cannot read them. For OpenClaw's model settings, see [Model providers](https://docs.openclaw.ai/concepts/model-providers) and, for Ollama, [Ollama](https://docs.openclaw.ai/providers/ollama).
+
+Earlier versions of Clawboo set `google/gemini-2.0-flash` for a Google key. Google shut that model down on 2026-06-01, and OpenClaw now treats it as an unknown model and reports the whole config as invalid. If your default is still `google/gemini-2.0-flash`, pick another model under **Manage > Default model**.
 
 ## What a new Boo is allowed to run
 

@@ -48,9 +48,12 @@ export function buildDelegateTool(): NativeLocalTool {
       if (!assignee || !task)
         return err('delegate requires both an assignee (teammate name) and a task')
       // Signal-only: acknowledge and return. The orchestrator observes this
-      // tool-call and creates + delivers the board task.
+      // tool-call and creates + delivers the board task. The answer comes before
+      // the engine has matched the name, so it says "queued", not "delegated":
+      // a hand-off the engine cannot route never starts, and the engine tells
+      // the sender so.
       return {
-        output: `Delegated to ${assignee}: ${task}. They'll pick it up and report back when done.`,
+        output: `Queued for ${assignee}: ${task}. If ${assignee} is a teammate here, they get it as a board task and report back to you when done. If it cannot start, you will get a message saying why.`,
         isError: false,
       }
     },

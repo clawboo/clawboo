@@ -25,6 +25,10 @@ describe('native delegate tool', () => {
     expect(out.isError).toBe(false)
     expect(out.output).toContain('Coder')
     expect(out.output).toContain('add a README')
+    // The tool answers before the engine matches the name, so it promises a
+    // queued hand-off, never a delegated one.
+    expect(out.output).toContain('Queued for Coder')
+    expect(out.output).not.toContain('Delegated')
   })
 
   it('rejects a missing / blank assignee or task', async () => {

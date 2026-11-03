@@ -40,9 +40,9 @@ Boo Zero can change as your install grows. Say you use OpenClaw, then put a Claw
 
 Click the mascot at the top of the team rail. Boo Zero's page opens and works like any [agent's page](/using/agents); the agent column hides while you are there. The message box reads **Ask me anything… use @ to tag a team**.
 
-Use this chat to ask Boo Zero about your teams. Every message you send here carries a fixed set of rules that names Boo Zero and tells it how to lead. You cannot edit them.
+Use this chat to ask Boo Zero about your teams. Every message you send here carries a fixed set of rules that names Boo Zero and tells it that it cannot hand out work from this chat. You cannot edit them.
 
-To give a team work, send the request in that team's chat instead. Boo Zero leads there, and its hand-offs become tasks on the board. A Clawboo Native Boo Zero cannot hand out work from its own chat.
+To give a team work, send the request in that team's chat instead. Boo Zero leads there, and its hand-offs become tasks on the board. Its own chat has no board and no team behind it, on every runtime, so Boo Zero tells you to ask in the team's chat. If a reply still contains a hand-off, it shows as a **Not handed off** note, not as a task.
 
 ### Ask about one team with @TeamName
 

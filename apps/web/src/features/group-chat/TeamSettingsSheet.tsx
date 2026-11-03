@@ -1,10 +1,11 @@
 // TeamSettingsSheet — modal that owns the per-team brief + per-team rules.
 //
-// Opened from the gear icon on `GroupChatViewHeader`. Hosts two editors
+// Opened from the gear icon on `GroupChatViewHeader`. Hosts three editors
 // stacked vertically: `TeamBriefForm` (per-team brief, read by Boo Zero
-// when working in this team) and `TeamRulesEditor` (durable user-set rules
+// when working in this team), `TeamRulesEditor` (durable user-set rules
 // injected into every team-agent preamble + every Boo Zero turn in this
-// team).
+// team) and `TeamVerifyCommandEditor` (the check the verification gate runs
+// for the team's tasks).
 
 import { useCallback, useId, useState } from 'react'
 import { X } from 'lucide-react'
@@ -19,6 +20,7 @@ import { TeamAccentPicker } from '@/features/teams/TeamAccentPicker'
 import { TeamIconPicker } from '@/features/teams/TeamIconPicker'
 import { TeamBriefForm } from './TeamBriefForm'
 import { TeamRulesEditor } from './TeamRulesEditor'
+import { TeamVerifyCommandEditor } from './TeamVerifyCommandEditor'
 
 interface TeamSettingsSheetProps {
   team: Team
@@ -158,6 +160,13 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             Rules
           </h3>
           <TeamRulesEditor teamId={team.id} />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Work check
+          </h3>
+          <TeamVerifyCommandEditor teamId={team.id} />
         </section>
       </div>
     </Modal>

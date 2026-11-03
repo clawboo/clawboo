@@ -14,6 +14,9 @@
 //   - backlog: it waits in the mailbox; the person parked the task on purpose.
 //   - done or cancelled: not delivered. The task cannot reopen, so the person is
 //     offered a follow-up task for the same agent instead.
+// A reply that would start the task again is refused instead, before anything is
+// written, when nothing could run the task (`startRefusal`), so it never says it
+// started a task no engine can see.
 
 import { delegationTargetOf } from '@clawboo/board-core'
 import {
@@ -38,12 +41,17 @@ export type ReplyDelivery =
   | {
       status: 'not-delivered'
       agentId: string | null
-      reason: 'finished' | 'unassigned' | 'failed'
+      /** `room_archived`: the task is filed under an archived chat room, so
+       *  nothing could start it. `no_team`: its room went with its team. */
+      reason: 'finished' | 'unassigned' | 'failed' | 'room_archived' | 'no_team'
     }
 
 export interface ReplyDeps {
   /** Starts the task's run (the board's `requestTaskDispatch`). */
   dispatch: (teamId: string, taskId: string) => void
+  /** Why the task could not be started for the reply, or null when it can.
+   *  Asked before anything is written. */
+  startRefusal?: (task: DbTask) => 'room_archived' | 'no_team' | null
   /** How long to wait for a steer to land before saying it is queued. */
   steerWaitMs?: number
   now?: () => number
@@ -71,6 +79,11 @@ export async function deliverPersonReply(
   }
 
   const stranded = isStrandedInProgress(db, task)
+  const wakeable = task.status === 'blocked' || task.status === 'todo' || stranded
+  if (wakeable && task.teamId) {
+    const refusal = deps.startRefusal?.(task) ?? null
+    if (refusal) return { status: 'not-delivered', agentId, reason: refusal }
+  }
   const forward = forwardPersonCommentToRun(db, { ...task, assigneeAgentId: agentId }, body)
   if (!forward.forwarded) return { status: 'not-delivered', agentId, reason: 'failed' }
 
@@ -87,7 +100,6 @@ export async function deliverPersonReply(
   }
   if (task.status === 'in_review') return { status: 'queued', agentId, reason: 'in-review' }
 
-  const wakeable = task.status === 'blocked' || task.status === 'todo' || stranded
   if (!wakeable || !task.teamId) return { status: 'queued', agentId, reason: 'next-run' }
   return wake(db, task, task.teamId, agentId, deps)
 }

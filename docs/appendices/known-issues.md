@@ -144,9 +144,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** tasks reach **Done** without a check result.
 
-**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own; from the next release, the run's instructions and the worktree's `TASK.md` tell it to.
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
 
-**What to do:** review results yourself. For runs that are checked, name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
+**What to do:** review results yourself. For runs that are checked, set the team's [work check](/using/teams#work-check) from the next release on, or name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
 
 **Status:** open.
 
@@ -305,6 +305,7 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | A delegated Hermes task that works for more than eight minutes is stopped as unresponsive                                                                                                             | Hermes      |
 | A Claude Code run that hits an API error (a bad key, an expired sign-in, a billing limit) lands its task as done, with the error text as its result                                                   | Claude Code |
 | New Google agents on Clawboo Native start on `gemini-2.0-flash`, which Google shut down                                                                                                               | Providers   |
+| Connecting OpenClaw with a Google key sets `google/gemini-2.0-flash`, which Google shut down and OpenClaw now rejects                                                                                 | OpenClaw    |
 | A review that failed or returned nothing is shown as **Reviewed by**                                                                                                                                  | Checks      |
 | A runtime's **Disconnect** deletes keys other runtimes use, and its dialog names only one (see [the entry above](#disconnecting-a-runtime-deletes-keys-other-runtimes-use))                           | Providers   |
 | On OpenClaw 2026.9, **Create Boo** and Marketplace deploys of OpenClaw agents fail partway, because Clawboo wrote a TOOLS.md that Gateway refuses                                                     | OpenClaw    |
