@@ -32,7 +32,7 @@
 // quiet driver (injected), which steers by stop-and-resume.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -73,11 +73,16 @@ export interface HermesAcpDeps {
   cancelGraceMs?: number
   /** Told when the handshake failed because this Hermes has no ACP mode. */
   onAcpUnavailable?: (reason: string) => void
+  /** Test seam: the longest unterminated stdout line (default MAX_ACP_LINE_CHARS). */
+  maxLineChars?: number
 }
 
 /** Python imports make `hermes acp` slow to answer its first message. */
 const HANDSHAKE_TIMEOUT_MS = 30_000
 const CANCEL_GRACE_MS = 3_000
+/** The longest stdout line `hermes acp` may write before the run fails. A tool
+ *  result rides in one line, so this is generous. */
+export const MAX_ACP_LINE_CHARS = 32 * 1024 * 1024
 
 /** Hermes's own answers to `/steer` and to a prompt sent mid-turn. They arrive on
  *  the text stream but are not the agent's words. */
@@ -178,11 +183,29 @@ export function createHermesAcpDriver(
   let toolStarts = 0
   let heartbeat: ReturnType<typeof setInterval> | null = null
   let heartbeatStarted = 0
+  const maxLineChars = deps.maxLineChars ?? MAX_ACP_LINE_CHARS
+  /** The throwaway home this run made (no per-identity home was given): it holds
+   *  a copy of the person's Hermes sign-in, so it goes when the run does. */
+  let ownedHome: string | null = null
+  const removeOwnedHome = (): void => {
+    const dir = ownedHome
+    ownedHome = null
+    if (dir) void rm(dir, { recursive: true, force: true }).catch(() => undefined)
+  }
 
+  /** A steer in flight. `passive`: an FYI, never worth a turn of its own.
+   *  `toolOpen` and `toolStarts` are read when Hermes acknowledges it, which is
+   *  when it decides where the steer goes, not when it was sent. */
+  interface SentSteer {
+    text: string
+    passive: boolean
+    toolOpen: boolean
+    toolStarts: number
+  }
   /** Steers sent and not yet acknowledged, oldest first. */
-  const awaitingAck: Array<{ text: string; toolOpen: boolean; toolStartsAtSend: number }> = []
+  const awaitingAck: SentSteer[] = []
   /** Steers that joined the running turn but may not have been read yet. */
-  const joined: Array<{ text: string; toolOpen: boolean; toolStartsAtSend: number }> = []
+  const joined: SentSteer[] = []
 
   const push = (ev: HermesNativeEvent): void => {
     if (!subscribed) {
@@ -216,6 +239,7 @@ export function createHermesAcpDriver(
       c.stdin?.end()
       killProcessTree(c)
     }
+    removeOwnedHome()
   }
 
   const fail = (message: string): void => {
@@ -240,6 +264,11 @@ export function createHermesAcpDriver(
         }
         if (awaitingAck.length > 0 && STEER_ACK_RE.test(u.text)) {
           const steer = awaitingAck.shift()!
+          // Where Hermes put it depends on whether a tool call was open as it
+          // took the steer: a tool that finished between the send and this
+          // moment carries nothing.
+          steer.toolOpen = openTools.size > 0
+          steer.toolStarts = toolStarts
           if (STEER_JOINED_RE.test(u.text)) joined.push(steer)
           // Queued as a turn of its own: Hermes runs it after this one, inside the
           // same prompt, so nothing is left to deliver.
@@ -269,11 +298,12 @@ export function createHermesAcpDriver(
     }
   }
 
-  /** Steers that joined the turn but had nothing left to ride on: sent while no
+  /** Steers that joined the turn but had nothing left to ride on: taken while no
    *  tool call was open, with no tool call after them. Hermes holds those for the
-   *  next turn, which ACP never starts. */
+   *  next turn, which ACP never starts. A passive steer is left there: an FYI
+   *  never keeps a finishing run going. */
   function unreadSteers(): string[] {
-    const late = joined.filter((s) => !s.toolOpen && toolStarts === s.toolStartsAtSend)
+    const late = joined.filter((s) => !s.passive && !s.toolOpen && toolStarts === s.toolStarts)
     joined.length = 0
     return late.map((s) => s.text)
   }
@@ -319,8 +349,17 @@ export function createHermesAcpDriver(
     })
     const connection = conn
     let buf = ''
-    spawned.stdout?.on('data', (d: Buffer) => {
-      buf += d.toString()
+    // A character split across two chunks must not decode as two U+FFFDs.
+    spawned.stdout?.setEncoding('utf8')
+    spawned.stdout?.on('data', (d: string) => {
+      buf += d
+      // One JSON-RPC message per line: a line this long without its end is not
+      // one Hermes would send, and buffering it could run for hours.
+      if (buf.length > maxLineChars) {
+        buf = ''
+        fail(`hermes acp wrote over ${maxLineChars} characters without ending the line`)
+        return
+      }
       let nl: number
       while ((nl = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, nl)
@@ -365,6 +404,8 @@ export function createHermesAcpDriver(
     child = null
     conn?.close(reason)
     if (c) killProcessTree(c)
+    // The quiet driver provisions a home of its own.
+    removeOwnedHome()
     resolveTurnStarted()
     if (finished) return
     if (acpMissing) deps.onAcpUnavailable?.(reason)
@@ -527,8 +568,11 @@ export function createHermesAcpDriver(
       try {
         // Persistent per-identity home when the runner materialized one;
         // otherwise a throwaway home (the conservative one-shot default).
-        const homeDir =
-          ctx.homeDir ?? (await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-')))
+        let homeDir = ctx.homeDir
+        if (!homeDir) {
+          homeDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-hermes-home-'))
+          ownedHome = homeDir
+        }
         home = await provisionHermesHome(homeDir, {
           mcpServers: ctx.mcpBaseUrl
             ? hermesMcpServers(ctx.mcpBaseUrl, ctx.memoryScope ?? undefined)
@@ -598,6 +642,9 @@ export function createHermesAcpDriver(
       // Context rides the prompt.
     },
 
+    // Live over ACP; once this run has fallen back, the quiet driver's way.
+    steering: () => (fallback ? 'interrupt-resume' : 'live'),
+
     async steer(text: string, steerOpts?: SteerOptions): Promise<boolean> {
       await turnStarted
       if (fallback) {
@@ -606,7 +653,13 @@ export function createHermesAcpDriver(
         return fallback.steer(text, steerOpts)
       }
       if (finished || !promptInFlight || !conn || !sessionId) return false
-      const steer = { text, toolOpen: openTools.size > 0, toolStartsAtSend: toolStarts }
+      // The send-time view, kept only if no acknowledgement comes to refine it.
+      const steer: SentSteer = {
+        text,
+        passive: steerOpts?.passive === true,
+        toolOpen: openTools.size > 0,
+        toolStarts,
+      }
       awaitingAck.push(steer)
       try {
         await conn.request('session/prompt', {

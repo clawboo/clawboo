@@ -338,7 +338,7 @@ How long a run may go without producing any event before Clawboo stops it. Every
 - Default: unset
 - Example: `CLAWBOO_HERMES_TRANSPORT=quiet`
 
-How Clawboo drives Hermes runs. Unset, it uses `hermes acp`, Hermes's Agent Client Protocol mode, and falls back to the quiet one-shot `hermes chat` for any run where that mode does not answer; after such a fallback it skips ACP for ten minutes. `quiet` always uses `hermes chat`. `acp` always tries ACP first, even right after a fallback. See [Hermes](/runtimes/hermes).
+How Clawboo drives Hermes runs. Unset, it uses `hermes acp`, Hermes's Agent Client Protocol mode, and falls back to the quiet one-shot `hermes chat` for a run where `hermes acp` cannot start or its handshake fails or times out (a run that stalls after the handshake does not fall back); after such a fallback it skips ACP for ten minutes. `quiet` always uses `hermes chat`. `acp` always tries ACP first, even right after a fallback. See [Hermes](/runtimes/hermes).
 
 ### CLAWBOO_HOME_MUTEX_ACQUIRE_MS
 

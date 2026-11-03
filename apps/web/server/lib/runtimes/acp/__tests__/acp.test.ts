@@ -99,8 +99,14 @@ describe('createAcpConnection', () => {
     await expect(conn.request('session/prompt', {})).rejects.toThrow('agent exited')
   })
 
-  it('allowOption prefers allow-once, then allow-always', () => {
-    expect(allowOption([{ optionId: 'a', kind: 'allow_always' }])).toBe('a')
+  it('allowOption grants once, and never a standing allow the agent would keep', () => {
+    expect(
+      allowOption([
+        { optionId: 'a', kind: 'allow_always' },
+        { optionId: 'o', kind: 'allow_once' },
+      ]),
+    ).toBe('o')
+    expect(allowOption([{ optionId: 'a', kind: 'allow_always' }])).toBeNull()
     expect(allowOption([{ optionId: 'r', kind: 'reject_always' }])).toBeNull()
   })
 })

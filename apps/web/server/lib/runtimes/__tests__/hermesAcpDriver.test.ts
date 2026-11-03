@@ -6,7 +6,8 @@
 // read from the missing usage, steering and its acknowledgements, a steer that came
 // too late, cancel, resuming a session, and falling back when there is no ACP.
 
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { readdirSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -70,9 +71,14 @@ process.stdin.on('data', (d) => {
     } else if (m.method === 'session/prompt') {
       const t = m.params.prompt[0].text
       if (t.startsWith('/steer ')) {
+        // The tool call finished before Hermes took the steer, so nothing carries it.
+        if (scenario === 'tool-done-before-ack') update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: 'built' })
         update(sid, { sessionUpdate: 'agent_message_chunk', content: text('⏩ Steer queued for the active turn: ' + t.slice(7)) })
         send({ id: m.id, result: { stopReason: 'end_turn' } })
-        if (scenario === 'steer') {
+        if (scenario === 'tool-done-before-ack') {
+          update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Answer.') })
+          finishMain({ stopReason: 'end_turn', usage: USAGE })
+        } else if (scenario === 'steer') {
           update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'tc-1', status: 'completed', rawOutput: 'built' })
           update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Steered.') })
           finishMain({ stopReason: 'end_turn', usage: USAGE })
@@ -82,7 +88,7 @@ process.stdin.on('data', (d) => {
         }
         continue
       }
-      if (mainPrompt === null && scenario === 'late-steer' && t.includes('while you were finishing')) {
+      if (mainPrompt === null && (scenario === 'late-steer' || scenario === 'tool-done-before-ack') && t.includes('while you were finishing')) {
         update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Took it in.') })
         send({ id: m.id, result: { stopReason: 'end_turn', usage: { ...USAGE, inputTokens: 200 } } })
         continue
@@ -124,8 +130,19 @@ process.stdin.on('data', (d) => {
           update(sid, { sessionUpdate: 'usage_update', size: 128000, used: 12601 })
           finishMain({ stopReason: 'end_turn' })
         }, 20)
-      } else if (scenario === 'steer') {
+      } else if (scenario === 'steer' || scenario === 'tool-done-before-ack') {
         update(sid, { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'terminal: npm run build', kind: 'execute', status: 'in_progress' })
+      } else if (scenario === 'split-utf8') {
+        // One line, cut inside the bytes of a three-byte character.
+        const raw = Buffer.from(JSON.stringify({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: text('日本') } } }) + '\n')
+        const cut = raw.indexOf(Buffer.from('日')) + 1
+        process.stdout.write(raw.subarray(0, cut))
+        setTimeout(() => {
+          process.stdout.write(raw.subarray(cut))
+          finishMain({ stopReason: 'end_turn', usage: USAGE })
+        }, 30)
+      } else if (scenario === 'long-line') {
+        process.stdout.write('x'.repeat(5000))
       } else if (scenario === 'late-steer') {
         update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Writing the answer.') })
       } else if (scenario === 'refusal') {
@@ -187,9 +204,11 @@ describe('createHermesAcpDriver', () => {
     fallback?: () => HermesDriver,
     onAcpUnavailable?: (reason: string) => void,
     opts: StartOpts = OPTS,
+    extra: { maxLineChars?: number } = {},
   ): { driver: HermesDriver; seen: HermesNativeEvent[] } {
     process.env['FAKE_SCENARIO'] = scenario
     const driver = createHermesAcpDriver(opts, ctx, {
+      ...extra,
       fallback:
         fallback ??
         (() => {
@@ -376,6 +395,64 @@ describe('createHermesAcpDriver', () => {
       summary: 'Took it in.',
       usage: { inputTokens: 200, outputTokens: 30 },
     })
+  })
+
+  it('never turns a passive steer into a turn of its own', async () => {
+    const { driver, seen } = driverFor('late-steer')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'message'))
+    await expect(driver.steer!('fyi: the build moved', { passive: true })).resolves.toBe(true)
+    await until(() => seen.some((e) => e.type === 'result'))
+    // The prompt and the /steer, and no follow-up turn for the FYI.
+    expect((await received()).filter((m) => m['method'] === 'session/prompt')).toHaveLength(2)
+    expect(resultOf(seen)).toMatchObject({ ok: true })
+  })
+
+  it('delivers a steer whose tool call finished before Hermes took it', async () => {
+    const { driver, seen } = driverFor('tool-done-before-ack')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'tool-call'))
+    await expect(driver.steer!('use the prod config')).resolves.toBe(true)
+    await until(() => seen.some((e) => e.type === 'result'))
+    const prompts = (await received()).filter((m) => m['method'] === 'session/prompt')
+    expect(prompts).toHaveLength(3)
+    const followUp = (prompts[2]!['params'] as { prompt: Array<{ text: string }> }).prompt[0]!.text
+    expect(followUp).toContain('use the prod config')
+  })
+
+  it('keeps a character that a stdout chunk split in two', async () => {
+    const { driver, seen } = driverFor('split-utf8')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const texts = seen.flatMap((e) => (e.type === 'message' ? [e.text] : []))
+    expect(texts.join('')).toBe('日本')
+  })
+
+  it('fails a run whose agent writes a line that never ends', async () => {
+    const { driver, seen } = driverFor('long-line', ctxFor(), undefined, undefined, OPTS, {
+      maxLineChars: 1000,
+    })
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    expect(resultOf(seen)).toMatchObject({ ok: false })
+    expect(resultOf(seen).errorMessage).toContain('without ending the line')
+  })
+
+  it('removes the throwaway home it made when the run ends', async () => {
+    const tmp = path.join(dir, 'tmp')
+    await mkdir(tmp)
+    const savedTmp = process.env['TMPDIR']
+    process.env['TMPDIR'] = tmp
+    try {
+      // No per-identity home: the driver makes one, with a copy of the sign-in.
+      const { driver, seen } = driverFor('plain', ctxFor({ homeDir: undefined }))
+      await driver.start()
+      await until(() => seen.some((e) => e.type === 'result'))
+      await until(() => readdirSync(tmp).every((n) => !n.startsWith('clawboo-hermes-home-')))
+    } finally {
+      if (savedTmp === undefined) delete process.env['TMPDIR']
+      else process.env['TMPDIR'] = savedTmp
+    }
   })
 
   it('cancels a turn on abort, and the run ends aborted', async () => {

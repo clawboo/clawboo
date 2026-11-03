@@ -62,6 +62,29 @@ describe('HermesAdapter transports', () => {
       reason: 'unsupported',
     })
   })
+
+  it('steers a run the way its own driver takes it, whatever the transport is now', async () => {
+    // A run that started on the quiet path keeps that driver after ACP comes back.
+    const quietRun = Object.assign(new FakeHermesDriver(), {
+      steering: () => 'interrupt-resume' as const,
+    })
+    const adapter = adapterOn('acp', quietRun)
+    const run = await adapter.start({}, { agentId: 'a1', sessionKey: SK, message: 'go' })
+    await expect(adapter.steer(run, 'fyi', { passive: true })).resolves.toEqual({
+      delivered: false,
+      reason: 'unsupported',
+    })
+    expect(quietRun.calls.some((c) => c.method === 'steer')).toBe(false)
+
+    // And the other way: an ACP run while the transport reads quiet.
+    const acpRun = Object.assign(new FakeHermesDriver(), { steering: () => 'live' as const })
+    const quietNow = adapterOn('quiet', acpRun)
+    const run2 = await quietNow.start({}, { agentId: 'a1', sessionKey: SK, message: 'go' })
+    await expect(quietNow.steer(run2, 'fyi', { passive: true })).resolves.toEqual({
+      delivered: true,
+      mode: 'live',
+    })
+  })
 })
 
 // The shared adapter contract holds on the ACP transport too.

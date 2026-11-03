@@ -55,11 +55,11 @@ const asRecord = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 const asStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 
-/** The option an unattended run grants: allow once, else allow always. */
+/** The option an unattended run grants: allow once, never allow always, which the
+ *  agent would keep in its own allowlist for later runs. A request with no
+ *  allow-once option is answered `cancelled`. */
 export function allowOption(options: AcpPermissionOption[]): string | null {
-  const pick =
-    options.find((o) => o.kind === 'allow_once') ?? options.find((o) => o.kind === 'allow_always')
-  return pick?.optionId ?? null
+  return options.find((o) => o.kind === 'allow_once')?.optionId ?? null
 }
 
 function permissionOptions(params: Record<string, unknown>): AcpPermissionOption[] {

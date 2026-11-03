@@ -51,6 +51,10 @@ export interface HermesDriver {
    *  the resume could not be started. Optional so a test double without it
    *  simply cannot be steered. */
   steer?(text: string, opts?: SteerOptions): Promise<boolean>
+  /** How THIS run takes a steer. A run keeps the driver it started with, so this,
+   *  not the adapter's process-wide transport, decides whether a passive steer
+   *  may go through. Absent means the adapter's capabilities decide. */
+  steering?(): 'live' | 'interrupt-resume'
 }
 
 export type HermesDriverFactory = (opts: StartOpts) => HermesDriver

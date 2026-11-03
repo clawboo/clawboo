@@ -467,6 +467,8 @@ export function createHermesDriver(
 
   return {
     ...spawn,
+    // The one-shot path takes a steer by stopping the run and resuming it.
+    steering: () => 'interrupt-resume' as const,
     steer(text: string): Promise<boolean> {
       if (state.sawResult) return Promise.resolve(false)
       // A steer that arrives before the queued relaunch starts rides along with it.
