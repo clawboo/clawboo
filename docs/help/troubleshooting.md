@@ -326,7 +326,7 @@ Then send the message or start the task again. A one-off `npx` run cannot load t
 **Fix:** install Python 3.13 (for example `brew install python@3.13`) and click **Retry**, or install Hermes yourself with a supported Python, then click **Refresh** at the top of **Settings > Runtimes**:
 
 ```bash
-pipx install --python python3.12 'hermes-agent[anthropic]<1'
+pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 ```
 
 **Prevent it:** keep a Python from 3.11 to 3.13 for Hermes. See [Hermes](/runtimes/hermes).

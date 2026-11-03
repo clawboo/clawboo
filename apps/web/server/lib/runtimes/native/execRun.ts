@@ -24,6 +24,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 
+import { setAwakeTimeout } from '@clawboo/executor'
 import { connectorChildEnv } from '@clawboo/mcp'
 
 import { killProcessTree } from '../killTree'
@@ -143,8 +144,9 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
       killProcessTree(child)
     }
 
-    const timer = setTimeout(() => stop('timeout'), timeoutMs)
-    timer.unref()
+    // Awake time, so a command still running when the machine sleeps is not
+    // killed on wake for time it spent suspended along with everything else.
+    const timer = setAwakeTimeout(() => stop('timeout'), timeoutMs)
 
     const onAbort = (): void => stop('abort')
     opts.signal.addEventListener('abort', onAbort, { once: true })
@@ -152,7 +154,7 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
     if (opts.signal.aborted) stop('abort')
 
     const cleanup = (): void => {
-      clearTimeout(timer)
+      timer.clear()
       opts.signal.removeEventListener('abort', onAbort)
       unregisterRuntimeChild(child)
     }

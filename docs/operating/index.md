@@ -22,6 +22,7 @@ Clawboo is one Node.js program. It serves the dashboard and the REST API on one 
 | [Data and state](/operating/data-and-state)                      | You want to find, back up, move or reset Clawboo's data, or see what it writes in OpenClaw's folder.     |
 | [MCP servers](/operating/mcp-servers)                            | You want an agent that Clawboo does not run to use the board, shared memory, tools or the peer room.     |
 | [Production defaults](/operating/production-defaults)            | You want to know what a fresh install allows and limits, and how to change each default.                 |
+| [Supported versions](/operating/supported-versions)              | You run another client against the server, or update one side, and need to know which versions work.     |
 
 ## The default posture
 

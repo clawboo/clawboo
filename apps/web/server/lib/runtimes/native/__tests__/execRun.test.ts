@@ -9,9 +9,23 @@ import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { OUTPUT_CAP_BYTES, runApprovedCommand } from '../execRun'
+import { DEFAULT_COMMAND_TIMEOUT_MS, OUTPUT_CAP_BYTES, runApprovedCommand } from '../execRun'
+
+// Counts the timeout's kills without changing them: the real kill still runs, so
+// every test here still stops a real process.
+const kills = vi.hoisted(() => ({ count: 0 }))
+vi.mock('../../killTree', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../killTree')>()
+  return {
+    ...actual,
+    killProcessTree: (...args: Parameters<typeof actual.killProcessTree>) => {
+      kills.count += 1
+      actual.killProcessTree(...args)
+    },
+  }
+})
 
 /**
  * POSIX ONLY, because the thing under test is POSIX only.
@@ -159,5 +173,50 @@ describePosix('runApprovedCommand', () => {
     // tier exists to refuse. As argv items they are literal text.
     const res = await run(['echo', 'a && b | c > d'])
     expect(res.output.trim()).toBe('a && b | c > d')
+  })
+})
+
+describePosix('the command timeout counts awake time', () => {
+  const MIN = 60_000
+
+  /** What a sleep does to the process on macOS: the wall clock jumps, and every
+   *  timer whose delay passed fires once on wake. `vi.setSystemTime` alone moves
+   *  pending timers along with the clock, so a plain timer would never notice. */
+  function sleepMachine(ms: number): void {
+    ;(globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
+  }
+
+  it('a sleep longer than the timeout does not kill a command still running on wake', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      // Runs for a real second, long past the fake sleep below.
+      const p = run(['sleep', '1'])
+      await vi.advanceTimersByTimeAsync(2 * MIN)
+
+      // An hour asleep, then one tick on wake.
+      sleepMachine(60 * MIN)
+      await vi.advanceTimersByTimeAsync(30_000)
+
+      const res = await p
+      expect(res.stoppedBy).toBeUndefined()
+      expect(res.exitCode).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a command that really runs too long is still killed at the limit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      kills.count = 0
+      const p = run(['sleep', '30'])
+      await vi.advanceTimersByTimeAsync(DEFAULT_COMMAND_TIMEOUT_MS - 1)
+      expect(kills.count).toBe(0)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(kills.count).toBe(1)
+      expect((await p).stoppedBy).toBe('timeout')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -160,7 +160,7 @@ Installs the runtime's CLI, pinned to a major version:
 
 - Claude Code: `npm install -g @anthropic-ai/claude-code@2`.
 - Codex: `npm install -g @openai/codex@0`.
-- Hermes: `pipx install 'hermes-agent[anthropic]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below.
+- Hermes: `pipx install 'hermes-agent[anthropic,acp]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below.
 
 Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, the install process is killed.
 

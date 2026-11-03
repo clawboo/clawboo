@@ -125,6 +125,14 @@ export function teamChatStreamGET(req: Request, res: Response): void {
         : 0
   }
 
+  // Tell the client where this connection starts. A browser sends Last-Event-ID
+  // only once it has received an id, and only stored rows carry one, so without
+  // this a connection that drops before its first row would reconnect with no
+  // cursor, start at the new head and skip every row stored in between. It is a
+  // named event with data because WebKit ignores an `id:` that arrives without
+  // data; a client that does not listen for `cursor` never sees it.
+  res.write(`event: cursor\nid: ${cursor}\ndata: ${JSON.stringify({ cursor })}\n\n`)
+
   // Tier 1 — committed turns. Tail the durable rows past the id cursor; the `data`
   // column is already the serialised TranscriptEntry, written straight to the wire.
   const poll = (): void => {

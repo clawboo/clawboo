@@ -116,14 +116,17 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     // extra, so a REUSED Anthropic key (the native default) routes without a
     // separate install. Confirmed against the installed CLI (`--provider
     // anthropic` errors "the 'anthropic' package is required" without it).
-    pkg: 'hermes-agent[anthropic]<1',
+    // The `[acp]` extra is Hermes's Agent Client Protocol mode (`hermes acp`), which
+    // clawboo drives so a run streams and takes a steer; without it runs fall back
+    // to the quiet one-shot mode (`hermes acp --check` reports the missing deps).
+    pkg: 'hermes-agent[anthropic,acp]<1',
     // hermes-agent requires Python >=3.11,<3.14. An interpreter outside that range
     // (a fresh macOS `python3` is the Xcode CLT Python 3.9; Homebrew's newest is
     // 3.14) makes pip report "(from versions: none)", so the installer resolves a
     // 3.11 to 3.13 interpreter first.
     pythonMinMinor: 11,
     pythonMaxMinor: 13,
-    installCommand: "pipx install 'hermes-agent[anthropic]<1'",
+    installCommand: "pipx install 'hermes-agent[anthropic,acp]<1'",
     builtIn: false,
     authKind: 'api-key',
     envVar: 'OPENROUTER_API_KEY',

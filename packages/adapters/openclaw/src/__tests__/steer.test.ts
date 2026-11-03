@@ -5,7 +5,7 @@
 // the run never read would become a follow-up turn nobody watches, so it is
 // cancelled when the run ends.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { EventFrame } from '@clawboo/gateway-client'
 import type { RuntimeEvent } from '@clawboo/executor'
@@ -155,6 +155,63 @@ describe('OpenClawAdapter.steer', () => {
       delivered: false,
       reason: 'rejected',
       detail: 'question response indeterminate',
+    })
+  })
+})
+
+describe('the steer filter counts awake time', () => {
+  const MIN = 60_000
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  /** What a sleep does to the process on macOS: the wall clock jumps, and every
+   *  timer whose delay passed fires once on wake. `vi.setSystemTime` alone moves
+   *  pending timers along with the clock, so a plain timer would never notice. */
+  function sleepMachine(ms: number): void {
+    ;(globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
+  }
+
+  it('a steer that closes out after a long sleep still cannot end the run', async () => {
+    const { fake, adapter, run, events } = await startedRun()
+    const pending = adapter.steer(run, 'Keep it short.')
+    const key = lastSteerKey(fake)
+    await vi.advanceTimersByTimeAsync(5 * MIN)
+
+    // An hour asleep, one tick on wake, and only then the Gateway commits the steer.
+    sleepMachine(60 * MIN)
+    await vi.advanceTimersByTimeAsync(30_000)
+    fake.emit(chatFrame(key, 'final'))
+    await expect(pending).resolves.toEqual({ delivered: true, mode: 'live' })
+
+    fake.emit(chatFrame(RUN, 'final', { message: { role: 'assistant', content: 'Done.' } }))
+    const seen: RuntimeEvent[] = []
+    for (;;) {
+      const ev = await nextEvent(events)
+      seen.push(ev)
+      if (ev.kind === 'done') break
+    }
+    expect(seen.filter((e) => e.kind === 'done')).toHaveLength(1)
+    expect(seen.at(-1)).toMatchObject({ kind: 'done', reason: 'success', summary: 'Done.' })
+    expect(run.runId).toBe(RUN)
+  })
+
+  it('a steer id still leaves the filter after 30 minutes awake', async () => {
+    // The list is module-level, so the TTL is what keeps it from growing for the
+    // life of the process.
+    const { fake, adapter, run, events } = await startedRun()
+    void adapter.steer(run, 'x')
+    const key = lastSteerKey(fake)
+    const steerDelta = (text: string): EventFrame =>
+      chatFrame(key, 'delta', { message: { role: 'assistant', content: text } })
+
+    await vi.advanceTimersByTimeAsync(30 * MIN - 1)
+    fake.emit(steerDelta('still filtered'))
+    await vi.advanceTimersByTimeAsync(1)
+    fake.emit(steerDelta('no longer filtered'))
+    await expect(nextEvent(events)).resolves.toMatchObject({
+      kind: 'text-delta',
+      text: 'no longer filtered',
     })
   })
 })

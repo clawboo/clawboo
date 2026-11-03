@@ -38,9 +38,15 @@ export function App() {
       <GatewayBootstrap />
       {/* Lights the fleet up during board runs, which no other status writer covers. */}
       <RunStatusBridge />
+      {/* `--clawboo-titlebar-inset` (unset = 0) lets an embedder reserve a strip
+          for its own title bar, such as an inset macOS one, so it never sits on
+          the sidebar. The fallback lives here rather than on :root, so a value
+          the embedder sets anywhere wins without a cascade fight. */}
       <div
         inert={settingsOpen || undefined}
+        data-testid="app-shell"
         className="flex h-screen overflow-hidden bg-background text-foreground"
+        style={{ paddingTop: 'var(--clawboo-titlebar-inset, 0px)' }}
       >
         {/* Cols 1 + 2 — team rail + agent column, resizable and collapsible. Each
             column keeps its own error boundary (inside AppSidebar) so a crash in

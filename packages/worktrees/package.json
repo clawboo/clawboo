@@ -38,6 +38,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@clawboo/executor": "workspace:*",
     "zod": "^3.25.0"
   },
   "devDependencies": {

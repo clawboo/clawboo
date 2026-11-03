@@ -24,7 +24,7 @@ import {
   NON_OPENCLAW_RUNTIME_IDS,
   type NonOpenClawRuntimeId,
 } from './descriptor'
-import { createHermesDriver } from './hermesDriver'
+import { createHermesRunDriver, hermesTransport } from './hermesTransport'
 import { createNativeDriver } from './native'
 import { isNativeOllamaConnected } from './native/nativeProviderDefaults'
 import type { RuntimeRunContext } from './types'
@@ -107,7 +107,9 @@ export function adapterFactoryFor(id: NonOpenClawRuntimeId): RuntimeAdapterFacto
         new CodexAdapter((opts) => createCodexDriver(opts, withAttachSecret(ctx)), health)
     case 'hermes':
       return (ctx) =>
-        new HermesAdapter((opts) => createHermesDriver(opts, withAttachSecret(ctx)), health)
+        new HermesAdapter((opts) => createHermesRunDriver(opts, withAttachSecret(ctx)), health, {
+          transport: () => hermesTransport(),
+        })
     case 'clawboo-native':
       return (ctx) => new NativeAdapter((opts) => createNativeDriver(opts, ctx), nativeKeyHealth)
     case 'clawboo-mock':

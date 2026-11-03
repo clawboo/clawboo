@@ -319,7 +319,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/pipx',
-      args: ['install', 'hermes-agent[anthropic]<1'],
+      args: ['install', 'hermes-agent[anthropic,acp]<1'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
@@ -333,7 +333,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', 'hermes-agent[anthropic]<1'],
+      args: ['-m', 'pip', 'install', '--user', 'hermes-agent[anthropic,acp]<1'],
     })
     const first = spawnState.children[0] as FakeChild
     first.emitStderr('error: externally-managed-environment')
@@ -346,7 +346,7 @@ describe('runtimes install/connect REST', () => {
         'install',
         '--user',
         '--break-system-packages',
-        'hermes-agent[anthropic]<1',
+        'hermes-agent[anthropic,acp]<1',
       ],
     })
     ;(spawnState.children[1] as FakeChild).emitClose(0)
