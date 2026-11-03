@@ -52,6 +52,10 @@ describe('receiptText', () => {
       { status: 'not-delivered', agentId: 'ada', reason: 'room_archived' },
       'Not sent: this task’s chat room was archived. Restart Clawboo to move it to General.',
     ],
+    [
+      { status: 'not-delivered', agentId: 'ada', reason: 'no_team' },
+      'Not sent: this task’s team was deleted',
+    ],
   ])('%j reads "%s"', (delivery, text) => {
     expect(receiptText(delivery, 'Ada')).toBe(text)
   })

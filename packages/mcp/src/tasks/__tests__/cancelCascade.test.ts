@@ -109,6 +109,35 @@ describe('Tasks MCP: cancelling a task', () => {
     expect(listUndeliveredInbox(db, 'lead', { teamId: 'A' })).toHaveLength(1)
   })
 
+  it('finishes the cascade on a repeated cancel, which an earlier call left undone', async () => {
+    // The first cancel is written before its steps are, so a failure between the
+    // two leaves the task cancelled and its steps queued. Asking again fixes it.
+    const { first, second, third } = plan()
+    expect(updateStatus(db, first, 'cancelled').ok).toBe(true)
+    const res = await cancel({ boundScope: { teamId: 'A', agentId: 'reviewer' } }, first)
+    expect(res.isError).toBe(false)
+    expect(getTask(db, second)?.status).toBe('cancelled')
+    expect(getTask(db, third)?.status).toBe('cancelled')
+    expect(listUndeliveredInbox(db, 'lead', { teamId: 'A' })).toHaveLength(1)
+  })
+
+  it('tells the delegator once when the same cancel arrives twice', async () => {
+    const { first } = plan()
+    await cancel({ boundScope: { teamId: 'A', agentId: 'reviewer' } }, first)
+    await cancel({ boundScope: { teamId: 'A', agentId: 'reviewer' } }, first)
+    expect(listUndeliveredInbox(db, 'lead', { teamId: 'A' })).toHaveLength(1)
+  })
+
+  it('says so in the result when the note to the delegator could not be written', async () => {
+    const { first, second } = plan()
+    db.$client.exec('DROP TABLE agent_inbox')
+    const res = await cancel({ boundScope: { teamId: 'A', agentId: 'reviewer' } }, first)
+    expect(res.isError).toBe(false)
+    expect(getTask(db, first)?.status).toBe('cancelled')
+    expect(getTask(db, second)?.status).toBe('cancelled')
+    expect(JSON.parse(res.text)).toMatchObject({ id: first, delegatorNotTold: 'lead' })
+  })
+
   it('writes nothing more for a status that is not a cancel', async () => {
     const { first, second } = plan()
     const client = await connectInMemory(

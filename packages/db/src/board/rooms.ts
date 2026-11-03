@@ -11,7 +11,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { delegationTargetOf } from '@clawboo/board-core'
-import { and, asc, eq, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { agents, roomMembers, rooms, tasks, type DbRoom, type DbTask } from '../schema'
@@ -280,9 +280,11 @@ export function listRoomIdsForTeam(db: ClawbooDb, teamId: string): string[] {
  *    unless its last run already says so. Otherwise the pump would start it as
  *    soon as it arrived, and archiving a room would start the work it was meant
  *    to stop.
- * A task still waiting on another one is not marked: it runs once a person
- * retries the step before it and that step is done. Finished tasks stay where
- * they are. `skip` names tasks the team chat never runs (the task runner's): they
+ * A task still waiting on another one in the same room is not marked: it runs
+ * once a person retries the step before it and that step is done. One waiting on
+ * a task outside the room is marked as a ready one is: that task can finish on its
+ * own, and the step would then start with nobody retrying it. Finished tasks stay
+ * where they are. `skip` names tasks the team chat never runs (the task runner's): they
  * move but are not stopped, as the room engine's Stop leaves them too.
  *
  * The caller stops the room's engine first and waits for that Stop to be
@@ -319,7 +321,20 @@ export function moveArchivedRoomTasks(
       completeExecutionProcess(db, last.id, { status: 'cancelled', error: stopped })
       updateStatus(db, task.id, 'todo')
     }
-    for (const task of getReadyTasks(db, { teamId: room.teamId, roomId: room.id })) {
+    const waitingOutside = db
+      .select()
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.roomId, room.id),
+          eq(tasks.status, 'todo'),
+          eq(tasks.dropped, 0),
+          sql`EXISTS (SELECT 1 FROM task_deps d JOIN tasks dt ON dt.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dt.status != 'done' AND (dt.room_id IS NULL OR dt.room_id != ${room.id}))`,
+        ),
+      )
+      .all() as DbTask[]
+    const ready = getReadyTasks(db, { teamId: room.teamId, roomId: room.id })
+    for (const task of [...ready, ...waitingOutside]) {
       if (!delegationTargetOf(task.sourceDelegationId) || opts.skip?.(task)) continue
       const execs = listExecutions(db, task.id)
       if (execs.length > 0 && execs[execs.length - 1]!.status === 'cancelled') continue

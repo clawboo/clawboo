@@ -67,7 +67,7 @@ import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
-import { taskOutsideItsEngine } from '../lib/teamChat/roomRoster'
+import { engineRefusal } from '../lib/teamChat/roomRoster'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -321,8 +321,9 @@ export function boardRetryPOST(req: Request, res: Response): void {
     }
     // Team chat would hand it to an engine that cannot see it: refuse before
     // anything is written, rather than answer that it started.
-    if (!rerun && taskOutsideItsEngine(db, task)) {
-      res.status(409).json({ ok: false, error: 'room_archived' })
+    const refusal = rerun ? null : engineRefusal(db, task)
+    if (refusal) {
+      res.status(409).json({ ok: false, error: refusal })
       return
     }
     if (task.status !== 'todo') {
@@ -379,8 +380,9 @@ export function boardAssignPOST(req: Request, res: Response): void {
     const rerun = runnerRerunFor(db, task, agentId)
     // Team chat would hand it to an engine that cannot see it: refuse before the
     // new binding is written, rather than answer that it starts now.
-    if (!rerun && taskOutsideItsEngine(db, task)) {
-      res.status(409).json({ ok: false, error: 'room_archived' })
+    const refusal = rerun ? null : engineRefusal(db, task)
+    if (refusal) {
+      res.status(409).json({ ok: false, error: refusal })
       return
     }
     // The new binding and the release to `todo` commit together or not at all.
@@ -589,9 +591,13 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         const mcpBaseUrl = loopbackMcpBaseUrl(req)
         try {
           /** The run the reply would start: through the runner, as Retry does,
-           *  for a task the runner ran; null for team chat. */
+           *  for a task the runner ran (named by its binding, or else by what the
+           *  runner was last given); null for team chat. */
           const rerunOf = (t: DbTask) => {
-            const agentId = delegationTargetOf(t.sourceDelegationId)
+            const agentId =
+              delegationTargetOf(t.sourceDelegationId) ??
+              readTaskRunnerInputs(t)?.assigneeAgentId ??
+              null
             const rerun = agentId ? runnerRerunFor(db, t, agentId) : null
             return agentId && rerun ? { agentId, rerun } : null
           }
@@ -601,8 +607,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
               startTask(db, id, teamId, current ? rerunOf(current) : null, mcpBaseUrl)
             },
             // As Retry: team chat could not run a task its engine cannot see.
-            startRefusal: (t) =>
-              !rerunOf(t) && taskOutsideItsEngine(db, t) ? 'room_archived' : null,
+            startRefusal: (t) => (rerunOf(t) ? null : engineRefusal(db, t)),
           })
         } catch (err) {
           // The comment is saved: say it was not delivered rather than fail the

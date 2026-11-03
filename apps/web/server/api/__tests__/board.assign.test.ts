@@ -23,6 +23,7 @@ import {
   teams,
   updateStatus,
 } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -551,5 +552,74 @@ describe('board: handing a task to one agent', () => {
       expect(r.statusCode()).toBe(202)
       expect(reruns).toEqual([{ taskId: t.id, assigneeAgentId: 'builder', runtime: 'claude-code' }])
     })
+  })
+
+  // A room is deleted only with its team, so a task still filed under a room
+  // that is gone has no chat left at all: restarting moves it nowhere.
+  describe('a task whose chat room went with its team', () => {
+    function deletedTeamTask(): string {
+      const db = getDb()
+      const roomId = createRoom(db, { teamId: OTHER_TEAM, name: 'Ops', memberIds: ['outsider'] }).id
+      const t = createTask(db, {
+        title: 'orphaned',
+        teamId: OTHER_TEAM,
+        roomId,
+        sourceDelegationId: 'r:deleg:agent:outsider:reflectTo:lead',
+      })
+      claimTask(db, t.id, 'outsider')
+      updateStatus(db, t.id, 'blocked')
+      // As the team delete route does: orphan its agents, then drop the team,
+      // which takes its rooms with it.
+      db.update(agents).set({ teamId: null }).where(eq(agents.teamId, OTHER_TEAM)).run()
+      db.delete(teams).where(eq(teams.id, OTHER_TEAM)).run()
+      return t.id
+    }
+
+    it('Retry refuses it as having no team, not as an archived room', () => {
+      const id = deletedTeamTask()
+      const r = mockRes()
+      boardRetryPOST(req({ params: { taskId: id } }), r.res)
+      expect(r.statusCode()).toBe(409)
+      expect(r.body()).toMatchObject({ ok: false, error: 'no_team' })
+      expect(dispatched).toEqual([])
+    })
+
+    it('a reply says the team is gone', async () => {
+      const id = deletedTeamTask()
+      const r = mockRes()
+      await boardCommentPOST(
+        req({ params: { taskId: id }, body: { body: 'still need this', authorType: 'user' } }),
+        r.res,
+      )
+      expect(r.body()).toMatchObject({
+        forwarded: false,
+        delivery: { status: 'not-delivered', reason: 'no_team' },
+      })
+      expect(dispatched).toEqual([])
+    })
+  })
+
+  it('a reply reruns a task the runner ran through the runner, as Retry does', async () => {
+    // The task has no hand-off marker, only what the runner was given. The reply
+    // used to read the marker alone and hand the task to team chat instead.
+    const db = getDb()
+    const t = createTask(db, { title: 'fix the build', teamId: TEAM })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'builder',
+      repoPath: '/repo',
+      kind: 'code',
+      model: null,
+    })
+    claimTask(db, t.id, 'builder')
+    updateStatus(db, t.id, 'blocked')
+    const r = mockRes()
+    await boardCommentPOST(
+      req({ params: { taskId: t.id }, body: { body: 'try again', authorType: 'user' } }),
+      r.res,
+    )
+    expect(r.body()).toMatchObject({ delivery: { status: 'woke-agent', agentId: 'builder' } })
+    expect(reruns).toEqual([{ taskId: t.id, assigneeAgentId: 'builder', runtime: 'claude-code' }])
+    expect(dispatched).toEqual([])
   })
 })

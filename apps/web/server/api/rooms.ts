@@ -19,6 +19,7 @@ import {
   archiveRoom,
   createRoom,
   getActiveRoom,
+  getRoom,
   invalidRoomMembers,
   listRooms,
   moveArchivedRoomTasks,
@@ -237,7 +238,10 @@ export function teamRoomPATCH(req: Request, res: Response): void {
 }
 
 // ─── DELETE /api/teams/:id/rooms/:roomId ─────────────────────────────────────
-// Archives the room: see the file header.
+// Archives the room: see the file header. A DELETE that failed after the archive
+// is finished by the next one: for an archived room that still holds unfinished
+// tasks it runs the stop and the move again. An archived room with none left is
+// gone, as it always was (404).
 
 export async function teamRoomDELETE(req: Request, res: Response): Promise<void> {
   const teamId = req.params['id'] as string | undefined
@@ -248,13 +252,15 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
   }
   try {
     const db = getDb()
-    if (!getActiveRoom(db, teamId, roomId)) {
+    const room = getRoom(db, roomId)
+    if (!room || room.teamId !== teamId) {
       res.status(404).json({ error: 'room not found' })
       return
     }
+    const resuming = room.archivedAt != null
     // Archived first: from here nothing builds an engine for this room or routes
     // a task to it, so nothing new can start in it while it winds down.
-    archiveRoom(db, roomId)
+    if (!resuming) archiveRoom(db, roomId)
     // Its agents start fresh if the room were ever reopened: no resume pointer
     // carries the archived conversation forward.
     db.delete(settings)
@@ -268,7 +274,11 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     // engine left reads tasks with no room, so where they are, Retry, Assign and
     // a reply would start nothing. The task runner's own tasks move unstopped,
     // as the Stop leaves them: the runner reruns them.
-    moveArchivedRoomTasks(db, { roomId, skip: (t) => runsOnTaskRunner(db, t) })
+    const moved = moveArchivedRoomTasks(db, { roomId, skip: (t) => runsOnTaskRunner(db, t) })
+    if (resuming && moved.length === 0) {
+      res.status(404).json({ error: 'room not found' })
+      return
+    }
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

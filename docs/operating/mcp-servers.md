@@ -266,9 +266,9 @@ This URL carries no scope, so the list has no claim or status tools.
 </Accordion>
 <Accordion title="claim_task or update_task_status is missing, or TeamChat lists no tools">
 
-**What it means:** the URL is unsigned. TeamChat also stays empty for a URL signed with a team but no agent.
+**What it means:** on a team run, this is by design: the team engine claims and moves the run's task itself, so a team run gets no claim or status tools, only `block_task` for its own task. Otherwise the URL is unsigned. TeamChat also stays empty for a URL signed with a team but no agent.
 
-**Fix:** get the URL from `/api/mcp/config` with `scopeTeamId`, and with `scopeAgentId` for TeamChat. Do not edit the ids in a signed URL.
+**Fix:** nothing to fix on a team run. Otherwise get the URL from `/api/mcp/config` with `scopeTeamId`, and with `scopeAgentId` for TeamChat. Do not edit the ids in a signed URL.
 
 </Accordion>
 <Accordion title="A stdio agent sees an empty board">

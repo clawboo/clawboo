@@ -2080,7 +2080,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // entry lives, not once per run: the refusal arrives as a new turn, and a
     // sender that repeats the same bad hand-off in it gets no second one.
     for (const handOff of signals.unrouted) {
-      const key = `unrouted:${sourceAgentId}:${handOff.name}:${handOff.task.slice(0, 80)}`
+      const key = `unrouted:${sourceAgentId}:${handOff.name}:${handOff.task}`
       if (processed.has(key)) continue
       processed.set(key, now())
       reflectUnrouted(handOff, sourceAgentId, delegatorAgentId, sourceTaskId)

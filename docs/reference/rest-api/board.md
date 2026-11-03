@@ -235,7 +235,7 @@ A runner rerun that does not start (the runner refuses it, for example because a
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), or `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`).
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), or `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`). A task filed under a room that no longer exists gets `no_team`: rooms are removed only with their team, so there is no chat left to run it.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -264,7 +264,7 @@ A task with `runnerInputs` starts through the task runner, on the new agent's ru
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `no_team`, `not_assignable` (the task is being worked on, finished, cancelled or dropped), or `room_archived` (as for `retry`: it would start in team chat but is still filed under an archived chat room). A refusal binds nothing and writes no note.
+**`409 Conflict`**: `no_team`, `not_assignable` (the task is being worked on, finished, cancelled or dropped), or `room_archived` (as for `retry`: it would start in team chat but is still filed under an archived chat room). `no_team` also covers a task whose room went with its team. A refusal binds nothing and writes no note.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -491,7 +491,7 @@ A `user` comment is a person's reply. After the comment is saved, the route deli
    - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits in the mailbox. A `todo` task that a reply started less than 15 seconds ago is not dispatched again.
    - `in_review` and `backlog`: the reply waits in the mailbox.
 
-A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run. A task that would start in team chat but is still filed under an archived chat room is refused before anything is written, mailbox included (`not-delivered`, `room_archived`).
+A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run. A reply that would start the task again in team chat (a `blocked` or `todo` task, or a stranded `in_progress` one) is not delivered when the task is still filed under an archived chat room (`not-delivered`, `room_archived`), or under a room that went with its team (`no_team`). The comment stays saved; the mailbox and the task are left as they were.
 
 - **Path params**: `taskId`.
 - **Request body**:
@@ -534,7 +534,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
     | {
         status: 'not-delivered'
         agentId: string | null
-        reason: 'finished' | 'unassigned' | 'failed' | 'room_archived'
+        reason: 'finished' | 'unassigned' | 'failed' | 'room_archived' | 'no_team'
       }
 }
 ```
@@ -552,6 +552,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
 | `not-delivered` | `unassigned`    | No agent has the task, and `agentId` is `null`                                                                                                                 |
 | `not-delivered` | `failed`        | Writing to the mailbox or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                     |
 | `not-delivered` | `room_archived` | The task would start in team chat but is still filed under an archived chat room, so nothing could run it. The comment is saved and nothing is sent            |
+| `not-delivered` | `no_team`       | The task would start in team chat but its room went with its team, so no chat is left to run it. The comment is saved and nothing is sent                      |
 
 For a `finished` reply, the dashboard offers **Send as a follow-up task**, which calls `POST /api/board` (above) with `title: "Follow up: <title>"`, the reply as `description`, the same `teamId` and `assigneeAgentId`, and the finished task as `parentTaskId`.
 

@@ -201,7 +201,7 @@ Create a subtask under a parent. It takes the parent's team and chat room, and s
 Claim a `todo` task for an agent. The claim is atomic: when two agents race, exactly one wins. The claimed task moves to `in_progress` with the assignee set.
 
 ```ts
-{ taskId: string; assigneeAgentId: string; assigneeRuntime?: string }
+{ taskId: string; assigneeAgentId?: string; assigneeRuntime?: string }
 ```
 
 - A caller bound to an agent claims for itself: `assigneeAgentId` is optional, and naming another agent is refused with `claim_task claims a task for you (<agent>), not for <name>. To hand a task to another agent, use assign_task.` The operator's stdio bin names the agent, as before.
@@ -239,7 +239,7 @@ Move a task to another status. Legal moves follow the board's state machine; `do
 ```
 
 - Moving a task to `todo` also clears its assignee and its verification verdict.
-- Moving a task to `cancelled` also cancels the plan steps still waiting on it (`todo` or `backlog`, all the way down the chain), as a person's cancel on the board does. The result then carries them as `cancelledDependents: [{ id, title }]`. The agent that delegated the task gets a mailbox note naming it and how many steps went with it, unless that agent made the call.
+- Moving a task to `cancelled` also cancels the plan steps still waiting on it (`todo` or `backlog`, all the way down the chain), as a person's cancel on the board does. The result then carries them as `cancelledDependents: [{ id, title }]`. Cancelling a task that is already cancelled runs the same cascade again, so a repeated call finishes one an earlier call left undone. The agent that delegated the task gets a mailbox note naming it and how many steps went with it, unless that agent made the call. When the note cannot be written, the cancel still stands and the result carries `delegatorNotTold: <agentId>`.
 - Returns the updated task row.
 - Errors: `status change failed: illegal_transition`, `status change failed: not_found`, and `status change failed: verification_required` when the task holds a failing verification verdict (only a person's override, from the board or the board API, can finish it). See [When work is checked](/concepts/verification).
 - Refused when a person moved the card on the board or in the task drawer after the task's latest run started (or the task has not run since): that run was overruled, and the status stays where the person put it. The tool error reads `A person moved this task to <column> after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.` A run started after the move writes as usual.

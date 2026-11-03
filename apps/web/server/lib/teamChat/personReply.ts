@@ -42,8 +42,8 @@ export type ReplyDelivery =
       status: 'not-delivered'
       agentId: string | null
       /** `room_archived`: the task is filed under an archived chat room, so
-       *  nothing could start it. */
-      reason: 'finished' | 'unassigned' | 'failed' | 'room_archived'
+       *  nothing could start it. `no_team`: its room went with its team. */
+      reason: 'finished' | 'unassigned' | 'failed' | 'room_archived' | 'no_team'
     }
 
 export interface ReplyDeps {
@@ -51,7 +51,7 @@ export interface ReplyDeps {
   dispatch: (teamId: string, taskId: string) => void
   /** Why the task could not be started for the reply, or null when it can.
    *  Asked before anything is written. */
-  startRefusal?: (task: DbTask) => 'room_archived' | null
+  startRefusal?: (task: DbTask) => 'room_archived' | 'no_team' | null
   /** How long to wait for a steer to land before saying it is queued. */
   steerWaitMs?: number
   now?: () => number

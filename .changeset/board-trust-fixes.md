@@ -4,7 +4,7 @@
 
 The board no longer says work started, or was handed off, when nothing happened.
 
-**Deleted chat rooms.** Deleting a room now waits for its work to stop, then moves its unfinished tasks to General, still stopped, so Retry, Assign or a reply runs them there. Before, those tasks stayed filed under the deleted room, where nothing could run them, while Retry, Assign and a reply all answered that they had started. Clawboo moves the tasks of rooms deleted before this update when it starts. Stopping a room also releases every task its work was running, not only the first.
+**Deleted chat rooms.** Deleting a room now waits for its work to stop, then moves its unfinished tasks to General, still stopped, so Retry, Assign or a reply runs them there. Before, those tasks stayed filed under the deleted room, where nothing could run them, while Retry, Assign and a reply all answered that they had started. Clawboo moves the tasks of rooms deleted before this update when it starts. A task left behind by a deleted team is now refused as having no team. Stopping a room also releases every task its work was running, not only the first.
 
 **Boo Zero's own chat.** Boo Zero is told that it cannot hand out work from its own chat, and sends you to the team's chat instead. A hand-off that still appears in a reply there shows as a **Not handed off** note, not as a "Delegated to" card for work that never starts.
 

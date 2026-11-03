@@ -127,15 +127,18 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
  * the board tells the delegator the same way. A cancel by the delegator itself
  * needs no note, and a task nobody delegated has nobody waiting on it. The row is
  * durable: it rides the delegator's next run or tool call.
+ *
+ * Returns the delegator when its note could not be written, so the caller can say
+ * so, and null otherwise.
  */
 function noteCancelForDelegator(
   db: ClawbooDb,
   task: DbTask,
   stepsCancelled: number,
   callerAgentId: string | undefined,
-): void {
+): string | null {
   const delegator = delegatorOf(task.sourceDelegationId)
-  if (!delegator || delegator === callerAgentId) return
+  if (!delegator || delegator === callerAgentId) return null
   const steps =
     stepsCancelled === 0
       ? ''
@@ -150,9 +153,12 @@ function noteCancelForDelegator(
       taskId: task.id,
       body: `“${task.title}” was cancelled through the Tasks tools.${steps} Do not hand it out again unless the work is still needed.`,
     })
+    return null
   } catch {
     // The cancel itself is written; failing the tool call now would only make
-    // the caller retry a cancel that already happened.
+    // the caller retry a cancel that already happened. The result says the note
+    // is missing instead.
+    return delegator
   }
 }
 
@@ -445,19 +451,28 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const denied = outOfTeam(taskId)
         if (denied) return denied
         const status = str(args['status']) as TaskStatus
-        const wasCancelled = getTask(db, taskId)?.status === 'cancelled'
         const r = updateStatus(db, taskId, status, { unlessPersonMoved: true })
-        if (!r.ok || !r.task || status !== 'cancelled' || wasCancelled)
-          return statusWriteResult(r, 'status change')
+        if (!r.ok || !r.task || status !== 'cancelled') return statusWriteResult(r, 'status change')
         // A cancelled step can never be done, so the steps waiting on it would
         // sit in To do forever, looking queued. The same cascade as a person's
-        // cancel on the board.
+        // cancel on the board. Run on a repeated cancel too, which finishes a
+        // cascade an earlier call did not: it moves only steps still waiting.
         const dependents = cancelDependents(db, taskId)
-        noteCancelForDelegator(db, r.task, dependents.length, boundAgentId)
-        if (dependents.length === 0) return jsonResult(r.task)
+        // `from` is read in the cancel's own write, so of two cancels racing, only
+        // the one that moved the task tells the delegator.
+        const unnoted =
+          r.from !== 'cancelled' || dependents.length > 0
+            ? noteCancelForDelegator(db, r.task, dependents.length, boundAgentId)
+            : null
+        if (dependents.length === 0 && !unnoted) return jsonResult(r.task)
         return jsonResult({
           ...r.task,
-          cancelledDependents: dependents.map((d) => ({ id: d.id, title: d.title })),
+          ...(dependents.length > 0
+            ? { cancelledDependents: dependents.map((d) => ({ id: d.id, title: d.title })) }
+            : {}),
+          // The agent that delegated the task, when its mailbox note could not
+          // be written: the cancel stands, but nobody told it.
+          ...(unnoted ? { delegatorNotTold: unnoted } : {}),
         })
       },
     },

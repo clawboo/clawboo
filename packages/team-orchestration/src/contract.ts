@@ -2398,7 +2398,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     })
 
     it('leaves the steps waiting on it queued, so a Retry carries the plan on', async () => {
-      const { board, orchestrator } = makeHarness()
+      const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
         sk('leader'),
         doneEvent(
@@ -2411,6 +2411,13 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'Blocked on access.'))
       expect(board.statusOf(s1!)).toBe('blocked')
       expect(board.statusOf(s2!)).toBe('todo')
+
+      // The person's Retry: back to To do, run again, done. Step 2 then starts.
+      expect(await board.updateStatus(s1!, 'todo')).toBe(true)
+      expect(await orchestrator.dispatchTask(s1!)).toBe('started')
+      await orchestrator.onEvent(sk('a2'), doneEvent('r3', 'Got access, step one done.'))
+      expect(board.statusOf(s1!)).toBe('done')
+      expect(delivered.at(-1)).toMatchObject({ agentId: 'a3', task: 's2' })
     })
   })
 
@@ -2496,6 +2503,24 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.onEvent(sk('leader'), toolCallEvent('r2', 'delegate', call))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(delivered)).toHaveLength(1)
+    })
+
+    it('tells the sender about each different task, even when two begin the same way', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      const opening = 'Collect the numbers for the quarterly board report, every region, '.repeat(2)
+      for (const [run, tail] of [
+        ['r1', 'then chart revenue'],
+        ['r2', 'then chart churn'],
+      ] as const)
+        await orchestrator.onEvent(
+          sk('leader'),
+          toolCallEvent(run, 'delegate', { assignee: 'Researcher', task: opening + tail }),
+        )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const told = reflections(delivered)
+        .map((r) => r.task)
+        .join('\n')
+      expect(told.match(/did not start/g)).toHaveLength(2)
     })
 
     it('a hand-off to a teammate still starts, with no refusal', async () => {

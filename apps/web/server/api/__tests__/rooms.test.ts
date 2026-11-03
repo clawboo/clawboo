@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
   agents,
+  archiveRoom,
   chatMessages,
   claimTask,
   createExecutionProcess,
@@ -245,6 +246,37 @@ describe('rooms REST', () => {
     expect(listExecutions(db, queued.id).map((e) => e.status)).toEqual(['cancelled'])
     // A finished task keeps its room, so its history reads where it happened.
     expect(getTask(db, done.id)?.roomId).toBe(room.id)
+  })
+
+  it('a second delete finishes the move a failed first one left undone', async () => {
+    // The first one archived the room and then failed, so its task stayed behind.
+    // The room reads as gone, but the task in it must still reach General.
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const queued = createTask(db, {
+      title: 'Left behind',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: encodeHumanAssignment('a1', 'n1'),
+    })
+    archiveRoom(db, room.id)
+
+    const retry = fakeRes()
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), retry.res)
+    expect(retry.status()).toBe(200)
+    expect(getTask(db, queued.id)?.roomId).toBeNull()
+    expect(listExecutions(db, queued.id).map((e) => e.status)).toEqual(['cancelled'])
+
+    const again = fakeRes()
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), again.res)
+    expect(again.status()).toBe(404)
+  })
+
+  it("delete 404s another team's room", async () => {
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const other = fakeRes()
+    await teamRoomDELETE(req({ id: 'OTHER', roomId: room.id }), other.res)
+    expect(other.status()).toBe(404)
+    expect(listRooms(db, 'T')).toHaveLength(1)
   })
 
   it('delete stops a step still running in the room when no engine is there to stop it', async () => {

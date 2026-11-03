@@ -100,6 +100,33 @@ describe('moveArchivedRoomTasks', () => {
     expect(listExecutions(db, second)).toEqual([])
   })
 
+  it('starts that waiting step once the step before it is retried and done', () => {
+    const first = roomTask('Step 1')
+    const second = roomTask('Step 2', 'cy')
+    linkDep(db, second, first)
+    archiveRoom(db, roomId)
+    moveArchivedRoomTasks(db)
+    claimTask(db, first, 'bea')
+    updateStatus(db, first, 'done')
+    expect(getReadyTasks(db, { teamId: 'T', roomId: null }).map((t) => t.id)).toEqual([second])
+    expect(ledgerAllowsAutoFire(listExecutions(db, second))).toBe(true)
+  })
+
+  it('marks a step stopped that waits on a task outside the room', () => {
+    // That task finishes in its own chat with no retry here, and the step would
+    // then start in the team chat with nobody asking for it.
+    const elsewhere = createTask(db, { title: 'In General', teamId: 'T' }).id
+    const step = roomTask('Waits on General')
+    linkDep(db, step, elsewhere)
+    archiveRoom(db, roomId)
+    moveArchivedRoomTasks(db)
+    expect(lastRun(step)).toBe('cancelled')
+    claimTask(db, elsewhere, 'cy')
+    updateStatus(db, elsewhere, 'done')
+    expect(getReadyTasks(db, { teamId: 'T', roomId: null }).map((t) => t.id)).toContain(step)
+    expect(ledgerAllowsAutoFire(listExecutions(db, step))).toBe(false)
+  })
+
   it('does not mark a task stopped again when its Stop already did', () => {
     const queued = roomTask('Queued')
     const stop = createExecutionProcess(db, { taskId: queued, executorType: 'openclaw' })

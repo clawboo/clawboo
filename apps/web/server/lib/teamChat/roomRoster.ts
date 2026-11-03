@@ -10,6 +10,7 @@
 import {
   activeRoomMemberIds,
   getActiveRoom,
+  getRoom,
   getTask,
   teams,
   type ClawbooDb,
@@ -70,15 +71,20 @@ export function roomIdForTask(db: ClawbooDb, taskId: string): string | null {
 }
 
 /**
- * Whether no team chat engine can run this task: it is filed under a room that
- * is not one of its team's active rooms. The room's engine is gone, and the
- * team's own chat engine, which `roomIdForTask` hands the task to, reads only
- * tasks with no room, so a dispatch there quietly finds nothing to run.
- * Archiving a room moves its unfinished tasks to the team's own chat
- * (`moveArchivedRoomTasks`), so this holds only for a task that move missed.
+ * Why no team chat engine can run this task, or null when one can. It is filed
+ * under a room that is not one of its team's active rooms, so the room's engine
+ * is gone, and the team's own chat engine, which `roomIdForTask` hands the task
+ * to, reads only tasks with no room: a dispatch there quietly finds nothing to
+ * run.
+ *  - `room_archived`: the room is archived. Archiving a room moves its unfinished
+ *    tasks to the team's own chat (`moveArchivedRoomTasks`, also run at boot), so
+ *    this holds only for a task that move missed.
+ *  - `no_team`: the room is gone. Rooms are archived, never deleted, except with
+ *    their team, so the team is gone too and there is no chat left to run it.
  */
-export function taskOutsideItsEngine(db: ClawbooDb, task: DbTask): boolean {
-  return task.roomId != null && roomIdForTask(db, task.id) === null
+export function engineRefusal(db: ClawbooDb, task: DbTask): 'room_archived' | 'no_team' | null {
+  if (task.roomId == null || roomIdForTask(db, task.id) !== null) return null
+  return getRoom(db, task.roomId) ? 'room_archived' : 'no_team'
 }
 
 /**

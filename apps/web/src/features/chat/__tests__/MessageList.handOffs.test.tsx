@@ -17,7 +17,7 @@ import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 
-import { MessageList, StreamingCard, type RenderBlock } from '../chatComponents'
+import { AssistantTurnCard, MessageList, StreamingCard, type RenderBlock } from '../chatComponents'
 
 afterEach(cleanup)
 
@@ -103,5 +103,15 @@ describe('the group chat, where a <delegate> tag starts a task', () => {
     renderUi(<StreamingCard text={TAGGED} agentId="bz" agentName="Boo Zero" />)
     expect(screen.getByTestId('delegation-card')).toHaveTextContent('Delegated to')
     expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+  })
+
+  it('draws neither a card nor a note once the turn is committed', () => {
+    // A committed turn drops the block from its prose and draws nothing inline.
+    const block = assistantTurn(TAGGED)
+    if (block.kind !== 'assistant-turn') throw new Error('expected an assistant turn')
+    renderUi(<AssistantTurnCard block={block} agentId="bz" agentName="Boo Zero" teamId="T" />)
+    expect(screen.queryByTestId('delegation-card')).toBeNull()
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByText(/On it\./)).toBeInTheDocument()
   })
 })
