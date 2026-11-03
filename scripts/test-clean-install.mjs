@@ -360,7 +360,7 @@ function shellQuote(value) {
  * Run a build/packaging tool to completion. Resolves `{ code, stdout, stderr }`
  * — never rejects on a non-zero exit, so the caller reports a readable failure.
  */
-function runTool(cmd, args, { cwd, timeoutMs = 120_000 } = {}) {
+function runTool(cmd, args, { cwd, timeoutMs = 120_000, env = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(
       IS_WINDOWS ? shellQuote(cmd) : cmd,
@@ -370,7 +370,7 @@ function runTool(cmd, args, { cwd, timeoutMs = 120_000 } = {}) {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: IS_WINDOWS,
         windowsHide: IS_WINDOWS,
-        env: { ...process.env, npm_config_yes: 'true' },
+        env: { ...process.env, npm_config_yes: 'true', ...env },
       },
     )
     let stdout = ''
@@ -855,7 +855,16 @@ async function packAndInstall() {
   const installed = await runTool(
     'npm',
     ['install', tarball, '--no-audit', '--no-fund', '--loglevel', 'error'],
-    { cwd: installDir, timeoutMs: INSTALL_TIMEOUT_MS },
+    {
+      cwd: installDir,
+      timeoutMs: INSTALL_TIMEOUT_MS,
+      // This script's Node first, so npm builds better-sqlite3's native binding
+      // for the Node the CLI runs on below. Windows names the variable `Path`
+      // and boots the CLI on its own PATH, so it is left as it is there.
+      env: IS_WINDOWS
+        ? {}
+        : { PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}` },
+    },
   )
   if (installed.code !== 0) {
     fail(`npm install of the tarball failed (exit ${installed.code})\n${installed.stderr}`)
@@ -1147,11 +1156,11 @@ async function main() {
   if (useShadowPath) {
     shadowBinDir = await fs.mkdtemp(path.join(os.tmpdir(), 'clawboo-shadow-bin-'))
     const allowedBins = ['node', 'npm', 'pnpm', 'which', 'ls']
-    // The first match wins, so the Node running this script comes first. The
-    // `npm install` above built better-sqlite3's native binding for the Node on
-    // this script's PATH, which in CI is this one. A system Node found first
-    // (the ubuntu-26.04 runner image ships Node 24 in /usr/local/bin) cannot
-    // load that binding, and every database route answers 500.
+    // The first match wins, so the Node running this script comes first: the
+    // `npm install` above built better-sqlite3's native binding for it. A system
+    // Node found first (the ubuntu-26.04 runner image ships Node 24 in
+    // /usr/local/bin) cannot load that binding, and every database route
+    // answers 500.
     for (const dir of [path.dirname(process.execPath), '/usr/bin', '/bin', '/usr/local/bin']) {
       for (const bin of allowedBins) {
         const src = path.join(dir, bin)
