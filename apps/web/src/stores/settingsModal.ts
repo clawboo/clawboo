@@ -60,11 +60,18 @@ interface SettingsModalState {
   view: SettingsView
   /** One-shot intent for the Runtimes panel (consumed on mount / arrival, then cleared). */
   runtimeIntent: RuntimeConnectIntent | null
+  /** One-shot: the runtime whose row the Runtimes panel opens and scrolls to (a
+   *  failed run's "Fix sign-in"). Consumed by that row, then cleared. */
+  focusRuntime: string | null
   /** Open the modal, optionally jumping to a view and/or handing the Runtimes panel a
-   *  one-shot intent (e.g. auto-open the OpenClaw setup flow). */
-  openSettings: (view?: SettingsView, opts?: { runtimeIntent?: RuntimeConnectIntent }) => void
+   *  one-shot intent (e.g. auto-open the OpenClaw setup flow, or open one runtime). */
+  openSettings: (
+    view?: SettingsView,
+    opts?: { runtimeIntent?: RuntimeConnectIntent; focusRuntime?: string },
+  ) => void
   setView: (view: SettingsView) => void
   clearRuntimeIntent: () => void
+  clearFocusRuntime: () => void
   close: () => void
 }
 
@@ -72,11 +79,18 @@ export const useSettingsModalStore = create<SettingsModalState>((set) => ({
   open: false,
   view: DEFAULT_SETTINGS_VIEW,
   runtimeIntent: null,
-  // Every open RESETS the one-shot intent (only set when explicitly passed) so a stale
-  // intent from a prior open can never re-fire.
+  focusRuntime: null,
+  // Every open RESETS the one-shot intents (only set when explicitly passed) so a
+  // stale intent from a prior open can never re-fire.
   openSettings: (view, opts) =>
-    set((s) => ({ open: true, view: view ?? s.view, runtimeIntent: opts?.runtimeIntent ?? null })),
+    set((s) => ({
+      open: true,
+      view: view ?? s.view,
+      runtimeIntent: opts?.runtimeIntent ?? null,
+      focusRuntime: opts?.focusRuntime ?? null,
+    })),
   setView: (view) => set({ view }),
   clearRuntimeIntent: () => set({ runtimeIntent: null }),
-  close: () => set({ open: false, runtimeIntent: null }),
+  clearFocusRuntime: () => set({ focusRuntime: null }),
+  close: () => set({ open: false, runtimeIntent: null, focusRuntime: null }),
 }))

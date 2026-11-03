@@ -16,7 +16,7 @@ import {
   useReducedMotion,
   type Transition,
 } from 'framer-motion'
-import { AlertTriangle, ChevronRight, RotateCcw, UserPlus } from 'lucide-react'
+import { AlertTriangle, ChevronRight, KeyRound, RotateCcw, UserPlus } from 'lucide-react'
 import { delegationTargetOf } from '@clawboo/board-core'
 import { BooAvatar } from '@clawboo/ui'
 
@@ -32,7 +32,9 @@ import { useTeamStore } from '@/stores/team'
 
 import { BoardMenu, MoreMenuButton, type BoardMenuItem } from './BoardMenu'
 import {
+  ACCOUNT_FAILURE_META,
   ATTENTION_META,
+  FIX_SIGN_IN,
   attentionLabel,
   taskAttentionOf,
   type AttentionReason,
@@ -157,8 +159,13 @@ function causeOf(detail: string): string {
 function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
   const single = (s: StuckItem): StuckEntry => ({ kind: 'task', key: s.task.id, ...s })
   if (!group) return stuck.map(single)
-  const keyOf = (s: StuckItem) =>
-    s.attention.detail ? `${s.attention.reason}:${causeOf(s.attention.detail)}` : null
+  // An account refusal groups only with the same refusal on the same runtime, so
+  // the group's Retry all still asks first and its Fix sign-in opens that runtime.
+  const keyOf = (s: StuckItem) => {
+    const { reason, detail, cause, runtime } = s.attention
+    if (!detail) return null
+    return `${reason}:${causeOf(detail)}${cause ? `|${cause}:${runtime ?? ''}` : ''}`
+  }
   const members = new Map<string, StuckItem[]>()
   for (const s of stuck) {
     const key = keyOf(s)
@@ -324,15 +331,18 @@ function returnFocus(trigger: HTMLElement | null) {
 
 /** The one action a card leads with, by why it waits. Retry when the task can go
  *  back to its agent; Assign when nobody has it; Review and Open take the person
- *  to the drawer, where a check's findings or the story of a block are. */
-type PrimaryAction = 'retry' | 'assign' | 'review' | 'open'
+ *  to the drawer, where a check's findings or the story of a block are. A run the
+ *  provider refused for the account leads with the fix, since a retry would fail
+ *  the same way. */
+type PrimaryAction = 'retry' | 'assign' | 'review' | 'open' | 'fix'
 
 function primaryActionOf(
-  reason: AttentionReason,
+  attention: TaskAttention,
   canRetry: boolean,
   canAssign: boolean,
 ): PrimaryAction {
-  switch (reason) {
+  if (attention.cause) return 'fix'
+  switch (attention.reason) {
     case 'failed':
     case 'timed_out':
     case 'stopped':
@@ -414,7 +424,7 @@ function NeedsYouTaskCard({
   onOpen: () => void
   onChanged: () => void
 }) {
-  const { retry, dismiss, assign } = useTaskActions()
+  const { retry, dismiss, assign, fixSignIn } = useTaskActions()
   // One action at a time: a second press while the first is still out would
   // only be refused.
   const [busy, setBusy] = useState(false)
@@ -437,8 +447,10 @@ function NeedsYouTaskCard({
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
   const canAssign = !bound && members.length > 0
-  const primary = primaryActionOf(attention.reason, canRetry, canAssign)
-  const detail = attention.detail ?? meta.hint
+  const primary = primaryActionOf(attention, canRetry, canAssign)
+  const detail =
+    attention.detail ?? (attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint)
+  const retryIt = (id: string) => retry(id, attention)
 
   // Focus stays on the pressed button until the board's next read takes the
   // card away, and the card hands it on as it leaves. An action picked from a
@@ -464,7 +476,7 @@ function NeedsYouTaskCard({
         key: 'retry',
         label: 'Retry',
         icon: <RotateCcw size={14} strokeWidth={2} />,
-        onSelect: () => act(retry, opener),
+        onSelect: () => act(retryIt, opener),
       })
     }
     if (primary !== 'assign') {
@@ -541,12 +553,21 @@ function NeedsYouTaskCard({
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
           {who}
         </span>
-        {primary === 'retry' ? (
+        {primary === 'fix' ? (
+          <button
+            type="button"
+            className={CARD_ACTION}
+            onClick={() => fixSignIn(attention.runtime)}
+          >
+            <KeyRound size={12} strokeWidth={2} aria-hidden />
+            {FIX_SIGN_IN}
+          </button>
+        ) : primary === 'retry' ? (
           <button
             type="button"
             className={CARD_ACTION}
             aria-disabled={busy || undefined}
-            onClick={() => act(retry)}
+            onClick={() => act(retryIt)}
           >
             <RotateCcw size={12} strokeWidth={2} aria-hidden />
             Retry
@@ -639,7 +660,7 @@ function NeedsYouGroupCard({
   onChanged: () => void
   reduced: boolean
 }) {
-  const { retryMany, dismissMany } = useTaskActions()
+  const { retryMany, dismissMany, fixSignIn } = useTaskActions()
   const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const headlineId = useId()
@@ -648,7 +669,11 @@ function NeedsYouGroupCard({
   const ids = items.map((i) => i.task.id)
   const agentIds = [...new Set(items.map((i) => agentOf(i.task)).filter((id) => id !== null))]
   const canRetryAll = items.every((i) => canRetryTask(i.task, i.attention))
-  const label = `${ATTENTION_META[reason].label} · ${countLabel(n, 'task')}`
+  // The same refusal on every task: the group leads with the fix, like a card.
+  const first = items[0]!.attention
+  const account = items.every((i) => i.attention.cause === first.cause) ? first : null
+  const label = `${account?.cause ? ACCOUNT_FAILURE_META[account.cause].label : ATTENTION_META[reason].label} · ${countLabel(n, 'task')}`
+  const retryAll = (taskIds: readonly string[]) => retryMany(taskIds, account ?? undefined)
 
   // As on a single card: focus stays on the pressed button (or goes back to the
   // menu's button), and the group hands it on as it leaves.
@@ -692,25 +717,41 @@ function NeedsYouGroupCard({
         <span className="flex min-w-0 flex-1 items-center">
           <AgentStack agentIds={agentIds} />
         </span>
-        {canRetryAll && (
+        {account?.cause ? (
+          <button type="button" className={CARD_ACTION} onClick={() => fixSignIn(account.runtime)}>
+            <KeyRound size={12} strokeWidth={2} aria-hidden />
+            {FIX_SIGN_IN}
+          </button>
+        ) : canRetryAll ? (
           <button
             type="button"
             aria-label={`Retry all ${countLabel(n, 'task')}`}
             className={CARD_ACTION}
             aria-disabled={busy || undefined}
-            onClick={() => act(retryMany)}
+            onClick={() => act(retryAll)}
           >
             <RotateCcw size={12} strokeWidth={2} aria-hidden />
             Retry all
           </button>
-        )}
+        ) : null}
         <MoreMenuButton
           label={`More for ${countLabel(n, 'task')}`}
           disabled={busy}
           items={(opener) => [
+            ...(account?.cause && canRetryAll
+              ? [
+                  {
+                    key: 'retry',
+                    label: 'Retry all',
+                    icon: <RotateCcw size={14} strokeWidth={2} />,
+                    onSelect: () => act(retryAll, opener),
+                  },
+                ]
+              : []),
             {
               key: 'dismiss',
               label: 'Dismiss all',
+              separator: !!account?.cause && canRetryAll,
               onSelect: () => act(dismissMany, opener),
             },
           ]}

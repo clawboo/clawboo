@@ -118,32 +118,37 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 - **Approvals**: an agent wants to run a command, use a risky tool, or make a risky handoff. Answer them on their card. See [Approvals](/using/approvals).
 - **Tasks that will not move by themselves**. Each card says why in amber, with the reason the run recorded when there is one, and shows the agent.
 
-| Badge            | What happened                                                |
-| ---------------- | ------------------------------------------------------------ |
-| **Failed**       | The last run ended in an error                               |
-| **Timed out**    | The agent stopped responding and its run was ended           |
-| **Stopped**      | You pressed **Stop** on its run. It never restarts by itself |
-| **Needs review** | Verification could not pass it                               |
-| **Blocked**      | An agent marked it blocked                                   |
-| **Unassigned**   | No agent is bound to it, so nobody will pick it up           |
-| **Not started**  | It is in In progress with no agent, so no run is going       |
+| Badge               | What happened                                                                 |
+| ------------------- | ----------------------------------------------------------------------------- |
+| **Failed**          | The last run ended in an error                                                |
+| **Sign-in failed**  | The runtime's key or login was refused, missing or expired                    |
+| **Billing problem** | The provider refused the account: no credit, a hold or a pending verification |
+| **Timed out**       | The agent stopped responding and its run was ended                            |
+| **Stopped**         | You pressed **Stop** on its run. It never restarts by itself                  |
+| **Needs review**    | Verification could not pass it                                                |
+| **Blocked**         | An agent marked it blocked                                                    |
+| **Unassigned**      | No agent is bound to it, so nobody will pick it up                            |
+| **Not started**     | It is in In progress with no agent, so no run is going                        |
 
 When several runs in a row failed, the badge counts them, for example **Failed 2×**. Each card has one button for the next step, and a **More** menu (the three dots) with the rest.
 
-| Button     | Shows for                                                                                  | What it does                                                                                                                                                   |
-| ---------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Retry**  | **Failed**, **Timed out**, **Stopped** or **Not started**, with an agent bound to the task | Puts the task back in **To do** and sends it straight to its agent. It works even after Clawboo has stopped retrying the task by itself                        |
-| **Assign** | **Unassigned**, or one of those four with no agent bound to it                             | Lists the members of the task's team. The one you pick starts the task at once, and the task becomes yours (see [Give an agent a task](#give-an-agent-a-task)) |
-| **Review** | **Needs review**                                                                           | Opens the task's drawer, where the check's result is                                                                                                           |
-| **Open**   | **Blocked**, or a task neither **Retry** nor **Assign** can move                           | Opens the task's drawer                                                                                                                                        |
+| Button          | Shows for                                                                                  | What it does                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fix sign-in** | **Sign-in failed** or **Billing problem**                                                  | Opens **Settings** > **Runtimes** at the runtime that ran the task, with its row open. Fix the key, login or account there, then retry the task                |
+| **Retry**       | **Failed**, **Timed out**, **Stopped** or **Not started**, with an agent bound to the task | Puts the task back in **To do** and sends it straight to its agent. It works even after Clawboo has stopped retrying the task by itself                        |
+| **Assign**      | **Unassigned**, or one of those four with no agent bound to it                             | Lists the members of the task's team. The one you pick starts the task at once, and the task becomes yours (see [Give an agent a task](#give-an-agent-a-task)) |
+| **Review**      | **Needs review**                                                                           | Opens the task's drawer, where the check's result is                                                                                                           |
+| **Open**        | **Blocked**, or a task neither **Retry** nor **Assign** can move                           | Opens the task's drawer                                                                                                                                        |
 
 The **More** menu holds what the card's button does not: **Retry**, the team's agents under **Assign to** (or **Give to someone else** when the task is bound to an agent), and always **Dismiss**. **Dismiss** asks first, then moves the task to **Cancelled**, along with any later plan steps that were waiting on it.
+
+A **Sign-in failed** or **Billing problem** task leads with **Fix sign-in** instead of **Retry**, because a retry fails the same way until the account is fixed. **Retry** stays in the **More** menu, and it asks first, quoting the error. Clawboo never retries such a task by itself, and when it failed in team chat, the lead is told not to hand it out again.
 
 **Retry** and **Assign** also leave a note in the task's comments. A task the task runner ran (an agent Routine, or a run started through the API) runs through the task runner again when the agent is on Clawboo Native, Claude Code, Codex or Hermes: in a worktree when the task names a repository, and checked as before. If that run cannot start, for example because a budget it counts against is paused, the task waits in **Needs you** with the reason. Other tasks, and tasks the runner ran before Clawboo started saving how it ran them, run in team chat; see [How a team works](/intro/how-it-works). Tasks that failed the same way share one card that lists them, with **Retry all** and, in its **More** menu, **Dismiss all**, which asks first. When nothing waits, the column says "Nothing needs you right now". In Week and Month, Needs you shows three items, then **+N more**. While you look at another week or month, Needs you folds into a narrow rail with its count: click it to go back to today.
 
 ### When a task runs again by itself
 
-If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself, through the task runner for a task the runner ran. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
+If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself, through the task runner for a task the runner ran. A run whose sign-in or billing was refused is the exception: it goes to **Needs you** at once. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
 
 Deleting a chat room stops its work the same way. Its unfinished tasks move to **General**: the ones that were queued for an agent wait in **Needs you** as **Stopped**, and **Retry** runs them there.
 
@@ -257,7 +262,7 @@ Each section folds from its heading, and a section with nothing in it is not sho
 
 | Section            | What it shows                                                                                                                                                                                                                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Needs you          | Only for a task that waits on you: why, with **Retry**, **Assign to…** (**Give to someone else…** when an agent is bound to the task) and **Dismiss**                                                                                                                                               |
+| Needs you          | Only for a task that waits on you: why, with **Fix sign-in** for a refused sign-in or account, **Retry**, **Assign to…** (**Give to someone else…** when an agent is bound to the task) and **Dismiss**                                                                                             |
 | The agent's report | What the agent reported, with its formatting, titled with its name, for example **Rin's report**                                                                                                                                                                                                    |
 | **Brief**          | The task's details, when they say more than its title                                                                                                                                                                                                                                               |
 | **Properties**     | **Status** (which you can change), **Runtime**, **Cost**, when it was **Added** and **Finished**, its **Parent** for a subtask, and the work it is **Part of**                                                                                                                                      |

@@ -22,6 +22,7 @@ import {
   agents,
   createTask,
   getTask,
+  routineSurvivesFailure,
   teams,
   updateStatus,
   type ClawbooDb,
@@ -30,7 +31,9 @@ import {
   type DbTask,
 } from '@clawboo/db'
 import { resolveRuntimeIntegration, type RuntimeAdapter } from '@clawboo/executor'
+import { classifyError, isTransientError, type RuntimeErrorClass } from '@clawboo/obs'
 import {
+  isOnceSpec,
   NotImplementedError,
   parseTaskTemplate,
   routineTargetOf,
@@ -57,6 +60,21 @@ export interface RoutineDispatchOutcome {
   ok: boolean
   taskId?: string | null
   error?: string
+  /** The class the failure was filed under, when the fire ran far enough to fail
+   *  in a way the runtime error taxonomy knows. */
+  errorClass?: RuntimeErrorClass
+  /** The failure may pass by itself (a rate limit, a timeout, a provider outage),
+   *  so the routine keeps its schedule, up to MAX_ROUTINE_TRANSIENT_FAILURES in a
+   *  row. Anything else stops it until a person resumes it. */
+  transient?: boolean
+}
+
+/** A failed fire filed under its class, from its error text when the runner named
+ *  none; an outcome that already says whether it may pass is left as it is. */
+function classified(outcome: RoutineDispatchOutcome): RoutineDispatchOutcome {
+  if (outcome.ok || outcome.transient !== undefined) return outcome
+  const errorClass = outcome.errorClass ?? classifyError(null, outcome.error ?? null)
+  return { ...outcome, errorClass, transient: isTransientError(errorClass) }
 }
 
 export interface WakeBridgeDeps {
@@ -133,23 +151,29 @@ function materializeTask(
  * task on its next run; left in `todo`, this one would sit on the board looking
  * like pending work that any agent's `claim_task` could pick up. `blocked` is
  * what the team engine uses for a failed task too, and the note (the card shows
- * the latest one as its reason) says who failed and why. A task bound at
- * registration is the board's own and is left exactly as the runner left it.
+ * the latest one as its reason) says who failed, why, and whether the routine
+ * runs again. A task bound at registration is the board's own and is left
+ * exactly as the runner left it.
  */
 function setAsideFailedFireTask(
   db: ClawbooDb,
   taskId: string,
   agentName: string,
   error: string | undefined,
+  routineContinues: boolean,
 ): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
     if (!updateStatus(db, taskId, 'blocked').ok) return
+    // The next run is said as a condition: the routine can be deleted while its
+    // fire runs, and this note is written before the outcome is recorded.
     addComment(
       db,
       taskId,
       `${agentName}'s scheduled run failed${error ? `: ${error}` : ''}. ` +
-        'The routine files a new task on its next run, so this one was set aside.',
+        (routineContinues
+          ? 'While the routine is scheduled, it files a new task on its next run, so this one was set aside.'
+          : 'The routine is stopped until you resume it, so this one was set aside.'),
       'system',
     )
   } catch {
@@ -190,7 +214,13 @@ async function dispatchTeamRoutine(
     stimulus,
     routine: { id: run.id, name: template.title },
   })
-  if (!result.ok) return { ok: false, error: result.error }
+  // The OpenClaw operator still down after a reconnect is a dropped connection,
+  // which may pass by itself; every other refusal stops the routine as before.
+  if (!result.ok) {
+    return result.transient
+      ? { ok: false, error: result.error, errorClass: 'ProviderError', transient: true }
+      : { ok: false, error: result.error }
+  }
 
   const runtime = loadAgentRow(db, result.targetAgentId)?.runtime ?? null
   emitEvent(db, {
@@ -255,7 +285,13 @@ export async function dispatchRoutine(
       ? deps.getOperatorClient()
       : getRegistry().source.operatorClient()
     if (!operatorClient) {
-      return { ok: false, error: `gateway_disconnected — cannot dispatch runtime '${runtime}'` }
+      // A dropped connection to the Gateway may pass by itself.
+      return {
+        ok: false,
+        error: `gateway_disconnected — cannot dispatch runtime '${runtime}'`,
+        errorClass: 'ProviderError',
+        transient: true,
+      }
     }
     probe = new OpenClawAdapter(operatorClient)
   } else {
@@ -273,9 +309,17 @@ export async function dispatchRoutine(
   // Everything below owns a task this fire may have created; a failed fire sets
   // it aside (see setAsideFailedFireTask). A dispatch that throws is a failed fire
   // too: both runners hand back a task they claimed before the error escapes.
-  const settle = (outcome: RoutineDispatchOutcome): RoutineDispatchOutcome => {
-    if (!outcome.ok && !template.teamTaskId)
-      setAsideFailedFireTask(db, task.id, agentRow.name, outcome.error)
+  const settle = (result: RoutineDispatchOutcome): RoutineDispatchOutcome => {
+    const outcome = classified(result)
+    if (!outcome.ok && !template.teamTaskId) {
+      // The ledger applies the same rule when it records this outcome.
+      const continues = routineSurvivesFailure({
+        transient: outcome.transient === true,
+        failureStreak: run.failureStreak,
+        hasNextRun: !isOnceSpec(run.cronSpec),
+      })
+      setAsideFailedFireTask(db, task.id, agentRow.name, outcome.error, continues)
+    }
     return outcome
   }
   const thrown = (err: unknown): RoutineDispatchOutcome => ({
@@ -345,17 +389,27 @@ export async function dispatchRoutine(
     // A lost claim means another worker already owns the task — the work is
     // happening; treat the fire as satisfied (drop, never retry).
     if (result.reason === 'conflict') return { ok: true, taskId: task.id }
-    return settle({ ok: false, taskId: task.id, error: `dispatch refused: ${result.reason}` })
+    return settle({
+      ok: false,
+      taskId: task.id,
+      error: `dispatch refused: ${result.reason}`,
+      transient: false,
+    })
   }
   // A person moved the card while it ran, which stopped the run. Their move is
   // the task's outcome: the fire did not fail, so the routine stays armed and the
   // task stays where they put it.
   if (result.stoppedByPerson) return { ok: true, taskId: task.id }
   if (result.doneReason !== 'success') {
+    // Only a run that errored can have failed in a way that passes; running out of
+    // room or being cut off is the task's own trouble, and stops the routine.
     return settle({
       ok: false,
       taskId: task.id,
       error: `run ${result.doneReason}: ${result.summary || '(no output)'}`,
+      ...(result.doneReason === 'error'
+        ? { errorClass: result.errorClass ?? classifyError(null, result.summary) }
+        : { transient: false }),
     })
   }
   return { ok: true, taskId: task.id }

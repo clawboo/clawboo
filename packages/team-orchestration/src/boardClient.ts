@@ -64,12 +64,16 @@ export interface ExecutionSummary {
   id: string
   status: string
   executorType?: string
+  /** The class a failed run was filed under (the runtime error taxonomy). */
+  errorClass?: string | null
 }
 
 export interface CompleteExecutionOutcome {
   status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
   summary?: string
   error?: string
+  /** The class the run's failure was filed under (`classifyError`). */
+  errorClass?: string
   costUsd?: number
 }
 

@@ -127,8 +127,13 @@ function failedDoneEvent(
 ): RuntimeEvent {
   return { kind: 'done', reason, summary, runId, sessionId: null, ts: 1, seq: 1 }
 }
-function errorEvent(runId: string, message: string, fatal: boolean): RuntimeEvent {
-  return { kind: 'error', code: null, message, fatal, runId, sessionId: null, ts: 1, seq: 1 }
+function errorEvent(
+  runId: string,
+  message: string,
+  fatal: boolean,
+  code: string | null = null,
+): RuntimeEvent {
+  return { kind: 'error', code, message, fatal, runId, sessionId: null, ts: 1, seq: 1 }
 }
 function toolCallEvent(runId: string, name: string, input: unknown): RuntimeEvent {
   return {
@@ -208,7 +213,9 @@ const idsOf = (board: CascadeBoard): string[] => board.created.map((t) => t.id)
 const ledgerOf = async (
   board: CascadeBoard,
   taskId: string,
-): Promise<Array<{ id: string; status: string; executorType?: string }>> => {
+): Promise<
+  Array<{ id: string; status: string; executorType?: string; errorClass?: string | null }>
+> => {
   const execs = await board.listExecutions(taskId)
   expect(execs).not.toBeNull()
   return execs!
@@ -1373,6 +1380,109 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
           /failed .* times|no longer re-delegating|handle it directly/i.test(r.task),
         ),
       ).toBe(true)
+    })
+
+    it('a refused sign-in: the leader is told a person must fix it before any retry', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">write the report</delegate>'),
+      )
+      const t1 = idsOf(board)[0]!
+      await orchestrator.onEvent(
+        sk('a2'),
+        errorEvent(
+          'rc1',
+          'Invalid API key · Fix external API key (HTTP 401)',
+          true,
+          'authentication_failed',
+        ),
+      )
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
+      // The ledger row says why, so the board can offer "Fix sign-in".
+      expect(board.completed.at(-1)?.outcome).toMatchObject({
+        status: 'failed',
+        errorClass: 'Auth',
+      })
+      expect((await ledgerOf(board, t1)).at(-1)).toMatchObject({ errorClass: 'Auth' })
+      expect(
+        board.comments.some(
+          (c) => c.taskId === t1 && /sign-in/i.test(c.body) && /401/.test(c.body),
+        ),
+      ).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(
+        reflections(delivered).some(
+          (r) =>
+            r.agentId === 'leader' &&
+            /sign-in/i.test(r.task) &&
+            /do not re-delegate/i.test(r.task) &&
+            /tell the user/i.test(r.task),
+        ),
+      ).toBe(true)
+      // Not blocked in code: once a person fixed the sign-in, "try again" in chat
+      // must reach the agent. The ordinary loop breaker still caps repeats.
+      const before = board.taskCount()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Bug Boo">write the report</delegate>'),
+      )
+      expect(board.taskCount()).toBe(before + 1)
+    })
+
+    it('a billing refusal reads as billing; an ordinary error is still worth re-delegating', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">billing task</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        errorEvent('rc1', 'Your credit balance is too low (HTTP 400)', true, 'billing_error'),
+      )
+      expect(board.completed.at(-1)?.outcome).toMatchObject({ errorClass: 'Billing' })
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const billingReports = reflections(delivered).filter((r) => r.agentId === 'leader')
+      expect(
+        billingReports.some((r) => /billing/i.test(r.task) && /do not re-delegate/i.test(r.task)),
+      ).toBe(true)
+
+      // A failure that may pass gets the plain report in its own batch, and a
+      // second try runs.
+      const seen = delivered.length
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Test Boo">plain task</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a4'),
+        errorEvent('rc2', 'Overloaded (HTTP 529)', true, 'overloaded'),
+      )
+      expect(board.completed.at(-1)?.outcome).toMatchObject({ errorClass: 'ProviderError' })
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const plainReports = reflections(delivered.slice(seen)).filter((r) => r.agentId === 'leader')
+      expect(plainReports.some((r) => /Overloaded/.test(r.task))).toBe(true)
+      expect(plainReports.some((r) => /do not re-delegate/i.test(r.task))).toBe(false)
+      const before = board.taskCount()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r3', '<delegate to="@Test Boo">plain task</delegate>'),
+      )
+      expect(board.taskCount()).toBe(before + 1)
+    })
+
+    it("a failed run's summary is never read as a refused sign-in", async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">add the login route</delegate>'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        failedDoneEvent('rc1', 'error', 'The /login route now returns 401 without a token.'),
+      )
+      expect(board.completed.at(-1)?.outcome.status).toBe('failed')
+      expect(board.completed.at(-1)?.outcome).not.toHaveProperty('errorClass')
     })
 
     it('a successful completion RESETS the loop breaker for that (agent, task)', async () => {

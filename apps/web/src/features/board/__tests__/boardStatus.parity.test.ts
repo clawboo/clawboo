@@ -23,10 +23,12 @@ import type { TaskStatus as DbTaskStatus } from '@clawboo/db'
 
 import {
   STATUS_LABEL,
+  attentionLabel,
   canTransition,
   isTerminalStatus,
   statusLabel,
   statusOptions,
+  taskAttentionOf,
 } from '../boardStatus'
 
 const OFF_LIST = ['', 'bogus', 'Done', 'in-progress', 'unknown']
@@ -118,5 +120,46 @@ describe('@clawboo/db still re-exports the shared union', () => {
   it('has a TaskStatus identical to @clawboo/board-core’s', () => {
     const same: MutuallyAssignable<DbTaskStatus, CoreTaskStatus> = true
     expect(same).toBe(true)
+  })
+})
+
+describe('taskAttentionOf reads why an account refusal waits', () => {
+  it('keeps the cause and the runtime to fix', () => {
+    expect(
+      taskAttentionOf({
+        status: 'blocked',
+        attention: {
+          reason: 'failed',
+          failedRuns: 1,
+          detail: 'bad key',
+          cause: 'sign_in',
+          runtime: 'hermes',
+        },
+      }),
+    ).toEqual({
+      reason: 'failed',
+      failedRuns: 1,
+      detail: 'bad key',
+      cause: 'sign_in',
+      runtime: 'hermes',
+    })
+  })
+
+  it('drops a cause it does not know, and a runtime without a cause', () => {
+    expect(
+      taskAttentionOf({
+        status: 'blocked',
+        attention: { reason: 'failed', failedRuns: 1, cause: 'gremlins', runtime: 'codex' },
+      }),
+    ).toEqual({ reason: 'failed', failedRuns: 1 })
+  })
+
+  it('labels the badge by the cause', () => {
+    expect(attentionLabel({ reason: 'failed', failedRuns: 1, cause: 'sign_in' })).toBe(
+      'Sign-in failed',
+    )
+    expect(attentionLabel({ reason: 'failed', failedRuns: 2, cause: 'billing' })).toBe(
+      'Billing problem 2×',
+    )
   })
 })

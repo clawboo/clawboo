@@ -107,6 +107,56 @@ describe('taskAttention: the reason a card shows', () => {
   })
 })
 
+describe('taskAttention: a run the provider refused the account for', () => {
+  const refused = (errorClass: string, extra: Record<string, string | null> = {}) => ({
+    status: 'failed',
+    error: 'Invalid API key · Fix external API key (HTTP 401)',
+    errorClass,
+    ...extra,
+  })
+
+  it('names the cause and the runtime that ran it on a blocked task', () => {
+    expect(
+      taskAttention({
+        status: 'blocked',
+        execs: [refused('Auth', { executorType: 'claude-code', runtime: null })],
+      }),
+    ).toEqual({
+      reason: 'failed',
+      failedRuns: 1,
+      detail: 'Invalid API key · Fix external API key (HTTP 401)',
+      cause: 'sign_in',
+      runtime: 'claude-code',
+    })
+  })
+
+  it('prefers the recorded runtime over an owner executor type', () => {
+    // The team engine types every fire `openclaw` and records the runtime beside it.
+    const a = taskAttention({
+      status: 'blocked',
+      execs: [refused('Billing', { executorType: 'openclaw', runtime: 'codex' })],
+    })
+    expect(a?.cause).toBe('billing')
+    expect(a?.runtime).toBe('codex')
+  })
+
+  it('parks a released task at once instead of after MAX_AUTO_FIRES tries', () => {
+    expect(
+      taskAttention({
+        status: 'todo',
+        sourceDelegationId: BOUND,
+        execs: [refused('Auth', { executorType: 'hermes' })],
+      }),
+    ).toMatchObject({ reason: 'failed', failedRuns: 1, cause: 'sign_in', runtime: 'hermes' })
+  })
+
+  it('carries no cause for any other failure', () => {
+    const a = taskAttention({ status: 'blocked', execs: [refused('ProviderError')] })
+    expect(a?.cause).toBeUndefined()
+    expect(a?.runtime).toBeUndefined()
+  })
+})
+
 describe('taskAttention: every other status moves on its own', () => {
   it.each(['backlog', 'in_progress', 'in_review', 'done', 'cancelled'])('%s', (status) => {
     expect(

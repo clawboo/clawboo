@@ -179,17 +179,19 @@ The **Ablation** table below it, marked **CI only**, is filled in only by the pr
 
 Each error's class tells you where to look. [Events and errors](/reference/events-and-errors) lists the words that put an error in each class.
 
-| Class               | What it usually means                                                  | What to do                                                                                                                                     |
-| ------------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **RateLimited**     | The provider is throttling you or you hit a quota                      | Wait, then retry. If it keeps happening, check your plan's limits with the provider                                                            |
-| **UserAborted**     | The run was stopped or cancelled                                       | Nothing, unless nobody meant to stop it                                                                                                        |
-| **Timeout**         | A model call, tool or program took too long                            | Retry. If the same step keeps timing out, check the service it calls                                                                           |
-| **UnexpectedEnv**   | A program, file or working login is missing, or permission was refused | Check the runtime is installed and its key or sign-in works in **Settings** > **Runtimes**, and that the files or folders the task needs exist |
-| **ContextOverflow** | The conversation or input was too long for the model                   | Start the chat fresh with `/reset`, or split the task into smaller ones                                                                        |
-| **InvalidArgs**     | A request or tool call was malformed                                   | Often the agent recovers on its own. If a task keeps failing this way, read the error text in its **Activity**                                 |
-| **ProviderError**   | The provider failed, was overloaded, or refused your account           | Retry later, and check the provider's status page. For a billing or account message, check your account with the provider                      |
-| **PolicyDenied**    | A guardrail refused a tool call (task-runner runs only)                | Nothing: the guardrail did its job. Change the agent's permissions if the call should be allowed                                               |
-| **Unknown**         | Nothing matched: a **harness bug**                                     | [Open an issue](https://github.com/clawboo/clawboo/issues) with the error text                                                                 |
+| Class               | What it usually means                                                         | What to do                                                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Billing**         | The provider refused the account: no credit, a hold or a pending verification | Fix the account with the provider, then retry. Retrying first fails the same way                                                          |
+| **Auth**            | The runtime's key or login was refused, missing or expired                    | Fix the sign-in in **Settings** > **Runtimes**. On the board, **Fix sign-in** opens it at that runtime. Retrying first fails the same way |
+| **RateLimited**     | The provider is throttling you, or you hit a quota or a usage limit           | Wait, then retry. If it keeps happening, check your plan's limits with the provider                                                       |
+| **UserAborted**     | The run was stopped or cancelled                                              | Nothing, unless nobody meant to stop it                                                                                                   |
+| **Timeout**         | A model call, tool or program took too long                                   | Retry. If the same step keeps timing out, check the service it calls                                                                      |
+| **UnexpectedEnv**   | A program or file is missing, or permission was refused                       | Check the runtime is installed in **Settings** > **Runtimes**, and that the files or folders the task needs exist                         |
+| **ContextOverflow** | The conversation or input was too long for the model                          | Start the chat fresh with `/reset`, or split the task into smaller ones                                                                   |
+| **InvalidArgs**     | A request or tool call was malformed                                          | Often the agent recovers on its own. If a task keeps failing this way, read the error text in its **Activity**                            |
+| **ProviderError**   | The provider failed, was overloaded, or could not be reached                  | Retry later, and check the provider's status page and your connection                                                                     |
+| **PolicyDenied**    | A guardrail refused a tool call (task-runner runs only)                       | Nothing: the guardrail did its job. Change the agent's permissions if the call should be allowed                                          |
+| **Unknown**         | Nothing matched: a **harness bug**                                            | [Open an issue](https://github.com/clawboo/clawboo/issues) with the error text                                                            |
 
 ## Export traces with OpenTelemetry
 

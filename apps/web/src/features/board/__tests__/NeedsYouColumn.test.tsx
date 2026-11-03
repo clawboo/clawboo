@@ -22,6 +22,7 @@ import type { BoardTask } from '@/lib/boardClient'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useConfirmStore } from '@/stores/confirm'
 import { useFleetStore } from '@/stores/fleet'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
@@ -766,5 +767,143 @@ describe('Needs you keeps a keyboard user’s place when a card leaves', () => {
     allow.focus()
     act(() => useApprovalsStore.setState({ pendingApprovals: new Map() }))
     expect(document.activeElement).toBe(openButton('Card A'))
+  })
+})
+
+describe('Needs you when the provider refused the account', () => {
+  const REFUSED = 'Invalid API key · Fix external API key (HTTP 401)'
+  const signInTask = (overrides: Partial<BoardTask> = {}): BoardTask =>
+    failedTask({
+      attention: {
+        reason: 'failed',
+        failedRuns: 1,
+        detail: REFUSED,
+        cause: 'sign_in',
+        runtime: 'claude-code',
+      },
+      ...overrides,
+    })
+
+  beforeEach(() =>
+    useSettingsModalStore.setState({
+      open: false,
+      view: 'fleet',
+      runtimeIntent: null,
+      focusRuntime: null,
+    }),
+  )
+
+  it('says the sign-in failed, keeps why, and leads with Fix sign-in instead of Retry', async () => {
+    renderColumn([signInTask()])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).getByText('Sign-in failed')).toBeInTheDocument()
+    expect(within(card).getByText(REFUSED)).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: /^Retry$/ })).toBeNull()
+    await userEvent.click(within(card).getByRole('button', { name: 'Fix sign-in' }))
+    // Settings opens on the runtime whose sign-in failed.
+    expect(useSettingsModalStore.getState()).toMatchObject({
+      open: true,
+      view: 'runtimes',
+      focusRuntime: 'claude-code',
+    })
+  })
+
+  it('names a billing refusal as billing, with the same fix', async () => {
+    renderColumn([
+      signInTask({
+        attention: {
+          reason: 'failed',
+          failedRuns: 1,
+          detail: 'Your credit balance is too low',
+          cause: 'billing',
+          runtime: 'codex',
+        },
+      }),
+    ])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).getByText('Billing problem')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: 'Fix sign-in' }))
+    expect(useSettingsModalStore.getState().focusRuntime).toBe('codex')
+  })
+
+  it('keeps Retry in the menu, and asks before retrying into the same refusal', async () => {
+    let retried = 0
+    server.use(
+      http.post('/api/board/:id/retry', () => {
+        retried += 1
+        return HttpResponse.json({ ok: true }, { status: 202 })
+      }),
+    )
+    renderColumn([signInTask()])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    await pickFromMenu(card, 'Retry')
+    const dialog = await screen.findByRole('alertdialog', {}, T)
+    expect(dialog).toHaveTextContent(REFUSED)
+    expect(dialog).toHaveTextContent(/fails the same way until the sign-in is fixed/)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull(), T)
+    expect(retried).toBe(0)
+
+    await pickFromMenu(card, 'Retry')
+    const again = await screen.findByRole('alertdialog', {}, T)
+    await userEvent.click(within(again).getByRole('button', { name: 'Retry anyway' }))
+    await waitFor(() => expect(retried).toBe(1), T)
+  })
+
+  it('a group that broke on the same refused sign-in leads with Fix sign-in', async () => {
+    renderCell(
+      [1, 2].map((i) =>
+        signInTask({
+          id: `s${i}`,
+          title: `Sign ${i}`,
+          sourceDelegationId: `r${i}:deleg:agent:a1:reflectTo:lead`,
+        }),
+      ),
+    )
+    const group = await screen.findByTestId('needs-you-group', {}, T)
+    expect(within(group).getByText('Sign-in failed · 2 tasks')).toBeInTheDocument()
+    expect(within(group).queryByRole('button', { name: /Retry all/ })).toBeNull()
+    await userEvent.click(within(group).getByRole('button', { name: 'Fix sign-in' }))
+    expect(useSettingsModalStore.getState()).toMatchObject({
+      open: true,
+      view: 'runtimes',
+      focusRuntime: 'claude-code',
+    })
+  })
+
+  it('groups a refused sign-in only with the same refusal on the same runtime', async () => {
+    const delegated = (i: number) => `r${i}:deleg:agent:a1:reflectTo:lead`
+    renderCell([
+      signInTask({ id: 's1', title: 'Claude 1', sourceDelegationId: delegated(1) }),
+      signInTask({ id: 's2', title: 'Claude 2', sourceDelegationId: delegated(2) }),
+      // The same words from another runtime: its Fix sign-in opens another row.
+      signInTask({
+        id: 's3',
+        title: 'Codex',
+        sourceDelegationId: delegated(3),
+        attention: {
+          reason: 'failed',
+          failedRuns: 1,
+          detail: REFUSED,
+          cause: 'sign_in',
+          runtime: 'codex',
+        },
+      }),
+      // The same words with no account cause: Retry all would skip the question.
+      signInTask({
+        id: 's4',
+        title: 'Plain',
+        sourceDelegationId: delegated(4),
+        attention: { reason: 'failed', failedRuns: 1, detail: REFUSED },
+      }),
+    ])
+    const group = await screen.findByTestId('needs-you-group', {}, T)
+    expect(screen.getAllByTestId('needs-you-group')).toHaveLength(1)
+    expect(
+      within(group)
+        .getAllByTestId('needs-you-task')
+        .map((r) => r.textContent),
+    ).toEqual(['Claude 1', 'Claude 2'])
+    expect(screen.getAllByTestId('needs-you-task')).toHaveLength(4)
   })
 })

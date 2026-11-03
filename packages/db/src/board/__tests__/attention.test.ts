@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { encodeHumanAssignment, MAX_AUTO_FIRES } from '@clawboo/board-core'
+import { accountFailureOf, encodeHumanAssignment, MAX_AUTO_FIRES } from '@clawboo/board-core'
+import { RUNTIME_ERROR_CLASSES, isAccountError } from '@clawboo/obs'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -173,5 +174,46 @@ describe('assignTaskDelegation', () => {
     expect(assignTaskDelegation(db, 'nope', sdid)).toEqual({ ok: false, reason: 'not_found' })
     expect(getTask(db, done.id)?.sourceDelegationId).toBe(BOUND)
     expect(getTask(db, dropped.id)?.sourceDelegationId).toBeNull()
+  })
+})
+
+describe('a run the provider refused the account for', () => {
+  it('records the class on the ledger row and names the cause on the card', () => {
+    const t = createTask(db, { title: 'report', teamId: 'T', sourceDelegationId: BOUND })
+    claimTask(db, t.id, 'a2')
+    clock += 10
+    vi.setSystemTime(clock)
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'claude-code' })
+    completeExecutionProcess(db, ex.id, {
+      status: 'failed',
+      error: 'Invalid API key · Fix external API key (HTTP 401)',
+      errorClass: 'Auth',
+    })
+    expect(listExecutionsForTasks(db, [t.id]).get(t.id)?.[0]?.errorClass).toBe('Auth')
+    updateStatus(db, t.id, 'blocked')
+    expect(attentionForTask(db, t.id)).toEqual({
+      reason: 'failed',
+      failedRuns: 1,
+      detail: 'Invalid API key · Fix external API key (HTTP 401)',
+      cause: 'sign_in',
+      runtime: 'claude-code',
+    })
+  })
+
+  it('leaves the class empty when a run closes without one', () => {
+    const t = createTask(db, { title: 'other', teamId: 'T' })
+    run(t.id, 'failed')
+    expect(listExecutionsForTasks(db, [t.id]).get(t.id)?.[0]?.errorClass).toBeNull()
+  })
+})
+
+describe('board-core and the error taxonomy agree on the account classes', () => {
+  // board-core imports nothing, so it spells the taxonomy's class names itself.
+  it('names a cause for exactly the classes the taxonomy calls account failures', () => {
+    for (const cls of RUNTIME_ERROR_CLASSES) {
+      expect(accountFailureOf({ status: 'failed', errorClass: cls }) !== null, cls).toBe(
+        isAccountError(cls),
+      )
+    }
   })
 })

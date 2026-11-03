@@ -107,19 +107,29 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     }
     const completedAt = now()
     let nextAt: number | null = null
-    if (outcome.ok) {
+    // A failure that may pass keeps the schedule, so it needs the next time too.
+    // Not for a one-time routine: "Run now" can fire one before its time, and
+    // its only time is then still ahead, but any failure stops it.
+    if (outcome.ok || (outcome.transient && !isOnceSpec(claimed.cronSpec))) {
       try {
         nextAt = nextOccurrence(claimed.cronSpec, completedAt)
       } catch {
         nextAt = null
       }
     }
-    recordRunOutcome(
+    const landed = recordRunOutcome(
       db,
       claimed.id,
-      outcome.ok ? { ok: true } : { ok: false, error: outcome.error ?? 'dispatch failed' },
+      outcome.ok
+        ? { ok: true }
+        : {
+            ok: false,
+            error: outcome.error ?? 'dispatch failed',
+            transient: outcome.transient === true,
+          },
       nextAt,
       completedAt,
+      claimed.cronSpec,
     )
     if (outcome.ok) {
       emitEvent(db, {
@@ -136,18 +146,38 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
         },
       })
     } else {
+      // `landed` is null when the row had moved on while the fire was in flight
+      // (another process healed it, or it was deleted): its state was kept.
+      const stopped = landed === 'error'
       emitEvent(db, {
         kind: 'routine_error',
         agentId: claimed.agentId || null,
         teamId: claimed.teamId,
         taskId: outcome.taskId ?? null,
         tenantId: claimed.tenantId,
-        data: { scheduledRunId: claimed.id, message: outcome.error ?? 'dispatch failed' },
+        data: {
+          scheduledRunId: claimed.id,
+          message: outcome.error ?? 'dispatch failed',
+          ...(outcome.errorClass ? { errorClass: outcome.errorClass } : {}),
+          ...(landed ? { stopped } : {}),
+        },
       })
-      deps.log.error(
-        { scheduledRunId: claimed.id, error: outcome.error },
-        'Routines: fire failed — routine parked in error until resumed',
-      )
+      if (!landed) {
+        deps.log.warn(
+          { scheduledRunId: claimed.id, error: outcome.error, errorClass: outcome.errorClass },
+          'Routines: fire failed after the routine had moved on, so its state was kept',
+        )
+      } else if (stopped) {
+        deps.log.error(
+          { scheduledRunId: claimed.id, error: outcome.error, errorClass: outcome.errorClass },
+          'Routines: fire failed, so the routine is parked in error until resumed',
+        )
+      } else {
+        deps.log.warn(
+          { scheduledRunId: claimed.id, error: outcome.error, errorClass: outcome.errorClass },
+          'Routines: fire failed, and the failure may pass, so the routine stays scheduled',
+        )
+      }
     }
     // The outcome set this routine's next run, which may be sooner than the
     // timer armed while it was in flight.

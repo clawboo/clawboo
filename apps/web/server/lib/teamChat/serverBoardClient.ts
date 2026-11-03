@@ -37,6 +37,7 @@ import type {
   CompleteExecutionOutcome,
   CreateTaskInput,
   ExecutionRef,
+  ExecutionSummary,
   TaskDetail,
 } from '@clawboo/team-orchestration'
 
@@ -238,14 +239,13 @@ export function createServerBoardClient(
       }
     },
 
-    async listExecutions(
-      taskId,
-    ): Promise<Array<{ id: string; status: string; executorType?: string }> | null> {
+    async listExecutions(taskId): Promise<ExecutionSummary[] | null> {
       try {
         return listExecutions(db, taskId).map((e) => ({
           id: e.id,
           status: e.status,
           executorType: e.executorType,
+          errorClass: e.errorClass,
         }))
       } catch {
         // NOT `[]` — see the interface note. An unreadable ledger must not read

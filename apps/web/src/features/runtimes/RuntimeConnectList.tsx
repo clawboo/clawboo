@@ -28,7 +28,7 @@
 // RuntimeConnectionCard (headerless here — the row owns the name + status).
 // OpenClaw isn't a RuntimeId, so its row hosts the inline Gateway setup directly.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight, Download, LogIn, Plug2, RefreshCw, Settings2, X } from 'lucide-react'
 
 import type { RuntimeStatus } from '@clawboo/control-client'
@@ -36,6 +36,7 @@ import type { RuntimeStatus } from '@clawboo/control-client'
 import { Button } from '@/features/shared/Button'
 import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CodexUpdateNotice } from './CodexUpdateNotice'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { OpenClawGatewaySection } from './OpenClawGatewaySection'
@@ -187,6 +188,23 @@ export function RuntimeConnectList({
   )
 }
 
+/**
+ * Open this row and bring it into view when Settings was opened at its runtime
+ * (a failed run's "Fix sign-in"), then clear the ask so it fires once.
+ */
+function useFocusedRow(runtimeId: string, testId: string, open: () => void): void {
+  const focusRuntime = useSettingsModalStore((s) => s.focusRuntime)
+  const clearFocusRuntime = useSettingsModalStore((s) => s.clearFocusRuntime)
+  useEffect(() => {
+    if (focusRuntime !== runtimeId) return
+    open()
+    clearFocusRuntime()
+    document
+      .querySelector(`[data-testid="${testId}"]`)
+      ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
+  }, [focusRuntime, runtimeId, testId, open, clearFocusRuntime])
+}
+
 function RuntimeRow({
   entry,
   status,
@@ -205,6 +223,7 @@ function RuntimeRow({
   codexReady?: boolean
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
+  const openRow = useCallback(() => setUserExpanded(true), [])
   const [display, setDisplay] = useState<DisplayState>('unknown')
   const prevShownRef = useRef<DisplayState | null>(null)
   // The fetched status (`live`) is the source of truth for SETTLED states; the
@@ -217,6 +236,7 @@ function RuntimeRow({
   const shown: DisplayState =
     display === 'installing' || display === 'connecting' ? display : (live ?? 'unknown')
   const testId = `runtime-list-row-${entry.id}`
+  useFocusedRow(entry.id, testId, openRow)
   const rowProps = {
     testId,
     icon: <RuntimeIcon id={entry.id} size={36} />,
@@ -356,6 +376,8 @@ function OpenClawRow({
 }) {
   const [userExpanded, setUserExpanded] = useState(false)
   const testId = 'runtime-list-row-openclaw'
+  const openRow = useCallback(() => setUserExpanded(true), [])
+  useFocusedRow('openclaw', testId, openRow)
   const rowProps = {
     testId,
     icon: <OpenClawIcon size={36} />,

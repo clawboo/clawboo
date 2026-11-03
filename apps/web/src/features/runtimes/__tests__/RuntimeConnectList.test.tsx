@@ -6,11 +6,12 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RuntimeStatus } from '@clawboo/control-client'
 
 import { server } from '../../../__vitest__/mswServer'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { RuntimeConnectList, type OpenClawTabConfig } from '../RuntimeConnectList'
 
 afterEach(() => cleanup())
@@ -276,5 +277,53 @@ describe('RuntimeConnectList — connected card + Manage', () => {
     )
     await userEvent.click(screen.getByTestId('runtime-hermes-details'))
     expect(onDiagnostics).toHaveBeenCalledWith('hermes')
+  })
+})
+
+describe('RuntimeConnectList: opening at a runtime to fix its sign-in', () => {
+  const HERMES_READY: RuntimeStatus = {
+    id: 'hermes',
+    connectionState: 'ready',
+    hasCredential: true,
+  }
+
+  beforeEach(() => useSettingsModalStore.setState({ focusRuntime: null }))
+
+  it("expands the asked-for runtime's row, scrolls it into view, and clears the ask", async () => {
+    const scrolled: Element[] = []
+    const original = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (this: Element) {
+      scrolled.push(this)
+    }
+    try {
+      useSettingsModalStore.setState({ focusRuntime: 'hermes' })
+      renderList([HERMES_READY])
+      await waitFor(() =>
+        expect(screen.getByTestId('runtime-list-row-hermes-toggle')).toHaveAttribute(
+          'aria-expanded',
+          'true',
+        ),
+      )
+      expect(scrolled).toContain(screen.getByTestId('runtime-list-row-hermes'))
+      expect(useSettingsModalStore.getState().focusRuntime).toBeNull()
+      // OpenClaw was not asked for and stays closed.
+      expect(screen.getByTestId('runtime-list-row-openclaw-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      )
+    } finally {
+      Element.prototype.scrollIntoView = original
+    }
+  })
+
+  it('opens the OpenClaw row too', async () => {
+    useSettingsModalStore.setState({ focusRuntime: 'openclaw' })
+    renderList([])
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime-list-row-openclaw-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      ),
+    )
   })
 })

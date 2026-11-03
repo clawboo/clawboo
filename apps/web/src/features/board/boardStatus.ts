@@ -22,6 +22,7 @@ import {
   isTaskStatus,
   isTerminal,
   legalTargets,
+  type AccountFailure,
   type AttentionReason,
   type TaskAttention,
   type TaskStatus,
@@ -30,7 +31,7 @@ import {
 import type { StatusTone } from '@/features/shared/StatusPill'
 
 export { TASK_STATUSES, isTaskStatus }
-export type { AttentionReason, TaskAttention, TaskStatus }
+export type { AccountFailure, AttentionReason, TaskAttention, TaskStatus }
 
 /** Human labels for each status — the single source the columns and the status
  *  editor both read, so a rename happens in one place. Typed against the shared
@@ -156,10 +157,29 @@ export const ATTENTION_META: Record<
   },
 }
 
+/** A run the provider refused for the account: the badge in place of "Failed",
+ *  and what to do, for a run that left no text of its own. The fix is the same
+ *  for both, in Settings at the runtime. */
+export const ACCOUNT_FAILURE_META: Record<AccountFailure, { label: string; hint: string }> = {
+  sign_in: {
+    label: 'Sign-in failed',
+    hint: "The runtime's key or login was refused. Fix the sign-in, then retry.",
+  },
+  billing: {
+    label: 'Billing problem',
+    hint: 'The provider refused the account (billing or credit). Fix it, then retry.',
+  },
+}
+
+/** The action a card offers for an account failure, in place of Retry. */
+export const FIX_SIGN_IN = 'Fix sign-in'
+
 /** The badge for a needs-you task: "Failed", or "Failed 3×" once it has failed
- *  more than once in a row. */
+ *  more than once in a row. An account failure names its cause instead. */
 export function attentionLabel(attention: TaskAttention): string {
-  const base = ATTENTION_META[attention.reason].label
+  const base = attention.cause
+    ? ACCOUNT_FAILURE_META[attention.cause].label
+    : ATTENTION_META[attention.reason].label
   const repeated =
     (attention.reason === 'failed' || attention.reason === 'timed_out') && attention.failedRuns > 1
   return repeated ? `${base} ${attention.failedRuns}×` : base
@@ -177,16 +197,22 @@ export function taskAttentionOf(task: {
 }): TaskAttention | null {
   const a = task.attention
   if (a && typeof a === 'object') {
-    const { reason, failedRuns, detail } = a as {
+    const { reason, failedRuns, detail, cause, runtime } = a as {
       reason?: unknown
       failedRuns?: unknown
       detail?: unknown
+      cause?: unknown
+      runtime?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
+      const known = cause === 'sign_in' || cause === 'billing' ? cause : null
       return {
         reason: reason as AttentionReason,
         failedRuns: typeof failedRuns === 'number' ? failedRuns : 0,
         ...(typeof detail === 'string' && detail ? { detail } : {}),
+        ...(known
+          ? { cause: known, ...(typeof runtime === 'string' && runtime ? { runtime } : {}) }
+          : {}),
       }
     }
   }

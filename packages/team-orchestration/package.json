@@ -45,7 +45,8 @@
   "dependencies": {
     "@clawboo/board-core": "workspace:*",
     "@clawboo/executor": "workspace:*",
-    "@clawboo/governance": "workspace:*"
+    "@clawboo/governance": "workspace:*",
+    "@clawboo/obs": "workspace:*"
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",

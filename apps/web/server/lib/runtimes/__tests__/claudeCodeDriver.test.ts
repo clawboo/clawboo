@@ -233,6 +233,54 @@ describe('createClaudeCodeDriver: an API error is a failed run', () => {
     ).toMatchObject([{ type: 'result', ok: true, summary: 'ok' }])
   })
 
+  it('reports a prompt that outgrew the context window as out of room, not as an API error', () => {
+    const [ev] = translateClaudeMessage(
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: true,
+        terminal_reason: 'prompt_too_long',
+        result: 'Prompt is too long',
+        session_id: 'sess-1',
+      },
+      { apiError: 'invalid_request' },
+    )
+    expect(ev).toMatchObject({
+      type: 'result',
+      ok: false,
+      contextFull: true,
+      errorMessage: 'Prompt is too long',
+    })
+    expect(ev).not.toHaveProperty('errorCode')
+  })
+
+  it('the adapter rotates a full context instead of failing the run', () => {
+    let seq = 0
+    const out = mapClaudeEvent(
+      {
+        type: 'result',
+        ok: false,
+        contextFull: true,
+        summary: 'Prompt is too long',
+        errorMessage: 'Prompt is too long',
+      },
+      { runId: 'r1', sessionId: null },
+      () => ++seq,
+      () => 0,
+      'the work so far',
+    )
+    // The cause rides a NON-fatal typed error, so no host treats the run as failed
+    // on it; the terminal is the same "out of room" a turn ceiling ends on.
+    expect(out.find((e) => e.kind === 'error')).toMatchObject({
+      code: 'context_overflow',
+      fatal: false,
+    })
+    expect(out.find((e) => e.kind === 'done')).toMatchObject({
+      reason: 'max_turns',
+      summary: 'the work so far',
+    })
+  })
+
   it('the adapter carries the cause onto the fatal error event', () => {
     let seq = 0
     const out = mapClaudeEvent(

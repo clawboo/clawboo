@@ -96,7 +96,7 @@ export function mapCodexEvent(
         out.push({
           ...base(),
           kind: 'error',
-          code: null,
+          code: ev.errorCode ?? null,
           message: ev.errorMessage || 'error',
           fatal: true,
         })

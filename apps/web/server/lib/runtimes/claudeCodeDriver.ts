@@ -62,6 +62,9 @@ interface SdkMessage {
   is_error?: boolean
   /** On a `result`: the HTTP status of the API error, when there was one. */
   api_error_status?: number | null
+  /** On a `result`: why the turn stopped (`completed`, `max_turns`,
+   *  `prompt_too_long`, ...). */
+  terminal_reason?: string
   /** On an `assistant` message: the API error the CLI turned into this message
    *  (`authentication_failed`, `billing_error`, `rate_limit`, `overloaded`, ...).
    *  Its text is the CLI's own error notice, not model output. */
@@ -392,8 +395,13 @@ export function translateClaudeMessage(
       return out
     }
     case 'result': {
-      const apiError = isApiErrorResult(msg)
-      const ok = msg.subtype === 'success' && !apiError
+      // The conversation outgrew the model's context window. Like a turn ceiling
+      // it is out of room, not a failure, so it is flagged for the host to
+      // rotate to a fresh session. The CLI sends it as an API error, but its
+      // cause is not one.
+      const contextFull = msg.terminal_reason === 'prompt_too_long'
+      const apiError = !contextFull && isApiErrorResult(msg)
+      const ok = msg.subtype === 'success' && !apiError && !contextFull
       // The SDK signals a turn-ceiling stop as `result.subtype === 'error_max_turns'`.
       // Surface it distinctly so the host rotates the session (continue) instead of
       // failing the task.
@@ -407,11 +415,13 @@ export function translateClaudeMessage(
               : {}),
           }
         : undefined
-      const errMsg = apiError
-        ? `${msg.result?.trim() || 'Claude Code API error'}${
-            msg.api_error_status != null ? ` (HTTP ${msg.api_error_status})` : ''
-          }`
-        : (msg.errors?.join('; ') ?? msg.subtype)
+      const errMsg = contextFull
+        ? msg.result?.trim() || 'Prompt is too long'
+        : apiError
+          ? `${msg.result?.trim() || 'Claude Code API error'}${
+              msg.api_error_status != null ? ` (HTTP ${msg.api_error_status})` : ''
+            }`
+          : (msg.errors?.join('; ') ?? msg.subtype)
       const errorCode = apiError ? (opts.apiError ?? null) : null
       return [
         {
@@ -422,6 +432,7 @@ export function translateClaudeMessage(
           ...(usage ? { usage } : {}),
           ...(msg.session_id ? { sessionId: msg.session_id } : {}),
           ...(maxTurns ? { maxTurns: true } : {}),
+          ...(contextFull ? { contextFull: true } : {}),
           ...(ok ? {} : { errorMessage: errMsg }),
           ...(errorCode ? { errorCode } : {}),
         },
