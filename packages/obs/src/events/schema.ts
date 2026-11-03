@@ -167,14 +167,30 @@ export interface CostData {
   outputTokens?: number
   model?: string | null
 }
+/**
+ * One approval opened. Names the call and never carries its arguments: this log
+ * is never pruned and every Activity feed reads it, so the arguments (a shell
+ * command, a message body) stay on the approval row behind the REST route.
+ */
 export interface ApprovalRequestedData {
   approvalId?: string
   scopeKey?: string
+  /** Who holds the call: `tool` (clawboo's own broker) or `exec` (the OpenClaw Gateway). */
   kind?: string
+  toolName?: string
+  /** The server's reading of the tool: `read` | `write` | `destructive`. */
+  toolClass?: string | null
+  grantId?: string | null
+  connectorId?: string | null
+  /** When the card stops being answerable (epoch ms). */
+  expiresAt?: number
 }
 export interface ApprovalResolvedData {
   approvalId?: string
+  /** `allow_once` | `allow_always` | `deny` | `expired`. */
   decision?: string
+  kind?: string
+  toolName?: string
 }
 export interface ErrorEventData {
   code?: string | null

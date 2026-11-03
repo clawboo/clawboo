@@ -26,11 +26,18 @@
 // can go; closing it properly means authenticating the resolve route, which is a
 // change to a surface older than this tool and is not in this tier.
 
-import { createApproval, getApproval, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
+import {
+  approvalEvent,
+  createApproval,
+  getApproval,
+  toolCallApprovals,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { and, eq } from 'drizzle-orm'
 import { createLogger } from '@clawboo/logger'
 import { connectorChildEnv } from '@clawboo/mcp'
 
+import { emitEvent } from '../../obs'
 import { classifyArgv, inspectResolvedProgram, isSameFile, resolveProgramPath } from './execPolicy'
 import { runApprovedCommand } from './execRun'
 import type { NativeLocalTool, NativeToolOutcome } from './fileTools'
@@ -283,10 +290,13 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
  */
 export function retirePendingApproval(db: ClawbooDb, id: string): void {
   try {
-    db.update(toolCallApprovals)
+    const retired = db
+      .update(toolCallApprovals)
       .set({ status: 'expired', resolvedAt: Date.now() })
       .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
-      .run()
+      .returning()
+      .all()
+    for (const row of retired) emitEvent(db, approvalEvent(db, 'approval_resolved', row))
   } catch (err) {
     log.debug({ err, id }, 'could not retire an abandoned approval')
   }

@@ -39,11 +39,17 @@ vi.mock('../serverDeliver', () => ({
 }))
 
 const { getDb, resetDb } = await import('../../db')
-const { evictIdleOrchestrators, getTeamOrchestrator, hasTeamOrchestrator, resetTeamOrchestrators } =
-  await import('../teamOrchestrator')
+const {
+  createEvictionScan,
+  evictIdleOrchestrators,
+  getTeamOrchestrator,
+  hasTeamOrchestrator,
+  resetTeamOrchestrators,
+} = await import('../teamOrchestrator')
 
 const IDLE_TTL_MS = 30 * 60_000
 const HARD_TTL_MS = 4 * IDLE_TTL_MS
+const EVICT_SCAN_MS = 5 * 60_000
 
 describe('eviction scan — quiescence wiring', () => {
   let home: string
@@ -105,6 +111,30 @@ describe('eviction scan — quiescence wiring', () => {
     // A run that never reports a terminal keeps its abort-map entry forever, so
     // without this ceiling the instance would be immortal.
     expect(evictIdleOrchestrators(Date.now() + HARD_TTL_MS + 1)).toBe(1)
+    expect(hasTeamOrchestrator('T')).toBe(false)
+  })
+
+  it('an overnight sleep is not hours of silence: a busy instance survives the scan on wake', () => {
+    const t0 = Date.now()
+    getTeamOrchestrator('T')
+    const scan = createEvictionScan(t0)
+    expect(scan(t0 + EVICT_SCAN_MS)).toBe(0)
+
+    // Eight hours asleep, then the first scan on wake.
+    expect(scan(t0 + EVICT_SCAN_MS + 8 * 60 * 60_000)).toBe(0)
+    expect(hasTeamOrchestrator('T')).toBe(true)
+  })
+
+  it('a hung run still reaches the HARD ceiling when the scans keep running', () => {
+    const t0 = Date.now()
+    getTeamOrchestrator('T')
+    const scan = createEvictionScan(t0)
+    let at = t0
+    while (at < t0 + HARD_TTL_MS) {
+      at += EVICT_SCAN_MS
+      expect(scan(at)).toBe(0)
+    }
+    expect(scan(at + EVICT_SCAN_MS)).toBe(1)
     expect(hasTeamOrchestrator('T')).toBe(false)
   })
 })

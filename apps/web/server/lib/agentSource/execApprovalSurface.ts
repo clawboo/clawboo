@@ -25,11 +25,12 @@
 // own, and clawboo must never keep a second copy of it — two allowlists that
 // disagree produce approvals the Gateway then ignores.
 
-import { toolCallApprovals } from '@clawboo/db'
+import { approvalEvent, toolCallApprovals } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
-import { and, eq, lt } from 'drizzle-orm'
+import { and, eq, lt, ne } from 'drizzle-orm'
 
 import { getDb } from '../db'
+import { emitEvent } from '../obs/emit'
 
 const log = createLogger('exec-approvals')
 
@@ -151,7 +152,31 @@ export function expireStaleExecApprovals(db: ReturnType<typeof getDb>): number {
     )
     .returning()
     .all()
+  for (const row of rows) emitEvent(db, approvalEvent(db, 'approval_resolved', row))
   return rows.length
+}
+
+/**
+ * Record an answer on the mirrored row, and announce it once.
+ *
+ * One answer given here arrives twice, as the RPC reply and as the Gateway's
+ * broadcast, in either order. So the write is guarded on the status actually
+ * changing: the second arrival matches nothing and emits nothing. A frame that
+ * names no decision only settles a row still pending, so it can never overwrite
+ * the specific answer the reply already recorded.
+ */
+function settleExecApproval(db: ReturnType<typeof getDb>, id: string, status: string): void {
+  const guard =
+    status === 'resolved'
+      ? eq(toolCallApprovals.status, 'pending')
+      : ne(toolCallApprovals.status, status)
+  const rows = db
+    .update(toolCallApprovals)
+    .set({ status, resolvedAt: Date.now() })
+    .where(and(eq(toolCallApprovals.id, id), guard))
+    .returning()
+    .all()
+  for (const row of rows) emitEvent(db, approvalEvent(db, 'approval_resolved', row))
 }
 
 export interface ExecApprovalSurface {
@@ -176,7 +201,8 @@ export function startExecApprovalSurface(
         const req = parseExecApprovalRequest(frame.payload)
         if (!req) return
         const now = Date.now()
-        getDb()
+        const db = getDb()
+        const inserted = db
           .insert(toolCallApprovals)
           .values({
             id: req.id,
@@ -203,7 +229,10 @@ export function startExecApprovalSurface(
             expiresAt: req.expiresAtMs ?? now + EXEC_APPROVAL_TTL_MS,
           })
           .onConflictDoNothing()
-          .run()
+          .returning()
+          .all()
+        // A redelivery inserts nothing, so it announces nothing.
+        for (const row of inserted) emitEvent(db, approvalEvent(db, 'approval_requested', row))
         log.info({ id: req.id, agentId: req.agentId }, 'mirrored an exec approval')
         return
       }
@@ -215,14 +244,7 @@ export function startExecApprovalSurface(
         const id = typeof p?.['id'] === 'string' ? p['id'] : ''
         const decision = typeof p?.['decision'] === 'string' ? p['decision'] : ''
         if (!id) return
-        getDb()
-          .update(toolCallApprovals)
-          .set({
-            status: decision ? execDecisionStatus(decision) : 'resolved',
-            resolvedAt: Date.now(),
-          })
-          .where(eq(toolCallApprovals.id, id))
-          .run()
+        settleExecApproval(getDb(), id, decision ? execDecisionStatus(decision) : 'resolved')
       }
     } catch (err) {
       // A malformed frame must never break the fan-out for every other listener.
@@ -276,10 +298,6 @@ export async function resolveExecApproval(
     log.warn({ err, id }, 'could not resolve exec approval')
     return { ok: false }
   }
-  getDb()
-    .update(toolCallApprovals)
-    .set({ status: execDecisionStatus(decision), resolvedAt: Date.now() })
-    .where(eq(toolCallApprovals.id, id))
-    .run()
+  settleExecApproval(getDb(), id, execDecisionStatus(decision))
   return { ok: true }
 }

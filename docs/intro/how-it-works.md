@@ -150,7 +150,7 @@ Team chat has no circuit breakers, but it has limits of its own:
 - One turn can hand off at most 8 tasks. Extra hand-offs are dropped with a note.
 - Hand-offs go at most three levels below the leader. The agent on a third-level task must do the work itself.
 - Clawboo stops handing a task to a teammate that has failed it 3 times in a row.
-- A teammate that goes quiet for 8 minutes is stopped (24 minutes while inside one tool call).
+- A teammate that goes quiet for 8 minutes is stopped (24 minutes while inside one tool call). Time the computer spends asleep does not count.
 
 [Limits and defaults](/reference/limits-and-defaults) lists every number.
 

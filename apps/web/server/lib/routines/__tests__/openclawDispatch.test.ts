@@ -295,6 +295,62 @@ describe('dispatchConnectedSubstrate', () => {
     expect(client.subscriberCount()).toBe(0)
   })
 
+  it('a machine that slept past the WATCHDOG does not time out a run that was working', async () => {
+    // The watchdog budget is awake time. On wake from a sleep longer than it, the
+    // run is still working: its next event is handled, not read as a timeout.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const agentRow = seedAgent()
+      const run = seedRoutine(agentRow.id)
+      const taskId = seedTask()
+      const client = new FakeOperatorClient()
+      const queue = createAsyncQueue<RuntimeEvent>({ max: 100 })
+      let aborted = 0
+      const dispatchPromise = dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: client as unknown as OperatorClientLike,
+        makeAdapter: () => ({
+          start: async () => ({ adapterId: 'openclaw', sessionKey: 'sk', runId: 'run-1' }),
+          events: () => queue,
+          abort: async () => {
+            aborted += 1
+          },
+        }),
+      })
+      await vi.advanceTimersByTimeAsync(2 * 60_000)
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+
+      // An hour asleep. `jump` is how a macOS sleep looks to timers: the clock
+      // moves on and every timer that came due fires once, on wake, so the
+      // overdue watchdog check runs BEFORE the run's next event. (`setSystemTime`
+      // would move the pending timers along with the clock, and a watchdog with
+      // one fixed deadline would pass too.)
+      ;(globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(
+        60 * 60_000,
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(aborted).toBe(0)
+      expect(getTask(db, taskId)?.status).toBe('in_progress')
+
+      // The run speaks again on wake and finishes.
+      const base = { runId: 'run-1', sessionId: 'sk', ts: 1, seq: 1 }
+      queue.push({ ...base, kind: 'text-delta', text: 'still going' } as RuntimeEvent)
+      await vi.advanceTimersByTimeAsync(0)
+      queue.push({ ...base, kind: 'done', reason: 'success', summary: 'done after the nap' })
+
+      await expect(dispatchPromise).resolves.toMatchObject({ ok: true, taskId })
+      expect(aborted).toBe(0)
+      expect(getTask(db, taskId)?.status).toBe('done')
+      expect(listExecutions(db, taskId)[0]?.status).toBe('succeeded')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('the BUDGET KILL-SWITCH applies to a scheduled OpenClaw fire (cost events crossing a cap)', async () => {
     const agentRow = seedAgent()
     const run = seedRoutine(agentRow.id)

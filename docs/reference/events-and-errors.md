@@ -24,33 +24,33 @@ These are the orchestration events defined in `@clawboo/obs`. The OpenClaw Gatew
 
 There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 
-| Kind                                          | Group      | Records                                                        | Written by                                                  | Activity badge     |
-| --------------------------------------------- | ---------- | -------------------------------------------------------------- | ----------------------------------------------------------- | ------------------ |
-| [`task_created`](#task_created)               | Board      | A task was created                                             | Board API, team engine                                      | task               |
-| [`task_claimed`](#task_claimed)               | Board      | An agent was given a task                                      | Board API, team engine                                      | claim              |
-| [`status_changed`](#status_changed)           | Board      | A task moved to another status                                 | Board API, team engine                                      | status             |
-| [`comment_added`](#comment_added)             | Board      | A comment landed on a task                                     | Board API, team engine                                      | note               |
-| [`dep_linked`](#dep_linked)                   | Board      | A task was made to wait for another                            | Board API, team engine                                      | (hidden)           |
-| [`execution_started`](#execution_started)     | Runs       | A run of a task started                                        | Task runner, team engine, board API, OpenClaw routine fires | run                |
-| [`execution_completed`](#execution_completed) | Runs       | A run finished                                                 | Task runner, team engine, board API, OpenClaw routine fires | run                |
-| [`tool_call`](#tool_call)                     | Runs       | An agent called a tool                                         | Task runner, team engine, OpenClaw session watcher          | tool               |
-| [`tool_result`](#tool_result)                 | Runs       | A tool returned                                                | Task runner, team engine, OpenClaw session watcher          | result             |
-| [`cost`](#cost)                               | Runs       | Spend and tokens reported during a run                         | Task runner, OpenClaw routine fires                         | cost               |
-| [`session_rotated`](#session_rotated)         | Runs       | A run moved to a fresh session                                 | Task runner                                                 | session rotated    |
-| [`approval_requested`](#approval_requested)   | Approvals  | Declared; nothing writes it                                    | None                                                        | approval           |
-| [`approval_resolved`](#approval_resolved)     | Approvals  | An abandoned approval expired                                  | Approval reaper                                             | approval           |
-| [`error`](#error)                             | Errors     | A failure, sorted into an [error class](#error-classes)        | Task runner, team engine                                    | error              |
-| [`span_start`](#span_start)                   | Traces     | A task-runner run span opened                                  | Task runner                                                 | (hidden)           |
-| [`span_end`](#span_end)                       | Traces     | A run span closed                                              | Task runner                                                 | (hidden)           |
-| [`routine_fired`](#routine_fired)             | Routines   | A due routine was picked up                                    | Routines engine                                             | routine fired      |
-| [`routine_dispatched`](#routine_dispatched)   | Routines   | A routine's work was handed to its target                      | Routines engine                                             | routine dispatched |
-| [`routine_completed`](#routine_completed)     | Routines   | A routine fire succeeded and the routine re-armed              | Routines engine                                             | routine completed  |
-| [`routine_error`](#routine_error)             | Routines   | A routine fire failed                                          | Routines engine                                             | routine error      |
-| [`team_chat_post`](#team_chat_post)           | Peer room  | An agent posted through the TeamChat MCP server                | TeamChat MCP over HTTP                                      | team chat post     |
-| [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                           | speaker selected   |
-| [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                           | turn bound hit     |
-| [`grant_decision`](#grant_decision)           | Connectors | A grant check allowed, paused or refused a connector tool call | Tool broker                                                 | grant              |
-| [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                        | connector          |
+| Kind                                          | Group      | Records                                                        | Written by                                                                         | Activity badge     |
+| --------------------------------------------- | ---------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------ |
+| [`task_created`](#task_created)               | Board      | A task was created                                             | Board API, team engine                                                             | task               |
+| [`task_claimed`](#task_claimed)               | Board      | An agent was given a task                                      | Board API, team engine                                                             | claim              |
+| [`status_changed`](#status_changed)           | Board      | A task moved to another status                                 | Board API, team engine                                                             | status             |
+| [`comment_added`](#comment_added)             | Board      | A comment landed on a task                                     | Board API, team engine                                                             | note               |
+| [`dep_linked`](#dep_linked)                   | Board      | A task was made to wait for another                            | Board API, team engine                                                             | (hidden)           |
+| [`execution_started`](#execution_started)     | Runs       | A run of a task started                                        | Task runner, team engine, board API, OpenClaw routine fires                        | run                |
+| [`execution_completed`](#execution_completed) | Runs       | A run finished                                                 | Task runner, team engine, board API, OpenClaw routine fires                        | run                |
+| [`tool_call`](#tool_call)                     | Runs       | An agent called a tool                                         | Task runner, team engine, OpenClaw session watcher                                 | tool               |
+| [`tool_result`](#tool_result)                 | Runs       | A tool returned                                                | Task runner, team engine, OpenClaw session watcher                                 | result             |
+| [`cost`](#cost)                               | Runs       | Spend and tokens reported during a run                         | Task runner, OpenClaw routine fires                                                | cost               |
+| [`session_rotated`](#session_rotated)         | Runs       | A run moved to a fresh session                                 | Task runner                                                                        | session rotated    |
+| [`approval_requested`](#approval_requested)   | Approvals  | An approval card opened                                        | Tool broker, Clawboo Native commands, risky hand-offs, OpenClaw command mirror     | approval           |
+| [`approval_resolved`](#approval_resolved)     | Approvals  | An approval card was answered or expired                       | Approval routes, OpenClaw command mirror, Clawboo Native commands, approval reaper | approval           |
+| [`error`](#error)                             | Errors     | A failure, sorted into an [error class](#error-classes)        | Task runner, team engine                                                           | error              |
+| [`span_start`](#span_start)                   | Traces     | A task-runner run span opened                                  | Task runner                                                                        | (hidden)           |
+| [`span_end`](#span_end)                       | Traces     | A run span closed                                              | Task runner                                                                        | (hidden)           |
+| [`routine_fired`](#routine_fired)             | Routines   | A due routine was picked up                                    | Routines engine                                                                    | routine fired      |
+| [`routine_dispatched`](#routine_dispatched)   | Routines   | A routine's work was handed to its target                      | Routines engine                                                                    | routine dispatched |
+| [`routine_completed`](#routine_completed)     | Routines   | A routine fire succeeded and the routine re-armed              | Routines engine                                                                    | routine completed  |
+| [`routine_error`](#routine_error)             | Routines   | A routine fire failed                                          | Routines engine                                                                    | routine error      |
+| [`team_chat_post`](#team_chat_post)           | Peer room  | An agent posted through the TeamChat MCP server                | TeamChat MCP over HTTP                                                             | team chat post     |
+| [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                                                  | speaker selected   |
+| [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                                                  | turn bound hit     |
+| [`grant_decision`](#grant_decision)           | Connectors | A grant check allowed, paused or refused a connector tool call | Tool broker                                                                        | grant              |
+| [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                                               | connector          |
 
 - **Board API** means the board routes the dashboard calls. Board changes made through the [Tasks MCP tools](/reference/mcp-tools) or by the task runner itself update the live board views but are not written to the log as board events.
 - **Task runner** runs serve `POST /api/runtimes/:id/run` and agent routine fires on runtimes other than OpenClaw. **Team engine** runs serve team chat and the tasks it delegates. See [How a team works](/intro/how-it-works) for the two paths.
@@ -289,21 +289,51 @@ A task-runner run reached its turn limit or filled its context, and continued in
 
 ## Approval events
 
+Every approval card is a row in the `tool_call_approvals` table, shown under **Needs you** on the Board (see [Approvals](/using/approvals)). Each row writes one `approval_requested` when it is created and one `approval_resolved` when it settles. The events name the call but never carry its arguments, its reason or the command text: those stay on the row, because nothing prunes the event log and every **Activity** feed reads it.
+
+The envelope carries the agent that asked, its team when Clawboo has a row for that agent, the task the approval gates when known, and the tenant.
+
 ### approval_requested
 
-Declared, but nothing writes it. Pending tool approvals live in the `tool_call_approvals` table and appear under **Needs you** on the Board (see [Approvals](/using/approvals)).
+An approval card opened: a connector call the tool broker paused, a [Clawboo Native command](/using/command-permissions), a risky hand-off, or an OpenClaw command the server copied from the Gateway. A request the Gateway delivers twice writes one event.
 
 ```ts
-{ approvalId?: string; scopeKey?: string; kind?: string }
+{
+  approvalId: string
+  kind: string // 'tool' (Clawboo holds the call) | 'exec' (the OpenClaw Gateway holds it)
+  toolName: string // 'run_command' for a Native command, 'exec' for an OpenClaw one, 'delegate:<kind>' for a hand-off
+  toolClass?: string | null // 'read' | 'write' | 'destructive'
+  grantId?: string | null
+  connectorId?: string | null
+  expiresAt: number // epoch ms; the card stops being answerable then
+  scopeKey?: string // declared; nothing writes it
+}
 ```
+
+A connector call that a remembered **Always** answers opens no card and writes no `approval_requested`. Its [`grant_decision`](#grant_decision) carries the rule's `ruleId`.
 
 ### approval_resolved
 
-Written only when the approval reaper expires an approval nobody answered. The reaper runs hourly and expires pending approvals older than 24 hours (`CLAWBOO_APPROVAL_TTL_MS`). A person's decision is stored on the approval row itself, not as an event.
+An approval card settled. Written by whichever of these got there first:
+
+- **A person's answer** through `POST /api/tools/approvals/:id/resolve` or `POST /api/capabilities/approve`. For an OpenClaw command, only once the Gateway has accepted it.
+- **Another surface's answer** to an OpenClaw command, which the Gateway reports to Clawboo's server.
+- **An OpenClaw deadline.** Every 30 seconds the server expires copied commands past the Gateway's deadline.
+- **A stopped run.** A Clawboo Native command whose run stopped before anyone answered is expired.
+- **The approval reaper**, which runs hourly and expires pending approvals older than 24 hours (`CLAWBOO_APPROVAL_TTL_MS`).
+
+A second answer to the same card changes nothing and writes nothing.
 
 ```ts
-{ approvalId?: string; decision?: string } // decision is 'expired'
+{
+  approvalId: string
+  decision: string // 'allow_once' | 'allow_always' | 'deny' | 'expired'; 'resolved' when the Gateway reported an answer without naming it
+  kind: string
+  toolName: string
+}
 ```
+
+A connector call, Native command or hand-off that nobody answers stops waiting at `expiresAt` without writing an event. Its row stays pending, and its `approval_resolved` arrives only when the reaper expires it: 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. Treat a card past its `expiresAt` as closed.
 
 ## Error events
 

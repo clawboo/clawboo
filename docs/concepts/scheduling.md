@@ -63,7 +63,7 @@ An agent routine creates a new Board task for its agent on every fire, with the 
 | Budget check before it starts | Yes                                                       | Yes                                                     |
 | Circuit breakers              | Yes                                                       | No                                                      |
 | Worktree and verification     | Only when the task template names a repository (API only) | Never                                                   |
-| Time limit                    | Ended after 30 minutes with no activity                   | 10 minutes for the whole run                            |
+| Time limit                    | Ended after 30 minutes of awake time with no activity     | 10 minutes of awake time for the whole run              |
 | Trace in Observability        | Yes                                                       | No                                                      |
 
 On OpenClaw, the Gateway must be connected, or the fire fails. A finished OpenClaw run gets a comment on its task saying it completed without verification. If a person moves the task's card out of In progress on the Board while it runs, the run stops at once. That counts as the outcome, not as a failure, and the routine stays on its schedule.

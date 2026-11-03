@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { createNudgeQueue } from '../nudgeQueue'
+
+/** A macOS sleep under fake timers: the wall clock jumps and every timer whose
+ *  delay passed fires once, on wake. (`vi.setSystemTime` would move the pending
+ *  timers along with the clock, so a plain setTimeout would pass too.) */
+const sleepFor = (ms: number): void =>
+  (globalThis.setTimeout as unknown as { clock: { jump(ms: number): void } }).clock.jump(ms)
 
 describe('createNudgeQueue', () => {
   it('delivers immediately when the session is idle', async () => {
@@ -151,5 +157,26 @@ describe('createNudgeQueue', () => {
     // onWedge (abort) ran BEFORE the queued send flushed.
     expect(order[0]).toBe('run1')
     expect(order.indexOf('wedge:s1')).toBeLessThan(order.indexOf('run2-after-abort'))
+  })
+
+  it('a machine that slept past the wedge timeout does not wedge the session on wake', async () => {
+    vi.useFakeTimers()
+    try {
+      const wedged: string[] = []
+      const nq = createNudgeQueue({ onWedge: (sk) => void wedged.push(sk) })
+      await nq.deliver('s1', async () => {})
+      vi.advanceTimersByTime(2 * 60_000)
+
+      sleepFor(60 * 60_000)
+      expect(wedged).toEqual([])
+      expect(nq.isBusy('s1')).toBe(true)
+
+      // A session that stays silent is still force-idled in awake time.
+      vi.advanceTimersByTime(10 * 60_000)
+      expect(wedged).toEqual(['s1'])
+      expect(nq.isBusy('s1')).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -9,8 +9,12 @@
 // only if the iterator stays silent through the grace too does the stream end.
 //
 // The timer is IDLE-reset, not total: every event re-arms it, so a long but
-// streaming run never trips. Distinct from the engine's 8-min delegate watchdog
-// (which fails the TASK): this frees the PROCESS-side resources beneath it.
+// streaming run never trips. It counts awake time, so a machine that slept past
+// the ceiling does not abort its runs on wake. Distinct from the engine's 8-min
+// delegate watchdog (which fails the TASK): this frees the PROCESS-side resources
+// beneath it.
+
+import { setAwakeTimeout, type AwakeTimer } from './suspendDetector'
 
 /** Default silence ceiling before a run's drain gives up on its iterator. High
  *  on purpose — an open tool call (build/test) is legitimately silent for many
@@ -49,17 +53,19 @@ export async function* withIdleTimeout<T>(
   // a fresh pull instead would drop that value on the floor (exactly the
   // terminal the grace window exists to deliver).
   let pending: Promise<IteratorResult<T>> | null = null
+  // Outside the loop so `finally` can clear it: a pull that rejects throws out
+  // of the race below before the loop's own clear runs.
+  let timer: AwakeTimer | undefined
   try {
     for (;;) {
       const windowMs = idled ? (opts.graceMs ?? IDLE_ABORT_GRACE_MS) : opts.idleMs
-      let timer: ReturnType<typeof setTimeout> | undefined
       const expiry = new Promise<'idle'>((resolve) => {
-        timer = setTimeout(() => resolve('idle'), windowMs)
-        ;(timer as { unref?: () => void }).unref?.()
+        timer = setAwakeTimeout(() => resolve('idle'), windowMs)
       })
       pending ??= it.next()
       const winner = await Promise.race([pending.then((r) => ({ r })), expiry])
-      clearTimeout(timer)
+      timer?.clear()
+      timer = undefined
       if (winner === 'idle') {
         if (idled) return // silent through the grace too — give up
         idled = true
@@ -77,6 +83,7 @@ export async function* withIdleTimeout<T>(
       yield winner.r.value
     }
   } finally {
+    timer?.clear()
     // End-of-consumption (including a caller break/throw): release the source.
     // `.catch` matters: a rejecting `return` implementation is otherwise a
     // floating rejection, the same class of defect as the carried pull above.
