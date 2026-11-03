@@ -9,7 +9,7 @@ This page lists every number Clawboo builds in that changes what you see: caps, 
 
 Some limits apply to only one of the two ways work runs. **Team chat** covers every chat turn, delegated task and team Routine. **Task runner** covers agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started with `POST /api/runtimes/:id/run`. [How a team works](/intro/how-it-works) explains both.
 
-Limits on running work count only the time the computer is awake. When a laptop sleeps, Clawboo sees the gap when it wakes and leaves it out, so closing the lid does not use up a delegated task's quiet time, a run's 30 minutes of silence, a running task's heartbeat window or an OpenClaw Routine run's 10 minutes. Approval windows count clock time, asleep or not.
+Limits on running work count only the time the computer is awake. When a laptop sleeps, Clawboo sees the gap when it wakes and leaves it out, so closing the lid does not use up a delegated task's quiet time, a run's 30 minutes of silence, a running task's heartbeat window or an OpenClaw Routine run's 10 minutes. Clawboo notices a sleep only as a gap of more than two of its own checks, a minute or two depending on the limit, so a shorter sleep still counts against the limit, and a longer stall of the server while the computer stays awake is left out as if it were sleep. Approval windows count clock time, asleep or not.
 
 | Area                                              | What it covers                                                  |
 | ------------------------------------------------- | --------------------------------------------------------------- |

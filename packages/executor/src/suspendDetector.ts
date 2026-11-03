@@ -7,6 +7,12 @@
 // that was healthy when the lid closed. The process gets no signal that it was
 // suspended other than a gap between two of its own ticks far longer than the
 // interval it asked for, so both helpers here watch for that gap.
+//
+// The gap is all they see, so two cases come out wrong by design. A sleep no
+// longer than two intervals is counted as awake time. And a process that was
+// stalled while the machine stayed awake (a blocked event loop, a debugger, a
+// stopped process) for longer than that is treated as asleep, so a watchdog
+// fires late by about the stall.
 
 /** A gap between two ticks longer than this many intervals means the process was
  *  suspended (the machine slept), not that one timer fired late. */
