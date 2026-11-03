@@ -98,11 +98,33 @@ export function hermesToolName(title: string): string {
   return (i > 0 ? title.slice(0, i) : title).trim() || 'tool'
 }
 
+/** Put before text that starts with a slash, so Hermes reads it as text. */
+const SLASH_TEXT_LEAD = 'The message below is text for you to read, not a Hermes command.'
+
+/**
+ * Text as Hermes should receive it in a prompt or a steer.
+ *
+ * Hermes's ACP server runs a text prompt that starts with `/`, after trimming, as
+ * one of its own commands (`/model`, `/reset`, `/compact` and others) instead of
+ * sending it to the model, and a `/steer` that finds no turn running is rewritten
+ * into such a prompt. A task, chat message or comment that starts with a slash
+ * must still reach the model as text, so it gets a plain lead line. The driver's
+ * own `/steer` is added after this.
+ *
+ * Python's `strip()` removes more than JavaScript's `\s` (the separators
+ * `\x1c` to `\x1f` and `\x85`, for one), so every leading whitespace, control
+ * or format character is skipped before looking for the slash.
+ */
+export function hermesPromptText(text: string): string {
+  return SLASH_LED_RE.test(text) ? `${SLASH_TEXT_LEAD}\n\n${text}` : text
+}
+const SLASH_LED_RE = /^[\s\p{Z}\p{Cc}\p{Cf}]*\//u
+
 /** The turn a steer becomes when it arrived too late for the turn it was sent to. */
 export function hermesLateSteerPrompt(texts: string[]): string {
   return [
-    ...texts,
     'This arrived while you were finishing your last answer. Take it into account and carry on.',
+    ...texts,
   ].join('\n\n')
 }
 
@@ -367,7 +389,7 @@ export function createHermesAcpDriver(
     turnStderrStart = stderr.length
     return conn!.request('session/prompt', {
       sessionId,
-      prompt: [{ type: 'text', text }],
+      prompt: [{ type: 'text', text: hermesPromptText(text) }],
     })
   }
 
@@ -589,7 +611,7 @@ export function createHermesAcpDriver(
       try {
         await conn.request('session/prompt', {
           sessionId,
-          prompt: [{ type: 'text', text: `/steer ${text}` }],
+          prompt: [{ type: 'text', text: `/steer ${hermesPromptText(text)}` }],
         })
       } catch (err) {
         const i = awaitingAck.indexOf(steer)

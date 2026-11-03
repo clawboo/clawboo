@@ -14,7 +14,13 @@ import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
 import type { StartOpts } from '@clawboo/executor'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createHermesAcpDriver, hermesAcpFailure, hermesToolName } from '../hermesAcpDriver'
+import {
+  createHermesAcpDriver,
+  hermesAcpFailure,
+  hermesLateSteerPrompt,
+  hermesPromptText,
+  hermesToolName,
+} from '../hermesAcpDriver'
 import type { RuntimeRunContext } from '../types'
 
 const FAKE_AGENT = String.raw`
@@ -180,9 +186,10 @@ describe('createHermesAcpDriver', () => {
     ctx: RuntimeRunContext = ctxFor(),
     fallback?: () => HermesDriver,
     onAcpUnavailable?: (reason: string) => void,
+    opts: StartOpts = OPTS,
   ): { driver: HermesDriver; seen: HermesNativeEvent[] } {
     process.env['FAKE_SCENARIO'] = scenario
-    const driver = createHermesAcpDriver(OPTS, ctx, {
+    const driver = createHermesAcpDriver(opts, ctx, {
       fallback:
         fallback ??
         (() => {
@@ -333,6 +340,27 @@ describe('createHermesAcpDriver', () => {
     expect(resultOf(seen)).toMatchObject({ ok: true, summary: 'Steered.' })
   })
 
+  it('never sends a prompt or steer that Hermes would run as one of its slash commands', async () => {
+    const { driver, seen } = driverFor('steer', ctxFor(), undefined, undefined, {
+      ...OPTS,
+      message: '/model some/cheaper-model',
+    })
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'tool-call'))
+    await expect(driver.steer!('/reset and start over')).resolves.toBe(true)
+    await until(() => seen.some((e) => e.type === 'result'))
+    const [first, steer] = (await received())
+      .filter((m) => m['method'] === 'session/prompt')
+      .map((m) => (m['params'] as { prompt: Array<{ text: string }> }).prompt[0]!.text)
+    // Hermes trims, then treats a leading slash as a command.
+    expect(first!.trim().startsWith('/')).toBe(false)
+    expect(first).toContain('/model some/cheaper-model')
+    expect(steer!.startsWith('/steer ')).toBe(true)
+    const steerArg = steer!.slice('/steer '.length)
+    expect(steerArg.trim().startsWith('/')).toBe(false)
+    expect(steerArg).toContain('/reset and start over')
+  })
+
   it('delivers a steer that came while Hermes wrote its final answer as one more turn', async () => {
     const { driver, seen } = driverFor('late-steer')
     await driver.start()
@@ -454,6 +482,32 @@ describe('Hermes ACP helpers', () => {
     )
     expect(hermesToolName('todo')).toBe('todo')
     expect(hermesToolName('')).toBe('tool')
+  })
+
+  it('gives text that starts with a slash a lead line, and leaves other text alone', () => {
+    expect(hermesPromptText('do the task')).toBe('do the task')
+    expect(hermesPromptText('write it to /tmp/out')).toBe('write it to /tmp/out')
+    // Python's str.strip() also drops \x1c to \x1f and \x85, which JavaScript's \s
+    // does not match.
+    for (const t of [
+      '/model openai/gpt-4o',
+      '  /reset',
+      '\n/compact now',
+      '\x1c/model cheap',
+      '\x1f\x85/reset',
+      ' /tools',
+    ]) {
+      const out = hermesPromptText(t)
+      expect(out.trim().startsWith('/')).toBe(false)
+      expect(out.endsWith(t)).toBe(true)
+    }
+  })
+
+  it('starts a late-steer turn with its own sentence, never with the steer text', () => {
+    const p = hermesLateSteerPrompt(['/model cheap', 'and add tests'])
+    expect(p.trim().startsWith('/')).toBe(false)
+    expect(p).toContain('/model cheap')
+    expect(p).toContain('and add tests')
   })
 
   it('keeps only the error lines of what Hermes logged', () => {
