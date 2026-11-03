@@ -70,6 +70,9 @@ it('sandboxes every preview response without letting script run', async () => {
     const res = await fetch(`${base}${sub}`, { redirect: 'manual' })
     expect(res.status, sub).toBe(status)
     expect(res.headers.get('content-security-policy'), sub).toBe('sandbox allow-same-origin')
+    // The header on a redirect does not travel with it, so the redirect must
+    // land on the preview's own index, which is sandboxed above.
+    if (status === 302) expect(res.headers.get('location'), sub).toBe('/api/board/t1/preview/')
     await res.arrayBuffer()
   }
 })

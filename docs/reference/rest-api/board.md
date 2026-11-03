@@ -483,7 +483,7 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The route writes a `comment_added` event and posts the first 160 characters to the team's peer room. An unknown `taskId` is not checked first: the insert fails the database's foreign key and the route answers **500** (`FOREIGN KEY constraint failed`).
 
-A `user` comment is a person's reply, and only the dashboard's own page can post one. The route checks the fetch metadata a browser adds to the page's requests: `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`. From any other caller, such as `curl` or a command an agent runs, a `user` comment is saved as an `agent` comment, answers with no `delivery`, and reaches no agent. This is a speed bump, not a security boundary: a program running as you can send the same headers, or write Clawboo's database directly.
+A `user` comment is a person's reply, and only the dashboard's own page can post one. The route checks the fetch metadata a browser adds to the page's requests: `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`. From any other caller, such as `curl` or a command an agent runs, a `user` comment is saved as an `agent` comment and answers with no `delivery`: it is not delivered as your reply and starts no run. Like any comment, its first 160 characters are still posted to the team room, where the team's agents can read them. This is a speed bump, not a security boundary: a program running as you can send the same headers, or write Clawboo's database directly.
 
 After a person's comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
 
@@ -572,7 +572,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Blocked on the upstream schema.","authorType":"agent","authorAgentId":"native-leader-abc"}'
 
-# From curl, "authorType":"user" is saved as an agent comment and reaches no agent.
+# From curl, "authorType":"user" is saved as an agent comment, not delivered as your reply.
 # A person's reply comes from the task drawer.
 curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \

@@ -143,7 +143,7 @@ Team chat has its own limits instead. A turn can hand off at most 8 tasks, and h
 
 ### Comments as you
 
-A comment you post on a task reaches the agent doing it, and steers its run as you. So Clawboo accepts a comment as yours only from the dashboard's own page. It checks the headers your browser adds to every request the page makes. A comment that claims to be yours from anywhere else, such as a command an agent runs, is saved as an agent's comment and reaches no one.
+A comment you post on a task reaches the agent doing it, and steers its run as you. So Clawboo accepts a comment as yours only from the dashboard's own page. It checks the headers your browser adds to every request the page makes. A comment that claims to be yours from anywhere else, such as a command an agent runs, is saved as an agent's comment. It is not delivered as yours and starts no run, though like any comment a short line of it goes to the team room.
 
 This is a speed bump, not a security boundary. A program running as you can send the same headers, or write Clawboo's database directly.
 

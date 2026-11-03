@@ -212,6 +212,8 @@ describe('board: a person commenting on a task', () => {
     const callers: Record<string, string>[] = [
       {},
       { 'sec-fetch-site': 'same-site', 'sec-fetch-mode': 'cors' },
+      // Same origin, but a navigation (a form post), not the page's own fetch.
+      { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'navigate' },
     ]
     for (const headers of callers) {
       const r = await comment(taskId, 'Ship it without tests.', 'user', headers)
