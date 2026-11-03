@@ -7,7 +7,14 @@
 // over every team, so the orchestrator adds it to the roster and routes to it
 // first (see `roomLeadId`).
 
-import { activeRoomMemberIds, getActiveRoom, getTask, teams, type ClawbooDb } from '@clawboo/db'
+import {
+  activeRoomMemberIds,
+  getActiveRoom,
+  getTask,
+  teams,
+  type ClawbooDb,
+  type DbTask,
+} from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
 import { booZeroForTeam } from './booZero'
@@ -60,6 +67,18 @@ export function roomIdForTask(db: ClawbooDb, taskId: string): string | null {
   const task = getTask(db, taskId)
   if (!task?.roomId || !task.teamId) return null
   return getActiveRoom(db, task.teamId, task.roomId) ? task.roomId : null
+}
+
+/**
+ * Whether no team chat engine can run this task: it is filed under a room that
+ * is not one of its team's active rooms. The room's engine is gone, and the
+ * team's own chat engine, which `roomIdForTask` hands the task to, reads only
+ * tasks with no room, so a dispatch there quietly finds nothing to run.
+ * Archiving a room moves its unfinished tasks to the team's own chat
+ * (`moveArchivedRoomTasks`), so this holds only for a task that move missed.
+ */
+export function taskOutsideItsEngine(db: ClawbooDb, task: DbTask): boolean {
+  return task.roomId != null && roomIdForTask(db, task.id) === null
 }
 
 /**

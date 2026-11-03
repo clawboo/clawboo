@@ -13,7 +13,16 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { agents, chatMessages, createRoom, teams } from '@clawboo/db'
+import { encodeHumanAssignment } from '@clawboo/board-core'
+import {
+  agents,
+  chatMessages,
+  createRoom,
+  createTask,
+  getTask,
+  listExecutions,
+  teams,
+} from '@clawboo/db'
 import type { TranscriptEntry } from '@clawboo/protocol'
 import type { TurnOrigin } from '@clawboo/team-orchestration'
 
@@ -149,11 +158,38 @@ describe('team chat rooms in the orchestrator', () => {
     expect(delivered).toHaveLength(0)
   })
 
-  it("retiring a room drops only that room's instance", () => {
+  it("retiring a room drops only that room's instance", async () => {
     getTeamOrchestrator('T')
     getTeamOrchestrator('T', { roomId })
-    retireRoomOrchestrator('T', roomId)
+    await retireRoomOrchestrator('T', roomId)
     expect(hasTeamOrchestrator('T', roomId)).toBe(false)
     expect(hasTeamOrchestrator('T')).toBe(true)
+  })
+
+  it('retiring a room waits for its Stop to land on every task it was running', async () => {
+    // The Stop's durable half (each run's execution closed as stopped, its task
+    // released) is async, and the teardown that followed it at once forgot every
+    // task the engine was tracking. Only the first task was released: the rest
+    // stayed In progress with a running execution nothing would ever close.
+    const db = getDb()
+    const orch = getTeamOrchestrator('T', { roomId })
+    // Its first resume has run, so the tasks below start from dispatchTask.
+    await orch.pump()
+    const ids: string[] = []
+    for (const agent of ['bea', 'cy']) {
+      const t = createTask(db, {
+        title: `Work for ${agent}`,
+        teamId: 'T',
+        roomId,
+        sourceDelegationId: encodeHumanAssignment(agent, agent),
+      })
+      expect(await orch.dispatchTask(t.id)).toBe('started')
+      ids.push(t.id)
+    }
+    await retireRoomOrchestrator('T', roomId)
+    for (const id of ids) {
+      expect(getTask(db, id)?.status).toBe('todo')
+      expect(listExecutions(db, id).at(-1)?.status).toBe('cancelled')
+    }
   })
 })

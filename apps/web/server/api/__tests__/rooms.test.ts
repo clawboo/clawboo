@@ -7,13 +7,21 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
   agents,
   chatMessages,
+  claimTask,
+  createExecutionProcess,
+  createTask,
   getSetting,
+  getTask,
+  listExecutions,
   listRooms,
   setSetting,
+  setTaskRunnerInputs,
   teams,
+  updateStatus,
   type ClawbooDb,
 } from '@clawboo/db'
 import { buildTeamSessionKey } from '@clawboo/team-orchestration'
@@ -174,7 +182,7 @@ describe('rooms REST', () => {
     expect(bad.status()).toBe(400)
   })
 
-  it('delete archives: the room leaves the list, its transcript stays, its resume pointers go', () => {
+  it('delete archives: the room leaves the list, its transcript stays, its resume pointers go', async () => {
     const room = (create({ name: 'R', memberIds: ['a1', 'a2'] }).body as RoomBody).room
     const roomKey = buildTeamSessionKey('a1', 'T', room.id)
     db.insert(chatMessages)
@@ -184,7 +192,7 @@ describe('rooms REST', () => {
     setSetting(db, nativeTeamSessionSettingKey('a1', 'T'), 'team-session-1')
 
     const del = fakeRes()
-    teamRoomDELETE(req({ id: 'T', roomId: room.id }), del.res)
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), del.res)
     expect(del.status()).toBe(200)
     expect(listRooms(db, 'T')).toHaveLength(0)
     expect(listRooms(db, 'T', { includeArchived: true })).toHaveLength(1)
@@ -200,16 +208,100 @@ describe('rooms REST', () => {
     expect(getSetting(db, nativeTeamSessionSettingKey('a1', 'T'))).toBe('team-session-1')
 
     const again = fakeRes()
-    teamRoomDELETE(req({ id: 'T', roomId: room.id }), again.res)
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), again.res)
     expect(again.status()).toBe(404)
   })
 
-  it('the chat ingest 404s a room that is not one of the team’s, or was deleted', () => {
+  it("delete moves the room's unfinished tasks to the team's own chat, stopped", async () => {
+    // Its tasks used to stay filed under the archived room, where no engine could
+    // see them, so Retry, Assign and a reply on them started nothing.
+    const room = (create({ name: 'R', memberIds: ['a1', 'a2'] }).body as RoomBody).room
+    const queued = createTask(db, {
+      title: 'Queued for a1',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: encodeHumanAssignment('a1', 'n1'),
+    })
+    const blocked = createTask(db, {
+      title: 'Blocked on a2',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: encodeHumanAssignment('a2', 'n2'),
+    })
+    claimTask(db, blocked.id, 'a2')
+    updateStatus(db, blocked.id, 'blocked')
+    const done = createTask(db, { title: 'Done', teamId: 'T', roomId: room.id })
+    claimTask(db, done.id, 'a1')
+    updateStatus(db, done.id, 'done')
+
+    const del = fakeRes()
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), del.res)
+    expect(del.status()).toBe(200)
+
+    expect(getTask(db, queued.id)?.roomId).toBeNull()
+    expect(getTask(db, blocked.id)?.roomId).toBeNull()
+    expect(getTask(db, blocked.id)?.status).toBe('blocked')
+    // Still stopped: the team chat's pump does not start it on its own.
+    expect(listExecutions(db, queued.id).map((e) => e.status)).toEqual(['cancelled'])
+    // A finished task keeps its room, so its history reads where it happened.
+    expect(getTask(db, done.id)?.roomId).toBe(room.id)
+  })
+
+  it('delete stops a step still running in the room when no engine is there to stop it', async () => {
+    // After a restart a room's engine is built only for ready work. Moved while
+    // running, the stale sweep would release the step and General would start it.
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const step = createTask(db, {
+      title: 'Step in flight',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: 'run-1:deleg:agent:a1:reflectTo:a2',
+    })
+    claimTask(db, step.id, 'a1')
+    createExecutionProcess(db, { taskId: step.id, executorType: 'openclaw' })
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
+    expect(getTask(db, step.id)).toMatchObject({ status: 'todo', roomId: null })
+    expect(listExecutions(db, step.id).map((e) => e.status)).toEqual(['cancelled'])
+  })
+
+  it("delete leaves the task runner's own tasks to the runner", async () => {
+    // The runner reruns them itself; a stopped marker would end that.
+    db.insert(agents)
+      .values({
+        id: 'b1',
+        name: 'b1',
+        gatewayId: 'b1',
+        teamId: 'T',
+        runtime: 'claude-code',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .run()
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const t = createTask(db, {
+      title: 'Runner rerun',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: 'run-1:deleg:agent:b1:reflectTo:a1',
+    })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'b1',
+      repoPath: '/repo',
+      kind: 'code',
+      model: null,
+    })
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
+    expect(getTask(db, t.id)?.roomId).toBeNull()
+    expect(listExecutions(db, t.id)).toEqual([])
+  })
+
+  it('the chat ingest 404s a room that is not one of the team’s, or was deleted', async () => {
     const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
     const unknown = fakeRes()
     teamChatIngestPOST(req({ id: 'OTHER' }, { message: 'hi', roomId: room.id }), unknown.res)
     expect(unknown.status()).toBe(404)
-    teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
     const archived = fakeRes()
     teamChatIngestPOST(req({ id: 'T' }, { message: 'hi', roomId: room.id }), archived.res)
     expect(archived.status()).toBe(404)

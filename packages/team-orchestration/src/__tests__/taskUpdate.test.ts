@@ -78,3 +78,20 @@ describe('buildTaskUpdateMessage, a person deciding a task on the board', () => 
     expect(msg).toContain('A person cancelled all of them on the board.')
   })
 })
+
+describe('buildTaskUpdateMessage, an agent that blocked its own task', () => {
+  it("says the task needs a person, with the agent's own words", () => {
+    const msg = buildTaskUpdateMessage([
+      {
+        by: 'Bug Boo',
+        title: 'Fix the parser',
+        summary: 'I need the API key.',
+        outcome: 'blocked',
+      },
+    ])
+    expect(msg).toContain('marked it blocked: it needs a person before it can go on')
+    expect(msg).toContain('I need the API key.')
+    // It is not done, so the reader must act on it rather than wait.
+    expect(msg).toContain('did NOT complete')
+  })
+})

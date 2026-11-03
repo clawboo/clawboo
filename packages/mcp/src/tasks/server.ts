@@ -6,9 +6,12 @@
 import {
   addComment,
   blockTask,
+  cancelDependents,
   claimTask,
   createCappedRootTask,
   createCappedSubtask,
+  delegatorOf,
+  enqueueInbox,
   getAncestors,
   getComments,
   getReadyTasks,
@@ -22,6 +25,7 @@ import {
   updateStatus,
   type ClawbooDb,
   type CreateTaskInput,
+  type DbTask,
   type GuardedCreateResult,
   type TaskStatus,
   type UpdateStatusResult,
@@ -117,13 +121,69 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
   return textResult(`parent not found: ${parentTaskId}`, true, result.reason)
 }
 
-/** The board's read surface — the half that is safe to attach to an agent that
- *  must not mutate the board (team runs, where claims/status are engine-owned:
- *  a model-issued `create_task`/`claim_task` would race the engine's writes or
- *  orphan a task no dispatcher runs). */
+/**
+ * Tell the agent that delegated a task that it was cancelled through these tools,
+ * and how many of the plan steps waiting on it went with it. A person's cancel on
+ * the board tells the delegator the same way. A cancel by the delegator itself
+ * needs no note, and a task nobody delegated has nobody waiting on it. The row is
+ * durable: it rides the delegator's next run or tool call.
+ */
+function noteCancelForDelegator(
+  db: ClawbooDb,
+  task: DbTask,
+  stepsCancelled: number,
+  callerAgentId: string | undefined,
+): void {
+  const delegator = delegatorOf(task.sourceDelegationId)
+  if (!delegator || delegator === callerAgentId) return
+  const steps =
+    stepsCancelled === 0
+      ? ''
+      : stepsCancelled === 1
+        ? ' One later step waiting on it was cancelled too.'
+        : ` ${stepsCancelled} later steps waiting on it were cancelled too.`
+  try {
+    enqueueInbox(db, {
+      agentId: delegator,
+      teamId: task.teamId,
+      kind: 'task_update',
+      taskId: task.id,
+      body: `“${task.title}” was cancelled through the Tasks tools.${steps} Do not hand it out again unless the work is still needed.`,
+    })
+  } catch {
+    // The cancel itself is written; failing the tool call now would only make
+    // the caller retry a cancel that already happened.
+  }
+}
+
+/** The board's read surface: the half that is safe to attach to an agent that
+ *  must not mutate the board at all (a Clawboo Native team run). */
 const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
 /** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
 const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
+/** Tools that move a card: who may call them depends on who is calling. */
+const STATUS_TOOL_NAMES = new Set([
+  'release_task',
+  'update_task_status',
+  'block_task',
+  'unblock_task',
+])
+/**
+ * Not served on a team run. The team engine claims each task for its agent and
+ * moves the card when the run ends: a model's `claim_task` would strand a card no
+ * recovery pass can reach, and its own `update_task_status(done)` would read to
+ * the engine as a person finishing the task, so the delegator would never get
+ * the result.
+ * `block_task` stays, for the agent's own task only: the engine reports a run
+ * that blocked its task to the delegator.
+ */
+const TEAM_RUN_WITHHELD_TOOL_NAMES = new Set([
+  'claim_task',
+  'assign_task',
+  'release_task',
+  'update_task_status',
+  'unblock_task',
+])
 
 export interface TasksServerOptions {
   /** Serve only {@link READ_ONLY_TOOL_NAMES} — board reads, no mutations. */
@@ -157,18 +217,26 @@ export interface TasksServerOptions {
    *
    * Effect: the two tools that take an agent id as an ARGUMENT are not served,
    * and `add_comment` drops BOTH its `authorAgentId` and its `authorType`. Those
-   * are the entire impersonation surface here — `claim_task` and `assign_task`
-   * require `assigneeAgentId`, so an unidentified caller could claim work as
-   * anyone and hand work to anyone, and a comment's `authorType` is rendered to
-   * the operator as its attribution.
+   * are the impersonation surface here: `claim_task` and `assign_task` require
+   * `assigneeAgentId`, so an unidentified caller could claim work as anyone and
+   * hand work to anyone, and a comment's `authorType` is rendered to the operator
+   * as its attribution.
    *
-   * DELIBERATELY NARROW. The other writes (create, release, status, block,
-   * unblock, link) name no agent, so they are anonymous board edits, not
-   * impersonation, and they keep working. Serving `readOnly` here instead would
-   * have been the easy call and would have taken board editing away from every
-   * OpenClaw agent to close a hole that only three tools open.
+   * The status tools are not served either. Every OpenClaw agent is this caller,
+   * on one URL shared by all of its sessions, so nothing can tell a team run from
+   * a 1:1 chat or an agent's own task from a teammate's, and an OpenClaw agent
+   * marking its delegated task done would cost its delegator the result (see
+   * `teamRun`). Creates, comments and links stay: they move no card.
    */
   unverifiedCaller?: boolean
+
+  /**
+   * The run is one the team engine drives, signed on the attach URL
+   * (`teamRun=1`). The engine owns claims and statuses there, so the tools in
+   * `TEAM_RUN_WITHHELD_TOOL_NAMES` are not served, and `block_task` blocks only a
+   * task the bound agent is working on.
+   */
+  teamRun?: boolean
 }
 
 export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Server {
@@ -193,23 +261,37 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     return textResult(`not found: ${taskId}`, true)
   }
 
-  const claimHandler = (args: Record<string, unknown>) => {
+  // The calling agent, when its identity is bound. Over HTTP only a signed scope
+  // binds it; in-process (Clawboo Native) the driver binds it.
+  const boundAgentId = opts?.boundScope?.agentId ?? undefined
+  const teamRun = opts?.teamRun === true
+
+  const claimFor = (args: Record<string, unknown>, assigneeAgentId: string): McpToolResult => {
     const denied = outOfTeam(str(args['taskId']))
     if (denied) return denied
     const result = claimTask(
       db,
       str(args['taskId']),
-      str(args['assigneeAgentId']),
+      assigneeAgentId,
       optStr(args['assigneeRuntime']),
     )
     if (!result.ok) return textResult(`claim failed: ${result.reason}`, true) // conflict → DO NOT retry
     return jsonResult(result.task)
   }
-  const claimSchema = z.object({
+  const assignSchema = z.object({
     taskId: z.string(),
     assigneeAgentId: z.string(),
     assigneeRuntime: z.string().optional(),
   })
+  // A bound caller claims as itself, so it need not name anyone. The operator's
+  // stdio bin has no identity of its own and names the agent it claims for.
+  const claimSchema = boundAgentId
+    ? z.object({
+        taskId: z.string(),
+        assigneeAgentId: z.string().optional(),
+        assigneeRuntime: z.string().optional(),
+      })
+    : assignSchema
 
   const tools: ToolDef[] = [
     {
@@ -318,17 +400,29 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'claim_task',
-      description:
-        'Atomically claim a todo task. A "conflict" error means another agent won — do not retry.',
+      description: boundAgentId
+        ? 'Atomically claim a todo task for yourself. A "conflict" error means another agent won, so do not retry. To hand a task to another agent, use assign_task.'
+        : 'Atomically claim a todo task for an agent. A "conflict" error means another agent won, so do not retry.',
       inputSchema: claimSchema,
-      handler: claimHandler,
+      handler: (args) => {
+        const named = optStr(args['assigneeAgentId'])
+        if (!boundAgentId) return claimFor(args, str(named))
+        // The claimant is the verified caller. Taking it from the arguments let
+        // one agent claim work in another's name.
+        if (named !== undefined && named !== boundAgentId)
+          return textResult(
+            `claim_task claims a task for you (${boundAgentId}), not for ${named}. To hand a task to another agent, use assign_task.`,
+            true,
+          )
+        return claimFor(args, boundAgentId)
+      },
     },
     {
       name: 'assign_task',
       description:
         'Assign a todo task to an agent (same atomic claim; conflict means already assigned).',
-      inputSchema: claimSchema,
-      handler: claimHandler,
+      inputSchema: assignSchema,
+      handler: (args) => claimFor(args, str(args['assigneeAgentId'])),
     },
     {
       name: 'release_task',
@@ -343,25 +437,46 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'update_task_status',
-      description: 'Transition a task status (state-machine enforced; illegal transitions error).',
+      description:
+        'Transition a task status (state-machine enforced; illegal transitions error). Cancelling a task also cancels the plan steps still waiting on it.',
       inputSchema: z.object({ taskId: z.string(), status: STATUS }),
       handler: (args) => {
-        const denied = outOfTeam(str(args['taskId']))
+        const taskId = str(args['taskId'])
+        const denied = outOfTeam(taskId)
         if (denied) return denied
-        const r = updateStatus(db, str(args['taskId']), str(args['status']) as TaskStatus, {
-          unlessPersonMoved: true,
+        const status = str(args['status']) as TaskStatus
+        const wasCancelled = getTask(db, taskId)?.status === 'cancelled'
+        const r = updateStatus(db, taskId, status, { unlessPersonMoved: true })
+        if (!r.ok || !r.task || status !== 'cancelled' || wasCancelled)
+          return statusWriteResult(r, 'status change')
+        // A cancelled step can never be done, so the steps waiting on it would
+        // sit in To do forever, looking queued. The same cascade as a person's
+        // cancel on the board.
+        const dependents = cancelDependents(db, taskId)
+        noteCancelForDelegator(db, r.task, dependents.length, boundAgentId)
+        if (dependents.length === 0) return jsonResult(r.task)
+        return jsonResult({
+          ...r.task,
+          cancelledDependents: dependents.map((d) => ({ id: d.id, title: d.title })),
         })
-        return statusWriteResult(r, 'status change')
       },
     },
     {
       name: 'block_task',
-      description: 'Mark a task blocked.',
+      description: teamRun
+        ? 'Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.'
+        : 'Mark a task blocked.',
       inputSchema: z.object({ taskId: z.string() }),
       handler: (args) => {
-        const denied = outOfTeam(str(args['taskId']))
+        const taskId = str(args['taskId'])
+        const denied = outOfTeam(taskId)
         if (denied) return denied
-        const r = blockTask(db, str(args['taskId']), { unlessPersonMoved: true })
+        if (teamRun && getTask(db, taskId)?.assigneeAgentId !== boundAgentId)
+          return textResult(
+            'On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.',
+            true,
+          )
+        const r = blockTask(db, taskId, { unlessPersonMoved: true })
         return statusWriteResult(r, 'block')
       },
     },
@@ -443,14 +558,15 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
   ]
 
+  const withheld = new Set<string>()
+  if (teamRun) for (const name of TEAM_RUN_WITHHELD_TOOL_NAMES) withheld.add(name)
+  if (opts?.unverifiedCaller === true)
+    for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES]) withheld.add(name)
   const active =
     opts?.readOnly === true
       ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name))
-      : opts?.unverifiedCaller === true
-        ? tools.filter((t) => !IDENTITY_TOOL_NAMES.has(t.name))
-        : tools
+      : tools.filter((t) => !withheld.has(t.name))
   // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).
-  const boundAgentId = opts?.boundScope?.agentId ?? undefined
   return buildServer(
     'clawboo-tasks',
     boundAgentId ? withInboxPiggyback(active, db, boundAgentId, { teamId: boundTeamId }) : active,

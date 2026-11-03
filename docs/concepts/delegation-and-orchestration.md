@@ -129,6 +129,10 @@ When a handed-off task fails, you can see it in three places:
 
 If a hand-off cannot start at all, for example because of the depth limit or a declined approval, the lead is told at once. When the hand-off came from a task, a note is added to that task's card.
 
+A hand-off tool call that names no teammate in the chat, or the agent itself, starts nothing either. The delegate tools answer that the work is queued before Clawboo has matched the name, so Clawboo then tells the agent the hand-off did not start and lists the teammates it can hand work to. It says so once for the same name and task, so an agent that repeats the mistake is not told again and again. No note is added to a card. For OpenClaw's `sessions_send`, which delivers messages itself, the note says only that no board task was made.
+
+A teammate on a team chat run can also mark its own task blocked when it cannot go on without you. The card waits in Needs you as **Blocked**, the teammate's reply is kept as its comment, and whoever handed it off is told the task needs a person. Steps waiting on it are not cancelled, so a **Retry** carries the plan on.
+
 ## Stop, and your own moves
 
 Pressing **Stop** in a chat halts that chat's running work. Tasks it was running go back to To do without counting as failures, and they do not restart on their own: Needs you shows them as **Stopped**. Work that had been handed out but had not started yet never starts.
@@ -141,8 +145,9 @@ Everything on this page happens in team chat, which is how most work runs. Clawb
 
 <Accordion title="Under the hood">
 
-- **The engine.** Each chat, General and every room, has one long-lived orchestration engine on the server. It reads typed run events, never prose. A hand-off is a tool call whose name matches `sessions_send` or has a `delegate` segment (so `delegate`, `team_delegate` and namespaced forms count), or a `<delegate>` or `<plan>` block in a finished turn. A `<plan>` wins over `<delegate>` blocks in the same turn. Self-delegations, unknown names and empty tasks are dropped.
+- **The engine.** Each chat, General and every room, has one long-lived orchestration engine on the server. It reads typed run events, never prose. A hand-off is a tool call whose name matches `sessions_send` or has a `delegate` segment (so `delegate`, `team_delegate` and namespaced forms count), or a `<delegate>` or `<plan>` block in a finished turn. A `<plan>` wins over `<delegate>` blocks in the same turn. Empty tasks are dropped. A hand-off tool call to an unknown name or to the caller itself starts nothing, and the caller gets a `[Task Update]` saying so, once per call.
 - **Spawning.** For each hand-off the engine checks the teammate's session, the repeated-failure breaker, the depth cap and the risky-word approval. Then it creates the task, claims it, opens a run record and delivers the message. A busy teammate gets a deferred `todo` task that the dispatcher fires when the teammate is free.
+- **The chat's backstop.** Each chat also ends a run whose finish it never sees, after 10 minutes of silence, so messages queued behind the run are not stuck. While the run is inside one tool call it waits 25 minutes instead, a minute past the engine's own allowance, so a long build or a command that prints nothing is not cut off at 10 (`TOOL_CALL_WEDGE_MS` in `serverDeliver.ts`).
 - **No sub-agents.** Every delegated run carries a blocklist of `sessions_send`, `sessions_spawn` and `sessions_yield`. OpenClaw cannot block tools per message, so Clawboo denies `sessions_spawn` and `sessions_yield` in the Gateway's `tools.deny` and repeats the team contract in each OpenClaw turn.
 - **Mailbox.** Undelivered notices live in the agent's durable mailbox with the kinds `task_update`, `alert` and `signal`.
 

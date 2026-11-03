@@ -64,17 +64,17 @@ A caller's identity decides which tools it is served and what those tools can se
 
 There are four kinds of caller:
 
-- **Bound caller.** A run Clawboo started with a signed attach URL. Claude Code, Codex and Hermes runs are bound to their team and agent this way. Clawboo Native agents are bound in-process.
+- **Bound caller.** A run Clawboo started with a signed attach URL. Claude Code, Codex and Hermes runs are bound to their team and agent this way. Clawboo Native agents are bound in-process. A run the team engine drives (a team chat turn, a hand-off, a plan step) is also signed as a **team run** (`teamRun=1` on its Tasks, Memory and Tools URLs, so none of them carries a plain signature for its team and agent), because the engine claims and moves that run's tasks itself. A Clawboo Native team run gets the same limit in-process.
 - **Unverified HTTP caller.** Any HTTP session without a valid signature. Every OpenClaw agent is one, because the OpenClaw Gateway uses one shared configuration for all of its agents. So is an external agent attached with an unscoped URL, or with parameters edited by hand.
 - **Operator (stdio bin).** Someone ran a `clawboo-mcp-*` bin directly. The operator is trusted, so scope and identity come from the tool arguments.
 - **In-process (Clawboo Native).** The servers run inside the dashboard server and are bound to the run's team and agent.
 
-| Server   | Bound caller                                                                                                                                 | Unverified HTTP caller                                                                                                   | Operator (stdio bin)                                |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| Tasks    | 12 tools. When the run has a team, reads and writes are limited to its tasks and new tasks land in it. Mailbox notices ride along on results | 10 tools (no `claim_task` or `assign_task`). Board-wide. Comments post as a plain `agent` comment                        | 12 tools, board-wide                                |
-| Memory   | Saves are shared with the team. Reads see team facts, this agent's own facts and facts that belong to no team. Provenance is recorded        | Saves and reads use only facts that belong to no team. No reporter or provenance is recorded                             | Scope comes from `scopeTeamId` and `scopeAgentId`   |
-| Tools    | Builtins plus the connector tools this agent's grants allow                                                                                  | Builtins and `read_tool_result`, plus any connector tools a `global` grant allows. Agent and team grants cannot be found | Builtins and `read_tool_result`; no connector tools |
-| TeamChat | 2 tools, posting as the bound agent in its peer room. `team_delegate` too on orchestrated runs                                               | No tools                                                                                                                 | 2 tools; author and team come from the arguments    |
+| Server   | Bound caller                                                                                                                                                                                                                                                                                    | Unverified HTTP caller                                                                                                   | Operator (stdio bin)                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Tasks    | 12 tools. When the run has a team, reads and writes are limited to its tasks and new tasks land in it. Mailbox notices ride along on results. A team run gets 7: no `claim_task`, `assign_task`, `release_task`, `update_task_status` or `unblock_task`, and `block_task` only for its own task | 6 tools: no claims and no status writes. Board-wide. Comments post as a plain `agent` comment                            | 12 tools, board-wide                                |
+| Memory   | Saves are shared with the team. Reads see team facts, this agent's own facts and facts that belong to no team. Provenance is recorded                                                                                                                                                           | Saves and reads use only facts that belong to no team. No reporter or provenance is recorded                             | Scope comes from `scopeTeamId` and `scopeAgentId`   |
+| Tools    | Builtins plus the connector tools this agent's grants allow                                                                                                                                                                                                                                     | Builtins and `read_tool_result`, plus any connector tools a `global` grant allows. Agent and team grants cannot be found | Builtins and `read_tool_result`; no connector tools |
+| TeamChat | 2 tools, posting as the bound agent in its peer room. `team_delegate` too on orchestrated runs                                                                                                                                                                                                  | No tools                                                                                                                 | 2 tools; author and team come from the arguments    |
 
 <Warning>
 
@@ -204,14 +204,15 @@ Claim a `todo` task for an agent. The claim is atomic: when two agents race, exa
 { taskId: string; assigneeAgentId: string; assigneeRuntime?: string }
 ```
 
+- A caller bound to an agent claims for itself: `assigneeAgentId` is optional, and naming another agent is refused with `claim_task claims a task for you (<agent>), not for <name>. To hand a task to another agent, use assign_task.` The operator's stdio bin names the agent, as before.
 - Succeeds only for a task that is `todo`, has no assignee and is not dropped.
 - Returns the claimed task row.
 - Errors: `claim failed: conflict` (the task exists but is not claimable, for example another agent won; do not retry), `claim failed: not_found`, and `not found: <taskId>` for a task outside the session's team.
-- Not served to an unverified HTTP caller, because `assigneeAgentId` would let it act as any agent.
+- Not served to an unverified HTTP caller, because `assigneeAgentId` would let it act as any agent, nor on a team run, where the engine claims each task for its agent.
 
 ### assign_task
 
-Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same arguments, results and errors; `conflict` means the task is already taken. Not served to an unverified HTTP caller.
+Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same results and errors, and `assigneeAgentId` is always required; `conflict` means the task is already taken. Not served to an unverified HTTP caller or on a team run.
 
 ### release_task
 
@@ -224,6 +225,7 @@ Put an `in_progress` task back to `todo` and clear its assignee and its verifica
 ```
 
 - Returns the text `released: <taskId>`. A task that is not `in_progress` is left unchanged, and the same text is returned.
+- Not served to an unverified HTTP caller or on a team run.
 
 ### update_task_status
 
@@ -237,9 +239,11 @@ Move a task to another status. Legal moves follow the board's state machine; `do
 ```
 
 - Moving a task to `todo` also clears its assignee and its verification verdict.
+- Moving a task to `cancelled` also cancels the plan steps still waiting on it (`todo` or `backlog`, all the way down the chain), as a person's cancel on the board does. The result then carries them as `cancelledDependents: [{ id, title }]`. The agent that delegated the task gets a mailbox note naming it and how many steps went with it, unless that agent made the call.
 - Returns the updated task row.
 - Errors: `status change failed: illegal_transition`, `status change failed: not_found`, and `status change failed: verification_required` when the task holds a failing verification verdict (only a person's override, from the board or the board API, can finish it). See [When work is checked](/concepts/verification).
 - Refused when a person moved the card on the board or in the task drawer after the task's latest run started (or the task has not run since): that run was overruled, and the status stays where the person put it. The tool error reads `A person moved this task to <column> after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.` A run started after the move writes as usual.
+- Not served to an unverified HTTP caller or on a team run. On a team run the engine moves the card when the run ends and reports the result to whoever handed out the task.
 
 ### block_task
 
@@ -252,6 +256,7 @@ Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
 ```
 
 - Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
+- On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` When the run ends, the task stays **Blocked** in Needs you, the agent's reply is kept as its comment, and its delegator is told the task waits on a person. Not served to an unverified HTTP caller.
 
 ### unblock_task
 
@@ -264,6 +269,7 @@ Move a task to `todo` (from `blocked`, or any status that may move to `todo`). I
 ```
 
 - Returns the updated task row. Error: `unblock failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
+- Not served to an unverified HTTP caller or on a team run.
 
 ### add_comment
 
@@ -488,7 +494,8 @@ Hand a self-contained piece of work to a teammate by name. It is served only on 
 ```
 
 - The tool writes nothing itself. The team engine sees the call and creates the board task for that teammate, who reports back when done. See [Delegation and orchestration](/concepts/delegation-and-orchestration).
-- Returns `Delegated to <assignee>: <task>. They'll pick it up and report back when done.` whenever both fields are present. A name that matches no teammate, or the caller itself, creates no task.
+- Returns `Queued for <assignee>: <task>. If <assignee> is a teammate here, they get it as a board task and report back to you when done. If it cannot start, you will get a message saying why.` whenever both fields are present. The answer comes before the engine matches the name.
+- A name that matches no teammate in the room, or the caller itself, creates no task. The engine then sends the caller a `[Task Update]` saying the hand-off did not start, with the names of the teammates it can hand work to.
 - Error: `team_delegate requires both an assignee (teammate name) and a task`.
 
 ## Transports

@@ -173,7 +173,12 @@ describe('TeamChat MCP (quartet)', () => {
         task: 'write the parser',
       })
       expect(res.isError).toBe(false)
-      expect(res.text).toContain('Delegated to Coder')
+      // "Queued", not "Delegated": the tool answers before the engine has matched
+      // the name, and a hand-off it cannot route never starts (the engine tells
+      // the sender so).
+      expect(res.text).toContain('Queued for Coder')
+      expect(res.text).not.toContain('Delegated')
+      expect(res.text).toContain('saying why')
       // Pure signal: no room post, no board write from this server.
       expect(readRoom(db, { roomId: resolveRoomForTeam('tm1') })).toHaveLength(0)
     })

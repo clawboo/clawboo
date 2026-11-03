@@ -10,7 +10,8 @@
 // Deleting a room ARCHIVES it, the way a reset keeps a conversation: its
 // transcript stays under its session keys, its in-flight work is stopped (a
 // clean release, as the composer's Stop does), and its agents stop resuming the
-// conversation. Its tasks stay on the board.
+// conversation. Its tasks stay on the board: the unfinished ones move to the
+// team's own group chat, still stopped, so a Retry there runs them.
 
 import type { Request, Response } from 'express'
 import {
@@ -20,6 +21,7 @@ import {
   getActiveRoom,
   invalidRoomMembers,
   listRooms,
+  moveArchivedRoomTasks,
   normalizeRoomName,
   renameRoom,
   setRoomMembers,
@@ -32,6 +34,7 @@ import {
 import { eq, like } from 'drizzle-orm'
 
 import { getDb } from '../lib/db'
+import { runsOnTaskRunner } from '../lib/runnerRoute'
 import { chatClearedAt } from '../lib/teamChat/chatCleared'
 import { nativeTeamSessionKeysForRoomLike } from '../lib/teamChat/nativeTeamSession'
 import { retireRoomOrchestrator } from '../lib/teamChat/teamOrchestrator'
@@ -236,7 +239,7 @@ export function teamRoomPATCH(req: Request, res: Response): void {
 // ─── DELETE /api/teams/:id/rooms/:roomId ─────────────────────────────────────
 // Archives the room: see the file header.
 
-export function teamRoomDELETE(req: Request, res: Response): void {
+export async function teamRoomDELETE(req: Request, res: Response): Promise<void> {
   const teamId = req.params['id'] as string | undefined
   const roomId = req.params['roomId'] as string | undefined
   if (!teamId || !roomId) {
@@ -249,14 +252,23 @@ export function teamRoomDELETE(req: Request, res: Response): void {
       res.status(404).json({ error: 'room not found' })
       return
     }
-    // Stop first, so nothing the room's engine is running outlives the room.
-    retireRoomOrchestrator(teamId, roomId)
+    // Archived first: from here nothing builds an engine for this room or routes
+    // a task to it, so nothing new can start in it while it winds down.
+    archiveRoom(db, roomId)
     // Its agents start fresh if the room were ever reopened: no resume pointer
     // carries the archived conversation forward.
     db.delete(settings)
       .where(like(settings.key, nativeTeamSessionKeysForRoomLike(teamId, roomId)))
       .run()
-    archiveRoom(db, roomId)
+    // Stop its engine, so nothing it is running outlives the room, and wait for
+    // the Stop to be written: its running tasks released, its queued ones marked
+    // stopped. Moved before that, the team chat's engine would start them.
+    await retireRoomOrchestrator(teamId, roomId)
+    // Its unfinished tasks go to the team's own chat, still stopped: the only
+    // engine left reads tasks with no room, so where they are, Retry, Assign and
+    // a reply would start nothing. The task runner's own tasks move unstopped,
+    // as the Stop leaves them: the runner reruns them.
+    moveArchivedRoomTasks(db, { roomId, skip: (t) => runsOnTaskRunner(db, t) })
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

@@ -38,7 +38,7 @@ export interface BooZeroRulesParams {
    * Optional team context. When set, the role line reads "...on team
    * <teamName>" so Boo Zero knows which team's lens to apply this turn.
    * Omitted in the 1:1 chat path (Boo Zero's individual chat) where there
-   * is no active team.
+   * is no active team, and where the anchor turns hand-offs off.
    */
   teamName?: string | null
 }
@@ -59,14 +59,26 @@ export function buildBooZeroRulesBlock(params: BooZeroRulesParams): string {
 /**
  * The thin per-turn anchor (~220 tokens). Carries the irreducible safety +
  * routing protocol; points at the read-once docs for the verbose examples.
+ *
+ * Without a team name it is the anchor for Boo Zero's one-to-one chat, where
+ * nothing acts on a `<delegate>` tag (no board, no team engine). Teaching the tag
+ * there would make Boo Zero promise hand-offs that never start, so that anchor
+ * says hand-offs are off and sends the person to the team's chat instead.
  */
 export function buildBooZeroAnchor(params: BooZeroRulesParams): string {
   const { displayName, teamName } = params
-  const roleLine = teamName
-    ? `You are the universal team leader on this Clawboo instance, currently coordinating team "${teamName}".`
-    : 'You are the universal team leader on this Clawboo instance, coordinating across every team.'
+  const identityLine = `You are ${displayName}. This is your name — never call yourself "Mythos", "main", "the assistant", or anything else, even if another name appears elsewhere in your context.`
+  if (!teamName) {
+    return `[Your Rules — authoritative]
+${identityLine}
+You are the universal team leader on this Clawboo instance, coordinating across every team. This is your one-to-one chat with the person, and hand-offs are off here: nothing in this chat delivers a \`<delegate>\` tag or a \`<plan>\` to anyone, so never write one, and never say you handed work to a teammate. This overrides the delegation instructions in your \`AGENTS.md\` / \`CLAWBOO.md\`, which apply only in a team's chat.
+When the person wants a team to do something, tell them to ask in that team's chat, where you lead the team and can hand the work out. Here you can answer questions, explain what a team has done, and help them plan the request.
+Never spawn sub-agents or use any built-in task or sub-agent tool. Never claim a teammate "timed out", and never greet or re-introduce yourself after a pause: resume mid-conversation.
+[End Your Rules]`
+  }
+  const roleLine = `You are the universal team leader on this Clawboo instance, currently coordinating team "${teamName}".`
   return `[Your Rules — authoritative]
-You are ${displayName}. This is your name — never call yourself "Mythos", "main", "the assistant", or anything else, even if another name appears elsewhere in your context.
+${identityLine}
 ${roleLine} You COORDINATE; you never do teammate work yourself, and you never spawn sub-agents or use any built-in task/sub-agent primitive — \`<delegate>\` is the ONLY routing mechanism.
 Routing syntax: \`<delegate to="@AgentName">task</delegate>\` — exact tag, quoted name, closing tag (the UI renders each as a card; without it the teammate is NOT notified). Multiple blocks per turn are encouraged.
 For a 3+ step pipeline, emit a \`<plan>\` so Clawboo auto-advances it without re-prompting:

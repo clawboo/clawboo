@@ -55,6 +55,7 @@ import {
   DeliveryRefusedError,
   isChatVisible,
   isTeamSessionKey,
+  OPEN_TOOL_CALL_TIMEOUT_MS,
   type NudgeQueue,
   type RunStamp,
   type TurnOrigin,
@@ -92,6 +93,17 @@ const log = createLogger('server-deliver')
 /** clawboo's own in-process runtime. Its agents read their own config, so the
  *  coding-runtime model override below skips them. */
 const NATIVE_RUNTIME = 'clawboo-native'
+
+/**
+ * The session's wedge while its run sits inside one tool call (call seen, no
+ * result yet). The runtime is silent then by design, sometimes for many minutes:
+ * a long build, a command that prints nothing, an approval the person has not
+ * answered. The nudge queue's usual 10 minutes would abort such a run before the
+ * engine's own allowance for an open tool call runs out. A minute past that
+ * allowance, so the engine's sweep fails a stuck delegate first, with its clearer
+ * reason; the 30-minute drain guard stays the outer bound.
+ */
+export const TOOL_CALL_WEDGE_MS = OPEN_TOOL_CALL_TIMEOUT_MS + 60_000
 
 /** A live run tracked for Stop / wedge — keyed by sessionKey in the abort map. */
 export interface RunEntry {
@@ -512,6 +524,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // → `onSessionClosed` fails it with "ended before reporting".
     const silentMs =
       Number(process.env['CLAWBOO_RUN_SILENT_TIMEOUT_MS']) || DEFAULT_RUN_SILENT_TIMEOUT_MS
+    /** The tool calls this run is inside: seen, with no result yet. */
+    const openToolCalls = new Set<string>()
     try {
       for await (const ev of withIdleTimeout(adapter.events(run) as AsyncIterable<RuntimeEvent>, {
         idleMs: silentMs,
@@ -527,6 +541,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         },
       })) {
         costTally.observe(ev)
+        if (ev.kind === 'tool-call') openToolCalls.add(ev.toolCallId || ev.name)
+        else if (ev.kind === 'tool-result') openToolCalls.delete(ev.toolCallId || ev.name)
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
           // Tolerate BOTH delta conventions so the running text is never garbled:
           // native emits INCREMENTAL chunks, but the OpenClaw adapter emits CUMULATIVE
@@ -659,7 +675,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               /* non-fatal */
             }
           }
-        } else if (ownsSlot()) nudge.markBusy(sessionKey)
+        } else if (ownsSlot())
+          nudge.markBusy(sessionKey, openToolCalls.size > 0 ? TOOL_CALL_WEDGE_MS : undefined)
         try {
           await onEvent(sessionKey, ev, obs.stamp)
         } catch (err) {

@@ -145,6 +145,10 @@ The **More** menu holds what the card's button does not: **Retry**, the team's a
 
 If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself, through the task runner for a task the runner ran. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
 
+Deleting a chat room stops its work the same way. Its unfinished tasks move to **General**: the ones that were queued for an agent wait in **Needs you** as **Stopped**, and **Retry** runs them there.
+
+An agent working on a task in team chat can mark that task blocked when it cannot go on without you. The task then waits in **Needs you** as **Blocked**, with the agent's reply as its comment, and whoever handed out the task is told. Steps of a plan that wait on it stay queued, so a **Retry** carries the plan on.
+
 When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever.
 
 ## Give an agent a task
@@ -443,6 +447,8 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 
 - The board reads `GET /api/board`, every five seconds while the tab is visible. The drawer reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions` and `GET /api/board/:taskId/workspace/detail`. The preview is served from `GET /api/board/:taskId/preview/`.
 - **New task** is `POST /api/board` with an `assigneeAgentId`. It reads each agent's role from `GET /api/teams/member-roles`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
+- On a team chat run the team engine claims and moves the task itself, so the agent gets no claim or status tools there except `block_task` on its own task. An OpenClaw agent gets none at all, since its tools cannot tell one agent from another. Cancelling a task with `update_task_status` cancels the plan steps waiting on it, as **Dismiss** does.
+- **Retry**, **Assign** and a reply refuse a task still filed under a deleted chat room (`room_archived`) instead of saying it started; restarting Clawboo moves it to General.
 - A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
 - The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`.
 - Full request and response shapes are in the [Board API](/reference/rest-api/board). How the board stores tasks and recovers stuck work is in [Board internals](/internals/board-internals).

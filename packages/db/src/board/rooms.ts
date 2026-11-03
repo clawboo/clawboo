@@ -10,11 +10,19 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm'
+import { delegationTargetOf } from '@clawboo/board-core'
+import { and, asc, eq, inArray, isNotNull, isNull, notInArray } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import { agents, roomMembers, rooms, type DbRoom } from '../schema'
+import { agents, roomMembers, rooms, tasks, type DbRoom, type DbTask } from '../schema'
 import { immediateWrite, withWriteRetry } from './contention'
+import {
+  completeExecutionProcess,
+  createExecutionProcess,
+  getReadyTasks,
+  listExecutions,
+  updateStatus,
+} from './repository'
 
 export interface RoomWithMembers extends DbRoom {
   /** Stored member ids, oldest membership first. */
@@ -253,4 +261,80 @@ export function listRoomIdsForTeam(db: ClawbooDb, teamId: string): string[] {
     .where(eq(rooms.teamId, teamId))
     .all()
     .map((r) => r.id)
+}
+
+/**
+ * Move the unfinished tasks of archived rooms to the team's own chat (room null),
+ * stopped, and return them. Archiving a room only stamps the room, and the only
+ * engine left to run its tasks is the team chat's, which reads tasks with no
+ * room: until they move, Retry, Assign and a reply on them start nothing.
+ *
+ * Stopped first, the way the room engine's own Stop stops its work, so nothing
+ * starts in the team chat until a person retries it:
+ *  - a task still running in the room with an engine run (`openclaw`) no engine
+ *    stopped: after a restart a room's engine is built only for ready work, so
+ *    nothing else would. Its run is closed as cancelled and the task goes back to
+ *    To do. Moved while running, the stale sweep would release it and the team
+ *    chat's pump would start it again;
+ *  - a ready task bound to an agent gets a created-and-cancelled execution,
+ *    unless its last run already says so. Otherwise the pump would start it as
+ *    soon as it arrived, and archiving a room would start the work it was meant
+ *    to stop.
+ * A task still waiting on another one is not marked: it runs once a person
+ * retries the step before it and that step is done. Finished tasks stay where
+ * they are. `skip` names tasks the team chat never runs (the task runner's): they
+ * move but are not stopped, as the room engine's Stop leaves them too.
+ *
+ * The caller stops the room's engine first and waits for that Stop to be
+ * written. `roomId` limits the move to one archived room (the archive route);
+ * without it every archived room is swept (the boot pass, which also covers rooms
+ * archived before this existed). Idempotent.
+ */
+export function moveArchivedRoomTasks(
+  db: ClawbooDb,
+  opts: { roomId?: string; skip?: (task: DbTask) => boolean } = {},
+): DbTask[] {
+  const archived = db
+    .select({ id: rooms.id, teamId: rooms.teamId })
+    .from(rooms)
+    .where(
+      opts.roomId
+        ? and(isNotNull(rooms.archivedAt), eq(rooms.id, opts.roomId))
+        : isNotNull(rooms.archivedAt),
+    )
+    .all()
+  const stopped = 'Stopped: its chat room was archived.'
+  const moved: DbTask[] = []
+  for (const room of archived) {
+    const running = db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.roomId, room.id), eq(tasks.status, 'in_progress')))
+      .all() as DbTask[]
+    for (const task of running) {
+      if (opts.skip?.(task)) continue
+      const execs = listExecutions(db, task.id)
+      const last = execs[execs.length - 1]
+      if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
+      completeExecutionProcess(db, last.id, { status: 'cancelled', error: stopped })
+      updateStatus(db, task.id, 'todo')
+    }
+    for (const task of getReadyTasks(db, { teamId: room.teamId, roomId: room.id })) {
+      if (!delegationTargetOf(task.sourceDelegationId) || opts.skip?.(task)) continue
+      const execs = listExecutions(db, task.id)
+      if (execs.length > 0 && execs[execs.length - 1]!.status === 'cancelled') continue
+      const stop = createExecutionProcess(db, { taskId: task.id, executorType: 'openclaw' })
+      completeExecutionProcess(db, stop.id, { status: 'cancelled', error: stopped })
+    }
+    const rows = withWriteRetry(() =>
+      db
+        .update(tasks)
+        .set({ roomId: null, updatedAt: Date.now() })
+        .where(and(eq(tasks.roomId, room.id), notInArray(tasks.status, ['done', 'cancelled'])))
+        .returning()
+        .all(),
+    ) as DbTask[]
+    moved.push(...rows)
+  }
+  return moved
 }

@@ -38,13 +38,25 @@ export interface SignableScope {
   agentId?: string | null
   tenantId?: string | null
   delegate?: boolean
+  /** The Tasks URL of a run the team engine drives (`teamRun=1`). Signed so the
+   *  runtime cannot strip it and win back the board writes the engine owns. */
+  teamRun?: boolean
 }
 
 /** One canonical byte string per semantic scope, independent of which param
  *  spelling carried it (`scopeAgentId` vs `postAuthorAgentId`). `\x1f` separators
- *  cannot appear in ids, so fields can never bleed into each other. */
+ *  cannot appear in ids, so fields can never bleed into each other. `teamRun` is
+ *  appended only when set, so every scope that existed before it signs to the
+ *  same bytes as before. */
 const canonical = (s: SignableScope): string =>
-  ['v1', s.teamId ?? '', s.agentId ?? '', s.tenantId ?? '', s.delegate ? '1' : '0'].join('\x1f')
+  [
+    'v1',
+    s.teamId ?? '',
+    s.agentId ?? '',
+    s.tenantId ?? '',
+    s.delegate ? '1' : '0',
+    ...(s.teamRun ? ['team-run'] : []),
+  ].join('\x1f')
 
 /** Sign a scope. Hex HMAC-SHA256; safe to place in a URL. */
 export function signAttachScope(secret: string, scope: SignableScope): string {

@@ -43,6 +43,7 @@ import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import {
   createNudgeQueue,
   DeliveryRefusedError,
+  OPEN_TOOL_CALL_TIMEOUT_MS,
   type NudgeQueue,
   type RunStamp,
 } from '@clawboo/team-orchestration'
@@ -53,7 +54,7 @@ import { estimateRunCostUsd, estimateRunCostUsdFromUsage } from '../../runtimes/
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { HUMAN_TURN, SYSTEM_TURN } from '@clawboo/team-orchestration'
-import { createServerDeliver, type RunEntry } from '../serverDeliver'
+import { createServerDeliver, TOOL_CALL_WEDGE_MS, type RunEntry } from '../serverDeliver'
 
 const CAPS: Capabilities = {
   streaming: true,
@@ -184,12 +185,15 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const metas: Array<{ sk: string; text: string }> = []
     const abortMap = new Map<string, RunEntry>()
     const real = createNudgeQueue()
+    /** The wedge each markBusy asked for (null: the queue's default). */
+    const wedges: Array<number | null> = []
     // Wrap markBusy/markIdle to record ordering vs onEvent.
     const nudge: NudgeQueue = {
       deliver: (sk, send) => real.deliver(sk, send),
-      markBusy: (sk) => {
+      markBusy: (sk, wedgeTimeoutMs) => {
         order.push('busy')
-        real.markBusy(sk)
+        wedges.push(wedgeTimeoutMs ?? null)
+        real.markBusy(sk, wedgeTimeoutMs)
       },
       markIdle: (sk) => {
         order.push('idle')
@@ -251,6 +255,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       statuses,
       abortMap,
       nudge,
+      wedges,
     }
   }
 
@@ -288,6 +293,52 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const doneIdx = w.order.indexOf('event:done')
     expect(idleIdx).toBeGreaterThanOrEqual(0)
     expect(idleIdx).toBeLessThan(doneIdx)
+  })
+
+  it("holds the wedge open for the engine's tool-call allowance while the run is inside a tool call", async () => {
+    // K7. A run silent inside one tool call (a long build, a command that prints
+    // nothing, an approval the person has not answered) was aborted by the
+    // 10-minute wedge, before the engine's 24-minute allowance for an open call.
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'status', phase: 'running' }
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'tool-call',
+          toolCallId: 'tc-1',
+          name: 'shell',
+          input: { cmd: 'pnpm build' },
+          partial: false,
+        }
+        yield {
+          ...base(run.sessionKey, 3),
+          kind: 'tool-result',
+          toolCallId: 'tc-1',
+          name: 'shell',
+          output: 'built',
+          isError: false,
+        }
+        yield { ...base(run.sessionKey, 4), kind: 'text-delta', text: 'ok', channel: 'assistant' }
+        yield { ...base(run.sessionKey, 5), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    const w = wire(adapter)
+    await w.deliver(SK, 'a1', 'build it', HUMAN_TURN)
+    for (let i = 0; i < 6; i++) await tick()
+    expect(w.events.map((e) => e.kind)).toEqual([
+      'status',
+      'tool-call',
+      'tool-result',
+      'text-delta',
+      'done',
+    ])
+    // Re-armed per event: the tool call's long allowance until its result, then
+    // the queue's default again.
+    expect(w.wedges).toEqual([null, TOOL_CALL_WEDGE_MS, null, null])
+    // A little past the engine's own allowance, so its sweep fails a stuck
+    // delegate first, with the clearer reason; still under the 30-minute drain guard.
+    expect(TOOL_CALL_WEDGE_MS).toBeGreaterThan(OPEN_TOOL_CALL_TIMEOUT_MS)
+    expect(TOOL_CALL_WEDGE_MS).toBeLessThan(30 * 60_000)
   })
 
   it('a DELEGATED-CHILD task turn neither STREAMS nor COMMITS into chat (its output lives on the board card)', async () => {

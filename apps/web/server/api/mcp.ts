@@ -143,20 +143,44 @@ export function redactAttachCredentials(url: string): string {
  *  (`scopeTeamId`/`scopeAgentId`/`scopeTenantId`). Each runtime's per-run attach
  *  URL carries these so the MCP session binds to the team/agent — the model can
  *  neither widen its visibility nor mis-tag a save. Absent ⇒ unbound (legacy).
- *  Exported for unit testing. */
+ *  A team run's URL carries `teamRun=1` inside the same signature (see
+ *  `mcpHttpUrl`). Exported for unit testing. */
 export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined {
+  const params = attachParams(req)
+  return params ? signedScope(params, params.get('teamRun') === '1') : undefined
+}
+
+/** Read the Tasks attach URL's binding: the scope `parseBoundScope` reads, and
+ *  whether the run is one the team engine drives (`teamRun=1`, which the same
+ *  signature covers, so a runtime can neither strip it nor add it). Undefined
+ *  when the URL carries no valid signed scope. Exported for unit testing. */
+export function parseTasksBinding(
+  req?: IncomingMessage,
+): { scope: MemoryScope; teamRun: boolean } | undefined {
+  const params = attachParams(req)
+  if (!params) return undefined
+  const teamRun = params.get('teamRun') === '1'
+  const scope = signedScope(params, teamRun)
+  return scope ? { scope, teamRun } : undefined
+}
+
+function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
   if (!req?.url) return undefined
-  let params: URLSearchParams
   try {
-    params = new URL(req.url, 'http://localhost').searchParams
+    return new URL(req.url, 'http://localhost').searchParams
   } catch {
     return undefined
   }
+}
+
+/** The scope the params claim, when their signature covers exactly that claim. */
+function signedScope(params: URLSearchParams, teamRun: boolean): MemoryScope | undefined {
   const teamId = params.get('scopeTeamId')
   const agentId = params.get('scopeAgentId')
   const tenantId = params.get('scopeTenantId')
   if (!teamId && !agentId && !tenantId) return undefined
-  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false })) return undefined
+  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false, teamRun }))
+    return undefined
   return {
     ...(teamId ? { teamId } : {}),
     ...(agentId ? { agentId } : {}),
@@ -257,11 +281,17 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     //
     // `tools` above has always failed closed here (no identity ⇒ no grants ⇒ 4
     // tools). These two did not. This is that same rule, applied late.
+    //
+    // A run the team engine drives says so on its signed URL (`teamRun`). The
+    // engine owns that run's claims and statuses, so its agent gets reads,
+    // creates, comments and blocking its own task, and nothing that moves
+    // another card (see createTasksServer).
     tasks: createStreamableHttpHandlers((req) => {
-      const scope = parseBoundScope(req)
+      const binding = parseTasksBinding(req)
       return createTasksServer(getDb(), {
-        boundScope: scope,
-        unverifiedCaller: scope === undefined,
+        boundScope: binding?.scope,
+        unverifiedCaller: binding === undefined,
+        ...(binding?.teamRun ? { teamRun: true } : {}),
       })
     }),
     memory: createStreamableHttpHandlers((req) => {

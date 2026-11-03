@@ -370,6 +370,11 @@ describe('resolveSessionsSendTarget', () => {
   it('returns null when no identifier resolves', () => {
     expect(resolveSessionsSendTarget({ label: 'Nobody', message: 'x' }, roster)).toBeNull()
   })
+
+  it('returns null for a label of only spaces or `@`, which an empty prefix would match to anyone', () => {
+    for (const label of ['   ', '@', ' @ '])
+      expect(resolveSessionsSendTarget({ label, message: 'x' }, roster), label).toBeNull()
+  })
 })
 
 describe('tag scanning holds up on hostile and mangled input', () => {

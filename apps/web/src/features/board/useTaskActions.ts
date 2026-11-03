@@ -31,16 +31,23 @@ async function countSucceeded(
   return results.filter((r) => r.status === 'fulfilled' && r.value.ok).length
 }
 
+/** A task still filed under an archived chat room: nothing can run it there, and
+ *  the pass that moves such tasks to General runs when Clawboo starts. */
+const ROOM_ARCHIVED =
+  'This task’s chat room was archived, so nothing can run it there. Restart Clawboo to move it to General, then try again.'
+
 const RETRY_REFUSED: Record<string, string> = {
   unassigned: 'Assign an agent to this task first.',
   not_retryable: 'This task is already running or finished.',
   no_team: 'This task has no team, so no agent can run it.',
+  room_archived: ROOM_ARCHIVED,
 }
 
 const ASSIGN_REFUSED: Record<string, string> = {
   agent_not_in_team: 'That agent is not on this task’s team.',
   not_assignable: 'This task is already being worked on or is finished.',
   no_team: 'This task has no team, so no agent can run it.',
+  room_archived: ROOM_ARCHIVED,
 }
 
 export interface TaskActions {

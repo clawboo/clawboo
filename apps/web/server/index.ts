@@ -13,6 +13,7 @@ import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
   listAgentsWithUndeliveredInbox,
+  moveArchivedRoomTasks,
   reapOrphanInbox,
   listRoomsWithFireableDelegations,
   reconcileOrphans,
@@ -43,6 +44,7 @@ import {
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { pumpRunnerReruns } from './lib/runnerRerun'
+import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
 import { startExecApprovalSurface } from './lib/agentSource/execApprovalSurface'
@@ -428,6 +430,22 @@ async function main() {
     }
   } catch (err) {
     log.error({ err }, 'Board: orphan reconciliation failed (non-fatal)')
+  }
+
+  // ── Archived rooms: their unfinished tasks belong to the team's own chat ────
+  // Archiving a room moves its unfinished tasks to the team's group chat, still
+  // stopped (see moveArchivedRoomTasks). Rooms archived before that existed still
+  // hold theirs, where no engine can see them; this pass moves them. After the
+  // orphan reconciliation, so a task it just released is marked stopped rather
+  // than started by the pump below. Idempotent; best-effort; never blocks boot.
+  try {
+    const db = getDb()
+    const moved = moveArchivedRoomTasks(db, { skip: (t) => runsOnTaskRunner(db, t) })
+    if (moved.length > 0) {
+      log.info({ moved: moved.length }, 'Board: moved unfinished tasks out of archived rooms')
+    }
+  } catch (err) {
+    log.error({ err }, 'Board: moving tasks out of archived rooms failed (non-fatal)')
   }
 
   // ── Worktrees: GC stale worktrees on startup ────────────────────────────────

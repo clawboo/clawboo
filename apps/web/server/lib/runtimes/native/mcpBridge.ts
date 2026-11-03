@@ -44,6 +44,10 @@ export interface McpBridgeOptions {
   /** Which servers to attach. `tasks: 'read'` attaches only the board's read
    *  tools (list_tasks/get_task) — visibility without engine-racing writes. */
   enable: { tasks: boolean | 'read'; memory: boolean; tools: boolean; teamchat?: boolean }
+  /** The run is one the team engine drives: with full Tasks access the agent
+   *  still gets none of the writes the engine owns (see the Tasks server's
+   *  `teamRun`), as the HTTP runtimes' signed team-run URLs do. */
+  teamRun?: boolean
   /**
    * The run's authoritative memory scope — bound onto the in-process Memory
    * server so native saves are team-shared + reads team-limited, matching the
@@ -90,6 +94,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
       await connectInMemoryClient(
         createTasksServer(db, {
           readOnly: enable.tasks === 'read',
+          ...(opts.teamRun ? { teamRun: true } : {}),
           // Same binding the Memory + TeamChat servers get: the run's team is
           // authoritative, so a bare `list_tasks` returns THIS team's board
           // (the agent is never told its own teamId to pass). The agentId
