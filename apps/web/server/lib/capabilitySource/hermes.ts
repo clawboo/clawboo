@@ -3,10 +3,11 @@
 // self-model; the invariant (hermesSkills.ts) is that clawboo NEVER writes a
 // Hermes skills dir — so its SKILL.md skills are surfaced `observe-only` rather
 // than the default `external-write` manageability (the runtime keeps its native
-// substrate). The mcp.json is clawboo-owned
-// but REGENERATED every run (provisionHermesHome overwrites it), so its
-// connectors are the clawboo attach spine — also `observe-only`, not a durable
-// user surface. Build-ins roll up to one observe-only record. write() → unsupported.
+// substrate). Connectors are the `mcp_servers` the home's config.yaml declares:
+// clawboo's own entries are REGENERATED every run (provisionHermesHome rewrites
+// its marked block), so they are the clawboo attach spine, and any others came
+// with the seeded user config. Both are `observe-only`, not a durable clawboo
+// surface. Built-ins roll up to one observe-only record. write() is unsupported.
 
 import { readFile, readdir } from 'node:fs/promises'
 import path from 'node:path'
@@ -21,6 +22,7 @@ import {
 } from '@clawboo/capability-registry'
 import { agents, type ClawbooDb } from '@clawboo/db'
 
+import { listHermesMcpServerNames } from '../runtimes/hermesHome'
 import { listNativeSkills } from '../runtimes/hermesSkills'
 import { buildRecord, builtinRollup, degradedStatus, okStatus } from './helpers'
 
@@ -67,9 +69,8 @@ interface McpConnector {
 
 async function readMcpConnectors(home: string): Promise<McpConnector[]> {
   try {
-    const raw = await readFile(path.join(home, 'mcp.json'), 'utf8')
-    const parsed = JSON.parse(raw) as { mcpServers?: Record<string, unknown> }
-    return Object.keys(parsed.mcpServers ?? {}).map((name) => ({ name }))
+    const raw = await readFile(path.join(home, 'config.yaml'), 'utf8')
+    return listHermesMcpServerNames(raw).map((name) => ({ name }))
   } catch {
     return []
   }
@@ -153,7 +154,7 @@ export class HermesCapabilitySource implements CapabilitySource {
               kind: 'connector',
               sourceKey: `mcp:${conn.name}`,
               origin: 'mcp-connector',
-              manageability: 'observe-only', // mcp.json is regenerated every run
+              manageability: 'observe-only', // config.yaml mcp_servers, rewritten every run
               name: conn.name,
               description: 'Attached MCP server',
               available: true,
@@ -175,7 +176,7 @@ export class HermesCapabilitySource implements CapabilitySource {
 
   async write(action: CapabilityWriteAction): Promise<CapabilityRecord | null> {
     // Every Hermes capability is observe-only (native self-model; clawboo never
-    // writes its skills dir, and mcp.json is regenerated each run).
+    // writes its skills dir, and its MCP block is rewritten each run).
     unsupported('hermes', action.kind)
   }
 }

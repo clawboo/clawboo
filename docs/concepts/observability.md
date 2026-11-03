@@ -70,17 +70,17 @@ Only runs the task runner starts have traces. Team-chat work and OpenClaw routin
 
 Clawboo sorts every error a run reports into a class, by keywords in its code and message. The first class that fits wins, in the order of this table:
 
-| Class             | Typical cause                                                                                |
-| ----------------- | -------------------------------------------------------------------------------------------- |
-| `RateLimited`     | The provider is throttling you: 429, rate limit, quota, resource exhausted                   |
-| `UserAborted`     | The run was stopped or cancelled                                                             |
-| `Timeout`         | Something took too long: timeout, timed out, ETIMEDOUT, deadline exceeded                    |
-| `UnexpectedEnv`   | A missing file or program, or a permission problem: ENOENT, EACCES, EPERM, command not found |
-| `ContextOverflow` | The prompt was too long for the model                                                        |
-| `InvalidArgs`     | The request was malformed: 400, 422, validation, missing required field                      |
-| `ProviderError`   | The provider failed: 500, 502, 503, 504, upstream, overloaded, service unavailable           |
-| `Unknown`         | Nothing matched                                                                              |
-| `PolicyDenied`    | A guardrail refused a tool call. Task-runner runs only, checked before every other class     |
+| Class             | Typical cause                                                                                                                                                               |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RateLimited`     | The provider is throttling you: 429, rate limit, quota, resource exhausted                                                                                                  |
+| `UserAborted`     | The run was stopped or cancelled                                                                                                                                            |
+| `Timeout`         | Something took too long: timeout, timed out, ETIMEDOUT, deadline exceeded                                                                                                   |
+| `UnexpectedEnv`   | A missing file, program or working login, or a permission problem: ENOENT, EACCES, EPERM, command not found, authentication failed, invalid API key                         |
+| `ContextOverflow` | The prompt was too long for the model                                                                                                                                       |
+| `InvalidArgs`     | The request was malformed: 400, 422, validation, missing required field                                                                                                     |
+| `ProviderError`   | The provider failed or refused the account: 500, 502, 503, 504, upstream, overloaded, service unavailable, billing error. Account refusals are checked before `InvalidArgs` |
+| `Unknown`         | Nothing matched                                                                                                                                                             |
+| `PolicyDenied`    | A guardrail refused a tool call. Task-runner runs only, checked before every other class                                                                                    |
 
 An `Unknown` error is flagged as a **harness bug**: most likely a defect in Clawboo rather than in your prompt or your provider. If you see one, please [open an issue](https://github.com/clawboo/clawboo/issues) with the error text. A `PolicyDenied` error is never a harness bug; it means a guardrail did its job.
 

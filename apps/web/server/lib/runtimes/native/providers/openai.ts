@@ -25,6 +25,8 @@ export interface OpenAiChunkSlice {
         index: number
         id?: string
         function?: { name?: string; arguments?: string }
+        /** Provider extension on a tool call (Gemini 3: `{ google: { thought_signature } }`). */
+        extra_content?: Record<string, unknown>
       }>
     }
     finish_reason?: string | null
@@ -32,7 +34,7 @@ export interface OpenAiChunkSlice {
   usage?: {
     prompt_tokens?: number
     completion_tokens?: number
-    prompt_tokens_details?: { cached_tokens?: number }
+    prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }
   } | null
 }
 interface OpenAiSdkModule {
@@ -64,9 +66,12 @@ export function toOpenAiTools(tools: NeutralToolDef[]): Array<Record<string, unk
   }))
 }
 
+/** `provider` is the client's provider id: a tool call's provider-opaque
+ *  fields go back only to the provider that produced them. */
 export function toOpenAiMessages(
   system: string,
   messages: NeutralMessage[],
+  provider?: string,
 ): Array<Record<string, unknown>> {
   const out: Array<Record<string, unknown>> = [{ role: 'system', content: system }]
   for (const m of messages) {
@@ -85,6 +90,7 @@ export function toOpenAiMessages(
                 id: c.id,
                 type: 'function',
                 function: { name: c.name, arguments: JSON.stringify(c.input ?? {}) },
+                ...(provider && c.providerData?.provider === provider ? c.providerData.fields : {}),
               })),
             }
           : {}),
@@ -112,8 +118,11 @@ export interface OpenAiChunkMapper {
   finish(): ProviderStreamEvent[]
 }
 
-export function createOpenAiChunkMapper(): OpenAiChunkMapper {
-  const toolAcc = new Map<number, { id: string; name: string; args: string }>()
+export function createOpenAiChunkMapper(provider?: string): OpenAiChunkMapper {
+  const toolAcc = new Map<
+    number,
+    { id: string; name: string; args: string; extra?: Record<string, unknown> }
+  >()
   let flushedTools = false
   let usage: ProviderStreamEvent | null = null
 
@@ -128,7 +137,15 @@ export function createOpenAiChunkMapper(): OpenAiChunkMapper {
       } catch {
         input = { _raw: acc.args }
       }
-      out.push({ type: 'tool-call', id: acc.id, name: acc.name, input })
+      out.push({
+        type: 'tool-call',
+        id: acc.id,
+        name: acc.name,
+        input,
+        ...(provider && acc.extra
+          ? { providerData: { provider, fields: { extra_content: acc.extra } } }
+          : {}),
+      })
     }
     toolAcc.clear()
     return out
@@ -144,6 +161,7 @@ export function createOpenAiChunkMapper(): OpenAiChunkMapper {
         if (frag.id) acc.id = frag.id
         if (frag.function?.name) acc.name = frag.function.name
         if (frag.function?.arguments) acc.args += frag.function.arguments
+        if (frag.extra_content) acc.extra = frag.extra_content
         toolAcc.set(frag.index, acc)
       }
       if (choice?.finish_reason === 'tool_calls') out.push(...flushTools())
@@ -155,6 +173,9 @@ export function createOpenAiChunkMapper(): OpenAiChunkMapper {
           ...(chunk.usage.prompt_tokens_details?.cached_tokens != null
             ? { cachedInputTokens: chunk.usage.prompt_tokens_details.cached_tokens }
             : {}),
+          ...(chunk.usage.prompt_tokens_details?.cache_write_tokens
+            ? { cacheWriteInputTokens: chunk.usage.prompt_tokens_details.cache_write_tokens }
+            : {}),
         }
       }
       return out
@@ -165,6 +186,17 @@ export function createOpenAiChunkMapper(): OpenAiChunkMapper {
       return out
     },
   }
+}
+
+/** Anthropic prompt caching is opt-in. OpenRouter accepts Anthropic's top-level
+ *  automatic `cache_control` for its Anthropic models (`anthropic/...`). */
+export function openRouterCacheControl(
+  provider: string,
+  model: string,
+): { cache_control?: { type: 'ephemeral' } } {
+  return provider === 'openrouter' && /^~?anthropic\//.test(model)
+    ? { cache_control: { type: 'ephemeral' } }
+    : {}
 }
 
 // ── The client ───────────────────────────────────────────────────────────────
@@ -189,20 +221,21 @@ export function createOpenAiProvider(opts: {
   return {
     provider: opts.provider,
     async *streamTurn(p: ProviderTurnParams): AsyncIterable<ProviderStreamEvent> {
-      const mapper = createOpenAiChunkMapper()
+      const mapper = createOpenAiChunkMapper(opts.provider)
       let stream: AsyncIterable<OpenAiChunkSlice>
       try {
         const client = await getClient()
         stream = await client.chat.completions.create(
           {
             model: p.model,
-            messages: toOpenAiMessages(p.system, p.messages),
+            messages: toOpenAiMessages(p.system, p.messages, opts.provider),
             ...(p.tools.length > 0 ? { tools: toOpenAiTools(p.tools) } : {}),
             // api.openai.com wants the modern param; compat endpoints
             // (OpenRouter/Ollama, reached via baseURL) take the classic one.
             ...(opts.baseURL
               ? { max_tokens: p.maxOutputTokens }
               : { max_completion_tokens: p.maxOutputTokens }),
+            ...openRouterCacheControl(opts.provider, p.model),
             stream: true,
             stream_options: { include_usage: true },
           },

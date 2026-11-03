@@ -17,6 +17,7 @@ import { resolveTeamSessionKeys } from './teamChatStream'
 import { chatClearedAt, chatClearedSettingKey } from '../lib/teamChat/chatCleared'
 import { getTenantId } from '../lib/tenant'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
+import { teamVerifyCommandSettingKey } from '../lib/verification/teamVerifyCommand'
 import {
   resolveServerOrchestrated,
   serverOrchestratedSettingKey,
@@ -241,6 +242,7 @@ export function teamsPATCH(req: Request, res: Response): void {
 // behind in the key/value store:
 //   - `team-rules:<teamId>`     — user-captured rules
 //   - `team-onboarding:<teamId>` — onboarding flags + user intro text
+//   - `team-verify-command:<teamId>`: the check the verification gate runs
 //   - `native-team-session:<agentId>:<teamId>` — native leader session-resume
 //     pointers (one per team member; the amnesia-fix continuity handles), and the
 //     same pointers for the team's chat rooms (`...:<teamId>:room:<roomId>`)
@@ -272,6 +274,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
         inArray(settings.key, [
           `team-rules:${teamId}`,
           `team-onboarding:${teamId}`,
+          teamVerifyCommandSettingKey(teamId),
           chatClearedSettingKey(teamId),
         ]),
       )

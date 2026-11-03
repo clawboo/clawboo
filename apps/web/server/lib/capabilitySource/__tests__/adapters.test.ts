@@ -156,15 +156,24 @@ describe('HermesCapabilitySource', () => {
       '---\nname: Web Fetch\ndescription: Fetch a URL\n---\n# body',
     )
     writeFileSync(
-      path.join(agentHome, 'mcp.json'),
-      JSON.stringify({
-        mcpServers: { 'clawboo-tasks': { url: 'http://x' }, 'custom-srv': { url: 'http://y' } },
-      }),
+      path.join(agentHome, 'config.yaml'),
+      [
+        'model:',
+        '  provider: openrouter',
+        'mcp_servers:',
+        '  custom-srv:',
+        '    url: "http://y"',
+        '  # >>> clawboo mcp_servers (managed by clawboo, rewritten every run) >>>',
+        '  clawboo-tasks:',
+        '    url: "http://x"',
+        '  # <<< clawboo mcp_servers <<<',
+        '',
+      ].join('\n'),
     )
     return { ...process.env, CLAWBOO_HOME: home }
   }
 
-  it('scans SKILL.md frontmatter + mcp.json — all observe-only (clawboo never writes a Hermes skills dir)', async () => {
+  it('scans SKILL.md frontmatter + config.yaml mcp_servers, all observe-only (clawboo never writes a Hermes skills dir)', async () => {
     const env = seedHermesHome('h1')
     const { records, status } = await new HermesCapabilitySource({ env }).read()
     expect(status.ok).toBe(true)
@@ -176,11 +185,9 @@ describe('HermesCapabilitySource', () => {
       manageability: 'observe-only',
       agentId: 'h1',
     })
-    expect(
-      records
-        .filter((r) => r.kind === 'connector')
-        .every((r) => r.manageability === 'observe-only'),
-    ).toBe(true)
+    const connectors = records.filter((r) => r.kind === 'connector')
+    expect(connectors.map((r) => r.name).sort()).toEqual(['clawboo-tasks', 'custom-srv'])
+    expect(connectors.every((r) => r.manageability === 'observe-only')).toBe(true)
     expect(records.some((r) => r.source === 'runtime-builtin')).toBe(true)
   })
 

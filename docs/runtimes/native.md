@@ -93,7 +93,7 @@ These are the built-in models for an agent whose model you leave on **Default** 
 | OpenAI         | `OPENAI_API_KEY`     | `gpt-5.4`                                  | `gpt-4o-mini`                             |
 | OpenRouter     | `OPENROUTER_API_KEY` | `anthropic/claude-haiku-4.5`               | `openai/gpt-4o-mini`                      |
 | Ollama (local) | none                 | A model you have pulled (`llama3.2` first) | Same as the leader                        |
-| Google         | `GEMINI_API_KEY`     | `gemini-2.0-flash`                         | `gemini-2.0-flash`                        |
+| Google         | `GEMINI_API_KEY`     | `gemini-3.6-flash`                         | `gemini-3.6-flash`                        |
 | xAI            | `XAI_API_KEY`        | `grok-2-latest`                            | `grok-2-latest`                           |
 | Groq           | `GROQ_API_KEY`       | `llama-3.3-70b-versatile`                  | `llama-3.1-8b-instant`                    |
 | Mistral        | `MISTRAL_API_KEY`    | `mistral-large-latest`                     | `mistral-small-latest`                    |
@@ -164,6 +164,7 @@ Clawboo Native reports the cost of every turn:
 
 - **Six models have an exact price:** `claude-haiku-4-5`, `claude-sonnet-4-6`, `gpt-4o`, `gpt-4o-mini`, `openai/gpt-4o-mini` and `anthropic/claude-haiku-4.5`. Clawboo records their cost at list price.
 - **Every other model is estimated**, including the default leader models `claude-sonnet-5` and `gpt-5.4`. Clawboo prices the turn's token counts from its rate table and records the result as an estimate. A model missing from the table is priced at USD 3 per million input tokens and USD 15 per million output tokens.
+- **Anthropic runs use prompt caching.** Direct and through OpenRouter, each Anthropic call asks Anthropic to cache the prompt, so from the second turn on most of it is read from the cache. A priced model's cached tokens cost the cache rate, and the turn's input count still covers the whole prompt.
 - **Local Ollama models are free.** A turn your own Ollama serves is recorded at $0, charges no budget, and its tasks read **free** on the Board. Ollama's cloud models (a `-cloud` tag) run on ollama.com and are estimated like any other unpriced model.
 
 Estimates count toward your budgets. Budgets only warn you unless you set a hard cap. Turns with an exact price are charged as they happen, so a hard cap can stop a native run partway through. Estimated turns are charged when the run ends, in team chat and in 1:1 chat alike. See [Budgets and spend](/using/budgets-and-spend).

@@ -54,6 +54,15 @@ interface SdkMessage {
   model?: string
   message?: { content?: unknown }
   result?: string
+  /** On a `result`: the turn ended on an API error. The CLI reports that as
+   *  `subtype: 'success'` with the error text in `result`. */
+  is_error?: boolean
+  /** On a `result`: the HTTP status of the API error, when there was one. */
+  api_error_status?: number | null
+  /** On an `assistant` message: the API error the CLI turned into this message
+   *  (`authentication_failed`, `billing_error`, `rate_limit`, `overloaded`, ...).
+   *  Its text is the CLI's own error notice, not model output. */
+  error?: string
   total_cost_usd?: number
   usage?: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number }
   errors?: string[]
@@ -222,14 +231,32 @@ function stringifyToolContent(content: unknown): string {
   }
 }
 
-/** Translate one SDK message into zero+ native Claude events. */
-export function translateClaudeMessage(msg: SdkMessage): ClaudeNativeEvent[] {
+/** True when a `result` reports a turn that ended on an API error: the CLI
+ *  sends those as a success carrying the error text. An `error_*` subtype also
+ *  sets `is_error`, but it names its own cause in `errors`. */
+const isApiErrorResult = (msg: SdkMessage): boolean =>
+  msg.subtype === 'success' && msg.is_error === true
+
+/** The API-error cause an assistant message stands in for, or null. A
+ *  `max_output_tokens` message still carries the model's (truncated) output. */
+const apiErrorOf = (msg: SdkMessage): string | null =>
+  msg.type === 'assistant' && msg.error && msg.error !== 'max_output_tokens' ? msg.error : null
+
+/** Translate one SDK message into zero+ native Claude events. `apiError` is the
+ *  cause an earlier assistant message carried, attached to the result it ends. */
+export function translateClaudeMessage(
+  msg: SdkMessage,
+  opts: { apiError?: string | null } = {},
+): ClaudeNativeEvent[] {
   switch (msg.type) {
     case 'system':
       return msg.subtype === 'init' && msg.session_id
         ? [{ type: 'init', sessionId: msg.session_id, ...(msg.model ? { model: msg.model } : {}) }]
         : []
     case 'assistant': {
+      // An API-error notice is reported once, as the failed result; its text
+      // must not stream as if the model wrote it.
+      if (apiErrorOf(msg)) return []
       const out: ClaudeNativeEvent[] = []
       for (const b of blocksOf(msg)) {
         if (b.type === 'text' && b.text) out.push({ type: 'text', text: b.text })
@@ -256,7 +283,8 @@ export function translateClaudeMessage(msg: SdkMessage): ClaudeNativeEvent[] {
       return out
     }
     case 'result': {
-      const ok = msg.subtype === 'success'
+      const apiError = isApiErrorResult(msg)
+      const ok = msg.subtype === 'success' && !apiError
       // The SDK signals a turn-ceiling stop as `result.subtype === 'error_max_turns'`.
       // Surface it distinctly so the host rotates the session (continue) instead of
       // failing the task.
@@ -270,7 +298,12 @@ export function translateClaudeMessage(msg: SdkMessage): ClaudeNativeEvent[] {
               : {}),
           }
         : undefined
-      const errMsg = msg.errors?.join('; ') ?? msg.subtype
+      const errMsg = apiError
+        ? `${msg.result?.trim() || 'Claude Code API error'}${
+            msg.api_error_status != null ? ` (HTTP ${msg.api_error_status})` : ''
+          }`
+        : (msg.errors?.join('; ') ?? msg.subtype)
+      const errorCode = apiError ? (opts.apiError ?? null) : null
       return [
         {
           type: 'result',
@@ -281,6 +314,7 @@ export function translateClaudeMessage(msg: SdkMessage): ClaudeNativeEvent[] {
           ...(msg.session_id ? { sessionId: msg.session_id } : {}),
           ...(maxTurns ? { maxTurns: true } : {}),
           ...(ok ? {} : { errorMessage: errMsg }),
+          ...(errorCode ? { errorCode } : {}),
         },
       ]
     }
@@ -361,6 +395,8 @@ export function createClaudeCodeDriver(
     // as a running total (so the latest one is the run's).
     let usage = { inputTokens: 0, outputTokens: 0, cachedInputTokens: 0 }
     let sawUsage = false
+    // The typed cause of the latest API-error notice, for the result that follows it.
+    let apiError: string | null = null
     try {
       // The brief goes in first: a steer can arrive while the SDK is still loading,
       // and it must reach the CLI after the task it steers.
@@ -395,7 +431,10 @@ export function createClaudeCodeDriver(
       options['env'] = { ...buildChildEnv(ctx.apiKeyEnv ?? {}), ...CLAUDE_CODE_ISOLATION_ENV }
       for await (const msg of mod.query({ prompt: input.stream, options })) {
         if (finished) break
-        if (msg.type === 'assistant') noteConsumed(msg)
+        if (msg.type === 'assistant') {
+          noteConsumed(msg)
+          apiError = apiErrorOf(msg) ?? apiError
+        }
         if (msg.type !== 'result') {
           for (const ev of translateClaudeMessage(msg)) push(ev)
           continue
@@ -412,8 +451,10 @@ export function createClaudeCodeDriver(
         // A successful turn with a person's steer still unread is not the end of
         // the run: the CLI starts a turn for it next. Anything else is.
         const unread = [...pendingSteers.keys()].some((id) => !passiveSteers.has(id))
-        if (msg.subtype === 'success' && unread) continue
-        for (const ev of translateClaudeMessage(msg)) {
+        const turnApiError = apiError
+        apiError = null
+        if (msg.subtype === 'success' && msg.is_error !== true && unread) continue
+        for (const ev of translateClaudeMessage(msg, { apiError: turnApiError })) {
           if (ev.type !== 'result') {
             push(ev)
             continue

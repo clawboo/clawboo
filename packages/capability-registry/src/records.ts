@@ -37,7 +37,7 @@ export type CapabilityScope = 'team' | 'agent' | 'global'
  * How clawboo may act on this capability. The UI + the write() path are a PURE
  * function of this tier — neither may offer an action the owning runtime forbids.
  * - 'managed'           clawboo fully owns the durable row (brokered tools, curated skills).
- * - 'external-write'    the runtime owns the store; clawboo writes THROUGH it (Hermes mcp.json / SKILL.md).
+ * - 'external-write'    the runtime owns the store; clawboo writes THROUGH it (Hermes config.yaml / SKILL.md).
  * - 'runtime-of-record' the runtime owns it; clawboo drives changes through the runtime's API (OpenClaw config).
  * - 'observe-only'      clawboo can read but never write (built-ins, external-vendor CLIs).
  */
@@ -49,7 +49,7 @@ export type CapabilityOrigin =
   | 'brokered-mcp' // the tool_registry brokered tools (managed)
   | 'curated-skill' // the per-agent skills table — a clawboo-managed annotation (managed)
   | 'filesystem-skill-md' // a SKILL.md on disk in a clawboo-owned home (external-write)
-  | 'mcp-connector' // an attached MCP server (Hermes mcp.json / Codex toml / Claude inline / OpenClaw mcp.servers)
+  | 'mcp-connector' // an attached MCP server (Hermes config.yaml mcp_servers / Codex toml / Claude inline / OpenClaw mcp.servers)
   | 'runtime-builtin' // a runtime's built-in tool (observe-only)
   | 'openclaw-extension' // OpenClaw plugin / Composio connector / tools.allow (runtime-of-record)
   | 'external-vendor-cli' // an outbound connector seen via a hook (gh, Linear) — observe-only
