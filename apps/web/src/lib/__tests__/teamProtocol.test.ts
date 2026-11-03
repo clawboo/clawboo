@@ -484,6 +484,25 @@ describe('buildClawbooHelpDoc', () => {
     expect(result).toContain('@Bug Fixer Boo')
   })
 
+  it("tells the universal leader that hand-offs work only in a team's chat", () => {
+    // Its 1:1 chat with a person has no board and no engine, so a <delegate>
+    // written there reaches no one (the per-turn 1:1 anchor says the same).
+    const lead = buildClawbooHelpDoc({
+      agentName: 'Boo Zero',
+      teamName: 'Dev Team',
+      teammates,
+      universalLeaderName: 'Boo Zero',
+    })
+    expect(lead).toContain("Hand-offs work only in a team's chat.")
+    const member = buildClawbooHelpDoc({
+      agentName: 'Lead Dev Boo',
+      teamName: 'Dev Team',
+      teammates,
+      universalLeaderName: 'Boo Zero',
+    })
+    expect(member).not.toContain("Hand-offs work only in a team's chat.")
+  })
+
   it('handles a solo agent (no teammates) without crashing', () => {
     const result = buildClawbooHelpDoc({
       agentName: 'Solo Boo',

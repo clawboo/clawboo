@@ -75,6 +75,17 @@ export function delegationTargetOf(sourceDelegationId: string | null | undefined
   return sourceDelegationId.match(/:agent:([^:]+)/)?.[1] ?? null
 }
 
+/**
+ * The agent a delegated task reports its result to, decoded from the
+ * `:reflectTo:<id>` segment of its `sourceDelegationId`, or null when it names
+ * none (a task a person assigned, a legacy manual card, an agent's own
+ * `create_task`). The same segment the team engine writes and reads.
+ */
+export function delegatorOf(sourceDelegationId: string | null | undefined): string | null {
+  if (!sourceDelegationId) return null
+  return sourceDelegationId.match(/:reflectTo:([^:]+)/)?.[1] ?? null
+}
+
 const HUMAN_ORIGIN_RE = /(?:^|:)origin:human(?::|$)/
 
 /**

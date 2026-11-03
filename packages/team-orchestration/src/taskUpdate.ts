@@ -7,11 +7,20 @@
  * Terminal outcome of a board task, as reflected back to the leader. `'done'`
  * (or omitted) is a successful completion. `'person_done'` and
  * `'person_cancelled'` are a person deciding the task on the board: neither is a
- * failure, and a cancelled task must not be redone. The others are failures the
- * leader must act on rather than keep waiting for.
+ * failure, and a cancelled task must not be redone. `'blocked'` is the agent
+ * marking its own task blocked because it needs a person. The others are
+ * failures. All of these but the person's decisions are ones the leader must act
+ * on rather than keep waiting for.
  */
 export type TaskUpdateOutcome =
-  'done' | 'person_done' | 'person_cancelled' | 'error' | 'aborted' | 'timeout' | 'max_turns'
+  | 'done'
+  | 'person_done'
+  | 'person_cancelled'
+  | 'blocked'
+  | 'error'
+  | 'aborted'
+  | 'timeout'
+  | 'max_turns'
 
 export interface TaskUpdateItem {
   /** Resolved assignee name (agent or, later, a human). */
@@ -27,6 +36,7 @@ export interface TaskUpdateItem {
 type FailedOutcome = Exclude<TaskUpdateOutcome, 'done' | 'person_done' | 'person_cancelled'>
 
 const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
+  blocked: 'marked it blocked: it needs a person before it can go on',
   error: 'failed with an error',
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',

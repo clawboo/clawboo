@@ -78,6 +78,31 @@ describe('native MCP bridge (in-process)', () => {
     await bridge!.close()
   })
 
+  it('on a team run, full Tasks access still leaves out the writes the team engine owns', async () => {
+    // A Clawboo Native agent whose Tasks access is set to full got claim_task and
+    // update_task_status on team runs too, where the engine claims each task and
+    // moves the card itself.
+    const bridge = await connectMcpBridge({
+      db,
+      agentId: 'native-team-agent',
+      enable: { tasks: true, memory: false, tools: false },
+      memoryScope: { teamId: 'team-bridge', agentId: 'native-team-agent' },
+      teamRun: true,
+    })
+    const names = (await bridge!.listTools()).map((t) => t.name)
+    expect(names).toContain('block_task')
+    expect(names).toContain('create_task')
+    for (const withheld of [
+      'claim_task',
+      'assign_task',
+      'release_task',
+      'update_task_status',
+      'unblock_task',
+    ])
+      expect(names).not.toContain(withheld)
+    await bridge!.close()
+  })
+
   it('an unknown tool call is a tool error, not a throw', async () => {
     const bridge = await connectMcpBridge({
       db,

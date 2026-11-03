@@ -346,7 +346,7 @@ export type ReplyDelivery =
   | {
       status: 'not-delivered'
       agentId: string | null
-      reason: 'finished' | 'unassigned' | 'failed'
+      reason: 'finished' | 'unassigned' | 'failed' | 'room_archived' | 'no_team'
     }
 
 /** A person's comment on a task, and where the server delivered it. */

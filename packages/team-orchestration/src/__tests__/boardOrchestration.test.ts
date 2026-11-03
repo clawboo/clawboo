@@ -68,17 +68,41 @@ describe('extractSignals', () => {
     expect(extractSignals(ev, 'leader', KNOWN).parallel).toHaveLength(1)
   })
 
-  it('drops a `delegate` tool-call to an unknown teammate', () => {
+  it('reports a `delegate` tool-call to an unknown teammate as unrouted, not a delegation', () => {
     const ev = toolCallEvent('r1', 'delegate', { assignee: 'Nobody', task: 'x' })
     const out = extractSignals(ev, 'leader', KNOWN)
     expect(out.parallel).toEqual([])
     expect(out.plan).toEqual([])
+    expect(out.unrouted).toEqual([
+      { name: 'Nobody', task: 'x', reason: 'unknown', via: 'delegate' },
+    ])
   })
 
-  it('drops a self-delegation `delegate` tool-call', () => {
+  it('reports a self-delegation `delegate` tool-call as unrouted', () => {
     const ev = toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'x' })
     // sourceAgentId === a2 (Bug Boo) targeting itself → skipped.
-    expect(extractSignals(ev, 'a2', KNOWN).parallel).toEqual([])
+    const out = extractSignals(ev, 'a2', KNOWN)
+    expect(out.parallel).toEqual([])
+    expect(out.unrouted).toEqual([{ name: 'Bug Boo', task: 'x', reason: 'self', via: 'delegate' }])
+  })
+
+  it('reports a sessions_send to no teammate as unrouted', () => {
+    const ev = toolCallEvent('r1', 'sessions_send', { label: 'Nobody', message: 'hi' })
+    expect(extractSignals(ev, 'leader', KNOWN).unrouted).toEqual([
+      { name: 'Nobody', task: 'hi', reason: 'unknown', via: 'sessions_send' },
+    ])
+  })
+
+  it('a hand-off that names no one at all is left to the tool, which refuses it', () => {
+    for (const assignee of ['', '   ']) {
+      const ev = toolCallEvent('r1', 'delegate', { assignee, task: 'x' })
+      expect(extractSignals(ev, 'leader', KNOWN)).toEqual({ parallel: [], plan: [], unrouted: [] })
+    }
+  })
+
+  it('a routed hand-off has nothing unrouted', () => {
+    const ev = toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'fix the bug' })
+    expect(extractSignals(ev, 'leader', KNOWN).unrouted).toEqual([])
   })
 
   it('drops a `delegate` tool-call with an empty task', () => {

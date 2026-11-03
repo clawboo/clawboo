@@ -327,7 +327,9 @@ export function resolveSessionsSendTarget(
     const hit = participants.find((p) => p.id === params.agentId)
     if (hit) return hit
   }
-  if (params.label) {
+  // A label with nothing in it but spaces or `@` names no one; as an empty
+  // prefix it would match every teammate.
+  if (params.label && params.label.replace(/^@/, '').trim()) {
     const lower = params.label.toLowerCase()
     const exact = participants.find((p) => p.name.toLowerCase() === lower)
     if (exact) return exact

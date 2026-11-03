@@ -16,7 +16,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
 import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
-import { parseBoundProvenance, parseBoundScope } from '../mcp'
+import { parseBoundProvenance, parseBoundScope, parseTasksBinding } from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
@@ -157,5 +157,67 @@ describe('parseBoundProvenance', () => {
     const scopeSig = /scopeSig=([0-9a-f]+)/.exec(url)![1]!
     const swapped = url.replace(/provSig=[0-9a-f]+/, `provSig=${scopeSig}`)
     expect(parseBoundProvenance(req(swapped))).toEqual({ agentId: 'agent-1' })
+  })
+})
+
+/** A Tasks URL as serverDeliver (a team run) or the task runner writes it. */
+const signedTasksUrl = (scope: { teamId: string; agentId: string; delegate?: boolean }): string =>
+  mcpHttpUrl('http://127.0.0.1:1', 'tasks', {
+    ...scope,
+    attachSecret: getMcpAttachSecret(getDb()),
+  }).replace('http://127.0.0.1:1', '')
+
+describe('parseBoundScope on a team run', () => {
+  const teamRunMemoryUrl = (): string =>
+    mcpHttpUrl('http://127.0.0.1:1', 'memory', {
+      teamId: 'team-A',
+      agentId: 'coder',
+      delegate: true,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+
+  it('binds the Memory URL a team run is given, which carries the team-run mark', () => {
+    const url = teamRunMemoryUrl()
+    expect(url).toContain('teamRun=1')
+    expect(parseBoundScope(req(url))).toEqual({ teamId: 'team-A', agentId: 'coder' })
+  })
+
+  it('refuses it with the mark stripped', () => {
+    expect(parseBoundScope(req(teamRunMemoryUrl().replace(/&?teamRun=1/, '')))).toBeUndefined()
+  })
+})
+
+describe('parseTasksBinding', () => {
+  it('reads a team run from the signed Tasks URL a team run is given', () => {
+    const url = signedTasksUrl({ teamId: 'team-A', agentId: 'coder', delegate: true })
+    expect(parseTasksBinding(req(url))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      teamRun: true,
+    })
+  })
+
+  it('reads any other signed run as no team run', () => {
+    const url = signedTasksUrl({ teamId: 'team-A', agentId: 'coder' })
+    expect(parseTasksBinding(req(url))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      teamRun: false,
+    })
+  })
+
+  it('refuses a team-run URL with the claim stripped, so editing the config cannot win the writes back', () => {
+    const url = signedTasksUrl({ teamId: 'team-A', agentId: 'coder', delegate: true })
+    const stripped = url.replace(/&?teamRun=1/, '')
+    expect(stripped).not.toContain('teamRun')
+    expect(parseTasksBinding(req(stripped))).toBeUndefined()
+  })
+
+  it('refuses a claim appended to a URL that was not signed with it', () => {
+    const url = signedTasksUrl({ teamId: 'team-A', agentId: 'coder' })
+    expect(parseTasksBinding(req(`${url}&teamRun=1`))).toBeUndefined()
+  })
+
+  it('is unbound with no scope at all (an OpenClaw agent, an external attach)', () => {
+    expect(parseTasksBinding(req('/api/mcp/tasks'))).toBeUndefined()
+    expect(parseTasksBinding(undefined)).toBeUndefined()
   })
 })

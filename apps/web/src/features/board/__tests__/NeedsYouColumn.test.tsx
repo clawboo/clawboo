@@ -194,6 +194,26 @@ describe('NeedsYouColumn', () => {
     await waitFor(() => expect(onTasksChanged).toHaveBeenCalled(), T)
   })
 
+  it('a Retry refused for an archived chat room says why, instead of claiming it started', async () => {
+    server.use(
+      http.post('/api/board/:id/retry', () =>
+        HttpResponse.json({ ok: false, error: 'room_archived' }, { status: 409 }),
+      ),
+    )
+    renderColumn([failedTask()])
+    await userEvent.click(await screen.findByRole('button', { name: /Retry/ }, T))
+    await waitFor(
+      () =>
+        expect(useToastStore.getState().toasts.map((t) => [t.type, t.message])).toEqual([
+          [
+            'error',
+            'This task’s chat room was archived, so nothing can run it there. Restart Clawboo to move it to General, then try again.',
+          ],
+        ]),
+      T,
+    )
+  })
+
   it('an unassigned task offers the team’s agents instead of Retry', async () => {
     let assigned: { id?: string; agentId?: string } = {}
     server.use(
@@ -492,6 +512,21 @@ describe('Needs you groups tasks that broke the same way', () => {
     await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1), T)
     expect(useToastStore.getState().toasts[0]?.message).toBe('Retried 2 of 3. One was refused.')
     await waitFor(() => expect(onTasksChanged).toHaveBeenCalled(), T)
+  })
+
+  it('says what to do when Retry all is refused because the chat rooms were archived', async () => {
+    // Trying again changes nothing until Clawboo restarts and moves them.
+    server.use(
+      http.post('/api/board/:id/retry', () =>
+        HttpResponse.json({ ok: false, error: 'room_archived' }, { status: 409 }),
+      ),
+    )
+    renderCell(sameCause(3))
+    await userEvent.click(await screen.findByRole('button', { name: /Retry all/ }, T))
+    await waitFor(() => expect(useToastStore.getState().toasts).toHaveLength(1), T)
+    expect(useToastStore.getState().toasts[0]?.message).toBe(
+      'These tasks’ chat rooms were archived, so nothing can run them there. Restart Clawboo to move them to General, then try again.',
+    )
   })
 
   it('Dismiss all asks once, naming the count, then cancels each', async () => {
