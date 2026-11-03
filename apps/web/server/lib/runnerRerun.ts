@@ -30,9 +30,10 @@ export { runnerRerunFor, type RunnerRerun } from './runnerRoute'
 const log = createLogger('runner-rerun')
 
 /**
- * Reruns started from here that have not settled, by task. A run can wait up to
- * the home mutex's timeout behind another run on the same agent before it claims
- * the task, so a second Retry, or an Assign to someone else, would otherwise
+ * Reruns started from here that have not settled, by task. A run can wait for a
+ * free run slot (see runSlots), then up to the home mutex's timeout behind another
+ * run on the same agent, before it claims the task, so a second Retry, or an
+ * Assign to someone else, would otherwise
  * queue a second run that claims the task later. Starting a rerun stops the one
  * still waiting; a claimed run cannot be replaced, because the board refuses a
  * Retry or an Assign while the task is in progress.

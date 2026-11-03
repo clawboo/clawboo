@@ -36,6 +36,7 @@ import type { Capabilities, RunHandle, RuntimeAdapter, RuntimeEvent } from '@cla
 import { usdToFractionalCents } from '@clawboo/governance'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import type { RuntimeRunContext } from '../../runtimes/types'
 import { normalizeSingleLeader, runTeamExchange } from '../runTeamExchange'
@@ -649,6 +650,76 @@ describe('runTeamExchange (the production trigger)', () => {
     expect(cwds.get('hm')).toBe(folder)
     expect(cwds.get('nv')).toBe(folder)
     expect(statSync(folder).isDirectory()).toBe(true)
+  })
+})
+
+describe('runTeamExchange under the run cap', () => {
+  let slots: RunSlots
+  beforeEach(() => {
+    slots = createRunSlots(1)
+    setRunSlotsForTests(slots)
+  })
+  afterEach(() => setRunSlotsForTests(null))
+
+  /** Counts the turns a participant actually started. */
+  function countingAdapter(starts: string[], agentId: string) {
+    const make = fixedAdapter('claude-code', 'wrapped-oneshot', `${agentId}: ok`)
+    return (ctx: RuntimeRunContext): RuntimeAdapter => {
+      const adapter = make(ctx)
+      const start = adapter.start.bind(adapter)
+      return {
+        ...adapter,
+        start: async (task, opts) => {
+          starts.push(agentId)
+          return start(task, opts)
+        },
+      }
+    }
+  }
+
+  it('a turn waits for a free slot, then runs', async () => {
+    seedTeam('tmq', [{ id: 'cc', runtime: 'claude-code' }], 'cc')
+    const starts: string[] = []
+    const other = slots.tryAcquire()!
+    const exchange = runTeamExchange({
+      db,
+      teamId: 'tmq',
+      stimulus: 'go',
+      makeAdapterFor: () => countingAdapter(starts, 'cc'),
+    })
+    await new Promise((r) => setImmediate(r))
+    expect(starts).toEqual([])
+    expect(slots.stats().queued).toBe(1)
+
+    other.release()
+    const res = await exchange
+    expect(res.ok).toBe(true)
+    expect(starts).toEqual(['cc'])
+    expect(slots.stats()).toEqual({ size: 1, running: 0, queued: 0 })
+  })
+
+  it('a client that leaves while a turn waits ends the exchange without running it', async () => {
+    seedTeam('tmq', [{ id: 'cc', runtime: 'claude-code' }], 'cc')
+    const starts: string[] = []
+    const other = slots.tryAcquire()!
+    const client = new AbortController()
+    const exchange = runTeamExchange({
+      db,
+      teamId: 'tmq',
+      stimulus: 'go',
+      signal: client.signal,
+      makeAdapterFor: () => countingAdapter(starts, 'cc'),
+    })
+    await new Promise((r) => setImmediate(r))
+    expect(slots.stats().queued).toBe(1)
+
+    client.abort()
+    const res = await exchange
+    expect(res.ok).toBe(true)
+    expect(starts).toEqual([])
+    expect(readRoom(db, { roomId: resolveRoomForTeam('tmq') })).toEqual([])
+    expect(slots.stats().queued).toBe(0)
+    other.release()
   })
 })
 

@@ -37,6 +37,7 @@ import { KeyedMutex } from '@clawboo/worktrees'
 
 import { budgetPreflight } from '../budgetPreflight'
 import { openclawAgentModel } from '../openclawAgentModel'
+import { RunQueueAbortedError, withRunSlot } from '../runSlots'
 import { registerRunStop, type RunStopHandle } from '../runStops'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
@@ -127,9 +128,27 @@ export async function dispatchConnectedSubstrate(
 ): Promise<RoutineDispatchOutcome> {
   const gatewayAgentId =
     input.agentRow.sourceAgentId ?? input.agentRow.gatewayId ?? input.agentRow.id
-  return connectedAgentMutex.run(connectedAgentKey(input.agentRow), () =>
-    dispatchConnectedSubstrateInner(input, gatewayAgentId),
-  )
+  // One of the process's run slots first, then the agent's lock (see runSlots). A
+  // person who moves the card while the fire waits for its slot ends the wait, and
+  // their move is the outcome, so the fire did not fail.
+  const queue = new AbortController()
+  const queuedStop = registerRunStop(input.taskId, () => queue.abort())
+  try {
+    return await withRunSlot(
+      () => {
+        queuedStop.release()
+        return connectedAgentMutex.run(connectedAgentKey(input.agentRow), () =>
+          dispatchConnectedSubstrateInner(input, gatewayAgentId),
+        )
+      },
+      { key: connectedAgentKey(input.agentRow), signal: queue.signal },
+    )
+  } catch (err) {
+    if (err instanceof RunQueueAbortedError) return { ok: true, taskId: input.taskId }
+    throw err
+  } finally {
+    queuedStop.release()
+  }
 }
 
 async function dispatchConnectedSubstrateInner(

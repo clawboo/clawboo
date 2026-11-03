@@ -37,6 +37,7 @@ import { budgetPreflight } from '../budgetPreflight'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
+import { RunQueueAbortedError, withRunSlot } from '../runSlots'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
@@ -49,6 +50,7 @@ import {
   DEFAULT_MAX_EXCHANGE_TURNS,
   runExchange,
   type ChatTurnDispatcher,
+  type ChatTurnOutcome,
   type ExchangeEmit,
   type ExchangeResult,
 } from './exchange'
@@ -249,7 +251,7 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
     resolved.set(p.agentId, { factory, homeKind })
   }
 
-  const dispatch: ChatTurnDispatcher = async (participant, turnIndex) => {
+  const dispatchTurn: ChatTurnDispatcher = async (participant, turnIndex) => {
     const r = resolved.get(participant.agentId)
     if (!r) return { obligations: [] } // unresolved runtime → no post, no obligation
     const apiKeyEnv = r.homeKind === 'connected' ? {} : buildApiKeyEnv(participant.runtime)
@@ -300,6 +302,27 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
       if (row) return connectedAgentMutex.run(connectedAgentKey(row), turn)
     }
     return turn()
+  }
+  // Every turn takes one of the process's run slots BEFORE its agent's lock (see
+  // runSlots). A client that leaves while a turn waits for its slot ends the wait:
+  // that speaker contributes nothing, and the exchange stops at its abort check.
+  const dispatch: ChatTurnDispatcher = (participant, turnIndex) => {
+    // The lock dispatchTurn takes, so two turns of one agent never hold two slots.
+    const r = resolved.get(participant.agentId)
+    const row = agentRowById.get(participant.agentId)
+    const key =
+      r?.homeKind === 'persistent'
+        ? runtimeIdentityHomePath(participant.runtime, participant.agentId)
+        : r?.homeKind === 'connected' && row
+          ? connectedAgentKey(row)
+          : null
+    return withRunSlot(() => dispatchTurn(participant, turnIndex), {
+      key,
+      signal: deps.signal,
+    }).catch((err: unknown): ChatTurnOutcome => {
+      if (err instanceof RunQueueAbortedError) return { obligations: [] }
+      throw err
+    })
   }
 
   const emit: ExchangeEmit = deps.emit ?? {

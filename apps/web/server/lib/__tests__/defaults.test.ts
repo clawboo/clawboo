@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 import { DEFAULTS, OPERATIONAL_DEFAULTS, REFERENCED_PACKAGE_DEFAULTS } from '../defaults'
+import { DEFAULT_MAX_CONCURRENT_RUNS } from '../runSlots'
 
 const read = (rel: string): string =>
   readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -49,5 +50,7 @@ describe('production defaults catalog', () => {
     expect(OPERATIONAL_DEFAULTS.approvalTtlMs.env).toBe('CLAWBOO_APPROVAL_TTL_MS')
     expect(OPERATIONAL_DEFAULTS.mcpProbeIntervalMs.value).toBe(60_000)
     expect(OPERATIONAL_DEFAULTS.apiPortStart.value).toBe(18790)
+    expect(OPERATIONAL_DEFAULTS.maxConcurrentRuns.value).toBe(DEFAULT_MAX_CONCURRENT_RUNS)
+    expect(OPERATIONAL_DEFAULTS.maxConcurrentRuns.env).toBe('CLAWBOO_MAX_CONCURRENT_RUNS')
   })
 })
