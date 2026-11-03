@@ -47,6 +47,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                       |
 | **Runs and verification**              |                                   |                                                              |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                         |
+| `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                 |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                       |
 | `CLAWBOO_MAX_FIX_CYCLES`               | `1`                               | Retries after a failed verification                          |
 | `CLAWBOO_REVIEWER_MODEL`               | the builder's model               | Model for the verification reviewer                          |
@@ -330,6 +331,14 @@ The Composio API address for brokered apps. The Composio key itself is saved in 
 - Example: `CLAWBOO_RUN_SILENT_TIMEOUT_MS=3600000`
 
 How long a run may go without producing any event before Clawboo stops it. Every event restarts the clock, so a run that keeps working is never cut off. It applies to team chat runs (including delegated tasks and team Routines), to agent Routines on Clawboo Native, Claude Code, Codex and Hermes, and to one-to-one chat with those agents. A delegated task in team chat also has its own fixed 8-minute idle watchdog; see [Limits and defaults](/reference/limits-and-defaults). Time the computer spends asleep does not count.
+
+### CLAWBOO_HERMES_TRANSPORT
+
+- Type: `acp` or `quiet`
+- Default: unset
+- Example: `CLAWBOO_HERMES_TRANSPORT=quiet`
+
+How Clawboo drives Hermes runs. Unset, it uses `hermes acp`, Hermes's Agent Client Protocol mode, and falls back to the quiet one-shot `hermes chat` for any run where that mode does not answer; after such a fallback it skips ACP for ten minutes. `quiet` always uses `hermes chat`. `acp` always tries ACP first, even right after a fallback. See [Hermes](/runtimes/hermes).
 
 ### CLAWBOO_HOME_MUTEX_ACQUIRE_MS
 

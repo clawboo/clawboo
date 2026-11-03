@@ -272,14 +272,16 @@ function outputOf(task: BoardTaskView, comments: TaskComment[] | null): string |
 
 /** How a comment reaches a task that is running now, by the agent's runtime.
  *  `live`: into the running turn at its next step. `resume`: the runtime takes no
- *  input mid-run (Hermes), so its run is paused and picked back up with the
- *  comment. Anything else reads its mailbox at its next run. */
+ *  input mid-run, so its run is paused and picked back up with the comment.
+ *  Anything else reads its mailbox at its next run. Hermes is `live` over its ACP
+ *  mode, which Clawboo installs it with; a Hermes installed without that mode
+ *  pauses and resumes instead, which this hint cannot see. */
 const MID_RUN_DELIVERY: Record<string, 'live' | 'resume'> = {
   'clawboo-native': 'live',
   'claude-code': 'live',
   codex: 'live',
   openclaw: 'live',
-  hermes: 'resume',
+  hermes: 'live',
 }
 
 /** What sending does for this task, in the person's words. */

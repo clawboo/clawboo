@@ -217,17 +217,29 @@ const PICK_PROVIDER_ENV: Record<string, string> = {
   'openai-api': 'OPENAI_API_KEY',
 }
 
-/** Pure spawn-plan builder — argv/env/home assertions need no spawn mocks. */
-export async function buildHermesSpawnPlan(
+/** What a Hermes run starts with, whichever way it is driven (`chat -Q` or `acp`):
+ *  its prompt, the model and provider it is pinned to, the session it resumes,
+ *  and the command and environment of the process. */
+export interface HermesRunSettings {
+  prompt: string
+  /** The model to pin, or undefined to leave it to the home config. */
+  model: string | undefined
+  /** The provider to pin, or null to leave it to the home config or Hermes. */
+  providerFlag: string | null
+  /** A provider the agent was set to and has a key for: it beats the home config. */
+  pickedProvider: string | null
+  /** The session to resume, only ever in a home that already existed. */
+  resume: string | null
+  command: string
+  env: Record<string, string>
+}
+
+/** Pure run-settings resolver, shared by both drivers. */
+export async function resolveHermesRun(
   opts: StartOpts,
   ctx: RuntimeRunContext,
   home: ProvisionedHermesHome,
-  /** `continueLatest`: resume the most recent session in this home
-   *  (`--continue`) when no session id is known. Used to resume a run that was
-   *  stopped to take a steer: one-shot `-Q` prints its session id only at a
-   *  clean exit, and the stopped run is the newest session in its home. */
-  extra: { continueLatest?: boolean } = {},
-): Promise<ResolvedSpawn> {
+): Promise<HermesRunSettings> {
   const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
   const explicitModel = ctx.model ?? opts.model
   // A per-agent PICKED provider (the create-team model picker, stored in execConfig →
@@ -295,6 +307,43 @@ export async function buildHermesSpawnPlan(
     (providerFlag && (pickedProvider || !configuredProvider)
       ? DERIVED_PROVIDER_MODEL[providerFlag]
       : undefined)
+  // Resolve the absolute path: Hermes lives in the Python user-site bin
+  // (e.g. ~/Library/Python/<ver>/bin), off the server's PATH, so a bare
+  // `spawn('hermes')` would ENOENT. Also prepend its dir to PATH so any
+  // tools Hermes itself shells out to are found.
+  const hermesBin = resolveRuntimeBin('hermes')
+  const binDir = hermesBin ? path.dirname(hermesBin) : null
+  return {
+    prompt,
+    model,
+    providerFlag,
+    pickedProvider,
+    resume,
+    command: hermesBin ?? 'hermes',
+    env: {
+      HERMES_HOME: home.home,
+      ...(binDir ? { PATH: `${binDir}${path.delimiter}${process.env['PATH'] ?? ''}` } : {}),
+      ...(ctx.apiKeyEnv ?? {}),
+    },
+  }
+}
+
+/** Pure spawn-plan builder: argv/env/home assertions need no spawn mocks. */
+export async function buildHermesSpawnPlan(
+  opts: StartOpts,
+  ctx: RuntimeRunContext,
+  home: ProvisionedHermesHome,
+  /** `continueLatest`: resume the most recent session in this home
+   *  (`--continue`) when no session id is known. Used to resume a run that was
+   *  stopped to take a steer: one-shot `-Q` prints its session id only at a
+   *  clean exit, and the stopped run is the newest session in its home. */
+  extra: { continueLatest?: boolean } = {},
+): Promise<ResolvedSpawn> {
+  const { prompt, model, providerFlag, resume, command, env } = await resolveHermesRun(
+    opts,
+    ctx,
+    home,
+  )
   const args = [
     'chat',
     '-q',
@@ -311,22 +360,7 @@ export async function buildHermesSpawnPlan(
     // Last: its session name is optional, so nothing may follow it as a value.
     ...(!resume && extra.continueLatest && !home.created ? ['--continue'] : []),
   ]
-  // Resolve the absolute path — Hermes lives in the Python user-site bin
-  // (e.g. ~/Library/Python/<ver>/bin), off the server's PATH, so a bare
-  // `spawn('hermes')` would ENOENT. Also prepend its dir to PATH so any
-  // tools Hermes itself shells out to are found.
-  const hermesBin = resolveRuntimeBin('hermes')
-  const binDir = hermesBin ? path.dirname(hermesBin) : null
-  return {
-    command: hermesBin ?? 'hermes',
-    args,
-    cwd: ctx.cwd ?? undefined,
-    env: {
-      HERMES_HOME: home.home,
-      ...(binDir ? { PATH: `${binDir}${path.delimiter}${process.env['PATH'] ?? ''}` } : {}),
-      ...(ctx.apiKeyEnv ?? {}),
-    },
-  }
+  return { command, args, cwd: ctx.cwd ?? undefined, env }
 }
 
 /** The input a stopped run resumes with: the steer(s), then why it stopped. */

@@ -5,15 +5,16 @@ description: 'Run agents on the open-source Hermes agent: install it with Python
 keywords: ['hermes', 'hermes-agent', 'OpenRouter', 'pipx', 'MEMORY.md', 'yolo']
 ---
 
-Hermes is an open-source agent, published as the `hermes-agent` Python package. Clawboo starts one `hermes chat` per turn or task, inside a folder that belongs to that agent and stays between runs. What Hermes saves there (its `MEMORY.md`, the skills it writes, its session history) carries over to the agent's next run. Use this page to set it up, see which provider it uses, and understand what it can do on your computer.
+Hermes is an open-source agent, published as the `hermes-agent` Python package. Clawboo starts one Hermes process per turn or task, inside a folder that belongs to that agent and stays between runs: `hermes acp`, Hermes's Agent Client Protocol mode, when Hermes has it, and `hermes chat` otherwise. What Hermes saves there (its `MEMORY.md`, the skills it writes, its session history) carries over to the agent's next run. Use this page to set it up, see which provider it uses, and understand what it can do on your computer.
 
-| Topic           | Hermes                                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------------------------ |
-| Best for        | An agent that builds up its own memory and skills over time; many models through one OpenRouter key                |
-| You need        | Python 3.11, 3.12 or 3.13, and one credential: an OpenRouter key, an Anthropic or OpenAI key, or a ChatGPT sign-in |
-| Who bills you   | The provider it runs on (OpenRouter, Anthropic, OpenAI), or your ChatGPT plan                                      |
-| Cost in Clawboo | Hermes reports none; Clawboo records an estimate                                                                   |
-| Steering        | A comment stops the run and resumes it with your comment                                                           |
+| Topic           | Hermes                                                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Best for        | An agent that builds up its own memory and skills over time; many models through one OpenRouter key                   |
+| You need        | Python 3.11, 3.12 or 3.13, and one credential: an OpenRouter key, an Anthropic or OpenAI key, or a ChatGPT sign-in    |
+| Who bills you   | The provider it runs on (OpenRouter, Anthropic, OpenAI), or your ChatGPT plan                                         |
+| Cost in Clawboo | Hermes reports tokens, not dollars; Clawboo records an estimate                                                       |
+| Live output     | Its text and tool calls as they happen, with the `acp` extra; otherwise its reply once the run ends                   |
+| Steering        | A comment reaches the running turn after its current tool call; without the `acp` extra, it stops and resumes the run |
 
 To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
@@ -34,7 +35,7 @@ To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 
 Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Hermes** row, click **Install**, then **Install** in the panel that opens.
 
-With pipx, Clawboo runs `pipx install --python <python> 'hermes-agent[anthropic]<1'`, passing the newest Python from 3.11 to 3.13 it finds. A newer Python on the same machine, such as 3.14, is passed over. If Clawboo finds none in that range, pipx uses its own default Python. Without pipx, Clawboo runs `<python> -m pip install --user 'hermes-agent[anthropic]<1'` with that same Python, and retries with `--break-system-packages` on a system that blocks user installs. The `[anthropic]` extra is what lets Hermes run on an Anthropic key.
+With pipx, Clawboo runs `pipx install --python <python> 'hermes-agent[anthropic,acp]<1'`, passing the newest Python from 3.11 to 3.13 it finds. A newer Python on the same machine, such as 3.14, is passed over. If Clawboo finds none in that range, pipx uses its own default Python. Without pipx, Clawboo runs `<python> -m pip install --user 'hermes-agent[anthropic,acp]<1'` with that same Python, and retries with `--break-system-packages` on a system that blocks user installs. The `[anthropic]` extra is what lets Hermes run on an Anthropic key. The `[acp]` extra is Hermes's Agent Client Protocol mode, which lets you watch a run as it works and steer it without stopping it.
 
 You should see the row change to **Needs key**, or to **Connected** if a key it can use is already connected.
 
@@ -178,7 +179,7 @@ Clawboo found neither pipx nor Python 3. Install Python 3.13 (for example `brew 
 pip found no `hermes-agent` release for the Python it used. That happens when that Python is older than 3.11 or newer than 3.13. Clawboo passes pipx the newest Python from 3.11 to 3.13 it finds; when it finds none, pipx falls back to its own default Python, which can be 3.14. Install Python 3.13, or install Hermes yourself with a supported Python, then click **Refresh** at the top of the Runtimes panel:
 
 ```bash
-pipx install --python python3.12 'hermes-agent[anthropic]<1'
+pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 ```
 
 </Accordion>
@@ -191,7 +192,13 @@ Hermes lands in Python's user folder for programs, which is often missing from t
 
 <Accordion title="the 'anthropic' package is required">
 
-This Hermes was installed without the `[anthropic]` extra, so it cannot run on an Anthropic key. Reinstall it with the extra: `pipx install --force 'hermes-agent[anthropic]<1'` for a pipx install, or `python3 -m pip install --user 'hermes-agent[anthropic]<1'` for a pip install.
+This Hermes was installed without the `[anthropic]` extra, so it cannot run on an Anthropic key. Reinstall it with the extra: `pipx install --force 'hermes-agent[anthropic,acp]<1'` for a pipx install, or `python3 -m pip install --user 'hermes-agent[anthropic,acp]<1'` for a pip install.
+
+</Accordion>
+
+<Accordion title="A Hermes run shows nothing until it finishes">
+
+This Hermes has no ACP mode: it was installed without the `[acp]` extra, before Clawboo asked for it. Clawboo then runs it with `hermes chat`, which prints only at the end, and a comment stops and resumes the run. Check with `hermes acp --check`, which says "ACP dependencies not installed" in that case, then reinstall with the extra: `pipx install --force 'hermes-agent[anthropic,acp]<1'`, or `python3 -m pip install --user 'hermes-agent[anthropic,acp]<1'` for a pip install. Clawboo tries ACP again within ten minutes, or at once after a restart.
 
 </Accordion>
 
@@ -211,7 +218,7 @@ HERMES_HOME="${CLAWBOO_HOME:-$HOME/.clawboo}/runtimes/hermes/<agent id>" hermes 
 
 Run it in a shell with the same `CLAWBOO_HOME` as the server, or none if the server uses the default.
 
-It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there and logs a warning on each run: write that mapping as indented lines in the agent's `config.yaml`.
+It should show `clawboo-tasks`, `clawboo-memory`, `clawboo-tools` and `clawboo-teamchat` as enabled after the agent's first run. If your config declares `mcp_servers` on one line with servers in it (`mcp_servers: {github: {...}}`), Clawboo cannot add its servers there and logs a warning on each run: write that mapping as indented lines in the agent's `config.yaml`. Over ACP, Clawboo then declares its servers for each session instead, so the agent still has its tools, but `hermes mcp list` does not show them.
 
 </Accordion>
 
@@ -231,10 +238,13 @@ Each agent uses its own copy, made once. Edit `~/.clawboo/runtimes/hermes/<agent
 
 <Accordion title="Under the hood">
 
-- Each run is `hermes chat -q <prompt> -Q --yolo --accept-hooks [-m <model>] [--resume <session id>] [--provider <id>] [--continue]`. Clawboo sets `HERMES_HOME` to the agent's folder and puts the connected OpenRouter, Anthropic and OpenAI keys in its environment.
-- While a run works, Clawboo marks it alive once a minute, for up to two hours; after that a run that still prints nothing meets the usual silence limits. `-Q` prints nothing until the run ends, so without that a long delegated Hermes task would look silent and be stopped after eight minutes.
-- `-Q` prints the reply on stdout and the session id on stderr. When the task runner picks a task back up on Hermes, Clawboo resumes the saved session with `--resume` (never in a newly created folder). To take a comment, it stops the run and starts it again with `--resume`, or with `--continue` when it does not know the session id yet.
-- A failed run's reason is what Hermes printed on stderr. When that holds a provider's error body, its `code` (`invalid_api_key`, `insufficient_quota`, ...) or else its `type` (`authentication_error`, ...) becomes the error's code, so a refused key waits in **Needs you** with **Fix sign-in**; see [Error classes](/reference/events-and-errors#error-classes).
+- Clawboo sets `HERMES_HOME` to the agent's folder and puts the connected OpenRouter, Anthropic and OpenAI keys in the environment of either kind of run.
+- **Over ACP** (the default when Hermes has it), each run is `hermes acp --accept-hooks` with `HERMES_YOLO_MODE=1`, spoken to over stdin and stdout: `initialize`, then `session/load` for a session to resume (a new session if it is gone) or `session/new`, then `session/set_mode` to `dont_ask` and `session/set_model` with `<provider>:<model>` when Clawboo picks the model, then one `session/prompt`. Hermes streams its text, reasoning and tool calls as session updates, and the prompt's answer reports the run's tokens. A comment goes in as `/steer <comment>`, which Hermes adds to the result of the tool call in progress. A comment that arrives while Hermes writes its final answer would be lost there, so Clawboo sends it as one more turn. Stop sends `session/cancel`. Any permission request is answered with allow-once, as `--yolo` does, and file or terminal requests are refused, since Clawboo offers neither.
+- Hermes's ACP mode answers a failed turn as a finished one, without its tokens. Clawboo reads a turn that reports no tokens as failed, with the error Hermes logged as the reason.
+- On either path, a failed run's reason is what Hermes printed on stderr. When that holds a provider's error body, its `code` (`invalid_api_key`, `insufficient_quota`, ...) or else its `type` (`authentication_error`, ...) becomes the error's code, so a refused key waits in **Needs you** with **Fix sign-in**; see [Error classes](/reference/events-and-errors#error-classes).
+- **Without ACP** (Hermes installed without the `acp` extra), each run is `hermes chat -q <prompt> -Q --yolo --accept-hooks [-m <model>] [--resume <session id>] [--provider <id>] [--continue]`. While it works, Clawboo marks it alive once a minute, for up to two hours, since `-Q` prints nothing until the run ends. When the task runner picks a task back up, Clawboo resumes the saved session with `--resume` (never in a newly created folder). To take a comment, it stops the run and starts it again with `--resume`, or with `--continue` when it does not know the session id yet.
+- Clawboo falls back to `hermes chat` on its own when `hermes acp` does not answer, and keeps using it for ten minutes. `CLAWBOO_HERMES_TRANSPORT=quiet` always uses `hermes chat`; `acp` always tries ACP first. A provider picked for the agent without a model also runs on `hermes chat`, since ACP pins a provider only together with a model.
+- Over ACP, Hermes offers its editor tool set (terminal, files, web, browser, skills, memory, todo, code and delegation) plus Clawboo's MCP servers; its messaging, scheduling and image tools are left out.
 - Hermes has its own task board; Clawboo does not sync it. Hermes works on Clawboo's board through the Tasks tools.
 - Run a board task on Hermes directly with `POST /api/runtimes/hermes/run`; see the [Runtimes API](/reference/rest-api/runtimes).
 
