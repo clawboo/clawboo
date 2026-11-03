@@ -99,7 +99,10 @@ describe('MemberModelSelect', () => {
 
   it('pre-selects the provider column matching the current model — a Claude routed via OpenRouter opens on OpenRouter, NOT the first (Codex) column', async () => {
     const CODEX_FIRST: ModelPickerGroup[] = [
-      { provider: 'OpenAI Codex', models: [{ id: 'openai-codex/gpt-5.5', label: 'GPT-5.5' }] },
+      {
+        provider: 'OpenAI Codex',
+        models: [{ id: 'openai-codex/plan-model-a', label: 'Plan model A' }],
+      },
       {
         provider: 'OpenRouter',
         models: [{ id: 'openrouter/anthropic/claude-sonnet-4.5', label: 'Claude Sonnet 4.5' }],
@@ -120,7 +123,7 @@ describe('MemberModelSelect', () => {
     // The RIGHT column shows OpenRouter's models (inferred from the id prefix), not
     // Codex's — even though Codex is the first group.
     expect(screen.getByRole('option', { name: /Claude Sonnet 4\.5/i })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /GPT-5\.5/i })).toBeNull()
+    expect(screen.queryByRole('option', { name: /Plan model A/i })).toBeNull()
   })
 
   it('an explicit pick shows the model label in the trigger (no "Default" prefix)', () => {

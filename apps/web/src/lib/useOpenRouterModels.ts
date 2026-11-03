@@ -22,8 +22,9 @@ import {
 import {
   HERMES_MODEL_GROUPS,
   HERMES_OPENROUTER_GROUP_NAME,
-  HERMES_CODEX_GROUP,
+  hermesCodexGroup,
 } from './hermesModelCatalog'
+import { mergeCodexGroup, useCodexModels } from './useCodexModels'
 import { useProviderModels } from './useProviderModels'
 
 const FALLBACK_OPENROUTER_MODELS: ModelOption[] =
@@ -114,18 +115,20 @@ export function useNativeModelGroups(): ModelGroup[] {
  *  to the small curated set while loading / on error. Every pick therefore pins
  *  `--provider openrouter`, so it always works with the connected OpenRouter key.
  *  `includeCodex` (a detected hermes ChatGPT login — `RuntimeStatus.codexAuth`)
- *  appends the subscription group; its picks pin `--provider openai-codex`. */
+ *  appends the subscription group (the plan default + the plan's live models); its
+ *  picks pin `--provider openai-codex`. */
 export function useHermesModelGroups(includeCodex = false): ModelGroup[] {
   const { liveModels } = useOpenRouterModels()
+  const { models: codexModels } = useCodexModels(includeCodex)
   return useMemo(
     () => [
       {
         provider: HERMES_OPENROUTER_GROUP_NAME,
         models: liveModels.length > 0 ? liveModels : HERMES_MODEL_GROUPS[0]!.models,
       },
-      ...(includeCodex ? [HERMES_CODEX_GROUP] : []),
+      ...(includeCodex ? [hermesCodexGroup(codexModels)] : []),
     ],
-    [liveModels, includeCodex],
+    [liveModels, includeCodex, codexModels],
   )
 }
 
@@ -154,11 +157,14 @@ export function mergeOpenRouterGroup(base: ModelGroup[], orGroup: ModelGroup | n
 }
 
 /** `base` groups with the OpenRouter group swapped for the live list in OpenClaw
- *  routing-id format. Keeps `base` untouched until the live list loads. */
+ *  routing-id format (kept untouched until that list loads), and the "OpenAI Codex"
+ *  group filled from the ChatGPT plan's live models (see mergeCodexGroup). */
 export function useOpenClawModelGroups(base: ModelGroup[]): ModelGroup[] {
   const { liveModels } = useOpenRouterModels()
+  const { models: codexModels } = useCodexModels()
   return useMemo(
-    () => mergeOpenRouterGroup(base, openClawOpenRouterGroup(liveModels)),
-    [base, liveModels],
+    () =>
+      mergeCodexGroup(mergeOpenRouterGroup(base, openClawOpenRouterGroup(liveModels)), codexModels),
+    [base, liveModels, codexModels],
   )
 }

@@ -142,15 +142,16 @@ export function parseHermesLine(line: string, state: HermesRunState): HermesNati
  *  config.yaml model is set): a provider such as OpenRouter returns 400
  *  "No models provided" when the request carries no model, and a coding-runtime
  *  team member is model-inert (ctx.model is null). The ids are cheap,
- *  always-available choices in each provider's own namespace. */
+ *  always-available choices in each provider's own namespace.
+ *
+ *  `openai-codex` (the ChatGPT subscription) is deliberately absent: given no
+ *  `-m`, Hermes asks the backend which models the account may use and runs the
+ *  first, so no id is passed that the backend could later refuse ("The '<model>'
+ *  model is not supported when using Codex with a ChatGPT account"). */
 const DERIVED_PROVIDER_MODEL: Record<string, string> = {
   openrouter: 'openai/gpt-4o-mini',
   anthropic: 'claude-haiku-4-5',
   'openai-api': 'gpt-4o-mini',
-  // The ChatGPT-subscription backend's own default. Deliberately NOT a "mini"
-  // tier: subscription usage is flat-cost, so the cheap-model pressure that
-  // picked the other rungs' defaults doesn't apply here.
-  'openai-codex': 'gpt-5.5',
 }
 
 /** Per-provider vault env-var — used to check a PICKED provider is actually connected

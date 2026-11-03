@@ -27,6 +27,7 @@ An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Reques
 | POST   | `/api/runtimes/:id/healthcheck`       | Check a provider key or local Ollama (native only, stores none)                    | general   | No      |
 | POST   | `/api/runtimes/:id/run`               | Run a board task on the runtime and wait for the result                            | general   | No      |
 | GET    | `/api/runtimes/openrouter/models`     | The live OpenRouter catalog                                                        | general   | No      |
+| GET    | `/api/runtimes/codex/models`          | The models your ChatGPT plan can run, read from your Codex CLI                     | general   | No      |
 | POST   | `/api/onboarding/native-leader-model` | Record the default native provider and model                                       | general   | No      |
 | GET    | `/api/onboarding/native-leader-model` | The recorded pick and what a new native agent would get                            | general   | No      |
 | GET    | `/api/onboarding/state`               | First-run signals in one call                                                      | general   | No      |
@@ -87,6 +88,8 @@ Lists every runtime with its capabilities, live health, and install and credenti
     hasCredential: boolean
     hasVaultCredential: boolean
     loggedIn: boolean // Codex only
+    updateRequired?: boolean // Codex only, once its model list has been read
+    cliVersion?: string | null // Codex only, once its model list has been read
     codexAuth: boolean // Hermes only
     ollamaConnected: boolean // Clawboo Native only
     installCommand: string | null
@@ -112,17 +115,19 @@ Lists every runtime with its capabilities, live health, and install and credenti
 
 The status fields:
 
-| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                       |
-| -------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `installed`          | all            | Always `true` for the built-in Clawboo Native. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes).                                                                                                                    |
-| `binPath`            | CLI runtimes   | The resolved CLI path, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                           |
-| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                        |
-| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                             |
-| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                  |
-| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                        |
-| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                     |
-| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value. |
-| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                   |
+| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                                     |
+| -------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installed`          | all            | Always `true` for the built-in Clawboo Native. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes).                                                                                                                                  |
+| `binPath`            | CLI runtimes   | The resolved CLI path, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                                         |
+| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                                      |
+| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                                           |
+| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                                |
+| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                                      |
+| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                                   |
+| `updateRequired`     | Codex          | The installed Codex CLI cannot read your ChatGPT plan's current model list, so its runs fail until it is updated. Present on a signed-in Codex once a model list read has run; the list request starts that read and does not wait for it. Reinstalling with `POST /api/runtimes/codex/install` updates it. |
+| `cliVersion`         | Codex          | The installed Codex CLI's version, from the same read, or `null`.                                                                                                                                                                                                                                           |
+| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value.               |
+| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                                 |
 
 `connectionState` is derived like this:
 
@@ -631,6 +636,36 @@ The live OpenRouter catalog behind the OpenRouter model pickers. It reads OpenRo
 
 ```bash
 curl http://localhost:18790/api/runtimes/openrouter/models
+```
+
+---
+
+## `GET /api/runtimes/codex/models`
+
+The models your ChatGPT plan can run, behind the ChatGPT subscription groups of the OpenClaw and Hermes model pickers and the default model the OpenClaw setup writes for a ChatGPT sign-in. Clawboo names none of these models itself: OpenAI decides which models each ChatGPT plan may use, and the list changes.
+
+The route asks your own Codex CLI. When `codex login status` reports a sign-in, it runs `codex app-server` in your `~/.codex` (or `CODEX_HOME`) and pages through `model/list`, so the CLI fetches the list with its own sign-in; Clawboo never reads a token. It also reads `models_cache.json` in the same folder, the list a Codex CLI last fetched there, and uses it when the CLI could not fetch a fresh one. An old Codex CLI that cannot read the current list answers with the models it shipped with; that answer is never used, and `updateRequired` is set instead. The result is cached for 10 minutes (1 minute when empty) and dropped after Codex is installed or signs in or out.
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+### Responses
+
+**`200 OK`**: this route does not fail. An empty `models` means the list is unknown; the pickers then offer only the plan's default, which each CLI resolves for itself:
+
+```ts
+{
+  models: Array<{ id: string; label: string }> // bare model ids, in the CLI's order
+  defaultModel: string | null // what a run uses when it names no model
+  updateRequired: boolean // the installed Codex CLI is too old for the plan's models
+  cliVersion: string | null
+}
+```
+
+### Example
+
+```bash
+curl http://localhost:18790/api/runtimes/codex/models
 ```
 
 ---

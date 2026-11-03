@@ -25,6 +25,11 @@ import {
   type PythonRange,
 } from '../lib/platform'
 import { invalidateCodexAuthCache, isCodexLoggedIn } from '../lib/runtimes/codexAuth'
+import {
+  getCodexModels,
+  invalidateCodexModelsCache,
+  peekCodexModels,
+} from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
@@ -166,12 +171,19 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
         const adapter = adapterFactoryFor(id)({})
         // Probe the codex login state async (off the event-loop hot path).
         const oauthLoggedIn = id === 'codex' ? await isCodexLoggedIn() : false
+        // A signed-in Codex CLI too old for the plan's current models fails every
+        // run. Read from the cached model probe, never awaited: the first request
+        // starts it and a later one reports it.
+        const codexModels = id === 'codex' && oauthLoggedIn ? peekCodexModels() : null
         return {
           id,
           participantKind: adapter.participantKind,
           capabilities: adapter.capabilities(),
           health: await adapter.health(),
           ...runtimeStatus(id, oauthLoggedIn),
+          ...(codexModels
+            ? { updateRequired: codexModels.updateRequired, cliVersion: codexModels.cliVersion }
+            : {}),
         }
       }),
     )
@@ -221,6 +233,8 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 /** On a successful install: flip the flag on (live; runtime flags need no
  *  restart), then report binary presence. */
 function finishInstall(res: Response, d: RuntimeDescriptor): void {
+  // A new Codex CLI can read models the old one could not.
+  if (d.id === 'codex') invalidateCodexModelsCache()
   // No cache to bust — resolveRuntimeBin probes PATH + user-install dirs live
   // (it's what finds Hermes in the Python user-site bin off PATH).
   if (d.healthBin && resolveRuntimeBin(d.healthBin)) {
@@ -825,6 +839,7 @@ export async function runtimesLogoutPOST(req: Request, res: Response): Promise<v
     /* re-probe is the truth */
   }
   invalidateCodexAuthCache()
+  invalidateCodexModelsCache()
   const loggedIn = await isCodexLoggedIn()
   res.json({ ok: !loggedIn, connectionState: runtimeStatus(id, loggedIn)['connectionState'] })
 }
@@ -922,4 +937,14 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
 export async function runtimesOpenRouterModelsGET(_req: Request, res: Response): Promise<void> {
   const models = (await fetchOpenRouterModels()) ?? []
   res.json({ models })
+}
+
+// ─── GET /api/runtimes/codex/models ──────────────────────────────────────────
+// The models the user's ChatGPT subscription can run, read from their own Codex
+// CLI (`codex app-server` → `model/list`, else the CLI's on-disk cache). Cached
+// in-process; never throws. Empty `models` means unknown: the pickers then offer
+// only the plan default, which each CLI resolves for itself.
+export async function runtimesCodexModelsGET(_req: Request, res: Response): Promise<void> {
+  const { models, defaultModel, updateRequired, cliVersion } = await getCodexModels()
+  res.json({ models, defaultModel, updateRequired, cliVersion })
 }

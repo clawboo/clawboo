@@ -43,6 +43,11 @@ export interface RuntimeStatus {
    *  manager, or configured with OLLAMA_BASE_URL). It readies the runtime without
    *  a key, so `hasCredential` can be false while `connectionState` is 'ready'. */
   ollamaConnected?: boolean
+  /** Codex-only: the installed CLI cannot read the ChatGPT plan's current models,
+   *  so its runs fail until it is updated (reinstalling updates it). */
+  updateRequired?: boolean
+  /** Codex-only: the installed CLI's version, when known. */
+  cliVersion?: string | null
   installCommand?: string | null
   builtIn?: boolean
   docsUrl?: string
@@ -212,6 +217,40 @@ export async function signOutRuntime(id: RuntimeId): Promise<{ ok: boolean; erro
     return ok ? { ok } : { ok, error: body.error ?? `HTTP ${res.status}` }
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export interface CodexModelOption {
+  /** The bare backend id (`gpt-5.6-luna`). */
+  id: string
+  label: string
+}
+
+export interface CodexModels {
+  /** The ChatGPT plan's models, most capable first; empty when unknown. */
+  models: CodexModelOption[]
+  /** The model a run uses when none is pinned, or null when unknown. */
+  defaultModel: string | null
+  /** The installed Codex CLI is too old for the plan's current models. */
+  updateRequired: boolean
+}
+
+/** GET /api/runtimes/codex/models → the models the user's ChatGPT subscription can
+ *  run, read live from their Codex CLI. Empty on any failure (the pickers then
+ *  offer only the plan default), so this never throws. */
+export async function fetchCodexModels(): Promise<CodexModels> {
+  const empty: CodexModels = { models: [], defaultModel: null, updateRequired: false }
+  try {
+    const res = await apiFetch('/api/runtimes/codex/models')
+    if (!res.ok) return empty
+    const body = (await res.json()) as Partial<CodexModels>
+    return {
+      models: Array.isArray(body.models) ? body.models : [],
+      defaultModel: typeof body.defaultModel === 'string' ? body.defaultModel : null,
+      updateRequired: body.updateRequired === true,
+    }
+  } catch {
+    return empty
   }
 }
 

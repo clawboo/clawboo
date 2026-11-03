@@ -152,6 +152,7 @@ import {
 import {
   runtimesListGET,
   runtimesOpenRouterModelsGET,
+  runtimesCodexModelsGET,
   runtimesInstallPOST,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
@@ -501,6 +502,7 @@ router.delete('/api/mcp/teamchat', mcpTeamchatSession)
 // Non-OpenClaw runtimes. POST drives a board task on the chosen runtime.
 router.get('/api/runtimes', runtimesListGET)
 router.get('/api/runtimes/openrouter/models', runtimesOpenRouterModelsGET)
+router.get('/api/runtimes/codex/models', runtimesCodexModelsGET)
 
 // Provider keys (Settings → Providers hub) — writes both the encrypted vault + OpenClaw .env.
 router.get('/api/providers', providersListGET)

@@ -49,7 +49,10 @@ export class CodexAdapter implements RuntimeAdapter {
       // The driver hosts the run in `codex app-server`, whose `turn/steer` adds
       // input to the in-progress turn without stopping it.
       steering: 'live',
-      models: ['gpt-5-codex', 'gpt-5', 'o4-mini'],
+      // None listed: which models a login may use is the backend's call, per
+      // account, and it moves. A run pins no model, so the CLI runs the account's
+      // default; the server reads the live list from `codex app-server`.
+      models: [],
       // Native-preservation seam: a wrapped one-shot with a PERSISTENT per-identity
       // CODEX_HOME — the change that gives a Codex LEADER conversational continuity
       // (`codex exec resume <thread-id>` needs the session files under

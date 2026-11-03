@@ -71,7 +71,7 @@ If the in-app sign-in fails, the panel shows the reason and the command to run y
 | Persona           | The agent's `SOUL.md` (which the Personality sliders write into) is added to every prompt as a persona block, up to 4,000 characters.                                                             |
 | `AGENTS.md`       | Draws the agent's links on the team graph. Codex never reads it.                                                                                                                                  |
 | Other agent files | Not used. See [Agents](/using/agents).                                                                                                                                                            |
-| Model             | Team setup has no model picker for Codex. It runs Codex's default model.                                                                                                                          |
+| Model             | Team setup has no model picker for Codex. A run names no model, so Codex runs your ChatGPT plan's own default. See [Models](#models).                                                             |
 | Codex home        | Each Codex agent has its own Codex folder (below). Your own `~/.codex` settings are not used.                                                                                                     |
 | Clawboo tools     | Every run gets Clawboo's Tasks, Memory, Tools and TeamChat servers (MCP).                                                                                                                         |
 | Leading a team    | A Codex leader hands work to teammates with the `team_delegate` tool.                                                                                                                             |
@@ -91,6 +91,12 @@ Each Codex agent gets its own Codex home at `~/.clawboo/runtimes/codex/<agent id
 ### Leading a team on Codex
 
 When onboarding deploys your first team on Codex (the **Sign in with ChatGPT** path), it gives the team a lead: the member with a leader role, or else its first agent. It also promotes that agent to Boo Zero, the leader that coordinates every team. It skips that promotion when you already chose a Boo Zero or have a Clawboo Native one; an OpenClaw Gateway's default agent is replaced. See [Boo Zero](/using/boo-zero).
+
+## Models
+
+OpenAI decides which models each ChatGPT plan may use, and the list changes, so Clawboo names no Codex model of its own. A Codex run passes no model, and Codex runs your plan's default. Where Clawboo shows your plan's models (the ChatGPT groups in the OpenClaw and Hermes model pickers, and the default model the OpenClaw setup writes), it asks your Codex CLI for them: it runs `codex app-server` in your `~/.codex` and reads `model/list`, falling back to the list Codex last saved there.
+
+An old Codex CLI cannot read your plan's current models and falls back to the ones it shipped with, which OpenAI refuses. When Clawboo spots that, the **Codex** row in **Settings** > **Runtimes** reads **Update needed**, and its **Update** button opens **Update Codex**, which reinstalls Codex with `npm install -g @openai/codex@0`.
 
 ## Permissions and safety
 
@@ -118,7 +124,7 @@ In **Settings** > **Runtimes**, click **Manage** on the **Codex** row, then **Si
 
 ## Limits
 
-- Team setup has no model picker for Codex members.
+- Team setup has no model picker for Codex members; runs use your plan's default model.
 - Your own `~/.codex` settings do not apply to Codex agents.
 - A Codex too old to run `codex app-server` falls back to `codex exec`, which cannot take comments mid-run.
 - Its cost in Clawboo is always an estimate.
@@ -157,6 +163,12 @@ The agent's Codex folder holds no usable sign-in, and Clawboo found none to copy
 
 </Accordion>
 
+<Accordion title="Every run fails with: The '...' model is not supported when using Codex with a ChatGPT account">
+
+OpenAI refused the model the run used. If the run named no model, your Codex CLI is too old for your plan: the error then goes on to say so and gives the update command. Open **Settings** > **Runtimes**, click **Update** on the **Codex** row, then **Update Codex**, or run `npm install -g @openai/codex@0` yourself, then try again. If the run named a model, pick one your plan offers instead, or clear it to use your plan's default.
+
+</Accordion>
+
 <Accordion title="Comments reach a Codex agent only at its next run">
 
 The run fell back to `codex exec`, which cannot take input mid-run. That happens when the installed Codex has no `codex app-server`, or the app-server does not answer within 20 seconds. Update Codex with `npm install -g @openai/codex@0`, then try again.
@@ -175,6 +187,8 @@ The run fell back to `codex exec`, which cannot take input mid-run. That happens
 
 - Each run starts `codex app-server` with `CODEX_HOME` set to the agent's Codex folder, sends `initialize` (20-second limit), then `thread/start` or `thread/resume` with `approvalPolicy: 'never'` and `sandbox: 'danger-full-access'`, then one `turn/start`. Any request the app-server sends back is answered with an error.
 - If the app-server cannot start or the handshake fails, the run uses `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check`, or `codex exec resume <id>` to continue a thread.
+- A failed run reports the reason the app-server or `codex exec` gave, unwrapped from OpenAI's JSON error, rather than the CLI's log.
+- Your plan's model list comes from `GET /api/runtimes/codex/models` (see the [Runtimes API](/reference/rest-api/runtimes)), cached for 10 minutes.
 - A comment on a running task goes in with `turn/steer`. A comment that arrives after the turn ended waits in the agent's mailbox for its next run.
 - Run a board task on Codex directly with `POST /api/runtimes/codex/run`; see the [Runtimes API](/reference/rest-api/runtimes). A run without an agent id uses the folder `~/.clawboo/runtimes/codex/codex`, and its `costUsd` is the token estimate.
 

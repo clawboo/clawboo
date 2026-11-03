@@ -61,6 +61,13 @@ process.stdin.on('data', (d) => {
     else if (m.method === 'thread/resume') {
       if (scenario === 'resume-fails') send({ id: m.id, error: { code: -32600, message: 'no rollout found for thread id ' + m.params.threadId } })
       else { threadId = m.params.threadId; send({ id: m.id, result: { thread: { id: threadId }, model: 'gpt-fake' } }) }
+    } else if (m.method === 'turn/start' && scenario === 'refused') {
+      // The backend refuses the model for this ChatGPT account; the body arrives as
+      // a JSON STRING, as an old CLI forwarded it.
+      const body = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message: "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account." } })
+      send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
+      notify('error', { threadId, turnId: 'turn-1', willRetry: false, error: { message: body } })
+      notify('turn/completed', { threadId, turn: { id: 'turn-1', status: 'failed', error: { message: body }, items: [] } })
     } else if (m.method === 'turn/start') {
       send({ id: m.id, result: { turn: { id: 'turn-1', status: 'inProgress', items: [] } } })
       notify('turn/started', { threadId, turn: { id: 'turn-1', status: 'inProgress', items: [] } })
@@ -232,6 +239,33 @@ describe('createCodexAppServerDriver', () => {
       ok: false,
       errorMessage: expect.stringContaining('no rollout found'),
     })
+  })
+
+  it("a refused model on an unpinned run reports the backend's reason and says to update the CLI", async () => {
+    const { driver, seen } = driverFor('refused')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = seen.find((e) => e.type === 'result') as { ok: boolean; errorMessage: string }
+    expect(result.ok).toBe(false)
+    // The readable message, not the JSON body it arrived in.
+    expect(result.errorMessage).toMatch(/^The 'gpt-5\.4' model is not supported/)
+    expect(result.errorMessage).not.toContain('invalid_request_error')
+    expect(result.errorMessage).toContain('too old')
+    expect(result.errorMessage).toContain('npm install -g @openai/codex@0')
+    // No model was named to the app-server: the CLI runs the account's own default.
+    const start = (await received()).find((m) => m['method'] === 'thread/start')
+    expect(start?.['params']).not.toHaveProperty('model')
+  })
+
+  it('a refused PINNED model points at the model, not the CLI', async () => {
+    const { driver, seen } = driverFor('refused', { model: 'gpt-x' })
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = seen.find((e) => e.type === 'result') as { errorMessage: string }
+    expect(result.errorMessage).toContain("plan's default")
+    expect(result.errorMessage).not.toContain('npm install')
+    const start = (await received()).find((m) => m['method'] === 'thread/start')
+    expect(start?.['params']).toMatchObject({ model: 'gpt-x' })
   })
 
   it('refuses a steer once the run has finished', async () => {

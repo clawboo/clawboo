@@ -22,6 +22,12 @@ vi.mock('../../lib/runtimes/codexAuth', () => ({
   userCodexHome: () => '/nonexistent/.codex',
   userCodexAuthPath: () => '/nonexistent/.codex/auth.json',
 }))
+// The subscription's live model list is read from the user's Codex CLI: machine
+// state, so the default it yields is set per test.
+const codexModelsState = vi.hoisted(() => ({ ref: null as string | null }))
+vi.mock('../../lib/runtimes/codexModels', () => ({
+  codexSubscriptionModelRef: () => Promise.resolve(codexModelsState.ref),
+}))
 // The live `openclaw models list` shellout is machine state too — force the
 // static-catalog path so the group assertions are deterministic.
 vi.mock('../../lib/modelCache', () => ({
@@ -84,6 +90,7 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     process.env['HOME'] = home
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     codexAuthState.loggedIn = false
+    codexModelsState.ref = null
   })
   afterEach(() => {
     for (const [k, v] of Object.entries(saved)) {
@@ -134,7 +141,8 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
   })
 
   // ── configure: the keyless carve-out ────────────────────────────────────────
-  it('configure accepts keyless openai-codex: model default set, NO key line in .env', async () => {
+  it("configure accepts keyless openai-codex: the plan's live default, NO key line in .env", async () => {
+    codexModelsState.ref = 'openai-codex/gpt-6-sol'
     const r = mockRes()
     await configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
     expect(r.statusCode()).toBe(200)
@@ -143,7 +151,7 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     const config = JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as {
       agents: { defaults: { model: { primary: string } } }
     }
-    expect(config.agents.defaults.model.primary).toBe('openai-codex/gpt-5.5')
+    expect(config.agents.defaults.model.primary).toBe('openai-codex/gpt-6-sol')
 
     // .env carries ONLY the gateway token — no CUSTOM_API_KEY, no provider key.
     const env = readFileSync(path.join(stateDir, '.env'), 'utf8')
@@ -152,6 +160,18 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     expect(env).not.toContain('OPENAI')
     // Ollama's local marker belongs to the Ollama provider alone.
     expect(env).not.toContain('OLLAMA_API_KEY')
+  })
+
+  it("configure writes NO default model for openai-codex when the plan's list is unknown", async () => {
+    codexModelsState.ref = null
+    const r = mockRes()
+    await configureOpenclawPOST(req({ provider: 'openai-codex' }), r.res)
+    expect(r.statusCode()).toBe(200)
+    const config = JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as {
+      agents: { defaults: Record<string, unknown> }
+    }
+    // OpenClaw then applies its own default rather than an id the plan may refuse.
+    expect(config.agents.defaults).toEqual({})
   })
 
   it('configure still 400s a key-less API-KEY provider (the carve-out is exact)', async () => {
@@ -174,6 +194,7 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
   })
 
   it('rung 2: an existing openai-codex oauth profile configures keylessly', async () => {
+    codexModelsState.ref = 'openai-codex/gpt-6-sol'
     writeProfiles(stateDir, 'main', OAUTH_PROFILE)
     const r = mockRes()
     await autoConfigureOpenclawPOST(req(), r.res)
@@ -184,13 +205,31 @@ describe('OpenClaw ChatGPT-subscription (openai-codex) path', () => {
     const config = JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as {
       agents: { defaults: { model: { primary: string } } }
     }
-    expect(config.agents.defaults.model.primary).toBe('openai-codex/gpt-5.5')
+    expect(config.agents.defaults.model.primary).toBe('openai-codex/gpt-6-sol')
     // No provider-key write happened (no key exists) — .env holds only the token.
     const env = readFileSync(path.join(stateDir, '.env'), 'utf8')
     expect(env).toMatch(/GATEWAY_AUTH_TOKEN=/)
     expect(env).not.toContain('API_KEY=')
     // No token VALUE leaked into the response.
     expect(JSON.stringify(body)).not.toContain('at-secret')
+  })
+
+  it("rung 2 with the plan's list unknown writes no primary, and never replaces one already set", async () => {
+    writeProfiles(stateDir, 'main', OAUTH_PROFILE)
+    await autoConfigureOpenclawPOST(req(), mockRes().res)
+    const read = () =>
+      JSON.parse(readFileSync(path.join(stateDir, 'openclaw.json'), 'utf8')) as {
+        agents: { defaults: { model: Record<string, unknown> } }
+      }
+    expect(read().agents.defaults.model).toEqual({})
+
+    // A primary the user (or OpenClaw's own login) already chose is kept.
+    const config = read()
+    config.agents.defaults.model['primary'] = 'openai/gpt-5.6-luna'
+    writeFileSync(path.join(stateDir, 'openclaw.json'), JSON.stringify(config))
+    codexModelsState.ref = 'openai-codex/gpt-6-sol'
+    await autoConfigureOpenclawPOST(req(), mockRes().res)
+    expect(read().agents.defaults.model['primary']).toBe('openai/gpt-5.6-luna')
   })
 
   it('rung 3: codex-CLI login only → needsCodexAuth + the NON-destructive login command', async () => {

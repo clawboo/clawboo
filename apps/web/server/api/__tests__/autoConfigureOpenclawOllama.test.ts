@@ -20,6 +20,10 @@ vi.mock('../../lib/runtimes/codexAuth', () => ({
   userCodexHome: () => '/nonexistent/.codex',
   userCodexAuthPath: () => '/nonexistent/.codex/auth.json',
 }))
+// The subscription's default model is read live from the user's Codex CLI.
+vi.mock('../../lib/runtimes/codexModels', () => ({
+  codexSubscriptionModelRef: () => Promise.resolve('openai-codex/gpt-6-sol'),
+}))
 
 import { __resetOllamaModelsCacheForTests } from '../../lib/runtimes/native/ollamaModels'
 import {
@@ -164,7 +168,7 @@ describe('POST /api/system/auto-configure-openclaw: the Ollama rung', () => {
     const body = await autoConfigure()
     expect(body['provider']).toBe('openai-codex')
     expect(readEnv()).not.toContain('OLLAMA_API_KEY')
-    expect(primaryOf(readConfig())).toBe('openai-codex/gpt-5.5')
+    expect(primaryOf(readConfig())).toBe('openai-codex/gpt-6-sol')
   })
 
   it('a codex-CLI login comes before Ollama: the ChatGPT sign-in is offered, nothing written', async () => {
