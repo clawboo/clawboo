@@ -184,3 +184,25 @@ describe('releasing the source cannot leave a floating rejection', () => {
     }
   })
 })
+
+describe('a source that fails', () => {
+  it('leaves no timer running after its pull rejects', async () => {
+    // The pull rejects inside the race, which throws past the loop's own clear.
+    vi.useFakeTimers()
+    try {
+      const src: AsyncIterable<number> = {
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.reject(new Error('the run broke')),
+        }),
+      }
+      const consume = async (): Promise<void> => {
+        for await (const v of withIdleTimeout(src, { idleMs: 30 * 60_000, onIdle: () => {} }))
+          void v
+      }
+      await expect(consume()).rejects.toThrow('the run broke')
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

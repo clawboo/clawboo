@@ -53,16 +53,19 @@ export async function* withIdleTimeout<T>(
   // a fresh pull instead would drop that value on the floor (exactly the
   // terminal the grace window exists to deliver).
   let pending: Promise<IteratorResult<T>> | null = null
+  // Outside the loop so `finally` can clear it: a pull that rejects throws out
+  // of the race below before the loop's own clear runs.
+  let timer: AwakeTimer | undefined
   try {
     for (;;) {
       const windowMs = idled ? (opts.graceMs ?? IDLE_ABORT_GRACE_MS) : opts.idleMs
-      let timer: AwakeTimer | undefined
       const expiry = new Promise<'idle'>((resolve) => {
         timer = setAwakeTimeout(() => resolve('idle'), windowMs)
       })
       pending ??= it.next()
       const winner = await Promise.race([pending.then((r) => ({ r })), expiry])
       timer?.clear()
+      timer = undefined
       if (winner === 'idle') {
         if (idled) return // silent through the grace too — give up
         idled = true
@@ -80,6 +83,7 @@ export async function* withIdleTimeout<T>(
       yield winner.r.value
     }
   } finally {
+    timer?.clear()
     // End-of-consumption (including a caller break/throw): release the source.
     // `.catch` matters: a rejecting `return` implementation is otherwise a
     // floating rejection, the same class of defect as the carried pull above.
