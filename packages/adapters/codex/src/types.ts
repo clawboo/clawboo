@@ -24,6 +24,9 @@ export type CodexNativeEvent =
       threadId?: string
       aborted?: boolean
       errorMessage?: string
+      /** The app-server's typed cause for a failed turn (`unauthorized`,
+       *  `usage_limit_exceeded`, `context_overflow`, ...). */
+      errorCode?: string
     }
 
 /**

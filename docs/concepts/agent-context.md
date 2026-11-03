@@ -81,7 +81,7 @@ The message is the task's title. The task runner adds no team rules, teammate li
 
 ## When the context window fills
 
-- **On the task runner**, a run that runs out of room before it finishes starts again in a fresh session, with a short handoff note on its last progress. Running out of room means hitting its turn limit, or using more than 85% of the runtime's context window. This happens at most 3 times per task. Clawboo Native and Claude Code report a 200,000-token window; Codex and Hermes report none, so the 85% rule does not apply to them.
+- **On the task runner**, a run that runs out of room before it finishes starts again in a fresh session, with a short handoff note on its last progress. Running out of room means hitting its turn limit, a Claude Code run whose conversation outgrew the model's context window, or using more than 85% of the runtime's context window. This happens at most 3 times per task. Clawboo Native and Claude Code report a 200,000-token window; Codex and Hermes report none, so the 85% rule does not apply to them.
 - **A Clawboo Native run** makes at most 16 model calls by default, counting each round of tool use as one.
 - **In team chat** nothing restarts. A Clawboo Native leader's carried conversation is trimmed to its most recent turns, about 240,000 characters. Other runtimes manage their own windows.
 

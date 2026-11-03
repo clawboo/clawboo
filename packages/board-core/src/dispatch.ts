@@ -23,6 +23,30 @@
 export interface LedgerRun {
   status: string
   error?: string | null
+  /** The class the failure was filed under, from the runtime error taxonomy
+   *  (`classifyError` in @clawboo/obs). Null for a run that did not fail, and
+   *  for one closed before the ledger recorded it. */
+  errorClass?: string | null
+  /** Who ran it: the runtime, or an owner such as the team engine. */
+  executorType?: string | null
+  /** The runtime that ran it, when `executorType` names an owner instead. */
+  runtime?: string | null
+}
+
+/** What a person has to fix before the same work can run: the runtime's
+ *  sign-in, or the provider account's billing. */
+export type AccountFailure = 'sign_in' | 'billing'
+
+/**
+ * The account problem a run failed on, or null. These are the taxonomy's `Auth`
+ * and `Billing` classes, spelled out because this module imports nothing (a test
+ * in @clawboo/db holds the two spellings together).
+ */
+export function accountFailureOf(run: LedgerRun | undefined): AccountFailure | null {
+  if (!run || (run.status !== 'failed' && run.status !== 'timed_out')) return null
+  if (run.errorClass === 'Auth') return 'sign_in'
+  if (run.errorClass === 'Billing') return 'billing'
+  return null
 }
 
 /**
@@ -54,14 +78,17 @@ export function trailingFailedRuns(execs: readonly LedgerRun[]): number {
  *   • last run `running` → someone owns it → leave it;
  *   • last run `cancelled` → the user STOPPED it → never auto-refire (a person
  *     re-queues it deliberately);
+ *   • last run refused by the provider for the account (sign-in or billing) →
+ *     park it: every re-fire fails the same way until a person fixes it;
  *   • MAX_AUTO_FIRES consecutive unsuccessful runs at the tail → park it;
  *   • otherwise (timed out / failed / orphaned) → infrastructure death, not
  *     intent → re-fire.
  */
 export function ledgerAllowsAutoFire(execs: readonly LedgerRun[]): boolean {
   if (execs.length === 0) return true
-  const last = execs[execs.length - 1]!.status
-  if (last === 'running' || last === 'cancelled') return false
+  const lastRun = execs[execs.length - 1]!
+  if (lastRun.status === 'running' || lastRun.status === 'cancelled') return false
+  if (accountFailureOf(lastRun)) return false
   return trailingFailedRuns(execs) < MAX_AUTO_FIRES
 }
 

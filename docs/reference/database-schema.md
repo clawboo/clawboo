@@ -323,31 +323,32 @@ Indexes: `idx_workspaces_task` (`task_id`).
 
 One row per run of a task, on any runtime: its status, git checkpoints, and token and cost totals.
 
-| Column               | Type                                 | Notes                                                                                                           |
-| -------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
-| `id`                 | `TEXT`, PK                           |                                                                                                                 |
-| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                 |
-| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                               |
-| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran) |
-| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                 |
-| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                          |
-| `claimed_at`         | `INTEGER`                            |                                                                                                                 |
-| `started_at`         | `INTEGER`                            |                                                                                                                 |
-| `completed_at`       | `INTEGER`                            |                                                                                                                 |
-| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                       |
-| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                        |
-| `input_tokens`       | `INTEGER`                            |                                                                                                                 |
-| `output_tokens`      | `INTEGER`                            |                                                                                                                 |
-| `cache_read`         | `INTEGER`                            |                                                                                                                 |
-| `cache_write`        | `INTEGER`                            |                                                                                                                 |
-| `cost_usd`           | `REAL`                               |                                                                                                                 |
-| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost    |
-| `summary`            | `TEXT`                               | The run's result summary                                                                                        |
-| `run_reason`         | `TEXT`                               | Why the run started                                                                                             |
-| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                |
-| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                      |
-| `tenant_id`          | `TEXT`                               | Unused                                                                                                          |
-| `created_at`         | `INTEGER`, not null                  |                                                                                                                 |
+| Column               | Type                                 | Notes                                                                                                                                                                                              |
+| -------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                    |
+| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                    |
+| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                  |
+| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                    |
+| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                    |
+| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                             |
+| `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                    |
+| `started_at`         | `INTEGER`                            |                                                                                                                                                                                                    |
+| `completed_at`       | `INTEGER`                            |                                                                                                                                                                                                    |
+| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                                                                                                          |
+| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                                                                                                           |
+| `input_tokens`       | `INTEGER`                            |                                                                                                                                                                                                    |
+| `output_tokens`      | `INTEGER`                            |                                                                                                                                                                                                    |
+| `cache_read`         | `INTEGER`                            |                                                                                                                                                                                                    |
+| `cache_write`        | `INTEGER`                            |                                                                                                                                                                                                    |
+| `cost_usd`           | `REAL`                               |                                                                                                                                                                                                    |
+| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost                                                                                       |
+| `summary`            | `TEXT`                               | The run's result summary                                                                                                                                                                           |
+| `run_reason`         | `TEXT`                               | Why the run started                                                                                                                                                                                |
+| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                   |
+| `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one |
+| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                         |
+| `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                             |
+| `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                    |
 
 Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
@@ -357,21 +358,22 @@ Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
 One row per routine. The row is the source of truth; the in-memory timer re-arms from `next_run_at` when the server starts. See [Routines](/using/routines).
 
-| Column          | Type                                  | Notes                                                                                           |
-| --------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `id`            | `TEXT`, PK                            |                                                                                                 |
-| `agent_id`      | `TEXT`, not null                      | Plain reference to `agents.id`; empty for a team routine                                        |
-| `team_id`       | `TEXT`                                | Plain reference to `teams.id`                                                                   |
-| `cron_spec`     | `TEXT`, not null                      | A cron expression, or `once@<ISO time>` for a one-time routine                                  |
-| `task_template` | `TEXT`, not null                      | JSON description of the work each fire creates                                                  |
-| `status`        | `TEXT`, not null, default `'idle'`    | `idle`, `queued`, `claimed`, `running`, `paused` or `error`                                     |
-| `last_run_at`   | `INTEGER`                             |                                                                                                 |
-| `next_run_at`   | `INTEGER`                             | Null when nothing will fire: a spent one-time routine, a paused one, or one stopped by an error |
-| `scheduled_by`  | `TEXT`, not null, default `'clawboo'` | The firing owner; the Routines engine writes `clawboo`                                          |
-| `last_error`    | `TEXT`                                | The last fire's error message                                                                   |
-| `tenant_id`     | `TEXT`                                | Unused                                                                                          |
-| `created_at`    | `INTEGER`, not null                   |                                                                                                 |
-| `updated_at`    | `INTEGER`, not null                   |                                                                                                 |
+| Column           | Type                                  | Notes                                                                                                            |
+| ---------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `id`             | `TEXT`, PK                            |                                                                                                                  |
+| `agent_id`       | `TEXT`, not null                      | Plain reference to `agents.id`; empty for a team routine                                                         |
+| `team_id`        | `TEXT`                                | Plain reference to `teams.id`                                                                                    |
+| `cron_spec`      | `TEXT`, not null                      | A cron expression, or `once@<ISO time>` for a one-time routine                                                   |
+| `task_template`  | `TEXT`, not null                      | JSON description of the work each fire creates                                                                   |
+| `status`         | `TEXT`, not null, default `'idle'`    | `idle`, `queued`, `claimed`, `running`, `paused` or `error`                                                      |
+| `last_run_at`    | `INTEGER`                             |                                                                                                                  |
+| `next_run_at`    | `INTEGER`                             | Null when nothing will fire: a spent one-time routine, a paused one, or one stopped by an error                  |
+| `scheduled_by`   | `TEXT`, not null, default `'clawboo'` | The firing owner; the Routines engine writes `clawboo`                                                           |
+| `last_error`     | `TEXT`                                | The last fire's error message. Cleared by a fire that succeeds                                                   |
+| `failure_streak` | `INTEGER`, not null, default `0`      | Failed fires in a row. The routine stops when a failure that may pass makes it 3; reset by a success or a resume |
+| `tenant_id`      | `TEXT`                                | Unused                                                                                                           |
+| `created_at`     | `INTEGER`, not null                   |                                                                                                                  |
+| `updated_at`     | `INTEGER`, not null                   |                                                                                                                  |
 
 Indexes: `idx_scheduled_runs_next` (`next_run_at`), `idx_scheduled_runs_status_next` (`status`, `next_run_at`), `idx_scheduled_runs_agent` (`agent_id`).
 

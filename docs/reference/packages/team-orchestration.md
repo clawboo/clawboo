@@ -73,6 +73,13 @@ would lose to its own claim, and one that completed the task would complete it t
   runner use, and fan-out per turn by `caps.maxFanout`. A lost claim is never retried. After
   `MAX_DELEGATION_FAILURES` failures in a row of the same task by the same agent, the engine refuses to delegate it
   to that agent again and tells the delegator to handle it another way.
+- **Account failures are not re-delegated.** A run that ends on a fatal error is filed under its class
+  (`classifyError` from `@clawboo/obs`, on the error's code and message), and the class goes on the run's ledger
+  row. For `Auth` or `Billing` the task's comment says the sign-in or the account was refused, the failure report
+  tells the delegator not to re-delegate or retry it and to tell the user. Nothing blocks a re-delegation in code,
+  so once a person has fixed the sign-in they can ask for it again in chat; the loop breaker above still caps
+  repeats. Only the runtime's own error is classified, never a failed run's summary, which can be the agent's prose
+  about anything.
 - **Silence fails a delegation.** `sweepStaleSessions` fails a delegated run that sends no event for
   `DELEGATION_IDLE_TIMEOUT_MS`, with longer allowances while a tool call is open or a run waits to start, and tells
   the delegator. The values are on [Limits and defaults](/reference/limits-and-defaults).

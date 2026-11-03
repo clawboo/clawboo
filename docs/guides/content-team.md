@@ -137,7 +137,7 @@ For a task that failed or was stopped, sending a comment starts its agent on it 
 
 You should see the routine under **Team routines**. Every Monday at 9:00, in the time zone of the computer running Clawboo, it posts your instructions in **General** as "Routine · Weekly posts", and Boo Zero takes it from there. To try it now, open the routine and click **Run now**.
 
-Clawboo must be running for a routine to fire. A run that was due while Clawboo was not running fires once when it starts again. A run that fails stops the routine until you resume it. See [Routines](/using/routines).
+Clawboo must be running for a routine to fire. A run that was due while Clawboo was not running fires once when it starts again. A run that fails for a reason that may pass, such as a rate limit, leaves the routine on its schedule; any other failure, or three in a row, stops it until you resume it. See [Routines](/using/routines).
 
 </Step>
 

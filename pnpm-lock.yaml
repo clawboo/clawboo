@@ -1012,6 +1012,9 @@ importers:
       '@clawboo/governance':
         specifier: workspace:*
         version: link:../governance
+      '@clawboo/obs':
+        specifier: workspace:*
+        version: link:../obs
     devDependencies:
       '@clawboo/tsconfig':
         specifier: workspace:*

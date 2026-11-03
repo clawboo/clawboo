@@ -252,6 +252,11 @@ export interface RoutineErrorData {
   scheduledRunId: string
   code?: string | null
   message: string
+  /** The class the failure was filed under, when the fire ran far enough to have one. */
+  errorClass?: string
+  /** The routine stopped on this failure. False: it keeps its schedule, since the
+   *  failure may pass by itself. */
+  stopped?: boolean
 }
 
 export interface TeamChatPostData {

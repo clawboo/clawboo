@@ -12,6 +12,8 @@ export const RUNTIME_ERROR_CLASSES = [
   'ProviderError',
   'RateLimited',
   'UserAborted',
+  'Auth',
+  'Billing',
   'UnexpectedEnv',
   'Unknown',
 ] as const
@@ -23,36 +25,40 @@ interface Rule {
   test: RegExp
 }
 
-// Order matters: the first matching rule wins. More specific/!-overloaded signals
-// (rate-limit, abort) are checked before the broader provider/env buckets.
+// Order matters: the first matching rule wins. The account classes go first: a
+// provider can send an empty balance as a 429 that names its quota (OpenAI's
+// `insufficient_quota`), and a revoked key as a 400. Billing goes before Auth
+// because a held account comes back as a 403. More specific signals (rate limit,
+// abort) are then checked before the broader provider/env buckets.
 const RULES: Rule[] = [
+  // The provider will not serve the account until someone pays or verifies it.
+  // Waiting does not fix it, so it is never transient. An empty OpenAI balance is
+  // read from its `insufficient_quota` code, never from the "exceeded your current
+  // quota" wording, which Gemini also sends for an ordinary per-minute limit.
+  {
+    cls: 'Billing',
+    test: /\b(billing[\s_-]?error|account[\s_-]?on[\s_-]?hold|verification[\s_-]?required|credit balance|insufficient[\s_-]?(?:quota|credits?|funds|balance)|payment[\s_-]?required|402)\b/i,
+  },
+  // The runtime has no working sign-in: a missing, revoked or expired key or
+  // login. Covers the typed causes the Claude Agent SDK reports
+  // (`authentication_failed`, ...), Codex's `unauthorized` and the provider
+  // error types (`authentication_error`, `invalid_api_key`, `permission_error`).
+  {
+    cls: 'Auth',
+    test: /\b(401|403|authentication[\s_-]?(?:failed|error)|permission[\s_-]error|oauth[\s_-]?org[\s_-]?not[\s_-]?allowed|cloud[\s_-]?credential[\s_-]?error|invalid[\s_-]?(?:x-)?api[\s_-]?key|incorrect api key|unauthori[sz]ed|not (?:logged|signed) in|(?:token|login|session|credentials?) (?:has |have )?(?:expired|been revoked)|could not be refreshed|(?:sign|log) in again|run \/login)\b/i,
+  },
   {
     cls: 'RateLimited',
-    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota)\b/i,
+    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota|usage[\s_-]?limit)\b/i,
   },
   {
     cls: 'UserAborted',
     test: /\b(abort|aborted|cancel(?:l?ed)?|sigint|sigterm|user[\s_-]?(?:aborted|cancel))\b/i,
   },
   { cls: 'Timeout', test: /\b(timeout|timed?[\s_-]?out|etimedout|deadline[\s_-]?exceeded)\b/i },
-  // Missing or rejected credentials: the environment the runtime runs in has no
-  // working login or key. Covers the typed causes the Claude Agent SDK reports
-  // (`authentication_failed`, ...), checked before InvalidArgs so the HTTP status
-  // in the message does not decide.
   {
     cls: 'UnexpectedEnv',
-    test: /\b(authentication[\s_-]?failed|oauth[\s_-]?org[\s_-]?not[\s_-]?allowed|cloud[\s_-]?credential[\s_-]?error|invalid[\s_-]?api[\s_-]?key|unauthori[sz]ed)\b/i,
-  },
-  // The provider refused the account (billing, a hold, a pending verification).
-  // Anthropic sends a low credit balance as a 400, so this too goes before
-  // InvalidArgs.
-  {
-    cls: 'ProviderError',
-    test: /\b(billing[\s_-]?error|account[\s_-]?on[\s_-]?hold|verification[\s_-]?required|credit balance)\b/i,
-  },
-  {
-    cls: 'UnexpectedEnv',
-    test: /\b(enoent|eacces|eperm|einval|espawn|command not found|no such file|permission denied|not installed|spawn\s|module not found|cannot find module)\b/i,
+    test: /\b(enoent|eacces|eperm|einval|espawn|command not found|no such file|permission denied|not installed|spawn\s|module not found|cannot find module|sandbox[\s_-]?error)\b/i,
   },
   // Context overflow is an oversized-input 400 — checked BEFORE InvalidArgs so a
   // "context length exceeded" 400 classifies here, not as a generic bad-request. Not a
@@ -63,11 +69,13 @@ const RULES: Rule[] = [
   },
   {
     cls: 'InvalidArgs',
-    test: /\b(400|422|invalid[\s_-]?(?:argument|param|input|request)|bad request|validation|unprocessable|missing required|schema|malformed|model[\s_-]?not[\s_-]?found)\b/i,
+    test: /\b(400|422|invalid[\s_-]?(?:argument|param|input|request)|bad request|validation|unprocessable|missing required|schema|malformed|model[\s_-]?not[\s_-]?found|(?:content|cyber|usage)[\s_-]?policy)\b/i,
   },
+  // The provider failed or could not be reached: a 5xx, an overload, or a
+  // connection that dropped or never opened.
   {
     cls: 'ProviderError',
-    test: /\b(50[0234]|provider[\s_-]?error|upstream|overloaded|service unavailable|bad gateway|internal server error|server[\s_-]?error|api[\s_-]?error|model[\s_-]?error)\b/i,
+    test: /\b(50[0234]|provider[\s_-]?error|upstream|overloaded|service unavailable|bad gateway|internal server error|server[\s_-]?error|api[\s_-]?error|model[\s_-]?error|econnreset|econnrefused|enotfound|eai_again|socket hang up|fetch failed|network[\s_-]?error|connection (?:reset|refused|closed|failed|error)|stream (?:disconnected|error)|too many failed attempts)\b/i,
   },
 ]
 
@@ -77,7 +85,10 @@ const RULES: Rule[] = [
  * then flags as an alertable harness defect.
  */
 export function classifyError(code?: string | null, message?: string | null): RuntimeErrorClass {
-  const hay = `${code ?? ''} ${message ?? ''}`.trim()
+  // A snake_case code is also read word by word, so `rate_limit_error` matches
+  // the rate-limit rule the way "rate limit error" would.
+  const words = code?.includes('_') ? code.replace(/_/g, ' ') : ''
+  const hay = `${code ?? ''} ${words} ${message ?? ''}`.trim()
   if (!hay) return 'Unknown'
   for (const r of RULES) {
     if (r.test.test(hay)) return r.cls
@@ -90,6 +101,27 @@ export function isHarnessBug(cls: RuntimeErrorClass): boolean {
   return cls === 'Unknown'
 }
 
+/** Classes that clear up by themselves: the same request can succeed later with
+ *  nothing changed (a rate limit, a timeout, a provider outage or a dropped
+ *  connection). */
+const TRANSIENT_CLASSES: ReadonlySet<RuntimeErrorClass> = new Set([
+  'RateLimited',
+  'Timeout',
+  'ProviderError',
+])
+
+/** True when trying the same work again later can succeed without anyone
+ *  changing anything. */
+export function isTransientError(cls: RuntimeErrorClass): boolean {
+  return TRANSIENT_CLASSES.has(cls)
+}
+
+/** True when the provider refused the account itself (its sign-in or its
+ *  billing): every retry fails the same way until a person fixes it. */
+export function isAccountError(cls: RuntimeErrorClass): cls is 'Auth' | 'Billing' {
+  return cls === 'Auth' || cls === 'Billing'
+}
+
 /**
  * Baseline EXPECTED classes per runtime — the classes whose mere occurrence is
  * not an alert (only an anomaly in their rate would be). `Unknown` is never in a
@@ -98,27 +130,46 @@ export function isHarnessBug(cls: RuntimeErrorClass): boolean {
 export const BASELINE_EXPECTED_CLASSES: Record<string, RuntimeErrorClass[]> = {
   openclaw: [
     'InvalidArgs',
+    'ContextOverflow',
     'Timeout',
     'ProviderError',
     'RateLimited',
     'UserAborted',
+    'Auth',
+    'Billing',
     'UnexpectedEnv',
   ],
   'claude-code': [
     'InvalidArgs',
+    'ContextOverflow',
     'Timeout',
     'ProviderError',
     'RateLimited',
     'UserAborted',
+    'Auth',
+    'Billing',
     'UnexpectedEnv',
   ],
-  codex: ['InvalidArgs', 'Timeout', 'ProviderError', 'RateLimited', 'UserAborted', 'UnexpectedEnv'],
-  hermes: [
+  codex: [
     'InvalidArgs',
+    'ContextOverflow',
     'Timeout',
     'ProviderError',
     'RateLimited',
     'UserAborted',
+    'Auth',
+    'Billing',
+    'UnexpectedEnv',
+  ],
+  hermes: [
+    'InvalidArgs',
+    'ContextOverflow',
+    'Timeout',
+    'ProviderError',
+    'RateLimited',
+    'UserAborted',
+    'Auth',
+    'Billing',
     'UnexpectedEnv',
   ],
 }
@@ -130,6 +181,8 @@ const GENERIC_BASELINE: RuntimeErrorClass[] = [
   'ProviderError',
   'RateLimited',
   'UserAborted',
+  'Auth',
+  'Billing',
   'UnexpectedEnv',
 ]
 

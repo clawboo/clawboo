@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 
@@ -776,7 +777,14 @@ describe('TaskDetailDrawer', () => {
 })
 
 describe('TaskDetailDrawer: a task that needs you', () => {
-  function failedHandlers(onRetry: (id: string) => void) {
+  function failedHandlers(
+    onRetry: (id: string) => void,
+    attention: Record<string, unknown> = {
+      reason: 'failed',
+      failedRuns: 1,
+      detail: 'provider out of credits',
+    },
+  ) {
     return [
       http.get('/api/board/t1', () =>
         HttpResponse.json({
@@ -788,7 +796,7 @@ describe('TaskDetailDrawer: a task that needs you', () => {
             teamId: 'team-1',
             assigneeAgentId: 'agent-7',
             sourceDelegationId: 'assign:n1:agent:agent-7:origin:human',
-            attention: { reason: 'failed', failedRuns: 1, detail: 'provider out of credits' },
+            attention,
           },
           comments: [
             { body: 'Run failed: provider out of credits', authorType: 'system' },
@@ -823,6 +831,39 @@ describe('TaskDetailDrawer: a task that needs you', () => {
     await userEvent.click(within(banner).getByRole('button', { name: /Retry/ }))
     await waitFor(() => expect(retried).toBe('t1'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('offers Fix sign-in for a refused sign-in, and asks before a Retry', async () => {
+    useSettingsModalStore.setState({ open: false, view: 'fleet', focusRuntime: null })
+    let retried = ''
+    server.use(
+      ...failedHandlers((id) => (retried = id), {
+        reason: 'failed',
+        failedRuns: 1,
+        detail: 'Invalid API key (HTTP 401)',
+        cause: 'sign_in',
+        runtime: 'claude-code',
+      }),
+    )
+    render(
+      <>
+        <TaskDetailDrawer taskId="t1" onClose={() => {}} />
+        <ConfirmDialog />
+      </>,
+    )
+    const banner = await screen.findByTestId('task-needs-you')
+    expect(within(banner).getByText('Sign-in failed')).toBeInTheDocument()
+    await userEvent.click(within(banner).getByRole('button', { name: 'Fix sign-in' }))
+    expect(useSettingsModalStore.getState()).toMatchObject({
+      open: true,
+      view: 'runtimes',
+      focusRuntime: 'claude-code',
+    })
+    await userEvent.click(within(banner).getByRole('button', { name: /Retry/ }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(/until the sign-in is fixed/)
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Retry anyway' }))
+    await waitFor(() => expect(retried).toBe('t1'))
   })
 
   it('shows the brief the person wrote and names the agent instead of its id', async () => {

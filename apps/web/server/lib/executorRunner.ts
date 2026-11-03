@@ -68,7 +68,7 @@ import {
   type BreakerConfig,
   type BreakerTrip,
 } from '@clawboo/governance'
-import { classifyError, isHarnessBug } from '@clawboo/obs'
+import { classifyError, isHarnessBug, type RuntimeErrorClass } from '@clawboo/obs'
 import { buildTurnEnvelope } from '@clawboo/team-orchestration'
 import {
   isolationForTask,
@@ -256,6 +256,8 @@ export type RunTaskResult =
       /** A person moved the task's card and that stopped the run (see
        *  `stopTaskRuns`). Their move is the outcome, not a failure. */
       stoppedByPerson?: boolean
+      /** The class a failed run (`doneReason: 'error'`) was filed under. */
+      errorClass?: RuntimeErrorClass
     }
 
 function defaultCompact(text: string): string {
@@ -942,6 +944,9 @@ async function runTaskInner(
   // Drive the normalized event stream to its terminal `done`.
   let lastText = ''
   let summary = ''
+  // True when `summary` is the agent's own last text because the terminal event
+  // carried none. A failure is never classified from it: that is prose.
+  let summaryIsAgentText = false
   // The run's cost, summed over every cost event in every rotation pass.
   let costUsd: number | null = null
   // True once any part of `costUsd` was estimated from tokens rather than reported.
@@ -964,6 +969,15 @@ async function runTaskInner(
   // The model the run's cost events named last, for Tokens Used.
   let runModel: string | null = null
   let doneReason: 'success' | 'max_turns' | 'aborted' | 'error' = 'error'
+  // The typed cause the last fatal error carried (`authentication_failed`, ...):
+  // what the run's failure is classified by, beside its message.
+  let fatalErrorCode: string | null = null
+  // The runtime's own statement of that error: what the class is read from, never
+  // the run's summary, which can be the agent's prose about anything (a route
+  // named /login, a 401 handler) and would misfile a transient failure.
+  let fatalErrorText: string | null = null
+  // The drain's idle guard ended the run: its class is Timeout whatever it says.
+  let silentKill = false
 
   // Budget kill-switch: on every cost event, atomically record spend against the
   // agent + mission(root) + team budgets. The moment a CAP-mode scope (or the
@@ -1083,9 +1097,12 @@ async function runTaskInner(
     // CURRENT run); cumulative spend/breaker state above the loop is untouched.
     lastText = ''
     summary = ''
+    summaryIsAgentText = false
     inputTokens = 0
     outputTokens = 0
     doneReason = 'error'
+    fatalErrorCode = null
+    fatalErrorText = null
     // Whether the runtime reported ANY spend for this pass. Codex and Hermes only
     // emit a cost event `if (ev.usage)`, so a CLI output-format drift silently
     // yields zero recorded spend — the budget ledger would then under-count real
@@ -1262,6 +1279,8 @@ async function runTaskInner(
         }
       } else if (ev.kind === 'error') {
         if (ev.fatal && ev.message) lastFatalError = ev.message
+        if (ev.fatal && ev.code) fatalErrorCode = ev.code
+        if (ev.fatal && ev.message) fatalErrorText = ev.message
         // A recognized policy denial (a broker Deny surfaced by the runtime) is
         // EXPECTED governance, not a harness bug — classify it as such and skip
         // the alert. Everything else goes through the taxonomy; an unknown class
@@ -1314,6 +1333,7 @@ async function runTaskInner(
         sawTerminal = true
         doneReason = ev.reason
         summary = ev.summary || lastText
+        summaryIsAgentText = !ev.summary && !!lastText
         // A cap the final cost report crossed. An abort here is the grace window's
         // (or the runtime giving up), so it is the stop; any other terminal means
         // the run finished, and its result is kept.
@@ -1418,6 +1438,7 @@ async function runTaskInner(
     // board comment.
     if (!stopForCancel && silentTimeout && !sawTerminal) {
       doneReason = 'error'
+      silentKill = true
       summary = `runtime silent: no events for ${Math.round(silentMs / 60_000)} minutes — the run was aborted by the drain idle guard`
       break
     }
@@ -1710,6 +1731,8 @@ async function runTaskInner(
   const success = doneReason === 'success'
   let status: string
   let needsVerifyFix = false
+  // The class a failed run was filed under, reported to the caller.
+  let failedClass: RuntimeErrorClass | null = null
 
   if (success) {
     addComment(db, taskId, reported, 'agent', assigneeAgentId)
@@ -1879,12 +1902,23 @@ async function runTaskInner(
       stopNote ?? `Run ${doneReason}: ${safeSummary || '(no output)'}`,
       'system',
     )
+    // A failed run is filed under its class, from the runtime's typed cause and
+    // its message. An unmappable failure is an UNKNOWN class → a harness bug →
+    // alert (AC5). The ledger keeps the class: an account refusal (sign-in or
+    // billing) is never auto-refired, and the board offers to fix it.
+    const errorClass: RuntimeErrorClass | null =
+      doneReason !== 'error'
+        ? null
+        : silentKill
+          ? 'Timeout'
+          : classifyError(fatalErrorCode, fatalErrorText ?? (summaryIsAgentText ? '' : safeSummary))
     // BIND the result. `completeExecutionProcess` refuses (returns null) when
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
       error: safeSummary || doneReason,
+      ...(errorClass ? { errorClass } : {}),
       costUsd,
       costSource,
       inputTokens: ledgerInputTokens,
@@ -1908,10 +1942,8 @@ async function runTaskInner(
           outputTokens: ledgerOutputTokens,
         },
       })
-    if (doneReason === 'error') {
-      // A terminal `done{reason:'error'}` carries no code — classify the message;
-      // an unmappable failure is an UNKNOWN class → a harness bug → alert (AC5).
-      const cls = classifyError(null, safeSummary)
+    if (errorClass) {
+      const cls = errorClass
       emitEvent(db, {
         kind: 'error',
         traceId: span.traceId,
@@ -1921,7 +1953,7 @@ async function runTaskInner(
         agentId: assigneeAgentId,
         runtime: runtimeId,
         data: {
-          code: null,
+          code: fatalErrorCode,
           message: safeSummary || 'error',
           errorClass: cls,
           harnessBug: isHarnessBug(cls),
@@ -1967,6 +1999,7 @@ async function runTaskInner(
     // A person's move may already have put it somewhere else (releaseTask only
     // touches a task still in progress), so report where it really is.
     status = getTask(db, taskId)?.status ?? 'todo'
+    if (errorClass) failedClass = errorClass
   }
 
   return {
@@ -1976,6 +2009,7 @@ async function runTaskInner(
     doneReason,
     status,
     summary: reported,
+    ...(failedClass ? { errorClass: failedClass } : {}),
     costUsd,
     usedWorktree: cwd != null,
     degradations: degrNotes,

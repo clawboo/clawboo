@@ -16,6 +16,8 @@ export {
   claimScheduledRun,
   markRunRunning,
   recordRunOutcome,
+  routineSurvivesFailure,
+  MAX_ROUTINE_TRANSIENT_FAILURES,
   setScheduledRunStatus,
   queueRunNow,
   updateScheduledRun,

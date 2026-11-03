@@ -304,6 +304,7 @@ const SCHEMA_DDL = `
       summary            TEXT,
       run_reason         TEXT,
       error              TEXT,
+      error_class        TEXT,
       recovery_tombstone INTEGER NOT NULL DEFAULT 0,
       tenant_id          TEXT,
       created_at         INTEGER NOT NULL
@@ -323,6 +324,7 @@ const SCHEMA_DDL = `
       next_run_at   INTEGER,
       scheduled_by  TEXT    NOT NULL DEFAULT 'clawboo',
       last_error    TEXT,
+      failure_streak INTEGER NOT NULL DEFAULT 0,
       tenant_id     TEXT,
       created_at    INTEGER NOT NULL,
       updated_at    INTEGER NOT NULL

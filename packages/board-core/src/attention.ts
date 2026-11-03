@@ -17,9 +17,11 @@
 // computes it and the board UI that renders it agree by construction.
 
 import {
+  accountFailureOf,
   delegationTargetOf,
   ledgerAllowsAutoFire,
   trailingFailedRuns,
+  type AccountFailure,
   type LedgerRun,
 } from './dispatch'
 
@@ -46,16 +48,31 @@ export interface TaskAttention {
   /** What the last run said when it failed, trimmed for a card. Present only for
    *  a failed or timed-out run that recorded one. */
   detail?: string
+  /** The last run failed because the provider refused the account: a person has
+   *  to fix its sign-in or billing before a retry can work. */
+  cause?: AccountFailure
+  /** The runtime whose sign-in to fix. Present only with `cause`. */
+  runtime?: string
 }
 
 /** Longest failure reason a card shows; the full text stays on the task. */
 const DETAIL_MAX = 280
 
-function failureDetail(execs: readonly LedgerRun[]): { detail?: string } {
-  const error = execs.length > 0 ? execs[execs.length - 1]!.error : null
-  const trimmed = typeof error === 'string' ? error.trim() : ''
-  if (!trimmed) return {}
-  return { detail: trimmed.length > DETAIL_MAX ? `${trimmed.slice(0, DETAIL_MAX - 1)}…` : trimmed }
+function failureDetail(
+  execs: readonly LedgerRun[],
+): Pick<TaskAttention, 'detail' | 'cause' | 'runtime'> {
+  const last = execs.length > 0 ? execs[execs.length - 1]! : undefined
+  const trimmed = typeof last?.error === 'string' ? last.error.trim() : ''
+  const cause = accountFailureOf(last)
+  const runtime = last?.runtime || last?.executorType || null
+  return {
+    ...(trimmed
+      ? {
+          detail: trimmed.length > DETAIL_MAX ? `${trimmed.slice(0, DETAIL_MAX - 1)}…` : trimmed,
+        }
+      : {}),
+    ...(cause ? { cause, ...(runtime ? { runtime } : {}) } : {}),
+  }
 }
 
 export interface AttentionInput {

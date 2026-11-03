@@ -83,6 +83,27 @@ export function mapClaudeEvent(
       }
       if (ev.aborted) {
         out.push({ ...base(), kind: 'done', reason: 'aborted', summary: ev.summary || accumulated })
+      } else if (ev.contextFull) {
+        // The context window is full: out of room, the same terminal as a turn
+        // ceiling, so the host rotates to a fresh session with a handoff note.
+        // A NON-fatal typed error says why without failing the run.
+        out.push({
+          ...base(),
+          kind: 'error',
+          code: 'context_overflow',
+          message: `The conversation outgrew the model's context window${
+            ev.errorMessage ? ` (${ev.errorMessage})` : ''
+          }.`,
+          fatal: false,
+        })
+        out.push({
+          ...base(),
+          kind: 'done',
+          reason: 'max_turns',
+          summary: accumulated || ev.summary,
+          ...(ev.usage ? { usage: ev.usage } : {}),
+          ...(ev.costUsd != null ? { costUsd: ev.costUsd } : {}),
+        })
       } else if (ev.maxTurns) {
         // Hit the turn ceiling — a clean "out of room" terminal, NOT an error.
         // The host rotates the session (carry a handoff note) and continues.

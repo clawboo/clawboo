@@ -90,7 +90,10 @@ export interface EnqueueUserMessageInput {
 /** What became of an ingested message. `ok` means the target's turn started, or
  *  was queued behind a run already in flight on that session. */
 export type EnqueueUserMessageResult =
-  { ok: true; targetAgentId: string } | { ok: false; error: string }
+  | { ok: true; targetAgentId: string }
+  /** `transient`: the OpenClaw operator was still down after a reconnect, which
+   *  may pass by itself (a routine keeps its schedule through it). */
+  | { ok: false; error: string; transient?: true }
 
 export interface TeamOrchestrator {
   readonly teamId: string
@@ -494,8 +497,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
       // The reason handed back to the caller (a routine records it as its error).
       // A holder rather than a `let`: it is written from inside the catch closures.
-      const delivery: { failure: string | null } = { failure: null }
+      const delivery: { failure: string | null; operatorDown: boolean } = {
+        failure: null,
+        operatorDown: false,
+      }
       const persistDeliverFailure = (operatorStillDown: boolean, err: unknown): void => {
+        delivery.operatorDown = operatorStillDown
         delivery.failure = operatorStillDown
           ? `Could not reach the OpenClaw Gateway: ${errorText(err)}`
           : errorText(err)
@@ -538,9 +545,10 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         }
         persistDeliverFailure(false, err)
       })
-      return delivery.failure
-        ? { ok: false, error: delivery.failure }
-        : { ok: true, targetAgentId: targetId }
+      if (!delivery.failure) return { ok: true, targetAgentId: targetId }
+      return delivery.operatorDown
+        ? { ok: false, error: delivery.failure, transient: true }
+        : { ok: false, error: delivery.failure }
     },
     stop(): Promise<void> {
       // Bump the stop generation SYNCHRONOUSLY before any await — the engine's

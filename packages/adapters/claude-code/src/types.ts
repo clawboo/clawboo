@@ -29,6 +29,10 @@ export type ClaudeNativeEvent =
        *  terminal — distinct from a failure — so the host can rotate the session
        *  and continue rather than fail the task. */
       maxTurns?: boolean
+      /** The conversation outgrew the model's context window (SDK
+       *  `result.terminal_reason === 'prompt_too_long'`). Out of room like
+       *  `maxTurns`, so the host rotates the session rather than fail the task. */
+      contextFull?: boolean
       errorMessage?: string
       /** The SDK's typed cause when the run ended on an API error
        *  (`authentication_failed`, `billing_error`, `rate_limit`, ...). */

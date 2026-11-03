@@ -145,12 +145,18 @@ export const boardClient: BoardClient = {
       // the note on BoardClient.listExecutions.
       if (!r.ok) return null
       const body = (await r.json()) as {
-        executions?: Array<{ id: string; status: string; executorType?: string }>
+        executions?: Array<{
+          id: string
+          status: string
+          executorType?: string
+          errorClass?: string | null
+        }>
       }
       return (body.executions ?? []).map((e) => ({
         id: e.id,
         status: e.status,
         executorType: e.executorType,
+        errorClass: e.errorClass ?? null,
       }))
     } catch {
       return null
