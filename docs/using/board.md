@@ -20,6 +20,8 @@ keywords:
     'Filter',
     'Display',
     'All view',
+    'alerts',
+    'notifications',
   ]
 ---
 
@@ -146,6 +148,20 @@ A **Sign-in failed** or **Billing problem** task leads with **Fix sign-in** inst
 
 **Retry** and **Assign** also leave a note in the task's comments. A task the task runner ran (an agent Routine, or a run started through the API) runs through the task runner again when the agent is on Clawboo Native, Claude Code, Codex or Hermes: in a worktree when the task names a repository, and checked as before. If that run cannot start, for example because a budget it counts against is paused, the task waits in **Needs you** with the reason. Other tasks, and tasks the runner ran before Clawboo started saving how it ran them, run in team chat; see [How a team works](/intro/how-it-works). Tasks that failed the same way share one card that lists them, with **Retry all** and, in its **More** menu, **Dismiss all**, which asks first. When nothing waits, the column says "Nothing needs you right now". In Week and Month, Needs you shows three items, then **+N more**. While you look at another week or month, Needs you folds into a narrow rail with its count: click it to go back to today.
 
+### Get an alert outside the tab
+
+Clawboo can send a browser notification when something new needs you while its tab is in the background or its window is not in front. Once the board has a task on it, the header offers **Get an alert when something needs you, even with this tab in the background**. Click **Turn on**, then allow notifications when your browser asks. **Not now** puts the offer away. Clawboo asks your browser only when you click **Turn on**, never by itself.
+
+| Alert                       | When                                                                                                      |
+| --------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **A task needs you**        | A run failed or stopped responding, an agent marked the task blocked, or the work did not pass its checks |
+| **Ada needs your approval** | An agent waits for you to allow or deny a command, a tool or a handoff, named by its agent                |
+| **3 things need you**       | Several arrived at once. One alert names the first two, approvals first, and counts the rest              |
+
+Click an alert to bring the tab back. An alert about one task opens it in the drawer. Any other alert opens the board on **Needs you**, on the team it is about.
+
+Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, and a task with no agent are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
+
 ### When a task runs again by itself
 
 If a run crashes or stops responding and its task goes back to **To do**, Clawboo starts it again by itself, through the task runner for a task the runner ran. A run whose sign-in or billing was refused is the exception: it goes to **Needs you** at once. After three unsuccessful runs in a row it stops trying, and the task waits in **Needs you** as **Failed 3×** or **Timed out 3×**. A task you stopped never restarts by itself. A task that was in review when Clawboo restarted does not run again by itself either: it waits in **Needs you** with a comment saying its run stopped. **Retry** always runs a task again, whatever its count.
@@ -270,7 +286,7 @@ Each section folds from its heading, and a section with nothing in it is not sho
 | **Workspace**      | The task's own git checkout, when it has one. See [Review what an agent built](#review-what-an-agent-built)                                                                                                                                                                                         |
 | **Run history**    | Every run: its runtime, outcome, time, cost and tokens, and the error when it failed                                                                                                                                                                                                                |
 | **Comments**       | Your replies and actions (**You**) and the notes Clawboo writes (**Clawboo**), then a box to reply to the agent. See [Steer a running task](#steer-a-running-task)                                                                                                                                  |
-| **Activity**       | The task's live tool calls, results and errors                                                                                                                                                                                                                                                      |
+| **Activity**       | The task's live tool calls, results and errors, or one line saying there are none yet                                                                                                                                                                                                               |
 
 Click the **Parent** to open that task in the drawer. A run that is still going can show OpenClaw as its runtime in **Run history** until it ends. The drawer's cost is the same total as the card's, to four decimal places, or `free` for a task that ran only on a local model.
 
@@ -456,6 +472,8 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 - **Retry**, **Assign**, and a reply that would start the task again, refuse a task still filed under a deleted chat room (`room_archived`) instead of saying it started; restarting Clawboo moves it to General. A task whose team was deleted is refused the same way (`no_team`), and nothing can run it.
 - A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
 - The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`.
+- `GET /api/board/:taskId/workspace/detail` answers `{ "ok": false, "reason": "no_workspace" }` for a task with no checkout of its own, and a `404` only for a task that does not exist.
+- Browser alerts add no polling. They follow the event stream the dashboard already keeps open (`GET /api/obs/stream`). When a run ends, a task moves or an approval opens while the tab is in the background, they read `GET /api/board` and `GET /api/tools/approvals?status=pending` once, a second after the first event, so a burst of events is one read and one alert. Your choice is stored in this browser's local storage under `clawboo.alerts.needsYou`. The desktop app is detected by the `window.clawbooDesktop` bridge it gives the dashboard.
 - Full request and response shapes are in the [Board API](/reference/rest-api/board). How the board stores tasks and recovers stuck work is in [Board internals](/internals/board-internals).
 
 </Accordion>

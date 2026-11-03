@@ -173,23 +173,46 @@ describe('ActivityTerminal', () => {
     expect(shown).toEqual(['older_call', 'newer_call'])
   })
 
-  it('shows the branded empty state when there is no activity', async () => {
+  it('says there is no activity in one quiet line, not a tall mono box (task drawer)', async () => {
     server.use(http.get('/api/obs/events', () => HttpResponse.json({ events: [] })))
-    render(<ActivityTerminal scope={{ taskId: 't1' }} />)
-    expect(await screen.findByText('No activity yet')).toBeInTheDocument()
+    render(<ActivityTerminal scope={{ taskId: 't1' }} maxHeight={260} hideHeader />)
+    const empty = await screen.findByTestId('activity-empty')
+    expect(empty).toHaveTextContent(/^No activity yet\./)
+    // Prose, in the body font and the muted token: not inside the mono log.
+    expect(empty.closest('.font-data')).toBeNull()
+    expect(empty.querySelector('p')).toHaveClass('text-xs', 'text-muted-foreground')
+    // No disc-and-title empty state in a capped host.
+    expect(screen.queryByRole('heading')).toBeNull()
+    // Liveness still shows, on the same line.
+    expect(empty).toHaveTextContent(/Live|Reconnecting/)
   })
 
-  it('surfaces a live indicator even when hideHeader (host owns the title)', async () => {
+  it('keeps the branded empty state for a host that fills a panel', async () => {
+    server.use(http.get('/api/obs/events', () => HttpResponse.json({ events: [] })))
+    render(<ActivityTerminal scope={{ agentId: 'a1' }} fill hideHeader />)
+    expect(await screen.findByText('No activity yet')).toBeInTheDocument()
+    expect(screen.getByTestId('activity-empty').closest('.font-data')).toBeNull()
+  })
+
+  it('surfaces a live indicator under hideHeader without covering the first line', async () => {
     server.use(
       http.get('/api/obs/events', () =>
         HttpResponse.json({ events: [wire(1, 'tool_call', { name: 'x', input: {} })] }),
       ),
     )
-    render(<ActivityTerminal scope={{ taskId: 't1' }} hideHeader />)
+    const { container } = render(<ActivityTerminal scope={{ taskId: 't1' }} hideHeader />)
     expect(await screen.findByText('x')).toBeInTheDocument()
-    // jsdom has no EventSource → the tail can't open → the pill reads "Reconnecting".
+    // jsdom has no EventSource → the tail can't open → the label reads "Reconnecting".
     // The point is liveness IS surfaced under hideHeader, not hidden.
-    expect(screen.getByText(/Live|Reconnecting/)).toBeInTheDocument()
+    const label = screen.getByText(/Live|Reconnecting/)
+    // On a strip of its own above the log, not floated over it: the pill used
+    // to be absolutely positioned and sat on top of the first event line.
+    for (let el: HTMLElement | null = label; el && el !== container; el = el.parentElement) {
+      expect(el.style.position).not.toBe('absolute')
+    }
+    const log = container.querySelector('.font-data')!
+    expect(log.contains(label)).toBe(false)
+    expect(label.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('collapses long tool output behind a disclosure', async () => {

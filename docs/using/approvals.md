@@ -46,6 +46,7 @@ Other forms do not trigger it: "deleted", "deployment" and "secrets" pass, and s
 - **The Tasks card** beside a team chat and the **Tasks & Routines** card on an agent's page, under **Needs you**.
 - **Settings > Insights > Governance**, in the **Approval queue**. It lists every pending request from every team, or "No pending approvals".
 - **Settings > Workspace > Capabilities**, at the top of the panel, while something is waiting.
+- **A browser alert**, when you have turned alerts on and the Clawboo tab is in the background. Click it to open **Needs you** on the board. See [Get an alert outside the tab](/using/board#get-an-alert-outside-the-tab).
 
 Answer a request in any of these places and it clears from the others within a few seconds. A request that Clawboo cannot tie to an agent shows in every chat and under every board filter. Connector calls from OpenClaw agents arrive this way, because OpenClaw agents reach connectors without an agent identity.
 

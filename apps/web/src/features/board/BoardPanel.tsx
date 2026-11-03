@@ -32,6 +32,7 @@ import {
 import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
+import { AlertsOptIn } from '@/features/alerts/AlertsOptIn'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
@@ -1759,6 +1760,19 @@ export function BoardPanel() {
     requestView({ day: Date.now(), align: 'nearest', smooth: true, needsYou: true })
   }, [requestView])
 
+  // A browser alert about an approval, or about several things at once: show
+  // Needs you, on the alert's team when the board is narrowed to another one.
+  const needsYouFocus = useViewStore((s) => s.boardNeedsYouFocus)
+  useEffect(() => {
+    if (!needsYouFocus) return
+    const { teamId } = needsYouFocus
+    if (teamId === 'all') setTeamFilter('all')
+    else if (teamId) setTeamFilter((f) => (f !== 'all' && f !== teamId ? teamId : f))
+    setOpenTaskId(null)
+    revealNeedsYou()
+    useViewStore.getState().clearBoardNeedsYouFocus()
+  }, [needsYouFocus, revealNeedsYou])
+
   // ── Since you last looked ──
   // Show steps through what changed, oldest first. Changes in Needs you are only
   // counted (it keeps its own list), so once only they are left, Show goes there.
@@ -1962,6 +1976,8 @@ export function BoardPanel() {
               </button>
             </span>
           ) : null}
+          {/* Offered once there is work on the board that could need the person. */}
+          {loaded && tasks.length > 0 ? <AlertsOptIn /> : null}
           <div className="ml-auto flex items-center gap-2">
             <GitHubStarButton />
             <Button
