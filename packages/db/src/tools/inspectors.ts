@@ -141,6 +141,7 @@ const isLoopbackHost = (host: string): boolean => {
     h === '0.0.0.0' ||
     h === '[::1]' ||
     h === '[::]' ||
+    h === '[::ffff:0:0]' ||
     /^\[::ffff:(127\.|7f)/.test(h)
   )
 }
@@ -148,22 +149,48 @@ const isLoopbackHost = (host: string): boolean => {
 // A host with an explicit port, with or without a scheme in front of it. A match
 // may only start where a host can start (the lookbehind), so a long run of host
 // characters with no port is read in linear time. The host is not length-capped:
-// a cap would let an over-long `*.localhost` name slip past unmatched.
-const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})/gi
+// a cap would let an over-long `*.localhost` name slip past unmatched. It takes
+// percent escapes and non-ASCII characters, which the URL parser turns into a
+// plain name (`%6c%6fcalhost`, and localhost in full-width letters, are
+// localhost), and a port of any length, because `:018790` is still port 18790.
+const HOST_PORT = /(?<![a-z0-9.%\u0080-\uffff-])(\[[0-9a-f:.]+\]|[a-z0-9.%\u0080-\uffff-]+):(\d+)/gi
 
-/** Whether a string names a dashboard address. The host is parsed the way a
- *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. */
-function namesDashboard(text: string): boolean {
+/** The plain-ASCII name at the end of a run, as a stricter reader takes it. */
+function asciiTail(run: string): string {
+  let i = run.length
+  while (i > 0 && /[a-z0-9.-]/i.test(run[i - 1]!)) i--
+  return run.slice(i)
+}
+
+const opensLoopback = (host: string, port: string): boolean => {
+  try {
+    return isLoopbackHost(new URL(`http://${host}:${port}`).hostname)
+  } catch {
+    return false // Not a host this browser could open.
+  }
+}
+
+function scanForDashboard(text: string): boolean {
   for (const m of text.matchAll(HOST_PORT)) {
-    if (!dashboardPorts.has(Number(m[1]))) continue
-    try {
-      const url = new URL(`http://${m[0]}`)
-      if (isLoopbackHost(url.hostname)) return true
-    } catch {
-      // Not a host this browser could open.
-    }
+    const host = m[1]!
+    const port = m[2]!
+    if (!dashboardPorts.has(Number(port))) continue
+    if (opensLoopback(host, port)) return true
+    const tail = asciiTail(host)
+    if (tail && tail !== host && opensLoopback(tail, port)) return true
   }
   return false
+}
+
+/** Whether a string names a dashboard address. The host is parsed the way a
+ *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. A URL
+ *  parser also drops every tab and line break, so `local<tab>host` is read
+ *  again without them. */
+function namesDashboard(text: string): boolean {
+  return (
+    scanForDashboard(text) ||
+    (/[\t\n\r]/.test(text) && scanForDashboard(text.replace(/[\t\n\r]/g, '')))
+  )
 }
 
 function argsNameDashboard(value: unknown, depth = 0): boolean {
