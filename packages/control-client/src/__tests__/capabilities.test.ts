@@ -40,6 +40,12 @@ describe('supportFloorFor', () => {
   it('falls back to the widest floor for a version it cannot read', () => {
     expect(supportFloorFor('dev')).toBe('0.0')
     expect(supportFloorFor('0.0.0-dev')).toBe('0.0')
+    expect(supportFloorFor('0.6garbage')).toBe('0.0')
+    expect(supportFloorFor('0.6.1.2')).toBe('0.0')
+  })
+
+  it('reads a version with a build suffix', () => {
+    expect(supportFloorFor('v0.6.1+build.7')).toBe('0.5')
   })
 })
 
@@ -59,6 +65,7 @@ describe('engineSupportsClient', () => {
 
   it('refuses a version it cannot read', () => {
     expect(engineSupportsClient(caps('0.6.2'), 'latest')).toBe(false)
+    expect(engineSupportsClient(caps('0.6.2'), '0.6garbage')).toBe(false)
   })
 })
 

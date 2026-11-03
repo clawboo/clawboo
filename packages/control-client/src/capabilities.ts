@@ -76,9 +76,12 @@ export const engineCapabilitiesSchema = z.object({
 })
 export type EngineCapabilities = z.infer<typeof engineCapabilitiesSchema>
 
-/** `[major, minor]` of a version string, or null when it does not start with one. */
+/** `major.minor`, an optional `.patch`, then an optional prerelease and build. */
+const VERSION_RE = /^v?(\d+)\.(\d+)(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
+/** `[major, minor]` of a whole version string, or null when it is not one. */
 function majorMinor(version: string): [number, number] | null {
-  const m = /^v?(\d+)\.(\d+)/.exec(version.trim())
+  const m = VERSION_RE.exec(version.trim())
   return m ? [Number(m[1]), Number(m[2])] : null
 }
 

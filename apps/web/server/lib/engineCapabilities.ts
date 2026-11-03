@@ -97,7 +97,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'chat.rooms': true,
     'chat.direct': true,
     // Enforced inside the board's status change, so it has no route of its own
-    // and no switch: finished worktree work cannot reach done without it.
+    // and no switch: a task whose stored verdict fails cannot reach done
+    // without a person's override. A task with no verdict can still be moved.
     'board.verification': true,
     'board.steering': true,
     'workspace.view': true,

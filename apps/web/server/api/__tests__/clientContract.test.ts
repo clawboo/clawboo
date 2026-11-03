@@ -612,8 +612,8 @@ describe('routes', () => {
   })
 })
 
-describe('the route sits behind the origin guard and the access gate', () => {
-  it('refuses a request without the token and a cross-origin one with it', async () => {
+describe('the route has no exemption in the origin guard or the access gate', () => {
+  it('refuses a request without the token and a cross-origin one with it, in the server order', async () => {
     const token = 'contract-test-token'
     let port = 0
     const gate = createAccessGate({ token })
