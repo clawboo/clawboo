@@ -26,6 +26,7 @@ vi.mock('../../platform', async (importActual) => {
 
 const {
   buildCodexExecArgs,
+  codexFailureMessage,
   createCodexDriver,
   hasUsableCodexAuth,
   seedCodexAuth,
@@ -278,5 +279,65 @@ describe('translateCodexEvent — codex 0.136 item-wrapped events', () => {
     expect(state.lastText).toBe('legacy')
     const terminal = translateCodexEvent({ msg: { type: 'task_complete' } }, state)
     expect(terminal[0]).toMatchObject({ type: 'result', summary: 'legacy' })
+  })
+})
+
+// A ChatGPT account whose CLI is too old for its models: the exact lines codex
+// 0.136 printed on 2026-10-22 (the backend body arrives as a JSON STRING).
+describe('a refused model reports the backend reason, not the stderr log', () => {
+  const REFUSED =
+    '{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5.4\' model is not supported when using Codex with a ChatGPT account."}}'
+  const fresh = (): Parameters<typeof translateCodexEvent>[1] => ({
+    lastText: '',
+    usage: { inputTokens: 0, outputTokens: 0 },
+    sawResult: false,
+  })
+
+  it('keeps the readable message from the error / turn.failed events', () => {
+    const state = fresh()
+    expect(translateCodexEvent({ type: 'error', message: REFUSED }, state)).toEqual([])
+    expect(
+      translateCodexEvent({ type: 'turn.failed', error: { message: REFUSED } }, state),
+    ).toEqual([])
+    expect(state.streamError).toBe(
+      "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.",
+    )
+    expect(state.sawResult).toBe(false)
+  })
+
+  it('an unpinned run whose default is refused points at updating the CLI', () => {
+    const msg = codexFailureMessage({
+      streamError: "The 'gpt-5.4' model is not supported when using Codex with a ChatGPT account.",
+      stderr: 'ERROR codex_models_manager::manager: failed to refresh available models',
+      code: 1,
+      modelPinned: false,
+    })
+    expect(msg).toMatch(/^The 'gpt-5\.4' model is not supported/)
+    expect(msg).toContain('too old')
+    expect(msg).toContain('npm install -g @openai/codex@0')
+    expect(msg).not.toContain('codex_models_manager')
+  })
+
+  it('a pinned model that is refused points at the model, not the CLI', () => {
+    const msg = codexFailureMessage({
+      streamError: "The 'gpt-x' model is not supported when using Codex with a ChatGPT account.",
+      stderr: '',
+      code: 1,
+      modelPinned: true,
+    })
+    expect(msg).toContain("plan's default")
+    expect(msg).not.toContain('npm install')
+  })
+
+  it('any other failure keeps its own reason: stream, then stderr, then the exit code', () => {
+    expect(
+      codexFailureMessage({ streamError: 'boom', stderr: 'x', code: 1, modelPinned: false }),
+    ).toBe('boom')
+    expect(codexFailureMessage({ stderr: ' log line \n', code: 2, modelPinned: false })).toBe(
+      'log line',
+    )
+    expect(codexFailureMessage({ stderr: '', code: 3, modelPinned: false })).toBe(
+      'codex exited with code 3',
+    )
   })
 })

@@ -51,6 +51,12 @@ export const server = setupServer(
   // Empty default = "codex not installed"; ChatGPT-path tests override it.
   http.get('/api/runtimes', () => HttpResponse.json({ runtimes: [] })),
   http.get('/api/runtimes/openrouter/models', () => HttpResponse.json({ models: [] })),
+  // Every OpenClaw model picker (and the Hermes one, once a ChatGPT login shows)
+  // reads the ChatGPT plan's live models. Empty default = the list is unknown, so
+  // the pickers offer only the plan default; a subscription test overrides it.
+  http.get('/api/runtimes/codex/models', () =>
+    HttpResponse.json({ models: [], defaultModel: null, updateRequired: false }),
+  ),
   http.get('/api/providers', () => HttpResponse.json({ providers: [] })),
   // A credential mutation (Providers hub / Runtimes panel) re-reads the registry,
   // because each agent's `providerReady` is derived from the vault. A benign empty

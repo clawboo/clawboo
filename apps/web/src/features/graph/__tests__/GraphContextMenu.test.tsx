@@ -43,6 +43,15 @@ describe('GraphContextMenu', () => {
     expect(items.map((i) => i.textContent)).toEqual(['Open agent', 'Delete'])
   })
 
+  it('offers Move to team when the agent can move, and calls it', async () => {
+    const onMove = vi.fn()
+    renderMenu({ onMove })
+    const items = screen.getAllByRole('menuitem')
+    expect(items.map((i) => i.textContent)).toEqual(['Open agent', 'Move to team', 'Delete'])
+    await userEvent.click(screen.getByRole('menuitem', { name: 'Move to team' }))
+    expect(onMove).toHaveBeenCalledTimes(1)
+  })
+
   it('focuses the first item on open and rovers the tabindex', async () => {
     renderMenu()
     await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Open agent' })).toHaveFocus())

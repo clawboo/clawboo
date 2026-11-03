@@ -132,7 +132,10 @@ through `thread/resume`, or `codex exec resume <id>` on the fallback.
 Each agent gets a managed `CODEX_HOME`, so session files survive between turns. The driver copies your
 `codex login` credentials (`~/.codex/auth.json`) into it and never writes them back. A managed home with no
 usable login and no API key fails fast with `no Codex credentials provisioned for managed home <path>` and asks
-the user to run `codex login`. The adapter's `models` list is informational; nothing in the host reads it.
+the user to run `codex login`. The adapter's `models` list is empty: OpenAI decides which models a ChatGPT
+login may use, so a run names no model unless the agent has one, and Codex runs the plan's default. A failed
+run reports the turn's own error, unwrapped from the JSON body OpenAI sends, ahead of the CLI's stderr; a
+refused model on a run that named none adds that the Codex CLI is too old for the plan and how to update it.
 
 ## Hermes
 

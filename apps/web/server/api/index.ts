@@ -54,6 +54,7 @@ import { teamChatStreamGET } from './teamChatStream'
 import {
   agentsDELETE,
   agentsCleanupPOST,
+  agentMovePOST,
   agentsListGET,
   agentsRegistryHealthGET,
   agentsCreatePOST,
@@ -151,6 +152,7 @@ import {
 import {
   runtimesListGET,
   runtimesOpenRouterModelsGET,
+  runtimesCodexModelsGET,
   runtimesInstallPOST,
   runtimesConnectPOST,
   runtimesDisconnectPOST,
@@ -350,6 +352,7 @@ router.post('/api/agents/cleanup-ghosts', agentsCleanupPOST)
 router.get('/api/agents/:agentId', agentGET)
 router.patch('/api/agents/:agentId/model', agentModelPATCH)
 router.delete('/api/agents/:agentId', agentsDELETE)
+router.post('/api/agents/:agentId/move', agentMovePOST)
 router.get('/api/agents/:agentId/files/:name', agentFileGET)
 router.put('/api/agents/:agentId/files/:name', agentFilePUT)
 router.get('/api/agents/:agentId/sessions', agentSessionsGET)
@@ -499,6 +502,7 @@ router.delete('/api/mcp/teamchat', mcpTeamchatSession)
 // Non-OpenClaw runtimes. POST drives a board task on the chosen runtime.
 router.get('/api/runtimes', runtimesListGET)
 router.get('/api/runtimes/openrouter/models', runtimesOpenRouterModelsGET)
+router.get('/api/runtimes/codex/models', runtimesCodexModelsGET)
 
 // Provider keys (Settings → Providers hub) — writes both the encrypted vault + OpenClaw .env.
 router.get('/api/providers', providersListGET)

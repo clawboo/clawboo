@@ -570,13 +570,25 @@ describe('hermes driver (preserved runtime)', () => {
     expect(hasUsableHermesCodexAuth(managedAuth)).toBe(true)
   })
 
-  it('derived rung: NO keys + seeded subscription auth → --provider openai-codex with its own default model', async () => {
+  it('derived rung: NO keys + seeded subscription auth → --provider openai-codex and NO -m', async () => {
     await writeUserAuth()
     const home = await provisionHermesHome(identityHome())
     const spawn = await plan(home, { apiKeyEnv: {} })
     expect(providerArg(spawn.args)).toBe('openai-codex')
-    // Flat-cost subscription → hermes's codex default, not a "mini" tier.
-    expect(modelArg(spawn.args)).toBe('gpt-5.5')
+    // No model: Hermes asks the backend for the account's own list and runs its
+    // first, so no id rides in that the backend could refuse.
+    expect(spawn.args).not.toContain('-m')
+  })
+
+  it('a PICKED openai-codex with no model (the plan-default pick) pins the provider and passes NO -m', async () => {
+    await writeUserAuth()
+    const home = await provisionHermesHome(identityHome())
+    const spawn = await plan(home, {
+      providerHint: 'openai-codex',
+      apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' }, // pick outranks the key rung
+    })
+    expect(providerArg(spawn.args)).toBe('openai-codex')
+    expect(spawn.args).not.toContain('-m')
   })
 
   it("every key rung outranks the subscription rung (existing keyed setups keep today's behavior)", async () => {
@@ -591,18 +603,18 @@ describe('hermes driver (preserved runtime)', () => {
     const home = await provisionHermesHome(identityHome())
     const spawn = await plan(home, {
       providerHint: 'openai-codex',
-      model: 'gpt-5.3-codex',
+      model: 'gpt-5.6-luna',
       apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' }, // pick outranks the key rung
     })
     expect(providerArg(spawn.args)).toBe('openai-codex')
-    expect(modelArg(spawn.args)).toBe('gpt-5.3-codex')
+    expect(modelArg(spawn.args)).toBe('gpt-5.6-luna')
   })
 
   it('a PICKED openai-codex with NO auth anywhere degrades like a keyless pick (pin + model dropped)', async () => {
     const home = await provisionHermesHome(identityHome())
     const spawn = await plan(home, {
       providerHint: 'openai-codex',
-      model: 'gpt-5.3-codex',
+      model: 'gpt-5.6-luna',
       apiKeyEnv: { OPENROUTER_API_KEY: 'sk-or' },
     })
     // Degraded to the key-derived rung; the codex-specific model went with the pin.

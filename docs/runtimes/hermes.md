@@ -74,7 +74,7 @@ Hermes keeps this sign-in separate from Codex's and OpenClaw's.
 
 <Step title="Put a Hermes agent on a team">
 
-Create a team, and in **Customize team** set a member's runtime to **Hermes**. You can also pick a model for that member: OpenRouter models when an OpenRouter key is connected, and ChatGPT models when Hermes is signed in with ChatGPT and Codex is connected. Leave it on **Default** to let Clawboo choose. Then deploy the team. See [Teams](/using/teams) for the full flow.
+Create a team, and in **Customize team** set a member's runtime to **Hermes**. You can also pick a model for that member: OpenRouter models when an OpenRouter key is connected, and ChatGPT models when Hermes is signed in with ChatGPT and Codex is connected. The ChatGPT group starts with **Plan default**, then lists the models your plan can run, read from your Codex CLI; Clawboo names none of its own, because OpenAI decides which models each plan may use. **Plan default** passes no model, so Hermes uses your plan's own default. Leave it on **Default** to let Clawboo choose. Then deploy the team. See [Teams](/using/teams) for the full flow.
 
 </Step>
 
@@ -107,10 +107,10 @@ For each run, Clawboo works down this list and uses the first match:
 3. **An OpenRouter key**: `--provider openrouter`, model `openai/gpt-4o-mini`.
 4. **An Anthropic key**: `--provider anthropic`, model `claude-haiku-4-5`.
 5. **An OpenAI key**: `--provider openai-api`, model `gpt-4o-mini`.
-6. **A ChatGPT sign-in**: `--provider openai-codex`, model `gpt-5.5`.
+6. **A ChatGPT sign-in**: `--provider openai-codex`, with no model, so Hermes uses your plan's own default.
 7. **Nothing**: Hermes uses its own default.
 
-The pick in rule 1 applies when the agent works in its team or in its own chat. A run started over the REST API has no pick; a model named in that request replaces the default models in rules 3 to 6.
+The pick in rule 1 applies when the agent works in its team or in its own chat. A run started over the REST API has no pick; a model named in that request replaces the default models in rules 3 to 5, and is passed in rule 6 too.
 
 Clawboo hands Hermes only its OpenRouter, Anthropic and OpenAI keys. If your Hermes config names another provider (Gemini, say), set that provider's key in the environment you start Clawboo from.
 

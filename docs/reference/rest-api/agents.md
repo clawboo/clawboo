@@ -1,7 +1,7 @@
 ---
 title: 'Agents API'
 sidebarTitle: 'Agents'
-description: 'REST reference for agents: list, create, sync, delete, agent files, sessions, model, workspaces, browser screenshots, the native shell switch and 1:1 chat.'
+description: 'REST reference for agents: list, create, sync, delete, move to another team, agent files, sessions, model, workspaces, browser screenshots, the native shell switch and 1:1 chat.'
 keywords: ['agents', 'boo', 'agent files', 'screenshot', 'browser', 'shell', 'registry']
 ---
 
@@ -28,6 +28,7 @@ A per-agent route goes to the source that owns the agent; an unknown id goes to 
 | POST   | `/api/agents/cleanup-ghosts`              | Delete local OpenClaw rows the Gateway no longer has          | No      |
 | GET    | `/api/agents/:agentId`                    | One agent record                                              | No      |
 | DELETE | `/api/agents/:agentId`                    | Delete an agent and its local rows                            | No      |
+| POST   | `/api/agents/:agentId/move`               | Move an agent to another team, with its unstarted work        | No      |
 | GET    | `/api/agents/:agentId/files/:name`        | Read one agent file                                           | No      |
 | PUT    | `/api/agents/:agentId/files/:name`        | Write one agent file                                          | No      |
 | GET    | `/api/agents/:agentId/sessions`           | List the agent's sessions                                     | No      |
@@ -455,6 +456,72 @@ An OpenClaw agent deleted while the Gateway is down is recorded as a pending del
 
 ```bash
 curl -X DELETE http://localhost:18790/api/agents/<agent-id>
+```
+
+---
+
+## `POST /api/agents/:agentId/move`
+
+Moves the agent to another team. It is what **Move to team** on the Org chart and team graphs sends. Everything below changes together in one transaction, or nothing does:
+
+- The agent's `teamId` becomes the new team.
+- Its tasks on the old team that nobody has started (`backlog`, `todo` or `blocked`), whether assigned or handed to it, lose their assignee and stay on the old team's board, unassigned. Done and cancelled tasks stay on the old board with the agent still named on them.
+- Its own routines, the agent routines that target it, move to the new team, except one bound to a specific task (`teamTaskId` in its template): that task is on the old team, so the routine is paused there instead. Team routines are not touched.
+- Its memberships in the old team's chat rooms are removed.
+- Its resume pointers for the old team, in General and in each room, are cleared.
+
+Not moved: the files it saved in the old team's folder (from its next run it works in the new team's folder), and memory and budgets scoped to the old team. Budgets set on the agent itself follow it. An OpenClaw agent's AGENTS.md is not rewritten, so it still names its old teammates until you edit it. The route needs no Gateway.
+
+`POST /api/teams/:id/agents` on the [Teams API](/reference/rest-api/teams) sets only the team column and moves none of this.
+
+- **Path params**: `agentId`.
+- **Request body**: `{ "teamId": string }` (required), the team to move to.
+
+### Responses
+
+**`200 OK`**: the agent moved. `fromTeamId` is `null` for an agent that had no team. `tasksHandedBack` counts the unstarted tasks left unassigned on the old board, `routinesMoved` the agent's routines now on the new team, and `routinesPaused` its routines bound to an old-team task, paused on the old team:
+
+```json
+{
+  "ok": true,
+  "fromTeamId": "<old-team-id>",
+  "toTeamId": "<team-id>",
+  "tasksHandedBack": 2,
+  "routinesMoved": 1,
+  "routinesPaused": 0
+}
+```
+
+**`400 Bad Request`**: one of these messages:
+
+| `error`                           | Cause                                      |
+| --------------------------------- | ------------------------------------------ |
+| `agentId and teamId are required` | `teamId` is missing, blank or not a string |
+| `same_team`                       | The agent is already on that team          |
+
+**`404 Not Found`**: `agent_not_found` (no agent with that id, or it is archived) or `team_not_found` (no team with that id).
+
+**`409 Conflict`**: the move is refused and nothing changes:
+
+| `error`             | Cause                                                                     |
+| ------------------- | ------------------------------------------------------------------------- |
+| `agent_is_boo_zero` | The agent is Boo Zero, which leads every team and joins none              |
+| `team_archived`     | The team to move to is archived                                           |
+| `agent_leads_team`  | The agent is its team's Leader; choose another Leader for that team first |
+| `agent_busy`        | The agent has a task in progress or in review; try again when it is done  |
+
+**`500 Internal Server Error`**: any other failure:
+
+```json
+{ "error": "<message>" }
+```
+
+### Example
+
+```bash
+curl -X POST http://localhost:18790/api/agents/<agent-id>/move \
+  -H 'Content-Type: application/json' \
+  -d '{"teamId":"<team-id>"}'
 ```
 
 ---

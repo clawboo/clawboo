@@ -336,6 +336,8 @@ curl -X DELETE http://localhost:18790/api/teams/<team-id>
 
 Assigns an agent to the team. This is an **upsert**: if the agent row does not exist it is created (with `status: 'idle'` and `gatewayId = agentId`); if it exists, only its `teamId` and `updatedAt` are set. The optional `agentName` is used as the display name when creating a new row (it defaults to the `agentId`).
 
+Because it sets only the team column, an existing agent's unstarted tasks, routines, room memberships and resume pointers stay on its old team. To move an agent between teams, use `POST /api/agents/:agentId/move` on the [Agents API](/reference/rest-api/agents), which moves them in one step and refuses Boo Zero, a team's Leader and an agent with a task in progress.
+
 Two more behaviors:
 
 - An OpenClaw agent that was deleted while its Gateway was down, and is not yet deleted in the Gateway, cannot be assigned: the route answers **409**, because the upsert would bring its row back.

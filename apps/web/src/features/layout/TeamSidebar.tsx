@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Plus } from 'lucide-react'
+import { Archive, Plus } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
@@ -117,16 +117,19 @@ function MascotIcon({
 function TeamIcon({
   team,
   selected,
+  archived = false,
   onClick,
   onContextMenu,
 }: {
   team: Team
   selected: boolean
-  onClick: () => void
+  /** Drawn dimmed, and named as archived for assistive tech. */
+  archived?: boolean
+  onClick: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
   return (
-    <RailTip label={team.name}>
+    <RailTip label={archived ? `${team.name} (archived)` : team.name}>
       <div className="relative flex items-center">
         {/* Selected indicator pill on the left edge — brand red. */}
         {selected && (
@@ -138,11 +141,12 @@ function TeamIcon({
         <button
           onClick={onClick}
           onContextMenu={onContextMenu}
-          aria-label={team.name}
+          aria-label={archived ? `${team.name} (archived)` : team.name}
           className={[
             'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
             selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
             team.color ? '' : 'bg-foreground/[0.06]',
+            archived ? 'opacity-45 grayscale hover:opacity-80' : '',
           ].join(' ')}
           style={{
             ...(team.color ? { background: team.color } : {}),
@@ -204,6 +208,7 @@ export function TeamSidebar({
     y: number
     team: Team
   } | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
 
   // Creating a team is now a Marketplace journey: the "+" navigates to the
   // Teams tab (the one canonical, richer team showcase) instead of opening a
@@ -427,6 +432,11 @@ export function TeamSidebar({
   }, [mascotMenu])
 
   const activeTeams = teams.filter((t) => !t.isArchived)
+  // Archived teams stay in the store (hydrateTeams asks for them) but used to be
+  // drawn nowhere, so an archive could not be undone from the dashboard. They
+  // sit in a collapsed group at the end of the rail; a click opens the team's
+  // menu, whose Unarchive restores it through the same PATCH that archived it.
+  const archivedTeams = teams.filter((t) => t.isArchived)
 
   return (
     <div
@@ -486,6 +496,42 @@ export function TeamSidebar({
             }}
           />
         ))}
+        {archivedTeams.length > 0 && (
+          <>
+            <RailTip label={`Archived (${archivedTeams.length})`}>
+              <button
+                type="button"
+                data-testid="archived-teams-toggle"
+                aria-label={`Archived (${archivedTeams.length})`}
+                aria-expanded={showArchived}
+                onClick={() => setShowArchived((v) => !v)}
+                className={[
+                  'flex h-10 w-10 shrink-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[13px] border-none p-0 transition-colors duration-150',
+                  showArchived
+                    ? 'bg-foreground/[0.08] text-foreground/70'
+                    : 'bg-transparent text-foreground/40 hover:bg-foreground/[0.05] hover:text-foreground/70',
+                ].join(' ')}
+              >
+                <Archive size={14} strokeWidth={2} />
+                <span className="font-data text-[10px] leading-none">{archivedTeams.length}</span>
+              </button>
+            </RailTip>
+            {showArchived &&
+              archivedTeams.map((team) => (
+                <TeamIcon
+                  key={team.id}
+                  team={team}
+                  selected={false}
+                  archived
+                  onClick={(e) => setContextMenu({ x: e.clientX, y: e.clientY, team })}
+                  onContextMenu={(e) => {
+                    e.preventDefault()
+                    setContextMenu({ x: e.clientX, y: e.clientY, team })
+                  }}
+                />
+              ))}
+          </>
+        )}
       </div>
 
       {/* Add team button — opens the Marketplace Teams showcase (the single

@@ -170,7 +170,7 @@ The written `openclaw.json` holds only: `gateway` (`mode: 'local'`, the port, to
 }
 ```
 
-Default models when `model` is omitted: `anthropic/claude-sonnet-4-5`, `openai/gpt-5.4`, `google/gemini-2.0-flash`, `openrouter/anthropic/claude-sonnet-4-5`, `xai/grok-3`, `groq/llama-3.3-70b-versatile`, `mistral/mistral-large-latest`, `moonshot/kimi-k2.5`, `minimax/MiniMax-M2.5`, `together/meta-llama/Llama-3.3-70B-Instruct-Turbo`, `nvidia/llama-3.1-nemotron-70b-instruct`, `huggingface/deepseek-ai/DeepSeek-R1`, `cerebras/zai-glm-4.7`, `venice/llama-3.3-70b`, `openai-codex/gpt-5.5`, and for `ollama` a pulled model (below). Any other provider gets `<provider>/default`.
+Default models when `model` is omitted: `anthropic/claude-sonnet-4-5`, `openai/gpt-5.4`, `google/gemini-2.0-flash`, `openrouter/anthropic/claude-sonnet-4-5`, `xai/grok-3`, `groq/llama-3.3-70b-versatile`, `mistral/mistral-large-latest`, `moonshot/kimi-k2.5`, `minimax/MiniMax-M2.5`, `together/meta-llama/Llama-3.3-70B-Instruct-Turbo`, `nvidia/llama-3.1-nemotron-70b-instruct`, `huggingface/deepseek-ai/DeepSeek-R1`, `cerebras/zai-glm-4.7`, `venice/llama-3.3-70b`, and for `ollama` a pulled model (below). Any other provider gets `<provider>/default`. `openai-codex` (the ChatGPT sign-in) gets your plan's own default model as `openai-codex/<model>`, read from your Codex CLI through [`GET /api/runtimes/codex/models`](/reference/rest-api/runtimes). OpenAI decides which models each plan may use, so Clawboo names none of its own: when that list is unknown, `openclaw.json` gets no default model and OpenClaw applies its own.
 
 The key line in `.env` uses the provider's own variable (for example `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` for `google`, `HF_TOKEN` for `huggingface`). A provider with no known variable gets `CUSTOM_API_KEY`. `openai-codex` (the ChatGPT sign-in) writes no key line: OpenClaw uses its own sign-in profile, created with `openclaw models auth login --provider openai-codex`.
 
@@ -203,10 +203,10 @@ The key line in `.env` uses the provider's own variable (for example `ANTHROPIC_
 **`200 OK`**: both files written, the token made and saved:
 
 ```ts
-{ ok: true, gatewayUrl: string, model: string } // gatewayUrl is ws://localhost:<port>
+{ ok: true, gatewayUrl: string, model: string | null } // gatewayUrl is ws://localhost:<port>
 ```
 
-`model` is the default written to `openclaw.json`. For `ollama` it can differ from the model you sent, when Ollama has not pulled that one.
+`model` is the default written to `openclaw.json`. For `ollama` it can differ from the model you sent, when Ollama has not pulled that one. It is `null` for `openai-codex` when your plan's model list is unknown, and then no default is written.
 
 **`500 Internal Server Error`**: a file or token failure:
 
@@ -242,6 +242,8 @@ It looks for a credential in five steps, in order, and stops at the first that m
 | 5    | Nothing is connected                                                 | Nothing written; `needsKey: true`, so the dashboard shows the key prompt                                 |
 
 In step 1, with several keys connected, the route takes the first in this fixed order, not your default native provider: anthropic, openai, google, openrouter, xai, groq, mistral, moonshot, minimax, together, nvidia, huggingface, cerebras, venice. A provider counts as connected when its key is in the vault or in `~/.openclaw/.env` (a variable only in the server's shell does not count), but the value written is the one that resolves first: the server's environment, then the vault, then `.env`.
+
+In step 2 a missing default model becomes your plan's own default (`openai-codex/<model>`, read from your Codex CLI through [`GET /api/runtimes/codex/models`](/reference/rest-api/runtimes)). When that list is unknown, none is written and OpenClaw applies its own.
 
 Step 3 exists because a `codex login` in your terminal is a ChatGPT subscription that OpenClaw cannot use until it holds a sign-in profile of its own. `loginCommand` is `openclaw models auth login --provider openai-codex`. The dashboard runs it for you through `POST /api/auth/cli-login/openclaw` and shows the command only if that fails.
 
@@ -587,7 +589,7 @@ curl -X POST http://localhost:18790/api/system/approve-device
 
 ## `GET /api/system/models`
 
-The model catalog behind the OpenClaw model pickers. It comes from `openclaw models list --all --json` (cached for 5 minutes); without the CLI, the built-in catalog is used instead. The result keeps only the 14 key providers, `ollama` and `openai-codex`, with provider names in the built-in catalog's display spelling. A known provider the CLI does not list is filled in from the built-in catalog.
+The model catalog behind the OpenClaw model pickers. It comes from `openclaw models list --all --json` (cached for 5 minutes); without the CLI, the built-in catalog is used instead. OpenClaw 2026.9 refuses that listing when several agents are configured and none is named the owner ("model inspection has no explicit owner"), which an install running a Clawboo team usually is. Clawboo then asks again with `--agent`, naming the agent marked `default`, else `main`, else the first one configured, and keeps passing it on later refreshes until a system agent (`agents.defaults.systemAgent.agentId`) is configured; OpenClaw then lists as that agent by itself, and the plain command runs again. It never sends `--agent` to an install that did not refuse. The listing follows that agent's sign-ins and keys. The result keeps only the 14 key providers, `ollama` and `openai-codex`, with provider names in the built-in catalog's display spelling. A known provider the CLI does not list is filled in from the built-in catalog. The built-in catalog's `OpenAI Codex` group has no models: the pickers fill it from your plan's live list ([`GET /api/runtimes/codex/models`](/reference/rest-api/runtimes)) and leave it out while that list is unknown.
 
 `configuredProviders` lists the providers OpenClaw can use: those with a key in `.env` or in an agent's `auth-profiles.json`, those with a sign-in profile (for example `openai-codex` after a ChatGPT sign-in), and always `ollama`.
 

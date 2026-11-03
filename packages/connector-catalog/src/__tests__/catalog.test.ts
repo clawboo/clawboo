@@ -290,3 +290,38 @@ describe('per-agent browser profiles', () => {
     }
   })
 })
+
+describe('Playwright destructive tools', () => {
+  it('lists exactly the truly destructive tools for the pinned version', () => {
+    // Playwright marks navigate and click destructive, which put the browser
+    // behind an admin grant. The catalog list replaces that marking, so it is
+    // tied to the pin: moving the pin means re-reading the new tools/list.
+    const def = CONNECTOR_DEFINITIONS.find((d) => d.slug === 'playwright')!
+    expect(def.launch.transport === 'stdio' && def.launch.pinnedVersion).toBe('0.0.79')
+    expect(def.destructiveTools).toEqual([
+      'browser_run_code_unsafe',
+      'browser_evaluate',
+      'browser_file_upload',
+      'browser_drop',
+    ])
+    expect(def.destructiveTools).not.toContain('browser_navigate')
+    expect(def.destructiveTools).not.toContain('browser_click')
+  })
+})
+
+describe('Chrome DevTools destructive tools', () => {
+  it('lists running script and uploading files, which its server leaves unmarked', () => {
+    // chrome-devtools-mcp 1.7.0 sends no destructiveHint at all, so without
+    // this list evaluate_script and upload_file were ordinary writes, and one
+    // remembered approval let them run unattended.
+    const def = CONNECTOR_DEFINITIONS.find((d) => d.slug === 'chrome-devtools')!
+    expect(def.launch.transport === 'stdio' && def.launch.pinnedVersion).toBe('1.7.0')
+    expect(def.destructiveTools).toEqual(['evaluate_script', 'upload_file'])
+  })
+
+  it('every browser connector names its destructive tools', () => {
+    for (const def of connectorsByCategory('browser')) {
+      expect(def.destructiveTools?.length ?? 0, def.slug).toBeGreaterThan(0)
+    }
+  })
+})

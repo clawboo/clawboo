@@ -122,6 +122,26 @@ describe('connector supervisor', () => {
     expect(search?.trifecta).toEqual(definition('x', []).trifecta)
   }, 30_000)
 
+  it('lets the catalog’s destructive list replace the server’s own marking', async () => {
+    // Playwright marks navigate and click destructive, which put the whole
+    // browser behind an admin grant. With a catalog list, only listed tools are
+    // destructive. A separate slug, so this connects its own child.
+    const { connector } = await connectConnector(db, {
+      ...definition(process.execPath, [file]),
+      slug: 'fixturelisted',
+      displayName: 'Fixture Listed',
+      destructiveTools: [],
+    })
+    try {
+      const wipe = connector.descriptors.find((d) => d.name === 'mcp__fixturelisted__wipe')
+      expect(wipe).toBeDefined()
+      expect(wipe?.destructive).toBeUndefined()
+    } finally {
+      // Its own child, so later tests that count live connectors see only theirs.
+      await disconnectConnector(connector.connectorId)
+    }
+  }, 30_000)
+
   it('advertises the server’s own JSON Schema rather than a re-derived one', async () => {
     const { connector } = await connectConnector(db, definition(process.execPath, [file]))
     const search = connector.descriptors.find((d) => d.name === 'mcp__fixture__search')

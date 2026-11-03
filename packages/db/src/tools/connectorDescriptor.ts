@@ -37,6 +37,13 @@ export interface ConnectorDescriptorOptions {
    * wrong in, and it is why an owner grant is minted at admin.
    */
   trustAnnotations: boolean
+  /**
+   * The catalog's own list of destructive tool names (raw, un-namespaced). When
+   * present it replaces the server's `destructiveHint` entirely: a listed tool
+   * is destructive, an unlisted one is not. A server that marks every action
+   * destructive would otherwise put the whole connector behind an admin grant.
+   */
+  destructiveTools?: readonly string[]
   /** The connector's declared exfiltration legs, from the CATALOG. */
   trifecta: { readsPrivateData: boolean; ingestsUntrustedContent: boolean; canEgress: boolean }
   /**
@@ -68,7 +75,9 @@ export function buildConnectorDescriptor(
   const readOnly =
     isBrokeredReadOnlyMetaTool(opts.name) ||
     (opts.trustAnnotations && tool.annotations?.['readOnlyHint'] === true)
-  const destructive = opts.trustAnnotations && tool.annotations?.['destructiveHint'] === true
+  const destructive = opts.destructiveTools
+    ? opts.destructiveTools.includes(tool.name)
+    : opts.trustAnnotations && tool.annotations?.['destructiveHint'] === true
   // A connector that can send bytes off the machine is `external` at minimum:
   // the risk floor comes from what the CATALOG says the connector can do, never
   // from what the server says about itself.
