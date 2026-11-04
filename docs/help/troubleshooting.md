@@ -556,6 +556,14 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 </Accordion>
 
+<Accordion title="[blocked: worktree kept] The worktree at <path> could not be rebuilt without losing work">
+
+**What it means:** the task ran again and its worktree folder had to be rebuilt from the task branch, but the folder holds something the rebuild would delete: uncommitted changes, files git ignores (such as an `.env` file), a commit no branch holds, a separate git repository, or contents git cannot read. The comment says which. Clawboo left the folder as it is, did not start the run, and moved the task to **Needs you**.
+
+**Fix:** open the folder the comment names. Commit or copy what you need from it, or remove it, then move the task back to **To do**. A `[not started: worktree unchecked]` comment is the milder case: git did not answer when Clawboo checked the folder, nothing was changed, and the task can run again as it is.
+
+</Accordion>
+
 <Accordion title="Couldn’t load the board.">
 
 **What it means:** the board's first read failed, usually because the Clawboo server is not answering.
