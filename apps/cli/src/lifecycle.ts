@@ -75,20 +75,39 @@ const ACCESS_COOKIE = 'clawboo_access'
 
 /**
  * The address the launcher dials, and puts in the links it opens and prints:
- * the one the server binds unless HOST says otherwise. Not `localhost`, which
- * can resolve to ::1 first, where another user's program can listen on the very
- * port the server holds on 127.0.0.1 and imitate the access gate.
+ * the loopback address the server listens on. 127.0.0.1 unless HOST names
+ * another loopback address (::1, or another 127.x), which is then all the
+ * server listens on. Never `localhost`, which can resolve to ::1 first, where
+ * another user's program can listen on the very port the server holds on
+ * 127.0.0.1 and imitate the access gate; a HOST of `localhost`, or a wide one
+ * such as 0.0.0.0, is dialled at 127.0.0.1.
  */
-export const DASHBOARD_HOST = '127.0.0.1'
+export function dashboardHost(env: NodeJS.ProcessEnv = process.env): string {
+  const host = (env['HOST'] ?? '').trim().replace(/^\[(.*)\]$/, '$1')
+  if (host === '::1') return '::1'
+  if (/^127(\.\d{1,3}){3}$/.test(host)) return host
+  return '127.0.0.1'
+}
+
+/** A host as it goes into a URL: an IPv6 literal in brackets. */
+function urlHost(host: string): string {
+  return host.includes(':') ? `[${host}]` : host
+}
 
 /**
- * May the access token go to this port? Only on 127.0.0.1, and only to the port
- * the server recorded in the private api-port.txt. Any other port answering with
- * the gate's refusal could be another user's program imitating it, so it never
- * receives the token. The desktop app follows the same rule.
+ * May the access token go to this port? Only at the dashboard host, and only to
+ * the port the server recorded in the private api-port.txt. Any other port
+ * answering with the gate's refusal could be another user's program imitating
+ * it, so the per-install token never reaches it; the desktop app follows the
+ * same rule. One exception: a STUDIO_ACCESS_TOKEN set in this shell may go to
+ * the port CLAWBOO_API_PORT names, since the person chose both, for a server
+ * whose api-port.txt this shell cannot see (a container, another CLAWBOO_HOME).
  */
 function mayReceiveToken(host: string, port: number): boolean {
-  return host === DASHBOARD_HOST && port === readRuntimePort()
+  if (host !== dashboardHost()) return false
+  if (port === readRuntimePort()) return true
+  const shellToken = (process.env['STUDIO_ACCESS_TOKEN'] ?? '').trim()
+  return shellToken !== '' && port === readPortEnv('CLAWBOO_API_PORT')
 }
 
 /**
@@ -147,7 +166,7 @@ async function getDashboardJson(
   headers: Record<string, string> = {},
   method: Method = 'GET',
 ): Promise<JsonReply | null> {
-  const url = `http://${host}:${port}${route}`
+  const url = `http://${urlHost(host)}:${port}${route}`
   const first = await getJson(url, timeoutMs, headers, method)
   if (first === null || first.status !== 401 || !isAccessGateError(first.body)) return first
   if (!mayReceiveToken(host, port)) return first
@@ -248,7 +267,7 @@ export async function mintLaunchCode(
   timeoutMs = 2_000,
 ): Promise<LaunchCodeReply | null> {
   const reply = await getDashboardJson(
-    DASHBOARD_HOST,
+    dashboardHost(),
     port,
     '/api/access/launch-code',
     timeoutMs,
@@ -280,10 +299,27 @@ export function uiPath(): string {
  * sign-in link (`?access_code=`); the access token itself never goes in a URL.
  */
 export function dashboardUrl(port: number, code?: string): string {
-  const base = `http://${DASHBOARD_HOST}:${port}${uiPath()}`
+  const base = `http://${urlHost(dashboardHost())}:${port}${uiPath()}`
   if (code === undefined) return base
   const page = base.endsWith('/') ? base : `${base}/`
   return `${page}?access_code=${encodeURIComponent(code)}`
+}
+
+/**
+ * What opening the dashboard achieved, for the CLI to say:
+ * - `signed-in`: the browser opened a one-time sign-in link;
+ * - `open`: the server has no gate, so the plain address is enough;
+ * - `sign-in-unknown`: the browser opened the plain address because the server
+ *   gave no link (a timeout, a 429, or a server older than launch codes), so it
+ *   may show the locked screen;
+ * - `no-browser`: no browser could be opened.
+ */
+export type OpenReport = 'signed-in' | 'open' | 'sign-in-unknown' | 'no-browser'
+
+export function openReport(minted: LaunchCodeReply | null, opened: boolean): OpenReport {
+  if (!opened) return 'no-browser'
+  if (minted === null) return 'sign-in-unknown'
+  return minted.gated ? 'signed-in' : 'open'
 }
 
 /** Runs a shell command and reports how it ended. A seam for tests. */
@@ -417,7 +453,7 @@ export interface DashboardDiscovery {
 export async function discoverDashboard(): Promise<DashboardDiscovery> {
   let gatedPort: number | null = null
   for (const candidate of dashboardCandidates()) {
-    const verdict = await probeDashboard(DASHBOARD_HOST, candidate.port, candidate.timeoutMs)
+    const verdict = await probeDashboard(dashboardHost(), candidate.port, candidate.timeoutMs)
     if (verdict === 'clawboo') return { port: candidate.port, gatedPort }
     if (verdict === 'gated' && gatedPort === null) gatedPort = candidate.port
   }
@@ -508,7 +544,7 @@ export async function fetchServerVersion(
   timeoutMs = SELF_VERSION_TIMEOUT_MS,
 ): Promise<string | null> {
   const reply = await getDashboardJson(
-    DASHBOARD_HOST,
+    dashboardHost(),
     port,
     '/api/system/self-version?local=1',
     timeoutMs,
@@ -703,7 +739,7 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
     await new Promise((r) => setTimeout(r, 500))
     const found =
       opts.port !== undefined
-        ? (await probeClawbooDashboard(DASHBOARD_HOST, opts.port, 800))
+        ? (await probeClawbooDashboard(dashboardHost(), opts.port, 800))
           ? opts.port
           : null
         : await findRunningDashboard()
@@ -771,10 +807,10 @@ function isErrno(err: unknown, code: string): boolean {
  */
 export async function stopDashboard(port: number, deps: StopDeps = {}): Promise<StopOutcome> {
   const isClawboo =
-    deps.isClawboo ?? ((p: number) => probeClawbooDashboard(DASHBOARD_HOST, p, 1_500))
+    deps.isClawboo ?? ((p: number) => probeClawbooDashboard(dashboardHost(), p, 1_500))
   const lookup = deps.findListenerPid ?? findListenerPid
   const kill = deps.kill ?? ((pid: number, signal: NodeJS.Signals) => process.kill(pid, signal))
-  const probe = deps.probe ?? ((p: number) => probePort(DASHBOARD_HOST, p, 500))
+  const probe = deps.probe ?? ((p: number) => probePort(dashboardHost(), p, 500))
   const readPortFile = deps.readPortFile ?? readRuntimePort
   const unlinkPortFile = deps.unlinkPortFile ?? removeRuntimePortFile
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)))

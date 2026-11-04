@@ -15,10 +15,12 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  dashboardHost,
   dashboardUrl,
   discoverDashboard,
   launcherAccessToken,
   mintLaunchCode,
+  openReport,
   openUrlInBrowser,
   probeDashboard,
 } from '../lifecycle'
@@ -51,13 +53,13 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
   res.end(JSON.stringify(body))
 }
 
-async function listen(handler: http.RequestListener): Promise<FakeServer> {
+async function listen(handler: http.RequestListener, host = '127.0.0.1'): Promise<FakeServer> {
   const seen: Seen[] = []
   const server = http.createServer((req, res) => {
     seen.push({ method: req.method ?? '', url: req.url ?? '', cookie: req.headers.cookie ?? '' })
     handler(req, res)
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await new Promise<void>((resolve) => server.listen(0, host, resolve))
   return {
     port: (server.address() as AddressInfo).port,
     seen,
@@ -66,7 +68,7 @@ async function listen(handler: http.RequestListener): Promise<FakeServer> {
 }
 
 /** A dashboard behind the gate, with a launch-code route like the real one. */
-function gatedDashboard(token: string): Promise<FakeServer> {
+function gatedDashboard(token: string, host = '127.0.0.1'): Promise<FakeServer> {
   return listen((req, res) => {
     if (req.headers.cookie !== `clawboo_access=${token}`) return sendJson(res, 401, GATE_401)
     if (req.url === '/api/settings') return sendJson(res, 200, CLAWBOO_SETTINGS)
@@ -74,7 +76,7 @@ function gatedDashboard(token: string): Promise<FakeServer> {
       return sendJson(res, 200, { gated: true, code: 'one-time-code_XYZ', expiresAt: 123 })
     }
     sendJson(res, 404, { error: 'not found' })
-  })
+  }, host)
 }
 
 let servers: FakeServer[] = []
@@ -86,6 +88,7 @@ const ENV_KEYS = [
   'CLAWBOO_API_PORT',
   'CLAWBOO_HOME',
   'CLAWBOO_BASE_PATH',
+  'HOST',
 ] as const
 
 beforeEach(() => {
@@ -249,12 +252,21 @@ describe('who may receive the token', () => {
     expect(await probeDashboard('127.0.0.1', real.port, 1_000)).toBe('clawboo')
   })
 
-  it('never sends it to a port that only CLAWBOO_API_PORT names', async () => {
+  it('never sends the per-install token to a port that only CLAWBOO_API_PORT names', async () => {
     writeSharedToken(FILE_TOKEN)
     const gated = await track(gatedDashboard(FILE_TOKEN))
     process.env['CLAWBOO_API_PORT'] = String(gated.port)
     expect(await probeDashboard('127.0.0.1', gated.port, 1_000)).toBe('gated')
     expect(gated.seen.map((s) => s.cookie)).toEqual([''])
+  })
+
+  it('sends a token set in this shell to the port CLAWBOO_API_PORT names', async () => {
+    // Both typed by the person, for a server whose api-port.txt this shell cannot
+    // see (a container, another CLAWBOO_HOME).
+    process.env['STUDIO_ACCESS_TOKEN'] = 'shell-token'
+    const gated = await track(gatedDashboard('shell-token'))
+    process.env['CLAWBOO_API_PORT'] = String(gated.port)
+    expect(await probeDashboard('127.0.0.1', gated.port, 1_000)).toBe('clawboo')
   })
 
   it('never sends it to another host, even on the recorded port', async () => {
@@ -263,6 +275,55 @@ describe('who may receive the token', () => {
     writePortFile(gated.port)
     expect(await probeDashboard('localhost', gated.port, 1_000)).not.toBe('clawboo')
     expect(gated.seen.every((s) => s.cookie === '')).toBe(true)
+  })
+})
+
+describe('dashboardHost', () => {
+  it('is 127.0.0.1 by default and for a wide or ambiguous HOST', () => {
+    for (const host of [undefined, '', '0.0.0.0', '::', '192.168.1.10', 'localhost']) {
+      expect(dashboardHost({ HOST: host }), String(host)).toBe('127.0.0.1')
+    }
+  })
+
+  it('is the loopback address HOST names, which is all such a server listens on', () => {
+    expect(dashboardHost({ HOST: '::1' })).toBe('::1')
+    expect(dashboardHost({ HOST: '[::1]' })).toBe('::1')
+    expect(dashboardHost({ HOST: '127.0.0.2' })).toBe('127.0.0.2')
+  })
+
+  it('reaches a server listening on ::1 only, token and all', async (ctx) => {
+    let gated: FakeServer
+    try {
+      gated = await track(gatedDashboard(FILE_TOKEN, '::1'))
+    } catch {
+      ctx.skip() // no IPv6 loopback on this machine
+      return
+    }
+    process.env['HOST'] = '::1'
+    writeSharedToken(FILE_TOKEN)
+    writePortFile(gated.port)
+    expect(await discoverDashboard()).toEqual({ port: gated.port, gatedPort: null })
+    expect(dashboardUrl(gated.port)).toBe(`http://[::1]:${gated.port}`)
+  })
+})
+
+describe('openReport', () => {
+  it('says signed in only when the browser opened a one-time link', () => {
+    expect(openReport({ gated: true, code: 'c', expiresAt: 1 }, true)).toBe('signed-in')
+  })
+
+  it('says the sign-in is unknown when a locked server gave no link', () => {
+    // A timeout or a 429 on the launch-code request: the browser opened the plain
+    // address, which shows the locked screen.
+    expect(openReport(null, true)).toBe('sign-in-unknown')
+  })
+
+  it('needs no sign-in on a server with no gate', () => {
+    expect(openReport({ gated: false }, true)).toBe('open')
+  })
+
+  it('reports no browser first', () => {
+    expect(openReport({ gated: true, code: 'c', expiresAt: 1 }, false)).toBe('no-browser')
   })
 })
 

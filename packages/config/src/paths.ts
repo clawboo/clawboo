@@ -14,7 +14,8 @@ export const resolveUserPath = (input: string): string => {
   return path.resolve(trimmed)
 }
 
-export const resolveDefaultHomeDir = (): string => {
+/** The user's own home folder, or null when it is unset or does not exist. */
+export const resolveOwnHomeDir = (): string | null => {
   const home = os.homedir()
   if (home) {
     try {
@@ -23,7 +24,21 @@ export const resolveDefaultHomeDir = (): string => {
       // fall through
     }
   }
-  return os.tmpdir()
+  return null
+}
+
+/** The home folder, falling back to the shared temp folder when there is none. */
+export const resolveDefaultHomeDir = (): string => resolveOwnHomeDir() ?? os.tmpdir()
+
+/**
+ * The Clawboo home only when it is one this user owns: `CLAWBOO_HOME`, or
+ * `~/.clawboo` under a home folder that exists. Null when it would fall back to
+ * the shared temp folder, where another user could create the folder first.
+ */
+export function resolveOwnClawbooDir(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env['CLAWBOO_HOME']?.trim()) return resolveClawbooDir(env)
+  const home = resolveOwnHomeDir()
+  return home === null ? null : path.join(home, CLAWBOO_DIRNAME)
 }
 
 /**

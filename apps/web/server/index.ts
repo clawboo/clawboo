@@ -54,6 +54,7 @@ import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWa
 import {
   resolveApiPort,
   writeApiPortFile,
+  getApiPortFilePath,
   removeApiPortFileIfOwned,
   waitForPortFree,
 } from './lib/portUtils'
@@ -737,8 +738,16 @@ async function main() {
 
     // Publish the chosen port for external tools (CLI, Vite proxy fallback,
     // e2e helpers). Best-effort: if writing fails, downstream consumers can
-    // still discover the port via the CLAWBOO_API_PORT env var.
-    writeApiPortFile(port)
+    // still discover the port via the CLAWBOO_API_PORT env var. Said out loud,
+    // since the clawboo command sends the access token only to this file's port.
+    if (!writeApiPortFile(port)) {
+      log.warn(
+        { port, file: getApiPortFilePath() },
+        'Could not write the port file. The clawboo command finds this server through it ' +
+          'and sends its access token only to the port it names, so it cannot sign in to ' +
+          'this server until the file can be written.',
+      )
+    }
 
     log.info({ url: browserUrl }, `Clawboo ready — open in browser: ${browserUrl}`)
 

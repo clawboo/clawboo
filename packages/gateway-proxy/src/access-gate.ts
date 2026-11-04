@@ -135,6 +135,42 @@ function isPageLoad(req: IncomingMessage): boolean {
   )
 }
 
+/**
+ * True when the request carries any fetch metadata. Browsers send it only to an
+ * HTTPS or loopback origin, so a phone on a plain-HTTP LAN address sends none,
+ * and neither do link previewers, scripts and older browsers.
+ */
+function hasFetchMetadata(req: IncomingMessage): boolean {
+  return ['sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-site'].some(
+    (name) => req.headers[name] !== undefined,
+  )
+}
+
+/** The only shape a minted launch code has, so nothing else is ever echoed into a page. */
+const LAUNCH_CODE_SHAPE = /^[A-Za-z0-9_-]{16,256}$/
+
+/**
+ * The page a request with no fetch metadata gets for a launch code: one button
+ * that POSTs the code back. A browser's person taps it; a link previewer never
+ * submits a form, so it never spends the code (or receives the token).
+ */
+function launchCodeConfirmPage(code: string): string {
+  return (
+    '<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<title>Sign in to Clawboo</title><style>' +
+    'body{font-family:system-ui,sans-serif;display:flex;min-height:100vh;margin:0;' +
+    'align-items:center;justify-content:center;background:#f6f6f7;color:#111}' +
+    'main{max-width:22rem;padding:1.5rem;text-align:center}' +
+    'button{font:inherit;font-weight:600;padding:.7rem 1.4rem;border:0;border-radius:.6rem;' +
+    'background:#e94560;color:#fff;cursor:pointer}p{color:#555;font-size:.9rem}' +
+    '</style></head><body><main><h1>Sign in to Clawboo</h1>' +
+    '<p>This one-time link signs in this browser. It works once, within two minutes.</p>' +
+    `<form method="post" action="?access_code=${code}">` +
+    '<button type="submit">Sign in</button></form></main></body></html>'
+  )
+}
+
 /** True when the request reached us over TLS (directly or via a terminating proxy). */
 function requestIsHttps(req: IncomingMessage): boolean {
   return String(req.headers['x-forwarded-proto'] ?? '').toLowerCase() === 'https'
@@ -311,15 +347,32 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
     // local users, and a URL lands in history, but a code is spent on first use
     // and dead within minutes. Never on an /api/ path, where it would let a
     // script holding a code skip the cookie; there it is ignored, and not spent.
-    // Only a page load spends a code (see isPageLoad); anything else is
-    // redirected without the cookie and leaves the code for the browser. A
-    // spent, expired or unknown code still redirects, without the cookie, so
-    // the browser lands on the dashboard's locked screen, which says how to get in.
+    // A code is spent by a page load (see isPageLoad), or by the POST from the
+    // sign-in page below. A request with no fetch metadata at all (a phone on a
+    // plain-HTTP LAN address, an older browser, a link previewer) gets that page
+    // instead of being spent. Anything else (a fetch, a frame) is redirected
+    // without the cookie and leaves the code for the browser. A spent, expired
+    // or unknown code still redirects, without the cookie, so the browser lands
+    // on the dashboard's locked screen, which says how to get in.
     const offeredCode = isApiPath ? null : url.searchParams.get(codeParam)
     if (offeredCode !== null) {
+      const posted = String(req.method ?? 'GET').toUpperCase() === 'POST'
+      if (!posted && !hasFetchMetadata(req) && LAUNCH_CODE_SHAPE.test(offeredCode)) {
+        res.statusCode = 200
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-store')
+        res.setHeader('Referrer-Policy', 'no-referrer')
+        res.setHeader(
+          'Content-Security-Policy',
+          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+        )
+        res.end(launchCodeConfirmPage(offeredCode))
+        return true
+      }
       url.searchParams.delete(codeParam)
-      res.statusCode = 302
-      if (isPageLoad(req) && redeemLaunchCode(offeredCode)) {
+      // 303 after the POST, so the browser follows with a GET.
+      res.statusCode = posted ? 303 : 302
+      if ((posted || isPageLoad(req)) && redeemLaunchCode(offeredCode)) {
         res.setHeader('Set-Cookie', accessCookie(req))
       }
       res.setHeader('Location', buildRedirectUrl(req, basePath + url.pathname + url.search))

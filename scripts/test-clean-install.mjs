@@ -120,6 +120,13 @@ const FAKE_PORT_CANDIDATES = [18791, 18795, 18799, 18803]
 // Total budget for bind attempts before giving up (covers slow teardown of a
 // just-killed e2e server; each retry round also best-effort kills leftovers).
 const FAKE_BIND_RETRY_MS = 10_000
+
+/**
+ * The CLI's closing line, `Clawboo:   http://<loopback>:<port>`. It prints
+ * whether or not a browser opened, so it is the readiness signal to wait for.
+ * Group 1 is the URL, group 2 the port.
+ */
+const DASHBOARD_URL_LINE = /Clawboo:\s+(http:\/\/(?:localhost|127\.0\.0\.1):(\d+))/
 // The CLI polls for its own server for up to ~45 s before giving up (a cold
 // Windows boot of the freshly-EXTRACTED bundle + better-sqlite3 binding gets
 // scanned by Defender on first load). Our budget has to exceed the CLI's own, or
@@ -1212,16 +1219,18 @@ async function main() {
     process.stderr.write(`[cli] ${data.toString().trimEnd()}\n`)
   })
 
-  // 11. Wait for the CLI to print an "opened at http://localhost:<port>" URL.
-  // CLI uses chalk for colors; strip ANSI escapes before regex matching.
+  // 11. Wait for the CLI's closing "Clawboo: <URL>" line. It prints whether or
+  // not a browser opened (a runner may have no xdg-open, and then there is no
+  // "opened at" line), on 127.0.0.1 since the launcher stopped dialling
+  // localhost. CLI uses chalk for colors; strip ANSI escapes before matching.
   // eslint-disable-next-line no-control-regex
   const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-  const urlRegex = /opened at\s+(http:\/\/localhost:(\d+))/i
+  const urlRegex = DASHBOARD_URL_LINE
   const deadline = Date.now() + READY_TIMEOUT_MS
   let openedUrl = null
   while (Date.now() < deadline) {
-    // ora writes the success banner ("opened at ...") to stderr; clack
-    // writes intro/outro to stdout. Search the combined buffer.
+    // ora writes its banner to stderr; clack writes intro/outro to stdout.
+    // Search the combined buffer.
     const match = stripAnsi(stdoutBuf + stderrBuf).match(urlRegex)
     if (match) {
       openedUrl = match[1]
@@ -1237,7 +1246,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 200))
   }
   if (!openedUrl) {
-    fail(`CLI did not print "opened at <URL>" within ${READY_TIMEOUT_MS}ms`)
+    fail(`CLI did not print "Clawboo: <URL>" within ${READY_TIMEOUT_MS}ms`)
     console.error('--- CLI stdout ---\n' + stripAnsi(stdoutBuf))
     return
   }
@@ -1626,14 +1635,14 @@ async function assertReusesRunningDashboard(cliPath, cwd, envPath) {
   })
   // 'close' (not 'exit') fires only after BOTH stdio streams drain. The reuse
   // path finishes in well under a second, so giving up on `exitCode` alone
-  // would race the still-pending 'data' event carrying the "opened at" line.
+  // would race the still-pending 'data' event carrying the "Clawboo:" line.
   reuseProc.once('close', () => {
     closed = true
   })
 
   // eslint-disable-next-line no-control-regex
   const strip = (s) => s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-  const urlRe = /opened at\s+(http:\/\/localhost:(\d+))/i
+  const urlRe = DASHBOARD_URL_LINE
   const deadline = Date.now() + READY_TIMEOUT_MS
   let openedPort = null
   while (Date.now() < deadline) {
@@ -1650,7 +1659,7 @@ async function assertReusesRunningDashboard(cliPath, cwd, envPath) {
     fail(
       closed
         ? `the second CLI exited (code ${reuseProc.exitCode}) before printing a URL`
-        : `the second CLI did not print "opened at <URL>" within ${READY_TIMEOUT_MS}ms`,
+        : `the second CLI did not print "Clawboo: <URL>" within ${READY_TIMEOUT_MS}ms`,
     )
     console.error('--- reuse CLI output ---\n' + strip(out))
     return false

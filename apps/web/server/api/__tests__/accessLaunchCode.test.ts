@@ -67,15 +67,24 @@ const pageLoad = { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' }
 function getPage(
   url: string,
   headers: Record<string, string> = {},
-): Promise<{ status: number; setCookie: string | null }> {
+  method = 'GET',
+): Promise<{ status: number; setCookie: string | null; body: string }> {
   return new Promise((resolve, reject) => {
-    http
-      .get(url, { headers }, (res) => {
-        res.resume()
+    const req = http.request(url, { method, headers }, (res) => {
+      let body = ''
+      res.setEncoding('utf8')
+      res.on('data', (chunk: string) => (body += chunk))
+      res.on('end', () => {
         const cookie = res.headers['set-cookie']
-        resolve({ status: res.statusCode ?? 0, setCookie: cookie ? cookie.join('; ') : null })
+        resolve({
+          status: res.statusCode ?? 0,
+          setCookie: cookie ? cookie.join('; ') : null,
+          body,
+        })
       })
-      .on('error', reject)
+    })
+    req.on('error', reject)
+    req.end()
   })
 }
 
@@ -114,9 +123,10 @@ describe('POST /api/access/launch-code on a locked server', () => {
       await fetch(`${base}/api/access/launch-code`, { method: 'POST', headers: withCookie })
     ).json()) as { code: string }
 
-    // A link previewer's fetch (no page-load metadata) leaves the code alone.
+    // A link previewer's fetch (no fetch metadata) gets the sign-in page, and
+    // the code is left alone.
     const preview = await getPage(`${base}/?access_code=${code}`)
-    expect(preview.status).toBe(302)
+    expect(preview.status).toBe(200)
     expect(preview.setCookie).toBeNull()
 
     const first = await getPage(`${base}/?access_code=${code}`, pageLoad)
@@ -126,6 +136,22 @@ describe('POST /api/access/launch-code on a locked server', () => {
     const second = await getPage(`${base}/?access_code=${code}`, pageLoad)
     expect(second.status).toBe(302)
     expect(second.setCookie).toBeNull()
+  })
+
+  it('signs in a browser that sends no fetch metadata through the sign-in page', async () => {
+    // A phone on a plain-HTTP LAN address: its browser sends no Sec-Fetch-*.
+    const base = await serve(TOKEN)
+    const { code } = (await (
+      await fetch(`${base}/api/access/launch-code`, { method: 'POST', headers: withCookie })
+    ).json()) as { code: string }
+
+    const page = await getPage(`${base}/?access_code=${code}`)
+    expect(page.status).toBe(200)
+    expect(page.body).toContain(`action="?access_code=${code}"`)
+
+    const posted = await getPage(`${base}/?access_code=${code}`, {}, 'POST')
+    expect(posted.status).toBe(303)
+    expect(posted.setCookie).toContain(`clawboo_access=${TOKEN}`)
   })
 
   it('answers only POST', async () => {

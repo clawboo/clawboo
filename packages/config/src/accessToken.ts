@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 
-import { resolveClawbooDir } from './paths'
+import { resolveClawbooDir, resolveOwnClawbooDir } from './paths'
 import { PRIVATE_FILE_MODE, mkdirPrivateSync } from './privateFiles'
 
 // The dashboard access token. `STUDIO_ACCESS_TOKEN` in the environment comes
@@ -59,11 +59,13 @@ export interface AccessTokenOptions {
 export class AccessTokenFileError extends Error {
   readonly file: string
   /** `problem` reads after the file name: "is empty", "could not be created (...)". */
-  constructor(file: string, problem: string) {
-    super(
-      `The access token file ${file} ${problem}. Delete it to make a new one on the next ` +
-        'start, or set STUDIO_ACCESS_TOKEN to choose the token yourself.',
-    )
+  constructor(
+    file: string,
+    problem: string,
+    remedy = 'Delete it to make a new one on the next start, or set STUDIO_ACCESS_TOKEN ' +
+      'to choose the token yourself.',
+  ) {
+    super(`The access token file ${file} ${problem}. ${remedy}`)
     this.name = 'AccessTokenFileError'
     this.file = file
   }
@@ -82,27 +84,41 @@ type FileRead =
   | { kind: 'absent' }
   | { kind: 'unusable'; problem: string; empty?: true }
 
+/** Refuses a symbolic link at open time; 0 on Windows, which has no such flag. */
+const noFollow = (): number => fs.constants?.O_NOFOLLOW ?? 0
+
+/**
+ * Judge the file and read it through one descriptor, so the permission check and
+ * the read are of the same file even if its name is pointed elsewhere between
+ * the two. The open refuses a symbolic link (ELOOP).
+ */
 function readTokenFile(file: string, platform: NodeJS.Platform): FileRead {
+  let fd: number
   try {
-    // lstat, not stat: a link here would point the chmod and the read at some
-    // other file.
-    if (!fs.lstatSync(file).isFile()) return { kind: 'unusable', problem: 'is not a regular file' }
+    // Windows has no O_NOFOLLOW; check for a link by name there instead.
+    if (platform === 'win32' && !fs.lstatSync(file).isFile()) {
+      return { kind: 'unusable', problem: 'is not a regular file' }
+    }
+    fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow())
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT') return { kind: 'absent' }
+    if (code === 'ELOOP' || code === 'EISDIR') {
+      return { kind: 'unusable', problem: 'is not a regular file' }
+    }
+    return { kind: 'unusable', problem: `could not be read (${(err as Error).message})` }
+  }
+  try {
+    if (!fs.fstatSync(fd).isFile()) return { kind: 'unusable', problem: 'is not a regular file' }
     // Narrow before reading, as settings.json is. Windows has no mode bits to
     // check; there the file inherits the user profile's permissions.
-    if (platform !== 'win32') {
-      try {
-        fs.chmodSync(file, PRIVATE_FILE_MODE)
-      } catch {
-        // Judged by the mode check below.
-      }
-      if ((fs.statSync(file).mode & 0o077) !== 0) {
-        return {
-          kind: 'unusable',
-          problem: 'is readable by other users and its permissions could not be narrowed',
-        }
+    if (platform !== 'win32' && !narrowedToOwner(fd)) {
+      return {
+        kind: 'unusable',
+        problem: 'is readable by other users and its permissions could not be narrowed',
       }
     }
-    const token = fs.readFileSync(file, 'utf8').trim()
+    const token = fs.readFileSync(fd, 'utf8').trim()
     if (!token)
       return { kind: 'unusable', problem: 'is empty, so it is not a usable token', empty: true }
     return SAFE_TOKEN_RE.test(token)
@@ -112,9 +128,20 @@ function readTokenFile(file: string, platform: NodeJS.Platform): FileRead {
           problem: `is not a usable token (only [${ACCESS_TOKEN_CHARSET}] is allowed)`,
         }
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' }
     return { kind: 'unusable', problem: `could not be read (${(err as Error).message})` }
+  } finally {
+    fs.closeSync(fd)
   }
+}
+
+/** Narrow the open file to 0600; true when it ends up closed to group and others. */
+function narrowedToOwner(fd: number): boolean {
+  try {
+    fs.fchmodSync(fd, PRIVATE_FILE_MODE)
+  } catch {
+    // Judged by the mode check below.
+  }
+  return (fs.fstatSync(fd).mode & 0o077) === 0
 }
 
 /** Synchronous sleep. Boot is synchronous here, and the wait is a few milliseconds. */
@@ -155,7 +182,15 @@ export function resolveAccessToken(opts: AccessTokenOptions = {}): ResolvedAcces
   }
 
   const platform = opts.platform ?? process.platform
-  const home = opts.clawbooHome ?? resolveClawbooDir(env)
+  const home = opts.clawbooHome ?? resolveOwnClawbooDir(env)
+  if (home === null) {
+    throw new AccessTokenFileError(
+      path.join(resolveClawbooDir(env), ACCESS_TOKEN_FILENAME),
+      'would sit in the shared temp folder, because the home folder does not exist',
+      'Set HOME to your home folder, CLAWBOO_HOME to a folder only you can use, or ' +
+        'STUDIO_ACCESS_TOKEN to choose the token yourself.',
+    )
+  }
   const file = path.join(home, ACCESS_TOKEN_FILENAME)
   const retryEmptyMs = opts.retryEmptyMs ?? 500
 
@@ -166,15 +201,31 @@ export function resolveAccessToken(opts: AccessTokenOptions = {}): ResolvedAcces
     if (read.kind === 'unusable') throw new AccessTokenFileError(file, read.problem)
 
     const token = randomBytes(32).toString('base64url')
+    let fd: number
     try {
       mkdirPrivateSync(home)
-      fs.writeFileSync(file, token, { flag: 'wx', mode: PRIVATE_FILE_MODE })
-      return { source: 'file', token, file, created: true }
+      fd = fs.openSync(file, 'wx', PRIVATE_FILE_MODE)
     } catch (err) {
       // Someone else wrote it first: read theirs on the next pass.
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue
       throw new AccessTokenFileError(file, `could not be created (${(err as Error).message})`)
     }
+    try {
+      // A FAT or SMB mount can ignore the mode asked for at create time. Check
+      // before trusting the token, and leave the file: it is never overwritten.
+      if (platform !== 'win32' && !narrowedToOwner(fd)) {
+        throw new AccessTokenFileError(
+          file,
+          'was created readable by other users, and its permissions could not be narrowed',
+          'Use a CLAWBOO_HOME on a filesystem that keeps file permissions, or set ' +
+            'STUDIO_ACCESS_TOKEN to choose the token yourself.',
+        )
+      }
+      fs.writeFileSync(fd, token, 'utf8')
+    } finally {
+      fs.closeSync(fd)
+    }
+    return { source: 'file', token, file, created: true }
   }
   throw new AccessTokenFileError(file, 'kept changing while it was read')
 }
@@ -187,7 +238,11 @@ export function readAccessTokenFile(
   opts: Omit<AccessTokenOptions, 'retryEmptyMs'> = {},
 ): string | null {
   const env = opts.env ?? process.env
-  const file = resolveAccessTokenPath(env, opts.clawbooHome)
-  const read = readTokenFile(file, opts.platform ?? process.platform)
+  const home = opts.clawbooHome ?? resolveOwnClawbooDir(env)
+  if (home === null) return null
+  const read = readTokenFile(
+    path.join(home, ACCESS_TOKEN_FILENAME),
+    opts.platform ?? process.platform,
+  )
   return read.kind === 'ok' ? read.token : null
 }

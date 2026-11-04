@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:18790/api/teams
 curl -s http://127.0.0.1:18790/api/agents
 ```
 
-Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. With an access token set, add `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` to these requests and to the next one.
+Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. Add the access cookie to these requests and to the next one: `-b "clawboo_access=$(cat ~/.clawboo/access-token)"` on a default install, or `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` when you set that variable. Leave it out only when `STUDIO_ACCESS_TOKEN=` is set blank.
 
 </Step>
 <Step title="Get a signed attach URL">
@@ -141,7 +141,7 @@ The runs Clawboo starts for a team chat (a turn, a hand-off, a plan step) carry 
 
 ## The attach token
 
-Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters once you set `STUDIO_ACCESS_TOKEN`:
+Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters whenever the access gate is on, which is every install unless `STUDIO_ACCESS_TOKEN=` is set blank:
 
 - A request to one of the four server paths without the access cookie is let in only when its token is valid and it came straight to the server's loopback port: from `127.0.0.1` or `::1`, with none of the headers a proxy adds (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`).
 - `/api/mcp/config` always needs the cookie, because it signs the identity you ask for. So does `POST /api/mcp/attach-secret/rotate`.
@@ -157,13 +157,16 @@ The attach token, and the rule that an unsigned TeamChat session gets no tools, 
 
 <Accordion title="If an attach URL leaks">
 
-The token and the signatures never change on their own. To replace them, ask Clawboo to make a new signing secret. The server keeps running. With an access token set, add `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`:
+The token and the signatures never change on their own. To replace them, ask Clawboo to make a new signing secret. The server keeps running. The request needs the access cookie; on a default install it is the token in `~/.clawboo/access-token`:
 
 ```bash
-curl -s -X POST http://127.0.0.1:18790/api/mcp/attach-secret/rotate
+curl -s -X POST -b "clawboo_access=$(cat ~/.clawboo/access-token)" \
+  http://127.0.0.1:18790/api/mcp/attach-secret/rotate
 ```
 
-You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it when an access token is set.
+When you set `STUDIO_ACCESS_TOKEN` yourself, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` instead. With the gate turned off, leave the cookie out.
+
+You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it while the access gate is on.
 
 </Accordion>
 
@@ -238,7 +241,7 @@ This URL carries no scope, so the list has no claim or status tools.
 <AccordionGroup>
 <Accordion title="401 Clawboo access token required, on an MCP URL">
 
-**What it means:** the access token is set, and the request had no cookie and no valid attach token, or it did not come straight to the loopback port.
+**What it means:** the access gate is on, and the request had no cookie and no valid attach token, or it did not come straight to the loopback port.
 
 **Fix:** copy the URL again from `/api/mcp/config` (sending the cookie). A URL from another install, from before a data reset, or from a version without attach tokens has no valid token. Point the agent at `127.0.0.1` directly, not through a proxy. If the agent's environment sets `HTTP_PROXY` or `HTTPS_PROXY`, add `127.0.0.1` and `localhost` to its `NO_PROXY`.
 

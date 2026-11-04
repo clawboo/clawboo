@@ -18,11 +18,15 @@ const PAGE_LOAD = {
   'sec-fetch-site': 'none',
 }
 
-function mockReq(url: string, headers: Record<string, string> = PAGE_LOAD): IncomingMessage {
+function mockReq(
+  url: string,
+  headers: Record<string, string> = PAGE_LOAD,
+  method = 'GET',
+): IncomingMessage {
   return {
     url,
     headers: { host: 'localhost:18790', ...headers },
-    method: 'GET',
+    method,
     socket: { remoteAddress: '127.0.0.1' },
   } as unknown as IncomingMessage
 }
@@ -63,9 +67,10 @@ function open(
   url: string,
   extra: Record<string, string> = {},
   base: Record<string, string> = PAGE_LOAD,
+  method = 'GET',
 ) {
   const cap = mockRes()
-  const handled = gate.handleHttp(mockReq(url, { ...base, ...extra }), cap.res)
+  const handled = gate.handleHttp(mockReq(url, { ...base, ...extra }, method), cap.res)
   return { handled, ...cap }
 }
 
@@ -181,7 +186,6 @@ describe('?access_code= on something other than a page load', () => {
   // must not spend the code, or it would receive the token in Set-Cookie and the
   // device the link was meant for would land on the locked screen.
   for (const [name, headers] of [
-    ['no fetch metadata (a link previewer, curl)', {}],
     ['a fetch() from a page', { 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }],
     ['a frame', { 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe' }],
     ['an image', { 'sec-fetch-mode': 'no-cors', 'sec-fetch-dest': 'image' }],
@@ -205,7 +209,57 @@ describe('?access_code= on something other than a page load', () => {
   })
 })
 
+describe('?access_code= with no fetch metadata at all', () => {
+  // A browser sends Sec-Fetch-* only to an HTTPS or loopback origin, so a phone
+  // opening a plain-HTTP LAN link sends none, and neither does a link previewer.
+  // Neither is spent by the GET: the browser gets a page whose button POSTs the
+  // code, which a previewer never does.
+  it('serves a sign-in page that posts the code, sets no cookie, and keeps the code', () => {
+    const { gate } = gateAt()
+    const { code } = gate.mintLaunchCode()!
+    const page = open(gate, `/?access_code=${code}`, {}, {})
+    expect(page.handled).toBe(true)
+    expect(page.statusCode).toBe(200)
+    expect(page.headers['content-type']).toContain('text/html')
+    expect(page.headers['cache-control']).toBe('no-store')
+    expect(page.headers['content-security-policy']).toContain("frame-ancestors 'none'")
+    expect(page.headers['set-cookie']).toBeUndefined()
+    expect(page.body).toContain('method="post"')
+    expect(page.body).toContain(`action="?access_code=${code}"`)
+    expect(page.body).not.toContain(TOKEN)
+    expect(open(gate, `/?access_code=${code}`).headers['set-cookie']).toBeDefined()
+  })
+
+  it('signs in on the POST from that page, once', () => {
+    const { gate } = gateAt()
+    const { code } = gate.mintLaunchCode()!
+    const posted = open(gate, `/board?access_code=${code}`, {}, {}, 'POST')
+    expect(posted.statusCode).toBe(303)
+    expect(posted.headers['set-cookie']).toContain(`clawboo_access=${TOKEN}`)
+    expect(posted.headers['location']).toBe('http://localhost:18790/board')
+    const again = open(gate, `/board?access_code=${code}`, {}, {}, 'POST')
+    expect(again.statusCode).toBe(303)
+    expect(again.headers['set-cookie']).toBeUndefined()
+  })
+
+  it('does not put a malformed code into the page', () => {
+    const { gate } = gateAt()
+    const reply = open(gate, '/?access_code="><script>alert(1)</script>', {}, {})
+    expect(reply.statusCode).toBe(302)
+    expect(reply.body).not.toContain('<script>')
+    expect(reply.headers['set-cookie']).toBeUndefined()
+  })
+})
+
 describe('?access_code= on an /api/ path', () => {
+  it('is not accepted by a POST to an /api/ path either', () => {
+    const { gate } = gateAt()
+    const { code } = gate.mintLaunchCode()!
+    const api = open(gate, `/api/settings?access_code=${code}`, {}, {}, 'POST')
+    expect(api.statusCode).toBe(401)
+    expect(open(gate, `/?access_code=${code}`).headers['set-cookie']).toBeDefined()
+  })
+
   for (const path of ['/api/settings', '/API/settings', '/api/access/launch-code']) {
     it(`is not accepted on ${path}, and the code survives for the page`, () => {
       const { gate } = gateAt()

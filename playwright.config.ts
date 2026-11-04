@@ -148,8 +148,10 @@ export default defineConfig({
   ],
   webServer: {
     command: `CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web build:ui && CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web start`,
-    // The public page shell: every /api/ route needs the access cookie.
-    url: `${API_BASE}/`,
+    // A Clawboo route, so a reused server on this port must be Clawboo: it
+    // answers 401 here without the cookie, which Playwright counts as ready,
+    // while another program at `/` would pass a root check and fail later.
+    url: `${API_BASE}/api/settings`,
     reuseExistingServer: !process.env.CI,
     // Bumped from 60s — a cold `vite build` takes 80–120s on the macOS
     // dev box. The 60s default was timing out before the UI bundle

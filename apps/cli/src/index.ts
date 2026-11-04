@@ -31,12 +31,13 @@ import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
 import { shouldOfferRestart } from './versionCheck'
 import {
-  DASHBOARD_HOST,
+  dashboardHost,
   dashboardUrl,
   discoverDashboard,
   fetchServerVersion,
   launcherAccessToken,
   mintLaunchCode,
+  openReport,
   openUrlInBrowser,
   probeDashboard,
   probePort,
@@ -168,7 +169,7 @@ function printGatedNotice(port: number): void {
   )
   p.log.info(
     chalk.gray('Open ') +
-      chalk.cyan.underline(`http://${DASHBOARD_HOST}:${port}${uiPath()}?access_token=<token>`) +
+      chalk.cyan.underline(`${dashboardUrl(port)}${uiPath() ? '' : '/'}?access_token=<token>`) +
       chalk.gray(' once to set it in your browser.'),
   )
 }
@@ -184,7 +185,7 @@ function printBrowserTokenHint(port: number): void {
   if (fromEnv === undefined || !fromEnv.trim()) return
   p.log.info(
     chalk.gray('STUDIO_ACCESS_TOKEN is set. If the dashboard does not load, open ') +
-      chalk.cyan.underline(`http://${DASHBOARD_HOST}:${port}${uiPath()}?access_token=<token>`) +
+      chalk.cyan.underline(`${dashboardUrl(port)}${uiPath() ? '' : '/'}?access_token=<token>`) +
       chalk.gray(' once in this browser.'),
   )
 }
@@ -209,14 +210,29 @@ async function openDashboard(port: number): Promise<boolean> {
   const minted = await mintLaunchCode(port)
   const spinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
   const opened = await openUrlInBrowser(minted?.gated ? dashboardUrl(port, minted.code) : plain)
-  if (opened) {
-    spinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(plain))
-  } else {
-    spinner.warn(chalk.yellow('Could not open a browser on this computer.'))
-    printNoBrowserHint()
+  switch (openReport(minted, opened)) {
+    case 'no-browser':
+      spinner.warn(chalk.yellow('Could not open a browser on this computer.'))
+      printNoBrowserHint()
+      break
+    case 'sign-in-unknown':
+      // The server gave no sign-in link (a timeout, a 429, or a server older
+      // than launch codes), so the browser may show the locked screen.
+      spinner.warn(
+        chalk.yellow('Clawboo opened at ') +
+          chalk.cyan.underline(plain) +
+          chalk.yellow(', but without a sign-in link.'),
+      )
+      p.log.info(
+        chalk.gray('If it says the dashboard is locked, run ') +
+          chalk.white('clawboo open') +
+          chalk.gray(' to sign this browser in.'),
+      )
+      printBrowserTokenHint(port)
+      break
+    default:
+      spinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(plain))
   }
-  // No code from a server that answered us: one older than launch codes.
-  if (minted === null) printBrowserTokenHint(port)
   return opened
 }
 
@@ -335,7 +351,7 @@ async function reconcileServerVersion(port: number, opts: LaunchOptions): Promis
   // would be a silent death. If something else grabbed it, start without a pin
   // from us and let the server resolve its own port (an auto-scan — or the
   // user's own CLAWBOO_API_PORT, if they have one exported).
-  const free = !(await probePort(DASHBOARD_HOST, port, 500))
+  const free = !(await probePort(dashboardHost(), port, 500))
   const restarted = await startAndReport({ port: free ? port : undefined, verb: 'Restarting' })
   if (restarted === null) printStoppedNotReplaced(port)
   return restarted
@@ -452,7 +468,7 @@ async function runStop(): Promise<void> {
     // A token-gated server there is alive too, so only a port with no Clawboo
     // answer at all counts as dead.
     const recorded = readRuntimePort()
-    if (recorded !== null && (await probeDashboard(DASHBOARD_HOST, recorded, 1_500)) === 'none') {
+    if (recorded !== null && (await probeDashboard(dashboardHost(), recorded, 1_500)) === 'none') {
       removeRuntimePortFile()
     }
     p.log.info(chalk.gray('No Clawboo server is running.'))
@@ -511,7 +527,7 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
     // Pin only if the port really freed — a `pnpm dev` supervisor can respawn
     // the server on the same port between our stop and our start. Unpinned, the
     // successor resolves its own port the way any boot does.
-    if (!(await probePort(DASHBOARD_HOST, port, 500))) pinned = port
+    if (!(await probePort(dashboardHost(), port, 500))) pinned = port
   }
 
   const started = await startAndReport({ port: pinned, verb: 'Restarting' })

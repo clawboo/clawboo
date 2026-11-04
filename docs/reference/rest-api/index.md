@@ -11,18 +11,18 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 
 | Topic          | Default                                                                               |
 | -------------- | ------------------------------------------------------------------------------------- |
-| Base URL       | `http://localhost:18790` (the port can differ; see [Base URL](#base-url))             |
+| Base URL       | `http://127.0.0.1:18790` (the port can differ; see [Base URL](#base-url))             |
 | Request bodies | JSON, up to 2 MB                                                                      |
-| Authentication | None on the default loopback bind; the `clawboo_access` cookie when a token is set    |
+| Authentication | The `clawboo_access` cookie on every `/api/*` route, unless the gate is turned off    |
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
 | Routes         | 206: 94 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 7 `PUT` ([index](#route-index))     |
 
-Check that the server is up (the response carries `"ok": true` when no boot check failed):
+Check that the server is up (the response carries `"ok": true` when no boot check failed). Without the cookie the answer is a `401` from the access gate, which also tells you Clawboo is running:
 
 ```bash
-curl http://localhost:18790/api/health
+curl -b "clawboo_access=$(cat ~/.clawboo/access-token)" http://127.0.0.1:18790/api/health
 ```
 
 The examples on these pages assume the default port. Every `/api/*` route needs the access cookie, so add it to each `curl` as shown under [Authentication](#authentication).
@@ -71,7 +71,7 @@ curl -b "clawboo_access=$(cat ~/.clawboo/access-token)" http://127.0.0.1:18790/a
 
 With your own token, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`. Send the cookie to `127.0.0.1`, the address Clawboo listens on: `localhost` can resolve to `::1`, where another program could be listening on the same port. On a computer other people use, the token also shows in the process list while `curl` runs.
 
-**One-time sign-in codes.** `POST /api/access/launch-code`, behind the cookie like every other route, answers `{ "gated": true, "code": "…", "expiresAt": <epoch ms>, "expiresInMs": 120000 }`, or `{ "gated": false }` on a server with no token. Loading any page address with `?access_code=<code>` in a browser sets the cookie once, within two minutes; a used, expired or unknown code redirects without it, and so does a request without the page-load headers `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`, which leaves the code live. A code is never accepted on an `/api/` path. The route is on the sensitive rate limit.
+**One-time sign-in codes.** `POST /api/access/launch-code`, behind the cookie like every other route, answers `{ "gated": true, "code": "…", "expiresAt": <epoch ms>, "expiresInMs": 120000 }`, or `{ "gated": false }` on a server with no token. Loading any page address with `?access_code=<code>` in a browser sets the cookie once, within two minutes, when the request carries `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. A request with no fetch metadata at all (browsers send none to a plain-HTTP network address) gets a `200` sign-in page whose button sends `POST ?access_code=<code>`, which sets the cookie with a `303`. A fetch or a frame, and a used, expired or unknown code, get a redirect without the cookie; a code that was not spent stays live. A code is never accepted on an `/api/` path. The route is on the sensitive rate limit.
 
 Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer (or a `401` when the token is wrong) instead of the route's response.
 

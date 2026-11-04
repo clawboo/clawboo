@@ -73,6 +73,9 @@ function DialogBody({
   const [copied, setCopied] = useState(false)
   const expiryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const alive = useRef(true)
+  // Each mint's number. A reply to anything but the latest is dropped: in Strict
+  // Mode the effect mints twice on one dialog, and the older reply can land last.
+  const latestRequest = useRef(0)
 
   const clearExpiry = (): void => {
     if (expiryTimer.current !== null) clearTimeout(expiryTimer.current)
@@ -80,13 +83,15 @@ function DialogBody({
   }
 
   const mint = useCallback(async () => {
+    const request = ++latestRequest.current
+    const current = (): boolean => alive.current && request === latestRequest.current
     clearExpiry()
     setCopied(false)
     setLink({ kind: 'loading' })
     try {
       const res = await apiFetch('/api/access/launch-code', { method: 'POST' })
       const body = res.ok ? ((await res.json()) as LaunchCodeBody) : null
-      if (!alive.current) return
+      if (!current()) return
       if (body?.gated === false) {
         setLink({ kind: 'ready', code: null })
         return
@@ -98,12 +103,12 @@ function DialogBody({
       setLink({ kind: 'ready', code: body.code })
       expiryTimer.current = setTimeout(
         () => {
-          if (alive.current) setLink({ kind: 'expired' })
+          if (current()) setLink({ kind: 'expired' })
         },
         Math.max(0, body.expiresInMs ?? 0),
       )
     } catch {
-      if (alive.current) setLink({ kind: 'error' })
+      if (current()) setLink({ kind: 'error' })
     }
   }, [])
 

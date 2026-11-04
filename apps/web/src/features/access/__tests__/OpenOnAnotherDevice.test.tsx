@@ -2,8 +2,9 @@
 // code for a phone) so nobody needs a terminal to open Clawboo somewhere else.
 // The link carries a launch code, never the access token.
 
+import { StrictMode } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { http, HttpResponse } from 'msw'
+import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
@@ -142,6 +143,31 @@ describe('OpenOnAnotherDeviceDialog on a network address', () => {
     )
     await screen.findByTestId('device-link')
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe('OpenOnAnotherDeviceDialog with overlapping requests', () => {
+  it('shows the newest link, even when an older request answers last', async () => {
+    // Strict Mode mounts the dialog's effect twice, so two codes are minted on
+    // one dialog; the first answers after the second.
+    let calls = 0
+    server.use(
+      http.post('/api/access/launch-code', async () => {
+        calls += 1
+        const code = calls === 1 ? 'code_older' : 'code_newer'
+        if (calls === 1) await delay(80)
+        return HttpResponse.json({ gated: true, code, expiresAt: 0, expiresInMs: 120_000 })
+      }),
+    )
+    render(
+      <StrictMode>
+        <OpenOnAnotherDeviceDialog open onClose={() => {}} origin="http://192.168.1.5:18790" />
+      </StrictMode>,
+    )
+    expect(await screen.findByText(/code_newer/)).toBeInTheDocument()
+    await waitFor(() => expect(calls).toBe(2))
+    await new Promise((r) => setTimeout(r, 150))
+    expect(screen.getByTestId('device-link')).toHaveTextContent('code_newer')
   })
 })
 

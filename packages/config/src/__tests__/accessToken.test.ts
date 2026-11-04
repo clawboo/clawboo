@@ -8,6 +8,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -45,8 +46,42 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
 })
 
+/**
+ * Run `before` just ahead of the exclusive create of the token file, and
+ * `after` (with the path) once it exists: another app winning the race, or a
+ * filesystem that ignores the mode.
+ */
+function beforeExclusiveCreate(before: () => void, after?: (created: string) => void): void {
+  const realOpen = fs.openSync.bind(fs)
+  let done = false
+  vi.spyOn(fs, 'openSync').mockImplementation(((
+    target: fs.PathLike,
+    flags?: fs.OpenMode,
+    mode?: fs.Mode | null,
+  ) => {
+    const exclusive = flags === 'wx'
+    if (exclusive && !done) {
+      done = true
+      before()
+      const fd = realOpen(target, flags as fs.OpenMode, mode)
+      after?.(String(target))
+      return fd
+    }
+    return realOpen(target, flags as fs.OpenMode, mode)
+  }) as typeof fs.openSync)
+}
+
 /** An environment with no STUDIO_ACCESS_TOKEN at all, pointed at the sandbox. */
 const unsetEnv = (): NodeJS.ProcessEnv => ({ CLAWBOO_HOME: home })
+
+/** Make every chmod fail, as it does on a file another user owns. */
+function failChmod(): void {
+  const eperm = () => {
+    throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
+  }
+  vi.spyOn(fs, 'chmodSync').mockImplementation(eperm)
+  vi.spyOn(fs, 'fchmodSync').mockImplementation(eperm)
+}
 
 function writeTokenFile(contents: string, mode = 0o600): void {
   mkdirSync(home, { recursive: true })
@@ -164,9 +199,7 @@ describe('resolveAccessToken: the shared file', () => {
 
   posixOnly('refuses a file that stays readable by others', () => {
     writeTokenFile('readable-token', 0o644)
-    vi.spyOn(fs, 'chmodSync').mockImplementation(() => {
-      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
-    })
+    failChmod()
     expect(() => resolveAccessToken({ env: unsetEnv() })).toThrow(/readable by other users/)
   })
 
@@ -213,17 +246,88 @@ describe('resolveAccessToken: the shared file', () => {
   it('uses the token another app wrote first when both start at once', () => {
     // The desktop app writes the file between our read (nothing there) and our
     // exclusive create: the create fails with EEXIST, and its token wins.
-    const realWrite = fs.writeFileSync.bind(fs)
-    vi.spyOn(fs, 'writeFileSync').mockImplementationOnce((target, data, options) => {
-      writeTokenFile('desktop-won-the-race')
-      return realWrite(target, data, options as fs.WriteFileOptions)
-    })
+    beforeExclusiveCreate(() => writeTokenFile('desktop-won-the-race'))
     expect(resolveAccessToken({ env: unsetEnv() })).toEqual({
       source: 'file',
       token: 'desktop-won-the-race',
       file,
       created: false,
     })
+  })
+})
+
+posixOnly('refuses a new file the filesystem left readable by others, and keeps it', () => {
+  // A FAT or SMB mount can ignore the 0600 asked for at create time.
+  beforeExclusiveCreate(
+    () => undefined,
+    (created) => chmodSync(created, 0o644),
+  )
+  failChmod()
+  expect(() => resolveAccessToken({ env: unsetEnv() })).toThrow(/readable by other users/)
+  expect(existsSync(file)).toBe(true)
+})
+
+posixOnly(
+  'reads the file it checked, even if the name is pointed elsewhere after the check',
+  () => {
+    // Someone who can rename entries in the folder swaps a file in between the
+    // permission check and the read. The read must still be the checked file.
+    writeTokenFile('checked-token')
+    const swap = path.join(tmp, 'swap')
+    writeFileSync(swap, 'swapped-token')
+    chmodSync(swap, 0o600)
+    let swapped = false
+    const doSwap = (): void => {
+      if (swapped) return
+      swapped = true
+      renameSync(swap, file)
+    }
+    const realStat = fs.statSync.bind(fs)
+    const realFstat = fs.fstatSync.bind(fs)
+    vi.spyOn(fs, 'statSync').mockImplementation(((p: fs.PathLike, o?: fs.StatSyncOptions) => {
+      if (String(p) === file) doSwap()
+      return realStat(p, o)
+    }) as typeof fs.statSync)
+    vi.spyOn(fs, 'fstatSync').mockImplementation(((fd: number, o?: fs.StatOptions) => {
+      doSwap()
+      return realFstat(fd, o)
+    }) as typeof fs.fstatSync)
+    const resolved = resolveAccessToken({ env: unsetEnv() })
+    expect(resolved.source === 'file' && resolved.token).toBe('checked-token')
+  },
+)
+
+describe('with no home folder', () => {
+  // os.homedir() names a folder that does not exist, and nothing says where the
+  // Clawboo home is. Falling back to the shared temp folder would put the token
+  // where other users can create the folder first, so the server refuses.
+  beforeEach(() => {
+    vi.spyOn(os, 'homedir').mockReturnValue(path.join(tmp, 'no-such-home'))
+    vi.spyOn(os, 'tmpdir').mockReturnValue(path.join(tmp, 'shared-tmp'))
+    mkdirSync(path.join(tmp, 'shared-tmp'))
+  })
+
+  it('refuses to make a token in the shared temp folder', () => {
+    expect(() => resolveAccessToken({ env: {} })).toThrow(/home folder/)
+    expect(existsSync(path.join(tmp, 'shared-tmp', '.clawboo', ACCESS_TOKEN_FILENAME))).toBe(false)
+  })
+
+  it('still works with CLAWBOO_HOME set', () => {
+    expect(resolveAccessToken({ env: { CLAWBOO_HOME: home } }).source).toBe('file')
+  })
+
+  it('still works with STUDIO_ACCESS_TOKEN set', () => {
+    expect(resolveAccessToken({ env: { STUDIO_ACCESS_TOKEN: 'set' } })).toEqual({
+      source: 'env',
+      token: 'set',
+    })
+  })
+
+  it('reads no token from the shared temp folder', () => {
+    const shared = path.join(tmp, 'shared-tmp', '.clawboo')
+    mkdirSync(shared, { mode: 0o700 })
+    writeFileSync(path.join(shared, ACCESS_TOKEN_FILENAME), 'planted', { mode: 0o600 })
+    expect(readAccessTokenFile({ env: {} })).toBeNull()
   })
 })
 
@@ -247,9 +351,7 @@ describe('readAccessTokenFile (the CLI side: read only)', () => {
 
   posixOnly('is null for a file that stays readable by others', () => {
     writeTokenFile('readable-token', 0o644)
-    vi.spyOn(fs, 'chmodSync').mockImplementation(() => {
-      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' })
-    })
+    failChmod()
     expect(readAccessTokenFile({ env: unsetEnv() })).toBeNull()
   })
 })

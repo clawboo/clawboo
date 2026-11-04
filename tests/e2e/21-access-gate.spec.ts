@@ -54,6 +54,37 @@ test.describe('the access gate', () => {
   })
 })
 
+test.describe('a launch code without fetch metadata', () => {
+  // Browsers send Sec-Fetch-* only to HTTPS and loopback addresses, so a phone
+  // opening a plain-HTTP LAN link sends none. Playwright's request context sends
+  // none either, so it stands in for that phone here.
+  test('gets a sign-in page, and the button signs the device in once', async ({
+    request,
+    playwright,
+  }) => {
+    const minted = await request.post(`${API_BASE}/api/access/launch-code`)
+    const { code } = (await minted.json()) as { code: string }
+    const phone = await playwright.request.newContext({ storageState: SIGNED_OUT })
+    const url = `${API_BASE}/?access_code=${code}`
+
+    const page = await phone.get(url, { maxRedirects: 0 })
+    expect(page.status()).toBe(200)
+    expect(page.headers()['set-cookie']).toBeUndefined()
+    expect(await page.text()).toContain('method="post"')
+
+    const signedIn = await phone.post(url, { maxRedirects: 0 })
+    expect(signedIn.status()).toBe(303)
+    expect(signedIn.headers()['set-cookie']).toContain('clawboo_access=')
+    expect((await phone.get(`${API_BASE}/api/settings`)).status()).toBe(200)
+
+    const late = await playwright.request.newContext({ storageState: SIGNED_OUT })
+    const again = await late.post(url, { maxRedirects: 0 })
+    expect(again.headers()['set-cookie']).toBeUndefined()
+    await late.dispose()
+    await phone.dispose()
+  })
+})
+
 test.describe('Open on another device', () => {
   // A private gateway: the worker-scoped one is closed by 15-live-reconnect.
   let ownGateway: MockGateway
