@@ -721,6 +721,29 @@ describe('runTeamExchange under the run cap', () => {
     expect(slots.stats().queued).toBe(0)
     other.release()
   })
+
+  it('a participant whose runtime cannot be resolved never waits for a slot', async () => {
+    seedTeam('tmq', [{ id: 'cc', runtime: 'claude-code' }], 'cc')
+    const other = slots.tryAcquire()!
+    try {
+      const exchange = runTeamExchange({
+        db,
+        teamId: 'tmq',
+        stimulus: 'go',
+        makeAdapterFor: () => null,
+      })
+      await new Promise((r) => setImmediate(r))
+      // Every slot is taken, but the turn runs nothing, so it does not queue for one.
+      expect(slots.stats().queued).toBe(0)
+      // And the exchange ends while the only slot is still held.
+      const res = await exchange
+      expect(res.ok).toBe(true)
+      expect(readRoom(db, { roomId: resolveRoomForTeam('tmq') })).toEqual([])
+      expect(slots.stats()).toEqual({ size: 1, running: 1, queued: 0 })
+    } finally {
+      other.release()
+    }
+  })
 })
 
 describe('normalizeSingleLeader (split-brain guard)', () => {

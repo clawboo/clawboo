@@ -307,13 +307,15 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
   // runSlots). A client that leaves while a turn waits for its slot ends the wait:
   // that speaker contributes nothing, and the exchange stops at its abort check.
   const dispatch: ChatTurnDispatcher = (participant, turnIndex) => {
-    // The lock dispatchTurn takes, so two turns of one agent never hold two slots.
     const r = resolved.get(participant.agentId)
+    // An unresolved runtime runs nothing, so its turn does not wait for a slot.
+    if (!r) return Promise.resolve({ obligations: [] })
+    // The lock dispatchTurn takes, so two turns of one agent never hold two slots.
     const row = agentRowById.get(participant.agentId)
     const key =
-      r?.homeKind === 'persistent'
+      r.homeKind === 'persistent'
         ? runtimeIdentityHomePath(participant.runtime, participant.agentId)
-        : r?.homeKind === 'connected' && row
+        : r.homeKind === 'connected' && row
           ? connectedAgentKey(row)
           : null
     return withRunSlot(() => dispatchTurn(participant, turnIndex), {

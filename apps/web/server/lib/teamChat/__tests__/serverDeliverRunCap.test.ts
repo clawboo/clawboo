@@ -19,9 +19,13 @@ import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
   agents,
   createTask,
+  enqueueInbox,
   getComments,
   listExecutions,
   listTasks,
+  listUndeliveredInbox,
+  postToRoom,
+  resolveRoomForTeam,
   teams,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -473,6 +477,48 @@ describe('the run cap in team chat (cap of one slot)', () => {
     expect(lead.starts).toHaveLength(1)
     await settle(() => h.persisted.some((p) => p.text.includes('hello back')))
     expect(order).toEqual(['other:start', 'other:end', 'lead:start', 'lead:end'])
+  })
+
+  it('a turn that waited for a slot starts with what reached its agent while it waited', async () => {
+    const order: string[] = []
+    const other = new ScriptedAdapter('other', [['hold', done('other done')]], order)
+    const lead = new ScriptedAdapter('lead', [[done('noted')]], order)
+    const h = harness(
+      new Map([
+        [OTHER, other],
+        [LEAD, lead],
+      ]),
+    )
+
+    await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
+    await settle(() => other.release !== null)
+    const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN)
+    await settle(() => h.queuedRuns.has(skFor(LEAD)))
+    // A teammate's result and a teammate's post reach the lead while its turn waits.
+    enqueueInbox(db, {
+      agentId: LEAD,
+      teamId: TEAM,
+      kind: 'task_update',
+      body: 'Worker finished: the parser passes',
+    })
+    postToRoom(db, {
+      roomId: resolveRoomForTeam(TEAM),
+      teamId: TEAM,
+      authorAgentId: WORKER,
+      body: 'the parser lives in src/parse.ts',
+      kind: 'peer',
+    })
+
+    other.release!()
+    await delivery
+    expect(lead.starts).toHaveLength(1)
+    const context = lead.starts[0]!.context ?? ''
+    expect(context).toContain('Worker finished: the parser passes')
+    expect(context).toContain('the parser lives in src/parse.ts')
+    // The row went out with this turn, so the next one does not carry it again.
+    expect(listUndeliveredInbox(db, LEAD, { teamId: TEAM }).map((r) => r.body)).not.toContain(
+      'Worker finished: the parser passes',
+    )
   })
 
   it("a person's turn that waited and then fails to start rejects, so its caller can say so", async () => {

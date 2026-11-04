@@ -135,6 +135,18 @@ describe('createRunSlots', () => {
     expect(slots.stats().queued).toBe(0)
   })
 
+  it('refuses a signal that has already aborted even when a slot is free, and takes none', async () => {
+    const slots = createRunSlots(1)
+    const ctl = new AbortController()
+    ctl.abort()
+    await expect(slots.acquire({ signal: ctl.signal, key: 'home:a' })).rejects.toBeInstanceOf(
+      RunQueueAbortedError,
+    )
+    expect(slots.stats()).toEqual({ size: 1, running: 0, queued: 0 })
+    // Neither the slot nor the agent's key stayed taken.
+    expect(slots.tryAcquire('home:a')).not.toBeNull()
+  })
+
   it('keeps a granted slot when the signal aborts afterwards', async () => {
     const slots = createRunSlots(1)
     const ctl = new AbortController()

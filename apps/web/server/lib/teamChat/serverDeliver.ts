@@ -887,9 +887,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       targetSessionKey,
       () =>
         new Promise<void>((started, failStart) => {
-          // Rendered HERE: this runs when the queue releases the delivery, so the
-          // context reflects state at start time rather than at enqueue time.
-          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -1206,6 +1203,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 return
               }
             }
+            // Rendered HERE, with the run's slot and its agent's lock held and every
+            // gate passed, so the context is the state at start time: anything that
+            // arrived while the delivery waited (in the nudge queue, for a run slot
+            // or for the lock) rides this turn.
+            const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
             let run: RunHandle
             try {
               run = await adapter.start(

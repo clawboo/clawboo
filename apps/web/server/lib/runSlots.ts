@@ -64,9 +64,10 @@ export interface RunSlots {
   tryAcquire(key?: string | null): RunSlot | null
   /**
    * A slot as soon as one is free for this run, oldest waiter first. Rejects with
-   * {@link RunQueueAbortedError} if `signal` aborts before the slot is granted. A
-   * slot granted just as the signal fires still resolves: the caller owns it and
-   * must release it.
+   * {@link RunQueueAbortedError} if `signal` aborts before the slot is granted,
+   * including a signal that had already aborted, even when a slot is free. A slot
+   * granted just as the signal fires still resolves: the caller owns it and must
+   * release it.
    */
   acquire(request?: RunSlotRequest): Promise<RunSlot>
   stats(): RunSlotStats
@@ -124,10 +125,11 @@ export function createRunSlots(size: number): RunSlots {
     tryAcquire,
     acquire(request) {
       const key = request?.key ?? null
+      const signal = request?.signal ?? null
+      // Before a free slot is taken: a run cancelled before it asked never starts.
+      if (signal?.aborted) return Promise.reject(new RunQueueAbortedError())
       const now = tryAcquire(key)
       if (now) return Promise.resolve(now)
-      const signal = request?.signal ?? null
-      if (signal?.aborted) return Promise.reject(new RunQueueAbortedError())
       return new Promise<RunSlot>((resolve, reject) => {
         const waiter: Waiter = {
           key,
