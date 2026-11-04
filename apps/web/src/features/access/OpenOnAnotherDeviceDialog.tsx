@@ -214,6 +214,16 @@ function DialogBody({
               the device you mean.
             </p>
           )}
+
+          {link.code !== null && !thisComputerOnly && (
+            // An app added to an iPhone's home screen keeps its own cookies, and
+            // the QR code opens the phone's browser, so the app needs the link
+            // pasted in (see AccessLock.tsx).
+            <p className="mt-2 text-xs text-muted-foreground">
+              An app added to a phone&apos;s home screen signs in when you paste this link on its
+              locked screen: copy it, send it to the phone, and paste it there.
+            </p>
+          )}
         </>
       )}
 

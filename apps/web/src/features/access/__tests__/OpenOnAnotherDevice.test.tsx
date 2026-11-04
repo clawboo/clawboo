@@ -115,6 +115,16 @@ describe('OpenOnAnotherDeviceDialog on a network address', () => {
     )
   })
 
+  it('says an app on a phone can paste the link on its locked screen', async () => {
+    // An app added to an iPhone's home screen keeps its own cookies, and the QR
+    // code opens Safari, so pasting the copied link is how that app signs in.
+    mintsCodes('code_one')
+    render(<OpenOnAnotherDeviceDialog open onClose={() => {}} origin={origin} />)
+    await screen.findByTestId('device-link')
+    expect(screen.getByText(/paste this link on its locked screen/i)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /copy link/i })).toBeInTheDocument()
+  })
+
   it('makes a new link on request', async () => {
     mintsCodes('code_one', 'code_two')
     render(<OpenOnAnotherDeviceDialog open onClose={() => {}} origin={origin} />)
@@ -180,6 +190,8 @@ describe('OpenOnAnotherDeviceDialog on this computer only', () => {
     )
     expect(screen.getByText(/only on this computer/i)).toBeInTheDocument()
     expect(screen.queryByTestId('device-qr')).not.toBeInTheDocument()
+    // No phone can reach this address, so no word about one pasting it.
+    expect(screen.queryByText(/paste this link/i)).not.toBeInTheDocument()
   })
 })
 
@@ -191,6 +203,7 @@ describe('OpenOnAnotherDeviceDialog on a server with no access token', () => {
       /^http:\/\/192\.168\.1\.5:18790\/$/,
     )
     expect(screen.getByText(/no sign-in/i)).toBeInTheDocument()
+    expect(screen.queryByText(/paste this link/i)).not.toBeInTheDocument()
   })
 })
 

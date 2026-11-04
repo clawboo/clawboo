@@ -656,6 +656,8 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 **Fix:** run `clawboo open` on the computer running Clawboo: it opens a signed-in browser. On a computer with no browser, run `clawboo open --print` and open the one-time link it prints. From a browser that is signed in, **Open on another device** at the bottom of the sidebar makes a link for another browser.
 
+An app added to a phone's home screen signs in with the **Paste a sign-in link** box on this screen, because a link you tap opens in the phone's browser instead of the app. In a signed-in browser, open **Open on another device** at the dashboard's address the phone uses, click **Copy link**, send the link to the phone, and paste it into the box within two minutes. If the box says the link is for another address, make the link in a browser that has the phone's address open.
+
 ### Clawboo access token required
 
 **What it means:** a request to the API had no access cookie, or the wrong one (a 401). Scripts see this; the dashboard shows the locked screen above instead. "Invalid Clawboo access token." means the token in an `?access_token=` address does not match the server's.
