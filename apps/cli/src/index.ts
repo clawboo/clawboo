@@ -29,6 +29,7 @@ import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
 import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
+import { agentRuns, holdNote, reportUnstopped } from './stopReport'
 import { shouldOfferRestart } from './versionCheck'
 import {
   DEFAULT_STOP_WAIT_SECONDS,
@@ -256,6 +257,12 @@ function printStoppedNotReplaced(port: number): void {
   )
 }
 
+/** After a stop: say so when a hold this command placed may still keep new work back. */
+function printHoldNote(outcome: StopOutcome, released: boolean | null): void {
+  const note = holdNote(outcome, released)
+  if (note) p.log.info(chalk.gray(note))
+}
+
 /** Deliberately not "run `clawboo stop`" — that is what just failed. */
 function printManualStopHint(port: number): void {
   const cmd =
@@ -458,13 +465,6 @@ function parseWaitSeconds(value: string): number {
   return seconds
 }
 
-/** What the server does once a hold this command placed could not be released. */
-const HOLD_LAPSES = 'It starts new work again within a minute, when its hold lapses.'
-
-function agentRuns(n: number): string {
-  return n === 1 ? '1 agent run' : `${n} agent runs`
-}
-
 function formatWait(ms: number): string {
   const total = Math.ceil(ms / 1000)
   const minutes = Math.floor(total / 60)
@@ -515,12 +515,9 @@ async function stopWithReport(
               `Waited ${formatWait(waitMs)}; stopping ${agentRuns(drain.running)} still going.`,
             ),
           )
-        } else if (drain?.status === 'lost') {
-          spinner.warn(
-            chalk.yellow(
-              `The server stopped answering with ${agentRuns(drain.running)} still going; stopping it.`,
-            ),
-          )
+        } else if (drain?.status === 'gone') {
+          // Its port closed: there is no server left to interrupt.
+          spinner.warn(chalk.yellow('The server went away during the wait.'))
         } else if (waited) {
           spinner.succeed(chalk.green('Agent runs finished'))
         } else {
@@ -533,24 +530,14 @@ async function stopWithReport(
   } finally {
     process.removeListener('SIGINT', onInterrupt)
   }
-  if (result.drain?.status === 'unreachable') {
-    spinner.fail(
-      chalk.yellow(
-        'The server did not answer the request to hold its agent runs, so it was not stopped.',
-      ),
-    )
-    p.log.info(chalk.gray(`To stop it anyway: clawboo ${command} --force`))
-    process.exit(1)
-  }
   if (result.stop === null) {
-    spinner.info(
-      chalk.gray(
-        result.released === false
-          ? `Cancelled. Clawboo keeps running. ${HOLD_LAPSES}`
-          : 'Cancelled. Clawboo keeps running and starts new work again.',
-      ),
-    )
-    process.exit(130)
+    // The wait ended without a stop: cancelled, or a server whose runs could not
+    // be seen. Say why, and whether its hold may still keep new work back.
+    const report = reportUnstopped(result, command)!
+    if (report.tone === 'fail') spinner.fail(chalk.yellow(report.text))
+    else spinner.info(chalk.gray(report.text))
+    for (const note of report.notes) p.log.info(chalk.gray(note))
+    process.exit(report.exitCode)
   }
   return { outcome: result.stop, spinner, released: result.released }
 }
@@ -604,10 +591,11 @@ async function runStop(opts: StopWaitOptions): Promise<void> {
       return
     case 'not-running':
       spinner.info(chalk.gray('No Clawboo server is running.'))
+      printHoldNote(outcome, released)
       return
     default:
       spinner.fail(chalk.yellow(describeStopFailure(outcome)))
-      if (released === false) p.log.info(chalk.gray(HOLD_LAPSES))
+      printHoldNote(outcome, released)
       printManualStopHint(port)
       process.exit(1)
   }
@@ -635,13 +623,14 @@ async function runRestart(opts: { open: boolean } & StopWaitOptions): Promise<vo
     const { outcome, spinner, released } = await stopWithReport(port, opts, 'restart')
     if (outcome.status === 'could-not-identify' || outcome.status === 'still-alive') {
       spinner.fail(chalk.yellow(describeStopFailure(outcome)))
-      if (released === false) p.log.info(chalk.gray(HOLD_LAPSES))
+      printHoldNote(outcome, released)
       printManualStopHint(port)
       // Deliberately do NOT start a replacement: a pinned start would throw on
       // the taken port, and an unpinned one would leave TWO dashboards running.
       process.exit(1)
     }
     spinner.succeed(chalk.green('Clawboo stopped'))
+    printHoldNote(outcome, released)
     // Pin only if the port really freed — a `pnpm dev` supervisor can respawn
     // the server on the same port between our stop and our start. Unpinned, the
     // successor resolves its own port the way any boot does.

@@ -827,6 +827,8 @@ export interface DrainDeps {
   /** Resolves after `ms`, or early when `signal` aborts. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   now?: () => number
+  /** Does the server's port still accept connections? */
+  listening?: () => Promise<boolean>
 }
 
 export interface DrainOptions {
@@ -853,8 +855,14 @@ export type DrainOutcome =
   | { status: 'unsupported' }
   /** The server gave no usable answer to the hold, so whether runs are going is unknown. */
   | { status: 'unreachable' }
-  /** The server stopped answering mid-wait, several polls in a row. */
+  /**
+   * The server stopped answering mid-wait, several polls in a row, while still
+   * listening on its port. Runs were going at its last answer, so the caller
+   * stops nothing, as for `unreachable`.
+   */
   | { status: 'lost'; running: number }
+  /** The server's port closed mid-wait: it is gone, so the stop that follows kills nothing. */
+  | { status: 'gone'; running: number }
 
 function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -890,7 +898,9 @@ function dashboardRequest(port: number): NonNullable<DrainDeps['request']> {
  * here: the stop that follows ends it, and a caller that does not stop calls
  * `releaseDashboardHold`. A server with no hold route answers `unsupported`, and
  * the caller stops it as before; one that gives no usable answer to a few tries
- * answers `unreachable`, and the caller stops nothing.
+ * answers `unreachable`, and one that stops answering mid-wait while still on
+ * its port answers `lost`: the caller stops neither. One whose port closed
+ * answers `gone`.
  */
 export async function drainDashboard(
   port: number,
@@ -900,6 +910,7 @@ export async function drainDashboard(
   const request = deps.request ?? dashboardRequest(port)
   const sleep = deps.sleep ?? abortableSleep
   const now = deps.now ?? Date.now
+  const listening = deps.listening ?? (() => probePort(dashboardHost(), port, 500))
   const place = (): Promise<JsonReply | null> =>
     request('POST', '/api/system/hold', {
       owner: opts.owner,
@@ -947,7 +958,13 @@ export async function drainDashboard(
     // One slow or refused poll is not the server gone: keep waiting on the last answer.
     if (next === null) {
       failedPolls += 1
-      if (failedPolls >= DRAIN_MAX_FAILED_POLLS) return { status: 'lost', running: state.running }
+      if (failedPolls >= DRAIN_MAX_FAILED_POLLS) {
+        // Silent but still listening: it may be busy with the very runs the wait
+        // is for, so this is no answer, not a finished drain.
+        return (await listening())
+          ? { status: 'lost', running: state.running }
+          : { status: 'gone', running: state.running }
+      }
       continue
     }
     failedPolls = 0
@@ -992,7 +1009,7 @@ export interface StopAfterRunsResult {
   drain: DrainOutcome | null
   /**
    * How the stop ended; null when nothing was stopped: the wait was cancelled,
-   * or the server could not be held (`unreachable`).
+   * or the server could not be held (`unreachable`) or went silent (`lost`).
    */
   stop: StopOutcome | null
   /**
@@ -1005,9 +1022,10 @@ export interface StopAfterRunsResult {
 /**
  * `clawboo stop` and `clawboo restart`: hold the server, wait for its agent runs
  * to finish (up to `waitMs`), then stop it. A cancelled wait releases the hold
- * and stops nothing, and so does a server that would not be held: stopping it
- * could interrupt runs nobody could see. A stop that leaves the server up for
- * any reason releases the hold too, so it starts new work again.
+ * and stops nothing, and so does a server that would not be held or went
+ * silent mid-wait: stopping it could interrupt runs nobody could see. A stop
+ * that leaves the server up for any reason releases the hold too, so it starts
+ * new work again.
  */
 export async function stopAfterAgentRuns(
   port: number,
@@ -1028,7 +1046,9 @@ export async function stopAfterAgentRuns(
       },
       deps.drain,
     )
-    if (drain.status === 'cancelled' || drain.status === 'unreachable') {
+    // Stop only a server whose runs could be seen: one that would not be held,
+    // or went silent with runs going, is left running for the person to decide.
+    if (drain.status === 'cancelled' || drain.status === 'unreachable' || drain.status === 'lost') {
       const released = await releaseDashboardHold(port, owner, deps.drain)
       return { drain, stop: null, released }
     }
