@@ -1,7 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
+import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
+import {
+  closePhoneNav,
+  isPhoneLayout,
+  togglePhoneNav,
+  usePhoneLayout,
+  usePhoneNav,
+} from '@/features/layout/phoneLayout'
 import {
   clearPeekHide,
   closePeek,
@@ -86,6 +94,70 @@ function Rail({
   )
 }
 
+// ─── Phone drawer ────────────────────────────────────────────────────────────
+
+/** The sidebar at phone width: the rail and the column laid over the content
+ *  from the left edge, behind a scrim, opened from the toggle at the start of
+ *  the view's header. Escape or a tap on the scrim closes it, and so does moving
+ *  to another view (see AppSidebar). Kept mounted while closed, inert and out of
+ *  sight, so the column keeps its search and scroll between openings. */
+function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
+  const open = usePhoneNav((s) => s.open)
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  useDismissableLayer({ active: open, level: 'dialog', onEscape: closePhoneNav })
+
+  // Focus goes into the drawer as it opens, so a keyboard or a screen reader
+  // starts there rather than behind the scrim.
+  useEffect(() => {
+    if (open) panelRef.current?.focus()
+  }, [open])
+
+  return (
+    <>
+      {/* A tap beside the drawer lands here and closes it. It is the scrim's own
+          click, not an outside-press, so the tap never also reaches whatever
+          sits under the scrim. */}
+      <div
+        aria-hidden
+        data-testid="sidebar-drawer-scrim"
+        onClick={closePhoneNav}
+        className="fixed inset-0 z-[57] bg-black/40"
+        style={{
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? 'auto' : 'none',
+          transition: 'opacity 160ms ease',
+        }}
+      />
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Sidebar"
+        tabIndex={-1}
+        inert={!open || undefined}
+        data-testid="sidebar-drawer"
+        className="fixed inset-y-0 left-0 z-[58] flex outline-none"
+        style={{
+          paddingTop: 'var(--clawboo-titlebar-inset, 0px)',
+          background: 'var(--background)',
+          boxShadow: open ? 'var(--shadow-overlay)' : 'none',
+          transform: open ? 'translateX(0)' : 'translateX(-100%)',
+          visibility: open ? 'visible' : 'hidden',
+          transition: open
+            ? 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s'
+            : 'transform 160ms ease, visibility 0s linear 160ms',
+        }}
+      >
+        <Rail peek={false} showToggle={!showColumn} />
+        {/* The column's natural width: a width dragged on a wide window would
+            leave no room beside the drawer to tap it closed. */}
+        {showColumn && <ColumnBody width={SIDEBAR_NATURAL_WIDTH} bordered />}
+      </div>
+    </>
+  )
+}
+
 // ─── AppSidebar ──────────────────────────────────────────────────────────────
 
 /** The left sidebar: team rail + agent column. Drag the right edge to resize;
@@ -99,6 +171,9 @@ export function AppSidebar() {
   const storedWidth = useViewStore((s) => s.sidebarWidth)
   // Boo Zero's view has no agent column, only the rail.
   const showColumn = useViewStore((s) => s.viewMode.type !== 'booZero')
+  // At phone width the sidebar is a drawer over the content instead.
+  const phone = usePhoneLayout()
+  const viewMode = useViewStore((s) => s.viewMode)
 
   const [drag, setDrag] = useState<{ width: number; collapsed: boolean } | null>(null)
   const width = drag?.width ?? storedWidth
@@ -166,12 +241,13 @@ export function AppSidebar() {
     [showColumn, storedWidth],
   )
 
-  // ── ⌘\ / Ctrl+\ toggles the sidebar ────────────────────────────────────────
+  // ── ⌘\ / Ctrl+\ toggles the sidebar (the drawer, at phone width) ─────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === '\\' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
         e.preventDefault()
-        useViewStore.getState().toggleColumnCollapsed()
+        if (isPhoneLayout()) togglePhoneNav()
+        else useViewStore.getState().toggleColumnCollapsed()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -200,7 +276,17 @@ export function AppSidebar() {
   }, [collapsed])
   useEffect(() => clearPeekHide, [])
 
+  // ── Phone drawer: closed by a move to another view, and by a wide window ───
+  useEffect(() => {
+    closePhoneNav()
+  }, [viewMode])
+  useEffect(() => {
+    if (!phone) closePhoneNav()
+  }, [phone])
+
   // ── Render ─────────────────────────────────────────────────────────────────
+  if (phone) return <PhoneDrawer showColumn={showColumn} />
+
   if (isCollapsed) {
     // Not mounted mid-drag: the drag preview collapses and expands live.
     if (dragging) return null

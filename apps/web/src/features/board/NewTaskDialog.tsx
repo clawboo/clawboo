@@ -339,7 +339,9 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
             : 'The result shows on the task card, on the board and in the team chat.'}
         </p>
 
-        <div className="mt-5 flex items-center gap-2">
+        {/* Wraps on a phone, where "Send to <agent>" leaves no room beside More
+            options: Cancel and Send move to their own row, still on the right. */}
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           {!moreOpen ? (
             <Button
               variant="ghost"

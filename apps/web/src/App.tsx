@@ -45,11 +45,14 @@ export function App() {
       {/* `--clawboo-titlebar-inset` (unset = 0) lets an embedder reserve a strip
           for its own title bar, such as an inset macOS one, so it never sits on
           the sidebar. The fallback lives here rather than on :root, so a value
-          the embedder sets anywhere wins without a cascade fight. */}
+          the embedder sets anywhere wins without a cascade fight.
+          `h-dvh`, not `h-screen`: a phone browser's `100vh` is the viewport with
+          its toolbars hidden, which puts the bottom of the app (the chat's
+          message box) under them while they show. */}
       <div
         inert={settingsOpen || undefined}
         data-testid="app-shell"
-        className="flex h-screen overflow-hidden bg-background text-foreground"
+        className="flex h-dvh overflow-hidden bg-background text-foreground"
         style={{ paddingTop: 'var(--clawboo-titlebar-inset, 0px)' }}
       >
         {/* Cols 1 + 2 — team rail + agent column, resizable and collapsible. Each

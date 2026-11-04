@@ -129,8 +129,9 @@ export function GitHubStarButton() {
       // Team halos / Connect, Group Chat's Brief & Rules gear all sit
       // around 30-32 px tall with the same thin border and no shadow.
       // The earlier 36 px + shadow made the pill float visually above
-      // the rest of the toolbar; now it belongs in the same row.
-      className="group inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-[12.5px] font-medium text-foreground transition-all duration-150 hover:border-border-strong hover:bg-foreground/[0.03]"
+      // the rest of the toolbar; now it belongs in the same row. Left out at
+      // phone width, where every view's header needs the room.
+      className="group inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 text-[12.5px] font-medium text-foreground transition-all duration-150 hover:border-border-strong hover:bg-foreground/[0.03] max-sm:hidden"
     >
       <Github className="h-3.5 w-3.5 shrink-0" strokeWidth={2} />
       <span>Star</span>

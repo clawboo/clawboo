@@ -14,6 +14,7 @@ import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { SidebarToggle } from './SidebarToggle'
+import { closePhoneNav, isPhoneLayout } from './phoneLayout'
 import type { PeekAnchor } from './sidebarPeek'
 
 /** The rail's top padding (`pt-1.5`), so a peek toggle can land on its anchor. */
@@ -445,7 +446,8 @@ export function TeamSidebar({
     >
       {/* The toggle lives here only when there is no agent column to hold it,
           and in the peek. There it lands exactly on the header toggle that
-          opened the peek, so the click that follows docks the sidebar. */}
+          opened the peek, so the click that follows docks the sidebar. In the
+          phone drawer it closes the drawer. */}
       {showToggle && (
         <div
           className="flex h-8 shrink-0 self-stretch"
@@ -460,7 +462,9 @@ export function TeamSidebar({
         >
           <SidebarToggle
             collapsed={peek}
-            onClick={() => useViewStore.getState().setColumnCollapsed(!peek)}
+            onClick={() =>
+              isPhoneLayout() ? closePhoneNav() : useViewStore.getState().setColumnCollapsed(!peek)
+            }
           />
         </div>
       )}

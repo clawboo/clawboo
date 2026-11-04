@@ -38,6 +38,7 @@ import {
 } from '@/stores/panelLayout'
 import type { Team } from '@/stores/team'
 import { useRoom } from '@/stores/rooms'
+import { usePhoneLayout } from '@/features/layout/phoneLayout'
 import { GroupChatPanel } from './GroupChatPanel'
 import { GroupChatViewHeader, TeamGraphCountPill } from './GroupChatViewHeader'
 import { TeamBrowser } from './TeamBrowser'
@@ -91,8 +92,13 @@ export function TeamSpaceSplit({ teamId, roomId, team, animateOpen }: TeamSpaceS
   const openCards = CARD_ORDER.filter((c) => isOpen[c])
   const anyCard = openCards.length > 0
   const [maximized, setMaximized] = useState<TeamCard | null>(null)
+  // At phone width the chat needs the whole screen, so the cards never sit
+  // beside it: a toggle shows one card over the chat instead, held here rather
+  // than in the saved open state, which belongs to the wide layout.
+  const phone = usePhoneLayout()
+  const [phoneCard, setPhoneCard] = useState<TeamCard | null>(null)
   // A maximized card that gets closed must not leave the view stuck maximized.
-  const shownMaximized = maximized && isOpen[maximized] ? maximized : null
+  const shownMaximized = phone ? phoneCard : maximized && isOpen[maximized] ? maximized : null
   const hPanelIds = useMemo(() => (anyCard ? ['chat', 'cards'] : ['chat']), [anyCard])
   const openKey = openCards.join(',')
   const vPanelIds = useMemo(() => (openKey ? openKey.split(',') : []), [openKey])
@@ -106,11 +112,23 @@ export function TeamSpaceSplit({ teamId, roomId, team, animateOpen }: TeamSpaceS
     panelIds: vPanelIds,
     storage: safeLayoutStorage,
   })
-  const toggleMax = (card: TeamCard) => setMaximized((m) => (m === card ? null : card))
+  // At phone width, closing or restoring the card on screen goes back to the chat.
+  const toggleMax = (card: TeamCard) =>
+    phone ? setPhoneCard(null) : setMaximized((m) => (m === card ? null : card))
   const closeCard = (card: TeamCard) => {
+    if (phone) {
+      setPhoneCard(null)
+      return
+    }
     setMaximized(null)
     usePanelLayoutStore.getState().setPaneOpen(PANE_OF[card], false)
   }
+  /** A header toggle: the card beside the chat, or over it at phone width. */
+  const paneToggle = (card: TeamCard) => ({
+    open: !phone && isOpen[card],
+    onClick: () =>
+      phone ? setPhoneCard(card) : usePanelLayoutStore.getState().togglePane(PANE_OF[card]),
+  })
 
   const graphCard = (
     <FloatingCard
@@ -195,8 +213,61 @@ export function TeamSpaceSplit({ teamId, roomId, team, animateOpen }: TeamSpaceS
     activity: '40',
   }
 
+  // The chat with its header: the whole view at phone width, the left panel
+  // otherwise.
+  const chatColumn = (
+    <div className="flex h-full flex-col">
+      {/* The team header belongs to the chat, so with the cards closed it
+              spans the full width and the toggles ride along to the right edge. */}
+      <GroupChatViewHeader
+        team={team}
+        room={room}
+        showCounts={false}
+        trailing={
+          <span className="flex items-center gap-1">
+            <PaneToggle
+              icon={Network}
+              label={roomId ? 'room graph' : 'team graph'}
+              {...paneToggle('graph')}
+              testId="pane-toggle-team-graph"
+            />
+            <PaneToggle
+              icon={ListChecks}
+              label="tasks"
+              {...paneToggle('tasks')}
+              testId="pane-toggle-team-tasks"
+            />
+            <PaneToggle
+              icon={Globe}
+              label="browser"
+              {...paneToggle('browser')}
+              testId="pane-toggle-team-browser"
+            />
+            <PaneToggle
+              icon={Terminal}
+              label="activity"
+              {...paneToggle('activity')}
+              testId="pane-toggle-team-activity"
+            />
+          </span>
+        }
+      />
+      <div className="min-h-0 flex-1">
+        <GroupChatPanel teamId={teamId} roomId={roomId} embedded />
+      </div>
+    </div>
+  )
+
   if (shownMaximized) {
     return <div className="h-full bg-background p-2">{cardOf[shownMaximized]}</div>
+  }
+
+  if (phone) {
+    return (
+      <div data-testid="group-chat-view" className="h-full bg-background">
+        {chatColumn}
+      </div>
+    )
   }
 
   return (
@@ -209,50 +280,7 @@ export function TeamSpaceSplit({ teamId, roomId, team, animateOpen }: TeamSpaceS
       onLayoutChanged={hLayout.onLayoutChanged}
     >
       <Panel id="chat" minSize={CHAT_MIN_PX}>
-        <div className="flex h-full flex-col">
-          {/* The team header belongs to the chat, so with the cards closed it
-              spans the full width and the toggles ride along to the right edge. */}
-          <GroupChatViewHeader
-            team={team}
-            room={room}
-            showCounts={false}
-            trailing={
-              <span className="flex items-center gap-1">
-                <PaneToggle
-                  icon={Network}
-                  label={roomId ? 'room graph' : 'team graph'}
-                  open={graphOpen}
-                  onClick={() => usePanelLayoutStore.getState().togglePane('team:graph')}
-                  testId="pane-toggle-team-graph"
-                />
-                <PaneToggle
-                  icon={ListChecks}
-                  label="tasks"
-                  open={tasksOpen}
-                  onClick={() => usePanelLayoutStore.getState().togglePane('team:tasks')}
-                  testId="pane-toggle-team-tasks"
-                />
-                <PaneToggle
-                  icon={Globe}
-                  label="browser"
-                  open={browserOpen}
-                  onClick={() => usePanelLayoutStore.getState().togglePane('team:browser')}
-                  testId="pane-toggle-team-browser"
-                />
-                <PaneToggle
-                  icon={Terminal}
-                  label="activity"
-                  open={activityOpen}
-                  onClick={() => usePanelLayoutStore.getState().togglePane('team:activity')}
-                  testId="pane-toggle-team-activity"
-                />
-              </span>
-            }
-          />
-          <div className="min-h-0 flex-1">
-            <GroupChatPanel teamId={teamId} roomId={roomId} embedded />
-          </div>
-        </div>
+        {chatColumn}
       </Panel>
       {anyCard && (
         <>

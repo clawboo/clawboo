@@ -101,6 +101,16 @@ The **agent column** sits next to it. From top to bottom:
 
 **Home** and the team's chats appear once the team has at least one agent. Press `Cmd/Ctrl+\` to hide or show the sidebar, and drag its edge to resize it.
 
+### On a phone
+
+Narrower than 640 px, the width of a phone, the dashboard lays out the screens you use away from your desk. To put it on your phone's home screen, see [Put the dashboard on your phone](/guides/self-host-securely#put-the-dashboard-on-your-phone).
+
+- **The sidebar is a drawer.** Tap the sidebar button at the start of a page's header to open it over the page. Tap beside it, press Escape, or open a page from it to close it.
+- **The Board shows one column at a time**, as wide as the screen, with **Needs you** first and its approvals inside. Swipe sideways for the next column; the board stops at each one. A task's details and **New task** fit the screen.
+- **A chat takes the whole screen**, on an agent's page and in a team's chats. The buttons in its header open one card (the graph, tasks, browser, activity or details) over the chat, and the card's close button goes back to it.
+
+Other pages, such as Settings, the Org chart, Memory, the Marketplace and Routines, open on a phone but are not laid out for one yet.
+
 ### The nav
 
 | Row             | What it opens                                                 | Shortcut     |

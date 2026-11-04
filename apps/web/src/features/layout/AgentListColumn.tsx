@@ -45,6 +45,7 @@ import { RoomDialog } from '@/features/group-chat/RoomDialog'
 import { RoomActionsMenu } from '@/features/group-chat/RoomActionsMenu'
 import { DEFAULT_ROOM_NAME, updateRoom } from '@/lib/roomsClient'
 import type { AgentStatus } from '@clawboo/gateway-client'
+import { closePhoneNav, usePhoneLayout } from './phoneLayout'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -578,6 +579,7 @@ export function AgentListColumn() {
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const columnCollapsed = useViewStore((s) => s.columnCollapsed)
+  const phone = usePhoneLayout()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showRoomDialog, setShowRoomDialog] = useState(false)
 
@@ -791,12 +793,17 @@ export function AgentListColumn() {
           </>
         )}
         {/* In the hover peek of a collapsed sidebar the rail holds the toggle,
-            right under the pointer that opened the peek. */}
-        {!columnCollapsed && (
-          <SidebarToggle
-            collapsed={false}
-            onClick={() => useViewStore.getState().setColumnCollapsed(true)}
-          />
+            right under the pointer that opened the peek. At phone width the
+            column sits in the drawer, and its toggle closes the drawer. */}
+        {phone ? (
+          <SidebarToggle collapsed={false} onClick={closePhoneNav} />
+        ) : (
+          !columnCollapsed && (
+            <SidebarToggle
+              collapsed={false}
+              onClick={() => useViewStore.getState().setColumnCollapsed(true)}
+            />
+          )
         )}
       </div>
 

@@ -38,6 +38,15 @@ describe('App shell title-bar inset', () => {
     expect(shell.style.paddingTop).toBe('var(--clawboo-titlebar-inset, 0px)')
   })
 
+  it('fills the visible viewport, not the tallest one a phone browser reports', () => {
+    // `100vh` on a phone is the viewport with the browser's toolbars hidden, so
+    // the bottom of the app (the chat's message box) would sit under them.
+    render(<App />)
+    const shell = screen.getByTestId('app-shell')
+    expect(shell).toHaveClass('h-dvh')
+    expect(shell).not.toHaveClass('h-screen')
+  })
+
   it('keeps the sidebar and content inside the padded shell', () => {
     render(<App />)
     const shell = screen.getByTestId('app-shell')

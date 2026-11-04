@@ -186,8 +186,10 @@ export function CalendarToolbar(props: CalendarToolbarProps) {
         </div>
       ) : (
         // The Kanban board has no dates to page through. The column heads count
-        // the tasks, so the bar does not.
-        <span className="text-xs text-muted-foreground">Every task by status, newest first</span>
+        // the tasks, so the bar does not. A phone needs the row for the actions.
+        <span className="text-xs text-muted-foreground max-sm:hidden">
+          Every task by status, newest first
+        </span>
       )}
 
       <div className="ml-auto flex flex-wrap items-center gap-1.5">{actions}</div>
