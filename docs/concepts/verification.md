@@ -39,7 +39,7 @@ A task that runs in team chat is checked when all three of these are true:
 
 1. **The team has a work check.** That is the verify command you set in the team's settings (see [Teams](/using/teams#work-check)). Without one, team-chat work is not checked: a lot of it writes documents rather than code, and a check with no command can only fail.
 2. **The agent works in the team folder.** Claude Code, Codex, Hermes and Clawboo Native runs start in `~/.clawboo/workspaces/<team id>`. OpenClaw agents work in their Gateway's workspace and are not checked.
-3. **The run changed the team folder**, compared with the folder as it was when the task's run started. A run that changed nothing lands in **Done** without a check.
+3. **The run changed the team folder**, compared with the folder as it was when the task first started. A run that changed nothing, with no failed attempt before it, lands in **Done** without a check.
 
 This covers work handed off in General or a room, the steps of a plan, and tasks you give an agent on the Board that run through the team, including their reruns from **Retry** or **Assign**.
 
@@ -147,7 +147,7 @@ How the reviewer works:
 
 ## Checks in team chat
 
-A team-chat task has no worktree: every teammate works in the same team folder. To see what a task changed, Clawboo keeps a history of the folder outside it, in `~/.clawboo/team-folder-history/<team id>.git`, and saves the folder there when the task's run starts and again when it ends. The folder itself never becomes a git checkout, and no `VERIFICATION.md` is written into it; the result is stored on the task.
+A team-chat task has no worktree: every teammate works in the same team folder. To see what a task changed, Clawboo keeps a history of the folder outside it, in `~/.clawboo/team-folder-history/<team id>.git`, and saves the folder there when the task first starts and again each time a run of it ends well. A later run (a fix round, or a **Retry**) keeps that first starting point. A run that fails or is stopped saves nothing: its changes are seen by the task's next checked run, and a cancelled task's are never checked. The folder itself never becomes a git checkout, and no `VERIFICATION.md` is written into it; the result is stored on the task.
 
 - **A fix round** gets the note of what failed together with the task itself, because a team-chat run starts a fresh session. Its check compares the folder with how it was when the task first started, so it covers all of the task's work.
 - **The reviewer** reads a separate checkout of the folder as the run left it, made from that history.
@@ -160,6 +160,7 @@ What a team-chat check cannot see:
 - **Files outside the team folder.** Claude Code, Codex and Hermes can change any file your user account can; only the team folder is compared.
 - **Dependency folders.** `node_modules`, `.venv`, `venv`, `__pycache__`, `.next`, `.turbo` and `target` are not counted as changes.
 - **Uncommitted edits inside a git repository** an agent cloned into the team folder. Only a new commit there counts as a change.
+- **Files a `.gitignore` in the team folder ignores.** They are not counted as changes, so a run that changed only those is not checked. They stay out on purpose: they include files such as `.env`, which would otherwise land in the history and the reviewer's checkout.
 
 When a team-chat check cannot finish, the task waits in **Needs you** with a comment, and whoever handed it out is told:
 
@@ -168,7 +169,7 @@ When a team-chat check cannot finish, the task waits in **Needs you** with a com
 - **The check cannot run**, for example because the folder's history is missing, or a fix round can no longer be checked after an earlier attempt failed.
 - **A fix round cannot be started**, for example because the board could not record its run. The comment says why.
 
-If Clawboo cannot record the team folder when a task starts, the task is not checked, and a comment on it says so. Pressing **Stop** during a check lets it finish: a pass still lands in **Done**, and a failure starts no fix round. If a person moves the card while its check runs, the check's result is dropped and the card stays where they put it. After a person's **Retry** of a task that failed its check, the task is measured again from where it first began, so a retry that changes nothing is still checked. Deleting a team deletes its folder's history too.
+If Clawboo cannot record the team folder when a task starts, the task is not checked, and a comment on it says so. Pressing **Stop** during a check lets it finish: a pass still lands in **Done**, and a failure starts no fix round. If a person moves the card while its check runs, the check's result is dropped and the card stays where they put it. If the check passes but the board does not take the task to **Done**, it waits in **Needs you** too, with a comment that says so. After a person's **Retry** of a task that failed its check, the task is measured again from where it first began, so a retry that changes nothing is still checked. Deleting a team deletes its folder's history too.
 
 ## Limits
 

@@ -620,4 +620,94 @@ describe('team-chat work check', () => {
     expect(statusOf(h.board, id)).toBe('blocked')
     expect(h.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
   })
+
+  it('a check that cannot run, whose move to Blocked the board refuses, does not reach Done', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const update = h.board.updateStatus.bind(h.board)
+    h.board.updateStatus = async (taskId, status) =>
+      status === 'blocked' ? false : update(taskId, status)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).not.toBe('done')
+    expect(h.engine.checksInFlight()).toBe(0)
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('index.lock')
+    // The task's run had ended; whatever runs on the session now is another turn.
+    expect(h.aborted).toHaveLength(0)
+  })
+
+  it('a fix round the board cannot open a run for goes to a person, not back to To do', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    h.board.createExecution = async () => null
+    await h.board.updateStatus(id, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(h.toWorker()).toHaveLength(1)
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+  })
+
+  it('a passed check whose Done the board refuses goes to a person with the true reason', async () => {
+    const h = makeHarness()
+    const update = h.board.updateStatus.bind(h.board)
+    h.board.updateStatus = async (taskId, status) =>
+      status === 'done' ? false : update(taskId, status)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    h.checks[0]!.resolve({ verdict: 'pass' })
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('check passed')
+    expect(h.updates()[0]!.task).not.toMatch(/earlier attempt failed/i)
+  })
+
+  it('a check a restart cut short keeps its run open until the task is parked', async () => {
+    const before = makeHarness()
+    const id = await delegate(before)
+    await before.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    vi.clearAllTimers() // the server dies mid-check
+    const update = before.board.updateStatus.bind(before.board)
+    let refuse = true
+    before.board.updateStatus = async (taskId, status) =>
+      status === 'blocked' && refuse ? false : update(taskId, status)
+
+    const after = createBoardOrchestrator({
+      teamId: 't1',
+      board: before.board,
+      known: () => KNOWN,
+      leaderAgentId: () => 'leader',
+      sessionKeyForAgent: sk,
+      agentIdForSession,
+      deliver: async (sessionKey, agentId, task, origin) => {
+        before.delivered.push({ sessionKey, agentId, task, origin })
+      },
+      stopGen: () => 0,
+      workCheck: { begin: async () => undefined, prepare: async () => null },
+    })
+    // The move to Blocked fails: the run stays open, so a later resume finds it.
+    await after.resume()
+    expect(statusOf(before.board, id)).toBe('in_review')
+    expect(before.board.completed).toHaveLength(0)
+
+    refuse = false
+    await after.resume()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(before.board, id)).toBe('blocked')
+    expect(before.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
+    expect(before.updates()).toHaveLength(1)
+  })
 })

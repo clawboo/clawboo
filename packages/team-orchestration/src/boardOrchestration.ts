@@ -1877,13 +1877,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     try {
       if (parkedByEngine && result.verdict === 'failed') {
         await deps.board.addComment(taskId, result.reason, 'system').catch(() => undefined)
-        await deps.board.updateStatus(taskId, 'blocked')
+        if (!(await deps.board.updateStatus(taskId, 'blocked'))) {
+          // Not parked, so nothing stands between this unchecked work and Done:
+          // the run fails instead, and the delegator hears why.
+          endCheck()
+          await failForSession(sessionKey, 'error', result.reason, null, false)
+          return
+        }
       }
       await finishCompletion(
         sessionKey,
         taskId,
         summary,
         result.verdict === 'failed' ? result.reason : undefined,
+        result.verdict === 'pass',
       )
     } finally {
       endCheck()
@@ -1960,8 +1967,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await failForSession(sessionKey, 'error', `Could not start the fix round: ${why}`)
       return
     }
-    if (!agentId || !detail || !exec) {
+    if (!agentId || !detail) {
       await releaseClaimed(taskId, sessionKey)
+      return
+    }
+    if (!exec) {
+      // Released, its fix note would be lost and the pump could run it again as
+      // new work; the task goes to a person instead, as for a write that threw.
+      await failForSession(
+        sessionKey,
+        'error',
+        'Could not start the fix round: the board did not record its run.',
+      )
       return
     }
     taskToExec.set(taskId, exec.id)
@@ -2004,6 +2021,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     taskId: string,
     summary: string,
     checkFailure?: string,
+    /** This attempt's work passed the team's check. */
+    checkPassed = false,
   ): Promise<void> {
     // Capture the Stop verdict BEFORE forgetSession clears the generation. A Stop
     // since this delegation was dispatched suppresses the amplifying tail
@@ -2054,7 +2073,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // the delegator hears that the task waits on a person. The steps waiting on
     // it stay queued, so a person's Retry carries the plan on. A check that failed
     // on its last attempt parks the task the same way (`checkFailure`).
-    const closeBlocked = async (failure: string | undefined): Promise<void> => {
+    const closeBlocked = async (
+      failure: string | undefined,
+      outcome: 'check_failed' | 'blocked' = failure ? 'check_failed' : 'blocked',
+    ): Promise<void> => {
       const execId = taskToExec.get(taskId)
       if (execId) {
         taskToExec.delete(taskId)
@@ -2070,7 +2092,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           by,
           title,
           summary: failure ?? (trimmed || `${by} did not say why.`),
-          outcome: failure ? 'check_failed' : 'blocked',
+          outcome,
           taskId,
           ...(scope ? { forTaskId: scope } : {}),
         })
@@ -2085,17 +2107,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
     const ok = await deps.board.updateStatus(taskId, 'done')
     if (!ok && deps.workCheck) {
-      // Not released but held: the board refuses `done` over a check that failed
-      // on an earlier attempt, and this attempt was not checked again (its change
-      // could not be measured). A person decides, as when a check fails for good.
+      // Not released but held. Unchecked, the board refuses `done` over a check
+      // that failed on an earlier attempt (this one's change could not be
+      // measured). Checked and passed, no verdict stands in the way, so the write
+      // itself failed. Either way a person decides, told which it was.
       const held = (await deps.board.getTask(taskId))?.task.status
       if (
         (held === 'in_progress' || held === 'in_review') &&
         (await deps.board.updateStatus(taskId, 'blocked'))
       ) {
-        await closeBlocked(
-          "An earlier attempt failed the team's check and this one could not be checked, so the task was kept from Done.",
-        )
+        const why = checkPassed
+          ? "The team's check passed, but the board did not mark the task done, so it waits for a person."
+          : "An earlier attempt failed the team's check and this one could not be checked, so the task was kept from Done."
+        await deps.board.addComment(taskId, why, 'system').catch(() => undefined)
+        await closeBlocked(why, checkPassed ? 'blocked' : 'check_failed')
         return
       }
     }
@@ -2213,6 +2238,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     /** Set when the run ended on the runtime's own fatal error (`detail` is then its
      *  message): its typed cause, if any. */
     fromError: { code: string | null } | null = null,
+    /** False when the task's own run has already ended (its work was being
+     *  checked): a run still going on the session is another turn's. */
+    abortRun = true,
   ): Promise<void> {
     const taskId = sessionToTask.get(sessionKey)
     if (!taskId) return // not a tracked delegation (e.g. the leader's own turn)
@@ -2221,7 +2249,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // kept executing invisibly — a zombie burning tokens whose eventual result
     // could only land as a '[late result]' comment. Best-effort; the drain idle
     // guard remains the backstop for a run that ignores the abort.
-    deps.abortSession?.(sessionKey)
+    if (abortRun) deps.abortSession?.(sessionKey)
     // A Stop since this delegation started suppresses the amplifying tail (the
     // failure reflection + ready-pump). A genuine user-Stop ABORT never reaches
     // here (onEvent routes it to a clean release); this guard only covers an
@@ -2489,11 +2517,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const last = execs?.[execs.length - 1]
     if (!last || last.status !== 'running') return
     if (last.executorType !== undefined && last.executorType !== 'openclaw') return
-    await deps.board.completeExecution(last.id, {
-      status: 'failed',
-      error: 'The server stopped while this work was being checked.',
-    })
-    if (!(await deps.board.updateStatus(t.id, 'blocked'))) return
+    // Parked first: until the move lands the run stays open, so the next
+    // `resume()` finds the task the same way and tries again.
+    if (!(await deps.board.updateStatus(t.id, 'blocked').catch(() => false))) return
+    await deps.board
+      .completeExecution(last.id, {
+        status: 'failed',
+        error: 'The server stopped while this work was being checked.',
+      })
+      .catch(() => undefined)
     await deps.board.addComment(
       t.id,
       'The work check was cut short by a restart, so the task waits for a person. Retry it to run the task and its check again.',

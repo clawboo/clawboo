@@ -79,7 +79,7 @@ Your introduction to the team is not included: it rides only the turns whose rep
 
 - **A summary, not a transcript.** The teammate's final reply is recorded as a comment on its card, with very long output trimmed. Its intermediate steps stay out of the lead's view.
 - **A task update for whoever handed it off.** Results that finish within a few seconds of each other arrive together in one update. A task the lead handed out reports to the lead. A sub-task reports to the teammate that handed it off, and that report climbs the chain to the lead. Only the lead's summary reaches the chat.
-- **A check first, on a team with a work check.** When the teammate's run changed the team's folder, the team's command runs before the task counts as done. A failure goes back to the teammate with what failed, and whoever handed off the task hears only once the check is over. See [How work is checked](/concepts/verification#checks-in-team-chat).
+- **A check first, on a team with a work check.** When the teammate's run changed the team's folder, the team's command runs before the task counts as done. A failure with an attempt left goes back to the teammate with what failed; after the last attempt the task waits in **Needs you**. Whoever handed off the task hears only once the check is over. See [How work is checked](/concepts/verification#checks-in-team-chat).
 - **A completion line in the chat**, so you can see the task finished even before the lead replies.
 - **An honest empty result.** If the teammate returned nothing, the lead is told so, rather than seeing a false success.
 

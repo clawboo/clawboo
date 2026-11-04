@@ -27,6 +27,7 @@ import {
   getTaskVerification,
   listExecutions,
   recordSpend,
+  startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -64,9 +65,19 @@ const HISTORY_EXCLUDES = [
 /** One git operation at a time per team history (the index is shared). */
 const historyMutex = new KeyedMutex()
 
-/** `<clawboo home>/team-folder-history/<team>.git`. */
+/**
+ * `<clawboo home>/team-folder-history/<team>.git`. Pinned under that root with
+ * the same single startsWith test as `teamWorkdirPath`, so no team id can name a
+ * folder anywhere else.
+ */
 export function teamFolderHistoryDir(teamId: string): string {
-  return path.join(resolveClawbooDir(), 'team-folder-history', `${sanitizeAgentId(teamId)}.git`)
+  const root = path.resolve(resolveClawbooDir(), 'team-folder-history')
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  const dir = path.resolve(root, `${sanitizeAgentId(teamId)}.git`)
+  if (!dir.startsWith(prefix)) {
+    throw new Error(`team folder history escapes ${root}: ${dir}`)
+  }
+  return dir
 }
 
 /** Forget where a task's work began: a person marked it Done or cancelled it, so
@@ -94,7 +105,10 @@ async function ensureHistory(gitDir: string): Promise<void> {
   await writeFile(path.join(gitDir, 'info', 'exclude'), `${HISTORY_EXCLUDES.join('\n')}\n`)
 }
 
-/** Commit the whole folder as it is now; returns the commit. */
+/** Commit the folder as it is now, less what git leaves out: the dependency
+ *  folders above, and whatever a `.gitignore` in the folder ignores. Returns the
+ *  commit. Ignored files stay out on purpose: forcing them in would also take
+ *  `.env` files and the like into the history and the reviewer's checkout. */
 async function snapshot(gitDir: string, folder: string, message: string): Promise<string> {
   await historyGit(gitDir, folder, ['add', '-A'])
   await historyGit(gitDir, folder, [
@@ -212,6 +226,10 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     async begin(taskId, agentId) {
       const target = targetFor(agentId)
       if (!target) return
+      // The task is claimed and nothing beats it until its run starts, so a slow
+      // snapshot (a big folder, another task's snapshot ahead in the queue) must
+      // not read as a dead claim to the board's stale sweep.
+      const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: agentId })
       try {
         await ensureTeamWorkdir(target.folder)
         await historyMutex.run(gitDir, async () => {
@@ -230,6 +248,8 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
           taskId,
           `Clawboo could not record the team folder before this run, so its work will not be checked: ${why}`,
         )
+      } finally {
+        stopBeat()
       }
     },
 

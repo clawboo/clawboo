@@ -113,9 +113,12 @@ would lose to its own claim, and one that completed the task would complete it t
   check a person's move overtook finishes nothing, even when the task is running again. A `prepare` that rejects, a
   check that throws, or one that has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
   `check_failed` too, and so does a `done` the board refuses while the task is still `in_progress` or
-  `in_review`. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
+  `in_review` (as `blocked`, saying the check passed, when it had). A check that cannot run whose move to
+  `blocked` the board refuses fails the session instead, so the work cannot reach `done` unchecked. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
   that unloads idle engines. `resume()` hands a task left `in_review` with a running engine execution and no check
-  of its own (a restart or teardown cut it short) to a person and tells its delegator (`check_interrupted`).
+  of its own (a restart or teardown cut it short) to a person and tells its delegator (`check_interrupted`); it
+  closes that execution only once the move to `blocked` lands, so a failed move is tried again by the next
+  `resume()`.
 - **A person's move is final.** `personMovedTask` stops the run working on the card, closes its execution as
   cancelled, and tells the delegator when the person marked it done or cancelled it. A run that ends after that
   changes nothing. `markStopped` makes a Stop durable at once, so the ready-pump never re-fires stopped work.

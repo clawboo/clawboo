@@ -19,6 +19,7 @@ import {
   getTask,
   getTaskVerification,
   setSetting,
+  tasks,
   teams,
   updateStatus,
   type ClawbooDb,
@@ -33,6 +34,7 @@ import type {
 } from '@clawboo/executor'
 import type { WorkCheckResult } from '@clawboo/team-orchestration'
 import { execGit } from '@clawboo/worktrees'
+import { eq } from 'drizzle-orm'
 
 import { getDb, getDbPath, resetDb } from '../../db'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
@@ -291,37 +293,58 @@ describe('team chat work check', () => {
     expect(getTask(db, id)?.status).toBe('blocked')
   })
 
-  it("keeps a person's move to Blocked made while the check ran", async () => {
-    setCommand('sleep 1; exit 1')
+  // These two need a command that waits, then fails. `sleep 1; exit 1` is POSIX;
+  // under cmd.exe it fails at once, before the move they make mid-check. The
+  // engine's handling of a check that is overtaken is the same on every platform.
+  it.skipIf(process.platform === 'win32')(
+    "keeps a person's move to Blocked made while the check ran",
+    async () => {
+      setCommand('sleep 1; exit 1')
+      const wc = check()
+      const id = startTask()
+      await wc.begin(id, AGENT)
+      await writeFile(path.join(folder, 'parser.ts'), 'x\n')
+      const running = runCheck(wc, id)
+      await new Promise((r) => setTimeout(r, 300))
+      updateStatus(db, id, 'blocked') // a person parks it
+
+      expect(await running).toEqual({ verdict: 'decided' })
+      expect(getTask(db, id)?.status).toBe('blocked')
+      // Nor is its verdict written over the task: a Retry would start clean.
+      expect(getTaskVerification(db, id)).toBeNull()
+    },
+  )
+
+  it.skipIf(process.platform === 'win32')(
+    'records nothing once another run of the task has started',
+    async () => {
+      setCommand('sleep 1; exit 1')
+      const wc = check()
+      const id = startTask()
+      createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+      await wc.begin(id, AGENT)
+      await writeFile(path.join(folder, 'parser.ts'), 'x\n')
+      const running = runCheck(wc, id)
+      await new Promise((r) => setTimeout(r, 300))
+      // The engine gave up on this check, and the task was run again since.
+      createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+
+      expect(await running).toEqual({ verdict: 'decided' })
+      expect(getTaskVerification(db, id)).toBeNull()
+      expect(getTask(db, id)?.status).toBe('in_review')
+    },
+  )
+
+  it('keeps the task alive on the board while it records where the task began', async () => {
+    setCommand('true')
     const wc = check()
     const id = startTask()
+    // As if the claim were minutes old: the stale sweep reads updatedAt.
+    db.update(tasks).set({ updatedAt: 1 }).where(eq(tasks.id, id)).run()
+
     await wc.begin(id, AGENT)
-    await writeFile(path.join(folder, 'parser.ts'), 'x\n')
-    const running = runCheck(wc, id)
-    await new Promise((r) => setTimeout(r, 300))
-    updateStatus(db, id, 'blocked') // a person parks it
 
-    expect(await running).toEqual({ verdict: 'decided' })
-    expect(getTask(db, id)?.status).toBe('blocked')
-    // Nor is its verdict written over the task: a Retry would start clean.
-    expect(getTaskVerification(db, id)).toBeNull()
-  })
-
-  it('records nothing once another run of the task has started', async () => {
-    setCommand('sleep 1; exit 1')
-    const wc = check()
-    const id = startTask()
-    createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
-    await wc.begin(id, AGENT)
-    await writeFile(path.join(folder, 'parser.ts'), 'x\n')
-    const running = runCheck(wc, id)
-    await new Promise((r) => setTimeout(r, 300))
-    // The engine gave up on this check, and the task was run again since.
-    createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
-
-    expect(await running).toEqual({ verdict: 'decided' })
-    expect(getTaskVerification(db, id)).toBeNull()
-    expect(getTask(db, id)?.status).toBe('in_review')
+    expect(getTask(db, id)?.updatedAt).toBeGreaterThan(1)
   })
 
   it('forgets where a task began once a person marks it Done or cancels it', async () => {
