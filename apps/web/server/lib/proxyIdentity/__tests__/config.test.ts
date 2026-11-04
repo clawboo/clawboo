@@ -24,6 +24,18 @@ import {
 } from '../config'
 
 const ed = generateKeyPairSync('ed25519')
+/**
+ * A 1024-bit RSA public key, too short for the lane, as a fixed fixture: only
+ * the public half exists, and no weak key is made when the tests run.
+ */
+const RSA_1024_PUBLIC_PEM = [
+  '-----BEGIN PUBLIC KEY-----',
+  'MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDRIa6tv0e8Th3w2dT4CddhMz/u',
+  'qQ84lajfipJZatq6PSU3pN6LKiCmzQGShGa73D+Tv1CZBL/NVgIZSuMkjviBYq7K',
+  'B0Q6C3tPLgaS0WveAGSTnIgO4xOR1mpKRVGWKrl+LXKHh/ptO5LecmLtkLt8qGVz',
+  'wDqKnMzh6Q6EgtQOuQIDAQAB',
+  '-----END PUBLIC KEY-----',
+].join('\n')
 const edPem = ed.publicKey.export({ format: 'pem', type: 'spki' }).toString()
 const edJwk = ed.publicKey.export({ format: 'jwk' })
 
@@ -176,9 +188,8 @@ describe('refusing to start', () => {
   })
 
   it('on an RSA key shorter than 2048 bits, a certificate, or text that is no key', () => {
-    const small = generateKeyPairSync('rsa', { modulusLength: 1024 }).publicKey
     const cases: Array<[string, RegExp]> = [
-      [small.export({ format: 'pem', type: 'spki' }).toString(), /shorter than 2048/],
+      [RSA_1024_PUBLIC_PEM, /shorter than 2048/],
       ['-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----', /must be a PEM public key/],
       ['not a key', /must be a PEM public key/],
       ['{"kty":"OKP","crv":"X25519","x":"AAAA"}', /Ed25519/],
