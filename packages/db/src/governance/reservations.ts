@@ -27,7 +27,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { MICRO_CENTS_PER_CENT } from '@clawboo/governance'
-import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+import { and, eq, isNull, ne, or, sql } from 'drizzle-orm'
 
 import { immediateWrite, withWriteRetry, type BoardTx } from '../board/contention'
 import type { ClawbooDb } from '../db'
@@ -40,8 +40,9 @@ export interface BudgetHoldScope {
   scopeId: string
 }
 
-/** The server process that holds a reservation, so a later boot can tell a
- *  live server's holds from a dead one's. */
+/** The server process that holds a reservation, so the server that starts next
+ *  can tell its own holds from the ones left before it (see
+ *  `sweepForeignBudgetReservations`). */
 export interface ReservationOwner {
   pid: number
   startedAt: number
@@ -186,46 +187,26 @@ export function heldByBudget(db: ClawbooDb): Map<string, { runs: number; heldMic
   )
 }
 
-/** Every server process that holds a reservation; `null` stands for rows that name none. */
-export function budgetReservationOwners(db: ClawbooDb): (ReservationOwner | null)[] {
-  const rows = db
-    .selectDistinct({
-      pid: budgetReservations.ownerPid,
-      startedAt: budgetReservations.ownerStartedAt,
-    })
-    .from(budgetReservations)
-    .all() as { pid: number | null; startedAt: number | null }[]
-  return rows.map((r) =>
-    r.pid != null && r.startedAt != null ? { pid: r.pid, startedAt: r.startedAt } : null,
-  )
-}
-
 /**
- * Drop the holds no live run can still settle: every row whose owner is not in
- * `liveOwners` (rows that name no owner included), and every row created before
- * `createdBefore`. Called at boot, when this server holds none yet. Returns the
- * rows removed.
+ * Drop every hold that `owner` (this server process) did not take: the holds of
+ * a server that stopped while its runs were going, and rows that name no owner.
+ * Clawboo runs one server per database, so no other process can still settle
+ * them. One statement, so it never binds a list of ids, and safe to run again
+ * at any time: it never touches the caller's own holds. Returns the rows removed.
  */
-export function sweepBudgetReservations(
-  db: ClawbooDb,
-  opts: { liveOwners: readonly ReservationOwner[]; createdBefore: number },
-): number {
-  return immediateWrite(db, (tx) => {
-    const rows = tx
-      .select({
-        id: budgetReservations.id,
-        pid: budgetReservations.ownerPid,
-        startedAt: budgetReservations.ownerStartedAt,
-        createdAt: budgetReservations.createdAt,
-      })
-      .from(budgetReservations)
-      .all() as { id: string; pid: number | null; startedAt: number | null; createdAt: number }[]
-    const live = (pid: number | null, startedAt: number | null): boolean =>
-      opts.liveOwners.some((o) => o.pid === pid && o.startedAt === startedAt)
-    const drop = rows
-      .filter((r) => r.createdAt < opts.createdBefore || !live(r.pid, r.startedAt))
-      .map((r) => r.id)
-    if (drop.length === 0) return 0
-    return tx.delete(budgetReservations).where(inArray(budgetReservations.id, drop)).run().changes
-  })
+export function sweepForeignBudgetReservations(db: ClawbooDb, owner: ReservationOwner): number {
+  return withWriteRetry(
+    () =>
+      db
+        .delete(budgetReservations)
+        .where(
+          or(
+            isNull(budgetReservations.ownerPid),
+            isNull(budgetReservations.ownerStartedAt),
+            ne(budgetReservations.ownerPid, owner.pid),
+            ne(budgetReservations.ownerStartedAt, owner.startedAt),
+          ),
+        )
+        .run().changes,
+  )
 }

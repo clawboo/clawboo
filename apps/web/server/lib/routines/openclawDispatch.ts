@@ -180,12 +180,28 @@ async function dispatchConnectedSubstrateInner(
     }
   }
   const hold = gate.hold
+  // However the fire ends, its budget hold goes with it: a refused claim, a claim
+  // that throws, and every way the drain ends.
+  try {
+    return await claimAndDrainRoutineRun(input, gatewayAgentId, missionId, hold)
+  } finally {
+    hold.release()
+  }
+}
+
+/** Claim the fire's task, beat it and drive it to its end, holding `hold`. */
+async function claimAndDrainRoutineRun(
+  input: ConnectedDispatchInput,
+  gatewayAgentId: string,
+  missionId: string,
+  hold: RunBudgetHold,
+): Promise<RoutineDispatchOutcome> {
+  const { db, run, taskId } = input
 
   // Atomic claim — a lost claim means another worker owns the task; the work
   // is happening, so the fire is satisfied (drop, never retry).
   const claim = claimTask(db, taskId, run.agentId, 'openclaw')
   if (!claim.ok) {
-    hold.release()
     return claim.reason === 'conflict'
       ? { ok: true, taskId }
       : { ok: false, taskId, error: `claim failed: ${claim.reason ?? 'unknown'}` }
@@ -221,8 +237,6 @@ async function dispatchConnectedSubstrateInner(
     }
     return { ok: false, taskId, error: `run failed: ${errorText(err)}` }
   } finally {
-    // However the fire ended, its budget hold goes with it.
-    hold.release()
     stop.release()
     stopBeat()
   }

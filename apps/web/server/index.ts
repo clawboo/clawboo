@@ -63,7 +63,7 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe } from './lib/bootProbe'
-import { sweepBudgetHoldsAtBoot } from './lib/budgetHold'
+import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
@@ -490,11 +490,10 @@ async function main() {
   // A run holds its estimated cost on its budgets until it ends (see budgetHold).
   // Holds left by a server that stopped without ending its runs (a crash, a force
   // quit, a restart mid-run) would block parallel runs on those budgets for good,
-  // so they go here, before this server starts a run. A second server still
-  // running on this state directory keeps its own. Best-effort; never blocks boot.
+  // so they go here, before this server starts a run. A sweep that fails is tried
+  // again on a timer. Best-effort; never blocks boot.
   try {
-    const swept = sweepBudgetHoldsAtBoot(getDb())
-    if (swept > 0) log.info({ swept }, 'Budgets: dropped holds left by runs that are gone')
+    sweepLeftoverBudgetHolds(getDb())
   } catch (err) {
     log.error({ err }, 'Budgets: sweeping leftover holds failed (non-fatal)')
   }

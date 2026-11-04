@@ -13,11 +13,10 @@ import { budgetReservations } from '../../schema'
 import { getBudget, recordSpend, setBudgetLimit } from '../budgets'
 import {
   admitAgainstBudget,
-  budgetReservationOwners,
   heldByBudget,
   releaseBudgetHold,
   reserveBudgets,
-  sweepBudgetReservations,
+  sweepForeignBudgetReservations,
 } from '../reservations'
 
 let dir: string
@@ -284,48 +283,55 @@ describe('recordSpend against a hold, and the end of a run', () => {
   })
 })
 
-describe('sweepBudgetReservations (the boot sweep)', () => {
-  it("drops a gone server's holds and old ones, keeps a live server's", () => {
+describe('sweepForeignBudgetReservations (the start-up sweep)', () => {
+  const me = { pid: 4242, startedAt: 1_000 }
+  const take = (owner: { pid: number; startedAt: number } | null, createdAt = 10_000_000) => {
+    const r = reserveBudgets(db, {
+      scopes: agentScope,
+      estimateCents: 5,
+      runKind: 'task',
+      owner,
+      now: createdAt,
+    })
+    if (!r.ok) throw new Error('refused')
+    return r.holdId
+  }
+
+  beforeEach(() => {
     setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1000, mode: 'cap' })
-    const live = { pid: 4242, startedAt: 1_000 }
-    const gone = { pid: 4343, startedAt: 2_000 }
-    const now = 10_000_000
-    const keep = reserveBudgets(db, {
-      scopes: agentScope,
-      estimateCents: 5,
-      runKind: 'task',
-      owner: live,
-      now,
-    })
-    const dead = reserveBudgets(db, {
-      scopes: agentScope,
-      estimateCents: 5,
-      runKind: 'task',
-      owner: gone,
-      now,
-    })
-    const unowned = reserveBudgets(db, {
-      scopes: agentScope,
-      estimateCents: 5,
-      runKind: 'task',
-      now,
-    })
-    const stale = reserveBudgets(db, {
-      scopes: agentScope,
-      estimateCents: 5,
-      runKind: 'task',
-      owner: live,
-      now: 10,
-    })
-    if (!keep.ok || !dead.ok || !unowned.ok || !stale.ok) throw new Error('refused')
+  })
 
-    expect(budgetReservationOwners(db)).toEqual(expect.arrayContaining([live, gone, null]))
-    const dropped = sweepBudgetReservations(db, { liveOwners: [live], createdBefore: now - 1_000 })
+  it('drops every hold this server did not take, and keeps its own however old', () => {
+    const mine = take(me, 1)
+    const earlierRun = take({ pid: 4343, startedAt: 2_000 })
+    // The same pid as this server, a different process: an earlier server that held it.
+    const samePid = take({ pid: me.pid, startedAt: 500 })
+    const unowned = take(null)
 
-    expect(dropped).toBe(3)
-    expect(holdRows(keep.holdId)).toHaveLength(1)
-    expect(holdRows(dead.holdId)).toHaveLength(0)
-    expect(holdRows(unowned.holdId)).toHaveLength(0)
-    expect(holdRows(stale.holdId)).toHaveLength(0)
+    expect(sweepForeignBudgetReservations(db, me)).toBe(3)
+    expect(holdRows(mine)).toHaveLength(1)
+    for (const gone of [earlierRun, samePid, unowned]) expect(holdRows(gone)).toHaveLength(0)
+  })
+
+  it('removes a large backlog in one statement', () => {
+    // One hold on each of 40,000 budgets: more ids than SQLite binds in one list.
+    const insert = db.$client.prepare(
+      "INSERT INTO budget_reservations (id, hold_id, budget_id, held_micro_cents, estimate_micro_cents, run_kind, owner_pid, owner_started_at, created_at, updated_at) VALUES (?, 'h-old', ?, 1, 1, 'task', 1, 1, 1, 1)",
+    )
+    const budgetId = getBudget(db, 'agent', 'a1')!.id
+    db.$client.exec('DROP INDEX uniq_budget_reservations_hold')
+    db.$client.transaction(() => {
+      for (let i = 0; i < 40_000; i++) insert.run(`r-${i}`, budgetId)
+    })()
+    expect(sweepForeignBudgetReservations(db, me)).toBe(40_000)
+    expect(heldByBudget(db).size).toBe(0)
+  })
+
+  it('is safe to run again once this server holds runs', () => {
+    take({ pid: 4343, startedAt: 2_000 })
+    expect(sweepForeignBudgetReservations(db, me)).toBe(1)
+    const mine = take(me)
+    expect(sweepForeignBudgetReservations(db, me)).toBe(0)
+    expect(holdRows(mine)).toHaveLength(1)
   })
 })

@@ -80,7 +80,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { reserveRunBudget, type RunBudgetHold } from './budgetHold'
-import { budgetRefusalText } from './budgetPreflight'
+import { budgetPreflight, budgetRefusalText } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
 import { RunQueueAbortedError, withRunSlot } from './runSlots'
@@ -626,6 +626,21 @@ interface ClaimState {
   steer?: SteerSlot
   /** The current attempt's budget hold, released when the attempt ends. */
   hold?: RunBudgetHold | null
+}
+
+/** The scope whose hard cap is paused now, read before a run rotates to a fresh
+ *  session (see the rotation loop), or null. A read that fails lets it rotate,
+ *  as a failed spend write lets a run go on. */
+function pausedScopeBeforeRotation(
+  db: ClawbooDb,
+  scopes: { agentId: string; missionId: string | null; teamId: string | null | undefined },
+): BudgetStopScope | null {
+  try {
+    const pre = budgetPreflight(db, scopes)
+    return pre.blocked && pre.scope !== 'tenant' ? pre.scope : null
+  } catch {
+    return null
+  }
 }
 
 /** Point the task's steer registration at `run` (the first run, or a rotated
@@ -1591,6 +1606,19 @@ async function runTaskInner(
       doneReason === 'max_turns' ? 'max_turns' : watermark ? 'context_watermark' : null
 
     if (rotateReason && rotations < maxRotations) {
+      // A cap another run paused while this pass went would let the fresh session
+      // spend past it before its first cost report stopped it, so the run stops
+      // here instead, as at a pause it saw itself. Only a pause: this run was let
+      // start, and room other runs hold is not a reason to cut it short.
+      const pausedNow = pausedScopeBeforeRotation(db, {
+        agentId: assigneeAgentId,
+        missionId,
+        teamId: task.teamId,
+      })
+      if (pausedNow) {
+        stopForBudget = pausedNow
+        break
+      }
       rotations += 1
       // Rotation successors start FRESH: continuity rides the handoff note,
       // never the exhausted native session (resuming it would re-exhaust

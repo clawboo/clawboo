@@ -1164,6 +1164,69 @@ describe('budget holds on a scheduled OpenClaw fire', () => {
     expect(holds()).toEqual([])
   })
 
+  it('the final gate refuses a fire that the cap can no longer hold beside another run, and keeps its schedule', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 10_000, mode: 'cap' })
+    // Another run is going and holds half the cap; the start gate still admits this fire.
+    expect(
+      reserveBudgets(db, {
+        scopes: [{ scope: 'agent', scopeId: agentRow.id }],
+        estimateCents: 5_000,
+        runKind: 'team-chat',
+      }).ok,
+    ).toBe(true)
+    const adapter = quietAdapter()
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      makeAdapter: () => {
+        // The cap is lowered while the fire gets ready: still active, but the other
+        // run's hold and this fire's estimate no longer fit under it.
+        setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1_000 })
+        return adapter.make()
+      },
+    })
+    expect(outcome).toEqual({ ok: false, taskId, error: 'budget_held:agent', transient: true })
+    expect(adapter.started()).toBe(0)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]).toMatchObject({
+      status: 'cancelled',
+      error: 'budget_held:agent',
+    })
+    // Only the other run's hold is left.
+    expect(holds()).toHaveLength(1)
+  })
+
+  it('a fire whose claim throws leaves no hold', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1000, mode: 'cap' })
+    db.$client.exec(
+      "CREATE TRIGGER claim_fails BEFORE UPDATE ON tasks BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END",
+    )
+    const adapter = quietAdapter()
+    await expect(
+      dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: new FakeOperatorClient() as unknown as OperatorClientLike,
+        makeAdapter: adapter.make,
+      }),
+    ).rejects.toThrow('disk I/O error')
+    expect(adapter.started()).toBe(0)
+    expect(holds()).toEqual([])
+  })
+
   it('a fire whose start fails leaves no hold', async () => {
     const agentRow = seedAgent()
     const run = seedRoutine(agentRow.id)

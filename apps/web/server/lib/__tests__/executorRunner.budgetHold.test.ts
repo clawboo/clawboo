@@ -17,6 +17,7 @@ import {
   getTask,
   listExecutions,
   recordSpend,
+  reserveBudgets,
   setBudgetLimit,
 } from '@clawboo/db'
 import type {
@@ -240,6 +241,86 @@ describe('budget holds on the task runner', () => {
     ])
     expect(getComments(db, taskId).map((c) => c.body)).toEqual([
       expect.stringContaining('The team budget is paused at its hard cap'),
+    ])
+    expect(holds()).toEqual([])
+  })
+
+  it('the final gate refuses a run the cap can no longer hold beside another run', async () => {
+    const db = getDb()
+    setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10_000, mode: 'cap' })
+    const a = heldAdapter()
+    const taskId = newTask('late squeeze')
+    const result = await run(taskId, 'agent-a', (ctx) => {
+      if (ctx.memoryScope) {
+        // After this run was let start: another run starts beside it and holds half
+        // the cap, then the cap is lowered (still active) so both no longer fit.
+        expect(
+          reserveBudgets(db, {
+            scopes: [{ scope: 'team', scopeId: 'team-1' }],
+            estimateCents: 5_000,
+            runKind: 'team-chat',
+          }).ok,
+        ).toBe(true)
+        setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 1_000 })
+      }
+      return a.adapter
+    })
+
+    expect(result).toEqual({ ok: false, reason: 'budget_held' })
+    expect(a.state.started).toBe(0)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId).map((e) => [e.status, e.error])).toEqual([
+      ['cancelled', 'budget_held:team'],
+    ])
+    expect(getComments(db, taskId).map((c) => c.body)).toEqual([
+      expect.stringContaining('runs already going have set aside the rest of it'),
+    ])
+    // Only the other run's hold is left.
+    expect(holds()).toHaveLength(1)
+  })
+
+  it('a run that would go on in a fresh session stops when another run paused its cap', async () => {
+    const db = getDb()
+    setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 100, mode: 'cap' })
+    let starts = 0
+    const adapter: RuntimeAdapter = {
+      id: 'claude-code',
+      participantKind: 'agent',
+      capabilities: () => CAPS,
+      async health() {
+        return { ok: true }
+      },
+      async start(_t: TaskHandle, o: StartOpts): Promise<RunHandle> {
+        starts++
+        return { adapterId: 'claude-code', sessionKey: o.sessionKey, runId: null }
+      },
+      events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+        const b = () => ({ runId: run.sessionKey, sessionId: run.sessionKey, ts: 1, seq: 1 })
+        return (async function* () {
+          yield {
+            ...b(),
+            kind: 'cost',
+            costUsd: 0.01,
+            usage: { inputTokens: 10, outputTokens: 10 },
+            model: 'claude-sonnet-4-6',
+          } as RuntimeEvent
+          // A teammate's run pauses the team's cap while this pass is going.
+          recordSpend(db, 'team', 'team-1', 150)
+          // The pass runs out of turns, which would rotate it to a fresh session.
+          yield { ...b(), kind: 'done', reason: 'max_turns', summary: 'half way' } as RuntimeEvent
+        })()
+      },
+      async abort() {},
+      async setModel() {},
+      async writeContext() {},
+    }
+    const taskId = newTask('long one')
+    const result = await run(taskId, 'agent-a', () => adapter)
+
+    expect(starts).toBe(1)
+    expect(result).toMatchObject({ ok: true, doneReason: 'aborted', status: 'todo' })
+    expect(listExecutions(db, taskId).map((e) => [e.status, e.error])).toEqual([
+      ['cancelled', 'budget_paused:team'],
     ])
     expect(holds()).toEqual([])
   })

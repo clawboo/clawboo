@@ -18,7 +18,7 @@ import {
 } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { estimateRunReserveCents, reserveRunBudget, sweepBudgetHoldsAtBoot } from '../budgetHold'
+import { estimateRunReserveCents, reserveRunBudget, sweepLeftoverBudgetHolds } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
 import { DEFAULTS } from '../defaults'
 
@@ -94,6 +94,51 @@ describe('estimateRunReserveCents', () => {
   })
 })
 
+describe('estimateRunReserveCents: a run is its records summed', () => {
+  function record(costUsd: number, runId: string | null, createdAt: number): void {
+    db.insert(costRecords)
+      .values({
+        agentId: 'oc',
+        model: 'm',
+        inputTokens: 1,
+        outputTokens: 1,
+        costUsd,
+        runId,
+        createdAt,
+      })
+      .run()
+  }
+
+  it('adds up an OpenClaw run recorded turn by turn', () => {
+    seedAgent('oc')
+    // One run of 16 turns at 5 cents, recorded as 16 rows that share its run id.
+    for (let i = 0; i < 16; i++) record(0.05, 'gw-run-1', 1_000 + i)
+    expect(estimateRunReserveCents(db, 'oc')).toBeCloseTo(80, 6)
+  })
+
+  it('counts a record with no run id as a run of its own', () => {
+    seedAgent('oc')
+    record(0.05, null, 1)
+    record(0.07, null, 2)
+    expect(estimateRunReserveCents(db, 'oc')).toBeCloseTo(7, 6)
+  })
+
+  it('never joins a run id to a record id', () => {
+    seedAgent('oc')
+    record(0.05, null, 1) // row id 1
+    record(0.04, '1', 2) // a run whose id reads "1"
+    expect(estimateRunReserveCents(db, 'oc')).toBeCloseTo(5, 6)
+  })
+
+  it('reads only the latest runs, however many turns each had', () => {
+    seedAgent('oc')
+    record(9, 'old-run', 1)
+    for (let r = 0; r < 10; r++)
+      for (let t = 0; t < 3; t++) record(0.01, `run-${r}`, 100 + r * 10 + t)
+    expect(estimateRunReserveCents(db, 'oc')).toBeCloseTo(3, 6)
+  })
+})
+
 describe('reserveRunBudget', () => {
   it('takes no hold when no budget applies', () => {
     const gate = reserveRunBudget(db, { agentId: 'a1', teamId: 't1' }, { kind: 'task' })
@@ -124,6 +169,52 @@ describe('reserveRunBudget', () => {
   })
 })
 
+describe('reserveRunBudget when the ledger fails', () => {
+  it('still refuses a paused cap when the hold cannot be written', () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 't1', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'team', 't1', 150)
+    db.$client.exec('DROP TABLE budget_reservations')
+    expect(reserveRunBudget(db, { agentId: 'a1', teamId: 't1' }, { kind: 'task' })).toEqual({
+      blocked: true,
+      scope: 'team',
+      reason: 'paused',
+    })
+  })
+
+  it('the final gate still refuses a cap that paused, when the hold cannot be read', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
+    const gate = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task', estimateCents: 10 })
+    if (gate.blocked) throw new Error('refused')
+    recordSpend(db, 'agent', 'a1', 150)
+    db.$client.exec('DROP TABLE budget_reservations')
+    expect(gate.hold.recheck()).toEqual({ blocked: true, scope: 'agent', reason: 'paused' })
+  })
+
+  it('lets the run go when neither the hold nor the budgets can be read', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
+    db.$client.exec('DROP TABLE budget_reservations')
+    db.$client.exec('DROP TABLE budgets')
+    const gate = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task' })
+    expect(gate.blocked).toBe(false)
+  })
+
+  it('retries a release whose delete failed at the next admission', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 1000, mode: 'cap' })
+    const gate = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task', estimateCents: 10 })
+    if (gate.blocked) throw new Error('refused')
+    db.$client.exec(
+      "CREATE TRIGGER no_delete BEFORE DELETE ON budget_reservations BEGIN SELECT RAISE(ABORT, 'database is locked'); END",
+    )
+    gate.hold.release()
+    expect(holds()).toHaveLength(1)
+    db.$client.exec('DROP TRIGGER no_delete')
+    // The next run's admission clears it before reading the room left.
+    const next = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task', estimateCents: 10 })
+    if (next.blocked) throw new Error('refused')
+    expect(holds().map((h) => h.holdId)).toEqual([next.hold.id])
+  })
+})
+
 describe('budgetRefusalText', () => {
   it('says what stopped the run, in both cases', () => {
     expect(budgetRefusalText('team')).toMatch(/^The team budget is paused at its hard cap/)
@@ -133,74 +224,60 @@ describe('budgetRefusalText', () => {
   })
 })
 
-describe('sweepBudgetHoldsAtBoot', () => {
-  const now = 50_000_000
-  function holdFor(owner: { pid: number; startedAt: number } | null, createdAt = now): string {
-    const r = reserveBudgets(db, {
-      scopes: [{ scope: 'agent', scopeId: 'a1' }],
-      estimateCents: 10,
-      runKind: 'task',
-      owner,
-      now: createdAt,
-    })
-    if (!r.ok) throw new Error('refused')
-    return r.holdId
-  }
-  const left = () => new Set(holds().map((h) => h.holdId))
-
+describe('sweepLeftoverBudgetHolds', () => {
   beforeEach(() => {
     setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 10_000, mode: 'cap' })
   })
 
-  it("drops a stopped server's holds after a restart, so its budget is free again", () => {
-    // A server held two runs and was killed; its pid is free now.
-    holdFor({ pid: 999_001, startedAt: 1_000 })
-    holdFor({ pid: 999_001, startedAt: 1_000 })
-    const swept = sweepBudgetHoldsAtBoot(db, { isAlive: () => false, now })
-    expect(swept).toBe(2)
-    expect(holds()).toEqual([])
-  })
-
-  it("keeps a live second server's holds, and drops one whose pid now names another process", () => {
-    const live = holdFor({ pid: 999_002, startedAt: 2_000_000 })
-    const reused = holdFor({ pid: 999_003, startedAt: 3_000_000 })
-    const swept = sweepBudgetHoldsAtBoot(db, {
-      isAlive: () => true,
-      startTimes: () => ({
-        ok: true,
-        times: new Map([
-          [999_002, 2_000_500],
-          // Started long after the hold was taken: not the server that took it.
-          [999_003, 9_000_000],
-        ]),
-      }),
-      now,
-    })
-    expect(swept).toBe(1)
-    expect(left()).toEqual(new Set([live]))
-    expect(left().has(reused)).toBe(false)
-  })
-
-  it('drops when it cannot tell, and drops holds that name no server or are too old', () => {
-    holdFor({ pid: 999_004, startedAt: 4_000 })
-    holdFor(null)
-    holdFor({ pid: 999_005, startedAt: 5_000 }, 1)
-    const swept = sweepBudgetHoldsAtBoot(db, {
-      isAlive: (pid) => pid === 999_005 || pid === 999_004,
-      startTimes: (pids) =>
-        pids.includes(999_004)
-          ? { ok: false, times: new Map(), error: 'ps: not found' }
-          : { ok: true, times: new Map([[999_005, 5_000]]) },
-      now,
-    })
-    expect(swept).toBe(3)
+  it("drops a stopped server's holds at start, so its budget is free again", () => {
+    // A server held two runs and was killed mid-run.
+    for (const pid of [999_001, 999_001]) {
+      reserveBudgets(db, {
+        scopes: [{ scope: 'agent', scopeId: 'a1' }],
+        estimateCents: 10,
+        runKind: 'task',
+        owner: { pid, startedAt: 1_000 },
+      })
+    }
+    sweepLeftoverBudgetHolds(db)
     expect(holds()).toEqual([])
   })
 
   it("keeps this server's own holds", () => {
     const gate = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task' })
     expect(gate.blocked).toBe(false)
-    expect(sweepBudgetHoldsAtBoot(db, { isAlive: () => false, now: Date.now() })).toBe(0)
+    sweepLeftoverBudgetHolds(db)
     expect(holds()).toHaveLength(1)
+  })
+
+  it('tries a failed sweep again until it succeeds, and stops trying after the limit', () => {
+    const timers: Array<{ fn: () => void; ms: number }> = []
+    let calls = 0
+    sweepLeftoverBudgetHolds(db, {
+      retryMs: 1_000,
+      maxTries: 5,
+      schedule: (fn, ms) => timers.push({ fn, ms }),
+      sweep: () => {
+        calls += 1
+        if (calls < 3) throw new Error('database is locked')
+        return 2
+      },
+    })
+    expect(calls).toBe(1)
+    timers.shift()!.fn()
+    timers.shift()!.fn()
+    expect(calls).toBe(3)
+    expect(timers).toEqual([])
+
+    let failing = 0
+    sweepLeftoverBudgetHolds(db, {
+      maxTries: 3,
+      schedule: (fn) => fn(),
+      sweep: () => {
+        failing += 1
+        throw new Error('database is locked')
+      },
+    })
+    expect(failing).toBe(3)
   })
 })

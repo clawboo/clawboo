@@ -783,7 +783,7 @@ Indexes: `uniq_budgets_scope` (unique: `scope`, `scope_id`), `idx_budgets_status
 
 ### budget_reservations
 
-What each run that is going holds against a budget it counts toward: its estimated cost, set aside from the moment it is let start until it ends, so runs that start together see each other (see [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time)). One row per run and budget. A run's recorded spend shrinks its row, and the row is deleted when the run ends. At startup the server deletes the rows of a server process that is no longer running, rows that name none, and rows older than 12 hours.
+What each run that is going holds against a budget it counts toward: its estimated cost, set aside from the moment it is let start until it ends, so runs that start together see each other (see [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time)). One row per run and budget. A run's recorded spend shrinks its row, and the row is deleted when the run ends. At startup the server deletes every row it did not write itself: Clawboo runs one server per database, so those rows were left by a server that stopped while its runs were going.
 
 | Column                 | Type                              | Notes                                                                               |
 | ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------- |

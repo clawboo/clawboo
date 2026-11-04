@@ -300,6 +300,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // each delta (REPLACE semantics matching the client store). Tolerate BOTH delta
     // conventions (native emits incremental chunks; a cumulative delta REPLACES).
     let acc = ''
+    let replyText = ''
     let publishedDelta = false
     let sawTerminal = false
     let committed = false
@@ -350,6 +351,10 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
         if (!terminal) continue
         sawTerminal = true
+        // The reply the turn produced, priced below: what streamed, or the summary
+        // of a runtime that streams nothing (Hermes answers in one piece). Team chat
+        // prices its runs on the same text.
+        if (ev.kind === 'done') replyText = acc.trim() ? acc : (ev.summary ?? '')
         if (ev.kind === 'done' && ev.reason === 'success') {
           succeeded = true
           if (driverCommitsReply) {
@@ -415,7 +420,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       const cost = costTally.settle({
         model: codingModel?.model ?? null,
         inputChars,
-        outputChars: acc.length,
+        outputChars: (replyText || acc).length,
       })
       if (cost.unbilledUsd > 0)
         recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd), { holdId })
@@ -424,7 +429,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         runtime,
         model: costTally.model() ?? codingModel?.model ?? null,
         inputTokens: cost.inputTokens ?? estimateTokensFromChars(inputChars),
-        outputTokens: cost.outputTokens ?? estimateTokensFromChars(acc.length),
+        outputTokens: cost.outputTokens ?? estimateTokensFromChars((replyText || acc).length),
         costUsd: cost.costUsd,
         sessionKey,
       })

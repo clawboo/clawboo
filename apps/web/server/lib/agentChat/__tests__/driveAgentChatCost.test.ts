@@ -174,8 +174,12 @@ describe('driveAgentChat: cost records and budget holds', () => {
     })
     const rows = records('hermes-x')
     expect(rows).toHaveLength(1)
-    expect(rows[0]!.costUsd).toBeGreaterThan(0)
-    expect(rows[0]!.inputTokens).toBeGreaterThan(0)
+    const row = rows[0]!
+    expect(row.inputTokens).toBeGreaterThan(0)
+    // The reply came in one piece, as the summary: it is the output that is priced.
+    expect(row.outputTokens).toBe(Math.ceil('All done.'.length / 4))
+    // At the default rate, $3 and $15 per million input and output tokens.
+    expect(row.costUsd).toBeCloseTo((row.inputTokens * 3 + row.outputTokens * 15) / 1_000_000, 12)
   })
 
   it('a turn that never reached the model writes no record and leaves no hold', async () => {
