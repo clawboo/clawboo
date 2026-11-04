@@ -42,6 +42,12 @@ export const server = setupServer(
   // and polls them, so every test that mounts the Board fetches this. Empty by
   // default; a test about routines overrides it.
   http.get('/api/schedules/occurrences', () => HttpResponse.json({ now: 0, routines: [] })),
+  // The routine form reads the zone routines are worked out in when it opens.
+  // The test runner's own zone by default, as on a laptop with nothing stored.
+  http.get('/api/schedules/time-zone', () => {
+    const zone = Intl.DateTimeFormat().resolvedOptions().timeZone
+    return HttpResponse.json({ timeZone: zone, hostTimeZone: zone, configured: false })
+  }),
   // The Board's New task dialog reads each member's role when it opens, to
   // suggest who fits the sentence. None by default; a test about the suggestion
   // overrides it.

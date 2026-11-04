@@ -196,6 +196,7 @@ export function ActivityTerminal({
     () => events.map((e) => ({ e, view: presentEvent(e) })).filter((r) => r.view != null),
     [events],
   )
+  const empty = !loading && rows.length === 0
 
   // Autoscroll-with-pin: follow the tail only while the user is near the bottom.
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -256,61 +257,72 @@ export function ActivityTerminal({
         </div>
       )}
 
-      {/* When the host owns the title (hideHeader), still surface liveness — a
-          small pill pinned to the console's top-right corner. */}
-      {hideHeader && !loading && (
+      {/* When the host owns the title (hideHeader), liveness still shows: on a
+          slim strip of its own above the log, so it never covers the first
+          line. A short empty log carries it on its one line instead. */}
+      {hideHeader && !loading && (rows.length > 0 || fill) && (
         <div
           style={{
-            position: 'absolute',
-            top: 6,
-            right: 8,
-            zIndex: 2,
-            padding: '2px 7px',
-            borderRadius: 999,
-            background: 'var(--code-block-bg, rgb(var(--foreground-rgb) / 0.05))',
-            border: `1px solid ${muted(0.07)}`,
-            pointerEvents: 'none',
+            display: 'flex',
+            justifyContent: 'flex-end',
+            flexShrink: 0,
+            padding: '6px 10px 0',
           }}
         >
           <LiveDot live={live} loading={loading} />
         </div>
       )}
 
-      <div
-        ref={scrollRef}
-        onScroll={onScroll}
-        className="font-data"
-        style={{
-          ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight }),
-          overflowY: 'auto',
-          padding: '4px 0',
-        }}
-      >
-        {loading ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>
-            {[0, 1, 2, 3].map((i) => (
-              <Skeleton key={i} height={12} width={`${85 - i * 12}%`} />
-            ))}
-          </div>
-        ) : rows.length === 0 ? (
-          <div style={{ padding: '14px 12px' }}>
-            <EmptyState
-              icon={Terminal}
-              title="No activity yet"
-              helper="Tool calls, results, errors, and lifecycle will stream here live as agents work."
-            />
-          </div>
-        ) : (
-          rows.map(({ e, view }) => (
-            <ActivityRowItem
-              key={e.seq}
-              event={e}
-              view={view!}
-              agentName={showAgent ? nameOf(e.agentId) : ''}
-            />
-          ))
-        )}
-      </div>
+      {empty && !fill ? (
+        // A capped host (the task drawer, a chat card) is often looking at work
+        // that has not started: one quiet line, not a tall box.
+        <div
+          data-testid="activity-empty"
+          className="flex items-center gap-3"
+          style={{ padding: '9px 10px 9px 12px' }}
+        >
+          <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+            No activity yet. It shows up here as agents work.
+          </p>
+          {hideHeader ? <LiveDot live={live} loading={loading} /> : null}
+        </div>
+      ) : empty ? (
+        <div data-testid="activity-empty" style={{ flex: 1, minHeight: 0, padding: '14px 12px' }}>
+          <EmptyState
+            icon={Terminal}
+            title="No activity yet"
+            helper="Tool calls, results and errors show up here as agents work."
+          />
+        </div>
+      ) : (
+        <div
+          ref={scrollRef}
+          onScroll={onScroll}
+          className="font-data"
+          style={{
+            ...(fill ? { flex: 1, minHeight: 0 } : { maxHeight }),
+            overflowY: 'auto',
+            padding: '4px 0',
+          }}
+        >
+          {loading ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '8px 12px' }}>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} height={12} width={`${85 - i * 12}%`} />
+              ))}
+            </div>
+          ) : (
+            rows.map(({ e, view }) => (
+              <ActivityRowItem
+                key={e.seq}
+                event={e}
+                view={view!}
+                agentName={showAgent ? nameOf(e.agentId) : ''}
+              />
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }

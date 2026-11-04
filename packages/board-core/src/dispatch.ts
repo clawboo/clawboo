@@ -31,6 +31,10 @@ export interface LedgerRun {
   executorType?: string | null
   /** The runtime that ran it, when `executorType` names an owner instead. */
   runtime?: string | null
+  /** When the run started, was claimed and was recorded (epoch ms). */
+  startedAt?: number | null
+  claimedAt?: number | null
+  createdAt?: number | null
 }
 
 /** What a person has to fix before the same work can run: the runtime's

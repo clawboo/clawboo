@@ -103,9 +103,11 @@ Clawboo never merges. When a run in a worktree finishes, what happens next depen
 
 Changes can still be uncommitted in the worktree folder when a run ends. Clawboo commits them to the branch when the verify command passes on a task-runner run, when a worktree is paused, and before a cleanup removes the folder. To see the work in the app, open the **Workspace** tab on the agent's page, or the **Workspace** section of the task on the Board, which shows the changed files and the diff.
 
+When a task runs again and its folder has to be rebuilt from the branch, Clawboo first checks that the folder holds nothing the rebuild would lose. A checkout that is still on the task branch with nothing uncommitted is kept as it is, along with files git ignores. Any other folder is never replaced if it holds uncommitted changes, files git ignores (an `.env` file or build output, for example), a commit no branch holds, a separate git repository, or anything git cannot read. The run does not start, and the task waits in **Needs you** with a comment that starts `[blocked: worktree kept]` and names the folder. Commit or copy what you need from it, or remove it, then move the task back to **To do**. If git does not answer when Clawboo checks the folder, the run does not start either: nothing is changed, and the task goes back to **To do** with a `[not started: worktree unchecked]` comment.
+
 ### Cleanup
 
-When the Clawboo server starts, it removes worktree folders that are older than 72 hours, or beyond the newest 25 for a repository. Tasks that are in progress or in review are skipped. Before removing a folder, Clawboo commits any uncommitted work to the branch. The branch itself is kept, so nothing is lost: if the task runs again, Clawboo rebuilds the checkout from the branch.
+When the Clawboo server starts, it removes worktree folders that are older than 72 hours, or beyond the newest 25 for a repository. Tasks that are in progress or in review are skipped. Before removing a folder, Clawboo commits any uncommitted work to the branch. Files git ignores, such as `.env` files and `node_modules`, are never committed, so they are removed with the folder; copy out anything you need before a task's worktree sits unused for 72 hours. A folder git does not list as a worktree is removed only when it holds nothing. A folder git cannot be asked about, because `git worktree list` failed, is always kept, and so is a separate repository or a checkout whose commit no branch holds. The branch itself is kept, so the committed work is not lost: if the task runs again, Clawboo rebuilds the checkout from the branch.
 
 Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches you no longer need with git.
 
@@ -114,7 +116,7 @@ Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches y
 <Accordion title="Under the hood">
 
 - Clawboo's commits on a task branch use the messages `clawboo: scaffold task <id>`, `clawboo: checkpoint task <id>` (after the verify command passes, before the reviewer), `clawboo: pause task <id>` and `clawboo: gc autosave task <id>`.
-- `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation`.
+- `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation`, and a folder at the task's path that holds uncommitted changes, or that git cannot read, with `409 unsafe_to_rebuild`.
 - The reviewer works in a detached checkout at the committed work, under `reviews/<hash>` in your Clawboo folder. The checkout has no branch of its own.
 - If `AGENT_HANDOFF.json` cannot be read or parsed, Clawboo treats it as missing and falls back to the `## Done` and `## Blocked` sections of `task-progress.md`.
 - Every git call Clawboo makes has a 60-second timeout.

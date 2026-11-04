@@ -79,7 +79,7 @@ The rules ignore letter case, because 0.5.0 also routes variants such as `/API/M
 | Reverse proxy            | A web address with HTTPS, such as `https://dash.example.com` | An access token, two allowlist variables, and a proxy rule that blocks `/api/mcp/` |
 | Network bind             | Another computer on a network you trust, or a container      | `HOST=0.0.0.0`, an access token, and the two allowlist variables                   |
 
-Clawboo has no user accounts. Anyone who has the access token can do everything you can, so keep it to yourself.
+Clawboo has no user accounts. Every install has an access token, kept in `~/.clawboo/access-token` unless you set `STUDIO_ACCESS_TOKEN` yourself, and anyone who has it, or a live one-time sign-in link, can do everything you can. Keep both to yourself.
 
 ## Before you begin
 
@@ -109,15 +109,15 @@ Use the server's Clawboo port on both sides. With a different local port, your b
 
 </Step>
 
-<Step title="Open the dashboard">
+<Step title="Sign in through the tunnel">
 
-Open `http://localhost:18790` on your computer. You should see your dashboard. The tunnel stays open until you stop the `ssh` command.
+On the server, run `clawboo open --print`. It prints a one-time sign-in link such as `http://127.0.0.1:18790/?access_code=…`. Open that link on your computer within two minutes. You should see your dashboard, and this browser stays signed in. The tunnel stays open until you stop the `ssh` command.
 
 </Step>
 
 </Steps>
 
-The tunnel needs no access token, but anyone else who can log in to the server can reach Clawboo's port too. On a server other people use, also create an access token as in Option 2 and start the server directly with it.
+The tunnel needs no token of your own. Anyone else who can log in to the server can reach Clawboo's port too, but the server's per-install token, readable only by your account there, keeps them out of the API.
 
 ## Option 2: Reverse proxy
 
@@ -131,7 +131,7 @@ A reverse proxy such as nginx, Caddy or a Cloudflare Tunnel gives Clawboo a web 
 openssl rand -hex 24
 ```
 
-This prints a 48-character token. Save it in your password manager now: you need it to sign in, and the server must start with the same value every time. If you write your own token, use only letters, digits, `.`, `_`, `~` and `-`. With any other character the server refuses to start.
+This prints a 48-character token. Save it in your password manager now: you need it to sign in, and the server must start with the same value every time. If you write your own token, use only letters, digits, `.`, `_`, `~` and `-`. With any other character the server refuses to start. Without this step the server would use its per-install token from `~/.clawboo/access-token`, which works too but is harder to sign in with from another computer.
 
 </Step>
 
@@ -228,7 +228,7 @@ Whatever the proxy, it must pass the `Host` your browser used and `X-Forwarded-P
 
 <Step title="Sign in once">
 
-Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private.
+Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private. To sign in a phone or another browser after that, use **Open on another device** at the bottom of the sidebar: its one-time link and QR code carry a code that works once, within two minutes, never the token.
 
 </Step>
 
@@ -236,7 +236,7 @@ Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cooki
 
 <Warning>
 
-**A reverse proxy is not authentication.** The proxy delivers every request from `127.0.0.1`, so to Clawboo the whole internet looks like a local caller. Without `STUDIO_ACCESS_TOKEN`, the dashboard and every `/api/` route are open to anyone who can reach the proxy, and the server starts without complaint. Keep the token unless the proxy authenticates every request itself (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access).
+**A reverse proxy is not authentication.** The proxy delivers every request from `127.0.0.1`, so to Clawboo the whole internet looks like a local caller. With the token turned off (`STUDIO_ACCESS_TOKEN=` set blank), or on 0.5.0 and older without `STUDIO_ACCESS_TOKEN`, the dashboard and every `/api/` route are open to anyone who can reach the proxy, and the server starts without complaint. Keep the token unless the proxy authenticates every request itself (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access).
 
 </Warning>
 
@@ -250,7 +250,7 @@ A network bind makes Clawboo listen on every interface of the machine, so other 
 
 <Step title="Create an access token and save it">
 
-Run `openssl rand -hex 24` and save the token, as in Option 2. Clawboo refuses to start on a network bind without a working token.
+Run `openssl rand -hex 24` and save the token, as in Option 2. Clawboo refuses to start on a network bind without a working token. Without one of your own it uses its per-install token: to sign in with that, run `clawboo open --print` on the server and open the link it prints with `127.0.0.1` replaced by the server's address, within two minutes.
 
 </Step>
 
@@ -275,7 +275,7 @@ Use `HOST=0.0.0.0`, not the server's own address. Clawboo's agents and backgroun
 
 <Step title="Sign in once">
 
-On the other computer, open `http://192.168.1.10:18790/?access_token=<your-token>`. You should see your dashboard.
+On the other computer, open `http://192.168.1.10:18790/?access_token=<your-token>`. You should see your dashboard. Once one browser is signed in, **Open on another device** at the bottom of the sidebar shows a one-time link and a QR code for a phone on the same network.
 
 </Step>
 
@@ -332,22 +332,22 @@ curl -i https://dash.example.com/api/mcp/config
 curl -i https://dash.example.com/api/mcp/tasks
 ```
 
-- **`/api/settings`** should answer `401`: Clawboo is reachable and wants the token. A `403` means `CLAWBOO_ALLOWED_HOSTS` does not include the name you used. A `200` means a request with no credentials got through, so anyone who can reach this address can use Clawboo: set `STUDIO_ACCESS_TOKEN`.
+- **`/api/settings`** should answer `401`: Clawboo is reachable and wants the token. A `403` means `CLAWBOO_ALLOWED_HOSTS` does not include the name you used. A `200` means a request with no credentials got through, so anyone who can reach this address can use Clawboo: the token is turned off, so remove the blank `STUDIO_ACCESS_TOKEN=` or set a token.
 - **The two `/api/mcp/` addresses** should answer `404` from your proxy. A `401` means Clawboo refused them but your deny rule is missing. A `200` or `400` means they reached Clawboo's MCP endpoints: add the deny rule now.
 
 Then sign in with your browser, open the board and send a message in a team chat. If both work, the allowlists are right.
 
 ## Settings at a glance
 
-| Variable                   | What it does                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------- |
-| `STUDIO_ACCESS_TOKEN`      | The access token for the dashboard and API                                                  |
-| `HOST`                     | The interface Clawboo listens on: `127.0.0.1` by default, `0.0.0.0` for a network bind      |
-| `CLAWBOO_ALLOWED_HOSTS`    | Host names or addresses people use to reach Clawboo, comma-separated                        |
-| `CLAWBOO_ALLOWED_ORIGINS`  | Full origins such as `https://dash.example.com`, comma-separated                            |
-| `CLAWBOO_API_PORT`         | A fixed port; the server stops with an error if it is taken                                 |
-| `CLAWBOO_BASE_PATH`        | A path prefix such as `/clawboo`                                                            |
-| `CLAWBOO_ALLOW_INSECURE=1` | Lets a network bind start without a token, which leaves every API route open to the network |
+| Variable                   | What it does                                                                                   |
+| -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `STUDIO_ACCESS_TOKEN`      | The access token for the dashboard and API, in place of the per-install one; blank: none       |
+| `HOST`                     | The interface Clawboo listens on: `127.0.0.1` by default, `0.0.0.0` for a network bind         |
+| `CLAWBOO_ALLOWED_HOSTS`    | Host names or addresses people use to reach Clawboo, comma-separated                           |
+| `CLAWBOO_ALLOWED_ORIGINS`  | Full origins such as `https://dash.example.com`, comma-separated                               |
+| `CLAWBOO_API_PORT`         | A fixed port; the server stops with an error if it is taken                                    |
+| `CLAWBOO_BASE_PATH`        | A path prefix such as `/clawboo`                                                               |
+| `CLAWBOO_ALLOW_INSECURE=1` | Lets a network bind start with the token off, which leaves every API route open to the network |
 
 [Environment variables](/reference/environment-variables) lists every setting.
 
@@ -363,7 +363,7 @@ Clawboo's same-origin guard does not recognize the name or origin in the request
 
 <Accordion title="401: Clawboo access token required">
 
-This browser has no cookie yet, or the token changed. Open your Clawboo address with `?access_token=<your-token>` once.
+This browser has no cookie yet, or the token changed. Open your Clawboo address with `?access_token=<your-token>` once, or open a one-time link from `clawboo open --print` on the server (replace `127.0.0.1:<port>` with the address you use) or from **Open on another device** in a signed-in browser.
 
 </Accordion>
 
@@ -387,7 +387,7 @@ The token has a character other than letters, digits, `.`, `_`, `~` and `-`, so 
 
 <Accordion title="The log says a request reached this server through a reverse proxy">
 
-The server has no access token, so the dashboard and every `/api/` route are open to anyone who can reach the proxy. Set `STUDIO_ACCESS_TOKEN` and restart, unless the proxy authenticates every request. The warning appears once per server start and never blocks a request.
+The server's access token is turned off (`STUDIO_ACCESS_TOKEN=` set blank), so the dashboard and every `/api/` route are open to anyone who can reach the proxy. Set a token, or unset the variable to use the per-install one, and restart, unless the proxy authenticates every request. The warning appears once per server start and never blocks a request.
 
 </Accordion>
 
@@ -399,7 +399,7 @@ The shell you ran the command in does not have the server's token, so `clawboo`,
 
 <Accordion title="The server exits with SECURITY: refusing to start">
 
-`HOST` is a network address and the server has no access token. Set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on `127.0.0.1` again. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, see the entry above.
+`HOST` is a network address and the access token is turned off (`STUDIO_ACCESS_TOKEN=` set blank). Set a token (letters, digits, `.`, `_`, `~` and `-` only) or unset the variable to use the per-install one, or unset `HOST` to listen on `127.0.0.1` again. A token file Clawboo cannot use also stops it with this message, naming the file: delete the file to get a new one. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, see the entry above.
 
 </Accordion>
 

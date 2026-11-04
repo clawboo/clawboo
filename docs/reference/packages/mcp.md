@@ -126,8 +126,10 @@ When you connect a connector, Clawboo is the MCP client. The server's connector 
   generous one, because a cold `npx` install happens inside it. Discovery stops at `MAX_CONNECTOR_TOOLS` tools.
 - **Results.** `flattenContent` turns an MCP result into text for the model, and images ride along separately.
 - **Environment.** `connectorChildEnv` builds a stdio connector's environment from an empty set, the few variables
-  a process needs to start (`CONNECTOR_ENV_ALLOWLIST`) and the credentials you gave that connector, so it never
-  inherits your provider keys.
+  a process needs to start, the proxy settings and npm's prefix, cache and update check in either spelling
+  (`CONNECTOR_ENV_ALLOWLIST`), and the credentials you gave that connector, so it never inherits your provider keys
+  or npm credentials. It sets `npm_config_update_notifier=false` unless that is already set; pass
+  `npmUpdateCheck: 'inherit'` to leave it as the operator configured it, as approved shell commands do.
   This closes the environment only. It is not a sandbox: the connector still runs as your user and can read your
   files.
 

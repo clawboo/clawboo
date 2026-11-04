@@ -38,6 +38,7 @@ import { Skeleton } from '@/features/shared/Skeleton'
 import { Spinner } from '@/features/shared/Spinner'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { CodexUpdateNotice } from './CodexUpdateNotice'
+import { HermesUpdateNotice } from './HermesUpdateNotice'
 import { RuntimeProvidersBody } from './RuntimeProvidersBody'
 import { OpenClawGatewaySection } from './OpenClawGatewaySection'
 import { OpenClawDefaultModel } from './OpenClawDefaultModel'
@@ -273,14 +274,24 @@ function RuntimeRow({
   // expands the inline management body (subscription + Re-check + Disconnect +
   // Details). The ChatGPT-subscription option lives inside Manage now. A Codex
   // signed in but too old for the plan's models is not really connected: every
-  // run fails, so the row says so and leads with the update.
+  // run fails, so the row says so and leads with the update. A Hermes without its
+  // ACP mode still runs, only not live, so its row offers the update and keeps
+  // its providers beside it.
   if (shown === 'ready') {
-    const needsUpdate = entry.id === 'codex' && status?.updateRequired === true
+    const codexUpdate = entry.id === 'codex' && status?.updateRequired === true
+    const hermesUpdate = entry.id === 'hermes' && status?.acpMissing === true
+    const needsUpdate = codexUpdate || hermesUpdate
     return (
       <AccordionRow
         {...rowProps}
         status={
-          needsUpdate ? <AmberStatusChip label="Update needed" /> : <StatusChip state="ready" />
+          codexUpdate ? (
+            <AmberStatusChip label="Update needed" />
+          ) : hermesUpdate ? (
+            <AmberStatusChip label="Update available" />
+          ) : (
+            <StatusChip state="ready" />
+          )
         }
         footer={
           <CtaToggle
@@ -305,7 +316,7 @@ function RuntimeRow({
           // subscription as a peer row) — for the runtimes whose keys live in the
           // Providers hub.
           extra={
-            needsUpdate ? (
+            codexUpdate ? (
               <CodexUpdateNotice cliVersion={status?.cliVersion} onChanged={onChanged} />
             ) : entry.id === 'clawboo-native' ? (
               <RuntimeProvidersBody
@@ -315,14 +326,17 @@ function RuntimeRow({
                 onChanged={onChanged}
               />
             ) : entry.id === 'hermes' ? (
-              <RuntimeProvidersBody
-                runtime="hermes"
-                onChanged={onChanged}
-                subscriptionTool={entry.altLoginCommand ? 'hermes' : undefined}
-                subscriptionConnected={status?.codexAuth === true}
-                subscriptionLoginCommand={entry.altLoginCommand}
-                codexReady={codexReady}
-              />
+              <>
+                {hermesUpdate && <HermesUpdateNotice onChanged={onChanged} />}
+                <RuntimeProvidersBody
+                  runtime="hermes"
+                  onChanged={onChanged}
+                  subscriptionTool={entry.altLoginCommand ? 'hermes' : undefined}
+                  subscriptionConnected={status?.codexAuth === true}
+                  subscriptionLoginCommand={entry.altLoginCommand}
+                  codexReady={codexReady}
+                />
+              </>
             ) : undefined
           }
         />
@@ -501,9 +515,10 @@ function OpenClawRow({
 }
 
 /** An amber dot + a calm label: a runtime that was set up but cannot run right
- *  now. OpenClaw's "set up before, gateway offline" reads "Disconnected"
- *  (distinct from a pristine, never-configured row); a Codex CLI too old for the
- *  plan reads "Update needed". */
+ *  now, or not fully. OpenClaw's "set up before, gateway offline" reads
+ *  "Disconnected" (distinct from a pristine, never-configured row); a Codex CLI
+ *  too old for the plan reads "Update needed"; a Hermes without its ACP mode
+ *  reads "Update available". */
 function AmberStatusChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -587,8 +602,9 @@ function InProgressChip({ label }: { label: string }) {
  *  body: subscription + Re-check + Disconnect + Details). */
 const MANAGE_CTA = { label: 'Manage', icon: <Settings2 size={13} /> }
 
-/** The same toggle for a connected Codex whose CLI must be updated before it can
- *  run: the body leads with the update notice and its action. */
+/** The same toggle for a connected runtime with an update to make (a Codex CLI
+ *  that cannot run, a Hermes without its ACP mode): the body leads with the
+ *  update notice and its action. */
 const UPDATE_CTA = { label: 'Update', icon: <Download size={13} /> }
 
 /** Small muted labels for the top-right status of an UNCONNECTED runtime (the

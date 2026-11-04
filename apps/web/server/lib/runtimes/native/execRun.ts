@@ -94,7 +94,9 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
     try {
       child = spawn(program ?? '', args, {
         cwd: opts.cwd,
-        env: opts.env ?? connectorChildEnv(),
+        // npm's own settings arrive as the operator made them; only a connector
+        // launch turns npm's update check off.
+        env: opts.env ?? connectorChildEnv({ npmUpdateCheck: 'inherit' }),
         // NEVER true. `shell: true` would hand the argv back to a shell for
         // re-parsing, which is the exact property this tier exists to refuse.
         shell: false,

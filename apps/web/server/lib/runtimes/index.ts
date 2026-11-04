@@ -14,7 +14,6 @@ import type { HealthResult, RuntimeAdapter } from '@clawboo/executor'
 
 import { getDb } from '../db'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
-import { resolveRuntimeBin } from '../platform'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { createClaudeCodeDriver } from './claudeCodeDriver'
 import { createCodexDriver } from './codexDriver'
@@ -23,8 +22,10 @@ import {
   mockRuntimeEnabled,
   NON_OPENCLAW_RUNTIME_IDS,
   type NonOpenClawRuntimeId,
+  type RuntimeDescriptor,
 } from './descriptor'
 import { createHermesRunDriver, hermesTransport } from './hermesTransport'
+import { resolveRuntimeInstall } from './installProbe'
 import { createNativeDriver } from './native'
 import { isNativeOllamaConnected } from './native/nativeProviderDefaults'
 import type { RuntimeRunContext } from './types'
@@ -44,13 +45,19 @@ export function enabledRuntimeIds(): NonOpenClawRuntimeId[] {
   return ids
 }
 
-function cliHealth(bin: string | null): () => Promise<HealthResult> {
+function cliHealth(d: RuntimeDescriptor): () => Promise<HealthResult> {
   // Resolve via PATH *and* well-known user-install dirs (pip --user / pipx) —
   // Hermes installs to the Python user-site bin, which is off the server's PATH.
+  // Claude Code is also healthy on the Agent SDK's own binary alone.
   return async () =>
-    bin && resolveRuntimeBin(bin)
+    resolveRuntimeInstall(d)
       ? { ok: true }
-      : { ok: false, message: `${String(bin)} not found on PATH or user-install dirs` }
+      : {
+          ok: false,
+          message: d.sdkBinary
+            ? `${String(d.healthBin)} not found on PATH or user-install dirs, and the Agent SDK's binary is not installed`
+            : `${String(d.healthBin)} not found on PATH or user-install dirs`,
+        }
 }
 
 /** Native is in-process — health = "can any routable provider key resolve"
@@ -97,7 +104,7 @@ export function withAttachSecret(ctx: RuntimeRunContext): RuntimeRunContext {
 export type RuntimeAdapterFactory = (ctx: RuntimeRunContext) => RuntimeAdapter
 
 export function adapterFactoryFor(id: NonOpenClawRuntimeId): RuntimeAdapterFactory {
-  const health = cliHealth(getDescriptor(id).healthBin)
+  const health = cliHealth(getDescriptor(id))
   switch (id) {
     case 'claude-code':
       return (ctx) =>

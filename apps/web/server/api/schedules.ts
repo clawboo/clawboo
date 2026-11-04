@@ -39,6 +39,12 @@ import {
 import { eq } from 'drizzle-orm'
 
 import { getDb } from '../lib/db'
+import { getRoutinesTicker } from '../lib/routines/ticker'
+import {
+  readSchedulerTimeZone,
+  routineTimeZone,
+  writeSchedulerTimeZone,
+} from '../lib/routines/timeZone'
 import { ClawbooRoutineScheduleSource } from '../lib/scheduleSource/clawbooRoutineScheduleSource'
 import { enrichScheduleRecords } from '../lib/scheduleSource/enrich'
 import { getScheduleMultiplexer } from '../lib/scheduleSource/registry'
@@ -198,32 +204,24 @@ function projectRoutine(
   bounds: readonly number[],
   boundsKey: string,
   now: number,
+  timeZone: string | undefined,
 ): WindowOccurrences[] {
   // The stored next run is the instant the ticker fires an idle routine at.
   const first = rec.status === 'idle' && rec.nextRunAt != null ? rec.nextRunAt : undefined
-  const key = `${rec.id}|${rec.cronSpec}|${rec.status}|${first ?? ''}|${boundsKey}`
+  const key = `${rec.id}|${rec.cronSpec}|${rec.status}|${first ?? ''}|${timeZone ?? ''}|${boundsKey}`
   const hit = occurrenceCache.get(key)
   if (hit && hit.validUntil > now) return hit.windows
   const windows = occurrencesInWindows(rec.cronSpec, bounds, {
     after: now,
     first,
     countCap: OCCURRENCE_COUNT_CAP,
+    timeZone,
   })
   let soonest = Infinity
   for (const w of windows) if (w.times[0] != null && w.times[0] < soonest) soonest = w.times[0]
   if (occurrenceCache.size >= OCCURRENCE_CACHE_MAX) occurrenceCache.clear()
   occurrenceCache.set(key, { windows, validUntil: Math.min(now + OCCURRENCE_CACHE_MS, soonest) })
   return windows
-}
-
-/** The server's time zone: cron is evaluated here, so a client whose zone
- *  differs can say so beside a routine's schedule. */
-function serverTimeZone(): string | null {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? null
-  } catch {
-    return null
-  }
 }
 
 export async function schedulesOccurrencesGET(req: Request, res: Response): Promise<void> {
@@ -250,18 +248,21 @@ export async function schedulesOccurrencesGET(req: Request, res: Response): Prom
       // Names are a convenience: the runs are still right without them.
     }
     const boundsKey = bounds.join(',')
+    const zone = routineTimeZone(db)
     const routines: Array<{ schedule: ScheduleRecord; windows: WindowOccurrences[] }> = []
     for (const schedule of armed) {
       let windows: WindowOccurrences[]
       try {
-        windows = projectRoutine(schedule, bounds, boundsKey, now)
+        windows = projectRoutine(schedule, bounds, boundsKey, now, zone)
       } catch {
         // A spec the ticker cannot read never fires, so it has nothing to show.
         continue
       }
       if (windows.some((w) => w.count > 0)) routines.push({ schedule, windows })
     }
-    res.json({ now, timeZone: serverTimeZone(), routines })
+    // The zone cron was read in, so a client whose zone differs can say so
+    // beside a routine's schedule.
+    res.json({ now, timeZone: readSchedulerTimeZone(db).timeZone, routines })
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
   }
@@ -270,6 +271,41 @@ export async function schedulesOccurrencesGET(req: Request, res: Response): Prom
 /** Test-only: forget cached projections. */
 export function resetOccurrenceCache(): void {
   occurrenceCache.clear()
+}
+
+// GET /api/schedules/time-zone: the zone routines are worked out in, the host's
+// zone, and whether a zone is stored (false = the host's applies).
+export function schedulesTimeZoneGET(_req: Request, res: Response): void {
+  try {
+    res.json(readSchedulerTimeZone(getDb()))
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+  }
+}
+
+// PUT /api/schedules/time-zone: body { timeZone: string | null }. A zone name
+// stores that zone; null follows the host's again. Every armed routine's next
+// run moves onto the new zone's wall clock.
+export function schedulesTimeZonePUT(req: Request, res: Response): void {
+  const raw = (req.body as { timeZone?: unknown } | undefined)?.timeZone
+  if (raw !== null && typeof raw !== 'string') {
+    res.status(400).json({
+      error: 'timeZone must be a time zone name, or null for the host zone',
+      code: 'invalid_body',
+    })
+    return
+  }
+  try {
+    const result = writeSchedulerTimeZone(getDb(), raw)
+    getRoutinesTicker()?.requestRescan()
+    res.json(result)
+  } catch (err) {
+    if (err instanceof RangeError) {
+      res.status(400).json({ error: err.message, code: 'invalid_time_zone' })
+      return
+    }
+    res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
+  }
 }
 
 // POST /api/schedules — body = ScheduleCreateSpec; routed by spec.source

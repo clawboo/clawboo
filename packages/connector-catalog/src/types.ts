@@ -153,6 +153,15 @@ export interface ConnectorStdioLaunch {
    * semicolon-joined value; `urlPatterns` repeats the flag once per URL pattern.
    */
   blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
+  /**
+   * How to hand this server's Chrome one extra command-line switch. Clawboo
+   * passes a host rule this way that refuses the dashboard's hosts on its port
+   * when Chrome looks them up, so a redirect hop, a script's request and a
+   * WebSocket are all caught. `joined` passes `<flag>=<switch>` as one
+   * argument; `playwrightConfig` writes a Playwright MCP config file that holds
+   * the switch under `browser.launchOptions.args` and passes `<flag> <file>`.
+   */
+  chromeSwitchArg?: { flag: string; style: 'joined' | 'playwrightConfig' }
 }
 
 export interface ConnectorHttpLaunch {

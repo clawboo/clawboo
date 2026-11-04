@@ -83,7 +83,15 @@ async function main() {
   // 2. Spawn `concurrently` with both processes inheriting the chosen port.
   // We use `concurrently` (already a dev dep) so behavior matches the old
   // script — colored prefixes, single Ctrl-C kills both, etc.
-  const env = { ...process.env, CLAWBOO_API_PORT: String(port) }
+  //
+  // No access token in dev: a blank STUDIO_ACCESS_TOKEN turns the gate off, so
+  // the server does not lock itself with the per-install token and
+  // http://localhost:5173 opens directly. One set in the shell still applies.
+  const env = {
+    ...process.env,
+    STUDIO_ACCESS_TOKEN: process.env.STUDIO_ACCESS_TOKEN ?? '',
+    CLAWBOO_API_PORT: String(port),
+  }
   const child = spawn(
     'pnpm',
     [
