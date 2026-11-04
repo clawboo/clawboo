@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { useRefreshOnVisible } from '@/lib/useVisiblePolling'
 import { apiFetch } from '@clawboo/control-client'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // useUpdateCheck — polls the server's self-version endpoint and decides whether
 // to surface the "update available" chip. Mirrors GitHubStarButton's
@@ -42,7 +43,7 @@ interface CachedInfo {
 function readCache(): SelfVersionInfo | null {
   if (typeof window === 'undefined') return null
   try {
-    const raw = window.localStorage.getItem(CACHE_KEY)
+    const raw = scopedLocalStorage.getItem(CACHE_KEY)
     if (!raw) return null
     const parsed = JSON.parse(raw) as CachedInfo
     if (!parsed || typeof parsed.fetchedAt !== 'number') return null
@@ -57,7 +58,7 @@ function readCache(): SelfVersionInfo | null {
 function writeCache(info: SelfVersionInfo): void {
   if (typeof window === 'undefined') return
   try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify({ info, fetchedAt: Date.now() }))
+    scopedLocalStorage.setItem(CACHE_KEY, JSON.stringify({ info, fetchedAt: Date.now() }))
   } catch {
     /* localStorage unavailable — fall through */
   }
@@ -66,7 +67,7 @@ function writeCache(info: SelfVersionInfo): void {
 function readDismissed(): string | null {
   if (typeof window === 'undefined') return null
   try {
-    return window.localStorage.getItem(DISMISS_KEY)
+    return scopedLocalStorage.getItem(DISMISS_KEY)
   } catch {
     return null
   }
@@ -75,8 +76,8 @@ function readDismissed(): string | null {
 function writeDismissed(version: string | null): void {
   if (typeof window === 'undefined') return
   try {
-    if (version) window.localStorage.setItem(DISMISS_KEY, version)
-    else window.localStorage.removeItem(DISMISS_KEY)
+    if (version) scopedLocalStorage.setItem(DISMISS_KEY, version)
+    else scopedLocalStorage.removeItem(DISMISS_KEY)
   } catch {
     /* best-effort */
   }

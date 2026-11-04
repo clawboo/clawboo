@@ -11,6 +11,7 @@ keywords:
     'secrets vault',
     'openclaw.json',
     'auth-profiles.json',
+    'CLAWBOO_MAX_CONCURRENT_RUNS',
   ]
 ---
 
@@ -27,6 +28,8 @@ Clawboo spreads its configuration over a few places. Use this page to find where
 | `~/.openclaw/`                                  | OpenClaw's own configuration, part of which Clawboo writes        | OpenClaw, or the dashboard                                                                   |
 
 `~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
+
+On a machine several teams share, one tuning variable is worth knowing: `CLAWBOO_MAX_CONCURRENT_RUNS`, how many agent runs execute at once across the whole server (8 by default). Runs beyond it wait their turn rather than fail. [Environment variables](/reference/environment-variables) describes it with the rest.
 
 ## settings.json
 

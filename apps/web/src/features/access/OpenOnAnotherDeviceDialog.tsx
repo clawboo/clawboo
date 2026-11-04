@@ -11,7 +11,7 @@ import { QRCodeSVG } from 'qrcode.react'
 
 import { apiFetch } from '@clawboo/control-client'
 
-import { readInjectedBase } from '@/app/bootstrapBase'
+import { readInjectedBase } from '@/app/injectedBase'
 import { Button } from '@/features/shared/Button'
 import { Modal } from '@/features/shared/Modal'
 import { Spinner } from '@/features/shared/Spinner'

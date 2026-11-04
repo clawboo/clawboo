@@ -149,7 +149,9 @@ A few modules carry rules worth knowing before you change them:
   commits, so a subscriber never sees a write that rolled back.
 - **Mark only what was delivered.** After `packInboxRows`, mark delivered only the row ids it reported as included.
 - **Scrub before storing.** Tool arguments, results and event payloads pass through `scrubSecrets`, which replaces
-  credential-looking values with `[REDACTED]`.
+  credential-looking values with `[REDACTED]`. The server's vault registers its saved values through
+  `registerKnownSecretSource`, and every scrub also masks those (as written, JSON-escaped and URL-encoded, at least
+  `MIN_KNOWN_SECRET_LENGTH` characters long) in string values, never in object keys.
 - **Budgets default to warn.** `setBudgetLimit` creates a budget in `mode: 'warn'` unless the caller passes
   `mode: 'cap'`. Updating a budget without `mode` keeps the mode it has, so re-setting a hard cap's limit keeps it a
   hard cap.

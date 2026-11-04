@@ -2,13 +2,14 @@
 // fallback when no word of the sentence matches. A per-viewer convenience, so a
 // storage that is blocked or holds junk reads as nothing remembered.
 
+import { scopedLocalStorage } from '@/lib/clientStorage'
 const KEY = 'clawboo.board.new-task-agents'
 
 type Remembered = Record<string, { agentId: string; at: number }>
 
 function read(): Remembered {
   try {
-    const parsed: unknown = JSON.parse(window.localStorage.getItem(KEY) ?? '{}')
+    const parsed: unknown = JSON.parse(scopedLocalStorage.getItem(KEY) ?? '{}')
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     const out: Remembered = {}
     for (const [teamId, entry] of Object.entries(parsed as Record<string, unknown>)) {
@@ -33,7 +34,7 @@ export function recentAssignees(teamId: string | null): string[] {
 export function rememberAssignee(teamId: string, agentId: string): void {
   try {
     const next = { ...read(), [teamId]: { agentId, at: Date.now() } }
-    window.localStorage.setItem(KEY, JSON.stringify(next))
+    scopedLocalStorage.setItem(KEY, JSON.stringify(next))
   } catch {
     // Not remembered; the next suggestion falls back to the team lead.
   }

@@ -192,6 +192,8 @@ interface HarnessOpts {
   busySessions?: Set<string>
   /** Sessions with ANY turn in flight or queued (the server's nudge queue). */
   occupiedSessions?: Set<string>
+  /** Sessions whose delivery the HOST holds in its run queue (waiting for a slot). */
+  queuedSessions?: Set<string>
   /** Awaited by `deliver` before it records the delivery, so a scenario can hold
    *  a delivery pending (a run still waiting on the agent's lock). */
   onDeliverStart?: (agentId: string) => Promise<void> | void
@@ -260,6 +262,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       stopGen: opts?.stopGen ?? (() => 0),
       isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
       isSessionOccupied: (sessionKey) => opts?.occupiedSessions?.has(sessionKey) ?? false,
+      isRunQueued: (sessionKey) => opts?.queuedSessions?.has(sessionKey) ?? false,
       onBoardChange: (c) => changes.push(c),
       narrate: (sessionKey, text) => narrations.push({ sessionKey, text }),
       ...(opts?.caps ? { caps: opts.caps } : {}),
@@ -744,6 +747,45 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const t1 = idsOf(board)[0]!
       expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
       expect(board.completed[0]!.outcome.status).toBe('timed_out')
+    })
+
+    it('never fails a delegation that waits in the host run queue, however long', async () => {
+      let clock = 1_000
+      const queued = new Set<string>([sk('a2')])
+      const h = makeHarness({ now: () => clock, queuedSessions: queued })
+      await delegate(h)
+      const { board, aborted, orchestrator } = h
+
+      // Far past every allowance, the 24-minute pending-start one included.
+      for (let i = 0; i < 6; i++) {
+        clock += OPEN_TOOL_CALL_TIMEOUT_MS
+        await orchestrator.sweepStaleSessions()
+      }
+      expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+      expect(board.completed).toHaveLength(0)
+      expect(aborted).toEqual([])
+    })
+
+    it('a run that leaves the queue gets the idle window from then, not from the delegation', async () => {
+      let clock = 1_000
+      const queued = new Set<string>([sk('a2')])
+      const h = makeHarness({ now: () => clock, queuedSessions: queued })
+      await delegate(h)
+      const { board, orchestrator } = h
+
+      clock += OPEN_TOOL_CALL_TIMEOUT_MS
+      await orchestrator.sweepStaleSessions()
+      // The slot came free and the run started.
+      queued.delete(sk('a2'))
+      clock += DELEGATION_IDLE_TIMEOUT_MS - 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusUpdates.some((s) => s.status === 'blocked')).toBe(false)
+
+      // From there it is an ordinary run: silence past the window fails it.
+      clock += 2
+      await orchestrator.sweepStaleSessions()
+      const t1 = idsOf(board)[0]!
+      expect(board.statusUpdates).toContainEqual({ taskId: t1, status: 'blocked' })
     })
 
     it('a tool RESULT closes the window — silence after it gets the normal timeout', async () => {
