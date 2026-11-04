@@ -108,13 +108,15 @@ would lose to its own claim, and one that completed the task would complete it t
   task is completed as usual), `retry` with a fix note (the first execution closes as succeeded and a new one
   delivers the note plus the task's brief; while `isSessionOccupied` reports another turn the session stays under
   check and the fix round waits for that turn's end, and after a Stop none starts; a fix round whose board writes
-  fail before it is sent fails the session with the error, like a rejected delivery), `failed` (the host blocked the
+  fail before it is sent fails the session with the error, like a rejected delivery, and keeps the task's later
+  plan steps queued), `failed` (the host blocked the
   task; the delegator's `[Task Update]` has the outcome `check_failed`) or `decided` (a person moved the card). A
   check a person's move overtook finishes nothing, even when the task is running again. A `prepare` that rejects, a
   check that throws, or one that has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
   `check_failed` too, and so does a `done` the board refuses while the task is still `in_progress` or
-  `in_review` (as `blocked`, saying the check passed, when it had). A check that cannot run whose move to
-  `blocked` the board refuses fails the session instead, so the work cannot reach `done` unchecked. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
+  `in_review` (as `done_refused` when the check had passed). A check that cannot run whose move to `blocked` the
+  board refuses stays under check, short of `done`, and the sweep tries the move again until it lands or a person
+  moves the card. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
   that unloads idle engines. `resume()` hands a task left `in_review` with a running engine execution and no check
   of its own (a restart or teardown cut it short) to a person and tells its delegator (`check_interrupted`); it
   closes that execution only once the move to `blocked` lands, so a failed move is tried again by the next

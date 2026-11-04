@@ -173,7 +173,7 @@ Deleting a chat room stops its work the same way. Its unfinished tasks move to *
 
 An agent working on a task in team chat can mark that task blocked when it cannot go on without you. The task then waits in **Needs you** as **Blocked**, with the agent's reply as its comment, and whoever handed out the task is told. Steps of a plan that wait on it stay queued, so a **Retry** carries the plan on.
 
-When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever.
+When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever. A task whose work failed the team's check, or whose fix round could not start, keeps its later steps queued instead, so a **Retry** carries the plan on.
 
 ## Give an agent a task
 

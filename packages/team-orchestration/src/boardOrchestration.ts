@@ -781,6 +781,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // Session -> a fix round waiting for another turn on the session to end. The
   // session stays under check until it goes out (see runWorkCheck).
   const pendingFix = new Map<string, { taskId: string; summary: string; fixNote: string }>()
+  // Session -> a check that could not run whose task the board would not move to
+  // Blocked. It stays under check, short of Done, and the sweep tries the move
+  // again (see retryPark).
+  const pendingPark = new Map<
+    string,
+    { taskId: string; summary: string; reason: string; checkId: number }
+  >()
   // Held outbox ids whose settlement could not be written yet, with what they
   // were settled as. The sweep writes them (see retrySettlements).
   const settleLater = new Map<string, ReportUpSettlement>()
@@ -1873,15 +1880,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // Still marked as checked until the result is written: the card is In review
     // until then, and `resume()` must not take it for a check a restart cut short.
     // Ended whatever happens, so a failed board write cannot leave the session
-    // under check for good.
+    // under check for good. The one exception waits on purpose: a check that
+    // could not run whose task the board will not move to Blocked. Finishing it
+    // then would write Done over work nobody checked, so it stays under check
+    // and the sweep tries the move again (retryPark).
+    let waiting = false
     try {
       if (parkedByEngine && result.verdict === 'failed') {
         await deps.board.addComment(taskId, result.reason, 'system').catch(() => undefined)
-        if (!(await deps.board.updateStatus(taskId, 'blocked'))) {
-          // Not parked, so nothing stands between this unchecked work and Done:
-          // the run fails instead, and the delegator hears why.
-          endCheck()
-          await failForSession(sessionKey, 'error', result.reason, null, false)
+        if (!(await parkFailedCheck(taskId))) {
+          pendingPark.set(sessionKey, { taskId, summary, reason: result.reason, checkId })
+          waiting = true
           return
         }
       }
@@ -1893,7 +1902,40 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         result.verdict === 'pass',
       )
     } finally {
-      endCheck()
+      if (!waiting) endCheck()
+    }
+  }
+
+  /** Move a task whose check could not run to Blocked. False only while the move
+   *  fails and the task is still the check's (In progress or In review); a task a
+   *  person moved meanwhile, or one that is gone, needs no move. */
+  async function parkFailedCheck(taskId: string): Promise<boolean> {
+    if (await deps.board.updateStatus(taskId, 'blocked').catch(() => false)) return true
+    const detail = await deps.board.getTask(taskId).catch(() => undefined)
+    if (detail === undefined) return false // unread: try again
+    const status = detail?.task.status
+    return status !== 'in_progress' && status !== 'in_review'
+  }
+
+  /** Try the move to Blocked again for a check waiting on it (see runWorkCheck),
+   *  and finish the task once it lands. Run by the sweep. */
+  async function retryPark(sessionKey: string): Promise<void> {
+    const p = pendingPark.get(sessionKey)
+    if (!p) return
+    if (
+      checking.get(sessionKey)?.check !== p.checkId ||
+      sessionToTask.get(sessionKey) !== p.taskId
+    ) {
+      // A person's move ended the check; their move is the outcome.
+      pendingPark.delete(sessionKey)
+      return
+    }
+    if (!(await parkFailedCheck(p.taskId))) return
+    pendingPark.delete(sessionKey)
+    try {
+      await finishCompletion(sessionKey, p.taskId, p.summary, p.reason)
+    } finally {
+      if (checking.get(sessionKey)?.check === p.checkId) checking.delete(sessionKey)
     }
   }
 
@@ -1964,7 +2006,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // closed is the task's again, so the failure closes it.
       if (prevExec && !prevClosed && !taskToExec.has(taskId)) taskToExec.set(taskId, prevExec)
       const why = err instanceof Error ? err.message : String(err)
-      await failForSession(sessionKey, 'error', `Could not start the fix round: ${why}`)
+      await failForSession(sessionKey, 'error', `Could not start the fix round: ${why}`, {
+        keepPlan: true,
+      })
       return
     }
     if (!agentId || !detail) {
@@ -1978,6 +2022,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         sessionKey,
         'error',
         'Could not start the fix round: the board did not record its run.',
+        { keepPlan: true },
       )
       return
     }
@@ -2007,6 +2052,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         err instanceof DeliveryRefusedError
           ? err.message
           : `Could not send the fix to ${nameOf(agentId)} (the message was rejected).`,
+        { keepPlan: true },
       )
     } finally {
       if (pendingStart.get(sessionKey) === taskId) pendingStart.delete(sessionKey)
@@ -2075,7 +2121,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // on its last attempt parks the task the same way (`checkFailure`).
     const closeBlocked = async (
       failure: string | undefined,
-      outcome: 'check_failed' | 'blocked' = failure ? 'check_failed' : 'blocked',
+      outcome: 'check_failed' | 'blocked' | 'done_refused' = failure ? 'check_failed' : 'blocked',
     ): Promise<void> => {
       const execId = taskToExec.get(taskId)
       if (execId) {
@@ -2091,7 +2137,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           toAgentId: to,
           by,
           title,
-          summary: failure ?? (trimmed || `${by} did not say why.`),
+          summary: failure ?? (trimmed || (outcome === 'blocked' ? `${by} did not say why.` : '')),
           outcome,
           taskId,
           ...(scope ? { forTaskId: scope } : {}),
@@ -2120,7 +2166,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           ? "The team's check passed, but the board did not mark the task done, so it waits for a person."
           : "An earlier attempt failed the team's check and this one could not be checked, so the task was kept from Done."
         await deps.board.addComment(taskId, why, 'system').catch(() => undefined)
-        await closeBlocked(why, checkPassed ? 'blocked' : 'check_failed')
+        // After a pass the update carries the agent's result, and its outcome says
+        // what happened: the work passed, and the board did not take it to Done.
+        if (checkPassed) await closeBlocked(undefined, 'done_refused')
+        else await closeBlocked(why, 'check_failed')
         return
       }
     }
@@ -2235,13 +2284,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sessionKey: string,
     reason: FailReason,
     detail: string,
-    /** Set when the run ended on the runtime's own fatal error (`detail` is then its
-     *  message): its typed cause, if any. */
-    fromError: { code: string | null } | null = null,
-    /** False when the task's own run has already ended (its work was being
-     *  checked): a run still going on the session is another turn's. */
-    abortRun = true,
+    opts: {
+      /** Set when the run ended on the runtime's own fatal error (`detail` is then
+       *  its message): its typed cause, if any. */
+      fromError?: { code: string | null } | null
+      /** The task's later plan steps stay queued: a fix round that could not
+       *  start, which, like a check failing for good, leaves the task to a person
+       *  whose Retry carries the plan on. */
+      keepPlan?: boolean
+    } = {},
   ): Promise<void> {
+    const { fromError = null, keepPlan = false } = opts
     const taskId = sessionToTask.get(sessionKey)
     if (!taskId) return // not a tracked delegation (e.g. the leader's own turn)
     // Failing a task whose RUN may still be live (the idle watchdog, a session
@@ -2249,7 +2302,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // kept executing invisibly — a zombie burning tokens whose eventual result
     // could only land as a '[late result]' comment. Best-effort; the drain idle
     // guard remains the backstop for a run that ignores the abort.
-    if (abortRun) deps.abortSession?.(sessionKey)
+    deps.abortSession?.(sessionKey)
     // A Stop since this delegation started suppresses the amplifying tail (the
     // failure reflection + ready-pump). A genuine user-Stop ABORT never reaches
     // here (onEvent routes it to a clean release); this guard only covers an
@@ -2312,7 +2365,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // would wait forever — cancel the pending dependents (else they ghost as
     // perpetual `todo` cards) and roll them into the failure so the delegator
     // learns the whole CHAIN stalled, not just this step.
-    const cancelled = await deps.board.cancelDependents(taskId)
+    const cancelled = keepPlan ? [] : await deps.board.cancelDependents(taskId)
     for (const c of cancelled) {
       pendingTargets.delete(c.id)
       taskReflectTo.delete(c.id)
@@ -2436,6 +2489,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     replayReportUps()
     // A fix round whose wait ended without a terminal reaching the engine.
     for (const sk of [...pendingFix.keys()]) await sendPendingFix(sk)
+    // A check waiting for the board to take its task out of review.
+    for (const sk of [...pendingPark.keys()]) await retryPark(sk)
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
       // Queued for a run slot: the run has not started, so its idle window starts
@@ -2690,7 +2745,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     } else if (event.kind === 'error' && event.fatal) {
       // A fatal runtime error ends the delegate; non-fatal errors keep waiting
       // (the run may recover) and surface in the activity terminal, not the chat.
-      await failForSession(sessionKey, 'error', event.message, { code: event.code })
+      await failForSession(sessionKey, 'error', event.message, {
+        fromError: { code: event.code },
+      })
       return
     }
 
@@ -2838,6 +2895,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         // (see runWorkCheck). No late-replay guard either: nothing was aborted,
         // and that other turn's hand-offs must still go out.
         pendingFix.delete(sessionKey)
+        pendingPark.delete(sessionKey)
         checking.delete(sessionKey)
         dropSessionTracking(sessionKey)
       } else {
@@ -3050,6 +3108,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       pendingStart.clear()
       checking.clear()
       pendingFix.clear()
+      pendingPark.clear()
       waitingOnTurn.clear()
       parkAlerted.clear()
       for (const t of deferredFires) clearTimeout(t)
