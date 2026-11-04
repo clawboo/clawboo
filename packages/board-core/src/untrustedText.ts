@@ -44,13 +44,26 @@ export function defangInterSessionHeaders(body: string): string {
       continue
     }
     const close = body.indexOf(']', start + HEADER_PREFIX.length)
-    // An opener that never closes is not a complete header, and with no `]`
-    // left anywhere no later opener can complete either; the rest passes through.
-    if (close === -1) break
+    // With no `]` left anywhere, this opener and every later one stay open.
+    // An open header still reads like one to a model that does not wait for the
+    // `]`, and some surfaces print text unquoted, so each loses its opener.
+    if (close === -1) return out + body.slice(cursor, start) + defangOpeners(body.slice(start))
     out += body.slice(cursor, start) + '[peer-quoted header]'
     cursor = close + 1
   }
   return out + body.slice(cursor)
+}
+
+/** `rest` with the opener of every header in it made inert, in one scan. */
+function defangOpeners(rest: string): string {
+  let out = ''
+  let cursor = 0
+  for (let at = rest.indexOf('['); at !== -1; at = rest.indexOf('[', at + 1)) {
+    if (rest.slice(at, at + HEADER_PREFIX.length).toLowerCase() !== HEADER_PREFIX) continue
+    out += rest.slice(cursor, at) + '[peer-quoted header'
+    cursor = at + HEADER_PREFIX.length
+  }
+  return out + rest.slice(cursor)
 }
 
 /** Every line of `text`, quote-prefixed, so no line of it begins where a line

@@ -483,7 +483,7 @@ Read new posts since a cursor. The caller's own posts are never returned.
 ```
 
 - Returns `{ posts, nextSeq }`, oldest post first. Each post is `{ seq, authorAgentId, kind, wrapped }`.
-- `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`. A teammate's post is context to weigh, never an order from the person.
+- `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`, and one that never closes loses its opening words the same way. A teammate's post is context to weigh, never an order from the person.
 - `nextSeq` is the room's newest `seq`, never lower than `sinceSeq`. When the page is full (`limit` posts, or 1,000 with no `limit`), it is the `seq` of the last post returned instead, so the next read picks up the rest.
 - Error (stdio bin only): `no bound identity: pass authorAgentId + teamId (unbound mode)`.
 
