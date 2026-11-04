@@ -57,8 +57,12 @@ export interface TicketBlockInput {
   why: string
   tools: TicketToolAccess
   /** Set when the run continues the agent's session from its last run on the
-   *  task: `changed` says whether the title or description changed since. */
+   *  task: `changed` says whether the brief it is sent differs from the text
+   *  that session last saw. */
   resumed: { changed: boolean } | null
+  /** The title or description was edited after the brief was written (while
+   *  the run waited in the queue), so the brief is older than the task. */
+  briefStale?: boolean
   /** The parent chain, nearest first (all of it; the block cuts it). */
   parents: Array<{ id: string; title: string; status: string }>
   /** The finished tasks this one waited on, oldest first. */
@@ -101,11 +105,29 @@ export function renderTicketBlock(input: TicketBlockInput): string {
   lines.push(`Title: ${title(input.title)}`)
   if (input.priority !== 'normal') lines.push(`Priority: ${TASK_PRIORITY_LABEL[input.priority]}.`)
   lines.push(`Why this run: ${input.why}`)
-  if (input.resumed) {
+  const continuing = 'You are continuing this task in the same session as your last run on it.'
+  if (input.resumed && !input.briefStale) {
     lines.push(
       input.resumed.changed
-        ? 'You are continuing this task in the same session as your last run on it. Its title or description has changed since then: the brief at the end of this message is the current version, so follow it rather than the earlier one.'
-        : 'You are continuing this task in the same session as your last run on it. Its title and description have not changed since then.',
+        ? `${continuing} Its title or description has changed since then: the brief at the end of this message is the current version, so follow it rather than the earlier one.`
+        : `${continuing} Its title and description have not changed since then.`,
+    )
+  } else if (input.resumed) {
+    // The brief is not the current version, so say only how it compares.
+    lines.push(
+      input.resumed.changed
+        ? `${continuing} The brief at the end of this message differs from the one you had then.`
+        : `${continuing} The brief at the end of this message is the one you had then.`,
+    )
+  }
+  if (input.briefStale) {
+    const stale = 'This task was edited after the brief at the end of this message was written'
+    lines.push(
+      input.tools === 'none'
+        ? `${stale}; the title above is its current one.`
+        : input.tools === 'pass-id'
+          ? `${stale}: call get_task with its id for its current title and description.`
+          : `${stale}: call get_task for its current title and description.`,
     )
   }
 

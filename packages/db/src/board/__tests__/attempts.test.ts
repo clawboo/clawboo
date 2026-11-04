@@ -151,6 +151,15 @@ describe('classifyAttempts on the team engine ledger (K17)', () => {
     expect(classifyAttempts([{ ...swept(), summary: 'half way' }]).lastKind).toBe('crash')
   })
 
+  it('calls a row the stale sweep wrote before its wording changed a crash too', () => {
+    // The sweep's text until 86ea611f; those rows are still in older databases.
+    const legacy: AttemptRow = {
+      status: 'timed_out',
+      error: 'stale: no progress within the watchdog window',
+    }
+    expect(classifyAttempts([legacy])).toMatchObject({ lastKind: 'crash', crashAttempts: 1 })
+  })
+
   it('counts a timeout with the failures in one streak', () => {
     expect(classifyAttempts([swept(), failed(), watchdog()])).toMatchObject({
       lastKind: 'timeout',

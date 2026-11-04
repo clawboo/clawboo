@@ -4,6 +4,7 @@
 
 import { randomUUID } from 'node:crypto'
 
+import { defangInterSessionHeaders } from '@clawboo/board-core'
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
@@ -121,8 +122,11 @@ export function packInboxRows(
   const includedIds: string[] = []
   let used = 0
   for (const r of rows) {
+    // Rows render unquoted, and some carry text a person or an agent wrote (a
+    // forwarded comment), so a header forged there must not read as a real one.
+    const text = defangInterSessionHeaders(r.body)
     const body =
-      r.body.length > DIGEST_ROW_MAX_CHARS ? `${r.body.slice(0, DIGEST_ROW_MAX_CHARS)}…` : r.body
+      text.length > DIGEST_ROW_MAX_CHARS ? `${text.slice(0, DIGEST_ROW_MAX_CHARS)}…` : text
     const line = `- ${body}`
     if (used + line.length + 1 > budgetChars) break
     bodies.push(line)

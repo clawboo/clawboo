@@ -33,6 +33,9 @@ export const ORPHANED_RUN_ERROR = 'orphaned: process not alive on restart'
  *  text is what tells a crash from a timeout. */
 export const STALE_RUN_ERROR = 'stale: no heartbeat within the watchdog window'
 
+/** The stale sweep's error before 86ea611f, still on rows in older databases. */
+const LEGACY_STALE_RUN_ERROR = 'stale: no progress within the watchdog window'
+
 /** How the most recent attempt ended. `timeout`: a watchdog stopped a run that
  *  had gone silent while its process lived (the team engine's, or the OpenClaw
  *  routine dispatcher's). */
@@ -94,7 +97,10 @@ function kindOf(row: AttemptRow): AttemptKind {
   if (row.status === 'succeeded') return 'success'
   if (row.status === 'cancelled') return 'cancelled'
   if (row.recoveryTombstone === 1) return 'crash'
-  if (row.status === 'timed_out') return row.error === STALE_RUN_ERROR ? 'crash' : 'timeout'
+  if (row.status === 'timed_out')
+    return row.error === STALE_RUN_ERROR || row.error === LEGACY_STALE_RUN_ERROR
+      ? 'crash'
+      : 'timeout'
   return 'error'
 }
 

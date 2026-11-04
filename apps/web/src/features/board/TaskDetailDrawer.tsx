@@ -680,11 +680,14 @@ export function TaskDetailDrawer({
                     <PrioritySelect
                       taskId={task.id}
                       priority={task['priority']}
-                      onChange={(priority) =>
+                      onChange={(priority) => {
                         setDetail((d) =>
                           d && d.task.id === taskId ? { ...d, task: { ...d.task, priority } } : d,
                         )
-                      }
+                        // Saved: the board reloads, so the card's mark does not
+                        // lag until its next poll.
+                        onChanged?.()
+                      }}
                     />
                   </PropRow>
                   <PropRow label="Runtime">

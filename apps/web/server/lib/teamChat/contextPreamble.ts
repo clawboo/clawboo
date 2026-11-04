@@ -405,10 +405,17 @@ export interface TicketRun {
   execId: string | null
   /** Why the run was delivered. */
   origin: Extract<TurnOrigin, { kind: 'delegation' } | { kind: 'assignment' }>
+  /** The hash of the title and description the run's brief carries, taken when
+   *  the brief was written. Null or absent: the task as it is now. */
+  briefHash?: string | null
   /** Set when the run continues the agent's session from its last run on the
-   *  task: what that session last saw. */
-  resumed: { ticketHash: string; seenAt: number } | null
+   *  task: what that session last saw, and when that run ended. */
+  resumed: { ticketHash: string; seenAt: number; endedAt?: number | null } | null
 }
+
+/** How long after a run ends the engine may still be writing that run's result
+ *  as its agent's comment: one inside this margin was the run's own. */
+const RESULT_COMMENT_GRACE_MS = 60_000
 
 /** The ticket block for `agentId`'s run on a board task, or null when the task
  *  no longer exists. */
@@ -453,12 +460,16 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
       : `${delegator} handed you this task.`
   }
 
-  // The parent chain, nearest first. The ancestor read is unordered.
+  // The parent chain, nearest first. The ancestor read is unordered. Only this
+  // team's tasks: the Tasks tools keep an agent to its team's board, and a link
+  // can cross it (a task moved between teams keeps its parent), so the walk
+  // stops at the first parent on another team's board.
   const byId = new Map(getAncestors(db, task.id).map((a) => [a.id, a]))
   const parents: TicketBlockInput['parents'] = []
   for (let id = task.parentTaskId; id && byId.has(id);) {
     const a = byId.get(id)!
     byId.delete(id) // a cycle in a corrupt database ends the walk
+    if (getTask(db, a.id)?.teamId !== task.teamId) break
     parents.push({ id: a.id, title: a.title, status: a.status })
     id = a.parent_task_id
   }
@@ -466,9 +477,10 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
   // Each finished dependency's result, from the agent that did it: its latest
   // comment there (the engine writes a run's result as one), else the latest
   // successful run's summary, else the latest comment any agent left. A later
-  // "looks good" from a reviewer does not replace the result.
+  // "looks good" from a reviewer does not replace the result. Only this team's
+  // tasks, as above: the REST link route checks no team.
   const dependencies: TicketBlockInput['dependencies'] = getDependencies(db, task.id)
-    .filter((d) => d.status === 'done')
+    .filter((d) => d.status === 'done' && d.teamId === task.teamId)
     .map((d) => {
       const agentComments = getComments(db, d.id).filter((c) => c.authorType === 'agent')
       const own = d.assigneeAgentId
@@ -491,15 +503,28 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     })
 
   // A fresh session gets the thread (the newest of it). A resumed one already
-  // holds what it saw, its own words included, so it gets only what is new.
-  const seenFrom = run.resumed ? run.resumed.seenAt - RESUME_COMMENT_OVERLAP_MS : null
+  // holds what it saw and what its agent wrote in that run, so it gets the rest:
+  // what others wrote since, and what its agent wrote from elsewhere (a chat,
+  // another task's run) after that run ended. A pointer from before the end was
+  // recorded counts all of the agent's own comments as the session's.
+  const resumed = run.resumed
+  const seenFrom = resumed ? resumed.seenAt - RESUME_COMMENT_OVERLAP_MS : null
+  const ownUntil = resumed
+    ? (resumed.endedAt ?? Number.POSITIVE_INFINITY) + RESULT_COMMENT_GRACE_MS
+    : null
   const comments = getComments(db, task.id)
-    .filter(
-      (c) =>
-        seenFrom === null ||
-        (c.createdAt >= seenFrom && !(c.authorType === 'agent' && c.authorAgentId === agentId)),
-    )
+    .filter((c) => {
+      if (seenFrom === null || ownUntil === null) return true
+      if (c.createdAt < seenFrom) return false
+      const own = c.authorType === 'agent' && c.authorAgentId === agentId
+      return !(own && c.createdAt <= ownUntil)
+    })
     .map((c) => ({ from: authorOf(c), body: c.body }))
+
+  // The brief was written when the run was queued. A resumed session compares
+  // with that brief (what it is sent), and an edit made since is said apart.
+  const currentHash = ticketHashOf(task)
+  const briefHash = run.briefHash ?? currentHash
 
   return renderTicketBlock({
     taskId: task.id,
@@ -507,7 +532,8 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     priority: taskPriorityOf(task.priority),
     why,
     tools,
-    resumed: run.resumed ? { changed: run.resumed.ticketHash !== ticketHashOf(task) } : null,
+    resumed: resumed ? { changed: resumed.ticketHash !== briefHash } : null,
+    briefStale: briefHash !== currentHash,
     parents,
     dependencies,
     comments,

@@ -20,6 +20,7 @@ import {
   createTask,
   linkDep,
   taskComments,
+  tasks,
   teams,
   updateStatus,
   updateTaskFields,
@@ -326,6 +327,101 @@ describe('buildTicketBlock: a resumed run gets only what changed', () => {
     expect(block).toContain(`"Launch plan" (id ${parent.id}`)
     expect(block).toContain(`"Draft the outline" (id ${dep.id}), done by Ada:`)
     expect(block).toContain('| Outline: intro, offer.')
+  })
+})
+
+describe('buildTicketBlock: only this team’s tasks', () => {
+  it('leaves out a parent or a finished dependency on another team’s board', () => {
+    // The REST link route checks no team, and a task moved between teams keeps
+    // its parent, so both links can cross the boundary the Tasks tools keep.
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'U', name: 'Other', icon: 'U', color: '#111', createdAt: now, updatedAt: now })
+      .run()
+    const foreignParent = createTask(db, { title: 'OTHER-TEAM-PARENT', teamId: 'U' })
+    const foreignDep = createTask(db, { title: 'OTHER-TEAM-DEP', teamId: 'U' })
+    updateStatus(db, foreignDep.id, 'in_progress')
+    updateStatus(db, foreignDep.id, 'done')
+    addComment(db, foreignDep.id, 'OTHER-TEAM-RESULT', 'agent', 'lead')
+    const ownDep = createTask(db, { title: 'Own dependency', teamId: 'T' })
+    updateStatus(db, ownDep.id, 'in_progress')
+    updateStatus(db, ownDep.id, 'done')
+    const { task, execId } = running('Write the email')
+    db.update(tasks).set({ parentTaskId: foreignParent.id }).where(eq(tasks.id, task.id)).run()
+    linkDep(db, task.id, foreignDep.id)
+    linkDep(db, task.id, ownDep.id)
+
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: null,
+    })!
+    expect(block).not.toContain('OTHER-TEAM')
+    expect(block).not.toContain('Part of')
+    expect(block).toContain('"Own dependency"')
+  })
+})
+
+describe('buildTicketBlock: what a session already holds', () => {
+  it('shows a resumed session its own comment written elsewhere after that run ended', () => {
+    const { task, execId } = running('Write the email')
+    const seenAt = Date.now() - 600_000
+    const setCreatedAt = (id: string, createdAt: number) =>
+      db.update(taskComments).set({ createdAt }).where(eq(taskComments.id, id)).run()
+    // Written by that run: already in the session.
+    setCreatedAt(
+      addComment(db, task.id, 'my result from that run', 'agent', 'coder').id,
+      seenAt + 5_000,
+    )
+    // Written later from a chat or another task's run: never in this session.
+    setCreatedAt(
+      addComment(db, task.id, 'a note I left from a chat', 'agent', 'coder').id,
+      seenAt + 300_000,
+    )
+
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: { ticketHash: ticketHashOf(task), seenAt, endedAt: seenAt + 10_000 },
+    })!
+    expect(block).toContain('a note I left from a chat')
+    expect(block).not.toContain('my result from that run')
+  })
+})
+
+describe('buildTicketBlock: a brief written before an edit', () => {
+  it('says the task was edited after the brief was written, on a fresh run too', () => {
+    const { task, execId } = running('Write the email', 'coder', { description: 'Two paragraphs.' })
+    const briefHash = ticketHashOf(task)
+    updateTaskFields(db, task.id, { description: 'Three paragraphs.' })
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      briefHash,
+      resumed: null,
+    })!
+    expect(block).toMatch(/edited after the brief at the end of this message was written/)
+    expect(block).toMatch(/call get_task for its current title and description/)
+  })
+
+  it('compares a resumed session with the brief it is sent, not with the task as it is now', () => {
+    const { task, execId } = running('Write the email', 'coder', { description: 'Two paragraphs.' })
+    // The session saw this text last time, and the brief carries it again.
+    const briefHash = ticketHashOf(task)
+    updateTaskFields(db, task.id, { description: 'Three paragraphs.' })
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      briefHash,
+      resumed: { ticketHash: briefHash, seenAt: Date.now() - 60_000 },
+    })!
+    expect(block).toContain('The brief at the end of this message is the one you had then.')
+    expect(block).not.toMatch(/is the current version/)
+    expect(block).toMatch(/edited after the brief at the end of this message was written/)
   })
 })
 

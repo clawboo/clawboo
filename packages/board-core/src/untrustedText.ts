@@ -125,6 +125,10 @@ export function formatPeerPost(post: PeerPostLike): string {
 
 const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** Every line break a reader could see, as regex character-class source: the
+ *  ones `quoteLines` splits on. */
+const LINE_BREAKS = '\\n\\r\\u0085\\u2028\\u2029'
+
 /**
  * Turn every line of `text` that looks like one of a surface's own section
  * markers (`[Label …]` or `[End label …]`, alone on its line, any case) into
@@ -138,7 +142,13 @@ const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\
 export function defangSectionMarkers(text: string, labels: readonly string[]): string {
   if (labels.length === 0) return text
   const names = labels.map(escapeRegExp).join('|')
-  const marker = new RegExp(`^[ \\t]*\\[(?:end\\s+)?(?:${names})\\b[^\\]]*\\][ \\t]*$`, 'gim')
+  // A line is bounded by any break `quoteLines` splits on (the `m` flag's `^`
+  // and `$` miss U+0085), and a marker never reaches past its own line, so a
+  // `[` whose `]` sits lines later takes nothing with it.
+  const marker = new RegExp(
+    `(?<=^|[${LINE_BREAKS}])[ \\t]*\\[(?:end[ \\t]+)?(?:${names})\\b[^\\]${LINE_BREAKS}]*\\][ \\t]*(?=$|[${LINE_BREAKS}])`,
+    'gi',
+  )
   return text.replace(marker, '(quoted section marker)')
 }
 
@@ -148,7 +158,11 @@ export function defangSectionMarkers(text: string, labels: readonly string[]): s
  * For a title or a name that sits inside a line clawboo writes.
  */
 export function oneLine(text: string, max?: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim()
+  // `\s` covers every line break but U+0085, which `quoteLines` treats as one.
+  const flat = text.replace(/[\s\u0085]+/g, ' ').trim()
   if (max === undefined || flat.length <= max) return flat
-  return `${flat.slice(0, Math.max(0, max - 1))}…`
+  if (max <= 0) return ''
+  const cut = flat.slice(0, max - 1)
+  // Never end on the first half of a character: alone it shows as U+FFFD.
+  return `${/[\uD800-\uDBFF]$/.test(cut) ? cut.slice(0, -1) : cut}…`
 }

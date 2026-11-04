@@ -159,7 +159,8 @@ describe('TaskDetailDrawer', () => {
       }),
     )
     const user = userEvent.setup()
-    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const onChanged = vi.fn()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
 
     await screen.findByText('Ship it')
     const select = screen.getByTestId('task-priority-select')
@@ -169,6 +170,8 @@ describe('TaskDetailDrawer', () => {
 
     await waitFor(() => expect(patched).toEqual({ priority: 2 }))
     expect(screen.getByTestId('task-priority-select')).toHaveTextContent('Urgent')
+    // The board reloads now, so the card's mark does not lag until its next poll.
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
   })
 
   it('puts the priority back and says so when the change is refused', async () => {
@@ -178,7 +181,8 @@ describe('TaskDetailDrawer', () => {
       http.patch('/api/board/t1', () => HttpResponse.json({ ok: false }, { status: 500 })),
     )
     const user = userEvent.setup()
-    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const onChanged = vi.fn()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
 
     await screen.findByText('Ship it')
     await user.click(screen.getByTestId('task-priority-select'))
@@ -190,6 +194,7 @@ describe('TaskDetailDrawer', () => {
       ),
     )
     expect(screen.getByTestId('task-priority-select')).toHaveTextContent('Normal')
+    expect(onChanged).not.toHaveBeenCalled()
   })
 
   it('offers "Complete anyway" when the verification gate blocks → done, then overrides', async () => {

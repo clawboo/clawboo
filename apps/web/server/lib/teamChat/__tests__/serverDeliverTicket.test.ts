@@ -13,7 +13,9 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
+  addComment,
   agents,
   claimTask,
   createExecutionProcess,
@@ -21,6 +23,7 @@ import {
   enqueueInbox,
   getSetting,
   getTask,
+  tasks,
   teams,
   updateStatus,
   updateTaskFields,
@@ -35,8 +38,11 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 import { createNudgeQueue, type TurnOrigin } from '@clawboo/team-orchestration'
+import { eq } from 'drizzle-orm'
 
 import { getDb, resetDb } from '../../db'
+import { homeDispatchMutex } from '../../executorRunner'
+import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import type { RuntimeRunContext } from '../../runtimes/types'
 import { parseTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
 import { createServerDeliver } from '../serverDeliver'
@@ -430,6 +436,72 @@ describe('serverDeliver: a board task run is bound to its task', () => {
       getSetting(db, taskSessionSettingKey('a1', 'T', taskId)),
     )
     expect(pointer?.ticketHash).toBe(briefHash)
+    // When the run ended, so a later run can tell this session's own comments
+    // from ones the agent wrote elsewhere afterwards.
+    expect(pointer?.endedAt).toBeGreaterThanOrEqual(pointer!.seenAt)
+    // And the run itself was told its brief is older than the task.
+    expect(captured[captured.length - 1]!.opts.context).toMatch(
+      /edited after the brief at the end of this message was written/,
+    )
+  })
+
+  it('builds the task block once it holds the agent’s lock, not while it waits', async () => {
+    seedAgent('a1', 'codex')
+    const taskId = claimedTask('Waiting task', 'a1')
+    const sk = 'agent:a1:team:T'
+    const exec = createExecutionProcess(db, { taskId, executorType: 'openclaw' })
+    sessionTask.set(sk, taskId)
+    sessionExec.set(sk, exec.id)
+    // Another of the agent's runs (the task runner, a routine) holds its home.
+    let release!: () => void
+    const held = homeDispatchMutex.run(
+      runtimeIdentityHomePath('codex', 'a1'),
+      () => new Promise<void>((resolve) => (release = resolve)),
+    )
+
+    const delivery = deliver()(sk, 'a1', 'Waiting task', {
+      kind: 'delegation',
+      fromAgentId: 'lead',
+    })
+    await settle()
+    expect(captured).toHaveLength(0)
+    addComment(db, taskId, 'written while the run waited', 'user')
+    release()
+    await held
+    await delivery
+    await vi.waitFor(() => expect(ended).toBe(1))
+    expect(captured[0]!.opts.context).toContain('written while the run waited')
+  })
+
+  it('a run stopped by a reassignment writes no pointer back for its agent', async () => {
+    seedAgent('a1', 'codex')
+    seedAgent('a2', 'codex')
+    const taskId = claimedTask('Handed over', 'a1')
+    const key = taskSessionSettingKey('a1', 'T', taskId)
+    const bindTo = (agentId: string, nonce: string) =>
+      db
+        .update(tasks)
+        .set({ sourceDelegationId: encodeHumanAssignment(agentId, nonce) })
+        .where(eq(tasks.id, taskId))
+        .run()
+    script.sessionIds = ['sid-1', 'sid-2', 'sid-3']
+    bindTo('a1', 'n0')
+    await runTask('a1', taskId, 'Handed over')
+    expect(getSetting(db, key)).toContain('sid-1')
+
+    // Stopped while still the agent's task: the session is kept.
+    script.reason = 'aborted'
+    await runTask('a1', taskId, 'Handed over')
+    expect(getSetting(db, key)).toContain('sid-2')
+
+    // Given to a2 mid-run: the Assign route rebinds the task and clears its
+    // pointers, and the stopped run ends `aborted` only after that.
+    script.beforeTerminal = () => {
+      bindTo('a2', 'n1')
+      clearTaskSessionPointers(db, taskId)
+    }
+    await runTask('a1', taskId, 'Handed over')
+    expect(getSetting(db, key)).toBeNull()
   })
 
   it('never writes a task pointer for OpenClaw', async () => {

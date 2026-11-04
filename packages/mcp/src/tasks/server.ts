@@ -278,7 +278,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   const teamRun = opts?.teamRun === true
   // The run's own task, when bound: the default for the one-task tools below.
   const boundTaskId = opts?.boundScope?.taskId ?? undefined
-  const taskIdField = boundTaskId ? z.string().optional() : z.string()
+  // Optional when a task is bound, but never empty: "" would read as "my task".
+  const taskIdField = boundTaskId ? z.string().min(1).optional() : z.string()
   /** The task a one-task tool acts on: the named one, else the run's own. */
   const taskOf = (args: Record<string, unknown>): string =>
     optStr(args['taskId']) || boundTaskId || ''
@@ -499,7 +500,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       description: teamRun
         ? `Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.${blockDefault ? ' Leave out taskId to block it.' : ''}`
         : 'Mark a task blocked.',
-      inputSchema: z.object({ taskId: blockDefault ? z.string().optional() : z.string() }),
+      inputSchema: z.object({ taskId: blockDefault ? z.string().min(1).optional() : z.string() }),
       handler: (args) => {
         const taskId = optStr(args['taskId']) || blockDefault || ''
         const denied = outOfTeam(taskId)

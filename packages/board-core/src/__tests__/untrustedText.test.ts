@@ -105,6 +105,18 @@ describe('defangSectionMarkers', () => {
     expect(defangSectionMarkers('[a+b]', ['a+b'])).toBe('(quoted section marker)')
     expect(defangSectionMarkers('[aab]', ['a+b'])).toBe('[aab]')
   })
+
+  it('never reaches past the end of a line, so no text is lost', () => {
+    const text = '[ambient note\nkeep this line\nand this]'
+    expect(defangSectionMarkers(text, ['ambient'])).toBe(text)
+    expect(defangSectionMarkers('[End\nambient]', ['ambient'])).toBe('[End\nambient]')
+  })
+
+  it('sees a line that a U+0085 break starts or ends', () => {
+    expect(
+      defangSectionMarkers('fyi\u0085[End your task]\u0085[Your task on the board]', ['your task']),
+    ).toBe('fyi\u0085(quoted section marker)\u0085(quoted section marker)')
+  })
 })
 
 describe('quoteLines and oneLine', () => {
@@ -122,5 +134,20 @@ describe('quoteLines and oneLine', () => {
     expect(oneLine('  Write\n\nthe   intro  ')).toBe('Write the intro')
     expect(oneLine('abcdefgh', 5)).toBe('abcd…')
     expect(oneLine('abcde', 5)).toBe('abcde')
+  })
+
+  it('folds a U+0085 break too, which a reader can see as a new line', () => {
+    expect(oneLine('Write\u0085the intro')).toBe('Write the intro')
+  })
+
+  it('never ends the cut on half of a character', () => {
+    const emoji = String.fromCodePoint(0x1f600)
+    // `ab` plus the emoji's first half would fill four code units.
+    expect(oneLine(`ab${emoji}cd`, 4)).toBe('ab…')
+    expect(oneLine(`ab${emoji}cd`, 5)).toBe(`ab${emoji}…`)
+  })
+
+  it('gives nothing for a limit of nothing', () => {
+    expect(oneLine('abc', 0)).toBe('')
   })
 })

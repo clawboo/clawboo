@@ -91,7 +91,7 @@ import {
   teamResumeEligible,
   type TaskSessionPointer,
 } from './nativeTeamSession'
-import { readTaskSessionPointer, taskTakesPointers, ticketHashOf } from './taskSessionPointers'
+import { readTaskSessionPointer, taskPointerWantedFor, ticketHashOf } from './taskSessionPointers'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { inboxRowBelongsToRoom } from './roomRoster'
 import { buildPeerCatchup } from './peerCatchup'
@@ -1109,41 +1109,56 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           const capturedHomeDir = homeDir
           const capturedWorkdir = workdir
 
-          // Rendered HERE: this runs when the queue releases the delivery, so the
-          // context reflects state at start time rather than at enqueue time. A
-          // task run's ticket block is rendered with it, after the resume decision
-          // above, because a resumed session is told what changed. `seenAt` (when
-          // this context is built) and the brief's ticket hash are recorded with
-          // the session's pointer on the terminal.
-          const seenAt = Date.now()
-          let ticketBlock: string | null = null
-          if (
-            runTaskId !== null &&
-            isTeamSessionKey(targetSessionKey) &&
-            (origin.kind === 'delegation' || origin.kind === 'assignment')
-          ) {
-            try {
-              ticketBlock = buildTicketBlock(db, targetAgentId, {
-                taskId: runTaskId,
-                execId: runExecId,
-                origin,
-                resumed: taskPointer
-                  ? { ticketHash: taskPointer.ticketHash, seenAt: taskPointer.seenAt }
-                  : null,
-              })
-            } catch (err) {
-              // The brief still goes out: a run without its ticket block is the
-              // old behavior, not a failure.
-              log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
+          // When this run's context was built: recorded with the session's
+          // pointer on the terminal, with the brief's ticket hash. Set by
+          // `renderRunContext`.
+          let seenAt = 0
+          /**
+           * The context the run starts with: the stable preamble, a task run's
+           * ticket block, then what is waiting. Called inside runJob, once the
+           * agent's lock is held and right before the start, so a run that
+           * waited behind another of its agent's runs (the task runner, a
+           * routine) starts from the board as it is then, not as it was when the
+           * queue released it. After the resume decision above, because a
+           * resumed session is told what changed.
+           */
+          const renderRunContext = (): ReturnType<typeof renderWaiting> => {
+            seenAt = Date.now()
+            let ticketBlock: string | null = null
+            if (
+              runTaskId !== null &&
+              isTeamSessionKey(targetSessionKey) &&
+              (origin.kind === 'delegation' || origin.kind === 'assignment')
+            ) {
+              try {
+                ticketBlock = buildTicketBlock(db, targetAgentId, {
+                  taskId: runTaskId,
+                  execId: runExecId,
+                  origin,
+                  briefHash: ticketHash,
+                  resumed: taskPointer
+                    ? {
+                        ticketHash: taskPointer.ticketHash,
+                        seenAt: taskPointer.seenAt,
+                        endedAt: taskPointer.endedAt ?? null,
+                      }
+                    : null,
+                })
+              } catch (err) {
+                // The brief still goes out: a run without its ticket block is the
+                // old behavior, not a failure.
+                log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
+              }
             }
+            return renderWaiting(ticketBlock)
           }
-          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting(ticketBlock)
 
           // The resume pointer to update on the terminal. Threaded into the drain
           // so the write lands BEFORE markIdle, closing the rapid-message race (see
-          // drainRun's `done` handler). Read side is ctx.resume above.
+          // the drain's `settleResumePointer`). Read side is ctx.resume above.
           //  · A task run whose runtime can resume: its own pointer on the task,
-          //    recording what this session saw (the ticket hash and `seenAt`).
+          //    recording what this session saw (the ticket hash and `seenAt`) and
+          //    when its run ended.
           //  · An eligible leader / user-facing team turn (the amnesia fix): the
           //    leader's pointer, holding the bare session id.
           const taskPointerRuntime =
@@ -1167,9 +1182,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                       runtime: taskPointerRuntime,
                       ticketHash,
                       seenAt,
+                      // Encoded as the run ends.
+                      endedAt: Date.now(),
                     }),
                   keepUnlessError: true,
-                  wanted: () => taskTakesPointers(getTask(db, runTaskId)),
+                  wanted: () => taskPointerWantedFor(getTask(db, runTaskId), targetAgentId),
                 }
               : teamResumeEligible({
                     runtime: resolvedRuntime,
@@ -1241,6 +1258,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 return
               }
             }
+            // Built now, holding the agent's lock, right before the start.
+            const { teamContext, digestIds, roomId, throughSeq } = renderRunContext()
             let run: RunHandle
             try {
               run = await adapter.start(

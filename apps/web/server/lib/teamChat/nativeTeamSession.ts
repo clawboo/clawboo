@@ -131,6 +131,10 @@ export interface TaskSessionPointer {
   /** When that session's last run was given its context (epoch ms). Comments
    *  made since are the ones it has not seen. */
   seenAt: number
+  /** When that run ended (epoch ms): the agent's own comments up to then are
+   *  already in the session, and later ones came from elsewhere. Absent on a
+   *  pointer written before it was recorded. */
+  endedAt?: number
 }
 
 export function encodeTaskSessionPointer(pointer: TaskSessionPointer): string {
@@ -156,6 +160,9 @@ export function parseTaskSessionPointer(raw: string | null | undefined): TaskSes
       runtime: o.runtime,
       ticketHash: o.ticketHash,
       seenAt: o.seenAt,
+      ...(typeof o.endedAt === 'number' && Number.isFinite(o.endedAt)
+        ? { endedAt: o.endedAt }
+        : {}),
     }
   } catch {
     return null

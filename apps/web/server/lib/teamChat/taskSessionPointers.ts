@@ -4,6 +4,7 @@
 
 import { createHash } from 'node:crypto'
 
+import { delegationTargetOf } from '@clawboo/board-core'
 import { getSetting, getTask, settings, type ClawbooDb } from '@clawboo/db'
 import { inArray, like } from 'drizzle-orm'
 
@@ -30,6 +31,26 @@ export function taskTakesPointers(
   task: { status: string; dropped?: number | boolean | null } | null | undefined,
 ): boolean {
   return !!task && !task.dropped && task.status !== 'done' && task.status !== 'cancelled'
+}
+
+/** Whether `agentId`'s run may still write its pointer on `task` as it ends:
+ *  the task takes pointers, and it is not bound to another agent. A task given
+ *  to someone else has had the old agent's pointer cleared while its stopped
+ *  run was still ending. */
+export function taskPointerWantedFor(
+  task:
+    | {
+        status: string
+        dropped?: number | boolean | null
+        sourceDelegationId?: string | null
+      }
+    | null
+    | undefined,
+  agentId: string,
+): boolean {
+  if (!task || !taskTakesPointers(task)) return false
+  const bound = delegationTargetOf(task.sourceDelegationId)
+  return bound === null || bound === agentId
 }
 
 /** `agentId`'s pointer for `taskId`, or null when it has none. */

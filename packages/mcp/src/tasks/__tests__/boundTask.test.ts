@@ -106,6 +106,16 @@ describe('Tasks tools with the run bound to its task', () => {
     expect((await callText(client, 'get_task', {})).isError).toBe(false)
   })
 
+  it('refuses an empty taskId instead of reading it as "my task"', async () => {
+    const mine = claimed('Write the parser')
+    const client = await connectInMemory(bound(mine))
+    expect((await callText(client, 'get_task', { taskId: '' })).isError).toBe(true)
+    expect((await callText(client, 'add_comment', { taskId: '', body: 'x' })).isError).toBe(true)
+    expect((await callText(client, 'block_task', { taskId: '' })).isError).toBe(true)
+    expect(getComments(db, mine)).toEqual([])
+    expect(getTask(db, mine)?.status).toBe('in_progress')
+  })
+
   it('refuses a call that names no task when no task is bound', async () => {
     const client = await connectInMemory(
       createTasksServer(db, { boundScope: { teamId: 'A', agentId: 'coder' } }),

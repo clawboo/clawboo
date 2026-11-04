@@ -1795,10 +1795,11 @@ async function runTaskInner(
         // performed. Carry the prior handoff's own list too: this run
         // reconstructed it from the worktree, and rewriting `[]` over it loses
         // everything an earlier runtime flagged.
+        // A watchdog stop counts too: what that run was doing is as unknown.
         brokenOrUnverified: [
-          ...(priorAttempts.lastKind === 'crash'
+          ...(priorAttempts.lastKind === 'crash' || priorAttempts.lastKind === 'timeout'
             ? [
-                `A previous attempt was interrupted (${priorAttempts.lastCrashReason ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
+                `A previous attempt was interrupted (${(priorAttempts.lastKind === 'crash' ? priorAttempts.lastCrashReason : priorAttempts.lastReason) ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
               ]
             : []),
           ...(resume?.broken ?? []),
