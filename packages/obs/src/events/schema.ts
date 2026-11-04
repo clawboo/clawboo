@@ -85,26 +85,43 @@ export function parseOrchestrationEvent(value: unknown): OrchestrationEvent {
 
 // ── Kind → data shapes (typed producers + reducers; not enforced at the wire) ──
 
+/**
+ * A person a sign-in proxy vouched for, with a signed token the server verified
+ * (the shape of @clawboo/protocol's PersonRef). Events a person's request caused
+ * carry it as `person`; absent means nothing vouched for who made the request.
+ */
+export interface EventPerson {
+  id: string
+  name: string | null
+  role: string | null
+}
 export interface TaskCreatedData {
   title?: string | null
   status?: string
   parentTaskId?: string | null
   priority?: string | null
+  person?: EventPerson
 }
 export interface TaskClaimedData {
+  person?: EventPerson
   assigneeAgentId?: string | null
   assigneeRuntime?: string | null
 }
 export interface StatusChangedData {
   from?: string | null
   to: string
+  /** `person` for a person's move (the board, the task drawer). */
+  by?: 'person'
+  person?: EventPerson
 }
 export interface CommentAddedData {
   authorType?: string
   body?: string
+  person?: EventPerson
 }
 export interface DepLinkedData {
   dependsOnTaskId: string
+  person?: EventPerson
 }
 export interface ExecutionStartedData {
   execId: string
@@ -191,6 +208,8 @@ export interface ApprovalResolvedData {
   decision?: string
   kind?: string
   toolName?: string
+  /** Who answered, when a sign-in proxy vouched for them. Absent otherwise. */
+  resolvedBy?: EventPerson
 }
 export interface ErrorEventData {
   code?: string | null

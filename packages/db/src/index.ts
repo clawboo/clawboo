@@ -137,6 +137,10 @@ export * from './reportUps'
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'
 
+// ── A person a sign-in proxy vouched for, as rows record them ──
+export { parsePersonJson, personJson } from './person'
+export type { PersonRecord } from './person'
+
 // ── The grant spine: capability_grants IS the Ghost Graph edge ──
 export * from './grants'
 

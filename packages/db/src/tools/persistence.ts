@@ -20,6 +20,7 @@ import {
   type DbToolRegistry,
 } from '../schema'
 import { mintStandingRule } from '../grants/repository'
+import { personJson, type PersonRecord } from '../person'
 import { recordApprovalEvent } from './approvalEvents'
 import { createBuiltinRegistry } from './registry'
 import { scrubArgsSummary, scrubResultSummary } from './scrub'
@@ -199,6 +200,7 @@ export function createApproval(db: ClawbooDb, input: CreateApprovalInput): DbToo
     createdAt: now,
     expiresAt: now + (input.ttlMs ?? DEFAULT_TTL_MS),
     resolvedAt: null,
+    resolvedBy: null,
   }
   withWriteRetry(() => db.insert(toolCallApprovals).values(row).run())
   recordApprovalEvent(db, 'approval_requested', row, { teamId: input.teamId })
@@ -237,19 +239,22 @@ const STANDING_RULE_TTL_MS = 30 * 24 * 60 * 60_000
 /** Resolve a still-pending approval before its `expiresAt`. The `status='pending'`
  *  guard makes a second resolve a no-op (idempotent). An answer after the
  *  deadline is refused and the card is expired instead: nothing waits on it any
- *  more, typically because the process holding it stopped. */
+ *  more, typically because the process holding it stopped. `resolvedBy` is the
+ *  person a sign-in proxy vouched for, written with the answer itself. */
 export function resolveApproval(
   db: ClawbooDb,
   id: string,
   decision: ApprovalDecision,
+  opts: { resolvedBy?: PersonRecord | null } = {},
 ): DbToolCallApproval | null {
+  const resolvedBy = personJson(opts.resolvedBy)
   const changed = immediateWrite(db, (tx) => {
     // The clock is read once the write lock is held. An answer that waited out
     // a busy lock past the deadline is late, whenever it was sent.
     const now = Date.now()
     return tx
       .update(toolCallApprovals)
-      .set({ status: decision, resolvedAt: now })
+      .set({ status: decision, resolvedAt: now, resolvedBy })
       .where(
         and(
           eq(toolCallApprovals.id, id),

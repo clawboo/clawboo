@@ -63,6 +63,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | Connectors, custom connectors and brokered apps     | `connectors`, `connectors.custom`, `connectors.broker`                      | Supported                      | Planned     | Planned       |
 | Live streams that resume after a dropped connection | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Supported                      | Planned     | Planned       |
 | Update from inside the app                          | `system.selfUpdate`                                                         | Supported for a global install | Planned     | Planned       |
+| Names from a sign-in proxy's identity tokens        | `auth.proxyIdentity`                                                        | Supported, off by default      | Planned     | Planned       |
 
 A flag being on means the server has the feature. It does not mean the surface you use shows it yet.
 

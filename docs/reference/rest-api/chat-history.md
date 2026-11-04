@@ -47,8 +47,11 @@ interface TranscriptEntry {
   confirmed: boolean
   fingerprint: string // an opaque id, not a content hash
   origin?: { kind: 'routine'; routineId: string; routineName: string } // posted by a routine
+  person?: { id: string; name: string | null; role: string | null } // who sent a user entry, through a verified sign-in proxy
 }
 ```
+
+Only the server sets `person`, on the team chat and 1:1 chat routes that store a message themselves, when a [sign-in proxy](/guides/sso-proxy) vouched for the sender. `POST /api/chat-history` drops a `person` from the entries it is sent.
 
 ### Three ways a conversation ends
 

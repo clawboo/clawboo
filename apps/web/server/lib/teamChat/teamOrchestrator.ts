@@ -34,6 +34,7 @@ import {
 } from '@clawboo/db'
 import { createSuspendDetector, steeringOf } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
+import type { PersonRef } from '@clawboo/protocol'
 import {
   agentIdFromSessionKey,
   buildTeamSessionKey,
@@ -96,6 +97,8 @@ export interface EnqueueUserMessageInput {
    *  transcript names the routine, and the turn is framed as scheduled (nobody
    *  is necessarily watching, so it should finish without waiting on them). */
   routine?: { id: string; name: string }
+  /** The person who sent it, when a sign-in proxy vouched for them. */
+  person?: PersonRef | null
 }
 
 /** What became of an ingested message. `ok` means the target's turn started, or
@@ -487,6 +490,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         role: 'user',
         kind: 'user',
         entryId: input.userEntryId,
+        ...(input.person ? { person: input.person } : {}),
         ...(input.routine
           ? {
               origin: {

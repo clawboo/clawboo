@@ -94,6 +94,7 @@ const PINNED_FEATURES = [
   'stream.events.resume',
   'system.selfUpdate',
   'system.hold',
+  'auth.proxyIdentity',
 ]
 
 /** The drain-and-hold answer (GET, POST /api/system/hold, DELETE /api/system/hold/:owner). */
@@ -106,6 +107,7 @@ const PINNED_ROUTES = [
   'GET /api/settings',
   'POST /api/settings',
   'POST /api/access/launch-code',
+  'GET /api/access/identity',
   'GET /api/approvals',
   'POST /api/approvals',
   'GET /api/chat-history',
@@ -331,6 +333,7 @@ const CHAT_MESSAGE_FIELDS = [
   'confirmed',
   'fingerprint',
   'origin',
+  'person',
 ]
 const CHAT_DELTA_FIELDS = ['sessionKey', 'runId', 'text']
 const CURSOR_FIELDS = ['cursor']

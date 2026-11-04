@@ -266,6 +266,9 @@ const SCHEMA_DDL = `
       author_type     TEXT    NOT NULL,
       body            TEXT    NOT NULL,
       tenant_id       TEXT,
+      -- The person whose request added it, when a sign-in proxy vouched for
+      -- them: a JSON {id, name, role}. NULL otherwise.
+      person          TEXT,
       created_at      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id);
@@ -492,7 +495,10 @@ const SCHEMA_DDL = `
       kind         TEXT    NOT NULL DEFAULT 'tool',
       created_at   INTEGER NOT NULL,
       expires_at   INTEGER NOT NULL,
-      resolved_at  INTEGER
+      resolved_at  INTEGER,
+      -- Who answered it, when a sign-in proxy vouched for them: a JSON
+      -- {id, name, role}. NULL when nothing did, never a guess.
+      resolved_by  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_status  ON tool_call_approvals (status);
     CREATE INDEX IF NOT EXISTS idx_tool_approvals_created ON tool_call_approvals (created_at);

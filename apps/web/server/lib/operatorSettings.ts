@@ -59,6 +59,12 @@ interface KindValue {
   flag: boolean
   /** An http or https URL with no credentials in it. */
   url: string | null
+  /** One of the key's `choices`, as the word itself in the file and the env. */
+  choice: string
+  /** Text: one line, or a block such as a PEM key for a `multiline` key. */
+  text: string | null
+  /** A whole number of seconds from the key's `min` to its `max`. File: a JSON number. */
+  seconds: number
 }
 type Kind = keyof KindValue
 
@@ -67,6 +73,13 @@ interface KeySpec {
   env: string
   /** Whether the dashboard offers a value of its own for this key. */
   userEditable: boolean
+  /** The words a `choice` key takes. */
+  choices?: readonly string[]
+  /** The range of a `seconds` key. */
+  min?: number
+  max?: number
+  /** A `text` key that may span lines. */
+  multiline?: boolean
 }
 
 export const OPERATOR_KEYS = {
@@ -80,6 +93,67 @@ export const OPERATOR_KEYS = {
   },
   /** Where the marketplace catalog index comes from. */
   catalogIndexUrl: { kind: 'url', env: 'CLAWBOO_CATALOG_INDEX_URL', userEditable: false },
+  // The identity lane for a sign-in proxy in front of Clawboo (lib/proxyIdentity).
+  // Only an administrator sets these: an agent that could change them could
+  // name its own key and sign in as anyone.
+  /** Verify the signed identity token a sign-in proxy sends: off, on or required. */
+  proxyIdentity: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY',
+    userEditable: false,
+    choices: ['off', 'on', 'required'],
+  },
+  /** The request header that carries the token. */
+  proxyIdentityHeader: { kind: 'text', env: 'CLAWBOO_PROXY_IDENTITY_HEADER', userEditable: false },
+  /** Where the proxy publishes its public keys (a JWKS). */
+  proxyIdentityJwksUrl: {
+    kind: 'url',
+    env: 'CLAWBOO_PROXY_IDENTITY_JWKS_URL',
+    userEditable: false,
+  },
+  /** The proxy's public key itself: a PEM public key, a JWK or a JWKS. */
+  proxyIdentityPublicKey: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY',
+    userEditable: false,
+    multiline: true,
+  },
+  /** The `iss` every token must carry. */
+  proxyIdentityIssuer: { kind: 'text', env: 'CLAWBOO_PROXY_IDENTITY_ISSUER', userEditable: false },
+  /** The `aud` every token must carry. */
+  proxyIdentityAudience: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_AUDIENCE',
+    userEditable: false,
+  },
+  /** `request`: one short-lived token per request, bound to its method and path.
+   *  `session`: the proxy's own sign-in token, good until it expires. */
+  proxyIdentityBinding: {
+    kind: 'choice',
+    env: 'CLAWBOO_PROXY_IDENTITY_BINDING',
+    userEditable: false,
+    choices: ['request', 'session'],
+  },
+  /** The longest lifetime a request-bound token may have. */
+  proxyIdentityMaxLifetime: {
+    kind: 'seconds',
+    env: 'CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME',
+    userEditable: false,
+    min: 1,
+    max: 300,
+  },
+  /** The claim that holds the person's name. */
+  proxyIdentityNameClaim: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_NAME_CLAIM',
+    userEditable: false,
+  },
+  /** The claim that holds the person's role. */
+  proxyIdentityRoleClaim: {
+    kind: 'text',
+    env: 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM',
+    userEditable: false,
+  },
 } as const satisfies Record<string, KeySpec>
 
 export type OperatorKey = keyof typeof OPERATOR_KEYS
@@ -89,6 +163,16 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   disableSelfUpdate: false,
   disableBrowserAutostart: false,
   catalogIndexUrl: null,
+  proxyIdentity: 'off',
+  proxyIdentityHeader: 'clawboo-identity',
+  proxyIdentityJwksUrl: null,
+  proxyIdentityPublicKey: null,
+  proxyIdentityIssuer: null,
+  proxyIdentityAudience: null,
+  proxyIdentityBinding: 'request',
+  proxyIdentityMaxLifetime: 60,
+  proxyIdentityNameClaim: 'name',
+  proxyIdentityRoleClaim: 'role',
 }
 
 /** TypeScript resolves DEFAULTS to a plain object, so `DEFAULTS[K]` loses its tie to K. */
@@ -153,12 +237,76 @@ function jsonErrorPlace(err: unknown): string {
   return m ? ` (line ${m[1]}, column ${m[2]})` : ''
 }
 
-function parseFileValue(kind: Kind, raw: unknown, where: string): boolean | string {
-  if (kind === 'flag') {
+type PinValue = boolean | string | number
+
+function parseChoice(spec: KeySpec, raw: string, where: string): string {
+  const value = raw.trim().toLowerCase()
+  const choices = spec.choices ?? []
+  if (!choices.includes(value)) {
+    throw new OperatorSettingsError(`${where} must be one of: ${choices.join(', ')}.`)
+  }
+  return value
+}
+
+/** Bigger than any real public key or JWKS, small enough to read at a glance. */
+const MAX_TEXT_CHARS = 16 * 1024
+const MAX_LINE_CHARS = 512
+
+function parseText(spec: KeySpec, raw: string, where: string): string {
+  const value = raw.trim()
+  // Not echoed: text this long, or broken over lines, is not a name or a header.
+  if (spec.multiline) {
+    if (value.length > MAX_TEXT_CHARS) {
+      throw new OperatorSettingsError(`${where} is longer than ${MAX_TEXT_CHARS} characters.`)
+    }
+    return value
+  }
+  // eslint-disable-next-line no-control-regex
+  if (value.length > MAX_LINE_CHARS || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new OperatorSettingsError(
+      `${where} must be one line of at most ${MAX_LINE_CHARS} characters.`,
+    )
+  }
+  return value
+}
+
+function parseSeconds(spec: KeySpec, raw: number, where: string): number {
+  const min = spec.min ?? 0
+  const max = spec.max ?? Number.MAX_SAFE_INTEGER
+  if (!Number.isInteger(raw) || raw < min || raw > max) {
+    throw new OperatorSettingsError(
+      `${where} must be a whole number of seconds from ${min} to ${max}.`,
+    )
+  }
+  return raw
+}
+
+function parseFileValue(spec: KeySpec, raw: unknown, where: string): PinValue {
+  if (spec.kind === 'flag') {
     if (typeof raw !== 'boolean') {
       throw new OperatorSettingsError(`${where} must be true or false.`)
     }
     return raw
+  }
+  if (spec.kind === 'seconds') {
+    if (typeof raw !== 'number') {
+      throw new OperatorSettingsError(`${where} must be a number of seconds.`)
+    }
+    return parseSeconds(spec, raw, where)
+  }
+  if (spec.kind === 'choice') {
+    if (typeof raw !== 'string') {
+      throw new OperatorSettingsError(
+        `${where} must be one of: ${(spec.choices ?? []).join(', ')}.`,
+      )
+    }
+    return parseChoice(spec, raw, where)
+  }
+  if (spec.kind === 'text') {
+    if (typeof raw !== 'string' || raw.trim() === '') {
+      throw new OperatorSettingsError(`${where} must be a non-empty string.`)
+    }
+    return parseText(spec, raw, where)
   }
   if (typeof raw !== 'string' || raw.trim() === '') {
     throw new OperatorSettingsError(`${where} must be an http or https URL.`)
@@ -167,15 +315,23 @@ function parseFileValue(kind: Kind, raw: unknown, where: string): boolean | stri
 }
 
 /** Unset or empty means "not pinned here", so `VAR=` never pins a value. */
-function parseEnvValue(kind: Kind, raw: string | undefined, name: string): boolean | string | null {
+function parseEnvValue(spec: KeySpec, raw: string | undefined, name: string): PinValue | null {
   const value = raw?.trim() ?? ''
   if (value === '') return null
-  if (kind === 'flag') {
+  if (spec.kind === 'flag') {
     const lower = value.toLowerCase()
     if (lower === '1' || lower === 'true') return true
     if (lower === '0' || lower === 'false') return false
     throw new OperatorSettingsError(`${name} must be 1 or 0 (or true or false), got "${value}".`)
   }
+  if (spec.kind === 'seconds') {
+    if (!/^\d+$/.test(value)) {
+      throw new OperatorSettingsError(`${name} must be a whole number of seconds.`)
+    }
+    return parseSeconds(spec, Number(value), name)
+  }
+  if (spec.kind === 'choice') return parseChoice(spec, value, name)
+  if (spec.kind === 'text') return parseText(spec, value, name)
   return parseUrl(value, name)
 }
 
@@ -275,7 +431,7 @@ export function readOperatorFile(env: NodeJS.ProcessEnv = process.env): Operator
       )
     }
     pins[key] = {
-      value: parseFileValue(OPERATOR_KEYS[key].kind, raw, `"${key}" in ${file}`),
+      value: parseFileValue(OPERATOR_KEYS[key], raw, `"${key}" in ${file}`),
       source: 'file',
     }
   }
@@ -287,7 +443,7 @@ export function readOperatorEnv(env: NodeJS.ProcessEnv = process.env): OperatorP
   const pins: Partial<Record<OperatorKey, Pin>> = {}
   for (const key of KEY_NAMES) {
     const spec = OPERATOR_KEYS[key]
-    const value = parseEnvValue(spec.kind, env[spec.env], spec.env)
+    const value = parseEnvValue(spec, env[spec.env], spec.env)
     if (value !== null) pins[key] = { value, source: 'environment' }
   }
   return pins as OperatorPins
@@ -342,9 +498,12 @@ function readUserValue<K extends OperatorKey>(db: ClawbooDb, key: K): OperatorVa
   if (raw === null) return undefined
   try {
     const parsed = JSON.parse(raw) as unknown
-    const kind = OPERATOR_KEYS[key].kind
+    const kind: Kind = OPERATOR_KEYS[key].kind
     if (kind === 'flag' && typeof parsed === 'boolean') return parsed as OperatorValue<K>
-    if (kind === 'url' && typeof parsed === 'string') return parsed as OperatorValue<K>
+    if (kind === 'seconds' && typeof parsed === 'number') return parsed as OperatorValue<K>
+    if (kind !== 'flag' && kind !== 'seconds' && typeof parsed === 'string') {
+      return parsed as OperatorValue<K>
+    }
   } catch {
     // A value this build cannot read is no choice at all.
   }

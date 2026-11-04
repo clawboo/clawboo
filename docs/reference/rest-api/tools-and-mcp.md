@@ -128,6 +128,7 @@ The queue holds two kinds of row, told apart by `kind`:
     createdAt: number
     expiresAt: number
     resolvedAt: number | null
+    resolvedBy: string | null // JSON { id, name, role } of who answered, when a sign-in proxy vouched for them
   }>
 }
 ```

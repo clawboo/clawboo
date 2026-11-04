@@ -362,6 +362,8 @@ Stores one approval decision in `approval_history` and returns the stored row.
 }
 ```
 
+A `resolvedBy` key in `details` is dropped. When the request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified, the server writes `details.resolvedBy` itself, as `{ id, name, role }`.
+
 ### Responses
 
 **`200 OK`**: the stored row (`null` if the insert returned nothing):

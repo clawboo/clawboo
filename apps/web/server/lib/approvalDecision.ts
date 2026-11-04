@@ -11,7 +11,7 @@
 // inferred. POST /api/tools/approvals/:id/resolve and POST
 // /api/capabilities/approve both answer through here, so neither can skip it.
 
-import { resolveApproval, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
+import { resolveApproval, toolCallApprovals, type ClawbooDb, type PersonRecord } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from './agentSource'
@@ -25,10 +25,13 @@ export interface ApprovalAnswer {
   body: Record<string, unknown>
 }
 
+/** `resolvedBy` is the person a sign-in proxy vouched for, recorded on the
+ *  approval with the answer; null records it with no name. */
 export async function decideApproval(
   db: ClawbooDb,
   id: string,
   decision: ApprovalDecision,
+  opts: { resolvedBy?: PersonRecord | null } = {},
 ): Promise<ApprovalAnswer> {
   const row = db
     .select({ kind: toolCallApprovals.kind })
@@ -42,7 +45,7 @@ export async function decideApproval(
     // is the only place a durable exec grant can live.
     const gatewayDecision =
       decision === 'deny' ? 'deny' : decision === 'allow_always' ? 'allow-always' : 'allow-once'
-    const out = await resolveExecApproval(getRegistry().source, id, gatewayDecision)
+    const out = await resolveExecApproval(getRegistry().source, id, gatewayDecision, opts)
     if (!out.ok) {
       return { status: 502, body: { error: 'the Gateway did not accept that decision' } }
     }
@@ -54,7 +57,7 @@ export async function decideApproval(
     }
   }
 
-  const updated = resolveApproval(db, id, decision)
+  const updated = resolveApproval(db, id, decision, opts)
   if (!updated) return { status: 404, body: { error: 'approval not found' } }
   // A card past its deadline takes no answer, so this one counted for nothing.
   // `pending` here means the card could not be marked expired; it is closed all

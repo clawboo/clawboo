@@ -147,6 +147,7 @@
             "pages": [
               "operating/index",
               "guides/self-host-securely",
+              "guides/sso-proxy",
               "operating/deployment",
               "operating/security",
               "operating/data-and-state",

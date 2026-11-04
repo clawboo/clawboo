@@ -28,6 +28,7 @@ import {
 import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
+import { personJson, type PersonRecord } from '../person'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import {
@@ -1040,6 +1041,8 @@ export function addComment(
   body: string,
   authorType: 'agent' | 'user' | 'system',
   authorAgentId?: string | null,
+  /** The person whose request added it, when a sign-in proxy vouched for them. */
+  opts: { person?: PersonRecord | null } = {},
 ): DbTaskComment {
   const now = Date.now()
   const row: DbTaskComment = {
@@ -1049,6 +1052,7 @@ export function addComment(
     authorType,
     body,
     tenantId: null,
+    person: personJson(opts.person),
     createdAt: now,
   }
   withWriteRetry(() => db.insert(taskComments).values(row).run())

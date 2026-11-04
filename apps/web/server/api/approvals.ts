@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express'
 import { approvalHistory } from '@clawboo/db'
 import { desc, eq } from 'drizzle-orm'
+import { personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 
 // ─── POST /api/approvals — persist a decision ─────────────────────────────────
@@ -36,13 +37,20 @@ export async function approvalsPOST(req: Request, res: Response): Promise<void> 
     const db = getDb()
     const now = Date.now()
 
+    // The client reports what was decided (an OpenClaw exec approval answered
+    // over the Gateway connection); WHO decided is never its to say. A
+    // `resolvedBy` it sent is dropped, and only the person a sign-in proxy
+    // vouched for is written there.
+    const { resolvedBy: _claimed, ...rest } = details ?? {}
+    const person = personOf(req)
+    const recorded = person ? { ...rest, resolvedBy: person } : rest
     const inserted = await db
       .insert(approvalHistory)
       .values({
         agentId,
         action,
         toolName,
-        details: details ? JSON.stringify(details) : null,
+        details: details || person ? JSON.stringify(recorded) : null,
         createdAt: now,
       })
       .returning()

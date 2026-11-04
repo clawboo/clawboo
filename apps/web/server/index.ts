@@ -8,7 +8,12 @@ import path from 'node:path'
 import express from 'express'
 import cors from 'cors'
 
-import { createAccessGate, createGatewayProxy, createOriginGuard } from '@clawboo/gateway-proxy'
+import {
+  createAccessGate,
+  createGatewayProxy,
+  createOriginGuard,
+  isRuntimeControlRequest,
+} from '@clawboo/gateway-proxy'
 import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
@@ -69,6 +74,13 @@ import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
+import {
+  loadProxyIdentityConfig,
+  proxyIdentityFileWarning,
+  type ProxyIdentityConfig,
+} from './lib/proxyIdentity/config'
+import { createProxyIdentityLane } from './lib/proxyIdentity/lane'
+import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
 import { restoreScreenshots } from './lib/screenshotBus'
@@ -159,12 +171,16 @@ async function main() {
   // environment variables. Refuse to start on anything that cannot be trusted:
   // carrying on would quietly drop pins they rely on, such as a disabled
   // self-update.
+  // The proxy identity lane is among them, and refuses the same way when it is
+  // on but has no key, issuer or audience it can trust.
+  let proxyIdentityConfig: ProxyIdentityConfig | null = null
   try {
     const operator = initOperatorSettings(process.env)
     const pinned = Object.entries(operator.pins).map(([key, pin]) => `${key} (${pin.source})`)
     if (pinned.length > 0) {
       log.info({ file: operator.file, pinned }, 'Operator settings: pinned by the administrator')
     }
+    proxyIdentityConfig = loadProxyIdentityConfig()
   } catch (err) {
     if (!(err instanceof OperatorSettingsError)) throw err
     log.error(`CONFIG: refusing to start. ${err.message}`)
@@ -216,6 +232,39 @@ async function main() {
     // remote request from loopback.
     authorizeRuntime: carriesAttachToken,
   })
+
+  // ── Proxy identity lane ───────────────────────────────────────────────────
+  // Off unless an administrator turned it on. Beside the access gate, not in
+  // place of it: a request still needs the access token while the gate is on.
+  // A spawned runtime's own control-plane calls are judged by the gate's own
+  // test, so the lane exempts exactly what the gate admits without a cookie.
+  const proxyIdentity = proxyIdentityConfig
+    ? createProxyIdentityLane(proxyIdentityConfig, createAssertionVerifier(proxyIdentityConfig), {
+        isRuntimeRequest: (req) => isRuntimeControlRequest(req, carriesAttachToken),
+        // The reason only: the token never reaches a log.
+        onRefuse: ({ reason, method, path }) =>
+          log.warn({ reason, method, path }, 'Proxy identity: refused a request'),
+      })
+    : null
+  if (proxyIdentityConfig) {
+    log.info(
+      {
+        mode: proxyIdentityConfig.mode,
+        binding: proxyIdentityConfig.binding,
+        keys: proxyIdentityConfig.keys.source,
+        header: proxyIdentityConfig.header,
+      },
+      'Proxy identity lane on',
+    )
+    if (proxyIdentityConfig.mode === 'on') {
+      log.info(
+        'Proxy identity: a request without a token still gets in with the access token, and ' +
+          'what it does is recorded with no name. Set it to required to refuse such requests.',
+      )
+    }
+    const fileWarning = proxyIdentityFileWarning()
+    if (fileWarning) log.warn(fileWarning)
+  }
 
   // ── Same-origin guard (CSWSH / DNS-rebinding / cross-site CSRF) ────────────
   // Always-on Origin + Host + Sec-Fetch-Site allowlist, independent of the token
@@ -334,7 +383,8 @@ async function main() {
   // checks above. Say so on the first forwarded request. Observes only; ahead of
   // the origin guard so a request it 403s still counts.
   const warnProxyExposure = createProxyExposureWarning({
-    gateEnabled: accessGate.enabled,
+    // A required identity lane guards every /api/ route as the gate would.
+    gateEnabled: accessGate.enabled || proxyIdentity?.mode === 'required',
     warn: (message) => log.warn({ port }, message),
   })
   app.use((req, _res, next) => {
@@ -370,9 +420,14 @@ async function main() {
     next()
   })
 
-  // Identity middleware. A pass-through: it sets req.tenantId and req.userId to
-  // the single implicit tenant and user (both null). Runs after the access gate,
-  // so unauthenticated requests are rejected before it.
+  // Proxy identity lane: checks the sign-in proxy's signed token and sets
+  // req.person. After the access gate, so a request without the access token
+  // is refused before any token is looked at.
+  if (proxyIdentity) app.use(proxyIdentity.http)
+
+  // Identity middleware. A pass-through: it sets req.tenantId and req.userId
+  // (the verified person's id, else null). Runs after the access gate and the
+  // identity lane, so unauthenticated requests are rejected before it.
   app.use(attachIdentity)
 
   // Per-request logging
@@ -425,7 +480,25 @@ async function main() {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
         return
       }
-      proxy.handleUpgrade(req, socket, head)
+      if (!proxyIdentity) {
+        proxy.handleUpgrade(req, socket, head)
+        return
+      }
+      // The identity lane checks the token before the handshake goes on. The
+      // check is async (a key may need fetching), and the HTTP server has
+      // already let go of this socket, so a client that resets it meanwhile
+      // must not raise an unhandled error.
+      const dropOnError = () => socket.destroy()
+      socket.on('error', dropOnError)
+      void proxyIdentity.checkUpgrade(req).then((decision) => {
+        socket.off('error', dropOnError)
+        if (socket.destroyed) return
+        if (!decision.ok) {
+          socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+          return
+        }
+        proxy.handleUpgrade(req, socket, head)
+      })
       return
     }
     // No other WS upgrades needed (Vite HMR runs on its own port)

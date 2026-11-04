@@ -308,6 +308,7 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     authorType: 'agent' | 'user' | 'system'
     body: string
     tenantId: string | null
+    person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
     createdAt: number
   }>
   ancestors: Array<{
@@ -535,6 +536,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
     authorType: 'agent' | 'user' | 'system'
     body: string
     tenantId: string | null
+    person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
     createdAt: number
   }
   forwarded: boolean // true when `delivery` is present and its status is not 'not-delivered'

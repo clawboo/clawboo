@@ -14,6 +14,7 @@ keywords:
     'CLAWBOO_OPERATOR_SETTINGS',
     'CLAWBOO_DISABLE_SELF_UPDATE',
     'CLAWBOO_MAX_CONCURRENT_RUNS',
+    'CLAWBOO_PROXY_IDENTITY',
   ]
 ---
 
@@ -46,6 +47,8 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                   |
 | `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off         |
 | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install             |
+| `CLAWBOO_PROXY_IDENTITY`               | `off`                             | Checks a sign-in proxy's signed identity tokens              |
+| `CLAWBOO_PROXY_IDENTITY_*`             | see below                         | The proxy's keys, issuer, audience, header and binding       |
 | **Provider keys**                      |                                   |                                                              |
 | `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes              |
 | `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings           |
@@ -305,11 +308,21 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 - it has a key Clawboo does not know, or a key whose value has the wrong type;
 - a key's name looks like a credential (containing `token`, `secret`, `password`, `apiKey`, `credential`, `privateKey` or `auth`), or a URL carries a user name, a password or a credential parameter. Keep keys in the vault or in the environment.
 
-| Key                       | Type    | Variable                            |
-| ------------------------- | ------- | ----------------------------------- |
-| `disableSelfUpdate`       | boolean | `CLAWBOO_DISABLE_SELF_UPDATE`       |
-| `disableBrowserAutostart` | boolean | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
-| `catalogIndexUrl`         | URL     | `CLAWBOO_CATALOG_INDEX_URL`         |
+| Key                        | Type                      | Variable                              |
+| -------------------------- | ------------------------- | ------------------------------------- |
+| `disableSelfUpdate`        | boolean                   | `CLAWBOO_DISABLE_SELF_UPDATE`         |
+| `disableBrowserAutostart`  | boolean                   | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`   |
+| `catalogIndexUrl`          | URL                       | `CLAWBOO_CATALOG_INDEX_URL`           |
+| `proxyIdentity`            | `off`, `on` or `required` | `CLAWBOO_PROXY_IDENTITY`              |
+| `proxyIdentityHeader`      | header name               | `CLAWBOO_PROXY_IDENTITY_HEADER`       |
+| `proxyIdentityJwksUrl`     | URL                       | `CLAWBOO_PROXY_IDENTITY_JWKS_URL`     |
+| `proxyIdentityPublicKey`   | public key                | `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`   |
+| `proxyIdentityIssuer`      | string                    | `CLAWBOO_PROXY_IDENTITY_ISSUER`       |
+| `proxyIdentityAudience`    | string                    | `CLAWBOO_PROXY_IDENTITY_AUDIENCE`     |
+| `proxyIdentityBinding`     | `request` or `session`    | `CLAWBOO_PROXY_IDENTITY_BINDING`      |
+| `proxyIdentityMaxLifetime` | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` |
+| `proxyIdentityNameClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   |
+| `proxyIdentityRoleClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   |
 
 Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
 
@@ -334,6 +347,90 @@ Stops Clawboo starting the browser connectors on an install that has never had o
 - Example: `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`
 
 Each browser keeps a process running, and on a machine with no browser installed it cannot browse anyway. With this on, they start only when someone connects them from **Connectors**. Browsers someone already connected still come back after a restart. Anyone using the dashboard can turn the same thing off for the whole install in **Settings** > **System** > **Deployment**, unless this variable or the file pins it. Operator file key: `disableBrowserAutostart`.
+
+### CLAWBOO_PROXY_IDENTITY
+
+Checks the signed identity token a sign-in proxy in front of Clawboo sends with each request, and records the person it names on approvals, chat messages and task moves. [Run Clawboo behind a sign-in proxy](/guides/sso-proxy) has the setup.
+
+- Type: `off`, `on` or `required`
+- Default: `off`
+- Example: `CLAWBOO_PROXY_IDENTITY=required`
+
+With `on`, a request that carries a token must have a good one, and a request without one works as before, with no name recorded. With `required`, every `/api/` request and the Gateway WebSocket must carry a good token, except a spawned runtime's own MCP calls. A token that does not verify gets `401` in both. The access token is still needed beside it while it is on. Operator file key: `proxyIdentity`.
+
+Turning it on needs a key (`CLAWBOO_PROXY_IDENTITY_JWKS_URL` or `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`, not both), `CLAWBOO_PROXY_IDENTITY_ISSUER` and `CLAWBOO_PROXY_IDENTITY_AUDIENCE`. Without them, or with a value Clawboo cannot trust, the server logs `CONFIG: refusing to start.` and exits with code 1. Agents run as the same user as the server, so set these where that user cannot change them: in your service manager, or a root-owned operator file. The server logs a `SECURITY:` warning when they come from a file that user owns, can write, or can replace through a folder above it. On Windows, where it cannot check who can change a file, it logs the warning whenever they come from the operator file.
+
+### CLAWBOO_PROXY_IDENTITY_HEADER
+
+- Type: header name, letters, digits and `-`
+- Default: `clawboo-identity`
+- Example: `CLAWBOO_PROXY_IDENTITY_HEADER=Cf-Access-Jwt-Assertion`
+
+The request header that carries the token, in any letter case. A `Bearer ` prefix is allowed, so `authorization` works for a proxy that sends `Authorization: Bearer <token>`. Headers Clawboo or a browser already uses, such as `cookie`, `host` and the forwarding headers, are refused. Operator file key: `proxyIdentityHeader`.
+
+### CLAWBOO_PROXY_IDENTITY_JWKS_URL
+
+- Type: URL, `https` (plain `http` only to `localhost`, `127.0.0.1` or `::1`)
+- Default: unset
+- Example: `CLAWBOO_PROXY_IDENTITY_JWKS_URL=https://team.cloudflareaccess.com/cdn-cgi/access/certs`
+
+Where the proxy publishes its public keys as a JWKS. Clawboo keeps the keys for 10 minutes and fetches again for a key id it has not seen, at most once every 30 seconds. While the keys cannot be fetched, every token is refused. Operator file key: `proxyIdentityJwksUrl`.
+
+### CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY
+
+- Type: a PEM public key (`-----BEGIN PUBLIC KEY-----`), a JWK, or a JWKS of up to 16 keys
+- Default: unset
+- Example: `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY='{"kty":"OKP","crv":"Ed25519","x":"…"}'`
+
+The proxy's public key itself, for a proxy that publishes no JWKS. Ed25519, P-256, P-384, P-521 and RSA keys of 2048 bits or more work. In a variable, write a PEM on one line with `\n` for each line break. A private key, a shared (`oct`) key or a certificate stops the server at startup. Operator file key: `proxyIdentityPublicKey`.
+
+### CLAWBOO_PROXY_IDENTITY_ISSUER
+
+- Type: string
+- Default: unset; required when the lane is on
+- Example: `CLAWBOO_PROXY_IDENTITY_ISSUER=https://team.cloudflareaccess.com`
+
+The `iss` every token must carry. Operator file key: `proxyIdentityIssuer`.
+
+### CLAWBOO_PROXY_IDENTITY_AUDIENCE
+
+- Type: string
+- Default: unset; required when the lane is on
+- Example: `CLAWBOO_PROXY_IDENTITY_AUDIENCE=clawboo`
+
+The `aud` every token must carry. Without it, a token your sign-in provider made for any other app would do. Operator file key: `proxyIdentityAudience`.
+
+### CLAWBOO_PROXY_IDENTITY_BINDING
+
+- Type: `request` or `session`
+- Default: `request`
+- Example: `CLAWBOO_PROXY_IDENTITY_BINDING=session`
+
+With `request`, every token names its request's method and path (`htm`, `htu`), carries `iat`, `exp` and a `jti`, and is accepted once. With `session`, the proxy's own sign-in token works on any path until it expires, which is what Cloudflare Access and oauth2-proxy send; `htm` and `htu` are still checked when present. Operator file key: `proxyIdentityBinding`.
+
+### CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME
+
+- Type: whole number of seconds, from 1 to 300
+- Default: `60`
+- Example: `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME=30`
+
+The longest a request-bound token may live, from its `iat` to its `exp`. Ignored with `session` binding. Clocks may differ by 5 seconds either way. Operator file key: `proxyIdentityMaxLifetime`.
+
+### CLAWBOO_PROXY_IDENTITY_NAME_CLAIM
+
+- Type: claim name, or a dotted path such as `profile.name`
+- Default: `name`
+- Example: `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM=email`
+
+The claim with the person's name. When the token has none, Clawboo uses `email`, then `preferred_username`. Operator file key: `proxyIdentityNameClaim`.
+
+### CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM
+
+- Type: claim name, or a dotted path such as `realm_access.roles`
+- Default: `role`
+- Example: `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM=groups`
+
+The claim with the person's role. A list is joined with commas. The role is recorded with the person, never enforced. Operator file key: `proxyIdentityRoleClaim`.
 
 ## Provider keys
 

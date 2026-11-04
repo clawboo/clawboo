@@ -12,11 +12,12 @@ import { useToastStore } from '@/stores/toast'
 
 import { SectionCard } from './SectionCard'
 
-type SettingKey = 'disableSelfUpdate' | 'disableBrowserAutostart' | 'catalogIndexUrl'
+type SettingKey =
+  'disableSelfUpdate' | 'disableBrowserAutostart' | 'catalogIndexUrl' | 'proxyIdentity'
 
 export interface EffectiveSetting {
   key: SettingKey
-  value: boolean | string | null
+  value: boolean | string | number | null
   source: 'environment' | 'file' | 'user' | 'default'
   pinned: boolean
   userEditable: boolean
@@ -145,6 +146,7 @@ export function DeploymentSettings() {
   const updates = byKey.get('disableSelfUpdate')
   const browsers = byKey.get('disableBrowserAutostart')
   const catalog = byKey.get('catalogIndexUrl')
+  const proxyIdentity = byKey.get('proxyIdentity')
 
   return (
     <SectionCard label="Deployment" data-testid="deployment-settings">
@@ -179,6 +181,21 @@ export function DeploymentSettings() {
             setting={catalog}
           >
             <Value>{typeof catalog.value === 'string' ? catalog.value : 'Default'}</Value>
+          </Row>
+        )}
+        {proxyIdentity && (
+          <Row
+            title="Sign-in proxy"
+            description="Checks the signed identity token a sign-in proxy sends with each request, and records who approved, wrote or moved what."
+            setting={proxyIdentity}
+          >
+            <Value>
+              {proxyIdentity.value === 'required'
+                ? 'Required'
+                : proxyIdentity.value === 'on'
+                  ? 'On'
+                  : 'Off'}
+            </Value>
           </Row>
         )}
       </div>

@@ -420,6 +420,9 @@ export const taskComments = sqliteTable(
     authorType: text('author_type').notNull(), // 'agent' | 'user' | 'system'
     body: text('body').notNull(),
     tenantId: text('tenant_id'),
+    /** The person whose request added it, when a sign-in proxy vouched for
+     *  them: a JSON `{ id, name, role }`. Null otherwise. */
+    person: text('person'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [index('idx_task_comments_task').on(t.taskId)],
@@ -729,6 +732,9 @@ export const toolCallApprovals = sqliteTable(
     createdAt: integer('created_at').notNull(),
     expiresAt: integer('expires_at').notNull(),
     resolvedAt: integer('resolved_at'),
+    /** Who answered it, when a sign-in proxy vouched for them: a JSON
+     *  `{ id, name, role }` (a PersonRef). Null when nothing did. */
+    resolvedBy: text('resolved_by'),
   },
   (t) => [
     index('idx_tool_approvals_status').on(t.status),

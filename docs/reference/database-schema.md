@@ -292,15 +292,16 @@ Primary key: `task_id`, `depends_on_task_id`. Indexes: `idx_task_deps_task` (`ta
 
 Comments and system notes on a task, such as report-backs and verification results.
 
-| Column            | Type                            | Notes                       |
-| ----------------- | ------------------------------- | --------------------------- |
-| `id`              | `TEXT`, PK                      |                             |
-| `task_id`         | `TEXT`, not null, FK `tasks.id` |                             |
-| `author_agent_id` | `TEXT`                          |                             |
-| `author_type`     | `TEXT`, not null                | `agent`, `user` or `system` |
-| `body`            | `TEXT`, not null                |                             |
-| `tenant_id`       | `TEXT`                          | Unused                      |
-| `created_at`      | `INTEGER`, not null             |                             |
+| Column            | Type                            | Notes                                                                                                                      |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`, PK                      |                                                                                                                            |
+| `task_id`         | `TEXT`, not null, FK `tasks.id` |                                                                                                                            |
+| `author_agent_id` | `TEXT`                          |                                                                                                                            |
+| `author_type`     | `TEXT`, not null                | `agent`, `user` or `system`                                                                                                |
+| `body`            | `TEXT`, not null                |                                                                                                                            |
+| `tenant_id`       | `TEXT`                          | Unused                                                                                                                     |
+| `person`          | `TEXT`                          | JSON `{ id, name, role }` of the person whose request added it, when a [sign-in proxy](/guides/sso-proxy) vouched for them |
+| `created_at`      | `INTEGER`, not null             |                                                                                                                            |
 
 Indexes: `idx_task_comments_task` (`task_id`).
 
@@ -518,6 +519,7 @@ Approval requests. `kind: 'tool'` is a call Clawboo itself is holding (the broke
 | `created_at`     | `INTEGER`, not null                   |                                                                                                                                                    |
 | `expires_at`     | `INTEGER`, not null                   | When the waiting call stops waiting; 5 minutes after creation for broker calls                                                                     |
 | `resolved_at`    | `INTEGER`                             |                                                                                                                                                    |
+| `resolved_by`    | `TEXT`                                | JSON `{ id, name, role }` of the person who answered, when a [sign-in proxy](/guides/sso-proxy) vouched for them; `NULL` otherwise                 |
 
 Indexes: `idx_tool_approvals_status` (`status`), `idx_tool_approvals_created` (`created_at`), `idx_tool_approvals_grant` (`grant_id`, `status`).
 

@@ -77,7 +77,37 @@ describe('/api/system/operator-settings', () => {
         userEditable: false,
         env: 'CLAWBOO_CATALOG_INDEX_URL',
       },
+      ...(
+        [
+          ['proxyIdentity', 'off', 'CLAWBOO_PROXY_IDENTITY'],
+          ['proxyIdentityHeader', 'clawboo-identity', 'CLAWBOO_PROXY_IDENTITY_HEADER'],
+          ['proxyIdentityJwksUrl', null, 'CLAWBOO_PROXY_IDENTITY_JWKS_URL'],
+          ['proxyIdentityPublicKey', null, 'CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY'],
+          ['proxyIdentityIssuer', null, 'CLAWBOO_PROXY_IDENTITY_ISSUER'],
+          ['proxyIdentityAudience', null, 'CLAWBOO_PROXY_IDENTITY_AUDIENCE'],
+          ['proxyIdentityBinding', 'request', 'CLAWBOO_PROXY_IDENTITY_BINDING'],
+          ['proxyIdentityMaxLifetime', 60, 'CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME'],
+          ['proxyIdentityNameClaim', 'name', 'CLAWBOO_PROXY_IDENTITY_NAME_CLAIM'],
+          ['proxyIdentityRoleClaim', 'role', 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM'],
+        ] as const
+      ).map(([key, value, env]) => ({
+        key,
+        value,
+        source: 'default',
+        pinned: false,
+        // An agent could flip a switch the dashboard offered, so none is offered.
+        userEditable: false,
+        env,
+      })),
     ])
+  })
+
+  it('refuses a person value for a proxy identity key', () => {
+    const { status } = call(operatorSettingsPUT, {
+      params: { key: 'proxyIdentity' },
+      body: { value: false },
+    })
+    expect(status).toBe(403)
   })
 
   it("saves a person's own value", () => {

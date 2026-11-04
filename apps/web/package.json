@@ -74,6 +74,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "framer-motion": "^11.0.0",
+    "jose": "6.2.7",
     "lucide-react": "^0.468.0",
     "openai": "7.15.0",
     "qrcode.react": "^4.2.0",

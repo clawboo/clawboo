@@ -40,6 +40,14 @@ function settings(overrides: Partial<Record<string, Partial<EffectiveSetting>>> 
       userEditable: false,
       env: 'CLAWBOO_CATALOG_INDEX_URL',
     },
+    {
+      key: 'proxyIdentity',
+      value: 'off',
+      source: 'default',
+      pinned: false,
+      userEditable: false,
+      env: 'CLAWBOO_PROXY_IDENTITY',
+    },
   ]
   return { settings: base.map((s) => ({ ...s, ...overrides[s.key] })) }
 }
@@ -79,6 +87,20 @@ describe('DeploymentSettings', () => {
     expect(screen.getByTestId('deployment-catalogIndexUrl')).toHaveTextContent(
       'https://mirror.example.com/i.json',
     )
+  })
+
+  it('shows the sign-in proxy lane as the administrator set it, read-only', async () => {
+    apiFetch.mockImplementation(() =>
+      json(settings({ proxyIdentity: { value: 'required', source: 'environment', pinned: true } })),
+    )
+    render(<DeploymentSettings />)
+    const row = await screen.findByTestId('deployment-proxyIdentity')
+    expect(row).toHaveTextContent('Sign-in proxy')
+    expect(row).toHaveTextContent('Required')
+    expect(screen.getByTestId('pinned-proxyIdentity')).toHaveTextContent(
+      'Set by your administrator',
+    )
+    expect(row.querySelector('[role="switch"]')).toBeNull()
   })
 
   it('lets a person change a setting nobody pinned, and shows what the server saved', async () => {

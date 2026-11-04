@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { appendEvent, type AppendEventInput } from '../events/appendEvent'
+import { parsePersonJson } from '../person'
 import { agents, type DbToolCallApproval } from '../schema'
 
 export type ApprovalEventKind = 'approval_requested' | 'approval_resolved'
@@ -63,11 +64,14 @@ export function approvalEvent(
     }
     return { ...envelope, data: { ...data } }
   }
+  // Who answered, only when a sign-in proxy vouched for them: never a guess.
+  const resolvedBy = parsePersonJson(row.resolvedBy)
   const data: ApprovalResolvedData = {
     approvalId: row.id,
     decision: row.status,
     kind: row.kind,
     toolName: row.toolName,
+    ...(resolvedBy ? { resolvedBy } : {}),
   }
   return { ...envelope, data: { ...data } }
 }

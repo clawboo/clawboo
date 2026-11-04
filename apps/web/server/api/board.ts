@@ -54,6 +54,7 @@ import { createLogger } from '@clawboo/logger'
 import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { personField, personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { isDashboardRequest } from '../lib/dashboardRequest'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -241,7 +242,12 @@ export function boardCreatePOST(req: Request, res: Response): void {
       taskId: task.id,
       teamId: task.teamId,
       agentId: assigneeAgentId ?? null,
-      data: { title: task.title, status: task.status, parentTaskId: task.parentTaskId },
+      data: {
+        title: task.title,
+        status: task.status,
+        parentTaskId: task.parentTaskId,
+        ...personField(req),
+      },
     })
     if (assigneeAgentId && task.teamId && task.status === 'todo') {
       requestTaskDispatch(task.teamId, task.id, loopbackMcpBaseUrl(req))
@@ -341,7 +347,7 @@ export function boardRetryPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId,
         teamId: task.teamId,
-        data: { to: 'todo', reason: 'retry' },
+        data: { to: 'todo', reason: 'retry', ...personField(req) },
       })
     }
     addComment(db, taskId, 'Retry requested.', 'user')
@@ -410,7 +416,7 @@ export function boardAssignPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId,
         teamId: task.teamId,
-        data: { to: 'todo', reason: 'assigned' },
+        data: { to: 'todo', reason: 'assigned', ...personField(req) },
       })
     }
     // Given to someone else, the task starts fresh: no agent resumes a
@@ -455,7 +461,11 @@ export function boardClaimPOST(req: Request, res: Response): void {
           teamId: t.teamId,
           agentId: t.assigneeAgentId,
           runtime: t.assigneeRuntime,
-          data: { assigneeAgentId: t.assigneeAgentId, assigneeRuntime: t.assigneeRuntime },
+          data: {
+            assigneeAgentId: t.assigneeAgentId,
+            assigneeRuntime: t.assigneeRuntime,
+            ...personField(req),
+          },
         })
         // Narrate the claim into the team room (fan-out to N peers; best-effort,
         // AFTER the canonical board write; never a write path back).
@@ -547,7 +557,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         taskId,
         teamId: task.teamId,
         agentId: task.assigneeAgentId,
-        data: { to: status, by: 'person' },
+        data: { to: status, by: 'person', ...personField(req) },
       })
       // Narrate the mutation into the team room (fan-out to N peers).
       // Best-effort, AFTER the canonical board write; never a write path back.
@@ -586,12 +596,21 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       parsed.data.authorType === 'user' && !isDashboardRequest(req)
         ? 'agent'
         : parsed.data.authorType
-    const comment = addComment(db, taskId, parsed.data.body, authorType, parsed.data.authorAgentId)
+    const comment = addComment(
+      db,
+      taskId,
+      parsed.data.body,
+      authorType,
+      parsed.data.authorAgentId,
+      {
+        person: personOf(req),
+      },
+    )
     emitEvent(db, {
       kind: 'comment_added',
       taskId,
       agentId: parsed.data.authorAgentId ?? null,
-      data: { authorType, body: parsed.data.body },
+      data: { authorType, body: parsed.data.body, ...personField(req) },
     })
     // Narrate the comment into the team room so every peer sees it, not just the
     // leader (best-effort, AFTER the canonical write; never a write path back).
@@ -764,7 +783,7 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
     emitEvent(db, {
       kind: 'dep_linked',
       taskId,
-      data: { dependsOnTaskId: parsed.data.dependsOnTaskId },
+      data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...personField(req) },
     })
     // Narrate the dependency into the team room (best-effort, after the write).
     reflectToRoom(db, task.teamId, `Task "${task.title}" now depends on "${dependsOn.title}".`)
@@ -792,7 +811,7 @@ export function boardCancelDependentsPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId: t.id,
         teamId: t.teamId,
-        data: { to: 'cancelled', reason: 'blocker_failed' },
+        data: { to: 'cancelled', reason: 'blocker_failed', ...personField(req) },
       })
     }
     res.json({ cancelled: cancelled.map((t) => ({ id: t.id, title: t.title })) })

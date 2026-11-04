@@ -24,6 +24,7 @@ import { randomUUID } from 'node:crypto'
 import { chatMessages, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import type {
+  PersonRef,
   TranscriptEntry,
   TranscriptEntryKind,
   TranscriptEntryOrigin,
@@ -56,6 +57,8 @@ export interface PersistTeamChatEntryInput {
   entryId?: string
   /** Who posted it on the person's behalf (a routine), when they did not type it. */
   origin?: TranscriptEntryOrigin
+  /** The person who sent a user-role entry, when a sign-in proxy vouched for them. */
+  person?: PersonRef
 }
 
 /** Build + insert one team-chat TranscriptEntry. Best-effort (chat persistence is
@@ -90,6 +93,7 @@ export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryI
     confirmed: true,
     fingerprint: randomUUID(),
     ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.person ? { person: input.person } : {}),
   }
   try {
     db.insert(chatMessages)

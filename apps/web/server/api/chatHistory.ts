@@ -118,6 +118,10 @@ export async function chatHistoryPOST(req: Request, res: Response): Promise<void
 
     for (const entry of entries) {
       if (!entry?.entryId) continue
+      // WHO sent a message is never the client's to say: only the proxy
+      // identity lane names a person, on the routes that store a message
+      // themselves. A `person` in a posted entry is dropped.
+      const { person: _claimed, ...stored } = entry
       await db
         .insert(chatMessages)
         .values({
@@ -125,7 +129,7 @@ export async function chatHistoryPOST(req: Request, res: Response): Promise<void
           gatewayUrl: gatewayUrl ?? '',
           entryId: entry.entryId,
           timestampMs: entry.timestampMs ?? Date.now(),
-          data: JSON.stringify(entry),
+          data: JSON.stringify(stored),
         })
         .onConflictDoNothing()
     }
