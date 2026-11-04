@@ -32,6 +32,11 @@ import {
 } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
 import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
+import {
+  checkHermesAcp,
+  peekHermesAcp,
+  resetHermesTransport,
+} from '../lib/runtimes/hermesTransport'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
@@ -181,6 +186,9 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
         // run. Read from the cached model probe, never awaited: the first request
         // starts it and a later one reports it.
         const codexModels = id === 'codex' && oauthLoggedIn ? peekCodexModels() : null
+        // A Hermes installed without its ACP mode runs, but on the quiet path.
+        // Asked of Hermes and cached, never awaited, like the Codex read above.
+        const hermesAcp = id === 'hermes' && resolveRuntimeBin('hermes') ? peekHermesAcp() : null
         return {
           id,
           participantKind: adapter.participantKind,
@@ -190,6 +198,7 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
           ...(codexModels
             ? { updateRequired: codexModels.updateRequired, cliVersion: codexModels.cliVersion }
             : {}),
+          ...(hermesAcp !== null ? { acpMissing: !hermesAcp } : {}),
         }
       }),
     )
@@ -198,6 +207,15 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
   }
+}
+
+/** The latest install of each runtime, read by the one-at-a-time guard. */
+const installs = new Map<NonOpenClawRuntimeId, { child: ChildProcess | null }>()
+
+/** An install's process has not exited yet. */
+function installRunning(ctl: { child: ChildProcess | null } | undefined): boolean {
+  const child = ctl?.child
+  return child != null && child.exitCode === null && child.signalCode === null
 }
 
 // ─── POST /api/runtimes/:id/install (SSE) ────────────────────────────────────
@@ -224,6 +242,18 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
 
+  // One install per runtime at a time: an update outlives its client (below), so
+  // a second request could otherwise run over it.
+  if (installRunning(installs.get(id))) {
+    sendEvent(res, {
+      type: 'error',
+      code: 'INSTALL_RUNNING',
+      message: `${d.name} is already being installed. Wait for it to finish, then Re-check.`,
+    })
+    res.end()
+    return
+  }
+
   // Runs use the Agent SDK's own binary, so with it present a CLI install would
   // fetch a second copy that no run starts. Checked directly: a CLI on PATH as
   // well would otherwise win the install probe and hide it.
@@ -240,11 +270,17 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
-  // One res.on('close') handler kills whichever child is active (the pip path
-  // may spawn a second child for the PEP-668 retry).
+  // An install over one that is already there is an update. Stopped part way it
+  // can leave the runtime half replaced (`pipx install --force` reinstalls into
+  // the same environment), so it runs to the end when its client goes away (a
+  // closed panel, a reloaded tab). A first install has nothing to break, so it
+  // still stops with its client. The handler covers whichever child is active
+  // (the pip path may spawn a second one for the PEP-668 retry).
+  const updating = Boolean(d.healthBin && resolveRuntimeBin(d.healthBin))
   const ctl: { child: ChildProcess | null } = { child: null }
+  installs.set(id, ctl)
   res.on('close', () => {
-    if (ctl.child && !ctl.child.killed) ctl.child.kill()
+    if (!updating && ctl.child && !ctl.child.killed) ctl.child.kill()
   })
 
   if (d.packageManager === 'npm') installViaNpm(res, d, ctl)
@@ -253,9 +289,15 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 
 /** On a successful install: flip the flag on (live; runtime flags need no
  *  restart), then report binary presence. */
-function finishInstall(res: Response, d: RuntimeDescriptor): void {
+async function finishInstall(res: Response, d: RuntimeDescriptor): Promise<void> {
   // A new Codex CLI can read models the old one could not.
   if (d.id === 'codex') invalidateCodexModelsCache()
+  // A reinstalled Hermes may have gained its ACP mode. Ask it again before
+  // reporting done, so the status read that follows already has the answer.
+  if (d.id === 'hermes') {
+    resetHermesTransport()
+    await checkHermesAcp()
+  }
   // No cache to bust — resolveRuntimeBin probes PATH + user-install dirs live
   // (it's what finds Hermes in the Python user-site bin off PATH).
   if (resolveRuntimeInstall(d)) {
@@ -292,7 +334,7 @@ function streamInstallChild(res: Response, child: ChildProcess, d: RuntimeDescri
     res.end()
   })
   child.on('close', (code) => {
-    if (code === 0) finishInstall(res, d)
+    if (code === 0) void finishInstall(res, d)
     else {
       sendEvent(res, {
         type: 'error',
@@ -415,7 +457,14 @@ function installViaPip(
   const pipx = resolveRuntimeBin('pipx') ?? findExecutable('pipx')
   if (pipx) {
     sendEvent(res, { type: 'progress', step: 'installing', message: 'Installing via pipx…' })
-    const args = ['install', ...(compatible ? ['--python', compatible.bin] : []), d.pkg ?? '']
+    // `--force` reinstalls over an existing install, which is how Update adds a
+    // missing extra; without it pipx leaves an installed package as it is.
+    const args = [
+      'install',
+      '--force',
+      ...(compatible ? ['--python', compatible.bin] : []),
+      d.pkg ?? '',
+    ]
     try {
       ctl.child = spawn(pipx, args, {
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -459,10 +508,13 @@ function runPipUser(
       message: 'Externally-managed environment detected; retrying with --break-system-packages…',
     })
   }
+  // `--upgrade` moves an existing install to the newest release in range, which is
+  // how Update reaches one that has the extras asked for.
   const args = [
     '-m',
     'pip',
     'install',
+    '--upgrade',
     '--user',
     ...(breakSystem ? ['--break-system-packages'] : []),
     d.pkg ?? '',
@@ -499,7 +551,7 @@ function runPipUser(
   })
   child.on('close', (code) => {
     if (code === 0) {
-      finishInstall(res, d)
+      void finishInstall(res, d)
       return
     }
     if (sawPep668 && !breakSystem) {

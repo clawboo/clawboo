@@ -55,6 +55,7 @@ vi.mock('../../lib/teamChat/teamOrchestrator', () => {
 
 const { getDb, resetDb } = await import('../../lib/db')
 const { boardGetGET, boardRetryPOST, boardUpdatePATCH } = await import('../board')
+const { registerRunSteer, resetRunSteers } = await import('../../lib/runSteers')
 
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
   let code = 200
@@ -346,6 +347,35 @@ describe('board: a person moving a card', () => {
       const two = mockRes()
       boardGetGET(req({ params: { taskId: idle.id } }), two.res)
       expect((two.body() as { task: { runningSince: number | null } }).task.runningSince).toBeNull()
+    })
+
+    it('says how the run on it takes a comment, and null with no run here', () => {
+      const live = workedTask('Steered')
+      const idle = createTask(getDb(), { title: 'Idle', teamId: TEAM })
+      const run = { adapterId: 'hermes', sessionKey: 'agent:a1:team:t1', runId: 'r1' }
+      // The runtime would take it live, but this run fell back to stop-and-resume.
+      const handle = registerRunSteer(
+        live.id,
+        {
+          capabilities: () => ({ steering: 'live' }) as never,
+          steer: async () => ({ delivered: true, mode: 'interrupt-resume' }),
+          runSteering: () => 'interrupt-resume',
+        },
+        run,
+      )
+      try {
+        const one = mockRes()
+        boardGetGET(req({ params: { taskId: live.id } }), one.res)
+        expect((one.body() as { task: { runSteering: unknown } }).task.runSteering).toBe(
+          'interrupt-resume',
+        )
+        const two = mockRes()
+        boardGetGET(req({ params: { taskId: idle.id } }), two.res)
+        expect((two.body() as { task: { runSteering: unknown } }).task.runSteering).toBeNull()
+      } finally {
+        handle.release()
+        resetRunSteers()
+      }
     })
   })
 })
