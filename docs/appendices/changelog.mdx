@@ -8,36 +8,36 @@ Release history of the `clawboo` npm package, newest first. Each entry starts wi
 
 <Note>
 
-These docs follow the main branch, which is ahead of the latest npm release, 0.5.0. What is listed under **Unreleased** is not in 0.5.0 yet. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
+These docs follow the main branch. The latest npm release is 0.6.0; anything on main that is newer is listed under **Unreleased** once it lands. Run `clawboo --version` to see your version, and `npx clawboo@latest` to run the latest release.
 
 </Note>
 
 ## At a glance
 
-| Version    | Released   | Highlights                                                                                                 |
-| ---------- | ---------- | ---------------------------------------------------------------------------------------------------------- |
-| Unreleased | Not yet    | Rooms, steering a running task, a rebuilt workspace, a Kanban-first Board, Ollama with no key, a proxy fix |
-| 0.5.0      | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                              |
-| 0.4.0      | 2026-09-28 | Connectors, a memory graph, building on the graph, Routines, a Needs you column                            |
-| 0.3.1      | 2026-07-20 | Team-chat reliability, live status badges, a provider manager per runtime                                  |
-| 0.3.0      | 2026-07-15 | Native-first: run on one provider key with no Gateway, teams that mix runtimes                             |
-| 0.2.0      | 2026-06-20 | Clawboo runs its own agents and coordinates four other runtimes                                            |
-| 0.1.9      | 2026-06-01 | A lighter welcome screen, team colors                                                                      |
-| 0.1.8      | 2026-05-29 | Light and dark themes, a design-system pass                                                                |
-| 0.1.7      | 2026-05-20 | Device pairing in the setup wizard, Windows fixes                                                          |
-| 0.1.6      | 2026-05-20 | Setup checks what is really installed                                                                      |
-| 0.1.5      | 2026-05-20 | Approve a new device from the dashboard                                                                    |
-| 0.1.4      | 2026-05-20 | OpenClaw protocol 4, Windows install support                                                               |
-| 0.1.3      | 2026-05-19 | The CLI only opens a port that really serves Clawboo                                                       |
-| 0.1.2      | 2026-05-19 | Fixes `Cannot GET /`                                                                                       |
-| 0.1.1      | 2026-05-19 | First real release                                                                                         |
-| 0.1.0      | 2026-02-28 | Name placeholder                                                                                           |
+| Version | Released   | Highlights                                                                                                     |
+| ------- | ---------- | -------------------------------------------------------------------------------------------------------------- |
+| 0.6.0   | 2026-11-04 | Rooms, steering, a rebuilt workspace, a dashboard that locks itself, a phone-ready web app, Ollama with no key |
+| 0.5.0   | 2026-10-21 | The Board as a calendar, task costs that count every run, a quieter team chat                                  |
+| 0.4.0   | 2026-09-28 | Connectors, a memory graph, building on the graph, Routines, a Needs you column                                |
+| 0.3.1   | 2026-07-20 | Team-chat reliability, live status badges, a provider manager per runtime                                      |
+| 0.3.0   | 2026-07-15 | Native-first: run on one provider key with no Gateway, teams that mix runtimes                                 |
+| 0.2.0   | 2026-06-20 | Clawboo runs its own agents and coordinates four other runtimes                                                |
+| 0.1.9   | 2026-06-01 | A lighter welcome screen, team colors                                                                          |
+| 0.1.8   | 2026-05-29 | Light and dark themes, a design-system pass                                                                    |
+| 0.1.7   | 2026-05-20 | Device pairing in the setup wizard, Windows fixes                                                              |
+| 0.1.6   | 2026-05-20 | Setup checks what is really installed                                                                          |
+| 0.1.5   | 2026-05-20 | Approve a new device from the dashboard                                                                        |
+| 0.1.4   | 2026-05-20 | OpenClaw protocol 4, Windows install support                                                                   |
+| 0.1.3   | 2026-05-19 | The CLI only opens a port that really serves Clawboo                                                           |
+| 0.1.2   | 2026-05-19 | Fixes `Cannot GET /`                                                                                           |
+| 0.1.1   | 2026-05-19 | First real release                                                                                             |
+| 0.1.0   | 2026-02-28 | Name placeholder                                                                                               |
 
 Every 0.1.x release is deprecated on npm. That line ran on OpenClaw only and does not work reliably with current OpenClaw. Install a supported release with `npm install -g clawboo@latest`, or run `npx clawboo@latest`. Keep the `@latest`: a bare `npx clawboo` can reuse an old copy from npm's cache.
 
-<Update label="Unreleased" description="On main, not yet on npm">
+<Update label="0.6.0" description="2026-11-04">
 
-The next release gives a team chat rooms, lets you steer a task while an agent works on it, and rebuilds the workspace around a team. The Board opens on a calmer Kanban view. Clawboo Native runs on a local Ollama with no key, and a security gap for installs behind a reverse proxy is closed.
+0.6.0 gives a team chat rooms, lets you steer a task while an agent works on it, and rebuilds the workspace around a team. The Board opens on a calmer Kanban view. Clawboo Native runs on a local Ollama with no key, and a security gap for installs behind a reverse proxy is closed. The dashboard now locks itself with a per-install access token, installs as a web app on a phone, and `clawboo stop` and updates wait for agents that are still working.
 
 **Security**
 

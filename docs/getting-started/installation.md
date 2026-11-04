@@ -23,7 +23,7 @@ Clawboo installs from npm and runs as a small server on your computer that you u
 
 <Note>
 
-These docs track the latest code. The latest npm release is 0.5.0, so some features described here arrive with the next release; see the Unreleased section of the [changelog](/appendices/changelog).
+These docs track the latest code. The latest npm release is 0.6.0; anything newer is listed under Unreleased in the [changelog](/appendices/changelog).
 
 </Note>
 

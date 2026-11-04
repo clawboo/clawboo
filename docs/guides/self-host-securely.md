@@ -29,7 +29,7 @@ Clawboo listens only on the computer it runs on. Use this guide to open the dash
 
 **Security advisory: clawboo 0.5.0 and older behind a reverse proxy.** On these releases the access token does not cover `/api/mcp/`. Any request that reaches Clawboo from `127.0.0.1` skips the access cookie on every `/api/mcp/` path, including `/api/mcp/config`. A reverse proxy on the same machine delivers every request from `127.0.0.1`. So anyone who can reach your proxy can use Clawboo's MCP servers and ask `/api/mcp/config` for an attach URL signed as any of your agents, with that agent's connector grants. This holds even with `STUDIO_ACCESS_TOKEN` set.
 
-If you already run Clawboo behind nginx, Caddy or a Cloudflare Tunnel, add the rule below for your proxy now, or upgrade once a release newer than 0.5.0 is out. Run `clawboo --version` to see your version.
+If you already run Clawboo behind nginx, Caddy or a Cloudflare Tunnel, add the rule below for your proxy now, or upgrade to 0.6.0. Run `clawboo --version` to see your version.
 
 </Warning>
 
