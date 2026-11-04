@@ -412,6 +412,60 @@ export function removeRuntimePortFile(): void {
   }
 }
 
+/**
+ * What holds the port the server recorded in `api-port.txt`, for a stop or a
+ * restart that discovery found no Clawboo server for:
+ * - `none`: no record, nothing listening, or a program that answers and is not
+ *   Clawboo. The record is stale.
+ * - `live`: a Clawboo server answers there, with or without its access gate.
+ *   Discovery asked elsewhere (`CLAWBOO_API_PORT`), or asked too briefly.
+ * - `silent`: it accepts a connection and lets an HTTP request time out. That is
+ *   how a Clawboo server too busy to answer looks (the kernel accepts for it), so
+ *   it counts as one: its record stays, and no second server starts beside it.
+ *   Discovery cannot see it, so `--force` would not find it either.
+ *
+ * A port that accepts and then drops the connection is a program that does not
+ * speak HTTP, not a busy server, so it reads as `none`.
+ */
+export type RecordedPortState = 'none' | 'live' | 'silent'
+
+export interface RecordedPort {
+  /** The recorded port; null when there is no record. */
+  port: number | null
+  state: RecordedPortState
+}
+
+export async function inspectRecordedPort(
+  opts: { timeoutMs?: number } = {},
+): Promise<RecordedPort> {
+  const timeoutMs = opts.timeoutMs ?? 2_000
+  const port = readRuntimePort()
+  if (port === null) return { port, state: 'none' }
+  const host = dashboardHost()
+  if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return { port, state: 'none' }
+  try {
+    // No token is sent: the access gate's own refusal already says Clawboo.
+    const res = await fetch(`http://${urlHost(host)}:${port}/api/settings`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: 'application/json' },
+    })
+    const ct = res.headers.get('content-type') ?? ''
+    const body: unknown = ct.includes('application/json')
+      ? await res.json().catch(() => null)
+      : null
+    if (res.status === 401 && isAccessGateError(body)) return { port, state: 'live' }
+    const clawboo =
+      res.ok &&
+      isRecord(body) &&
+      typeof body['gatewayUrl'] === 'string' &&
+      typeof body['hasToken'] === 'boolean'
+    return { port, state: clawboo ? 'live' : 'none' }
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'TimeoutError'
+    return { port, state: timedOut ? 'silent' : 'none' }
+  }
+}
+
 interface PortCandidate {
   port: number
   timeoutMs: number

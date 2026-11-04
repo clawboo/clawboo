@@ -29,7 +29,13 @@ import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
 import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
-import { agentRuns, holdNote, reportUnstopped } from './stopReport'
+import {
+  agentRuns,
+  holdNote,
+  reportNoServer,
+  reportUnstopped,
+  type NoServerReport,
+} from './stopReport'
 import { shouldOfferRestart } from './versionCheck'
 import {
   DEFAULT_STOP_WAIT_SECONDS,
@@ -41,11 +47,10 @@ import {
   mintLaunchCode,
   openReport,
   openUrlInBrowser,
-  probeDashboard,
   probePort,
-  readRuntimePort,
   removeRuntimePortFile,
   startDashboard,
+  inspectRecordedPort,
   stopAfterAgentRuns,
   stopDashboard,
   uiPath,
@@ -261,6 +266,13 @@ function printStoppedNotReplaced(port: number): void {
 function printHoldNote(outcome: StopOutcome, released: boolean | null): void {
   const note = holdNote(outcome, released)
   if (note) p.log.info(chalk.gray(note))
+}
+
+/** Discovery found no server: say what holds the recorded port, if anything. */
+function printNoServer(report: NoServerReport): void {
+  if (report.tone === 'fail') p.log.warn(chalk.yellow(report.text))
+  else p.log.info(chalk.gray(report.text))
+  if (report.manualStopPort !== null) printManualStopHint(report.manualStopPort)
 }
 
 /** Deliberately not "run `clawboo stop`" — that is what just failed. */
@@ -533,10 +545,11 @@ async function stopWithReport(
   if (result.stop === null) {
     // The wait ended without a stop: cancelled, or a server whose runs could not
     // be seen. Say why, and whether its hold may still keep new work back.
-    const report = reportUnstopped(result, command)!
+    const report = reportUnstopped(result)!
     if (report.tone === 'fail') spinner.fail(chalk.yellow(report.text))
     else spinner.info(chalk.gray(report.text))
     for (const note of report.notes) p.log.info(chalk.gray(note))
+    if (report.manualStop) printManualStopHint(port)
     process.exit(report.exitCode)
   }
   return { outcome: result.stop, spinner, released: result.released }
@@ -566,17 +579,16 @@ async function runStop(opts: StopWaitOptions): Promise<void> {
   }
   if (port === null) {
     // A port file naming a dead server is exactly the stale state this command
-    // exists to clear — but "discovery found nothing" is not the same as "the
+    // exists to clear, but "discovery found nothing" is not the same as "the
     // recorded port is dead". `CLAWBOO_API_PORT` short-circuits discovery to a
     // single port, so a live instance on a different one would still be named
-    // by the file. Probe the recorded port before deleting the only record of it.
-    // A token-gated server there is alive too, so only a port with no Clawboo
-    // answer at all counts as dead.
-    const recorded = readRuntimePort()
-    if (recorded !== null && (await probeDashboard(dashboardHost(), recorded, 1_500)) === 'none') {
-      removeRuntimePortFile()
-    }
-    p.log.info(chalk.gray('No Clawboo server is running.'))
+    // by the file, and a server too busy to answer is invisible to discovery
+    // (and so to `--force`) while it still holds its port. Look at the recorded
+    // port before deleting the only record of it.
+    const report = reportNoServer(await inspectRecordedPort(), 'stop')
+    if (report.clearRecord) removeRuntimePortFile()
+    printNoServer(report)
+    if (report.exitCode !== 0) process.exit(report.exitCode)
     return
   }
 
@@ -618,7 +630,12 @@ async function runRestart(opts: { open: boolean } & StopWaitOptions): Promise<vo
 
   let pinned: number | undefined
   if (port === null) {
-    p.log.info(chalk.gray('No Clawboo server is running — starting one.'))
+    // Never start beside a server that still holds the recorded port: one too
+    // busy to answer is invisible to discovery, and two dashboards would share
+    // one database.
+    const report = reportNoServer(await inspectRecordedPort(), 'restart')
+    printNoServer(report)
+    if (!report.start) process.exit(report.exitCode)
   } else {
     const { outcome, spinner, released } = await stopWithReport(port, opts, 'restart')
     if (outcome.status === 'could-not-identify' || outcome.status === 'still-alive') {
@@ -631,6 +648,14 @@ async function runRestart(opts: { open: boolean } & StopWaitOptions): Promise<vo
     }
     spinner.succeed(chalk.green('Clawboo stopped'))
     printHoldNote(outcome, released)
+    // The same rule after the stop: a stop that found no server to signal (one
+    // too busy to answer), or a supervisor that brought the server back, leaves
+    // the recorded port held, and the new server must not start beside it.
+    const after = await inspectRecordedPort()
+    if (after.state !== 'none') {
+      printNoServer(reportNoServer(after, 'restart'))
+      process.exit(1)
+    }
     // Pin only if the port really freed — a `pnpm dev` supervisor can respawn
     // the server on the same port between our stop and our start. Unpinned, the
     // successor resolves its own port the way any boot does.
