@@ -10,7 +10,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { branchExists, isWorktreeRegistered, revParse } from '../git'
-import { completeWorktree, pauseWorktree, provisionWorktree } from '../lifecycle'
+import { completeWorktree, gcWorktrees, pauseWorktree, provisionWorktree } from '../lifecycle'
 import type { Worktree } from '../types'
 import { cleanup, git, initRepo, scaffoldInput } from './gitHarness'
 
@@ -100,5 +100,24 @@ describe('pause and complete across several roots', () => {
       )
     }
     expect(existsSync(wt.worktreePath)).toBe(true)
+  })
+
+  it('GC leaves alone, and does not count, folders the caller does not own', async () => {
+    const mine = await provisionUnderWorkRoot('t1')
+    const theirs = await provisionUnderWorkRoot('t2')
+
+    const res = await gcWorktrees({
+      repoPath: repo,
+      rootDir: workRoot,
+      maxAgeMs: 60 * 60 * 1000,
+      maxCount: 0,
+      owns: (taskId, worktreePath) => taskId === 't1' && worktreePath === mine.worktreePath,
+    })
+
+    expect(res.reaped).toEqual(['t1'])
+    expect(res.skipped).toEqual([])
+    expect(existsSync(mine.worktreePath)).toBe(false)
+    expect(existsSync(theirs.worktreePath)).toBe(true)
+    expect(await isWorktreeRegistered(repo, theirs.worktreePath)).toBe(true)
   })
 })

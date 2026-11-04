@@ -234,6 +234,57 @@ describe('task checkouts recorded under the work folder', () => {
     expect(getWorkspaceForTask(getDb(), taskId)?.status).toBe('active')
   })
 
+  it('GC leaves alone a work-folder checkout this install does not record', async () => {
+    // Another install's checkout of the same repository in a shared work folder:
+    // registered with git, aged, and for a task this database has never seen.
+    const { taskId, recorded } = await provisionInWorkFolder()
+    expect(updateStatus(getDb(), taskId, 'todo').ok).toBe(true)
+    const foreign = path.join(path.dirname(recorded), 'other-install-task')
+    await git(repo, ['worktree', 'add', '-b', 'clawboo/task-other-install-task', foreign])
+    await writeFile(path.join(foreign, '.env'), 'SECRET=1\n')
+
+    const summary = await gcTaskWorkspaces({ maxAgeMs: 0, maxCount: 1000 })
+
+    expect(summary.reaped).toEqual([taskId])
+    expect(existsSync(recorded)).toBe(false)
+    expect(existsSync(path.join(foreign, '.env'))).toBe(true)
+    expect(await isWorktreeRegistered(repo, foreign)).toBe(true)
+  })
+
+  it('a provision over a missing work-folder checkout records where it rebuilt it', async () => {
+    const { taskId, recorded } = await provisionInWorkFolder()
+    await git(repo, ['worktree', 'remove', '--force', recorded])
+
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+
+    if (!prov.ok) throw new Error(`provision failed: ${prov.reason}`)
+    expect(prov.worktree.worktreePath).not.toBe(recorded)
+    expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(prov.worktree.worktreePath)
+    // Pause now acts on the checkout the agent works in.
+    await writeFile(path.join(prov.worktree.worktreePath, 'feature.ts'), 'export const x = 1\n')
+    const paused = await actOnTaskWorkspace(taskId, 'pause')
+    if (!paused.ok || paused.action !== 'pause') throw new Error('expected pause')
+    expect(paused.pause.committed).toBe(true)
+    expect(existsSync(prov.worktree.worktreePath)).toBe(false)
+  })
+
+  it('resume records the rebuilt path when the recorded one is under no known root', async () => {
+    const elsewhere = path.join(home, 'elsewhere')
+    const { taskId, recorded, branch } = await provisionInWorkFolder({ workDir: elsewhere })
+    await git(repo, ['worktree', 'remove', '--force', recorded])
+
+    const resumed = await resumeTaskWorkspace(taskId, { repoPath: repo })
+
+    if (!resumed.ok) throw new Error(`resume failed: ${resumed.reason}`)
+    expect(resumed.worktree.worktreePath.startsWith(path.join(home, '.clawboo'))).toBe(true)
+    expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(resumed.worktree.worktreePath)
+    await writeFile(path.join(resumed.worktree.worktreePath, 'feature.ts'), 'export const x = 1\n')
+    const paused = await actOnTaskWorkspace(taskId, 'pause')
+    if (!paused.ok || paused.action !== 'pause') throw new Error('expected pause')
+    expect(paused.pause.committed).toBe(true)
+    expect(await git(repo, ['show', `${branch}:feature.ts`])).toBe('export const x = 1\n')
+  })
+
   it('a repeat provision hands back the recorded checkout, not a rebuilt path', async () => {
     const { taskId, recorded } = await provisionInWorkFolder()
 

@@ -3,7 +3,7 @@
 // layout keeps them. Anything else is a broken record and is refused before a
 // command runs.
 
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -13,6 +13,8 @@ import { runDeterministicGate } from '../deterministicGate'
 
 // Exits 0 on every platform the server tests run on.
 const PASSING = 'git --version'
+/** Passes only when run in a folder holding `marker.txt`. */
+const IN_CHECKOUT = `node -e "process.exit(require('fs').existsSync('marker.txt') ? 0 : 1)"`
 
 let base: string
 let dataDir: string
@@ -51,6 +53,10 @@ describe('the verify gate accepts both layouts', () => {
   it('runs in a task checkout under the data folder', async () => {
     const wt = await checkout(dataDir, 'worktrees', 'abc', 't1')
     expect(await gateIn(wt)).toMatchObject({ passed: true, exitCode: 0 })
+    // The command runs in the checkout itself, not just somewhere it can pass.
+    await writeFile(path.join(wt, 'marker.txt'), 'here')
+    const det = await runDeterministicGate({ worktreePath: wt, verifyCommand: IN_CHECKOUT })
+    expect(det.passed).toBe(true)
   })
 
   it('runs in a task checkout under the default work folder beside CLAWBOO_HOME', async () => {
@@ -91,5 +97,17 @@ describe('the verify gate still refuses anything else', () => {
     process.env['CLAWBOO_WORK_DIR'] = path.join(base, 'work')
     const dir = await checkout(base, ...segments)
     await expect(gateIn(dir)).rejects.toThrow(/outside/)
+  })
+
+  it('a checkout under the data folder that is a link to a folder outside both', async () => {
+    // A repository elsewhere, reached through a link where a checkout belongs.
+    const outside = await checkout(base, 'elsewhere', 'repo')
+    await writeFile(path.join(outside, 'VERIFICATION.md'), 'untouched\n')
+    await mkdir(path.join(dataDir, 'worktrees', 'abc'), { recursive: true })
+    const link = path.join(dataDir, 'worktrees', 'abc', 't1')
+    await symlink(outside, link, 'junction')
+
+    await expect(gateIn(link)).rejects.toThrow(/outside/)
+    expect(await readFile(path.join(outside, 'VERIFICATION.md'), 'utf8')).toBe('untouched\n')
   })
 })

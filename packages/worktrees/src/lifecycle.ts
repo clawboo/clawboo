@@ -430,6 +430,12 @@ export interface GcOptions {
   maxCount?: number
   /** Return true to skip a still-active task's worktree. */
   isActive?: (taskId: string) => boolean
+  /**
+   * Return false for a folder this caller does not own, such as one another
+   * install keeps in a shared root. Such a folder is left alone and does not
+   * count toward `maxCount`. Absent, every folder under the root is the caller's.
+   */
+  owns?: (taskId: string, worktreePath: string) => boolean
   /** Injectable clock for tests. */
   now?: number
 }
@@ -447,7 +453,8 @@ export interface GcResult {
  * autosaved (git does not list it, or could not answer) is reaped only when it
  * holds nothing, and skipped with a reason otherwise. Active tasks are skipped;
  * failures are collected and do not abort the sweep ("continue on failure").
- * Only ever touches directories under the clawboo worktree root.
+ * Only ever touches directories under the clawboo worktree root, and of those
+ * only the ones `owns` accepts.
  */
 export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
   const root = worktreeRootFor(opts.repoPath, opts.rootDir)
@@ -466,6 +473,7 @@ export async function gcWorktrees(opts: GcOptions): Promise<GcResult> {
   const infos = await Promise.all(
     entries
       .filter((e) => e.isDirectory())
+      .filter((e) => opts.owns?.(e.name, path.join(root, e.name)) ?? true)
       .map(async (e) => {
         const p = path.join(root, e.name)
         const st = await stat(p)

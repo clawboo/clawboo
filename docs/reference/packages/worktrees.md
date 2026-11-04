@@ -97,13 +97,15 @@ These functions remove folders recursively and run commands, so every path they 
   removes the folder; files git ignores are not committed and go with it. It skips a listed checkout that is a
   separate repository, has its commit on no branch, or has changes on a detached HEAD. A folder git does not
   list is removed only under the rule above, and a folder whose registration git could not report is always
-  kept.
+  kept. With `owns`, GC leaves alone, and does not count, any folder the callback rejects; the server passes it for
+  the work folder's roots and accepts only checkouts its board records there.
 - **Review checkouts stay in the review folder.** `removeReviewWorktree(repo, worktree, rootDir)` throws before it
   removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
   `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
   its own path the same way.
 - **Verify commands run in Clawboo's folders only.** The server's verification gate refuses a worktree path outside
-  Clawboo's state folder and the work folder's `worktrees/` and `reviews/` before it runs `VERIFY_CMD`.
+  Clawboo's state folder and the work folder's `worktrees/` and `reviews/`, or one whose real path leaves them, before
+  it runs `VERIFY_CMD` in that real path.
 
 ## Helpers you will reach for
 

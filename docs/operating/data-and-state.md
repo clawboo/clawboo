@@ -79,7 +79,7 @@ On macOS and Linux, Clawboo makes the database, its working files, `settings.jso
 
 A newer layout keeps task worktrees, review checkouts and team folders out of `~/.clawboo`, in a separate work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. This version still makes new worktrees, review checkouts and team folders in `~/.clawboo`.
 
-It does work with a task worktree the board records under the work folder's `worktrees/`, so a version that keeps them there can be rolled back to this one. Pausing and completing the task and its work check act on that checkout where it is, a paused one is rebuilt there, and the worktree cleanup sweeps the work folder's `worktrees/` too. The Workspace tab shows such a worktree, and a team folder whose `workspaces/<team id>` is a link into the work folder.
+It does work with a task worktree the board records under the work folder's `worktrees/`, so a version that keeps them there can be rolled back to this one. Pausing and completing the task and its work check act on that checkout where it is, and a paused one is rebuilt there. The worktree cleanup also removes old checkouts there, but only ones the board records, so it never touches a folder another install keeps in the same work folder. When a checkout has to be made again under `~/.clawboo` instead, the board records the new place. The Workspace tab shows such a worktree, and a team folder whose `workspaces/<team id>` is a link into the work folder.
 
 ## What Clawboo writes in OpenClaw's folder
 

@@ -37,7 +37,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset |
 | **Folders**                            |                                   |                                                              |
 | `CLAWBOO_HOME`                         | `~/.clawboo`                      | Folder for everything Clawboo stores                         |
-| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder Clawboo also reads task worktrees from           |
+| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder; `<CLAWBOO_HOME>-work` when that is set          |
 | `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes            |
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                    |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                      |

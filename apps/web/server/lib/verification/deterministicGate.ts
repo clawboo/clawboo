@@ -33,7 +33,7 @@ import { execGit, SOR_FILES } from '@clawboo/worktrees'
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
 import { killProcessTree } from '../runtimes/killTree'
-import { workDirSpellings } from '../workDir'
+import { realPathOf, workDirSpellings } from '../workDir'
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 const TAIL_CHARS = 4_000
@@ -169,19 +169,38 @@ export async function runDeterministicGate(
   // is the same broken record as one pointing outside, and earns the same
   // answer. The work folder counts in each of its spellings, so a checkout
   // recorded by the real path of a linked work folder passes too.
-  const rootPrefixes = [
+  //
+  // The spelling is not the whole answer: a checkout folder that is a link to a
+  // repository elsewhere passes that test, and the command would then run, and
+  // the evidence land, in that repository. So when the folder exists, its real
+  // path (every link resolved) has to be inside a root's real path too, and the
+  // real path is what everything below uses. A missing folder keeps its
+  // spelling, so the spawn fails and the attempt is recorded as a failure, as
+  // it always was.
+  const roots = [
     path.resolve(resolveClawbooDir()),
     ...workDirSpellings().flatMap((dir) => [
       path.join(dir, 'worktrees'),
       path.join(dir, 'reviews'),
     ]),
-  ].map((root) => (root.endsWith(path.sep) ? root : root + path.sep))
-  const worktreePath = path.resolve(input.worktreePath)
-  if (!rootPrefixes.some((prefix) => worktreePath.startsWith(prefix))) {
+  ]
+  const asPrefix = (root: string): string => (root.endsWith(path.sep) ? root : root + path.sep)
+  const recordedPath = path.resolve(input.worktreePath)
+  if (!roots.some((root) => recordedPath.startsWith(asPrefix(root)))) {
     throw new Error(
-      `worktree path is outside the clawboo state directory and work folder: ${worktreePath}`,
+      `worktree path is outside the clawboo state directory and work folder: ${recordedPath}`,
     )
   }
+  const realPath = realPathOf(recordedPath)
+  if (realPath !== null) {
+    const realRoots = roots.map(realPathOf).filter((root): root is string => root !== null)
+    if (!realRoots.some((root) => realPath.startsWith(asPrefix(root)))) {
+      throw new Error(
+        `worktree path resolves outside the clawboo state directory and work folder: ${recordedPath} is ${realPath}`,
+      )
+    }
+  }
+  const worktreePath = realPath ?? recordedPath
   const { command, source: commandSource } = await resolveVerifyCommand(
     worktreePath,
     input.verifyCommand,

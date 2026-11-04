@@ -1088,17 +1088,25 @@ export function getWorkspaceForTask(db: ClawbooDb, taskId: string): DbWorkspace 
 
 export type WorkspaceStatus = 'active' | 'archived' | 'stale'
 
-/** Update a workspace's lifecycle status (active → archived on cleanup, → stale on GC). */
+/**
+ * Update a workspace's lifecycle status (active → archived on cleanup, → stale on
+ * GC). `worktreePath` records where a rebuild put the checkout, when that is not
+ * where the row said it was.
+ */
 export function updateWorkspaceStatus(
   db: ClawbooDb,
   workspaceId: string,
   status: WorkspaceStatus,
-  opts: { lastUsedAt?: number } = {},
+  opts: { lastUsedAt?: number; worktreePath?: string } = {},
 ): void {
   withWriteRetry(() =>
     db
       .update(workspaces)
-      .set({ status, ...(opts.lastUsedAt !== undefined ? { lastUsedAt: opts.lastUsedAt } : {}) })
+      .set({
+        status,
+        ...(opts.lastUsedAt !== undefined ? { lastUsedAt: opts.lastUsedAt } : {}),
+        ...(opts.worktreePath !== undefined ? { worktreePath: opts.worktreePath } : {}),
+      })
       .where(eq(workspaces.id, workspaceId))
       .run(),
   )
