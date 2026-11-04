@@ -13,6 +13,16 @@ export function isLoopbackHostname(hostname: string): boolean {
 }
 
 /**
+ * The any-address a server binds to (`HOST=0.0.0.0`, or `::`). A browser can
+ * open it, but as a destination it means the computer it is typed on, so a
+ * link to it reaches nothing from a phone.
+ */
+export function isWildcardHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1')
+  return host === '0.0.0.0' || host === '::'
+}
+
+/**
  * The dashboard page under `origin` and the mount, with the launch code when
  * there is one. A `localhost` origin becomes `127.0.0.1`, the address the server
  * listens on: `localhost` can resolve to ::1, where another user's program

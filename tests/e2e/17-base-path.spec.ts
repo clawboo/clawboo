@@ -359,6 +359,38 @@ test.describe('the guards still enforce under the prefix', () => {
     }
     await context.close()
   })
+
+  test('a link pasted on the locked screen signs in under the mount', async ({ browser }) => {
+    const minted = await fetch(`${server.origin}${BASE_PATH}/api/access/launch-code`, {
+      method: 'POST',
+      headers: { Cookie: `clawboo_access=${TOKEN}` },
+    })
+    const { code } = (await minted.json()) as { code: string }
+    // A phone's width: the app on a home screen is where pasting matters.
+    const context = await browser.newContext({
+      storageState: SIGNED_OUT,
+      viewport: { width: 375, height: 812 },
+      hasTouch: true,
+    })
+    const page = await context.newPage()
+    await page.goto(`${server.origin}${BASE_PATH}/`)
+    await expect(page.getByTestId('access-locked')).toBeVisible({ timeout: 30_000 })
+    const field = page.getByLabel('Paste a sign-in link')
+    const signIn = page.getByRole('button', { name: 'Sign in' })
+
+    // A link for the root of this address is for another dashboard.
+    await field.fill(`${server.origin}/?access_code=${code}`)
+    await signIn.click()
+    await expect(page.getByRole('alert')).toHaveText(/another dashboard/)
+
+    await field.fill(`${server.origin}${BASE_PATH}/?access_code=${code}`)
+    await signIn.click()
+    await expect(page).toHaveURL(`${server.origin}${BASE_PATH}/`)
+    await expect(page.getByTestId('access-locked')).toHaveCount(0, { timeout: 30_000 })
+    const cookie = (await context.cookies()).find((c) => c.name === 'clawboo_access')
+    expect(cookie?.path).toBe(BASE_PATH)
+    await context.close()
+  })
 })
 
 test.describe('a server started with no STUDIO_ACCESS_TOKEN locks itself', () => {

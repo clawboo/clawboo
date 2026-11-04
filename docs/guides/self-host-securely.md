@@ -226,13 +226,13 @@ The tunnel checks rules from first to last, so the deny rule must come before th
 
 </Tabs>
 
-Whatever the proxy, it must pass the `Host` your browser used and `X-Forwarded-Proto`. Clawboo checks `Host` against the allowlist, builds the redirect after sign-in from both, and marks the cookie `Secure` when `X-Forwarded-Proto` is `https`.
+Whatever the proxy, it must pass the `Host` your browser used and `X-Forwarded-Proto`. Clawboo checks `Host` against the allowlist, builds the redirect after sign-in from both, accepts a sign-in form only when its `Origin` matches both, and marks the cookie `Secure` when `X-Forwarded-Proto` is `https`.
 
 </Step>
 
 <Step title="Sign in once">
 
-Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private. To sign in a phone or another browser after that, use **Open on another device** at the bottom of the sidebar: its one-time link and QR code carry a code that works once, within two minutes, never the token.
+Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private. To sign in a phone or another browser after that, use **Open on another device** at the bottom of the sidebar: its one-time link and QR code carry a code that works once, within two minutes, never the token. An app added to a phone's home screen signs in by pasting that link on its locked screen (see [Paste a sign-in link](/operating/security#the-access-token)).
 
 </Step>
 
@@ -351,7 +351,7 @@ The installed app opens at the dashboard's address, under your prefix if you ser
 
 - **It signs in the way the browser does.** The installed app uses the same access cookie. Installing it puts the token in no address and stores no copy of it.
 - **Android shares the sign-in with Chrome.** An app installed from Chrome uses Chrome's cookies.
-- **iPhone and iPad keep it apart.** iOS gives a home-screen app storage of its own, apart from Safari's, and a sign-in link opens in Safari rather than in the app. The installed app can open on the locked screen, or lose its sign-in later, and that screen cannot sign it in yet. When that happens, use the dashboard in Safari.
+- **iPhone and iPad keep it apart.** iOS gives a home-screen app storage of its own, apart from Safari's, and a sign-in link you tap opens in Safari rather than in the app, so the installed app can open on the locked screen, or lose its sign-in later. Sign it in there with the **Paste a sign-in link** box: in a signed-in browser, open **Open on another device** at the dashboard's address the phone uses, click **Copy link**, send the link to the phone, and paste it into the box within two minutes. See [The access token](/operating/security#the-access-token).
 - **No offline copy.** Clawboo ships no service worker. The installed app shows only live data, needs the server to be reachable, and keeps nothing from the API for offline use.
 
 [Where things live](/using/index#on-a-phone) lists what the dashboard lays out for a phone's width.
