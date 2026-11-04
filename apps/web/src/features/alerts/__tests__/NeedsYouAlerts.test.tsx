@@ -45,6 +45,7 @@ const failed = (id: string, title: string) => ({
 
 let tasks: unknown[] = []
 let boardReads = 0
+let failBoardReads = 0
 let focused = true
 
 function goBackground(): void {
@@ -69,9 +70,14 @@ beforeEach(() => {
   vi.spyOn(document, 'hasFocus').mockImplementation(() => focused)
   tasks = [failed('old', 'Already waiting')]
   boardReads = 0
+  failBoardReads = 0
   server.use(
     http.get('/api/board', () => {
       boardReads += 1
+      if (failBoardReads > 0) {
+        failBoardReads -= 1
+        return HttpResponse.json({ error: 'busy' }, { status: 503 })
+      }
       return HttpResponse.json({ tasks })
     }),
   )
@@ -175,6 +181,43 @@ describe('NeedsYouAlerts', () => {
 
     act(() => FakeNotification.shown[0]!.onclick?.())
     expect(useViewStore.getState().boardNeedsYouFocus).toMatchObject({ teamId: 'team-a' })
+  })
+
+  it('still announces a Gateway shell approval when the approval queue cannot be read', async () => {
+    server.use(
+      http.get('/api/tools/approvals', () => HttpResponse.json({ error: 'down' }, { status: 500 })),
+    )
+    render(<NeedsYouAlerts batchMs={10} retryMs={[]} />)
+    goBackground()
+    await waitFor(() => expect(boardReads).toBe(1))
+
+    const req = {
+      id: 'ex-2',
+      agentId: 'ada',
+      command: 'npm test',
+      createdAtMs: Date.now() + 1000,
+      expiresAtMs: Date.now() + 60_000,
+    } as ApprovalRequest
+    act(() => {
+      useApprovalsStore.setState({ pendingApprovals: new Map([[req.id, req]]) })
+    })
+    await waitFor(() => expect(FakeNotification.shown).toHaveLength(1))
+    expect(FakeNotification.shown[0]!.title).toBe('Ada needs your approval')
+  })
+
+  it('reads again by itself after a failed read, so a quiet board still gets its alert', async () => {
+    render(<NeedsYouAlerts batchMs={10} retryMs={[40]} />)
+    goBackground()
+    await waitFor(() => expect(boardReads).toBe(1))
+
+    tasks = [...tasks, failed('new', 'Send the invoice')]
+    failBoardReads = 1
+    signal(5) // the one event there will be
+    await waitFor(() => expect(boardReads).toBe(3)) // the failed read, then the retry
+    await waitFor(() => expect(FakeNotification.shown).toHaveLength(1))
+    expect(FakeNotification.shown[0]!.options.body).toBe(
+      '"Send the invoice" failed. Click to open it.',
+    )
   })
 
   it('stays quiet inside the desktop app, which raises its own', async () => {

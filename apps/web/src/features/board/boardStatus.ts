@@ -197,12 +197,13 @@ export function taskAttentionOf(task: {
 }): TaskAttention | null {
   const a = task.attention
   if (a && typeof a === 'object') {
-    const { reason, failedRuns, detail, cause, runtime } = a as {
+    const { reason, failedRuns, detail, cause, runtime, byPerson } = a as {
       reason?: unknown
       failedRuns?: unknown
       detail?: unknown
       cause?: unknown
       runtime?: unknown
+      byPerson?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
       const known = cause === 'sign_in' || cause === 'billing' ? cause : null
@@ -213,6 +214,7 @@ export function taskAttentionOf(task: {
         ...(known
           ? { cause: known, ...(typeof runtime === 'string' && runtime ? { runtime } : {}) }
           : {}),
+        ...(byPerson === true ? { byPerson: true } : {}),
       }
     }
   }

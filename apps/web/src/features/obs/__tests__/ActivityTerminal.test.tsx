@@ -177,7 +177,10 @@ describe('ActivityTerminal', () => {
     server.use(http.get('/api/obs/events', () => HttpResponse.json({ events: [] })))
     render(<ActivityTerminal scope={{ taskId: 't1' }} maxHeight={260} hideHeader />)
     const empty = await screen.findByTestId('activity-empty')
-    expect(empty).toHaveTextContent(/^No activity yet\./)
+    // Short enough to sit on one line beside the Live mark in a 520px drawer.
+    expect(empty.querySelector('p')?.textContent).toBe(
+      'No activity yet. It shows up here as agents work.',
+    )
     // Prose, in the body font and the muted token: not inside the mono log.
     expect(empty.closest('.font-data')).toBeNull()
     expect(empty.querySelector('p')).toHaveClass('text-xs', 'text-muted-foreground')

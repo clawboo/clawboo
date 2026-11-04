@@ -116,6 +116,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
+      byPerson?: true // for blocked: a person moved it there and no run has started since
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.

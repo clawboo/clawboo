@@ -9,11 +9,13 @@ import {
   approvalAsk,
   collectAlertItems,
   createAlertWatcher,
-  diffAlertItems,
+  foldAlertRead,
   latestAlertTrigger,
+  startAlertMemory,
   type AlertAgent,
   type AlertApprovalInput,
   type AlertNotice,
+  type AlertRead,
   type AlertTaskInput,
 } from '../alertRules'
 
@@ -28,7 +30,6 @@ const task = (
   teamId: 'team-a',
   attention: reason ? { reason, failedRuns: 1 } : null,
   updatedAt: 1000,
-  personMovedAt: null,
   ...extra,
 })
 
@@ -37,6 +38,7 @@ const approval = (id: string, extra: Partial<AlertApprovalInput> = {}): AlertApp
   toolName: 'mcp__github__create_issue',
   agentId: 'ada',
   kind: 'tool',
+  createdAt: 1000,
   expiresAt: null,
   ...extra,
 })
@@ -64,25 +66,34 @@ describe('collectAlertItems', () => {
       [],
     )
     expect(items.map((i) => i.key)).toEqual([
-      'task:f:failed',
-      'task:t:timed_out',
-      'task:b:blocked',
-      'task:r:needs_review',
+      'task:f:failed:1',
+      'task:t:timed_out:1',
+      'task:b:blocked:1',
+      'task:r:needs_review:1',
     ])
   })
 
-  it('leaves out a task the person moved to Blocked themselves', () => {
+  it("leaves out a Blocked move the server says was the person's own, whatever changed since", () => {
     const items = collectAlertItems(
       [
-        task('mine', 'blocked', { updatedAt: 2000, personMovedAt: 2000 }),
-        // A person moved it earlier, then an agent blocked it: that one is news.
-        task('agent', 'blocked', { updatedAt: 3000, personMovedAt: 2000 }),
-        // A person's move does not hide a run that failed after it.
-        task('ran', 'failed', { updatedAt: 2000, personMovedAt: 2000 }),
+        // The server compares the move with the latest run start, so a later
+        // edit to the title (a newer updatedAt) does not undo it.
+        task('mine', null, {
+          status: 'blocked',
+          attention: { reason: 'blocked', failedRuns: 0, byPerson: true },
+          updatedAt: 9000,
+        }),
+        task('agent', 'blocked'),
       ],
       [],
     )
-    expect(items.map((i) => i.key)).toEqual(['task:agent:blocked', 'task:ran:failed'])
+    expect(items.map((i) => i.key)).toEqual(['task:agent:blocked:1'])
+  })
+
+  it('records when each item began waiting', () => {
+    const [a, t] = collectAlertItems([task('f', 'failed', { updatedAt: 4000 })], [approval('a1')])
+    expect(a).toMatchObject({ kind: 'approval', at: 1000 })
+    expect(t).toMatchObject({ kind: 'task', at: 4000 })
   })
 
   it('reads a blocked task from a server too old to send attention', () => {
@@ -105,23 +116,149 @@ describe('collectAlertItems', () => {
   })
 })
 
-describe('diffAlertItems', () => {
-  it('returns only what is new, and forgets what left so its return is new again', () => {
-    const first = collectAlertItems([task('f', 'failed')], [approval('a1')])
-    const { fresh: none, seen } = diffAlertItems(first, new Set(first.map((i) => i.key)))
-    expect(none).toEqual([])
+describe('foldAlertRead', () => {
+  const SINCE = 5000
+  const read = (over: Partial<AlertRead> = {}): AlertRead => ({
+    tasks: [],
+    approvals: [],
+    approvalsComplete: true,
+    ...over,
+  })
+  const keys = (items: { key: string }[]) => items.map((i) => i.key)
 
-    // The task was retried (left the list) while the approval stayed.
-    const second = collectAlertItems([], [approval('a1')])
-    const next = diffAlertItems(second, seen)
-    expect(next.fresh).toEqual([])
-
-    // It failed again: announced again.
-    const third = diffAlertItems(
-      collectAlertItems([task('f', 'failed')], [approval('a1')]),
-      next.seen,
+  it('takes what is waiting as seen, and announces what comes after', () => {
+    let m = startAlertMemory(SINCE)
+    m = foldAlertRead(m, read({ tasks: [task('old', 'failed')] }), { announce: false }).memory
+    const next = foldAlertRead(
+      m,
+      read({ tasks: [task('old', 'failed'), task('new', 'failed', { updatedAt: 6000 })] }),
+      { announce: true },
     )
-    expect(third.fresh.map((i) => i.key)).toEqual(['task:f:failed'])
+    expect(keys(next.fresh)).toEqual(['task:new:failed:1'])
+    expect(
+      foldAlertRead(next.memory, read({ tasks: [task('old', 'failed')] }), { announce: true })
+        .fresh,
+    ).toEqual([])
+  })
+
+  it('announces a task that fails again, even when no read saw it leave the list', () => {
+    let m = startAlertMemory(SINCE)
+    m = foldAlertRead(m, read({ tasks: [task('f', 'failed')] }), { announce: false }).memory
+    const again = task('f', null, {
+      status: 'blocked',
+      attention: { reason: 'failed', failedRuns: 2 },
+      updatedAt: 7000,
+    })
+    expect(keys(foldAlertRead(m, read({ tasks: [again] }), { announce: true }).fresh)).toEqual([
+      'task:f:failed:2',
+    ])
+  })
+
+  it('announces what began waiting after the tab left, even when the first read already held it', () => {
+    // The task failed between the tab leaving and the server answering.
+    const m = foldAlertRead(
+      startAlertMemory(SINCE),
+      read({ tasks: [task('old', 'failed'), task('raced', 'failed', { updatedAt: 5200 })] }),
+      { announce: false },
+    ).memory
+    expect(
+      keys(
+        foldAlertRead(
+          m,
+          read({ tasks: [task('old', 'failed'), task('raced', 'failed', { updatedAt: 5200 })] }),
+          { announce: true },
+        ).fresh,
+      ),
+    ).toEqual(['task:raced:failed:1'])
+  })
+
+  it('goes by when each item began waiting when the first read failed', () => {
+    const m = foldAlertRead(
+      startAlertMemory(SINCE),
+      read({ tasks: null, approvals: [], approvalsComplete: false }),
+      { announce: false },
+    ).memory
+    const after = foldAlertRead(
+      m,
+      read({
+        tasks: [
+          task('before', 'failed', { updatedAt: 4000 }),
+          task('after', 'failed', { updatedAt: 6000 }),
+        ],
+        approvals: [approval('a-old', { createdAt: 4500 }), approval('a-new', { createdAt: 5500 })],
+      }),
+      { announce: true },
+    )
+    expect(keys(after.fresh).sort()).toEqual(['approval:a-new', 'task:after:failed:1'])
+    // And from then on the lists are known, so anything new counts.
+    expect(
+      keys(
+        foldAlertRead(
+          after.memory,
+          read({
+            tasks: [
+              task('before', 'failed', { updatedAt: 4000 }),
+              task('late', 'failed', { updatedAt: 1 }),
+            ],
+          }),
+          { announce: true },
+        ).fresh,
+      ),
+    ).toEqual(['task:late:failed:1'])
+  })
+
+  it('still announces approvals when the board cannot be read, and keeps what it knew of tasks', () => {
+    let m = startAlertMemory(SINCE)
+    m = foldAlertRead(m, read({ tasks: [task('old', 'failed')] }), { announce: false }).memory
+    const noBoard = foldAlertRead(
+      m,
+      read({ tasks: null, approvals: [approval('a1', { createdAt: 6000 })] }),
+      { announce: true },
+    )
+    expect(keys(noBoard.fresh)).toEqual(['approval:a1'])
+    // The board is back: the old task is still known, nothing is said twice.
+    expect(
+      foldAlertRead(
+        noBoard.memory,
+        read({ tasks: [task('old', 'failed')], approvals: [approval('a1', { createdAt: 6000 })] }),
+        { announce: true },
+      ).fresh,
+    ).toEqual([])
+  })
+
+  it('announces a Gateway approval when the queue cannot be read, without forgetting the queue', () => {
+    let m = startAlertMemory(SINCE)
+    m = foldAlertRead(m, read({ approvals: [approval('queued')] }), { announce: false }).memory
+    const partial = foldAlertRead(
+      m,
+      read({
+        approvals: [approval('shell', { kind: 'exec', toolName: 'exec', createdAt: 6000 })],
+        approvalsComplete: false,
+      }),
+      { announce: true },
+    )
+    expect(keys(partial.fresh)).toEqual(['approval:shell'])
+    // The queue is back, still holding the old one: not news.
+    expect(
+      foldAlertRead(
+        partial.memory,
+        read({ approvals: [approval('queued'), approval('shell', { kind: 'exec' })] }),
+        { announce: true },
+      ).fresh,
+    ).toEqual([])
+  })
+
+  it('forgets what left a whole list, so its return is news again', () => {
+    let m = startAlertMemory(SINCE)
+    m = foldAlertRead(m, read({ tasks: [task('b', 'blocked')] }), { announce: false }).memory
+    m = foldAlertRead(m, read({ tasks: [] }), { announce: true }).memory
+    expect(
+      keys(
+        foldAlertRead(m, read({ tasks: [task('b', 'blocked', { updatedAt: 8000 })] }), {
+          announce: true,
+        }).fresh,
+      ),
+    ).toEqual(['task:b:blocked:1'])
   })
 })
 
@@ -223,31 +360,32 @@ describe('latestAlertTrigger', () => {
 })
 
 describe('createAlertWatcher', () => {
+  const SINCE = 5000
   function harness() {
-    let tasks: AlertTaskInput[] = []
+    let tasks: AlertTaskInput[] | null = []
     let approvals: AlertApprovalInput[] = []
-    let failRead = false
+    let approvalsComplete = true
     const notices: AlertNotice[] = []
-    const reads = { count: 0 }
+    const reads = { count: 0, complete: [] as boolean[] }
     const watcher = createAlertWatcher({
       readTasks: async () => {
         reads.count += 1
-        return failRead ? null : tasks
+        return tasks
       },
-      readApprovals: async () => approvals,
+      readApprovals: async () => ({ rows: approvals, complete: approvalsComplete }),
       agentOf,
       notify: (n) => notices.push(n),
+      onRead: (complete) => reads.complete.push(complete),
+      now: () => 10_000,
     })
     return {
       watcher,
       notices,
       reads,
-      set(t: AlertTaskInput[], a: AlertApprovalInput[] = []) {
+      set(t: AlertTaskInput[] | null, a: AlertApprovalInput[] = [], complete = true) {
         tasks = t
         approvals = a
-      },
-      failNext(v: boolean) {
-        failRead = v
+        approvalsComplete = complete
       },
     }
   }
@@ -255,8 +393,8 @@ describe('createAlertWatcher', () => {
   it('announces only what arrived after the prime', async () => {
     const h = harness()
     h.set([task('old', 'failed')])
-    await h.watcher.prime()
-    h.set([task('old', 'failed'), task('new', 'failed')])
+    await h.watcher.prime(SINCE)
+    h.set([task('old', 'failed'), task('new', 'failed', { updatedAt: 6000 })])
     await h.watcher.check()
     expect(h.notices.map((n) => n.title)).toEqual(['A task needs you'])
     expect(h.notices[0]!.body).toContain('Task new')
@@ -265,35 +403,47 @@ describe('createAlertWatcher', () => {
     expect(h.notices).toHaveLength(1)
   })
 
-  it('primes instead of announcing when asked to check first', async () => {
+  it('checks without a prime as if the tab had just left', async () => {
     const h = harness()
     h.set([task('a', 'failed')])
     await h.watcher.check()
     expect(h.notices).toEqual([])
   })
 
-  it('keeps what it had seen when a read fails', async () => {
+  it('announces what arrived after a failed prime, and not what was there before', async () => {
     const h = harness()
-    h.set([task('a', 'failed')])
-    await h.watcher.prime()
-    h.failNext(true)
+    h.set(null, [], false)
+    await h.watcher.prime(SINCE)
+    expect(h.reads.complete).toEqual([false])
+    h.set([
+      task('before', 'failed', { updatedAt: 4000 }),
+      task('after', 'failed', { updatedAt: 6000 }),
+    ])
     await h.watcher.check()
-    h.failNext(false)
+    expect(h.notices.map((n) => n.body)).toEqual(['"Task after" failed. Click to open it.'])
+    expect(h.reads.complete).toEqual([false, true])
+  })
+
+  it('says when part of a read failed, so the caller can try again', async () => {
+    const h = harness()
+    await h.watcher.prime(SINCE)
+    h.set([], [approval('a1', { createdAt: 6000 })], false)
     await h.watcher.check()
-    expect(h.notices).toEqual([])
+    expect(h.reads.complete).toEqual([true, false])
+    expect(h.notices.map((n) => n.title)).toEqual(['Ada needs your approval'])
   })
 
   it('turns a burst of checks into one more read and one alert', async () => {
     const h = harness()
-    await h.watcher.prime()
-    h.set([task('a', 'failed'), task('b', 'failed')])
+    await h.watcher.prime(SINCE)
+    h.set([task('a', 'failed', { updatedAt: 6000 }), task('b', 'failed', { updatedAt: 6000 })])
     const runs = [h.watcher.check(), h.watcher.check(), h.watcher.check()]
     await Promise.all(runs)
     expect(h.reads.count).toBe(3) // the prime, the first check, one catch-up
     expect(h.notices.map((n) => n.title)).toEqual(['2 tasks need you'])
   })
 
-  it('drops a read that was out when it was reset, then primes again', async () => {
+  it('drops a read that was out when it was reset', async () => {
     let release: () => void = () => {}
     const notify = vi.fn()
     let tasks: AlertTaskInput[] = []
@@ -302,19 +452,17 @@ describe('createAlertWatcher', () => {
         new Promise((resolve) => {
           release = () => resolve(tasks)
         }),
-      readApprovals: async () => [],
+      readApprovals: async () => ({ rows: [], complete: true }),
       agentOf,
       notify,
+      now: () => 10_000,
     })
-    const first = watcher.prime()
+    const first = watcher.check()
     watcher.reset()
-    tasks = [task('a', 'failed')]
+    // It began waiting after the read started, so only the reset keeps it quiet.
+    tasks = [task('a', 'failed', { updatedAt: 12_000 })]
     release()
     await first
-    // The reset dropped the prime, so this check primes rather than announcing.
-    const check = watcher.check()
-    release()
-    await check
     expect(notify).not.toHaveBeenCalled()
   })
 })

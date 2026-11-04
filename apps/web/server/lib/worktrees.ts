@@ -54,6 +54,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { getDb } from './db'
+import { emitEvent } from './obs'
 import type { RuntimeRunContext } from './runtimes'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
 import { readTeamVerifyCommand } from './verification/teamVerifyCommand'
@@ -424,6 +425,16 @@ export async function actOnTaskWorkspace(
     // when a human re-queues it.
     const r = updateStatus(db, taskId, 'blocked')
     taskStatus = r.ok ? 'blocked' : (getTask(db, taskId)?.status ?? 'in_review')
+    // On the event log too: it is what live views (the browser alerts among
+    // them) follow, and the status write above reaches only the in-process bus.
+    if (r.ok) {
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: r.task?.teamId ?? null,
+        data: { to: 'blocked', reason: 'verification_exhausted' },
+      })
+    }
     addComment(
       db,
       taskId,

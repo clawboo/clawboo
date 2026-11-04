@@ -282,7 +282,7 @@ export function ActivityTerminal({
           style={{ padding: '9px 10px 9px 12px' }}
         >
           <p className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
-            No activity yet. Tool calls, results and errors show up here as agents work.
+            No activity yet. It shows up here as agents work.
           </p>
           {hideHeader ? <LiveDot live={live} loading={loading} /> : null}
         </div>

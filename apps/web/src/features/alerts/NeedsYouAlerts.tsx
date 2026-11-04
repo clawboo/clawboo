@@ -6,11 +6,12 @@
 // ended, a task moved, an approval opened), and the Gateway socket delivers
 // shell approvals to the approvals store. Either one, while the tab is in the
 // background, schedules ONE read of the board and the approval queue a moment
-// later, so a burst of events becomes one read and one alert.
+// later, so a burst of events becomes one read and one alert. A read that
+// fails is tried again a few times, so a quiet board still gets its alert.
 //
 // While the tab is in front nothing is read. On the way to the background the
-// watcher reads once to take what is waiting as seen: the person was looking
-// at it, so only what arrives after that is announced.
+// watcher notes the time and reads once to take what is waiting as seen: the
+// person was looking at it, so only what begins waiting after that is announced.
 
 import { useEffect } from 'react'
 import { apiFetch } from '@clawboo/control-client'
@@ -34,47 +35,57 @@ import {
 /** How long after the first event of a burst the read waits for the rest. */
 export const ALERT_BATCH_MS = 1000
 
+/** When a read fails, read again after these waits, then wait for the next
+ *  event. A quiet board would otherwise never get the alert. */
+export const ALERT_RETRY_MS: readonly number[] = [5_000, 20_000, 60_000]
+
 /** Behind another tab or window, or in a window that does not have focus. */
 function inBackground(): boolean {
   return document.hidden || !document.hasFocus()
 }
 
-async function readApprovals(): Promise<AlertApprovalInput[] | null> {
-  let rows: AlertApprovalInput[]
+/** Shell approvals the Gateway socket delivered, which the server may not have
+ *  mirrored yet. The same id from both sources is announced once. */
+function localExecApprovals(): AlertApprovalInput[] {
+  return Array.from(useApprovalsStore.getState().pendingApprovals.values(), (a) => ({
+    id: a.id,
+    toolName: 'exec',
+    agentId: a.agentId,
+    kind: 'exec',
+    createdAt: a.createdAtMs,
+    expiresAt: a.expiresAtMs,
+  }))
+}
+
+async function readApprovals(): Promise<{ rows: AlertApprovalInput[]; complete: boolean }> {
   try {
     const res = await apiFetch('/api/tools/approvals?status=pending')
-    if (!res.ok) return null
-    const body = (await res.json()) as {
-      approvals?: Array<{
-        id: string
-        toolName: string
-        agentId: string | null
-        kind?: string | null
-        expiresAt?: number | null
-      }>
+    if (res.ok) {
+      const body = (await res.json()) as {
+        approvals?: Array<{
+          id: string
+          toolName: string
+          agentId: string | null
+          kind?: string | null
+          createdAt?: number | null
+          expiresAt?: number | null
+        }>
+      }
+      const rows = (body.approvals ?? []).map((a): AlertApprovalInput => ({
+        id: a.id,
+        toolName: a.toolName,
+        agentId: a.agentId ?? null,
+        kind: a.kind ?? null,
+        createdAt: a.createdAt ?? null,
+        expiresAt: a.expiresAt ?? null,
+      }))
+      return { rows: [...rows, ...localExecApprovals()], complete: true }
     }
-    rows = (body.approvals ?? []).map((a) => ({
-      id: a.id,
-      toolName: a.toolName,
-      agentId: a.agentId ?? null,
-      kind: a.kind ?? null,
-      expiresAt: a.expiresAt ?? null,
-    }))
   } catch {
-    return null
+    // Read below as incomplete.
   }
-  // Shell approvals the Gateway socket delivered, which the server may not have
-  // mirrored yet. The same id from both sources is announced once.
-  for (const a of useApprovalsStore.getState().pendingApprovals.values()) {
-    rows.push({
-      id: a.id,
-      toolName: 'exec',
-      agentId: a.agentId,
-      kind: 'exec',
-      expiresAt: a.expiresAtMs,
-    })
-  }
-  return rows
+  // The queue could not be read; what the Gateway delivered can still be told.
+  return { rows: localExecApprovals(), complete: false }
 }
 
 function agentOf(id: string | null): AlertAgent | null {
@@ -130,7 +141,13 @@ export function showTestAlert(): boolean {
   }
 }
 
-export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number } = {}): null {
+export function NeedsYouAlerts({
+  batchMs = ALERT_BATCH_MS,
+  retryMs = ALERT_RETRY_MS,
+}: {
+  batchMs?: number
+  retryMs?: readonly number[]
+} = {}): null {
   const choice = useAlertPrefs((s) => s.choice)
   const permission = useAlertPrefs((s) => s.permission)
   const active = alertsActive(choice, permission)
@@ -163,6 +180,35 @@ export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number 
 
   useEffect(() => {
     if (!active) return
+    let background = false
+    let timer: number | null = null
+    let retryTimer: number | null = null
+    let retries = 0
+    const cancelTimer = (): void => {
+      if (timer !== null) window.clearTimeout(timer)
+      timer = null
+    }
+    const cancelRetry = (): void => {
+      if (retryTimer !== null) window.clearTimeout(retryTimer)
+      retryTimer = null
+      retries = 0
+    }
+    // A read that came back incomplete is tried again a few times, further
+    // apart each time; a complete one ends the run of retries.
+    const onRead = (complete: boolean): void => {
+      if (complete) {
+        cancelRetry()
+        return
+      }
+      if (!background || retryTimer !== null || retries >= retryMs.length) return
+      const wait = retryMs[retries]!
+      retries += 1
+      retryTimer = window.setTimeout(() => {
+        retryTimer = null
+        if (background) void watcher.check()
+      }, wait)
+    }
+
     const watcher = createAlertWatcher({
       readTasks: async () => {
         const res = await fetchBoardResult()
@@ -171,14 +217,8 @@ export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number 
       readApprovals,
       agentOf,
       notify: showAlert,
+      onRead,
     })
-
-    let background = false
-    let timer: number | null = null
-    const cancelTimer = (): void => {
-      if (timer !== null) window.clearTimeout(timer)
-      timer = null
-    }
     // Throttled, not debounced: a run that keeps moving tasks must not hold
     // the read off for as long as it keeps going.
     const schedule = (): void => {
@@ -193,9 +233,11 @@ export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number 
       if (next === background) return
       background = next
       if (next) {
-        void watcher.prime()
+        // From this moment only what begins waiting is news.
+        void watcher.prime(Date.now())
       } else {
         cancelTimer()
+        cancelRetry()
         watcher.reset()
       }
     }
@@ -215,6 +257,7 @@ export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number 
 
     return () => {
       cancelTimer()
+      cancelRetry()
       watcher.reset()
       document.removeEventListener('visibilitychange', sync)
       window.removeEventListener('focus', sync)
@@ -222,7 +265,7 @@ export function NeedsYouAlerts({ batchMs = ALERT_BATCH_MS }: { batchMs?: number 
       offSignal()
       offExec()
     }
-  }, [active, batchMs])
+  }, [active, batchMs, retryMs])
 
   return null
 }

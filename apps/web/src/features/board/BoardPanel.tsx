@@ -1761,13 +1761,15 @@ export function BoardPanel() {
   }, [requestView])
 
   // A browser alert about an approval, or about several things at once: show
-  // Needs you, on the alert's team when the board is narrowed to another one.
+  // Needs you, on the alert's team when the board is narrowed to another one,
+  // and with no filter, which would otherwise hide what the alert is about.
   const needsYouFocus = useViewStore((s) => s.boardNeedsYouFocus)
   useEffect(() => {
     if (!needsYouFocus) return
     const { teamId } = needsYouFocus
     if (teamId === 'all') setTeamFilter('all')
     else if (teamId) setTeamFilter((f) => (f !== 'all' && f !== teamId ? teamId : f))
+    setBoardFilter(NO_FILTER)
     setOpenTaskId(null)
     revealNeedsYou()
     useViewStore.getState().clearBoardNeedsYouFocus()

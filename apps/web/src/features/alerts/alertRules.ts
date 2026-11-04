@@ -41,8 +41,8 @@ export interface AlertTaskInput {
   status: string
   teamId?: unknown
   attention?: unknown
+  /** The task's last change: for a task that needs a person, when it began to. */
   updatedAt?: unknown
-  personMovedAt?: unknown
 }
 
 /** The fields of a pending approval the alerts read, from either system. */
@@ -52,26 +52,26 @@ export interface AlertApprovalInput {
   agentId: string | null
   /** `exec` for a shell command; anything else is a tool call. */
   kind?: string | null
+  createdAt?: number | null
   expiresAt?: number | null
 }
 
-export type AlertItem =
+export type AlertKind = 'task' | 'approval'
+
+export type AlertItem = {
+  key: string
+  /** When it began waiting on the person, when that is known (epoch ms). */
+  at: number | null
+} & (
   | {
-      key: string
       kind: 'task'
       taskId: string
       title: string
       reason: AnnouncedReason
       teamId: string | null
     }
-  | { key: string; kind: 'approval'; approvalId: string; toolName: string; agentId: string | null }
-
-/** Moved to Blocked by a person, and nothing has moved it since: their own act. */
-function blockedByPerson(task: AlertTaskInput): boolean {
-  const moved = typeof task.personMovedAt === 'number' ? task.personMovedAt : null
-  const updated = typeof task.updatedAt === 'number' ? task.updatedAt : 0
-  return moved != null && moved >= updated
-}
+  | { kind: 'approval'; approvalId: string; toolName: string; agentId: string | null }
+)
 
 function titleOf(task: AlertTaskInput): string {
   return typeof task.title === 'string' && task.title.trim() ? task.title.trim() : 'A task'
@@ -91,6 +91,7 @@ export function collectAlertItems(
     seenApprovals.add(a.id)
     items.push({
       key: `approval:${a.id}`,
+      at: typeof a.createdAt === 'number' ? a.createdAt : null,
       kind: 'approval',
       approvalId: a.id,
       toolName: a.kind === 'exec' ? 'exec' : a.toolName,
@@ -100,11 +101,14 @@ export function collectAlertItems(
   for (const t of tasks) {
     const attention = taskAttentionOf(t)
     if (!attention || !isAnnounced(attention.reason)) continue
-    if (attention.reason === 'blocked' && blockedByPerson(t)) continue
+    // The person moved it to Blocked themselves, and no run has started since.
+    if (attention.byPerson) continue
     items.push({
-      // Keyed by the reason too: a task that fails, is retried and fails again
-      // is announced again once it has left the list in between.
-      key: `task:${t.id}:${attention.reason}`,
+      // Keyed by the reason and the failed-run count too: a task that fails,
+      // is retried and fails again is news again, even when no read saw it
+      // leave the list in between.
+      key: `task:${t.id}:${attention.reason}:${attention.failedRuns}`,
+      at: typeof t.updatedAt === 'number' ? t.updatedAt : null,
       kind: 'task',
       taskId: t.id,
       title: titleOf(t),
@@ -115,16 +119,87 @@ export function collectAlertItems(
   return items
 }
 
-/** Items not announced before, plus the updated seen set (only what is still
- *  waiting, so an item that leaves and comes back is new again). */
-export function diffAlertItems(
-  items: readonly AlertItem[],
-  seen: ReadonlySet<string>,
-): { fresh: AlertItem[]; seen: Set<string> } {
-  return {
-    fresh: items.filter((i) => !seen.has(i.key)),
-    seen: new Set(items.map((i) => i.key)),
+/** One read of what needs the person. A part that could not be read is not
+ *  evidence that its items are gone. */
+export interface AlertRead {
+  /** The board's tasks, or null when the board could not be read. */
+  tasks: readonly AlertTaskInput[] | null
+  approvals: readonly AlertApprovalInput[]
+  /** False when the approval queue could not be read, so `approvals` holds
+   *  only the shell approvals the Gateway socket delivered. */
+  approvalsComplete: boolean
+}
+
+/** What the watcher remembers while the tab is in the background. */
+export interface AlertMemory {
+  /** When the tab went to the background. */
+  since: number
+  /** Items the person already knows about: waiting before the tab left, or
+   *  announced since. */
+  known: Set<string>
+  /** The kinds whose whole list has been read since `since`, so anything new
+   *  in them is news whatever its timestamp says. */
+  listed: Set<AlertKind>
+}
+
+export function startAlertMemory(since: number): AlertMemory {
+  return { since, known: new Set(), listed: new Set() }
+}
+
+/**
+ * Fold one read into memory and return what is news.
+ *
+ * The read taken as the tab leaves (`announce: false`) only records what is
+ * already waiting. An item that began waiting after the tab left is left out
+ * of it, so the next read announces it even though it was in that response.
+ * Until a kind's whole list has been read, its timestamps decide: an item that
+ * began waiting before the tab left was there for the person to see. A part
+ * that failed keeps what was known of its kind, and a whole list forgets what
+ * has left it, so an item that leaves and comes back is news again.
+ */
+export function foldAlertRead(
+  memory: AlertMemory,
+  read: AlertRead,
+  opts: { announce: boolean; now?: number },
+): { fresh: AlertItem[]; memory: AlertMemory } {
+  const now = opts.now ?? Date.now()
+  const known = new Set(memory.known)
+  const listed = new Set(memory.listed)
+  const fresh: AlertItem[] = []
+  const began = (i: AlertItem): boolean => i.at !== null && i.at > memory.since
+
+  const parts: { kind: AlertKind; items: AlertItem[]; complete: boolean }[] = [
+    {
+      kind: 'approval',
+      items: collectAlertItems([], read.approvals, now),
+      complete: read.approvalsComplete,
+    },
+  ]
+  if (read.tasks) {
+    parts.push({ kind: 'task', items: collectAlertItems(read.tasks, [], now), complete: true })
   }
+
+  for (const part of parts) {
+    for (const item of part.items) {
+      if (known.has(item.key)) continue
+      const isNews = listed.has(part.kind) ? true : began(item)
+      if (!isNews) {
+        known.add(item.key)
+        continue
+      }
+      if (!opts.announce) continue
+      fresh.push(item)
+      known.add(item.key)
+    }
+    if (part.complete) {
+      const current = new Set(part.items.map((i) => i.key))
+      for (const key of [...known]) {
+        if (key.startsWith(`${part.kind}:`) && !current.has(key)) known.delete(key)
+      }
+      listed.add(part.kind)
+    }
+  }
+  return { fresh, memory: { since: memory.since, known, listed } }
 }
 
 // ─── Notice copy ─────────────────────────────────────────────────────────────
@@ -256,18 +331,24 @@ export function alertNotice(
 export interface AlertWatcherDeps {
   /** The board's tasks, or null when the read failed. */
   readTasks(): Promise<readonly AlertTaskInput[] | null>
-  /** The pending approvals, or null when the read failed. */
-  readApprovals(): Promise<readonly AlertApprovalInput[] | null>
+  /** The pending approvals; `complete` is false when the queue could not be
+   *  read and only the locally known ones are listed. */
+  readApprovals(): Promise<{ rows: readonly AlertApprovalInput[]; complete: boolean }>
   agentOf(id: string | null): AlertAgent | null
   notify(notice: AlertNotice): void
+  /** After each read: false when part of it failed, so the caller can try
+   *  again rather than wait for the next event. */
+  onRead?(complete: boolean): void
+  now?(): number
 }
 
 export interface AlertWatcher {
-  /** Take what is waiting now as already seen: the person was looking. */
-  prime(): Promise<void>
-  /** Read again and announce what is new since the last read. */
+  /** The tab went to the background at `since`: read what is waiting, which
+   *  the person has seen, and announce only what begins waiting after it. */
+  prime(since: number): Promise<void>
+  /** Read again and announce what is new. */
   check(): Promise<void>
-  /** Forget what was seen; the next call primes again. */
+  /** Forget everything; the tab is in front again. */
   reset(): void
 }
 
@@ -276,32 +357,33 @@ export interface AlertWatcher {
  * after it, so a burst of events costs at most two reads and one alert.
  */
 export function createAlertWatcher(deps: AlertWatcherDeps): AlertWatcher {
-  // Null until primed. A check before then primes instead: everything already
-  // waiting is on the board for the person to see.
-  let seen: Set<string> | null = null
+  const now = (): number => (deps.now ? deps.now() : Date.now())
+  // Null while the tab is in front.
+  let memory: AlertMemory | null = null
   let generation = 0
   let running: Promise<void> | null = null
   let queued: 'prime' | 'check' | null = null
 
-  const read = async (): Promise<AlertItem[] | null> => {
-    const [tasks, approvals] = await Promise.all([deps.readTasks(), deps.readApprovals()])
-    if (!tasks || !approvals) return null
-    return collectAlertItems(tasks, approvals)
-  }
-
   const runOnce = async (mode: 'prime' | 'check'): Promise<void> => {
     const gen = generation
-    const items = await read()
-    // A reset while the read was out: the answer belongs to a past session.
-    if (!items || gen !== generation) return
-    if (mode === 'prime' || seen === null) {
-      seen = new Set(items.map((i) => i.key))
-      return
-    }
-    const { fresh, seen: next } = diffAlertItems(items, seen)
-    seen = next
+    if (!memory) memory = startAlertMemory(now())
+    const [tasks, approvals] = await Promise.all([
+      deps.readTasks().catch(() => null),
+      deps
+        .readApprovals()
+        .catch(() => ({ rows: [] as readonly AlertApprovalInput[], complete: false })),
+    ])
+    // A reset or a new prime while the read was out: it belongs to a past session.
+    if (gen !== generation || !memory) return
+    const { fresh, memory: next } = foldAlertRead(
+      memory,
+      { tasks, approvals: approvals.rows, approvalsComplete: approvals.complete },
+      { announce: mode === 'check', now: now() },
+    )
+    memory = next
     const notice = alertNotice(fresh, deps.agentOf)
     if (notice) deps.notify(notice)
+    deps.onRead?.(tasks !== null && approvals.complete)
   }
 
   const run = (mode: 'prime' | 'check'): Promise<void> => {
@@ -319,7 +401,7 @@ export function createAlertWatcher(deps: AlertWatcherDeps): AlertWatcher {
           try {
             await runOnce(next)
           } catch {
-            // The server was briefly out of reach; the next event reads again.
+            // A notification that could not be shown; the next event reads again.
           }
           next = queued
         }
@@ -331,11 +413,15 @@ export function createAlertWatcher(deps: AlertWatcherDeps): AlertWatcher {
   }
 
   return {
-    prime: () => run('prime'),
+    prime(since) {
+      generation += 1
+      memory = startAlertMemory(since)
+      return run('prime')
+    },
     check: () => run('check'),
     reset() {
       generation += 1
-      seen = null
+      memory = null
       queued = null
     },
   }
