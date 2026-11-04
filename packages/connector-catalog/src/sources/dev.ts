@@ -164,8 +164,14 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       // the same site. Verified present in 0.0.79's own --help.
       perAgentProfileFlag: '--user-data-dir',
       // Verified in 0.0.79: each origin becomes a context route that aborts
-      // every request to it, navigations and subresources alike.
+      // every request to it, navigations and subresources alike. A route never
+      // sees a redirect hop or a WebSocket, so a local page that answers 302 to
+      // the dashboard loaded it; the host rule below is what catches those.
       blockOriginsArg: { flag: '--blocked-origins', style: 'origins' },
+      // Verified in 0.0.79: --config reads a JSON file, and the Chrome switches
+      // in its browser.launchOptions.args reach the browser alongside the CLI
+      // flags Clawboo passes, a persistent profile included.
+      chromeSwitchArg: { flag: '--config', style: 'playwrightConfig' },
     },
     auth: { kind: 'none', inputs: [] },
     // Deliberately broad: a browser can reach anything. The egress allowlist is
@@ -203,8 +209,12 @@ export const DEV_CONNECTORS: ConnectorDefinition[] = [
       // present in 1.7.0's own --help.
       perAgentProfileFlag: '--userDataDir',
       // Verified in 1.7.0: URLPattern strings, checked on navigation and on
-      // runtime requests (its bundled polyfill covers Node 22).
+      // runtime requests (its bundled polyfill covers Node 22). Clawboo also
+      // passes file: and view-source: here, which this server opened and put in
+      // its snapshot otherwise.
       blockOriginsArg: { flag: '--blockedUrlPattern', style: 'urlPatterns' },
+      // Verified in 1.7.0: each --chromeArg value is a Chrome launch switch.
+      chromeSwitchArg: { flag: '--chromeArg', style: 'joined' },
     },
     auth: { kind: 'none', inputs: [] },
     egressAllow: ['*'],

@@ -374,6 +374,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
         ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
         : {}),
       ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
+      ...(def.launch.chromeSwitchArg ? { chromeSwitchArg: def.launch.chromeSwitchArg } : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,

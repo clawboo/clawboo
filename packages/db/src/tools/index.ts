@@ -28,6 +28,7 @@ export {
   argClampInspector,
   dashboardInspector,
   defaultInspectors,
+  localFileInspector,
   riskClassifierInspector,
   runInspectors,
   scopeInspector,
