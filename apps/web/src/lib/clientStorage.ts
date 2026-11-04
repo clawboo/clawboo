@@ -18,6 +18,13 @@
 // left behind for the next instance on the origin to inherit. Removing a key
 // removes both spellings, or the old one would come back on the next read.
 //
+// The move is a read, a write and a remove, not one atomic step: storage has no
+// cross-tab lock that a synchronous read could wait on (`navigator.locks` is
+// async, and these reads run while modules load). Two instances whose pages load
+// at the same moment can therefore both copy the old value before either removes
+// it. That happens at most once per key, only for a key from before the prefix,
+// and leaves each instance where the shared value had it.
+//
 // EVERY CALL TOLERATES FAILURE. Storage throws in Safari private mode and some
 // embedded webviews, and a full one throws on write. A read then answers null and
 // a write or remove does nothing, which is what each caller did with its own

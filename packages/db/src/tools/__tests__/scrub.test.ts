@@ -156,6 +156,58 @@ describe('saved secret values', () => {
     expect(scrubResultSummary(KEY)).toBe('[REDACTED]')
   })
 
+  it('masks the \\u00e4 spelling an ASCII-only JSON writer gives a non-ASCII value', () => {
+    // Python's json.dumps escapes every non-ASCII character by default.
+    const password = 'pässwörd-☃-0123456789'
+    values = new Set([password])
+    const lower = '{"p": "p\\u00e4ssw\\u00f6rd-\\u2603-0123456789"}'
+    expect(scrubResultSummary(lower)).toBe('{"p": "[REDACTED]"}')
+    const upper = lower.replace(/\\u([0-9a-f]{4})/g, (_, hex: string) => `\\u${hex.toUpperCase()}`)
+    expect(upper).not.toBe(lower)
+    expect(scrubResultSummary(upper)).toBe('{"p": "[REDACTED]"}')
+  })
+
+  it('masks a value only partly URL-encoded, or encoded in mixed hex case', () => {
+    // Built at run time so a secret scanner does not read the line as a real token.
+    const token = ['ya29', '.A0Ab+Cd/Ef==Gh9iJkLmNo'].join('')
+    values = new Set([token])
+    // Python's urllib.parse.quote leaves the slash alone by default.
+    const quoted = token.replace('+', '%2B').replaceAll('=', '%3D')
+    expect(scrubResultSummary(`?t=${quoted}&x=1`)).toBe('?t=[REDACTED]&x=1')
+    const mixed = token.replace('+', '%2b').replace('/', '%2F').replace('=', '%3d')
+    expect(mixed).toContain('=')
+    expect(scrubResultSummary(`?t=${mixed}`)).toBe('?t=[REDACTED]')
+    // A multi-byte character arrives as its UTF-8 bytes, in either case.
+    const password = 'pässword two-0123456789'
+    values = new Set([password])
+    expect(scrubResultSummary('pw=p%c3%A4ssword+two-0123456789')).toBe('pw=[REDACTED]')
+    expect(scrubResultSummary('pw=pässword%20two-0123456789')).toBe('pw=[REDACTED]')
+    // Encoded text that is not a saved value is left as it was.
+    expect(scrubResultSummary('q=caf%C3%A9+au+lait')).toBe('q=caf%C3%A9+au+lait')
+  })
+
+  it('keeps a value that overlaps itself cheap to mask across a long output', () => {
+    // Every start position of a periodic value is a match, so recording each one
+    // separately made millions of spans for a few megabytes of text.
+    const periodic = 'ab'.repeat(8)
+    const plain = ['q7Lm2ZxW', '9tRb4VcN'].join('')
+    const text = `<${'ab'.repeat(2_000_000)}>`
+    const time = (value: string): number => {
+      values = new Set([value])
+      const started = performance.now()
+      scrubResultSummary(text, text.length)
+      return performance.now() - started
+    }
+    time(plain)
+    const baseline = time(plain)
+    const overlapping = time(periodic)
+    expect(scrubResultSummary(text, text.length)).toBe('<[REDACTED]>')
+    // The scan itself still visits every start; only the bookkeeping must not grow.
+    // Measured: about 5x the baseline once runs fold, about 40x when every start
+    // was kept and sorted.
+    expect(overlapping).toBeLessThan(baseline * 12 + 100)
+  })
+
   it('stays fast on a large output', () => {
     values = new Set(Array.from({ length: 20 }, (_, i) => `${KEY}${i}`))
     const big = `${'lorem ipsum dolor sit amet '.repeat(200_000)}${KEY}7 end`

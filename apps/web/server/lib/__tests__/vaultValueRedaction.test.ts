@@ -8,7 +8,7 @@
 // real write paths (tool audit, events, governance audit, memory, a run
 // summary, the verify gate), and then reads every row of the database back.
 
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -124,6 +124,40 @@ describe('value-based redaction of saved keys', () => {
     expect(det.passed).toBe(true)
     expect(det.stdoutTail).not.toContain(MISTRAL)
     expect(det.stdoutTail).toContain('[REDACTED]')
+  })
+
+  it("masks the verify gate's error output", async () => {
+    const worktree = path.join(clawbooHome, 'worktrees', 'repo', 'task-2')
+    mkdirSync(worktree, { recursive: true })
+    const det = await runDeterministicGate({
+      worktreePath: worktree,
+      verifyCommand: `node -e "process.stderr.write('${MISTRAL}')"`,
+      env: { ...process.env },
+    })
+    expect(det.passed).toBe(true)
+    expect(det.stderrTail).not.toContain(MISTRAL)
+    expect(det.stderrTail).toContain('[REDACTED]')
+  })
+
+  it('reads the vault again after a read that failed, keeping what it lent meanwhile', () => {
+    const file = path.join(clawbooHome, 'secrets', 'runtime-keys.json')
+    const saved = readFileSync(file, 'utf8')
+    // A vault file that cannot be parsed, read before anything was lent.
+    writeFileSync(file, '{ not json')
+    expect(scrubResultSummary(GROQ)).toBe(GROQ)
+    writeFileSync(file, saved)
+    expect(scrubResultSummary(GROQ)).toBe('[REDACTED]')
+    // Once a set was lent, a later read that fails keeps it rather than lending nothing.
+    setRuntimeSecret('connector:x:TOKEN', ['another-saved', '-value-0123'].join(''))
+    writeFileSync(file, '{ not json')
+    expect(scrubResultSummary(XAI)).toBe('[REDACTED]')
+  })
+
+  it('reads the vault again after the master key could not be loaded', () => {
+    process.env['CLAWBOO_SECRETS_MASTER_KEY'] = 'not a usable key'
+    expect(scrubResultSummary(GROQ)).toBe(GROQ)
+    delete process.env['CLAWBOO_SECRETS_MASTER_KEY']
+    expect(scrubResultSummary(GROQ)).toBe('[REDACTED]')
   })
 
   it('masks the JSON-escaped and URL-encoded spellings of a saved value', () => {

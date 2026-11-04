@@ -172,7 +172,9 @@ export const useChatStore = create<ChatStore>((set) => ({
       // Optional diagnostic — enable in browser DevTools with
       //   localStorage.setItem('clawboo:debug-triple-render', 'true')
       // to capture the upstream source of duplicates if this path is hit.
-      // Off by default.
+      // Off by default. Under a base path the stored key carries the prefix,
+      // for example '/a:clawboo:debug-triple-render'. Set that spelling: the
+      // unprefixed one is only read while no prefixed value is stored.
       if (
         typeof window !== 'undefined' &&
         droppedByContent.length > 0 &&
