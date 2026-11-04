@@ -23,11 +23,17 @@ const hooks = vi.hoisted(() => ({
   identity: null as null | Armed,
   /** False simulates a platform without O_NOFOLLOW (Windows). */
   noFollow: true,
+  /** True makes the kernel's name for an open file unreadable, as it is off
+   *  Linux, so a test reaches the path checks that come after it. */
+  noKernelPath: false,
+  /** Path lookups made since the test began. */
+  seen: { realpath: 0, identity: 0 },
 }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   const tick = async (key: 'realpath' | 'identity'): Promise<void> => {
+    hooks.seen[key] += 1
     const armed = hooks[key]
     if (!armed) return
     armed.left -= 1
@@ -49,6 +55,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       await tick('identity')
       return actual.lstat(...args)
     }) as typeof actual.lstat,
+    readlink: (async (...args: Parameters<typeof actual.readlink>) => {
+      if (hooks.noKernelPath && String(args[0]).startsWith('/proc/self/fd/')) {
+        throw Object.assign(new Error('no /proc here'), { code: 'ENOENT' })
+      }
+      return actual.readlink(...args)
+    }) as typeof actual.readlink,
   }
   return { ...mocked, default: mocked }
 })
@@ -74,12 +86,14 @@ beforeEach(async () => {
   hooks.realpath = null
   hooks.identity = null
   hooks.noFollow = true
+  hooks.noKernelPath = false
   root = await realRealpath(await mkdtemp(path.join(os.tmpdir(), 'clawboo-race-root-')))
   outside = await realRealpath(await mkdtemp(path.join(os.tmpdir(), 'clawboo-race-out-')))
   await mkdir(path.join(root, 'dist'))
   await writeFile(path.join(root, 'dist', 'index.html'), '<h1>Built</h1>')
   await writeFile(path.join(root, 'notes.txt'), 'inside the worktree')
   await writeFile(path.join(outside, 'index.html'), 'vault-key-canary')
+  hooks.seen = { realpath: 0, identity: 0 }
 })
 
 afterEach(async () => {
@@ -123,6 +137,9 @@ describe('openConfinedFile refuses an outside file however the swap is timed', (
     // Opened through a folder that led outside; then, before the name check,
     // the folder is the worktree's again and the outside file has a second
     // name at the checked path. The name and the inode now match.
+    // On Linux the kernel check would refuse this first; it is switched off
+    // so the test reaches the link-count check it is about.
+    hooks.noKernelPath = true
     await swapDistForLink()
     hooks.realpath = {
       left: 1,
@@ -134,19 +151,30 @@ describe('openConfinedFile refuses an outside file however the swap is timed', (
     }
     const served = await bytesServed()
     expect(served).toBeInstanceOf(WorkspacePathError)
+    // The name and the inode matched, so only the second link-count read refused it.
+    expect((served as Error).message).toBe('Hard-linked files are not served.')
+    expect(hooks.seen.identity).toBe(1)
   })
 
   it('refuses a leaf swapped for a link where O_NOFOLLOW does not exist, even to a file inside', async () => {
     hooks.noFollow = false
+    hooks.noKernelPath = true
     await rm(path.join(root, 'dist', 'index.html'))
     await symlink(path.join(root, 'notes.txt'), path.join(root, 'dist', 'index.html'))
     const served = await bytesServed()
     expect(served).toBeInstanceOf(WorkspacePathError)
+    // Refused by the name check (the path no longer resolves to itself), before
+    // the identity lookup could see the link.
+    expect(hooks.seen.realpath).toBe(1)
+    expect(hooks.seen.identity).toBe(0)
   })
 
-  // A folder toggled between the two path lookups after the open: inside for
-  // the name check, outside again for the identity check. Only the kernel's
-  // own name for the handle sees through it, which Node can read on Linux.
+  // The handle holds the outside file (the folder led outside at the open),
+  // and the folder is toggled so both path lookups after the open agree with
+  // it: inside for the name check, outside again for the identity check. The
+  // path checks pass that, so only the kernel's own name for the handle can
+  // refuse it, which Node can read on Linux. The hooks are what make the
+  // test fail if that check is ever removed.
   it.runIf(process.platform === 'linux')(
     'on Linux, refuses a folder toggled between the post-open lookups',
     async () => {
@@ -155,6 +183,8 @@ describe('openConfinedFile refuses an outside file however the swap is timed', (
       hooks.identity = { left: 1, fn: swapDistForLink }
       const served = await bytesServed()
       expect(served).toBeInstanceOf(WorkspacePathError)
+      // Refused by the kernel check, before any path lookup ran.
+      expect(hooks.seen.realpath).toBe(0)
     },
   )
 })

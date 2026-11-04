@@ -314,6 +314,17 @@ const REFUSAL_TAG: Record<Extract<WorkspaceOutcome, { ok: false }>['refusal'], s
   unsafe_to_rebuild: '[blocked: worktree kept]',
 }
 
+function registrationUnknown(
+  wtPath: string,
+  repoPath: string | null | undefined,
+): WorkspaceOutcome {
+  return {
+    ok: false,
+    refusal: 'registration_unknown',
+    reason: `Could not check the worktree at ${wtPath} against ${repoPath ?? 'its repository'} (git did not answer), so nothing was changed. The task can run again.`,
+  }
+}
+
 function unsafeWorkspace(r: { worktreePath: string; why: string }): WorkspaceOutcome {
   return {
     ok: false,
@@ -376,13 +387,7 @@ async function acquireWorkspace(
     // may replace the folder, so a failed `git worktree list` must not read as
     // "reaped". It says nothing about a checkout that may be live.
     const registration = onDisk && repoPath ? await worktreeRegistration(repoPath, wtPath) : null
-    if (registration === 'unknown') {
-      return {
-        ok: false,
-        refusal: 'registration_unknown',
-        reason: `Could not check the worktree at ${wtPath} against ${repoPath ?? 'its repository'} (git did not answer), so nothing was changed. The task can run again.`,
-      }
-    }
+    if (registration === 'unknown') return registrationUnknown(wtPath, repoPath)
     const reaped =
       existing.workspace.status === 'stale' || !onDisk || registration === 'unregistered'
     if (!reaped) return { ok: true, cwd: wtPath, resume: existing.resume }
@@ -399,6 +404,10 @@ async function acquireWorkspace(
       }
       // A fresh provision would replace the folder the same way.
       if (resumed.reason === 'unsafe_to_rebuild') return unsafeWorkspace(resumed)
+      // Resume asks git again, and an unanswered check stops it the same way.
+      if (resumed.reason === 'registration_unknown') {
+        return registrationUnknown(resumed.worktreePath, repoPath)
+      }
     }
   }
 

@@ -31,8 +31,12 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 
-/** How many registration probes, from now, answer as if `git worktree list` failed. */
-const probe = vi.hoisted(() => ({ failures: 0 }))
+const probe = vi.hoisted(() => ({
+  /** How many registration probes, from now, answer as if `git worktree list` failed. */
+  failures: 0,
+  /** The next resume finds that git cannot answer its own registration check. */
+  resumeUnanswered: false,
+}))
 
 vi.mock('@clawboo/worktrees', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@clawboo/worktrees')>()
@@ -49,6 +53,13 @@ vi.mock('@clawboo/worktrees', async (importOriginal) => {
       failOnce() ? false : actual.isWorktreeRegistered(repo, wt),
     worktreeRegistration: async (repo: string, wt: string) =>
       failOnce() ? ('unknown' as const) : actual.worktreeRegistration(repo, wt),
+    // Resume asks git again inside the package, out of reach of the probe above;
+    // this is what it throws when that check goes unanswered.
+    resumeWorktree: async (opts: Parameters<typeof actual.resumeWorktree>[0]) => {
+      if (!probe.resumeUnanswered) return actual.resumeWorktree(opts)
+      probe.resumeUnanswered = false
+      throw new actual.RegistrationUnknownError(path.join(opts.rootDir ?? '', opts.taskId))
+    },
   }
 })
 
@@ -118,6 +129,7 @@ describe('executor runner: a rebuild never discards uncommitted work', () => {
 
   beforeEach(async () => {
     probe.failures = 0
+    probe.resumeUnanswered = false
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-wtsafe-home-'))
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
@@ -238,6 +250,34 @@ describe('executor runner: a rebuild never discards uncommitted work', () => {
     expect(getTask(getDb(), t.taskId)?.status).toBe('todo')
     expect((await git(repo, ['rev-parse', t.branch])).trim()).toBe(tip)
     const note = getComments(getDb(), t.taskId).find((c) => c.body.includes(t.wtPath))
+    expect(note?.body).toMatch(/^\[not started: worktree unchecked\]/)
+  })
+
+  it('an unanswered check inside the rebuild stops the run as retryable, with no fresh provision', async () => {
+    const t = await taskWithUncommittedWork()
+    await git(t.wtPath, ['add', '-A'])
+    await git(t.wtPath, ['-c', 'user.name=t', '-c', 'user.email=t@e', 'commit', '-m', 'saved'])
+    const tip = (await git(repo, ['rev-parse', t.branch])).trim()
+    const ws = getWorkspaceForTask(getDb(), t.taskId)
+    updateWorkspaceStatus(getDb(), ws?.id ?? '', 'stale')
+    const second = new CountingAdapter('codex')
+    probe.resumeUnanswered = true
+
+    const r = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => second,
+      taskId: t.taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      disableMemoryAutoInject: true,
+    })
+
+    expect(r).toEqual({ ok: false, reason: 'workspace_unavailable' })
+    expect(second.startCount).toBe(0)
+    // To do, not Needs you: nothing is wrong with the folder.
+    expect(getTask(getDb(), t.taskId)?.status).toBe('todo')
+    expect((await git(repo, ['rev-parse', t.branch])).trim()).toBe(tip)
+    const note = getComments(getDb(), t.taskId).find((c) => c.body.includes('git did not answer'))
     expect(note?.body).toMatch(/^\[not started: worktree unchecked\]/)
   })
 

@@ -46,6 +46,7 @@ export {
   provisionReviewWorktree,
   removeReviewWorktree,
   UnsafeWorktreeError,
+  RegistrationUnknownError,
   type ProvisionOptions,
   type ResumeOptions,
   type LoadOptions,

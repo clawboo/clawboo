@@ -72,6 +72,21 @@ export class UnsafeWorktreeError extends Error {
   }
 }
 
+/**
+ * Thrown when `git worktree list` failed, so whether the checkout at
+ * `worktreePath` is registered is not known. Nothing was removed. Unlike
+ * {@link UnsafeWorktreeError} this says nothing about the folder, so a caller
+ * can simply try again later.
+ */
+export class RegistrationUnknownError extends Error {
+  readonly worktreePath: string
+  constructor(worktreePath: string) {
+    super(`left ${worktreePath} as it is: git could not say whether it is a registered worktree`)
+    this.name = 'RegistrationUnknownError'
+    this.worktreePath = worktreePath
+  }
+}
+
 /** Why a folder with these contents cannot be replaced, or null when it can. */
 function whyNotReplaceable(contents: CheckoutContents, repoPath: string): string | null {
   switch (contents) {
@@ -254,13 +269,18 @@ export interface ResumeOptions {
  * A registered checkout of the task branch with no changes is kept as it is,
  * files git ignores included. Any other folder at the path is replaced only
  * when that loses nothing; otherwise this throws {@link UnsafeWorktreeError}
- * and leaves it alone.
+ * and leaves it alone. When git cannot list the repository's worktrees it
+ * throws {@link RegistrationUnknownError} before touching anything.
  */
 export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
   const worktreePath = worktreePathFor(opts.repoPath, opts.taskId, opts.rootDir)
   const branch = branchNameForTask(opts.taskId)
 
   return mutex.run(worktreePath, async () => {
+    // Asked once, first, and that one answer decides: the replace below removes
+    // the folder, which an unanswered check must never lead to.
+    const registration = await worktreeRegistration(opts.repoPath, worktreePath)
+    if (registration === 'unknown') throw new RegistrationUnknownError(worktreePath)
     if (!(await branchExists(opts.repoPath, branch))) {
       throw new Error(`cannot resume: branch ${branch} no longer exists`)
     }
@@ -268,9 +288,9 @@ export async function resumeWorktree(opts: ResumeOptions): Promise<Worktree> {
     // Already the task's own checkout, at the branch, with nothing uncommitted:
     // re-adding it would give the same files and delete the ignored ones.
     if (
+      registration === 'registered' &&
       (contents === 'clean' || contents === 'ignored') &&
-      (await isOnBranch(worktreePath, branch)) &&
-      (await worktreeRegistration(opts.repoPath, worktreePath)) === 'registered'
+      (await isOnBranch(worktreePath, branch))
     ) {
       const baseCommit = await findScaffoldCommit(opts.repoPath, branch, opts.taskId)
       return { taskId: opts.taskId, worktreePath, branch, baseCommit, detached: false }

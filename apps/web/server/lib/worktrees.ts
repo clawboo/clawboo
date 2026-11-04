@@ -39,6 +39,7 @@ import {
   readHandoff,
   resumeWorktree,
   SOR_FILES,
+  RegistrationUnknownError,
   UnsafeWorktreeError,
   worktreeDiff,
   writeHandoff,
@@ -96,6 +97,12 @@ export type ProvisionResult =
    *  (uncommitted changes, or a folder git cannot read). It is left as it was,
    *  and nothing falls back to a fresh provision over it. */
   | { ok: false; reason: 'unsafe_to_rebuild'; worktreePath: string; why: string }
+
+/** A rebuild's outcome: a provision's, or `registration_unknown` when resume
+ *  asked git whether the checkout is registered and got no answer, so it
+ *  changed nothing. That says nothing about the folder: the task can run again. */
+export type ResumeResult =
+  ProvisionResult | { ok: false; reason: 'registration_unknown'; worktreePath: string }
 
 function unsafeToRebuild(err: UnsafeWorktreeError): ProvisionResult {
   return { ok: false, reason: 'unsafe_to_rebuild', worktreePath: err.worktreePath, why: err.why }
@@ -184,12 +191,14 @@ export async function provisionTaskWorkspace(
  * missing `cwd`. Returns `not_found` when there is no recorded workspace or the
  * branch is gone (a genuinely-fresh provision is the caller's fallback), and
  * `unsafe_to_rebuild` when a folder at the path could hold work that replacing
- * it would lose (no fallback: a provision would replace it the same way).
+ * it would lose (no fallback: a provision would replace it the same way), and
+ * `registration_unknown` when git could not say whether the checkout is
+ * registered (nothing was changed; no fallback either).
  */
 export async function resumeTaskWorkspace(
   taskId: string,
   input: { repoPath: string },
-): Promise<ProvisionResult> {
+): Promise<ResumeResult> {
   const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath) return { ok: false, reason: 'not_found' }
@@ -208,6 +217,9 @@ export async function resumeTaskWorkspace(
     return { ok: true, worktree, workspaceId: ws.id, isolation: 'worktree' }
   } catch (err) {
     if (err instanceof UnsafeWorktreeError) return unsafeToRebuild(err)
+    if (err instanceof RegistrationUnknownError) {
+      return { ok: false, reason: 'registration_unknown', worktreePath: err.worktreePath }
+    }
     // Branch gone / git error — the caller falls back to a fresh provision.
     return { ok: false, reason: 'not_found' }
   }
