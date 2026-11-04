@@ -403,7 +403,7 @@ A call goes through these checks in order:
 
 Results:
 
-- A refused call returns the tool error `denied: <reason>`, and the same reason in `_meta.denied`. Reasons start with `unknown-tool:`, `disabled:`, `unavailable:`, `provenance:`, `invalid-args:`, `grant:` (for example `grant:no-grant`; see the [grant decision reasons](/reference/events-and-errors#grant_decision)), `security:` or `scope:`.
+- A refused call returns the tool error `denied: <reason>`, and the same reason in `_meta.denied`. Reasons start with `unknown-tool:`, `disabled:`, `unavailable:`, `provenance:`, `invalid-args:`, `grant:` (for example `grant:no-grant`; see the [grant decision reasons](/reference/events-and-errors#grant_decision)), `dashboard:`, `local-file:`, `security:` or `scope:`.
 - A call whose approval is refused, expires or times out returns `approval deny`, `approval expired` or `approval timeout`.
 - A text result larger than 16 KiB is stored whole (up to 8 MiB) and the model gets a trimmed view: the start and the end of the result, with a notice between them that carries a `tr_` handle and the exact `read_tool_result` call for the rest. Only the Tools server trims results; the other three servers bound theirs with `limit` arguments. Stored results are deleted after 7 days (`CLAWBOO_TOOL_RESULT_TTL_MS`).
 

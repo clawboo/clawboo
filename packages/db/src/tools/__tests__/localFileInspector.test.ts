@@ -97,14 +97,20 @@ describe('a url argument that opens a local file', () => {
     'example.com/file:///etc/passwd',
     'https://example.com/?next=file:///etc/passwd',
   ])('lets %j through', async (url) => {
-    expect(await refused({ url })).toBe(false)
+    // Not denied by any inspector. The chain still asks first for an external
+    // tool, so `require_approval` is the expected outcome, not `allow`.
+    expect((await outcome({ url })).decision).not.toBe('deny')
   })
 
   it('reads only url arguments, so text typed into a page may say anything', async () => {
-    expect(await refused({ text: 'file:///etc/passwd' })).toBe(false)
-    expect(await refused({ text: 'C:\\temp\\out.txt' })).toBe(false)
-    expect(await refused({ value: '// a comment typed into an editor' })).toBe(false)
-    expect(await refused({ type: 'url' })).toBe(false)
+    for (const args of [
+      { text: 'file:///etc/passwd' },
+      { text: 'C:\\temp\\out.txt' },
+      { value: '// a comment typed into an editor' },
+      { type: 'url' },
+    ]) {
+      expect((await outcome(args)).decision, JSON.stringify(args)).not.toBe('deny')
+    }
   })
 })
 
