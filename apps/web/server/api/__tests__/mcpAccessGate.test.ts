@@ -174,6 +174,23 @@ describe('carriesAttachToken', () => {
     }
   })
 
+  it('accepts a transport mount only when every reading of the path is one', () => {
+    for (const p of [
+      '/api/board/t/preview/../../../mcp/tasks',
+      '/api/board/t/preview/%2e%2e/%2e%2e/%2e%2e/mcp/tasks',
+      '/api/mcp/x/../tasks',
+      '/api/mcp\\tasks',
+    ]) {
+      expect(carriesAttachToken(mockReq(`${p}?attachToken=${token()}`)), p).toBe(false)
+    }
+    // The router's own reading counts too.
+    const routed = Object.assign(mockReq(`/api/mcp/tasks?attachToken=${token()}`), {
+      path: '/api/board/t/preview/x',
+    })
+    expect(carriesAttachToken(routed)).toBe(false)
+    expect(carriesAttachToken(mockReq(`/api/mcp/tasks?attachToken=${token()}`))).toBe(true)
+  })
+
   it('does not read the token from anywhere but the query string', () => {
     const req = mockReq('/api/mcp/tasks', {
       'x-attach-token': token(),

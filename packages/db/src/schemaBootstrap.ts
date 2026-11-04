@@ -538,6 +538,28 @@ const SCHEMA_DDL = `
     CREATE UNIQUE INDEX IF NOT EXISTS uniq_budgets_scope ON budgets (scope, scope_id);
     CREATE INDEX IF NOT EXISTS idx_budgets_status ON budgets (status);
 
+    -- What a run that is going expects to spend, set aside on each budget it
+    -- counts toward from the moment it is let start until it ends, so parallel
+    -- runs see each other. One row per (run's hold, budget); the hold shrinks
+    -- as the run's real spend is recorded and is deleted when the run ends.
+    -- owner_pid + owner_started_at name the server process that holds it, so a
+    -- boot sweep can drop the holds of a server that is gone.
+    CREATE TABLE IF NOT EXISTS budget_reservations (
+      id                   TEXT    PRIMARY KEY,
+      hold_id              TEXT    NOT NULL,
+      budget_id            TEXT    NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+      held_micro_cents     INTEGER NOT NULL DEFAULT 0,
+      estimate_micro_cents INTEGER NOT NULL DEFAULT 0,
+      run_kind             TEXT    NOT NULL,
+      run_ref              TEXT,
+      owner_pid            INTEGER,
+      owner_started_at     INTEGER,
+      created_at           INTEGER NOT NULL,
+      updated_at           INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_budget_reservations_hold ON budget_reservations (hold_id, budget_id);
+    CREATE INDEX IF NOT EXISTS idx_budget_reservations_budget ON budget_reservations (budget_id);
+
     CREATE TABLE IF NOT EXISTS governance_audit (
       id         TEXT    PRIMARY KEY,
       event_type TEXT    NOT NULL,

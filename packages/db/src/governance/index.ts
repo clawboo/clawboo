@@ -3,5 +3,6 @@
 // boundaries, cap predicates) lives in @clawboo/governance; this dir is the
 // persistent layer over the board's SQLite, re-exported through src/index.ts.
 export * from './budgets'
+export * from './reservations'
 export * from './audit'
 export * from './schemas'

@@ -41,6 +41,7 @@ import {
   readRoom,
   recordRotation,
   recordSpend,
+  type BudgetRefusalReason,
   type BudgetScope,
   type ClawbooDb,
   type DbTeamChat,
@@ -49,7 +50,8 @@ import type { RuntimeAdapter, RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { formatPeerPost } from '@clawboo/mcp'
 
-import { budgetPreflight, budgetRefusalText } from '../budgetPreflight'
+import { reserveRunBudget, type RunBudgetHold } from '../budgetHold'
+import { budgetRefusalText } from '../budgetPreflight'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
 import { ensureTeamWorkdir } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
@@ -161,24 +163,47 @@ export async function dispatchChatTurn(
   deps: DispatchChatTurnDeps,
   _turnIndex: number,
 ): Promise<ChatTurnOutcome> {
-  const { db, participant, roomId, teamId } = deps
+  const { db, participant, teamId } = deps
   const agentId = participant.agentId
 
   // Every turn checks the budgets this turn would charge, not only the first: a
   // speaker obliged later may be over its own cap, and the turn before may have
-  // paused the team's. A refusal tells the person and stops the exchange, as a
-  // turn that trips a cap does.
-  const pre = budgetPreflight(db, { agentId, teamId })
-  if (pre.blocked) {
-    persistTeamChatEntry(db, {
-      teamId,
-      agentId,
-      text: budgetRefusalText(pre.scope),
-      role: 'system',
-      kind: 'meta',
-    })
-    return { obligations: [], decided: false, summary: '', budgetStopped: pre.scope }
+  // paused the team's, or runs going elsewhere may have set aside the room left
+  // under it. A refusal tells the person and stops the exchange, as a turn that
+  // trips a cap does. A turn let start holds its estimate until it ends (see
+  // budgetHold).
+  const gate = reserveRunBudget(db, { agentId, teamId }, { kind: 'exchange', ref: deps.roomId })
+  if (gate.blocked) return refuseTurn(deps, gate.scope, gate.reason)
+  try {
+    return await dispatchHeldTurn(deps, gate.hold)
+  } finally {
+    gate.hold.release()
   }
+}
+
+/** Tell the room why a turn did not start, and stop the exchange. */
+function refuseTurn(
+  deps: DispatchChatTurnDeps,
+  scope: BudgetScope,
+  reason: BudgetRefusalReason,
+): ChatTurnOutcome {
+  persistTeamChatEntry(deps.db, {
+    teamId: deps.teamId,
+    agentId: deps.participant.agentId,
+    text: budgetRefusalText(scope, reason),
+    role: 'system',
+    kind: 'meta',
+  })
+  return { obligations: [], decided: false, summary: '', budgetStopped: scope }
+}
+
+/** The turn, once its budgets have let it start. */
+async function dispatchHeldTurn(
+  deps: DispatchChatTurnDeps,
+  hold: RunBudgetHold,
+): Promise<ChatTurnOutcome> {
+  const { db, participant, roomId, teamId } = deps
+  const agentId = participant.agentId
 
   const prior = loadChatLeaderState(db, roomId, agentId)
 
@@ -235,6 +260,13 @@ export async function dispatchChatTurn(
 
   const nextTurnIndex = prior.turnIndex + 1
   const sessionKey = turnSessionKey(roomId, agentId, nextTurnIndex)
+  // The final gate, right before the model call: a cap that paused while the turn
+  // got ready refuses it now, before anything is spent.
+  const finalGate = hold.recheck()
+  if (finalGate.blocked) {
+    await adapter.dispose?.()
+    return refuseTurn(deps, finalGate.scope, finalGate.reason)
+  }
   const run = await adapter.start(
     { taskId: null, teamId },
     { agentId, sessionKey, message, ...(context ? { context } : {}) },
@@ -347,8 +379,8 @@ export async function dispatchChatTurn(
       })
   if (usd > 0) {
     const cents = usdToFractionalCents(usd)
-    const a = recordSpend(db, 'agent', agentId, cents)
-    const t = recordSpend(db, 'team', teamId, cents)
+    const a = recordSpend(db, 'agent', agentId, cents, { holdId: hold.id })
+    const t = recordSpend(db, 'team', teamId, cents, { holdId: hold.id })
     if (a?.status === 'paused' && a.mode === 'cap') budgetStopped = 'agent'
     else if (t?.status === 'paused' && t.mode === 'cap') budgetStopped = 'team'
   }

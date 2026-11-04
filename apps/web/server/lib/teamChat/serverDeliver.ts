@@ -35,6 +35,8 @@ import {
   setSetting,
   startTaskHeartbeat,
   updateTaskFields,
+  type BudgetRefusalReason,
+  type BudgetScope,
   type ClawbooDb,
   resolveRoomForTeam,
 } from '@clawboo/db'
@@ -64,7 +66,13 @@ import {
 import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource/registry'
-import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
+import {
+  NO_BUDGET_HOLD,
+  reserveRunBudget,
+  type RunBudgetGate,
+  type RunBudgetHold,
+} from '../budgetHold'
+import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
 import { runSlots, type RunSlot } from '../runSlots'
@@ -316,13 +324,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
    *  run's output still reaches the chat. (This is how a stale-DB `recordSpend` schema
    *  error silently broke every native team turn — native emits `cost` events, OpenClaw
    *  doesn't.) */
-  function recordSpendForRun(sessionKey: string, agentId: string, usd: number): boolean {
+  function recordSpendForRun(
+    sessionKey: string,
+    agentId: string,
+    usd: number,
+    holdId: string | null,
+  ): boolean {
     try {
       const cents = usdToFractionalCents(usd)
-      const a = recordSpend(db, 'agent', agentId, cents)
-      const t = recordSpend(db, 'team', teamId, cents)
+      // The run's own spend replaces its held estimate as it lands (see budgetHold).
+      const spend = { holdId }
+      const a = recordSpend(db, 'agent', agentId, cents, spend)
+      const t = recordSpend(db, 'team', teamId, cents, spend)
       const taskId = taskForSession(sessionKey)
-      const m = taskId ? recordSpend(db, 'mission', missionRootId(db, taskId), cents) : null
+      const m = taskId ? recordSpend(db, 'mission', missionRootId(db, taskId), cents, spend) : null
       if (a?.status === 'paused' && a.mode === 'cap') return true
       if (m?.status === 'paused' && m.mode === 'cap') return true
       if (t?.status === 'paused' && t.mode === 'cap') return true
@@ -450,6 +465,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
        *  the session's next delivery flushes and before the engine reacts to the
        *  terminal, so whatever that starts can take the slot. */
       releaseRunSlot: () => void
+      /** The run's budget hold (see budgetHold): its id rides every spend, and it
+       *  is released once the run's cost is settled, before the slot, so a run the
+       *  terminal starts does not count this one as still going. */
+      hold: RunBudgetHold
     },
   ): Promise<void> {
     let sawTerminal = false
@@ -499,7 +518,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         })
         // Only the part no cost event already charged. The run is at its end, so a
         // cap this crosses has no run left to stop.
-        if (cost.unbilledUsd > 0) recordSpendForRun(sessionKey, agentId, cost.unbilledUsd)
+        if (cost.unbilledUsd > 0)
+          recordSpendForRun(sessionKey, agentId, cost.unbilledUsd, obs.hold.id)
         // Listed in Tokens Used (an OpenClaw run is listed from its own transcript
         // instead), with tokens guessed from the text when the run reported none.
         recordRunTokens(db, {
@@ -524,6 +544,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       } catch {
         /* best-effort: a ledger write never breaks the drain */
       }
+      // Settled: the real spend has replaced the estimate.
+      obs.hold.release()
     }
     // Did this run publish any live delta / commit its turn? Drives the
     // stream-without-commit belt at the terminal: a turn that STREAMED but persisted
@@ -651,7 +673,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // Real per-turn USD (native): charge it live, then run the budget
           // kill-switch — a paused CAP budget aborts the run; the resulting `done:aborted`
           // flows through this same loop (the engine fails the task).
-          if (recordSpendForRun(sessionKey, agentId, ev.costUsd)) {
+          if (recordSpendForRun(sessionKey, agentId, ev.costUsd, obs.hold.id)) {
             markServerAbort('the run was stopped by a budget cap')
             await adapter.abort(run).catch(() => undefined)
           }
@@ -707,6 +729,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // one CLEARING delta — empty text tells the client to drop its StreamingCard
           // (nothing will ever replace it, so leaving it lingers-then-vanishes).
           if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+          // Price the run now, before the slot goes and the engine's close (onEvent
+          // below), on the text it produced: the committed reply on a `done`, the
+          // partial on a fatal error. Settling releases its budget hold, so a run
+          // that markIdle or the engine starts next does not see this one as going.
+          settleRunCost(ev.kind === 'done' ? (acc.trim() ? acc : (ev.summary ?? '')) : acc)
           obs.releaseRunSlot()
           // Evict THIS run's abort entry BEFORE markIdle — this run is terminal, so
           // its handle is dead weight, and markIdle synchronously flushes the
@@ -720,9 +747,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // Left-pane liveness: the run is over. `error` only on a fatal error — a
           // clean `done` (success OR aborted) reads as back-to-idle.
           publishStatus?.(agentId, ev.kind === 'error' ? 'error' : 'idle')
-          // Price the run now, before the engine's close (onEvent below), on the text
-          // it produced: the committed reply on a `done`, the partial on a fatal error.
-          settleRunCost(ev.kind === 'done' ? (acc.trim() ? acc : (ev.summary ?? '')) : acc)
           // Persist the run's REAL runtime onto its task so the board card + drawer
           // show it: the engine creates the task with a hardcoded
           // `assigneeRuntime: 'openclaw'`, and nothing else writes it. The run's cost
@@ -778,13 +802,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
       await settleResumePointer(null)
+      // A dead stream still cost something. Priced before the slot goes and before
+      // the engine fails the task, whose cost-less close leaves this recorded cost
+      // in place.
+      settleRunCost(acc)
       obs.releaseRunSlot()
       evictOwnEntry()
       if (ownsSlot()) nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')
-      // A dead stream still cost something. Priced before the engine fails the task,
-      // whose cost-less close leaves this recorded cost in place.
-      settleRunCost(acc)
       try {
         await onSessionClosed(sessionKey, obs.stamp)
       } catch (err) {
@@ -1251,6 +1276,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let queuedEntry: QueuedRun | null = null
           let keepBusy: ReturnType<typeof setInterval> | null = null
           let runSlot: RunSlot | null = null
+          // The run's budget hold, from the budget gate until its cost settles or the
+          // run is refused; the job's `finally` releases it too, whatever ended it.
+          let runHold: RunBudgetHold | null = null
           let runStarted = false
           /** Out of the run queue: the run started, or the delivery ended without one. */
           const leaveQueue = (): void => {
@@ -1332,34 +1360,47 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             }
             // The budget gate, as in the task runner: a paused hard cap on the agent,
             // the mission its task belongs to or the team refuses the run before it
-            // starts. Read while holding the agent's lock, so a cap that the run
-            // ahead of this one paused is seen. A ledger read that fails lets the run
-            // go, as a failed spend write does (see recordSpendForRun).
-            let budget: BudgetPreflightResult = { blocked: false }
+            // starts, and so does a cap whose remaining room runs already going have
+            // set aside. A run let start holds its estimate on each of them until its
+            // cost settles (see budgetHold). Taken while holding the agent's lock, so
+            // a cap that the run ahead of this one paused is seen. A ledger read that
+            // fails lets the run go, as a failed spend write does (see
+            // recordSpendForRun).
+            let budget: RunBudgetGate = { blocked: false, hold: NO_BUDGET_HOLD }
             try {
               const missionTaskId = taskForSession(targetSessionKey)
-              budget = budgetPreflight(db, {
-                agentId: targetAgentId,
-                missionId: missionTaskId ? missionRootId(db, missionTaskId) : null,
-                teamId,
-              })
+              budget = reserveRunBudget(
+                db,
+                {
+                  agentId: targetAgentId,
+                  missionId: missionTaskId ? missionRootId(db, missionTaskId) : null,
+                  teamId,
+                },
+                { kind: 'team-chat', ref: targetSessionKey },
+              )
             } catch (err) {
               log.error({ err, agentId: targetAgentId }, 'budget gate could not read the budgets')
             }
-            if (budget.blocked) {
-              const text = budgetRefusalText(budget.scope)
+            const refuseForBudget = (scope: BudgetScope, reason: BudgetRefusalReason): void => {
+              const text = budgetRefusalText(scope, reason)
               const personAsked = origin.kind === 'human' || origin.kind === 'schedule'
               if (chatVisible && (personAsked || !budgetNoticeShown.has(targetAgentId))) {
                 budgetNoticeShown.add(targetAgentId)
                 deps.persistMeta?.(targetSessionKey, text)
               }
               settleFailed(new DeliveryRefusedError(text))
+            }
+            if (budget.blocked) {
+              refuseForBudget(budget.scope, budget.reason)
               return
             }
+            const hold = budget.hold
+            runHold = hold
             if (capturedWorkdir) {
               try {
                 await ensureTeamWorkdir(capturedWorkdir)
               } catch (e) {
+                hold.release()
                 // Never fall back to the server's working directory.
                 settleFailed(
                   new Error(
@@ -1375,6 +1416,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // or for the lock) rides this turn. A task run's ticket block and its
             // `seenAt` are built with it (see renderRunContext).
             const { teamContext, digestIds, roomId, throughSeq } = renderRunContext()
+            // The final gate, right before the model call: a cap that paused while
+            // the run got ready refuses it now, before anything is spent, and its
+            // hold goes before the refusal reaches the engine.
+            const finalGate = hold.recheck()
+            if (finalGate.blocked) {
+              hold.release()
+              refuseForBudget(finalGate.scope, finalGate.reason)
+              return
+            }
             let run: RunHandle
             try {
               run = await adapter.start(
@@ -1398,6 +1448,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 },
               )
             } catch (e) {
+              // Nothing ran, so nothing was spent: the hold goes before the engine
+              // hears about it.
+              hold.release()
               // Gate 2: a start that threw after a Stop or a release is not a
               // failure of whatever task holds the session now.
               const why = refusal()
@@ -1425,6 +1478,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // a refused delivery consumes no inbox rows or cursor.
             const after = refusal()
             if (after) {
+              hold.release()
               // A delivery settled early has to tell the engine itself that a Stop
               // ended it.
               if (!settledEarly) started()
@@ -1490,6 +1544,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 execId: runExecId,
                 model: configuredModel,
                 releaseRunSlot: () => runSlot?.release(),
+                hold,
               })
             } finally {
               steerHandle?.release()
@@ -1542,6 +1597,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 settleFailed(e instanceof Error ? e : new Error(String(e)))
               })
               .finally(() => {
+                // Every way out of runJob releases its budget hold itself, before the
+                // agent's lock goes; this covers a throw that skipped them.
+                runHold?.release()
                 slot.release()
                 leaveQueue()
                 stopBeat()

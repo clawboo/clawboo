@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { URL } from 'node:url'
 
+import { anyPathUnder, isOriginFormTarget } from './request-path'
+
 // ─── Origin/Host guard — CSWSH + DNS-rebinding + cross-site CSRF defense ───────
 //
 // The dashboard's WS proxy (`/api/gateway/ws`) injects the upstream Gateway bearer
@@ -37,9 +39,10 @@ export interface OriginGuardOptions {
 
 export interface OriginGuard {
   /**
-   * Call at the top of every HTTP request handler (guards `/api/*` only).
-   * Returns true when the response has been handled (a 403 was written; caller
-   * must not write again). Returns false when the request may proceed.
+   * Call at the top of every HTTP request handler (guards `/api/*` only, and
+   * refuses with 400 any request target that is not a path).
+   * Returns true when the response has been handled (a 400 or 403 was written;
+   * caller must not write again). Returns false when the request may proceed.
    */
   checkHttp: (req: IncomingMessage, res: ServerResponse) => boolean
   /** Returns true when a WebSocket upgrade request should be allowed. */
@@ -56,12 +59,6 @@ function headerValue(req: IncomingMessage, name: string): string | undefined {
   const v = req.headers[name]
   if (Array.isArray(v)) return v[0]
   return typeof v === 'string' ? v : undefined
-}
-
-function pathnameOf(url: string | undefined): string {
-  const raw = typeof url === 'string' ? url : ''
-  const q = raw.indexOf('?')
-  return (q === -1 ? raw : raw.slice(0, q)) || '/'
 }
 
 /** Wrap a bare IPv6 literal in brackets so `new URL` can parse it as a host. */
@@ -189,9 +186,21 @@ export function createOriginGuard(options: OriginGuardOptions): OriginGuard {
   }
 
   function checkHttp(req: IncomingMessage, res: ServerResponse): boolean {
+    // A whole URL as the request target (absolute-form) is what a client sends a
+    // forward proxy. No browser or Clawboo client sends one here, and each layer
+    // would read its path its own way, so it is refused on every path.
+    if (!isOriginFormTarget(req)) {
+      res.statusCode = 400
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ error: 'Bad request target.' }))
+      return true
+    }
+
     // Guard the sensitive API surface only; the SPA HTML/static assets are public.
-    // Lower-case the path (parity with access-gate.ts) as defense-in-depth.
-    if (!pathnameOf(req.url).toLowerCase().startsWith('/api/')) return false
+    // A path is an API path when any reading of it is under `/api/`, in any letter
+    // case (parity with access-gate.ts; see request-path.ts), so no spelling the
+    // router sends to an API route skips the guard.
+    if (!anyPathUnder(req, '/api/')) return false
 
     if (
       isAllowedHost(headerValue(req, 'host')) &&
