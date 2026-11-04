@@ -39,6 +39,7 @@ import { createStaleTaskSweep } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
+import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
   isActiveTeamRoom,
@@ -471,6 +472,18 @@ async function main() {
     }
   } catch (err) {
     log.error({ err }, 'Board: moving tasks out of archived rooms failed (non-fatal)')
+  }
+
+  // ── Task resume pointers nothing will read again ───────────────────────────
+  // A task's own events clear its pointers as it finishes, is cancelled or is
+  // given to someone else. This catches what they could not: a task an MCP stdio
+  // server finished from another process, or one that finished while this server
+  // was down. Best-effort; never blocks boot.
+  try {
+    const swept = sweepTaskSessionPointers(getDb())
+    if (swept > 0) log.info({ swept }, 'Board: dropped task resume pointers nothing will resume')
+  } catch (err) {
+    log.error({ err }, 'Board: sweeping task resume pointers failed (non-fatal)')
   }
 
   // ── Worktrees: GC stale worktrees on startup ────────────────────────────────

@@ -19,17 +19,32 @@
 // + `[About the User]` verbatim (documented, stable). Settings are read directly via
 // `getSetting` so this module depends only on `@clawboo/db` (no lib→api inversion).
 
-import { agents, getSetting, type ClawbooDb } from '@clawboo/db'
-import type { TurnFraming } from '@clawboo/team-orchestration'
+import { oneLine, taskPriorityOf } from '@clawboo/board-core'
+import {
+  agents,
+  classifyAttempts,
+  getAncestors,
+  getComments,
+  getDependencies,
+  getSetting,
+  getTask,
+  listExecutions,
+  type ClawbooDb,
+  type DbTaskComment,
+} from '@clawboo/db'
+import type { TurnFraming, TurnOrigin } from '@clawboo/team-orchestration'
 import { asc, eq } from 'drizzle-orm'
 
 import { connectorsForRun } from '../connectors/agentConnectors'
 import { listLiveConnectors } from '../connectors/supervisor'
+import { buildLastAttemptNote } from '../resumeNote'
 import { loadAgentConfigOrDefault } from '../runtimes/native/agentConfigStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { buildConnectorAwareness } from './connectorAwareness'
 import { roomMemberIdSet } from './roomRoster'
+import { ticketHashOf } from './taskSessionPointers'
 import { formatLeaderRoster, readTeammateRole } from './teammateRoles'
+import { renderTicketBlock, type TicketBlockInput } from './ticketBlock'
 
 /** Durable team rules (settings key `team-rules:<teamId>`, JSON `{ content }`). */
 function readTeamRulesContent(db: ClawbooDb, teamId: string): string {
@@ -368,4 +383,134 @@ export function buildServerTeamContext(
     .filter(Boolean)
     .join('\n\n')
   return composed.length > 0 ? composed : null
+}
+
+// ── The ticket block ─────────────────────────────────────────────────────────
+// A board task run used to start with its brief and nothing else: no task id,
+// no parents, no finished dependencies, no comments and no word about an
+// earlier attempt, so a retry, a reply or a re-fired run started from zero. The
+// block carries that story, bounded (see ./ticketBlock). It is rendered when the
+// run STARTS, like the mailbox envelope, and it rides after the stable team
+// preamble, so that part stays in the provider's prompt cache.
+
+/** How far before a resumed session's last context a comment still counts as
+ *  new to it: a comment written in the instant that context was built may or
+ *  may not have made it in, and showing it twice beats not at all. */
+const RESUME_COMMENT_OVERLAP_MS = 2_000
+
+/** The board task run a ticket block is for. */
+export interface TicketRun {
+  taskId: string
+  /** The run's own execution row: never counted as an earlier attempt. */
+  execId: string | null
+  /** Why the run was delivered. */
+  origin: Extract<TurnOrigin, { kind: 'delegation' } | { kind: 'assignment' }>
+  /** Set when the run continues the agent's session from its last run on the
+   *  task: what that session last saw. */
+  resumed: { ticketHash: string; seenAt: number } | null
+}
+
+/** The ticket block for `agentId`'s run on a board task, or null when the task
+ *  no longer exists. */
+export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun): string | null {
+  const task = getTask(db, run.taskId)
+  if (!task) return null
+  const runtime = readAgentRuntime(db, agentId)
+  const tools: TicketBlockInput['tools'] = !hasBoardRead(db, agentId, runtime)
+    ? 'none'
+    : runtime === 'openclaw'
+      ? 'pass-id'
+      : 'bound'
+
+  const names = new Map(
+    db
+      .select({ id: agents.id, name: agents.name })
+      .from(agents)
+      .all()
+      .map((a) => [a.id, a.name] as const),
+  )
+  const nameOf = (id: string | null | undefined): string | null =>
+    id ? (names.get(id) ?? id) : null
+  const authorOf = (c: DbTaskComment): string =>
+    c.authorType === 'user'
+      ? 'person'
+      : c.authorType === 'system'
+        ? 'clawboo'
+        : (nameOf(c.authorAgentId) ?? 'an agent')
+
+  const attempts = classifyAttempts(listExecutions(db, task.id).filter((e) => e.id !== run.execId))
+  const again = attempts.lastKind !== null
+  let why: string
+  if (run.origin.kind === 'assignment') {
+    why = again
+      ? 'this task is starting again; a person assigned it to you on the board.'
+      : 'a person assigned you this task on the board.'
+  } else {
+    // A name is free text: on one line, it cannot add lines of its own.
+    const delegator = oneLine(nameOf(run.origin.fromAgentId) ?? 'a teammate', 80)
+    why = again
+      ? `this task is starting again; ${delegator} handed it to you.`
+      : `${delegator} handed you this task.`
+  }
+
+  // The parent chain, nearest first. The ancestor read is unordered.
+  const byId = new Map(getAncestors(db, task.id).map((a) => [a.id, a]))
+  const parents: TicketBlockInput['parents'] = []
+  for (let id = task.parentTaskId; id && byId.has(id);) {
+    const a = byId.get(id)!
+    byId.delete(id) // a cycle in a corrupt database ends the walk
+    parents.push({ id: a.id, title: a.title, status: a.status })
+    id = a.parent_task_id
+  }
+
+  // Each finished dependency's result, from the agent that did it: its latest
+  // comment there (the engine writes a run's result as one), else the latest
+  // successful run's summary, else the latest comment any agent left. A later
+  // "looks good" from a reviewer does not replace the result.
+  const dependencies: TicketBlockInput['dependencies'] = getDependencies(db, task.id)
+    .filter((d) => d.status === 'done')
+    .map((d) => {
+      const agentComments = getComments(db, d.id).filter((c) => c.authorType === 'agent')
+      const own = d.assigneeAgentId
+        ? agentComments.filter((c) => c.authorAgentId === d.assigneeAgentId)
+        : []
+      const ownComment = own[own.length - 1]
+      if (ownComment)
+        return { id: d.id, title: d.title, by: nameOf(d.assigneeAgentId), result: ownComment.body }
+      const runs = listExecutions(db, d.id).filter((e) => e.status === 'succeeded' && e.summary)
+      const lastRun = runs[runs.length - 1]
+      if (lastRun)
+        return { id: d.id, title: d.title, by: nameOf(d.assigneeAgentId), result: lastRun.summary }
+      const anyComment = agentComments[agentComments.length - 1]
+      return {
+        id: d.id,
+        title: d.title,
+        by: nameOf(anyComment?.authorAgentId ?? d.assigneeAgentId),
+        result: anyComment?.body ?? null,
+      }
+    })
+
+  // A fresh session gets the thread (the newest of it). A resumed one already
+  // holds what it saw, its own words included, so it gets only what is new.
+  const seenFrom = run.resumed ? run.resumed.seenAt - RESUME_COMMENT_OVERLAP_MS : null
+  const comments = getComments(db, task.id)
+    .filter(
+      (c) =>
+        seenFrom === null ||
+        (c.createdAt >= seenFrom && !(c.authorType === 'agent' && c.authorAgentId === agentId)),
+    )
+    .map((c) => ({ from: authorOf(c), body: c.body }))
+
+  return renderTicketBlock({
+    taskId: task.id,
+    title: task.title,
+    priority: taskPriorityOf(task.priority),
+    why,
+    tools,
+    resumed: run.resumed ? { changed: run.resumed.ticketHash !== ticketHashOf(task) } : null,
+    parents,
+    dependencies,
+    comments,
+    lastAttempt: buildLastAttemptNote(attempts),
+  })
 }

@@ -149,6 +149,49 @@ describe('TaskDetailDrawer', () => {
     await waitFor(() => expect(patched).toEqual({ status: 'done' }))
   })
 
+  it('shows the priority by name and saves a change as its stored value', async () => {
+    let patched: { priority?: number } | null = null
+    server.use(
+      ...detailHandlers(), // a task with no priority set reads as Normal
+      http.patch('/api/board/t1', async ({ request }) => {
+        patched = (await request.json()) as { priority: number }
+        return HttpResponse.json({ ok: true, task: { id: 't1', priority: patched.priority } })
+      }),
+    )
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    await screen.findByText('Ship it')
+    const select = screen.getByTestId('task-priority-select')
+    expect(select).toHaveTextContent('Normal')
+    await user.click(select)
+    await user.click(await screen.findByRole('option', { name: 'Urgent' }))
+
+    await waitFor(() => expect(patched).toEqual({ priority: 2 }))
+    expect(screen.getByTestId('task-priority-select')).toHaveTextContent('Urgent')
+  })
+
+  it('puts the priority back and says so when the change is refused', async () => {
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      ...detailHandlers(),
+      http.patch('/api/board/t1', () => HttpResponse.json({ ok: false }, { status: 500 })),
+    )
+    const user = userEvent.setup()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    await screen.findByText('Ship it')
+    await user.click(screen.getByTestId('task-priority-select'))
+    await user.click(await screen.findByRole('option', { name: 'High' }))
+
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+        'The priority could not be saved. Try again.',
+      ),
+    )
+    expect(screen.getByTestId('task-priority-select')).toHaveTextContent('Normal')
+  })
+
   it('offers "Complete anyway" when the verification gate blocks → done, then overrides', async () => {
     const bodies: Array<{ status?: string; humanOverride?: boolean }> = []
     server.use(

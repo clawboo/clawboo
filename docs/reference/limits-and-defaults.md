@@ -94,16 +94,19 @@ Cleanup commits a worktree's changes before removing it and keeps its branch.
 
 ## What reaches an agent
 
-| Limit                                                  | Value                                                  | Change it                                        | Source                                              |
-| ------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------- |
-| Teammates' new peer-room posts added to a turn         | 4,000 characters, at most 800 per post                 | No                                               | `apps/web/server/lib/teamChat/peerCatchup.ts:25,27` |
-| Inbox notices added to a turn                          | 4,000 characters, at most 400 per notice               | No                                               | `packages/db/src/inbox.ts:102,98`                   |
-| Undelivered inbox notices kept                         | 30 days                                                | No                                               | `packages/db/src/inbox.ts:176`                      |
-| One tool result in an agent's context                  | 16 KiB; the rest is cut and kept for the agent to read | No                                               | `packages/mcp/src/ceiling.ts:35`                    |
-| Stored copy of a large tool result                     | Up to 8 MiB                                            | No                                               | `packages/db/src/tools/resultStore.ts:45`           |
-| How long stored tool results are kept                  | 7 days                                                 | `CLAWBOO_TOOL_RESULT_TTL_MS`                     | `apps/web/server/lib/approvalReaper.ts:29`          |
-| Memory facts added at the start of a run (task runner) | Top 5, within 1,500 characters                         | Per run (`disableMemoryAutoInject` turns it off) | `apps/web/server/lib/defaults.ts:53,56`             |
-| Related facts added alongside them                     | Up to 2, at similarity 0.8 or more                     | No                                               | `apps/web/server/lib/memoryInjection.ts:81-82`      |
+| Limit                                                  | Value                                                                                  | Change it                                        | Source                                              |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------- |
+| Teammates' new peer-room posts added to a turn         | 4,000 characters, at most 800 per post                                                 | No                                               | `apps/web/server/lib/teamChat/peerCatchup.ts:25,27` |
+| Inbox notices added to a turn                          | 4,000 characters, at most 400 per notice                                               | No                                               | `packages/db/src/inbox.ts:102,98`                   |
+| Undelivered inbox notices kept                         | 30 days                                                                                | No                                               | `packages/db/src/inbox.ts:176`                      |
+| One tool result in an agent's context                  | 16 KiB; the rest is cut and kept for the agent to read                                 | No                                               | `packages/mcp/src/ceiling.ts:35`                    |
+| Stored copy of a large tool result                     | Up to 8 MiB                                                                            | No                                               | `packages/db/src/tools/resultStore.ts:45`           |
+| How long stored tool results are kept                  | 7 days                                                                                 | `CLAWBOO_TOOL_RESULT_TTL_MS`                     | `apps/web/server/lib/approvalReaper.ts:29`          |
+| Memory facts added at the start of a run (task runner) | Top 5, within 1,500 characters                                                         | Per run (`disableMemoryAutoInject` turns it off) | `apps/web/server/lib/defaults.ts:53,56`             |
+| Related facts added alongside them                     | Up to 2, at similarity 0.8 or more                                                     | No                                               | `apps/web/server/lib/memoryInjection.ts:81-82`      |
+| Comments in a task run's task block                    | The newest 8, at most 4,000 characters each and 12,000 in all; `get_task` has the rest | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:23-27` |
+| Finished tasks' results in a task block                | Up to 6, at most 2,000 characters each and 6,000 in all                                | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:29-33` |
+| Parent tasks in a task block                           | Up to 6, nearest first; titles up to 200 characters                                    | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:35-37` |
 
 [What an agent sees](/concepts/agent-context) explains what goes into each turn.
 

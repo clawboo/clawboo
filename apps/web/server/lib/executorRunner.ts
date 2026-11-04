@@ -891,6 +891,9 @@ async function runTaskInner(
       runtime: runtimeId,
       taskId,
       sessionKey: baseSessionKey,
+      // The task this run works on, for the Tasks tools' default (signed onto
+      // the Tasks URL). `taskId` above stamps memory provenance only.
+      boundTaskId: taskId,
     },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),

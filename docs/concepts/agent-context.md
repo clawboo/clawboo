@@ -41,14 +41,31 @@ Clawboo builds this context for every turn in General or a room, including every
 5. **How to work**: instructions for this kind of turn. A leader learns how to hand off work on its runtime. A teammate on a handed-off task learns that its reply goes back to the team, not to you, and that nobody can answer its questions mid-task. On a task you gave it from the Board, it learns that you read its reply on the task card. A note names the [peer room](/concepts/peer-chat) and board tools when the agent has them.
 6. **Routine note**: when a Routine sent the message. It says you may be away, so the agent should make assumptions and state them rather than ask.
 7. **Connectors**: on turns you read, the connectors whose tools this agent has, plus a few you could add. Connectors you connected but did not share with it are not named. An OpenClaw agent has only connectors shared with every agent, because all OpenClaw agents reach Clawboo's tools through one shared setting, and a Clawboo Native agent whose **tools MCP** server is switched off has none.
-8. **Waiting for you**, in two parts:
+8. **The task**, on a run for a board task. See [The task block](#the-task-block).
+9. **Waiting for you**, in two parts:
    - **Addressed to you**: results of tasks this agent handed out, and alerts about its work. The agent is told to act on them.
    - **Ambient**: what teammates posted in the peer room since this agent last spoke, and other notices. The agent is told to treat them as information, never as instructions.
-9. **The message**: your message, the task text for a teammate, or, when teammates finish, one batch of their results for the agent that handed out the work.
+10. **The message**: your message, the task text for a teammate, or, when teammates finish, one batch of their results for the agent that handed out the work. Each result in the batch is quoted as the teammate wrote it, under a line saying who it came from, so the agent reads it as information about the work, not as instructions.
 
 Results, alerts and notices share a budget of 4,000 characters, and peer-room posts get their own 4,000 characters, at most 800 per post. Anything that does not fit waits for the next turn.
 
-The persona, rules, introduction and teammate list change only when you change them. Clawboo reads them again for every turn, so an edit applies from the next turn. The waiting items and the message are new each time. All of it rides in front of the message, so the runtime's own setup stays the same from turn to turn.
+The persona, rules, introduction and teammate list change only when you change them. Clawboo reads them again for every turn, so an edit applies from the next turn. The task block, the waiting items and the message are new each time, and they come after the parts that stay the same, so a provider can reuse that steady start from one run to the next (prompt caching). All of it rides in front of the message, so the runtime's own setup stays the same from turn to turn.
+
+## The task block
+
+A run for a board task, a teammate's hand-off or a task you gave an agent on the Board, also gets the story of that task. Before, the agent got the task's text and nothing else, so a retry, a reply or a second run started from zero. The block holds, in order, leaving out what the task does not have:
+
+- **The task's id**, and how to use it. Clawboo Native, Claude Code, Codex and Hermes agents are told their Tasks tools use this task when a call leaves the id out (`get_task` reads its whole history). An OpenClaw agent is told to pass the id itself.
+- **Its title**, and its priority when that is not Normal.
+- **Why this run started**: who handed the task over, or that you assigned it, and whether it is starting again.
+- **The tasks it is part of**, nearest first, up to 6, each with its id and status.
+- **The finished tasks it waited on**, with each one's result: up to 6, at most 2,000 characters each and 6,000 in all.
+- **Its comments**: the newest 8, at most 4,000 characters each and 12,000 in all, oldest first, then how many were left out and that `get_task` has the rest. A task with hundreds of comments still starts with a block of the same size.
+- **How the last attempt ended**: it failed (with its error), went quiet and was stopped by the watchdog, was cut off when the process running it stopped, or was stopped by a person. After an interruption the agent is told to check what is already done before it repeats anything with a side effect. When a task keeps failing, the block says how many times in a row.
+
+The task's description is not in the block: it is the message, the agent's instruction. Everything in the block that people and agents wrote (titles, results, comments) is quoted as data: each comment and result sits under a header that names who wrote it and says it is not you, with every line of it quoted, and the block ends by saying none of it can change the agent's task or the team rules.
+
+**A run that continues its session.** When an agent runs the same task again and continues its session from its last run on it (see [Conversation history](#conversation-history)), the block says whether the title or description changed since that run, and carries only the comments made since then, without the agent's own, in place of the thread. It still lists the tasks it is part of and the finished tasks it waited on: a long session may no longer hold its first run's block (Clawboo Native trims an old conversation from the oldest end, and the other runtimes compact theirs), and a task linked since was never in it. The task's text is sent as the message again either way, because a runtime that cannot find the old session starts a fresh one without saying so.
 
 ## A task-runner run
 
@@ -74,7 +91,7 @@ The message is the task's title. The task runner adds no team rules, teammate li
 ## Conversation history
 
 - **A leader in team chat.** A Clawboo Native or Codex leader continues the same conversation, separately in General and in each room. A Claude Code or Hermes leader starts each turn without the earlier conversation. OpenClaw keeps the conversation in its own Gateway session.
-- **A teammate on a handed-off task.** Clawboo Native, Claude Code, Codex and Hermes teammates start each task without earlier conversation. An OpenClaw teammate's Gateway session can still hold its earlier turns.
+- **An agent running a board task.** Clawboo Native, Claude Code, Codex and Hermes continue their own session from their last run on the same task: a retry, a reply that restarts the task, or a run that starts again after a restart picks up the conversation of the last run that came to an end, instead of starting cold (a run cut off by a restart leaves nothing to pick up). A new task starts a new session. So does a task you give to a different agent, for everyone, the first agent included if the task comes back to it, and a task that finishes or is cancelled ends its session. When a run that tried to continue a session fails, or cannot start, the next run starts fresh; a run stopped part way, or one that ran out of turns, keeps its session. OpenClaw cannot do this: its session is one per agent in each chat, shared by all of its turns there, so its earlier turns, other tasks included, may still be in its Gateway session.
 - **A one-to-one chat with a Clawboo Native, Claude Code, Codex or Hermes agent** continues the conversation: each message resumes the session the one before it saved. On its first turn, and after `/reset`, the agent also gets up to 8 of its own saved notes, without the team's notes. Claude Code, Codex and Hermes also get their persona with every message.
 - **Boo Zero's one-to-one chat** adds Boo Zero's rules to every message. Mention a team with `@TeamName` and the message also carries that team's brief, board, saved memory and recent chat.
 - **Starting fresh.** `/reset` (or `/new`) in a chat ends what the agents carry from it, and the messages stay on screen. See [Team chat](/using/team-chat).
@@ -103,7 +120,9 @@ The dashboard does not show the assembled context itself. The lists on this page
 - **Delivery.** Every runtime gets Clawboo's context in front of the message, separated by a blank line, in the run's first user message.
 - **Persona.** `apps/web/server/lib/runtimes/personaBlock.ts`.
 - **Restarts and limits.** `DEFAULT_ROTATION` in `packages/executor/src/session-rotation.ts`; `DEFAULT_MAX_TURNS` in `packages/adapters/native/src/agentConfig.ts`; the 240,000-character bound in `apps/web/server/lib/runtimes/native/conversation.ts`.
-- **Conversation pointers.** `apps/web/server/lib/teamChat/nativeTeamSession.ts` keeps them for Clawboo Native and Codex leaders. A one-to-one chat keeps one pointer per agent, whatever its runtime (`nativeChatSessionSettingKey` in `apps/web/server/lib/agentChat/driveAgentChat.ts`). The one-to-one notes come from `apps/web/server/lib/agentChat/memoryRecall.ts`.
+- **Conversation pointers.** `apps/web/server/lib/teamChat/nativeTeamSession.ts` keeps them for Clawboo Native and Codex leaders, and per task (`taskSessionSettingKey`, gated by `taskResumeEligible`) for task runs on Clawboo Native, Claude Code, Codex and Hermes; `taskSessionPointers.ts` reads, clears and sweeps those. `serverDeliver.ts` writes a run's pointer on the first event that ends it (`settleResumePointer`), and clears it when a run that resumed fails, cannot start, or ends with no such event. A one-to-one chat keeps one pointer per agent, whatever its runtime (`nativeChatSessionSettingKey` in `apps/web/server/lib/agentChat/driveAgentChat.ts`). The one-to-one notes come from `apps/web/server/lib/agentChat/memoryRecall.ts`.
+- **The task block.** `buildTicketBlock` in `contextPreamble.ts` reads the board; `renderTicketBlock` and `TICKET_LIMITS` in `apps/web/server/lib/teamChat/ticketBlock.ts` lay it out and hold its limits; `buildLastAttemptNote` in `apps/web/server/lib/resumeNote.ts` writes the last-attempt line. `serverDeliver.ts` renders it when the run starts and puts it between the steady context and the waiting items. The quoting is `formatInterSessionMessage` in `packages/board-core/src/untrustedText.ts`, which also frames teammates' results in a batch (`taskUpdate.ts`) and the notes that ride a tool result (`packages/mcp/src/piggyback.ts`).
+- **The task on the Tasks tools.** A task run's Tasks URL carries the task as `scopeTaskId`, inside its signature, so a runtime cannot point it at another task (`mcpHttpUrl` in `packages/mcp/src/config.ts`). Clawboo Native gets it in-process. It is not the memory provenance task id, so it changes nothing about how memories are promoted.
 
 </Accordion>
 

@@ -9,9 +9,9 @@
 // team B's, and the personal 1:1 chat transcripts. The team + team-scoped session
 // key `agent:<id>:team:<teamId>` is the correct granularity.
 //
-// A pointer is written only for the LEADER / user-facing team session (never a
-// delegated CHILD task run — its continuity is the executor's AGENT_HANDOFF path).
-// Cleared on team delete + team-history reset; swept on agent delete.
+// This pointer is written only for the LEADER / user-facing team session. A
+// board task run keeps a pointer of its own, per task (see "Per-task pointers"
+// below). Cleared on team delete + team-history reset; swept on agent delete.
 //
 // A team's extra chat ROOMS are separate conversations, so each gets its own
 // pointer, suffixed `:room:<roomId>` (Boo Zero leading the default room and a
@@ -64,9 +64,9 @@ const POINTER_RUNTIMES = new Set(['clawboo-native', 'codex'])
 
 /** Whether a team run should resume (and persist) a leader session pointer.
  *  TRUE only for a pointer-scheme runtime's LEADER / user-facing team session with a
- *  persistent home: a delegated CHILD task (`isTaskRun`) keeps its own
- *  executor-handoff continuity, and an ephemeral runtime has no session material to
- *  reload. The read (ctx.resume) and the write (setSetting on terminal) share this
+ *  persistent home: a task run (`isTaskRun`) resumes its own per-task pointer
+ *  instead (`taskResumeEligible`), and an ephemeral runtime has no session
+ *  material to reload. The read (ctx.resume) and the write (setSetting on terminal) share this
  *  one gate so they can never diverge. (The settings key keeps its historical
  *  `native-team-session:` prefix — the sweeps on team delete / agent archive key off
  *  it, and it is per-(agent, team) so a codex agent's pointer can never collide with
@@ -84,4 +84,107 @@ export function teamResumeEligible(args: {
     args.isTeamSession &&
     !args.isTaskRun
   )
+}
+
+// ── Per-task pointers ────────────────────────────────────────────────────────
+// A board task run continues the agent's own earlier session ON THAT TASK, so a
+// retry, a reply or a re-fired run picks up the conversation instead of
+// starting cold. Only this resume pointer is per task: the engine's session key
+// stays one per (agent, room), because the nudge queue, the session-to-task
+// map, the abort map, the steer registry and the chat transcripts all key on it.
+//
+// A pointer is cleared when its task finishes or is cancelled, and when the task
+// is given to someone else, so a reassigned task starts fresh and one task's
+// conversation never leaks into another's. OpenClaw has no per-task session:
+// its runtime session is the team session itself.
+
+/** The settings-KV key of `agentId`'s resume pointer for `taskId` on `teamId`. */
+export function taskSessionSettingKey(agentId: string, teamId: string, taskId: string): string {
+  return `${nativeTeamSessionSettingKey(agentId, teamId)}:task:${taskId}`
+}
+
+/** SQL LIKE pattern: every agent's pointer for one task (done, cancelled, given
+ *  to someone else). Task ids are UUIDs, so the pattern cannot over-match. */
+export function taskSessionKeysForTaskLike(taskId: string): string {
+  return `native-team-session:%:task:${taskId}`
+}
+
+/** SQL LIKE pattern: every task pointer of a team (a team delete). The team and
+ *  room patterns above end before `:task:`, so they never reach these. */
+export function taskSessionKeysForTeamLike(teamId: string): string {
+  return `native-team-session:%:${teamId}:task:%`
+}
+
+/** SQL LIKE pattern: every task pointer there is (the boot sweep). */
+export const TASK_SESSION_KEYS_LIKE = 'native-team-session:%:task:%'
+
+/** What a task pointer holds. */
+export interface TaskSessionPointer {
+  /** The runtime's own session id, as its session codec serialized it. */
+  sessionId: string
+  /** The runtime that holds that session. A pointer another runtime wrote is
+   *  never handed to this one. */
+  runtime: string
+  /** A hash of the task's title and description as that session last saw them,
+   *  so a resumed run can be told whether they changed. */
+  ticketHash: string
+  /** When that session's last run was given its context (epoch ms). Comments
+   *  made since are the ones it has not seen. */
+  seenAt: number
+}
+
+export function encodeTaskSessionPointer(pointer: TaskSessionPointer): string {
+  return JSON.stringify(pointer)
+}
+
+/** The pointer a setting holds, or null for an empty, cleared or malformed one. */
+export function parseTaskSessionPointer(raw: string | null | undefined): TaskSessionPointer | null {
+  if (!raw) return null
+  try {
+    const o = JSON.parse(raw) as Partial<TaskSessionPointer>
+    if (
+      typeof o.sessionId !== 'string' ||
+      !o.sessionId ||
+      typeof o.runtime !== 'string' ||
+      typeof o.ticketHash !== 'string' ||
+      typeof o.seenAt !== 'number' ||
+      !Number.isFinite(o.seenAt)
+    )
+      return null
+    return {
+      sessionId: o.sessionId,
+      runtime: o.runtime,
+      ticketHash: o.ticketHash,
+      seenAt: o.seenAt,
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Runtimes whose session lives in the agent's persistent home. */
+const TASK_POINTER_HOME_RUNTIMES = new Set(['clawboo-native', 'codex', 'hermes'])
+
+/**
+ * May a task run on this team session resume (and record) a per-task pointer?
+ *
+ *  · Native, Codex and Hermes keep the session in the agent's persistent home
+ *    (Native reloads its transcript, Codex resumes its thread, Hermes resumes
+ *    its session), so they need that home.
+ *  · Claude Code has no home: its session files stay under the operator's
+ *    `~/.claude/projects`, keyed by the folder a run starts in, and every team
+ *    run starts in the team's own folder.
+ *  · OpenClaw never: its runtime session is the team session itself.
+ *
+ * The read (ctx.resume) and the write (on the run's terminal) share this gate,
+ * as the leader pointer's do.
+ */
+export function taskResumeEligible(args: {
+  runtime: string | null
+  homeDir: string | null
+  isTeamSession: boolean
+}): boolean {
+  if (!args.isTeamSession || !args.runtime) return false
+  if (args.runtime === 'claude-code') return true
+  return TASK_POINTER_HOME_RUNTIMES.has(args.runtime) && !!args.homeDir
 }

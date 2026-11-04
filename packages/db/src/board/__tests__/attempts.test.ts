@@ -32,6 +32,7 @@ describe('classifyAttempts', () => {
       lastKind: null,
       lastCrashLeftWork: false,
       lastCrashReason: null,
+      lastReason: null,
     })
   })
 
@@ -116,5 +117,60 @@ describe('classifyAttempts', () => {
     expect(classifyAttempts([orphaned()]).lastCrashReason).toMatch(/process not alive/)
     expect(classifyAttempts([swept()]).lastCrashReason).toMatch(/no heartbeat/)
     expect(classifyAttempts([failed()]).lastCrashReason).toBeNull()
+  })
+})
+
+// K17: the team engine writes `timed_out` too, for a run that went silent while
+// its process lived (its idle watchdog), and so does the OpenClaw routine
+// watchdog. Neither is a crash: the process was alive, and the engine stopped
+// the run itself. Only the stale sweep's `timed_out` means nobody was there.
+describe('classifyAttempts on the team engine ledger (K17)', () => {
+  const watchdog = (): AttemptRow => ({
+    status: 'timed_out',
+    error: 'No response from the delegate for 8 minutes.',
+  })
+  const routineWatchdog = (): AttemptRow => ({
+    status: 'timed_out',
+    error: 'Routine run timed out after 10 minutes.',
+  })
+
+  it('does not call a watchdog timeout a crash', () => {
+    expect(classifyAttempts([watchdog()])).toMatchObject({
+      lastKind: 'timeout',
+      crashAttempts: 0,
+      errorAttempts: 1,
+      lastCrashLeftWork: false,
+      lastCrashReason: null,
+      lastReason: 'No response from the delegate for 8 minutes.',
+    })
+    expect(classifyAttempts([routineWatchdog()]).lastKind).toBe('timeout')
+  })
+
+  it('still calls the stale sweep a crash, with or without a summary', () => {
+    expect(classifyAttempts([swept()]).lastKind).toBe('crash')
+    expect(classifyAttempts([{ ...swept(), summary: 'half way' }]).lastKind).toBe('crash')
+  })
+
+  it('counts a timeout with the failures in one streak', () => {
+    expect(classifyAttempts([swept(), failed(), watchdog()])).toMatchObject({
+      lastKind: 'timeout',
+      crashAttempts: 1,
+      errorAttempts: 2,
+    })
+  })
+
+  it('says why the newest attempt ended, whatever its kind', () => {
+    expect(classifyAttempts([failed('the API said 529')]).lastReason).toBe('the API said 529')
+    expect(classifyAttempts([orphaned()]).lastReason).toMatch(/process not alive/)
+    expect(
+      classifyAttempts([
+        { status: 'cancelled', error: 'Stopped: a person moved the card to To do.' },
+      ]),
+    ).toMatchObject({
+      lastKind: 'cancelled',
+      lastReason: 'Stopped: a person moved the card to To do.',
+    })
+    expect(classifyAttempts([ok()]).lastReason).toBeNull()
+    expect(classifyAttempts([{ status: 'failed', error: '   ' }]).lastReason).toBeNull()
   })
 })

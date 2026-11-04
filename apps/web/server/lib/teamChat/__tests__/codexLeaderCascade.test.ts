@@ -440,11 +440,21 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     // re-reads the same pointer and loops through identical failures.
     setSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM), 'stale-sid')
 
+    // As the real Codex adapter ends a failed run: a fatal error, then `done`.
+    // The drain stops at the error, so the clear has to happen there.
     const adapters = new Map<string, ScriptedCodex>([
       [
         LEAD,
         new ScriptedCodex([
-          [{ kind: 'done', reason: 'error', summary: 'session not found' } as RuntimeEvent],
+          [
+            {
+              kind: 'error',
+              code: null,
+              message: 'session not found',
+              fatal: true,
+            } as RuntimeEvent,
+            { kind: 'done', reason: 'error', summary: 'session not found' } as RuntimeEvent,
+          ],
         ]),
       ],
     ])

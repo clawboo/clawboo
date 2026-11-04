@@ -457,3 +457,29 @@ describe('DraggableCard: the marks', () => {
     expect(within(card).getByTestId('board-card-unseen')).toBeInTheDocument()
   })
 })
+
+// A raised priority is the one new mark on the meta row: neutral ink, a tooltip
+// and words for a screen reader. Normal, nearly every task, and Low get none.
+describe('the priority mark', () => {
+  it('marks an urgent and a high task, and reads an old large value as urgent', () => {
+    for (const [priority, label] of [
+      [2, 'Urgent priority'],
+      [1, 'High priority'],
+      [100, 'Urgent priority'],
+    ] as const) {
+      const { card, unmount } = renderChip(makeTask({ priority }))
+      const mark = within(card).getByTestId('board-card-priority')
+      expect(mark).toHaveAttribute('title', label)
+      expect(within(mark).getByText(label)).toHaveClass('sr-only')
+      unmount()
+    }
+  })
+
+  it('leaves a normal, a low and an unset priority unmarked', () => {
+    for (const priority of [0, -1, undefined]) {
+      const { card, unmount } = renderChip(makeTask(priority === undefined ? {} : { priority }))
+      expect(within(card).queryByTestId('board-card-priority')).toBeNull()
+      unmount()
+    }
+  })
+})

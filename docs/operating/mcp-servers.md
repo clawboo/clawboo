@@ -139,6 +139,8 @@ A stdio bin is different: it runs as you, the operator. Tasks, Memory and TeamCh
 
 The runs Clawboo starts for a team chat (a turn, a hand-off, a plan step) carry one more signed mark, `teamRun=1`, on their Tasks, Memory and Tools URLs. The team engine claims and moves those tasks itself, so those runs get no claims and no status writes except `block_task` on the agent's own task. The mark is inside the signature, and no URL such a run holds is signed without it, so a runtime that edits its own config cannot win the writes back. You cannot mint such a URL from `/api/mcp/config`.
 
+A run on a board task also carries that task on its Tasks URL, as `scopeTaskId`, inside the same signature. `get_task` and `add_comment` use it when a call names no task, and so does `block_task` on a team run. It is a default, not a permission: it opens no task the run could not already reach, and a runtime that edits it breaks the signature, so the session is served as unverified. It is separate from the Memory URL's `provTaskId`, which records where a memory came from.
+
 ## The attach token
 
 Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters once you set `STUDIO_ACCESS_TOKEN`:

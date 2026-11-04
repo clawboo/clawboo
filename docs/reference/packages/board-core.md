@@ -1,7 +1,7 @@
 ---
 title: '@clawboo/board-core'
 sidebarTitle: 'board-core'
-description: "The task rules every layer shares: the seven statuses and their legal moves, the auto-fire policy, the Needs you reasons, and a task's run cost."
+description: "The task rules every layer shares: the seven statuses and their legal moves, the auto-fire policy, the Needs you reasons, a task's run cost, its priority levels, and how text people and agents wrote is framed for a model."
 keywords:
   [
     '@clawboo/board-core',
@@ -14,6 +14,8 @@ keywords:
     'taskAttention',
     'MAX_AUTO_FIRES',
     'summarizeRunCost',
+    'priority',
+    'formatInterSessionMessage',
   ]
 ---
 
@@ -118,6 +120,34 @@ The result carries the reason, the number of trailing failed runs, and a `detail
 
 `RUN_COST_SOURCES` lists `reported`, `local`, `token-estimate` and `char-estimate`, most trustworthy first. `local`
 is a run on a model the user's own Ollama served, so its $0 is exact.
+
+## Priority
+
+A task's `priority` column is an integer, and the ready queue serves the higher one first. `priority.ts` reads and
+writes it through four named levels, `TASK_PRIORITIES`: `urgent` (2), `high` (1), `normal` (0, every task's default)
+and `low` (-1), with `TASK_PRIORITY_VALUE` and `TASK_PRIORITY_LABEL` for each.
+
+- `clampTaskPriority(n)` is the value to store for any requested one: rounded, then held to -1 to 2; anything that is
+  not a finite number is 0. `@clawboo/db` applies it to every create and update, so a large number cannot jump the
+  queue.
+- `taskPriorityOf(n)` is the level a stored value reads as. A value written before the clamp, outside the range,
+  reads as the nearest level, and the ready queue orders it the same way.
+
+## Text from people and agents
+
+A model reads everything Clawboo hands it as one pile, so text a teammate, a person or a sub-task wrote could read
+like Clawboo's own instructions. `untrustedText.ts` frames such text as data, the same way everywhere:
+
+- `formatInterSessionMessage({ from, kind, seq? }, body)` writes one header,
+  `[Inter-session message · from=… · kind=… · isUser=false]`, then every line of the body quoted with `| `. A value in
+  the header cannot close it early, and an inter-session header inside the body is neutralised
+  (`defangInterSessionHeaders`), so the body can never present itself as a second header or as the person.
+  `formatPeerPost` is this for a peer-room post. The team engine uses it for each result in a `[Task Update]`, the
+  Tasks server for each mailbox note riding a tool result, and the server for the comments and results in a task
+  run's ticket block.
+- `defangSectionMarkers(text, labels)` turns a line shaped like one of a surface's own section markers into plain
+  text, for text a surface renders unquoted between its markers (the turn envelope).
+- `oneLine(text, max?)` folds a title or a name onto one line, cut with `…` past `max`.
 
 ## Test it
 

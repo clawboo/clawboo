@@ -212,8 +212,13 @@ export interface TasksServerOptions {
    *
    * `agentId` (when bound) additionally enables the mid-run inbox piggyback:
    * the calling agent's undelivered mailbox rows ride each tool response.
+   *
+   * `taskId` (when bound) is the task the run works on. `get_task`,
+   * `add_comment` and `block_task` use it when a call leaves `taskId` out, so an
+   * agent reads its own task's history without having to find the id first. A
+   * default only: it widens nothing, and every other guard still applies.
    */
-  boundScope?: { teamId?: string | null; agentId?: string | null }
+  boundScope?: { teamId?: string | null; agentId?: string | null; taskId?: string | null }
 
   /**
    * The caller reached us over a transport that CAN carry a verified scope and
@@ -271,6 +276,19 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   // binds it; in-process (Clawboo Native) the driver binds it.
   const boundAgentId = opts?.boundScope?.agentId ?? undefined
   const teamRun = opts?.teamRun === true
+  // The run's own task, when bound: the default for the one-task tools below.
+  const boundTaskId = opts?.boundScope?.taskId ?? undefined
+  const taskIdField = boundTaskId ? z.string().optional() : z.string()
+  /** The task a one-task tool acts on: the named one, else the run's own. */
+  const taskOf = (args: Record<string, unknown>): string =>
+    optStr(args['taskId']) || boundTaskId || ''
+  /** Appended to a one-task tool's description when a task is bound. */
+  const ownTaskHint = (verb: string): string =>
+    boundTaskId ? ` Leave out taskId to ${verb} the task you are working on.` : ''
+  // block_task takes the run's own task only on a team run, whose engine handles
+  // a task its agent blocked. The task runner binds its task too but does not
+  // yet, so there the id stays required and no hint points at it.
+  const blockDefault = teamRun ? boundTaskId : undefined
 
   const claimFor = (args: Record<string, unknown>, assigneeAgentId: string): McpToolResult => {
     const denied = outOfTeam(str(args['taskId']))
@@ -324,10 +342,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'get_task',
-      description: 'Get a task with its comments and ancestor chain.',
-      inputSchema: z.object({ taskId: z.string() }),
+      description: `Get a task with its comments and ancestor chain.${ownTaskHint('read')}`,
+      inputSchema: z.object({ taskId: taskIdField }),
       handler: (args) => {
-        const id = str(args['taskId'])
+        const id = taskOf(args)
         const task = getTask(db, id)
         if (!task) return textResult(`not found: ${id}`, true)
         // Out-of-team reads are refused as not-found: a bound run must not be
@@ -339,7 +357,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     {
       name: 'create_task',
       description:
-        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply. Without one it is a root task, rate-limited per rolling window.',
+        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply. Without one it is a root task, rate-limited per rolling window. priority: 2 urgent, 1 high, 0 normal (the default), -1 low; any other number is held to that range.',
       inputSchema: z.object({
         title: z.string(),
         description: z.string().optional(),
@@ -479,11 +497,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     {
       name: 'block_task',
       description: teamRun
-        ? 'Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.'
+        ? `Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.${blockDefault ? ' Leave out taskId to block it.' : ''}`
         : 'Mark a task blocked.',
-      inputSchema: z.object({ taskId: z.string() }),
+      inputSchema: z.object({ taskId: blockDefault ? z.string().optional() : z.string() }),
       handler: (args) => {
-        const taskId = str(args['taskId'])
+        const taskId = optStr(args['taskId']) || blockDefault || ''
         const denied = outOfTeam(taskId)
         if (denied) return denied
         if (teamRun && getTask(db, taskId)?.assigneeAgentId !== boundAgentId)
@@ -508,15 +526,16 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'add_comment',
-      description: 'Add a comment to a task (report-up summaries, system notes).',
+      description: `Add a comment to a task (report-up summaries, system notes).${ownTaskHint('comment on')}`,
       inputSchema: z.object({
-        taskId: z.string(),
+        taskId: taskIdField,
         body: z.string(),
         authorAgentId: z.string().optional(),
         authorType: z.enum(['agent', 'user', 'system']).optional(),
       }),
       handler: (args) => {
-        const denied = outOfTeam(str(args['taskId']))
+        const taskId = taskOf(args)
+        const denied = outOfTeam(taskId)
         if (denied) return denied
         // An unverified caller cannot prove it is the author it names, so the
         // comment posts as a plain agent comment rather than under someone else's
@@ -535,17 +554,23 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         // is why that route honours 'user' only from the dashboard's own page.
         // This tool writes the row directly and delivers nothing, so here the
         // attack is the label, and the label is aimed squarely at the human.
+        //
+        // A session bound to an agent always comments as that agent. The ticket
+        // block shows a later run who wrote each comment ("person", "clawboo" or
+        // the agent's name), so an agent naming another author or kind would be
+        // speaking as the person or the engine to whoever runs the task next.
         const unverified = opts?.unverifiedCaller === true
+        const asSelf = unverified || boundAgentId !== undefined
         return jsonResult(
           addComment(
             db,
-            str(args['taskId']),
+            taskId,
             str(args['body']),
-            unverified
+            asSelf
               ? 'agent'
               : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ??
                   'agent'),
-            unverified ? undefined : optStr(args['authorAgentId']),
+            unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
           ),
         )
       },

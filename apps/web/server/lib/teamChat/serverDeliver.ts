@@ -24,6 +24,7 @@ import {
   agents,
   getAncestors,
   getSetting,
+  getTask,
   listUndeliveredInbox,
   markInboxDelivered,
   recordExecutionUsage,
@@ -81,8 +82,16 @@ import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
-import { buildServerTeamContext } from './contextPreamble'
-import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+import { buildServerTeamContext, buildTicketBlock } from './contextPreamble'
+import {
+  encodeTaskSessionPointer,
+  nativeTeamSessionSettingKey,
+  taskResumeEligible,
+  taskSessionSettingKey,
+  teamResumeEligible,
+  type TaskSessionPointer,
+} from './nativeTeamSession'
+import { readTaskSessionPointer, taskTakesPointers, ticketHashOf } from './taskSessionPointers'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { inboxRowBelongsToRoom } from './roomRoster'
 import { buildPeerCatchup } from './peerCatchup'
@@ -104,6 +113,23 @@ const NATIVE_RUNTIME = 'clawboo-native'
  * reason; the 30-minute drain guard stays the outer bound.
  */
 export const TOOL_CALL_WEDGE_MS = OPEN_TOOL_CALL_TIMEOUT_MS + 60_000
+
+/** Where a run records the session it ended with, so the next run resumes it. */
+interface ResumePointerWrite {
+  /** The settings key. */
+  key: string
+  /** The value to store for the session id the run ended with. */
+  encode: (sessionId: string) => string
+  /** A failed run that tried to resume most likely holds a dead handle, so it
+   *  clears the pointer. A task run that was stopped part way or ran out of
+   *  turns keeps it: its session is sound, the run was only cut short. */
+  keepUnlessError: boolean
+  /** Asked before writing. A task finished or cancelled while its run went on
+   *  has had its pointers cleared, and the stopped run must not write one back. */
+  wanted?: () => boolean
+}
+
+type DoneReason = Extract<RuntimeEvent, { kind: 'done' }>['reason']
 
 /** A live run tracked for Stop / wedge — keyed by sessionKey in the abort map. */
 export interface RunEntry {
@@ -378,9 +404,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
        *  into the input-token ESTIMATE so an OpenClaw / no-USD run's cost reflects its
        *  real prompt size, not just the short task text. */
       contextChars: number
-      /** The leader session-resume pointer key to update on the terminal, or
-       *  null when this run is not an eligible leader/user-facing team turn. */
-      resumePointerKey: string | null
+      /** The resume pointer to update on the terminal: the leader's, for an
+       *  eligible leader/user-facing team turn, or the run's own task's, for a
+       *  task run whose runtime can resume. Null otherwise. */
+      resumePointer: ResumePointerWrite | null
       /** True when THIS run was started with a resume handle (ctx.resume) — drives
        *  the stale-pointer self-heal: a FAILED resumed run clears the pointer so the
        *  next turn starts fresh instead of looping through identical failures
@@ -515,6 +542,40 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const evictOwnEntry = (): void => {
       if (abortMap.get(sessionKey)?.run === run) abortMap.delete(sessionKey)
     }
+    /**
+     * Record the session this run ended with, so the next run resumes it, or
+     * clear the pointer. Called once, on the run's first terminal and BEFORE
+     * markIdle: the next queued delivery, which the nudge flushes on markIdle,
+     * reads the pointer to build ctx.resume, so a write after the drain would
+     * let a rapidly-sent message 2 resume message 0's transcript and drop this
+     * turn. The harness awaited saveSessionTranscript before its terminal, so
+     * the session file exists. `null` is a stream that died with no terminal.
+     */
+    const settleResumePointer = async (reason: DoneReason | null): Promise<void> => {
+      const pointer = obs.resumePointer
+      if (!pointer || !adapter.sessionCodec) return
+      const sound =
+        reason === 'success' ||
+        (pointer.keepUnlessError && (reason === 'aborted' || reason === 'max_turns'))
+      try {
+        if (!sound && obs.resumeAttempted) {
+          // Stale-pointer self-heal (mirrors executorRunner's clear-on-failed-
+          // resume): a run that TRIED to resume and failed most likely holds a
+          // dead handle (codex `exec resume <unknown-id>` is a hard exit 1), so
+          // writing it back would send every later run through the same failure.
+          // Clear it; the next run starts fresh.
+          setSetting(db, pointer.key, '')
+          return
+        }
+        // A stream that died with no terminal may still have its run going.
+        if (reason === null || (pointer.wanted && !pointer.wanted())) return
+        const blob = await adapter.sessionCodec.serialize(run)
+        const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
+        if (sid) setSetting(db, pointer.key, pointer.encode(sid))
+      } catch {
+        // Best-effort: a missing or unparseable id means the next run starts fresh.
+      }
+    }
 
     // Drain idle guard: a wedged adapter iterator must not hang this drain (and
     // with it the agent's home mutex + the engine's view of the session) forever.
@@ -590,41 +651,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const killed = takeServerAbortReason()
             if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
           }
-          // Leader continuity: persist THIS turn's harness session id so the NEXT team
-          // turn resumes it. Done HERE (on the terminal, BEFORE markIdle) so the next
-          // queued delivery — which the nudge flushes on markIdle and which reads the
-          // pointer to build ctx.resume — sees the FRESH id. Doing it after the drain
-          // would race: a rapidly-sent message 2 would read the stale pointer and resume
-          // message 0's transcript, dropping this turn. The harness already awaited
-          // saveSessionTranscript before emitting `done`, so the session file exists.
-          // Non-null resumePointerKey ⇒ an eligible leader / user-facing team turn.
-          if (obs.resumePointerKey && adapter.sessionCodec) {
-            if (ev.reason !== 'success' && obs.resumeAttempted) {
-              // Stale-pointer self-heal (structural, mirrors executorRunner's
-              // clear-on-failed-resume): a FAILED turn that TRIED to resume most
-              // likely holds a dead handle — codex `exec resume <unknown-id>` is a
-              // hard exit-1 — so writing it back would loop every subsequent turn
-              // through the same failure. Clear it; the next turn starts fresh.
-              try {
-                setSetting(db, obs.resumePointerKey, '')
-              } catch {
-                /* best-effort */
-              }
-            } else {
-              try {
-                const blob = await adapter.sessionCodec.serialize(run)
-                const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
-                if (sid) setSetting(db, obs.resumePointerKey, sid)
-              } catch {
-                // A missing/unparseable id just means the next turn starts fresh.
-              }
-            }
-          }
         }
         // Per-tool runtime detail → the obs activity terminal (all runtimes).
         emitRunObs(sessionKey, agentId, obs.runtime, ev)
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
         if (terminal) {
+          // On the FIRST terminal: every runtime ends a failed run with a fatal
+          // `error` before its `done`, and this loop stops at the first one.
+          await settleResumePointer(ev.kind === 'done' ? ev.reason : 'error')
           // A fatal-error terminal never reaches the `done` persist above — commit the
           // partial streamed text (what the user already watched) so it survives the
           // failure instead of vanishing with the stream.
@@ -715,6 +749,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // Ordered last: a partial committed just above replaces the StreamingCard on
       // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+      await settleResumePointer(null)
       evictOwnEntry()
       if (ownsSlot()) nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')
@@ -773,6 +808,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // The run's own execution row, read with its task: the engine opens it right
     // before it calls deliver, and forgets it when the run ends.
     const runExecId = runTaskId !== null ? execForSession(targetSessionKey) : null
+    // The title and description the brief carries, hashed now, when the brief was
+    // written: an edit made while this waits in the queue reaches the ticket block
+    // but not the brief, so the session it starts has seen the older text.
+    const briefTask = runTaskId !== null ? getTask(db, runTaskId) : null
+    const ticketHash = briefTask ? ticketHashOf(briefTask) : null
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
     const stamp: RunStamp = { reportForTaskId, stopGen: deliveredGen }
@@ -804,7 +844,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // bookkeeping; it cannot un-bake duplicated context. It also meant anything
     // arriving while the delivery sat in the queue was missed, which is the exact
     // opposite of "currency is a property of the runner".
-    const renderWaiting = (): {
+    //
+    // A task run's ticket block (see contextPreamble's `buildTicketBlock`) is
+    // rendered at the same moment and placed between the stable team preamble and
+    // the envelope: the preamble stays a byte-stable prefix for the provider's
+    // prompt cache, and everything that changes from run to run comes after it.
+    const renderWaiting = (
+      ticketBlock: string | null,
+    ): {
       teamContext: string | null
       digestIds: string[]
       roomId: string | null
@@ -847,7 +894,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         ],
       })
       return {
-        teamContext: [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null,
+        teamContext: [baseTeamContext, ticketBlock, envelope].filter(Boolean).join('\n\n') || null,
         // Only rows that actually FIT get marked — a row truncated out of the
         // budget was not delivered and rides the next digest.
         digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
@@ -866,9 +913,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (why === 'released') nudge.markIdle(targetSessionKey)
             started()
           }
-          // Rendered HERE: this runs when the queue releases the delivery, so the
-          // context reflects state at start time rather than at enqueue time.
-          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -908,6 +952,24 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // The resume handle THIS run was started with (ctx.resume) — drives the
           // drain's stale-pointer self-heal on a failed resumed run.
           let resumeHandle: string | null = null
+          // A task run's own session on its task, from its last run there, when
+          // its runtime can resume one (see `taskResumeEligible`). A pointer
+          // another runtime wrote is never handed to this one.
+          let taskPointer: TaskSessionPointer | null = null
+          const readTaskPointer = (
+            runtime: string | null,
+            home: string | null,
+          ): TaskSessionPointer | null => {
+            if (runTaskId === null || !runtime) return null
+            const eligible = taskResumeEligible({
+              runtime,
+              homeDir: home,
+              isTeamSession: isTeamSessionKey(targetSessionKey),
+            })
+            if (!eligible) return null
+            const p = readTaskSessionPointer(db, targetAgentId, teamId, runTaskId)
+            return p && p.runtime === runtime ? p : null
+          }
           if (makeAdapterForAgent) {
             // Test path: the adapter is injected. Its caps still pick the mutex: a
             // persistent home takes the home mutex, and the connected mutex engages
@@ -932,15 +994,18 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               homeKind === 'persistent'
                 ? runtimeIdentityHomePath(resolvedRuntime ?? adapter.id, targetAgentId)
                 : null
-            resumeHandle = teamResumeEligible({
-              runtime: resolvedRuntime,
-              homeDir,
-              isTeamSession: isTeamSessionKey(targetSessionKey),
-              isTaskRun: holdsWork,
-            })
-              ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
-                null
-              : null
+            taskPointer = readTaskPointer(resolvedRuntime, homeDir)
+            resumeHandle =
+              taskPointer?.sessionId ??
+              (teamResumeEligible({
+                runtime: resolvedRuntime,
+                homeDir,
+                isTeamSession: isTeamSessionKey(targetSessionKey),
+                isTaskRun: holdsWork,
+              })
+                ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
+                  null
+                : null)
           } else {
             const runtime = resolvedRuntime
             // native + the coding runtimes (claude-code / codex / hermes), PLUS
@@ -1004,7 +1069,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // reads its OWN config (no top-level `model`), so scope to non-native.
               const codingModel =
                 runtime !== NATIVE_RUNTIME ? parseCodingModelConfig(row?.execConfig ?? null) : null
-              resumeHandle = teamResumeId
+              // A task run resumes its own session on the task instead; a leader
+              // turn never runs a task, so at most one of the two is set.
+              taskPointer = readTaskPointer(runtime, homeDir)
+              resumeHandle = taskPointer?.sessionId ?? teamResumeId
               // Claude Code / Codex / Hermes / Native start in the team's own
               // folder, not the server's working directory (clawboo's state dir).
               // For Native the folder is also what turns on its file tools.
@@ -1013,18 +1081,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 ...(workdir ? { cwd: workdir } : {}),
                 model: codingModel?.model ?? null,
                 ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
-                resume: teamResumeId,
+                resume: resumeHandle,
                 mcpBaseUrl,
                 // `delegate: true` = THIS run is orchestrator-driven, so the engine IS
                 // observing its tool-calls — it rides the TeamChat attach URL and
                 // exposes the `team_delegate` signal tool (how a coding-runtime LEADER
                 // delegates; the engine's DELEGATE_TOOL_NAME_RE branch turns the call
                 // into a board task). executorRunner runs never set it.
+                //
+                // `boundTaskId`: a task run's own task, signed onto its Tasks URL so
+                // the Tasks tools use it when a call leaves taskId out. Not the
+                // provenance `taskId`, which would change how memories get promoted.
                 memoryScope: {
                   teamId,
                   agentId: targetAgentId,
                   delegate: true,
                   attachSecret: getMcpAttachSecret(db),
+                  ...(runTaskId !== null ? { boundTaskId: runTaskId } : {}),
                 },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
@@ -1035,19 +1108,81 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // const so TS narrows them cleanly inside the closures below.
           const capturedHomeDir = homeDir
           const capturedWorkdir = workdir
-          // The native leader session-resume pointer to update on the terminal (the
-          // amnesia fix) — non-null ONLY for an eligible native leader / user-facing team
-          // turn (a delegated child keeps its own executor-handoff continuity). Threaded
-          // into the drain so the write lands BEFORE markIdle, closing the rapid-message
-          // race (see drainRun's `done` handler). Read side is ctx.resume above.
-          const resumePointerKey = teamResumeEligible({
-            runtime: resolvedRuntime,
-            homeDir: capturedHomeDir,
-            isTeamSession: isTeamSessionKey(targetSessionKey),
-            isTaskRun: holdsWork,
-          })
-            ? nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)
-            : null
+
+          // Rendered HERE: this runs when the queue releases the delivery, so the
+          // context reflects state at start time rather than at enqueue time. A
+          // task run's ticket block is rendered with it, after the resume decision
+          // above, because a resumed session is told what changed. `seenAt` (when
+          // this context is built) and the brief's ticket hash are recorded with
+          // the session's pointer on the terminal.
+          const seenAt = Date.now()
+          let ticketBlock: string | null = null
+          if (
+            runTaskId !== null &&
+            isTeamSessionKey(targetSessionKey) &&
+            (origin.kind === 'delegation' || origin.kind === 'assignment')
+          ) {
+            try {
+              ticketBlock = buildTicketBlock(db, targetAgentId, {
+                taskId: runTaskId,
+                execId: runExecId,
+                origin,
+                resumed: taskPointer
+                  ? { ticketHash: taskPointer.ticketHash, seenAt: taskPointer.seenAt }
+                  : null,
+              })
+            } catch (err) {
+              // The brief still goes out: a run without its ticket block is the
+              // old behavior, not a failure.
+              log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
+            }
+          }
+          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting(ticketBlock)
+
+          // The resume pointer to update on the terminal. Threaded into the drain
+          // so the write lands BEFORE markIdle, closing the rapid-message race (see
+          // drainRun's `done` handler). Read side is ctx.resume above.
+          //  · A task run whose runtime can resume: its own pointer on the task,
+          //    recording what this session saw (the ticket hash and `seenAt`).
+          //  · An eligible leader / user-facing team turn (the amnesia fix): the
+          //    leader's pointer, holding the bare session id.
+          const taskPointerRuntime =
+            runTaskId !== null &&
+            resolvedRuntime &&
+            ticketHash !== null &&
+            taskResumeEligible({
+              runtime: resolvedRuntime,
+              homeDir: capturedHomeDir,
+              isTeamSession: isTeamSessionKey(targetSessionKey),
+            })
+              ? resolvedRuntime
+              : null
+          const resumePointer: ResumePointerWrite | null =
+            taskPointerRuntime !== null && runTaskId !== null && ticketHash !== null
+              ? {
+                  key: taskSessionSettingKey(targetAgentId, teamId, runTaskId),
+                  encode: (sessionId) =>
+                    encodeTaskSessionPointer({
+                      sessionId,
+                      runtime: taskPointerRuntime,
+                      ticketHash,
+                      seenAt,
+                    }),
+                  keepUnlessError: true,
+                  wanted: () => taskTakesPointers(getTask(db, runTaskId)),
+                }
+              : teamResumeEligible({
+                    runtime: resolvedRuntime,
+                    homeDir: capturedHomeDir,
+                    isTeamSession: isTeamSessionKey(targetSessionKey),
+                    isTaskRun: holdsWork,
+                  })
+                ? {
+                    key: nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId),
+                    encode: (sessionId) => sessionId,
+                    keepUnlessError: false,
+                  }
+                : null
           // A connected substrate serializes on the SHARED per-gateway-agent mutex —
           // cross-subsystem (routines / runTeamExchange / other teams' orchestrators)
           // AND Boo-Zero-in-N-teams (the one OpenClaw agent that spans teams).
@@ -1109,7 +1244,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             let run: RunHandle
             try {
               run = await adapter.start(
-                { taskId: null, teamId },
+                // Every adapter ignores this argument today; the agent learns its
+                // task from the ticket block and its Tasks URL. Passed truthfully
+                // all the same, as the task runner does.
+                { taskId: runTaskId, teamId },
                 {
                   agentId: targetAgentId,
                   sessionKey: targetSessionKey,
@@ -1132,6 +1270,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               if (why) {
                 settleRefused(why)
                 return
+              }
+              // A start that tried to resume and threw most likely holds a dead
+              // handle, as the drain's self-heal assumes of a failed resumed run:
+              // clear it, so the next run starts fresh instead of failing the same way.
+              if (resumeHandle !== null && resumePointer) {
+                try {
+                  setSetting(db, resumePointer.key, '')
+                } catch {
+                  /* best-effort */
+                }
               }
               // Immediate-send failure → the engine fails the task now rather than
               // waiting out the 8-minute watchdog (the nudge un-busies the session).
@@ -1196,7 +1344,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 runtime: resolvedRuntime,
                 message,
                 contextChars: teamContext ? teamContext.length : 0,
-                resumePointerKey,
+                resumePointer,
                 resumeAttempted: resumeHandle != null,
                 chatVisible,
                 stamp,

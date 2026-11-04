@@ -48,7 +48,9 @@ to anyone changing them:
   access is set to read. `teamRun` is set for a run the team engine drives (signed `teamRun=1` on its Tasks, Memory and Tools URLs; Clawboo Native sets it in-process):
   it leaves out `claim_task`, `assign_task`, `release_task`, `update_task_status` and `unblock_task`, and lets
   `block_task` block only the bound agent's own task. A bound agent's `claim_task` claims for that agent. A bound
-  team scope forces `list_tasks` to that team and makes `get_task` refuse another team's task. Cancelling a task
+  team scope forces `list_tasks` to that team and makes `get_task` refuse another team's task. A bound task
+  (`boundScope.taskId`, from the signed `scopeTaskId` of a run on a board task; `boundTaskId` on `AttachScope`) is what
+  `get_task` and `add_comment` use when a call leaves out `taskId`, and `block_task` on a team run. Cancelling a task
   with `update_task_status` cancels the plan steps waiting on it and leaves its delegator a mailbox note. A lost
   claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep) come back as tool
   errors the model should not retry.
@@ -56,7 +58,8 @@ to anyone changing them:
   grants. A connector tool is listed only to an agent whose grant would allow it.
 - **TeamChat.** `team_delegate` only signals: the team engine sees the tool call and creates the board task.
 - **Mailbox delivery.** For a bound agent, its undelivered mailbox rows ride along on the next Tasks or TeamChat
-  tool response as a second content block.
+  tool response as a second content block, each framed as data with `formatInterSessionMessage` (from
+  `@clawboo/board-core`, which `formatPeerPost` is now built on).
 
 ## Transports
 

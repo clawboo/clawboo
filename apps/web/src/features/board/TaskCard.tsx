@@ -1,14 +1,28 @@
 // A task's card on the board, and its drag-and-drop wrapper. The board draws
 // every card as a chip: a neutral card with the title, then one row saying who
-// has it, at most one status mark (else its cost), and when it was added,
-// started or finished. A card never repeats what its column already says.
+// has it, a raised priority, at most one status mark (else its cost), and when
+// it was added, started or finished. A card never repeats what its column
+// already says.
 // Without a stamp the card takes a plain form.
 
 import { createContext, useContext, useEffect, useLayoutEffect, useRef } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useDraggable } from '@dnd-kit/core'
-import { delegationTargetOf, type TaskRunCost } from '@clawboo/board-core'
-import { Check, CircleDashed, CornerDownRight, GripVertical, X } from 'lucide-react'
+import {
+  delegationTargetOf,
+  TASK_PRIORITY_LABEL,
+  taskPriorityOf,
+  type TaskRunCost,
+} from '@clawboo/board-core'
+import {
+  Check,
+  ChevronsUp,
+  ChevronUp,
+  CircleDashed,
+  CornerDownRight,
+  GripVertical,
+  X,
+} from 'lucide-react'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { runtimeLabel } from '@/features/runtimes/RuntimeBrand'
@@ -165,6 +179,31 @@ function chipStatusMark(
 }
 
 /**
+ * A raised priority, as a small neutral mark: two chevrons for Urgent, one for
+ * High. Normal is what nearly every task has, and Low only waits longer, so
+ * neither gets a mark: the row stays as it was for them.
+ */
+function PriorityMark({ priority }: { priority: unknown }) {
+  const level = taskPriorityOf(typeof priority === 'number' ? priority : null)
+  if (level !== 'urgent' && level !== 'high') return null
+  const label = `${TASK_PRIORITY_LABEL[level]} priority`
+  return (
+    <span
+      data-testid="board-card-priority"
+      title={label}
+      className="inline-flex shrink-0 items-center text-muted-foreground"
+    >
+      {level === 'urgent' ? (
+        <ChevronsUp size={12} strokeWidth={2} aria-hidden />
+      ) : (
+        <ChevronUp size={12} strokeWidth={2} aria-hidden />
+      )}
+      <span className="sr-only">{label}</span>
+    </span>
+  )
+}
+
+/**
  * A recorded cost, in plain tabular figures. A card has room for cents at most:
  * a sub-cent cost reads "<$0.01", which already says it is not exact, and a
  * larger estimate carries a tilde. The exact figure and whether it is an
@@ -205,9 +244,9 @@ function CostLabel({
 }
 
 /**
- * A calendar chip's meta row, one line: who has it, at most one status mark
- * (else its cost), a subtask arrow when neither of those has taken the subtask
- * into its own label, and the stamp at the end. The runtime is not here: the
+ * A calendar chip's meta row, one line: who has it, a raised priority, at most
+ * one status mark (else its cost), a subtask arrow when neither of those has
+ * taken the subtask into its own label, and the stamp at the end. The runtime is not here: the
  * drawer and the graph carry it. Every mark is muted ink or a status colour.
  */
 function ChipMeta({
@@ -246,6 +285,7 @@ function ChipMeta({
           <span className="sr-only">Unassigned</span>
         </span>
       ) : null}
+      <PriorityMark priority={task['priority']} />
       {mark ??
         (costShown && cost.usd !== null ? (
           <CostLabel
