@@ -172,9 +172,12 @@ describe('saved secret values', () => {
     const token = ['ya29', '.A0Ab+Cd/Ef==Gh9iJkLmNo'].join('')
     values = new Set([token])
     // Python's urllib.parse.quote leaves the slash alone by default.
-    const quoted = token.replace('+', '%2B').replaceAll('=', '%3D')
+    const quoted = ['ya29', '.A0Ab%2BCd/Ef%3D%3DGh9iJkLmNo'].join('')
+    expect(decodeURIComponent(quoted)).toBe(token)
     expect(scrubResultSummary(`?t=${quoted}&x=1`)).toBe('?t=[REDACTED]&x=1')
-    const mixed = token.replace('+', '%2b').replace('/', '%2F').replace('=', '%3d')
+    // Lower-case hex, and only the first `=` encoded.
+    const mixed = ['ya29', '.A0Ab%2bCd%2FEf%3d=Gh9iJkLmNo'].join('')
+    expect(decodeURIComponent(mixed)).toBe(token)
     expect(mixed).toContain('=')
     expect(scrubResultSummary(`?t=${mixed}`)).toBe('?t=[REDACTED]')
     // A multi-byte character arrives as its UTF-8 bytes, in either case.
