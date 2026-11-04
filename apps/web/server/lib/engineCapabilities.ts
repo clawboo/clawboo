@@ -81,6 +81,11 @@ export const FEATURE_ROUTES = {
   'stream.agentChat.resume': ['GET /api/agents/:agentId/chat/stream'],
   'stream.events.resume': ['GET /api/obs/stream'],
   'system.selfUpdate': ['POST /api/system/self-update'],
+  'system.hold': [
+    'GET /api/system/hold',
+    'POST /api/system/hold',
+    'DELETE /api/system/hold/:owner',
+  ],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -119,6 +124,7 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // Matches self-version's `applyable`: a global npm install this user can
     // write, with in-app updates not turned off by an administrator.
     'system.selfUpdate': selfUpdateRefusal() === null,
+    'system.hold': true,
   }
   return {
     version,

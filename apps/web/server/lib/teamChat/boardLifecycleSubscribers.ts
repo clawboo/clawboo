@@ -33,6 +33,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 
 import { getDb } from '../db'
+import { engineHeld } from '../engineHold'
 import { recipientFor } from './inboxNotices'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { clearTaskSessionPointers } from './taskSessionPointers'
@@ -62,6 +63,9 @@ function schedulePump(teamId: string, taskId: string, mcpBaseUrl: string | null)
   if (pendingPumps.has(key)) return
   const t = setTimeout(() => {
     pendingPumps.delete(key)
+    // A held engine (see engineHold) claims nothing it cannot start; the server's
+    // dispatch pump runs a pass when the hold lifts.
+    if (engineHeld()) return
     getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
       .pump()
       .catch((err: unknown) => log.error({ err, teamId, roomId }, 'wake-on-work pump failed'))

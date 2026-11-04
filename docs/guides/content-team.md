@@ -33,7 +33,7 @@ Read this before you rely on the team. What an agent can do depends on its runti
 
 The skills a catalog agent lists, such as `web-search` or `email-draft`, describe its role. They do not give it a working tool.
 
-Nobody checks writing work automatically. A task that finishes in team chat goes to **Done** without a verification step, so read what the team wrote before you publish it. See [How work is checked](/concepts/verification).
+Nobody checks writing work automatically. Unless the team has a [work check](/using/teams#work-check), a command that tests what the agents changed, a task that finishes in team chat goes to **Done** without a verification step, so read what the team wrote before you publish it. See [How work is checked](/concepts/verification).
 
 ## Steps
 

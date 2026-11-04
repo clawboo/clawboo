@@ -19,26 +19,37 @@ keywords:
   ]
 ---
 
-Clawboo can check an agent's work before the task counts as done. It runs the project's test command, and for bigger or handed-off changes a second agent reviews the change. These checks run in one narrow case: a task-runner run that worked in its own git worktree and changed files. Most work, including everything handed off in team chat, is never checked.
+Clawboo can check an agent's work before the task counts as done. It runs the project's test command, and for bigger, risky or handed-down changes a second agent reviews the change. The check runs in two cases: a task-runner run that worked in its own git worktree and changed files, and a team-chat task that changed its team's folder on a team with a [work check](/using/teams#work-check). Other work is never checked.
 
 ## When checks run
 
-Checks run only when all three of these are true:
+### Task-runner runs
+
+A task-runner run is checked when all three of these are true:
 
 1. **The task ran on the task runner.** That means an agent Routine whose task names a repository (set through the API), or a run started with `POST /api/runtimes/:id/run` and a `repoPath`. [How a team works](/intro/how-it-works) explains the two paths. A worktree completed through the board's workspace API is also checked, without a reviewer.
 2. **The task changes files**, so it got its own git worktree. Research and review tasks get none.
 3. **The agent changed something.** A run that changed no files lands in **Done** without a check.
 
-Nothing in the dashboard starts a checked run. A Routine you create in the app sends only its instructions, so it runs without a repository, and its work is not checked.
+A Routine you create in the app sends only its instructions, so it runs without a repository, and its work is not checked this way.
+
+### Team chat
+
+A task that runs in team chat is checked when all three of these are true:
+
+1. **The team has a work check.** That is the verify command you set in the team's settings (see [Teams](/using/teams#work-check)). Without one, team-chat work is not checked: a lot of it writes documents rather than code, and a check with no command can only fail.
+2. **The agent works in the team folder.** Claude Code, Codex, Hermes and Clawboo Native runs start in `~/.clawboo/workspaces/<team id>`. OpenClaw agents work in their Gateway's workspace and are not checked.
+3. **The run changed the team folder**, compared with the folder as it was when the task first started. A run that changed nothing, with no failed attempt before it, lands in **Done** without a check.
+
+This covers work handed off in General or a room, the steps of a plan, and tasks you give an agent on the Board that run through the team, including their reruns from **Retry** or **Assign**.
 
 ### Never checked
 
-- Work handed off in team chat, in General or a room, including the steps of a plan
-- Tasks you give an agent on the Board, and their reruns from **Retry** or **Assign**
+- Team-chat work on a team with no work check, or by an OpenClaw agent
 - One-to-one chats
 - OpenClaw work. An OpenClaw Routine run gets a comment saying it completed without verification.
-- Routines created in the app
-- Research and review tasks
+- Agent Routines created in the app (a team Routine posts into team chat, where the rules above apply)
+- Research and review tasks on the task runner
 - Tasks you move to **Done** yourself
 
 A task with no check result reaches **Done** normally. Unchecked is not the same as failed.
@@ -46,9 +57,9 @@ A task with no check result reaches **Done** normally. Unchecked is not the same
 ## What happens during a check
 
 1. The agent's run ends. On the [Board](/using/board) the card stays in **In progress** with a **Verifying** badge.
-2. Clawboo runs the team's verify command if the team has one, otherwise the one named in the worktree's `init.sh`, inside the worktree, and reads its exit code. The command gets 10 minutes. Time the computer spends asleep does not count, except a sleep of under about a minute.
-3. If the command passes and the change is large or was handed off, a reviewer agent reads the committed change.
-4. Clawboo stores the result on the task and moves the card to match.
+2. Clawboo runs the team's verify command if the team has one, otherwise the one named in the worktree's `init.sh`, inside the worktree, and reads its exit code. A team-chat task's check runs the team's command in the team folder. The command gets 10 minutes. Time the computer spends asleep does not count, except a sleep of under about a minute.
+3. If the command passes and the change is large, risky or handed down from another task, a reviewer agent reads the committed change.
+4. Clawboo stores the result on the task and moves the card to match. In team chat, whoever handed out the task hears about it only after the check: on a pass, as a normal result.
 
 ```mermaid
 flowchart TD
@@ -56,7 +67,7 @@ flowchart TD
     B -->|No| D["Done, unchecked"]
     B -->|Yes| C["Run the verify command"]
     C -->|Fails| F["Fail"]
-    C -->|Passes| R{"Large or handed off?"}
+    C -->|Passes| R{"Large, risky or handed down?"}
     R -->|No| P["Pass: Done"]
     R -->|Yes| V["Reviewer reads the change"]
     V -->|Blocking issue| F
@@ -102,12 +113,12 @@ The agent that did the work can edit `init.sh`, so without a team verify command
 
 The reviewer runs only after the test command passes, and only when at least one of these holds:
 
-- The task was handed out by another agent (it has a parent task).
+- The task was handed down from another task (it has a parent task). In team chat, a hand-off straight from the lead, or a task you give on the Board, has no parent task; one a teammate hands off while working on its own task does.
 - More than 5 files changed.
 - More than 300 lines changed, counting lines added and removed.
 - The task's title or description names a risky action: delete, destroy, drop table, deploy, publish, release, `rm -rf`, prod or production, secret, credential, API key or force push. It is the same word list team chat uses to ask a leader before a risky hand-off.
 
-These rules are fixed. A small change on a task nobody handed out, whose title and description name none of those words, is judged by the test command alone.
+These rules are fixed. A small change on a task with no parent task, whose title and description name none of those words, is judged by the test command alone.
 
 How the reviewer works:
 
@@ -126,26 +137,53 @@ How the reviewer works:
 
 ## The failures checks are for
 
-| Failure                                   | What Clawboo does                                               | What you see                                        | What you can do                                                |
-| ----------------------------------------- | --------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
-| The agent says it is done, but tests fail | Runs the verify command itself and trusts only its exit code    | The task goes back for a fix, then to **Needs you** | Read the failure comment on the card                           |
-| The agent marks its own work              | A reviewer in a fresh session reads large or handed-off changes | Blocking findings send the work back                | Set `CLAWBOO_REVIEWER_MODEL` for a different model             |
-| No test command is set                    | The placeholder counts as a failure                             | **Needs review** after the last attempt             | Set the team's verify command, or name the command in the task |
-| A fix loop that never ends                | Two attempts by default, then stop                              | The card waits in **Needs you**                     | Retry, complete it anyway, or dismiss it                       |
-| A check that hangs                        | Stops the command after 10 minutes, with everything it started  | Counts as a failure                                 | Make the command finish faster                                 |
+| Failure                                   | What Clawboo does                                                           | What you see                                                       | What you can do                                                |
+| ----------------------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| The agent says it is done, but tests fail | Runs the verify command itself and trusts only its exit code                | The task goes back for a fix, then to **Needs you**                | Read the failure comment on the card                           |
+| The agent marks its own work              | A reviewer in a fresh session reads large, risky or handed-down changes     | Blocking findings send the work back                               | Set `CLAWBOO_REVIEWER_MODEL` for a different model             |
+| No test command is set                    | A task-runner check fails on the placeholder; team-chat work is not checked | A task-runner task reaches **Needs review** after the last attempt | Set the team's verify command, or name the command in the task |
+| A fix loop that never ends                | Two attempts by default, then stop                                          | The card waits in **Needs you**                                    | Retry, complete it anyway, or dismiss it                       |
+| A check that hangs                        | Stops the command after 10 minutes, with everything it started              | Counts as a failure                                                | Make the command finish faster                                 |
+
+## Checks in team chat
+
+A team-chat task has no worktree: every teammate works in the same team folder. To see what a task changed, Clawboo keeps a history of the folder outside it, in `~/.clawboo/team-folder-history/<team id>.git`, and saves the folder there when the task first starts and again each time a run of it ends well. A later run (a fix round, or a **Retry**) keeps that first starting point. A run that fails or is stopped saves nothing: its changes are seen by the task's next checked run, and a cancelled task's are never checked. The folder itself never becomes a git checkout, and no `VERIFICATION.md` is written into it; the result is stored on the task.
+
+- **A fix round** gets the note of what failed together with the task itself, because a team-chat run starts a fresh session. Its check compares the folder with how it was when the task first started, so it covers all of the task's work.
+- **The reviewer** reads a separate checkout of the folder as the run left it, made from that history.
+- **Whoever handed out the task** hears about it once, after the check. When the last attempt fails, they are told the task failed the team's check and needs a person.
+- **While a task is checked**, its agent takes no other task, and a reply the agent gives you in that time is not taken as the task's result.
+
+What a team-chat check cannot see:
+
+- **Teammates working at the same time.** The command runs on the live folder, so it also sees what a teammate changes while the check runs, and a task's change includes anything a teammate changed in the folder while the task ran.
+- **Files outside the team folder.** Claude Code, Codex and Hermes can change any file your user account can; only the team folder is compared.
+- **Dependency folders.** `node_modules`, `.venv`, `venv`, `__pycache__`, `.next`, `.turbo` and `target` are not counted as changes.
+- **Uncommitted edits inside a git repository** an agent cloned into the team folder. Only a new commit there counts as a change.
+- **Files a `.gitignore` in the team folder ignores.** They are not counted as changes, so a run that changed only those is not checked. They stay out on purpose: they include files such as `.env`, which would otherwise land in the history and the reviewer's checkout.
+
+When a team-chat check cannot finish, the task waits in **Needs you** with a comment, and whoever handed it out is told:
+
+- **Clawboo restarts, or the chat is closed,** while the check runs. The task moves once Clawboo is running again.
+- **The check does not answer within 30 minutes.** The verify command itself is stopped after 10.
+- **The check cannot run**, for example because the folder's history is missing, or a fix round can no longer be checked after an earlier attempt failed.
+- **A fix round cannot be started**, for example because the board could not record its run. The comment says why.
+
+If Clawboo cannot record the team folder when a task starts, the task is not checked, and a comment on it says so. Pressing **Stop** during a check lets it finish: a pass still lands in **Done**, and a failure starts no fix round. If a person moves the card while its check runs, the check's result is dropped and the card stays where they put it. If the check passes but the board does not take the task to **Done**, it waits in **Needs you** too, with a comment that says so. After a person's **Retry** of a task that failed its check, the task is measured again from where it first began, so a retry that changes nothing is still checked. Deleting a team deletes its folder's history too.
 
 ## Limits
 
-- Only task-runner runs in a worktree are checked, and the dashboard cannot start one.
+- Only task-runner runs in a worktree, and team-chat tasks on a team with a work check, are checked. The dashboard cannot start a task-runner run.
 - A check is only as strong as its command, and without a team verify command the agent can edit `init.sh`.
 - The team's verify command can be changed by any local caller of the API, an agent's shell included. It keeps a cooperative agent from choosing its own check; it does not stop one that sets out to.
 - The reviewer runs on the agent's own runtime, with the agent's model unless you set `CLAWBOO_REVIEWER_MODEL`.
-- Checked work stays on its own branch, `clawboo/task-<id>`. Clawboo never merges it; merging is up to you.
+- Task-runner work stays on its own branch, `clawboo/task-<id>`. Clawboo never merges it; merging is up to you. Team-chat work stays in the team folder, where the agent made it.
 - A check is not continuous integration: it runs one command, once per attempt, with no pipeline, cache or test matrix.
 
 <Accordion title="Under the hood">
 
-- **Where it runs.** `verifyTask` (`apps/web/server/lib/verification/index.ts`) is called only from `actOnTaskWorkspace` (`apps/web/server/lib/worktrees.ts`). The task runner calls it with a reviewer when a run completes (`apps/web/server/lib/executorRunner.ts`). `PATCH /api/board/:taskId/workspace` with `{"action": "complete"}` calls it without one, so that route never runs the reviewer.
+- **Where it runs.** `verifyTask` (`apps/web/server/lib/verification/index.ts`) is called from `actOnTaskWorkspace` (`apps/web/server/lib/worktrees.ts`) and from the team chat's work check (`apps/web/server/lib/teamChat/teamWorkCheck.ts`). The task runner calls `actOnTaskWorkspace` with a reviewer when a run completes (`apps/web/server/lib/executorRunner.ts`). `PATCH /api/board/:taskId/workspace` with `{"action": "complete"}` calls it without one, so that route never runs the reviewer.
+- **Team chat.** The team engine's `workCheck` dependency (`@clawboo/team-orchestration`) calls `begin` before it delivers a fresh run of a task, which commits the team folder to a bare repository outside it and pins `refs/clawboo/base/<task id>`, and `prepare` when the run ends well. A changed folder moves the task to `in_review` and runs `verifyTask` there with the team's command, the commit as the reviewed revision, and no `VERIFICATION.md`. Its `shouldRecord` drops the verdict once the task has left `in_review` or a newer execution of it has started. A pass lets the engine mark the task done; a failure with an attempt left moves it back to `in_progress` and the engine delivers a fix round as a new execution; the last failure moves it to `blocked` and the delegator's `[Task Update]` has the outcome `check_failed`. The base ref stays until a pass, or a person's Done or Cancelled, so a Retry is measured from the task's first start. A task left `in_review` with an open engine execution and no check under way is blocked by the next engine's `resume()` (outcome `check_interrupted`), and the dispatch pump builds the engine of any room holding one (`listRoomsWithEngineTasksInReview`).
 - **The command.** The team's verify command (settings key `team-verify-command:<teamId>`) wins and is recorded as `commandSource: 'configured'`. Otherwise the gate reads `VERIFY_CMD='...'` from `init.sh`, then the `- Verify:` line of `VERIFICATION.md`, and records `scaffold` when that command matches the `init.sh` of the task's scaffold commit (read from the repository with `git --no-replace-objects`), else `agent`. A command containing `configure VERIFY_CMD` counts as none (`packages/governance/src/verify/commandParser.ts`). It runs through a shell in the worktree with Clawboo's secrets removed from its environment, keeps the last 4,000 characters of output, and refuses a worktree outside the Clawboo folder and the work folder's `worktrees/` and `reviews/`, or one whose real path, links resolved, leaves them; it runs in that real path (`apps/web/server/lib/verification/deterministicGate.ts`; see [The work folder](/operating/data-and-state#the-work-folder)).
 - **The stored result.** Statuses are `pass`, `fail` and `completed_with_debt`, which is given at the last attempt. A `completed_with_debt` result lists the open issues in `debtNotes`, and a later pass with debt adds to them. A later check whose command passes drops the failed command's issue, even when the reviewer then fails the work. A `fail` keeps the rest, and the task drawer lists them under the failure, marked **Still open from an earlier pass with debt**. A `pass` clears them all when its review completed. A pass with no review, or with a review that returned nothing or did not complete, keeps the reviewer's issues, because nobody looked at them again. The task drawer lists those under **Passed**, marked **Not reviewed again**. Each attempt's own result stays in `attempts`. `PATCH /api/board/:taskId` refuses `done` with `409 verification_required` while a stored result blocks it, unless the request sets `humanOverride`, which writes a `verification` audit row. A stored result that cannot be parsed does not block, and `completed_with_debt` over a passing command does not block a later move to Done.
 - **Skipped by Clawboo.** A run that changed nothing, and an OpenClaw Routine completion (an `unverified` audit row), both reach `done` without the gate.

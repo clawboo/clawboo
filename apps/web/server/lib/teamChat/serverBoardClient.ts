@@ -41,6 +41,7 @@ import type {
   TaskDetail,
 } from '@clawboo/team-orchestration'
 
+import { engineHeld } from '../engineHold'
 import { emitEvent } from '../obs'
 import { runsOnTaskRunner } from '../runnerRoute'
 
@@ -85,6 +86,12 @@ export function createServerBoardClient(
     },
 
     async claim(taskId, assigneeAgentId, assigneeRuntime): Promise<ClaimResult> {
+      // A held engine (see engineHold) claims nothing: a claimed task would sit
+      // `in_progress` waiting for a run slot across the stop the hold is for.
+      // Refused as a conflict, the engine leaves the task in To do, as it does
+      // when another engine wins the claim, and the server's dispatch pump fires
+      // it once the hold lifts or after the next start.
+      if (engineHeld()) return { ok: false, reason: 'conflict' }
       try {
         const result = claimTask(db, taskId, assigneeAgentId, assigneeRuntime)
         if (result.ok && result.task) {

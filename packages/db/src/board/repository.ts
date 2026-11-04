@@ -497,6 +497,31 @@ export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
 }
 
 /**
+ * Rooms holding a task In review whose last run is still open under the team
+ * engine (executor type `openclaw`): a team-chat work check under way, or one a
+ * restart cut short. The dispatch pump builds such a room's engine when none is
+ * loaded, and the engine's `resume()` hands the interrupted ones to a person. A
+ * task-runner task in review has a runner execution and is not listed.
+ */
+export function listRoomsWithEngineTasksInReview(
+  db: ClawbooDb,
+): Array<{ teamId: string; roomId: string | null }> {
+  const rows = db
+    .select({ id: tasks.id, teamId: tasks.teamId, roomId: tasks.roomId })
+    .from(tasks)
+    .where(and(eq(tasks.status, 'in_review'), eq(tasks.dropped, 0)))
+    .all() as Array<{ id: string; teamId: string | null; roomId: string | null }>
+  const rooms = new Map<string, { teamId: string; roomId: string | null }>()
+  for (const r of rows) {
+    if (!r.teamId) continue
+    const last = listExecutions(db, r.id).at(-1)
+    if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
+    rooms.set(`${r.teamId}\u0000${r.roomId ?? ''}`, { teamId: r.teamId, roomId: r.roomId })
+  }
+  return [...rooms.values()]
+}
+
+/**
  * Liveness heartbeat for a running task: bump `updatedAt` — the exact column
  * `reconcileStaleInProgress` keys on — so an actively-driven run is never swept
  * as stale, and the sweep TTL can be minutes instead of an hour. Guarded on

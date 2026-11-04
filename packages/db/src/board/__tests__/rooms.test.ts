@@ -8,12 +8,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createDb, type ClawbooDb } from '../../db'
 import { agents, roomMembers, teams } from '../../schema'
 import {
+  claimTask,
+  createExecutionProcess,
   createSubtask,
   createTask,
   getReadyTasks,
+  listRoomsWithEngineTasksInReview,
   listRoomsWithFireableDelegations,
   listTasks,
   listTeamsWithFireableDelegations,
+  updateStatus,
 } from '../repository'
 import {
   activeRoomMemberIds,
@@ -168,5 +172,22 @@ describe('board tasks and rooms', () => {
     })
     expect(listRoomsWithFireableDelegations(db)).toEqual([{ teamId: 'T', roomId: room.id }])
     expect(listTeamsWithFireableDelegations(db)).toEqual(['T'])
+  })
+
+  it('the in-review scan names rooms whose team-chat work is being checked', () => {
+    const room = createRoom(db, { teamId: 'T', name: 'A', memberIds: ['a1'] })
+    const inReview = (title: string, roomId: string | null, executorType: string): string => {
+      const t = createTask(db, { title, teamId: 'T', roomId })
+      claimTask(db, t.id, 'a1')
+      createExecutionProcess(db, { taskId: t.id, executorType })
+      updateStatus(db, t.id, 'in_review')
+      return t.id
+    }
+    // A task-runner task in review is the runner's, not the team engine's.
+    inReview('runner work', null, 'claude-code')
+    expect(listRoomsWithEngineTasksInReview(db)).toEqual([])
+
+    inReview('team work', room.id, 'openclaw')
+    expect(listRoomsWithEngineTasksInReview(db)).toEqual([{ teamId: 'T', roomId: room.id }])
   })
 })

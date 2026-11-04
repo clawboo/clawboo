@@ -102,7 +102,8 @@ These functions remove folders recursively and run commands, so every path they 
 - **Review checkouts stay in the review folder.** `removeReviewWorktree(repo, worktree, rootDir)` throws before it
   removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
   `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
-  its own path the same way.
+  its own path the same way. Its `repoPath` may be a bare repository, such as the history the server keeps of a team
+  folder (see [How work is checked](/concepts/verification#checks-in-team-chat)).
 - **Verify commands run in Clawboo's folders only.** The server's verification gate refuses a worktree path outside
   Clawboo's state folder and the work folder's `worktrees/` and `reviews/`, or one whose real path leaves them, before
   it runs `VERIFY_CMD` in that real path.

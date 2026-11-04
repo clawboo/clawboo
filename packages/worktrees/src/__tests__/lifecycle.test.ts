@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
-import { mkdir, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -213,6 +214,22 @@ describe('worktree lifecycle', () => {
     expect(await isDetached(review.worktreePath)).toBe(true)
     await removeReviewWorktree(repo, review)
     expect(existsSync(review.worktreePath)).toBe(false)
+  })
+
+  it('provisions a reviewer worktree from a bare repository (a history kept outside its folder)', async () => {
+    const bare = await mkdtemp(path.join(os.tmpdir(), 'clawboo-wt-bare-'))
+    const reviews = await mkdtemp(path.join(os.tmpdir(), 'clawboo-wt-reviews-'))
+    try {
+      await git(bare, ['clone', '--bare', '-q', repo, '.'])
+      const sha = await resolveBaseSha(repo, 'HEAD')
+      const review = await provisionReviewWorktree({ repoPath: bare, sha, rootDir: reviews })
+      expect(review.detached).toBe(true)
+      expect(existsSync(path.join(review.worktreePath, 'README.md'))).toBe(true)
+      await removeReviewWorktree(bare, review, reviews)
+      expect(existsSync(review.worktreePath)).toBe(false)
+    } finally {
+      await cleanup(bare, reviews)
+    }
   })
 
   it('refuses to tear down a review worktree path that is not directly under the review root', async () => {
