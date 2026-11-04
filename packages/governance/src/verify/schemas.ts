@@ -129,7 +129,7 @@ export const debtNoteSchema = z.object({
 export type DebtNote = z.infer<typeof debtNoteSchema>
 
 /** The `criterion` of the debt note a red deterministic gate leaves at exhaustion.
- *  A later pass ran the gate green, so it never carries this note. */
+ *  A later attempt that ran the gate green never carries this note. */
 export const GATE_DEBT_CRITERION = 'deterministic gate'
 
 /**

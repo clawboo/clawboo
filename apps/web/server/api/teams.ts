@@ -6,6 +6,7 @@ import { eq, inArray, like, sql } from 'drizzle-orm'
 import { personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
+import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
 import { getRegistry } from '../lib/agentSource/registry'
 import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
 import { ensureNativeBooZero } from '../lib/teamChat/booZero'
@@ -311,6 +312,10 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
       } catch {
         folderRemoved = false
       }
+      // The history the work check keeps of that folder goes with it.
+      await rm(teamFolderHistoryDir(teamId), { recursive: true, force: true }).catch(
+        () => undefined,
+      )
     }
 
     res.json({ ok: true, folderRemoved })

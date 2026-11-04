@@ -26,6 +26,7 @@ import {
 } from '@clawboo/obs'
 
 import { getDb, resetDb } from '../../db'
+import { engineHold } from '../../engineHold'
 import { createServerBoardClient } from '../serverBoardClient'
 
 /** Rehydrate a stored row into the reducer shape (mirrors api/obs.ts `toEvent`). */
@@ -44,12 +45,16 @@ const TEAM = 'team-sbc'
 describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-sbc-home-'))
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home // → getDbPath() lands in the sandbox
+    // getDb() follows CLAWBOO_HOME before $HOME: sandbox both.
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     db = getDb()
   })
   afterEach(async () => {
@@ -58,6 +63,8 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -87,6 +94,22 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     const second = await client.claim(task!.id, 'a2')
     expect(second.ok).toBe(false)
     expect(second.reason).toBe('conflict')
+  })
+
+  it('claims nothing while the engine is held, leaving the task in To do for after the hold', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 'later', teamId: TEAM })
+    engineHold().place('sbc-test')
+    try {
+      const held = await client.claim(task!.id, 'a1')
+      expect(held).toEqual({ ok: false, reason: 'conflict' })
+      expect(getTask(db, task!.id)?.status).toBe('todo')
+      expect(getTask(db, task!.id)?.assigneeAgentId ?? null).toBeNull()
+      expect(kinds()).not.toContain('task_claimed')
+    } finally {
+      engineHold().release('sbc-test')
+    }
+    expect((await client.claim(task!.id, 'a1')).ok).toBe(true)
   })
 
   it('createExecution → exec + execution_started; completeExecution → completed + execution_completed', async () => {

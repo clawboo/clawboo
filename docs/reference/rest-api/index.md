@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 211 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 214 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -183,9 +183,11 @@ The same-origin guard runs on the upgrade first (`403 Forbidden` on failure), th
 
 A script or app that talks to more than one Clawboo server should not guess what each one supports. `GET /api/system/capabilities` (see [System](/reference/rest-api/system)) answers with the server's version, its client API revision, the oldest release whose clients it still serves, and a feature flag for each optional surface. A server supports clients of its current and previous minor release; see [Supported versions](/operating/supported-versions).
 
+Something that stops or restarts a server (a stop script, an updater, a process manager) can ask it to hold first, so it starts no new agent run, and wait for the runs going to finish. See [Drain and hold](/reference/rest-api/system#drain-and-hold).
+
 ## Route index
 
-The router registers 211 routes: 97 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
+The router registers 214 routes: 98 `GET`, 82 `POST`, 16 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -206,7 +208,7 @@ The router registers 211 routes: 97 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                      |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                      |
 | [Authentication](#authentication)                    | 2      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**; `/api/access/identity`: who is signed in             |
-| [System](/reference/rest-api/system)                 | 14     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version, capabilities and update, pinned settings     |
+| [System](/reference/rest-api/system)                 | 17     | `/api/system/*`: OpenClaw setup and Gateway control, models, device pairing, Clawboo's version, capabilities, update, drain and hold, pinned settings     |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                              |
 
 Source of truth for maintainers: the router `apps/web/server/api/index.ts`, the middleware order in `apps/web/server/index.ts`, `apps/web/server/lib/rateLimit.ts`, and `packages/gateway-proxy/src/access-gate.ts` and `origin-guard.ts`. `apps/web/server/api/__tests__/clientContract.test.ts` pins every route and method, so removing or renaming one fails it unless the API revision goes up.

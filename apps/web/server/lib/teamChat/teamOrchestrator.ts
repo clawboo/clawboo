@@ -26,6 +26,7 @@ import {
   enqueueInbox,
   getActiveRoom,
   listPendingReportUps,
+  listRoomsWithEngineTasksInReview,
   listRoomsWithPendingReportUps,
   reapReportUps,
   settleReportUps,
@@ -60,6 +61,7 @@ import { createReportUpOutbox } from './reportUpOutbox'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type QueuedRun, type RunEntry } from './serverDeliver'
+import { createTeamWorkCheck } from './teamWorkCheck'
 import { roomIdForTask, roomLeadId, roomMembers } from './roomRoster'
 
 const log = createLogger('team-orchestrator')
@@ -412,6 +414,10 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // failed in the queue) stays pending, and this engine's sweep or the room's
     // next engine sends it again.
     reportUps: createReportUpOutbox(db, teamId, roomId),
+    // The task runner's verification gate, run on the team folder: a task whose
+    // run changed it is done only once the team's verify command (and, for a
+    // large, risky or handed-down change, a reviewer) passes it.
+    workCheck: createTeamWorkCheck({ db, teamId, mcpBaseUrl }),
   })
   engineRef.current = engine
 
@@ -681,8 +687,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       lastActivityAt = Math.min(lastActivityAt + ms, at)
     },
     // A live run registers itself in `abortMap` for its whole lifetime, so an
-    // empty map is exactly "nothing running".
-    isQuiescent: () => abortMap.size === 0,
+    // empty map is exactly "nothing running". A work check runs after its run has
+    // ended, so the engine counts those itself.
+    isQuiescent: () => abortMap.size === 0 && engine.checksInFlight() === 0,
     dispose: () => orchestrator.dispose(),
   }
 }
@@ -745,6 +752,17 @@ export function roomsWithUnheldReportUps(
 ): Array<{ teamId: string; roomId: string | null }> {
   reapReportUps(db)
   return listRoomsWithPendingReportUps(db).filter((r) => !hasTeamOrchestrator(r.teamId, r.roomId))
+}
+
+/** Chat rooms with team-chat work In review and no resident engine to finish its
+ *  check: a restart cut the check short. Building the room's engine hands those
+ *  tasks to a person (its `resume()`). */
+export function roomsWithUnheldChecks(
+  db: ClawbooDb,
+): Array<{ teamId: string; roomId: string | null }> {
+  return listRoomsWithEngineTasksInReview(db).filter(
+    (r) => !hasTeamOrchestrator(r.teamId, r.roomId),
+  )
 }
 
 /** The room a board task is driven from (its own active room, else the team's

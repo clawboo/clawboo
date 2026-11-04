@@ -11,6 +11,10 @@
 // = another ticker won = drop, never retry) → dispatch → record the outcome +
 // re-arm from the cron spec. Only the claim pass is serialized: a dispatch still
 // in flight never holds up the next due routine.
+//
+// A HELD ENGINE (see engineHold) claims nothing: due routines stay in the ledger,
+// queued or idle, and the timer only rescans. When the hold lifts the ticker
+// rescans at once and fires what came due meanwhile.
 
 import {
   claimScheduledRun,
@@ -26,6 +30,7 @@ import {
 import { isOnceSpec, nextOccurrence } from '@clawboo/scheduler'
 
 import { getDb } from '../db'
+import { engineHold } from '../engineHold'
 import { emitEvent } from '../obs'
 import { routineTimeZone } from './timeZone'
 import { dispatchRoutine, type RoutineDispatchOutcome } from './wakeBridge'
@@ -48,6 +53,8 @@ export interface RoutinesTickerDeps {
   log: TickerLog
   /** Threaded into the wake-bridge so executor runs can attach clawboo's MCP. */
   mcpBaseUrl?: string | null
+  /** True while the engine is held. Defaults to the process's engine hold. */
+  held?: () => boolean
 }
 
 export interface RoutinesTicker {
@@ -67,6 +74,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
   const dispatch =
     deps.dispatch ??
     ((run: DbScheduledRun) => dispatchRoutine(run, { db, mcpBaseUrl: deps.mcpBaseUrl ?? null }))
+  const held = deps.held ?? ((): boolean => engineHold().isHeld())
 
   let timer: ReturnType<typeof setTimeout> | null = null
   let running = false
@@ -80,9 +88,10 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     const nowMs = now()
     // A queued row (Run now, or a fire a restart re-queued) is due this instant.
     // minNextRunAt only sees idle rows, so without this a Run now waited out the
-    // whole rescan interval.
-    const delay =
-      listQueuedRuns(db).length > 0
+    // whole rescan interval. Held, nothing is due: the hold's lift rescans.
+    const delay = held()
+      ? MAX_ARM_DELAY_MS
+      : listQueuedRuns(db).length > 0
         ? 0
         : next == null
           ? MAX_ARM_DELAY_MS
@@ -190,6 +199,12 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     // The atomic claim makes that harmless, but one pass at a time keeps the
     // `routine_fired` log in order.
     if (claiming) return { fired: 0 }
+    // Held: claim nothing. A due row stays as it is in the ledger and fires once
+    // the hold lifts, so a stop or an update never starts a routine it would kill.
+    if (held()) {
+      arm()
+      return { fired: 0 }
+    }
     claiming = true
     const claimedRuns: DbScheduledRun[] = []
     try {
@@ -282,8 +297,10 @@ export function startRoutinesTicker(opts: { log: TickerLog; mcpBaseUrl: string |
   ticker.bootResume()
   ticker.start()
   void ticker.tick()
+  const stopFollowingHold = engineHold().onResume(() => ticker.requestRescan())
 
   const stop = (): void => {
+    stopFollowingHold()
     ticker.stop()
     singleton = null
   }

@@ -2,8 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { withIdleTimeout } from '../idleTimeout'
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
-
 /** An async source the test drives by hand. */
 function manualSource<T>(): {
   iterable: AsyncIterable<T>
@@ -39,30 +37,37 @@ function manualSource<T>(): {
 
 describe('withIdleTimeout', () => {
   it('the window is IDLE-reset, not a total budget: a long streaming run never trips', async () => {
-    // Total elapsed (~100 ms) deliberately EXCEEDS idleMs (40 ms), while every
-    // individual gap (~20 ms) stays under it. A total-budget implementation trips
+    // Total elapsed (100 ms) deliberately EXCEEDS idleMs (40 ms), while every
+    // individual gap (20 ms) stays under it. A total-budget implementation trips
     // here; only a per-event re-arm survives. (An earlier version of this test ran
-    // 60 ms against a 200 ms window, which both implementations passed.)
-    const src = manualSource<number>()
-    const seen: number[] = []
-    let idled = false
-    const consume = (async () => {
-      for await (const v of withIdleTimeout(src.iterable, {
-        idleMs: 40,
-        onIdle: () => {
-          idled = true
-        },
-      }))
-        seen.push(v)
-    })()
-    for (const v of [1, 2, 3, 4, 5]) {
-      src.push(v)
-      await sleep(20) // under idleMs individually; 5 x 20 is well over it in total
+    // 60 ms against a 200 ms window, which both implementations passed.) The gaps
+    // run on a fake clock so they are exact: a real 20 ms sleep on a loaded runner
+    // can oversleep past the 40 ms window and trip it.
+    vi.useFakeTimers()
+    try {
+      const src = manualSource<number>()
+      const seen: number[] = []
+      let idled = false
+      const consume = (async () => {
+        for await (const v of withIdleTimeout(src.iterable, {
+          idleMs: 40,
+          onIdle: () => {
+            idled = true
+          },
+        }))
+          seen.push(v)
+      })()
+      for (const v of [1, 2, 3, 4, 5]) {
+        src.push(v)
+        await vi.advanceTimersByTimeAsync(20) // under idleMs individually; 5 x 20 is well over it in total
+      }
+      src.end()
+      await consume
+      expect(seen).toEqual([1, 2, 3, 4, 5])
+      expect(idled).toBe(false)
+    } finally {
+      vi.useRealTimers()
     }
-    src.end()
-    await consume
-    expect(seen).toEqual([1, 2, 3, 4, 5])
-    expect(idled).toBe(false)
   })
 
   it('fires onIdle on silence, then the grace window delivers the terminal', async () => {

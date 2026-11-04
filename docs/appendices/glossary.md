@@ -157,7 +157,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Task**: one piece of work on the Board, usually with an agent, a status and comments. See [Board](/using/board).
 
-**Task runner**: one of the two ways Clawboo runs agents. It runs agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API. Only the task runner gives a run that names a git repository its own worktree, checks finished work, and stops runs that go nowhere. Most work runs in team chat instead. See [How a team works](/intro/how-it-works).
+**Task runner**: one of the two ways Clawboo runs agents. It runs agent routines on Clawboo Native, Claude Code, Codex and Hermes, and runs started through the API. Only the task runner gives a run that names a git repository its own worktree and stops runs that go nowhere. Most work runs in team chat instead. See [How a team works](/intro/how-it-works).
 
 **Tasks card**: the card beside a team chat that sorts the chat's tasks into **Needs you**, **In progress**, **To do**, **Done** and **Cancelled**. Open a task there to read its comments, steer it, or open it on the Board. An agent's page has a **Tasks & Routines** card instead. See [Team chat](/using/team-chat).
 
@@ -177,7 +177,7 @@ Plain definitions of the words you meet in Clawboo and in these docs, from A to 
 
 **Vault**: Clawboo's encrypted store for the keys you connect, kept in your Clawboo folder. Keys you save under **Providers** are also copied, unencrypted, into OpenClaw's files. See [Where keys are stored](/using/providers-and-runtimes#where-keys-are-stored).
 
-**Verification**: Clawboo's check on finished work. It runs the project's test command, and for bigger changes a second agent reviews the work. It runs only for task-runner runs that worked in their own git worktree and changed files, so most work is never checked. See [How work is checked](/concepts/verification).
+**Verification**: Clawboo's check on finished work. It runs the project's test command, and for bigger changes a second agent reviews the work. It runs for task-runner runs that worked in their own git worktree and changed files, and for team chat work that changed the team's folder on a team with a work check. Other work is never checked. See [How work is checked](/concepts/verification).
 
 ### W
 

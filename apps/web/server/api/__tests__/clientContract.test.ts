@@ -27,6 +27,8 @@ import {
   ENGINE_FEATURES,
   RESUMABLE_STREAMS,
   engineCapabilitiesSchema,
+  engineHoldSchema,
+  engineHoldStateSchema,
   supportFloorFor,
   type AgentStatusFrame,
   type BoardChangeFrame,
@@ -91,8 +93,14 @@ const PINNED_FEATURES = [
   'stream.agentChat.resume',
   'stream.events.resume',
   'system.selfUpdate',
+  'system.hold',
   'auth.proxyIdentity',
 ]
+
+/** The drain-and-hold answer (GET, POST /api/system/hold, DELETE /api/system/hold/:owner). */
+const PINNED_HOLD_FIELDS = ['backgroundWork', 'held', 'holds', 'runs']
+const PINNED_HOLD_ENTRY_FIELDS = ['expiresAt', 'expiresInMs', 'heldAt', 'owner', 'reason']
+const PINNED_HOLD_RUNS_FIELDS = ['limit', 'queued', 'running']
 
 /** Every route the API router serves, as `METHOD /path`, in registration order. */
 const PINNED_ROUTES = [
@@ -138,6 +146,9 @@ const PINNED_ROUTES = [
   'GET /api/system/self-version',
   'GET /api/system/capabilities',
   'POST /api/system/self-update',
+  'GET /api/system/hold',
+  'POST /api/system/hold',
+  'DELETE /api/system/hold/:owner',
   'GET /api/system/operator-settings',
   'PUT /api/system/operator-settings/:key',
   'GET /api/teams',
@@ -578,6 +589,45 @@ describe('GET /api/system/capabilities', () => {
   it('declares the pinned response fields in the exported schema', () => {
     expect(Object.keys(engineCapabilitiesSchema.shape).sort(), BUMP).toEqual(
       [...PINNED_CAPABILITY_FIELDS].sort(),
+    )
+  })
+})
+
+describe('drain and hold', () => {
+  it('places, reports and releases a hold in the pinned shape', async () => {
+    const json = { 'Content-Type': 'application/json' }
+    const placed = await fetch(`${base}/api/system/hold`, {
+      method: 'POST',
+      headers: json,
+      body: JSON.stringify({ owner: 'contract-client', ttlSeconds: 30, reason: 'stop' }),
+    })
+    expect(placed.status).toBe(200)
+    const body = (await placed.json()) as Record<string, unknown>
+    expect(Object.keys(body).sort(), BUMP).toEqual([...PINNED_HOLD_FIELDS].sort())
+    const held = engineHoldStateSchema.parse(body)
+    expect(held.held).toBe(true)
+    expect(Object.keys(held.holds[0]!).sort(), BUMP).toEqual([...PINNED_HOLD_ENTRY_FIELDS].sort())
+    expect(Object.keys(held.runs).sort(), BUMP).toEqual([...PINNED_HOLD_RUNS_FIELDS].sort())
+
+    const read = await fetch(`${base}/api/system/hold`)
+    expect(engineHoldStateSchema.parse(await read.json()).holds[0]!.owner).toBe('contract-client')
+
+    const refused = await fetch(`${base}/api/system/hold/another-client`, { method: 'DELETE' })
+    expect(refused.status).toBe(404)
+    const released = await fetch(`${base}/api/system/hold/contract-client`, { method: 'DELETE' })
+    expect(released.status).toBe(200)
+    expect(engineHoldStateSchema.parse(await released.json()).held).toBe(false)
+  })
+
+  it('declares the pinned fields in the exported schemas', () => {
+    expect(Object.keys(engineHoldStateSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_HOLD_FIELDS].sort(),
+    )
+    expect(Object.keys(engineHoldSchema.shape).sort(), BUMP).toEqual(
+      [...PINNED_HOLD_ENTRY_FIELDS].sort(),
+    )
+    expect(Object.keys(engineHoldStateSchema.shape.runs.shape).sort(), BUMP).toEqual(
+      [...PINNED_HOLD_RUNS_FIELDS].sort(),
     )
   })
 })

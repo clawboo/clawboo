@@ -1,6 +1,6 @@
 ---
 title: 'System API'
-description: 'REST reference for /api/system: OpenClaw status, install, setup, Gateway control, config, device pairing and models, plus Clawboo version, capabilities and self-update.'
+description: 'REST reference for /api/system: OpenClaw status, install, setup, Gateway control, config, device pairing and models, plus Clawboo version, capabilities, self-update and drain and hold.'
 keywords:
   [
     'openclaw',
@@ -10,16 +10,17 @@ keywords:
     'device pairing',
     'self-update',
     'capabilities',
+    'drain and hold',
     'feature flags',
     'openclaw.json',
   ]
 ---
 
-Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), installing a newer one (`self-update`), and the settings an administrator can pin (`operator-settings`).
+Use these routes to manage the host itself. Most of them drive OpenClaw: detect what is installed, install the OpenClaw CLI, write its config, control the Gateway process, read or patch `openclaw.json`, approve a device-pairing request, and list the model catalog. The dashboard's OpenClaw setup and **Manage** section in **Settings > Runtimes**, the **System** panel and the update chip call them. The last routes are about Clawboo itself: which release this server runs and what it supports (`self-version`, `capabilities`), installing a newer one (`self-update`), holding new agent runs back before a stop (`hold`), and the settings an administrator can pin (`operator-settings`).
 
 <Note>
 
-Every route here except `self-version`, `capabilities`, `self-update` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
+Every route here except `self-version`, `capabilities`, `self-update`, `hold` and `operator-settings` is for OpenClaw. OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so its lifecycle lives here. [`/api/runtimes`](/reference/rest-api/runtimes) covers Clawboo Native (built in), Claude Code, Codex and Hermes, and the agent registry is in the [Agents API](/reference/rest-api/agents).
 
 </Note>
 
@@ -41,6 +42,9 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | GET    | `/api/system/self-version`            | Which Clawboo this server runs, and whether a newer one exists  | general   | No                        |
 | GET    | `/api/system/capabilities`            | This server's version, API revision and feature flags           | general   | No                        |
 | POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it         | sensitive | SSE                       |
+| GET    | `/api/system/hold`                    | Whether the server is held, and whether agent runs are going    | general   | No                        |
+| POST   | `/api/system/hold`                    | Hold the server, or renew a hold: no new agent run starts       | general   | No                        |
+| DELETE | `/api/system/hold/:owner`             | Release the hold that owner placed                              | general   | No                        |
 | GET    | `/api/system/operator-settings`       | Settings an administrator can pin, and where each value is from | general   | No                        |
 | PUT    | `/api/system/operator-settings/:key`  | Save a value for a setting nobody pinned, for the whole install | sensitive | No                        |
 
@@ -727,6 +731,7 @@ The answer is built from the running process alone: no database read, no network
     "stream.agentChat.resume": true,
     "stream.events.resume": true,
     "system.selfUpdate": true,
+    "system.hold": true,
     "auth.proxyIdentity": false
   }
 }
@@ -757,13 +762,14 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `connectors.broker`                                                         | Always. Apps connected through one broker key (`/api/connectors/composio`).                                                                                                                                                                               |
 | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Always. The team chat stream, the 1:1 chat stream and the event stream each resume from `Last-Event-ID`.                                                                                                                                                  |
 | `system.selfUpdate`                                                         | `POST /api/system/self-update` can succeed here: a global npm install this user can write, with in-app updates not turned off. The same answer as `self-version`'s `applyable`.                                                                           |
+| `system.hold`                                                               | Always. The server can be held before a stop or an update (`/api/system/hold`), and the in-app update waits for agent runs before it restarts.                                                                                                            |
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is. |
 
 ### For client authors
 
-The workspace package `@clawboo/control-client` (in the repository, not published to npm) exports `engineCapabilitiesSchema` (zod), `fetchEngineCapabilities()`, `engineHasFeature()`, `engineSupportsClient()` and `RESUMABLE_STREAMS`, the schema of every event on the three resumable streams. A server older than this route answers `404` in development and the dashboard page (HTML, `200`) once built; `fetchEngineCapabilities()` returns `null` for both.
+The workspace package `@clawboo/control-client` (in the repository, not published to npm) exports `engineCapabilitiesSchema` (zod), `fetchEngineCapabilities()`, `engineHasFeature()`, `engineSupportsClient()`, `RESUMABLE_STREAMS`, the schema of every event on the three resumable streams, and `engineHoldStateSchema`, the answer of the hold routes. A server older than this route answers `404` in development and the dashboard page (HTML, `200`) once built; `fetchEngineCapabilities()` returns `null` for both.
 
-The contract test `apps/web/server/api/__tests__/clientContract.test.ts` pins this answer, every route and method, and the stream events. It fails when one is removed or renamed without raising `apiRevision`.
+The contract test `apps/web/server/api/__tests__/clientContract.test.ts` pins this answer, every route and method, the hold routes' answer, and the stream events. It fails when one is removed or renamed without raising `apiRevision`.
 
 ### Example
 
@@ -775,7 +781,7 @@ curl http://localhost:18790/api/system/capabilities
 
 ## `POST /api/system/self-update`
 
-Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
+Installs `clawboo@latest` globally and restarts the server into it, without cutting off an agent run. Streams **Server-Sent Events**. The request body is optional: `{ "force": true }` restarts without waiting for agent runs.
 
 Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. A global install whose package folder, the folder holding it, or the prefix's `bin` folder (where npm links the `clawboo` command) the server's user cannot write is refused too, as is any install whose administrator turned in-app updates off. Each gets one `unsupported` event naming the reason and the command to run instead (the chip hides its button in those cases anyway).
 
@@ -786,20 +792,29 @@ Only a `global` install can update itself. An `npx` run lives in npm's `_npx` ca
 | `dev`          | A source checkout                                                                     |
 | `not-writable` | The server's user cannot write the install, so `npm install -g` would fail or diverge |
 
+### Waiting for agent runs
+
+An update holds the server from its first event, under the owner id `self-update` (see [Drain and hold](#drain-and-hold)), so no new agent run starts while npm installs. An install that takes longer than 5 minutes stops holding, so a stalled npm does not keep agent work waiting; the update holds again once the install lands. Once the new version is installed, the server waits for the agent runs already going, then restarts. It waits at most 10 minutes; at that bound it restarts anyway, which interrupts the runs still going. While it waits it sends a `progress` event with `step: 'waiting'` each time the number of runs changes, and a `: keepalive` comment every 15 seconds, so a proxy does not close a quiet stream. A browser that disconnects during the wait does not cancel the restart, because the new version is already on disk. An update that ends without a restart (a failed install, or `installed-elsewhere`) releases its hold, and one refused with `unsupported` never holds.
+
+`{ "force": true }` skips the wait. Sent with a new update, the server restarts as soon as the install lands. Sent while an update is waiting, it makes that update restart now and answers with one `forced` event; the waiting update's own stream then reports `restarting`. The update chip's **Restart now** button sends it. One update runs at a time: a second request without `force` gets an `error` event with `code: 'IN_PROGRESS'`.
+
 ### Event stream
 
-| `type`                | When                                                                            | Payload fields                                                    |
-| --------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `unsupported`         | The update cannot run here (see `reason` above)                                 | `method`, `reason`, `command`, `message`                          |
-| `progress`            | Install start                                                                   | `step: 'installing'`, `message`                                   |
-| `output`              | Each non-empty line of npm output                                               | `line`                                                            |
-| `error`               | A spawn failure, or npm exits non-zero; at most one per stream                  | `code`, `message`, and on a non-zero exit `exitCode` and `detail` |
-| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`                                              |
-| `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                                                         |
-| `restarting`          | Just before the new server starts                                               | `port`, `version`                                                 |
+| `type`                | When                                                                                                                   | Payload fields                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `unsupported`         | The update cannot run here (see `reason` above)                                                                        | `method`, `reason`, `command`, `message`                                       |
+| `progress`            | Install start                                                                                                          | `step: 'installing'`, `message`                                                |
+| `output`              | Each non-empty line of npm output                                                                                      | `line`                                                                         |
+| `error`               | A spawn failure, or npm exits non-zero; at most one per stream                                                         | `code`, `message`, and on a non-zero exit `exitCode` and `detail`              |
+| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, the API port is unknown, or the server cannot start its successor | `version`, `message`                                                           |
+| `installed`           | npm exited 0 and the on-disk version changed                                                                           | `version`                                                                      |
+| `progress`            | Installed, and agent runs are still going (see above)                                                                  | `step: 'waiting'`, `running`, `message`                                        |
+| `restarting`          | Just before the new server starts                                                                                      | `port`, `version`, `interruptedRuns` (runs still going, `0` after a full wait) |
+| `forced`              | This request made an update that was waiting restart now                                                               | `message`                                                                      |
 
 | `code`        | Meaning                                                                                  |
 | ------------- | ---------------------------------------------------------------------------------------- |
+| `IN_PROGRESS` | An update is already running, and this request did not ask for `force`                   |
 | `EACCES`      | npm's output named `EACCES`, `EPERM` or "permission denied": the install needs elevation |
 | npm's code    | npm printed its own code (`ETARGET`, `ENOTFOUND`, ...)                                   |
 | `EXIT_<code>` | A non-zero npm exit that printed no code of its own (e.g. `EXIT_7`)                      |
@@ -824,6 +839,119 @@ From a terminal, run the `updateCommand` that `self-version` reports, then `claw
 
 ```bash
 curl -N -X POST http://localhost:18790/api/system/self-update
+
+# While an update waits for agent runs: restart now
+curl -N -X POST http://localhost:18790/api/system/self-update \
+  -H 'Content-Type: application/json' -d '{"force": true}'
+```
+
+---
+
+## Drain and hold
+
+Anything that stops or restarts the server can first ask it to hold: `clawboo stop`, `clawboo restart`, a desktop app's updater, a process manager's stop script. A held server starts no new agent run, and the runs already going carry on to their end. The caller waits until `backgroundWork` is `none`, then stops the server, so no agent is cut off halfway through.
+
+While the server is held:
+
+- A run that would start waits instead, in the same first-come queue that holds runs back when [`CLAWBOO_MAX_CONCURRENT_RUNS`](/reference/environment-variables) is reached. That covers board task runs, team chat turns, 1:1 chat turns with Clawboo Native, Claude Code, Codex and Hermes agents, the turns of a peer exchange and Routine runs on any runtime. A run that is waiting is not failed and does not count against any time limit.
+- Clawboo's Routines scheduler fires nothing. A Routine that falls due stays due and fires once the hold lifts, or after the next start.
+- Team chat claims no board task. A task agents hand each other stays in To do instead of waiting `in_progress`, and the board's dispatch pump, which starts those tasks, skips its pass.
+
+When the last hold is released or lapses, the waiting runs start in order, the scheduler checks for due Routines and the pump runs a pass, which starts the tasks left in To do.
+
+The hold covers the runs this server starts. A 1:1 chat with an OpenClaw agent, and OpenClaw's own scheduled jobs and messaging channels, run inside the OpenClaw Gateway: they are neither held nor counted in `backgroundWork`, and stopping the server does not stop them.
+
+A hold belongs to the owner id its caller picks, and only that id releases it. Each hold lapses after its time to live, 60 seconds unless the caller asks for another, so a caller that crashes cannot leave the server held. To hold for longer, place the hold again before it lapses: that renews it. Several callers can each hold at once; the server stays held until every hold is gone. Holds live in memory, so a restart clears them.
+
+A typical stop:
+
+1. `POST /api/system/hold` with your owner id.
+2. Poll `GET /api/system/hold` until `backgroundWork` is `none`. Place the hold again every 20 seconds or so while you wait. Give up at a bound of your own.
+3. Stop the server. To cancel instead, `DELETE /api/system/hold/<owner>`.
+
+Runs waiting to start when the server stops do not run. Tasks agents handed to each other are picked up again after the next start, as after any restart; a chat message or a task run a person started during the hold has to be started again.
+
+### `GET /api/system/hold`
+
+- **Path/query params**: none.
+- **Request body**: none.
+
+**`200 OK`**:
+
+| Field            | Type                  | Notes                                                                                                      |
+| ---------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `held`           | `boolean`             | `true` while any hold is live: no new agent run starts                                                     |
+| `holds`          | `object[]`            | The live holds, oldest first (below)                                                                       |
+| `backgroundWork` | `'present' \| 'none'` | `present` while an agent run is going; `none` when stopping the server now stops no run                    |
+| `runs.running`   | `number`              | Agent runs going now                                                                                       |
+| `runs.queued`    | `number`              | Runs waiting to start. While the server is held they do not start, so `backgroundWork` does not count them |
+| `runs.limit`     | `number`              | How many runs may go at once (`CLAWBOO_MAX_CONCURRENT_RUNS`, default 8)                                    |
+
+Each entry in `holds`:
+
+| Field         | Type             | Notes                                                                       |
+| ------------- | ---------------- | --------------------------------------------------------------------------- |
+| `owner`       | `string`         | The owner id that placed it, and the only one that releases it              |
+| `reason`      | `string \| null` | What its caller said it is for (`stop`, `restart`, `update`), or `null`     |
+| `heldAt`      | `number`         | Epoch ms on the server's clock when the owner placed it; a renewal keeps it |
+| `expiresAt`   | `number`         | Epoch ms when it lapses unless renewed                                      |
+| `expiresInMs` | `number`         | Time left on the server's clock, for a caller whose clock differs           |
+
+```json
+{
+  "held": true,
+  "holds": [
+    {
+      "owner": "clawboo-stop-48213",
+      "reason": "stop",
+      "heldAt": 1793782800000,
+      "expiresAt": 1793782860000,
+      "expiresInMs": 41250
+    }
+  ],
+  "backgroundWork": "present",
+  "runs": { "running": 2, "queued": 1, "limit": 8 }
+}
+```
+
+### `POST /api/system/hold`
+
+Holds the server, or renews the hold this owner already placed. Body:
+
+| Field        | Type     | Required | Notes                                                                                                                                                          |
+| ------------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`      | `string` | Yes      | 1 to 128 letters, digits or `.` `_` `:` `@` `-`, starting with a letter or digit. Pick one per caller. `self-update` is the in-app update's own and is refused |
+| `ttlSeconds` | `number` | No       | How long the hold lives unless renewed: a whole number from 5 to 900. Default 60                                                                               |
+| `reason`     | `string` | No       | Up to 200 characters, shown in `holds`. A renewal that leaves it out keeps the one given before                                                                |
+
+| Status | When                          | Body                                   |
+| ------ | ----------------------------- | -------------------------------------- |
+| `200`  | Held, or the hold was renewed | The same answer as `GET`               |
+| `400`  | A field failed the checks     | `{ "error": "<which field and why>" }` |
+
+### `DELETE /api/system/hold/:owner`
+
+Releases the hold `owner` placed. No other owner's hold is touched.
+
+| Status | When                                                                     | Body                                                                                                   |
+| ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `200`  | Released                                                                 | The same answer as `GET`                                                                               |
+| `403`  | `self-update`, the in-app update's own hold, which ends with the update  | `{ "error": "self-update is the in-app update's own hold. It ends with the update." }`                 |
+| `404`  | That owner holds no hold: it never placed one, released it, or it lapsed | `{ "error": "No hold is placed under that owner id. Only the owner that placed a hold releases it." }` |
+
+### Example
+
+```bash
+# Hold for two minutes before a stop
+curl -X POST http://localhost:18790/api/system/hold \
+  -H 'Content-Type: application/json' \
+  -d '{"owner": "my-stop-script", "ttlSeconds": 120, "reason": "stop"}'
+
+# Is an agent run still going?
+curl http://localhost:18790/api/system/hold
+
+# Changed your mind: let the server start new work again
+curl -X DELETE http://localhost:18790/api/system/hold/my-stop-script
 ```
 
 ---
@@ -880,7 +1008,7 @@ curl -X PUT http://localhost:18790/api/system/operator-settings/disableBrowserAu
 
 Errors use the standard `{ "error": string }` body. `approve-device` adds `details` on its 404 and `requestId` on the 500 from the approval command. `GET /api/system/models` never returns an error status; it falls back to a `200` with a `null` catalog. The SSE routes report failures as `error` frames once the stream is open. Going over a rate limit answers **429** with `{ "error": "Too many requests. Wait a moment and retry." }` (general) or `{ "error": "Too many requests for this operation. Wait a moment and retry." }` (sensitive), plus a `Retry-After` header.
 
-**Source of truth:** `apps/web/server/api/system.ts`, `systemUpdate.ts`, `systemCapabilities.ts` and `operatorSettings.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; the feature flags in `apps/web/server/lib/engineCapabilities.ts`; pinned settings in `apps/web/server/lib/operatorSettings.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
+**Source of truth:** `apps/web/server/api/system.ts`, `systemUpdate.ts`, `systemCapabilities.ts`, `systemHold.ts` and `operatorSettings.ts`; the hold in `apps/web/server/lib/engineHold.ts` and the run queue it gates in `apps/web/server/lib/runSlots.ts`; the version check in `apps/web/server/lib/updateCheck.ts`; the feature flags in `apps/web/server/lib/engineCapabilities.ts`; pinned settings in `apps/web/server/lib/operatorSettings.ts`; key files in `apps/web/server/lib/openclawEnv.ts`.
 
 ## Related
 
