@@ -1176,4 +1176,48 @@ describe('BoardPanel', () => {
     // The request is consumed: closing and re-rendering does not re-open it.
     expect(useViewStore.getState().boardFocus).toBeNull()
   })
+
+  it("shows Needs you on the alert's team when a browser alert about an approval is clicked", async () => {
+    useTeamStore.setState({
+      teams: [
+        { id: 'team-a', name: 'Alpha', icon: 'A' },
+        { id: 'team-b', name: 'Beta', icon: 'B' },
+      ] as never,
+      selectedTeamId: 'team-b',
+    })
+    const reads: string[] = []
+    server.use(
+      http.get('/api/board', ({ request }) => {
+        reads.push(new URL(request.url).search)
+        return HttpResponse.json({ tasks: [] })
+      }),
+    )
+    useViewStore.getState().openBoardNeedsYou('team-a')
+    render(<BoardPanel />)
+    await waitFor(() => expect(reads).toContain('?teamId=team-a'))
+    expect(screen.getByLabelText('Filter by team')).toHaveTextContent('Alpha')
+    expect(useViewStore.getState().boardNeedsYouFocus).toBeNull()
+  })
+
+  it('offers browser alerts once there is work on the board', async () => {
+    vi.stubGlobal('Notification', { permission: 'default', requestPermission: vi.fn() })
+    const { useAlertPrefs } = await import('@/features/alerts/alertPrefs')
+    useAlertPrefs.setState({ choice: null, permission: 'default' })
+    try {
+      let tasks: unknown[] = []
+      server.use(http.get('/api/board', () => HttpResponse.json({ tasks })))
+      const { unmount } = render(<BoardPanel />)
+      await screen.findByTestId('board-empty')
+      expect(screen.queryByTestId('alerts-opt-in')).toBeNull()
+      unmount()
+
+      tasks = [{ id: 't1', title: 'Wire the widget', status: 'todo' }]
+      render(<BoardPanel />)
+      expect(await screen.findByTestId('alerts-opt-in')).toBeInTheDocument()
+      const header = screen.getByTestId('board-header')
+      expect(within(header).getByRole('button', { name: 'Turn on' })).toBeInTheDocument()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

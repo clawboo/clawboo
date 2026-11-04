@@ -56,6 +56,14 @@ export interface BoardFocus {
   nonce: number
 }
 
+/** A request for the Board to bring Needs you into view (set by a browser alert
+ *  about an approval, or about several things at once). `teamId` is the team
+ *  to show, `all` for every team, or null to keep the board's team. */
+export interface BoardNeedsYouFocus {
+  teamId: string | null
+  nonce: number
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface ViewStore {
@@ -71,6 +79,13 @@ interface ViewStore {
   openBoardTask: (taskId: string, teamId?: string | null) => void
   /** The Board took the request (it opened the drawer). */
   clearBoardFocus: () => void
+
+  /** Pending "show Needs you" request for the Board (consumed once). */
+  boardNeedsYouFocus: BoardNeedsYouFocus | null
+  /** Switch to the Board and bring Needs you into view. */
+  openBoardNeedsYou: (teamId?: string | null) => void
+  /** The Board took the request. */
+  clearBoardNeedsYouFocus: () => void
 
   /** Open an agent's chat / detail view. */
   openAgent: (agentId: string) => void
@@ -140,6 +155,14 @@ export const useViewStore = create<ViewStore>((set) => ({
       boardFocus: { taskId, teamId, nonce: (s.boardFocus?.nonce ?? 0) + 1 },
     })),
   clearBoardFocus: () => set({ boardFocus: null }),
+
+  boardNeedsYouFocus: null,
+  openBoardNeedsYou: (teamId = null) =>
+    set((s) => ({
+      viewMode: { type: 'nav', view: 'board' },
+      boardNeedsYouFocus: { teamId, nonce: (s.boardNeedsYouFocus?.nonce ?? 0) + 1 },
+    })),
+  clearBoardNeedsYouFocus: () => set({ boardNeedsYouFocus: null }),
 
   openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
 

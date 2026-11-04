@@ -24,6 +24,7 @@ import {
   setTaskVerification,
   getTaskVerification,
   getComments,
+  listEvents,
   updateStatus,
   updateWorkspaceStatus,
 } from '@clawboo/db'
@@ -298,6 +299,10 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(getTask(db, taskId)?.status).toBe('blocked')
     expect(getTaskVerification(db, taskId)?.attempts).toHaveLength(2)
     expect(getComments(db, taskId).some((c) => /fix loop is exhausted/i.test(c.body))).toBe(true)
+    // On the event log too, which is what the browser alerts wake up on.
+    expect(
+      listEvents(db, { taskId, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
+    ).toContainEqual({ to: 'blocked', reason: 'verification_exhausted' })
 
     // `blocked -> todo` is one legal move, and it clears the verdict so a
     // re-queued task is not gated by the failure a human just reviewed.
