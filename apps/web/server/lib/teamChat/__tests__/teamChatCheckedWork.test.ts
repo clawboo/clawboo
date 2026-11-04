@@ -44,6 +44,7 @@ import { teamVerifyCommandSettingKey } from '../../verification/teamVerifyComman
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 import { createTeamWorkCheck } from '../teamWorkCheck'
+import { settle } from './settleCascade'
 
 const TEAM = 'T'
 const LEAD = 'lead'
@@ -105,19 +106,10 @@ class ScriptedAgent implements RuntimeAdapter {
 const done = (summary: string): RuntimeEvent =>
   ({ kind: 'done', reason: 'success', summary }) as RuntimeEvent
 
-/** A real wait: git and the verify command run in child processes, so the
- *  cascade needs wall time between the fake-time steps. Taken before any test
- *  fakes the timers. */
-const realSetTimeout = globalThis.setTimeout
-const realSleep = (ms: number): Promise<void> => new Promise((r) => realSetTimeout(r, ms))
-
-async function settle(until: () => boolean, budgetMs = 60 * REFLECT_WINDOW_MS): Promise<void> {
-  for (let t = 0; t < budgetMs && !until(); t += 250) {
-    await vi.advanceTimersByTimeAsync(250)
-    await realSleep(10)
-  }
-  await realSleep(10)
-}
+/** Real time the cascade may take: two checks, each running `git` and the verify
+ *  command in child processes, which on a loaded Windows runner take seconds each.
+ *  Inside the server suites' test timeout on each platform (vitest.config.ts). */
+const REAL_BUDGET_MS = process.platform === 'win32' ? 50_000 : 25_000
 
 describe('team-chat code work is checked', () => {
   let home: string
@@ -234,7 +226,12 @@ describe('team-chat code work is checked', () => {
     })
 
     await deliver(skFor(LEAD), LEAD, 'team: create done.txt', HUMAN_TURN)
-    await settle(() => lead.startOpts.length >= 2)
+    await settle(
+      () => lead.startOpts.length >= 2,
+      "the lead's update after the passing check",
+      60 * REFLECT_WINDOW_MS,
+      REAL_BUDGET_MS,
+    )
 
     // The worker ran twice: the task, then the fix round with what failed.
     expect(worker.startOpts).toHaveLength(2)
