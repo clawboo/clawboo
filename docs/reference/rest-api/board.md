@@ -116,6 +116,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
+      byPerson?: true // for blocked: a person moved it there and no run has started since
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -167,7 +168,7 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   title: string                 // required, 1 to 500 chars
   description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
   teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
@@ -249,7 +250,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/retry
 
 ## `POST /api/board/:taskId/assign`
 
-Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started.
+Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started. When the agent is not the one it was bound to, every agent's saved session on the task is cleared, so the new agent starts fresh and so does an earlier one if the task comes back to it. Assigning it to the same agent again keeps that agent's session, like a retry.
 
 A task with `runnerInputs` starts through the task runner, on the new agent's runtime, with the saved repository and isolation kind; the saved model is kept only when the runtime is the same. An agent on a runtime the runner cannot run, such as OpenClaw, and a task with no `runnerInputs`, start in team chat. See `retry` above.
 
@@ -291,7 +292,15 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
 
 ```ts
 {
-  task: DbTask & { attention; runCost; runningSince } // shape as in GET /api/board
+  task: DbTask & {
+    attention
+    runCost
+    runningSince // shape as in GET /api/board
+    // How the run working on the task takes a comment now: the run's own way,
+    // which can differ from its runtime's (a Hermes run that fell back to
+    // `hermes chat` stops and resumes). null when no run is registered here.
+    runSteering: 'live' | 'interrupt-resume' | 'none' | null
+  }
   comments: Array<{
     id: string
     taskId: string
@@ -414,7 +423,7 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ```ts
 {
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal, -1 low; held to that range
   title?: string                // 1 to 500 chars
   description?: string          // up to 20000 chars
   humanOverride?: boolean        // move to done despite a failed check (audited); only with status 'done'
@@ -466,10 +475,10 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ### Example
 
 ```bash
-# Bump priority + retitle
+# Make it urgent + retitle
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
   -H 'Content-Type: application/json' \
-  -d '{"priority":5,"title":"Updated title"}'
+  -d '{"priority":2,"title":"Updated title"}'
 
 # Ship despite a non-promotable verdict (audited)
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
@@ -1128,10 +1137,16 @@ The task drawer's workspace view: the contents of the task files that exist (`TA
 
 ### Responses
 
-**`404 Not Found`**: no workspace row (or it has no worktree path):
+**`404 Not Found`**: no task with that id:
 
 ```json
-{ "error": "workspace not found" }
+{ "error": "task not found" }
+```
+
+**`200 OK`** with `ok: false`: the task exists but has no checkout of its own (no workspace row, or one with no worktree path). Most tasks never get one, so this is the ordinary answer for them:
+
+```json
+{ "ok": false, "reason": "no_workspace" }
 ```
 
 **`200 OK`**: the task files and the diff (`diffStat` and `diff` are empty when the worktree is paused or git is unavailable):
@@ -1265,7 +1280,7 @@ Most error bodies are `{ "error": "<message>" }`. The exceptions:
 - `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`, `room_archived`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
 - The workspace file view adds `reason` to its misses and answers a refused path with `{ "ok": false, "error": "<message>" }`.
 - The preview routes answer `{ "ok": false, "error": "<message>" }` on `400`, `404` and `413`.
-- `GET /api/board/:taskId/workspace` and `/workspace/detail` answer a missing workspace with a bare `{ "error": "workspace not found" }`.
+- `GET /api/board/:taskId/workspace` answers a missing workspace with a bare `{ "error": "workspace not found" }`. `/workspace/detail` answers a task without one with `200` and `{ "ok": false, "reason": "no_workspace" }`, and an unknown task with `404` and `{ "error": "task not found" }`.
 
 An unknown `taskId` on a comment, or an unknown `parentTaskId` on a create, is a `500` from the database's foreign key, not a `404`.
 

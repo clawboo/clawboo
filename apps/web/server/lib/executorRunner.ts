@@ -82,6 +82,7 @@ import {
 import { budgetPreflight } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
+import { RunQueueAbortedError, withRunSlot } from './runSlots'
 import { registerRunStop, type RunStopHandle } from './runStops'
 import { registerRunSteer, type RunSteerHandle } from './runSteers'
 import { verifyMaxAttempts } from './verification'
@@ -522,15 +523,29 @@ async function runTaskOnRuntimeInner(
     resolveRuntimeIntegration(probe.capabilities()).home.kind === 'persistent'
       ? runtimeIdentityHomePath(probe.id, input.assigneeAgentId)
       : null
-  const runOnce = (attempt: RunTaskInput): Promise<RunTaskResult> =>
+  const locked = (attempt: RunTaskInput): Promise<RunTaskResult> =>
     homeKey
       ? homeDispatchMutex.run(homeKey, () => run(attempt), {
           acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS,
         })
       : run(attempt)
+  // One of the process's run slots (see runSlots), taken BEFORE the home lock so a
+  // run waiting for a slot holds nothing another run needs. The wait comes before
+  // the claim, so a queued task stays in `todo`. The slot is held until the run,
+  // its completion and its review are over: the critic runs inside it and takes
+  // none of its own, which would deadlock a cap of one.
+  const runOnce = (attempt: RunTaskInput): Promise<RunTaskResult> =>
+    withRunSlot(() => locked(attempt), { key: homeKey, signal: input.abortSignal }).catch(
+      (err: unknown): RunTaskResult => {
+        // Cancelled while queued (the caller left, or a person moved the card): the
+        // same outcome as the aborted-waiter check before the claim.
+        if (err instanceof RunQueueAbortedError) return { ok: false, reason: 'conflict' }
+        throw err
+      },
+    )
 
   // The liveness beat is owned HERE — outside the mutex — so one interval spans
-  // the mutex wait, the run, and every fix cycle, and the `finally` guarantees
+  // the slot and mutex waits, the run, and every fix cycle, and the `finally` guarantees
   // it stops on EVERY exit including a throw. (A leaked beat kept a parked task
   // eternally fresh: the sweep could never reclaim it while the process lived.)
   // Pre-claim beats no-op via the in_progress + assignee guard.
@@ -944,6 +959,9 @@ async function runTaskInner(
       runtime: runtimeId,
       taskId,
       sessionKey: baseSessionKey,
+      // The task this run works on, for the Tasks tools' default (signed onto
+      // the Tasks URL). `taskId` above stamps memory provenance only.
+      boundTaskId: taskId,
     },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
@@ -1845,10 +1863,11 @@ async function runTaskInner(
         // performed. Carry the prior handoff's own list too: this run
         // reconstructed it from the worktree, and rewriting `[]` over it loses
         // everything an earlier runtime flagged.
+        // A watchdog stop counts too: what that run was doing is as unknown.
         brokenOrUnverified: [
-          ...(priorAttempts.lastKind === 'crash'
+          ...(priorAttempts.lastKind === 'crash' || priorAttempts.lastKind === 'timeout'
             ? [
-                `A previous attempt was interrupted (${priorAttempts.lastCrashReason ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
+                `A previous attempt was interrupted (${(priorAttempts.lastKind === 'crash' ? priorAttempts.lastCrashReason : priorAttempts.lastReason) ?? 'no reason recorded'}) and the outcome of whatever it was doing is UNKNOWN — verify before redoing anything with a side effect.`,
               ]
             : []),
           ...(resume?.broken ?? []),

@@ -85,6 +85,18 @@ describe('HermesAdapter transports', () => {
       mode: 'live',
     })
   })
+
+  it("reports how a run takes a steer: its own driver's way, else the transport's", async () => {
+    const quietRun = Object.assign(new FakeHermesDriver(), {
+      steering: () => 'interrupt-resume' as const,
+    })
+    const adapter = adapterOn('acp', quietRun)
+    const run = await adapter.start({}, { agentId: 'a1', sessionKey: SK, message: 'go' })
+    expect(adapter.runSteering(run)).toBe('interrupt-resume')
+    // A run this adapter does not hold reads what new runs get.
+    expect(adapterOn('acp').runSteering(run)).toBe('live')
+    expect(adapterOn('quiet').runSteering(run)).toBe('interrupt-resume')
+  })
 })
 
 // The shared adapter contract holds on the ACP transport too.

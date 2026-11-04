@@ -64,11 +64,13 @@ import {
   runnerRerunFor,
   type RunnerRerun,
 } from '../lib/runnerRerun'
+import { taskRunSteering } from '../lib/runSteers'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
 import { engineRefusal } from '../lib/teamChat/roomRoster'
+import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -133,6 +135,8 @@ export function boardGetGET(req: Request, res: Response): void {
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
         runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
+        // How the run on it takes a comment right now, for the composer's hint.
+        runSteering: taskRunSteering(taskId),
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
@@ -408,6 +412,19 @@ export function boardAssignPOST(req: Request, res: Response): void {
         teamId: task.teamId,
         data: { to: 'todo', reason: 'assigned' },
       })
+    }
+    // Given to someone else, the task starts fresh: no agent resumes a
+    // conversation about it from before, the new one or one it comes back to.
+    // Assigned again to the same agent, it is a retry, and keeps its session.
+    if (delegationTargetOf(task.sourceDelegationId) !== agentId) {
+      try {
+        clearTaskSessionPointers(db, taskId)
+      } catch (err) {
+        // The new binding is saved, so failing now would leave the task assigned
+        // and never started. A pointer left behind is the earlier agent's: the
+        // new one starts fresh regardless.
+        log.error({ err, taskId }, 'clearing the task resume pointers failed')
+      }
     }
     addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
@@ -908,13 +925,19 @@ export function boardExecutionsGET(req: Request, res: Response): void {
 
 // ─── GET /api/board/:taskId/workspace/detail ─────────────────────────────────
 // The task-detail drawer's Workspace tab: SoR file contents + the unified diff
-// (baseline vs working tree, SoR bookkeeping excluded).
+// (baseline vs working tree, SoR bookkeeping excluded). Most tasks never get a
+// worktree, and the drawer asks on every open, so a known task without one is
+// an ordinary answer (`ok: false`), not a 404; only an unknown task is.
 export async function boardWorkspaceDetailGET(req: Request, res: Response): Promise<void> {
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const detail = await readWorktreeDetail(taskId)
     if (!detail.ok) {
-      res.status(404).json({ error: 'workspace not found' })
+      if (!getTask(getDb(), taskId)) {
+        res.status(404).json({ error: 'task not found' })
+        return
+      }
+      res.json({ ok: false, reason: 'no_workspace' })
       return
     }
     res.json(detail)

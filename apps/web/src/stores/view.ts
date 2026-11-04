@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── ViewMode ────────────────────────────────────────────────────────────────
 // Discriminated union replacing the old flat View type.
@@ -56,6 +57,14 @@ export interface BoardFocus {
   nonce: number
 }
 
+/** A request for the Board to bring Needs you into view (set by a browser alert
+ *  about an approval, or about several things at once). `teamId` is the team
+ *  to show, `all` for every team, or null to keep the board's team. */
+export interface BoardNeedsYouFocus {
+  teamId: string | null
+  nonce: number
+}
+
 // ─── Store ───────────────────────────────────────────────────────────────────
 
 interface ViewStore {
@@ -71,6 +80,13 @@ interface ViewStore {
   openBoardTask: (taskId: string, teamId?: string | null) => void
   /** The Board took the request (it opened the drawer). */
   clearBoardFocus: () => void
+
+  /** Pending "show Needs you" request for the Board (consumed once). */
+  boardNeedsYouFocus: BoardNeedsYouFocus | null
+  /** Switch to the Board and bring Needs you into view. */
+  openBoardNeedsYou: (teamId?: string | null) => void
+  /** The Board took the request. */
+  clearBoardNeedsYouFocus: () => void
 
   /** Open an agent's chat / detail view. */
   openAgent: (agentId: string) => void
@@ -105,21 +121,9 @@ export function clampSidebarWidth(width: number): number {
   return Math.round(Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, width)))
 }
 
-function readStored(key: string): string | null {
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function writeStored(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    // Private mode / blocked storage: the layout still works, it just isn't remembered.
-  }
-}
+// Private mode / blocked storage: the layout still works, it just isn't remembered.
+const readStored = (key: string): string | null => scopedLocalStorage.getItem(key)
+const writeStored = (key: string, value: string): void => scopedLocalStorage.setItem(key, value)
 
 function initialSidebarWidth(): number {
   const n = Number(readStored(SIDEBAR_WIDTH_KEY))
@@ -140,6 +144,14 @@ export const useViewStore = create<ViewStore>((set) => ({
       boardFocus: { taskId, teamId, nonce: (s.boardFocus?.nonce ?? 0) + 1 },
     })),
   clearBoardFocus: () => set({ boardFocus: null }),
+
+  boardNeedsYouFocus: null,
+  openBoardNeedsYou: (teamId = null) =>
+    set((s) => ({
+      viewMode: { type: 'nav', view: 'board' },
+      boardNeedsYouFocus: { teamId, nonce: (s.boardNeedsYouFocus?.nonce ?? 0) + 1 },
+    })),
+  clearBoardNeedsYouFocus: () => set({ boardNeedsYouFocus: null }),
 
   openAgent: (agentId) => set({ viewMode: { type: 'agent', agentId } }),
 

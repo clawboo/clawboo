@@ -54,6 +54,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runtimesRunPOST } from '../../api/runtimes'
 import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
+import { createRunSlots, setRunSlotsForTests } from '../runSlots'
 import type { RuntimeRunContext } from '../runtimes'
 import { getTaskWorkspace } from '../worktrees'
 
@@ -372,6 +373,61 @@ describe('executor runner — all-on integration (board + executors + worktrees 
       outputTokens: 40,
       costUsd: 0.2,
     })
+  })
+
+  it("a cap of ONE run slot fits the builder and its review: the review runs inside the run's slot", async () => {
+    setRunSlotsForTests(createRunSlots(1))
+    try {
+      const parentId = newCodeTask('Ship the feature')
+      // A handed-off task (it has a parent) always gets the reviewer.
+      const taskId = createTask(getDb(), {
+        title: 'Implement the thing',
+        description: 'do it',
+        status: 'todo',
+        teamId: 'team-1',
+        parentTaskId: parentId,
+      }).id
+      const builder = scriptBuilder()
+      builder.done('success')
+      const review = '{"findings":[]}'
+      const reviewer = [
+        { runId: 'v', sessionId: 'v', ts: 1, seq: 1, kind: 'text-delta', text: review },
+        {
+          runId: 'v',
+          sessionId: 'v',
+          ts: 1,
+          seq: 2,
+          kind: 'done',
+          reason: 'success',
+          summary: review,
+        },
+      ] as RuntimeEvent[]
+      let liveCalls = 0
+      const result = await runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: (ctx: RuntimeRunContext) => {
+          if (!ctx.cwd) return new ScriptedAdapter('claude-code', [])
+          liveCalls += 1
+          if (liveCalls === 1) {
+            dirtyWorktree(ctx.cwd)
+            return new ScriptedAdapter('claude-code', builder.build())
+          }
+          return new ScriptedAdapter('claude-code', reviewer)
+        },
+        taskId,
+        assigneeAgentId: 'claude-1',
+        repoPath: repo,
+        kind: 'code',
+        mcpBaseUrl: 'http://localhost:18790',
+      })
+
+      // Had the review waited for a slot of its own, it would have waited on its
+      // own builder forever.
+      expect(result.ok && result.status).toBe('done')
+      expect(getTaskVerification(getDb(), taskId)?.attempts[0]?.critic.ran).toBe(true)
+    } finally {
+      setRunSlotsForTests(null)
+    }
   })
 
   it('all-on halt path: a budget trip cancels the run cleanly and SKIPS verify', async () => {

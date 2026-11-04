@@ -16,7 +16,8 @@ vi.mock('../../lib/cwdGuard', () => ({ liveCwd: () => '/live/dir' }))
 
 const updateState = vi.hoisted(() => ({ versions: [] as (string | null)[] }))
 vi.mock('../../lib/updateCheck', () => ({
-  detectInstallMethod: () => 'global',
+  // A global install this user can write, with updates allowed.
+  selfUpdateRefusal: () => null,
   readVersionFromDisk: () => updateState.versions.shift() ?? null,
   buildUpdateCommand: () => 'npm install -g clawboo@latest',
   computeSelfVersion: async () => ({}),

@@ -25,7 +25,11 @@ import {
   updateStatus,
   resetBoardLifecycleListeners,
   teams,
+  getSetting,
+  setSetting,
 } from '@clawboo/db'
+
+import { encodeTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
 
 /** Ordered log of what the subscribers asked the orchestrator to do. The order
  *  records that the synchronous detach lands before the debounced pump. */
@@ -59,7 +63,7 @@ vi.mock('../teamOrchestrator', () => {
   }
 })
 
-const { getDb, resetDb } = await import('../../db')
+const { getDb, getDbPath, resetDb } = await import('../../db')
 const { registerBoardLifecycleSubscribers, resetBoardLifecycleRegistration } =
   await import('../boardLifecycleSubscribers')
 
@@ -69,12 +73,17 @@ const LEADER = 'leader'
 describe('board lifecycle subscribers', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-lifecycle-'))
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    // `getDb()` follows CLAWBOO_HOME before $HOME: sandbox both.
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     pumped.length = 0
     calls.length = 0
     resident = false
@@ -111,6 +120,8 @@ describe('board lifecycle subscribers', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -295,5 +306,33 @@ describe('board lifecycle subscribers', () => {
       releaseTask(db, t.id)
     }
     expect(listUndeliveredInbox(db, 'leader', { teamId: TEAM })).toHaveLength(1)
+  })
+
+  it('forgets every agent’s resume pointer on a task that finishes or is cancelled, and only then', () => {
+    const db = getDb()
+    const pointer = encodeTaskSessionPointer({
+      sessionId: 's',
+      runtime: 'codex',
+      ticketHash: 'h',
+      seenAt: 1,
+    })
+    const done = createTask(db, { title: 'will finish', teamId: TEAM })
+    const cancelled = createTask(db, { title: 'will be cancelled', teamId: TEAM })
+    const blocked = createTask(db, { title: 'will be blocked', teamId: TEAM })
+    for (const t of [done, cancelled, blocked]) {
+      setSetting(db, taskSessionSettingKey('a1', TEAM, t.id), pointer)
+      setSetting(db, taskSessionSettingKey('a2', TEAM, t.id), pointer)
+    }
+    updateStatus(db, done.id, 'in_progress')
+    updateStatus(db, done.id, 'done')
+    updateStatus(db, cancelled.id, 'cancelled')
+    updateStatus(db, blocked.id, 'blocked')
+
+    for (const agent of ['a1', 'a2']) {
+      expect(getSetting(db, taskSessionSettingKey(agent, TEAM, done.id))).toBeNull()
+      expect(getSetting(db, taskSessionSettingKey(agent, TEAM, cancelled.id))).toBeNull()
+      // Blocked waits on a person; its next run resumes the same session.
+      expect(getSetting(db, taskSessionSettingKey(agent, TEAM, blocked.id))).toBe(pointer)
+    }
   })
 })

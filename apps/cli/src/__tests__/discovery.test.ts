@@ -3,6 +3,10 @@
 // gated case wrong is what made a token-gated install fork a fresh orphaned
 // server on every `clawboo` run.
 
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { discoverDashboard, probeDashboard } from '../lifecycle'
@@ -26,17 +30,26 @@ const GATE_401 = {
 }
 
 let originalEnv: string | undefined
+let originalHome: string | undefined
+let home: string
 
 beforeEach(() => {
   originalEnv = process.env['CLAWBOO_API_PORT']
-  // Pin discovery to a single port so these tests never scan 20 ports or read
-  // the developer's real ~/.clawboo/api-port.txt.
+  originalHome = process.env['CLAWBOO_HOME']
+  // Pin discovery to a single port so these tests never scan 20 ports, and
+  // sandbox the Clawboo home so they never read the developer's real
+  // api-port.txt or access-token.
   process.env['CLAWBOO_API_PORT'] = String(PORT)
+  home = fs.mkdtempSync(path.join(os.tmpdir(), 'clawboo-cli-discovery-'))
+  process.env['CLAWBOO_HOME'] = home
 })
 
 afterEach(() => {
   if (originalEnv === undefined) delete process.env['CLAWBOO_API_PORT']
   else process.env['CLAWBOO_API_PORT'] = originalEnv
+  if (originalHome === undefined) delete process.env['CLAWBOO_HOME']
+  else process.env['CLAWBOO_HOME'] = originalHome
+  fs.rmSync(home, { recursive: true, force: true })
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })

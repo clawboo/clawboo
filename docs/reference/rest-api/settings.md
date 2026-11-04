@@ -7,7 +7,7 @@ keywords: ['misc', 'health', 'boot probe', 'system health', 'graph-layout', 'gat
 
 Three small surfaces: the OpenClaw Gateway connection settings, the boot report the **System Health** panel shows, and the node positions the dashboard saves for its graphs. Use this page when you point Clawboo at a Gateway from a script, or check an install's health from a monitor.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All six routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All six routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
 
 ## Routes
 

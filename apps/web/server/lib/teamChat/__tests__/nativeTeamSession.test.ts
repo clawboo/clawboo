@@ -9,6 +9,13 @@ import {
   nativeTeamSessionKeysForTeamLike,
   nativeTeamSessionRoomKeysForTeamLike,
   nativeTeamSessionSettingKey,
+  encodeTaskSessionPointer,
+  parseTaskSessionPointer,
+  TASK_SESSION_KEYS_LIKE,
+  taskResumeEligible,
+  taskSessionKeysForTaskLike,
+  taskSessionKeysForTeamLike,
+  taskSessionSettingKey,
   teamResumeEligible,
 } from '../nativeTeamSession'
 
@@ -100,5 +107,92 @@ describe('teamResumeEligible', () => {
     expect(teamResumeEligible({ ...base, runtime: 'hermes' })).toBe(false)
     expect(teamResumeEligible({ ...base, runtime: 'claude-code' })).toBe(false)
     expect(teamResumeEligible({ ...base, runtime: null })).toBe(false)
+  })
+})
+
+// Per-task resume pointers: a board task run continues the agent's own earlier
+// session on that task. Only the pointer is per task; the engine's session key
+// stays one per (agent, room).
+describe('task session pointers', () => {
+  const like = (pattern: string, key: string): boolean =>
+    new RegExp(
+      `^${pattern
+        .split('%')
+        .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('.*')}$`,
+    ).test(key)
+
+  it('keys a pointer by agent, team and task, under the existing prefix', () => {
+    expect(taskSessionSettingKey('a1', 'team-9', 'task-7')).toBe(
+      'native-team-session:a1:team-9:task:task-7',
+    )
+  })
+
+  it('every sweep reaches it: per task, per team, per agent, and the boot sweep', () => {
+    const key = taskSessionSettingKey('a1', 'team-9', 'task-7')
+    expect(like(taskSessionKeysForTaskLike('task-7'), key)).toBe(true)
+    expect(like(taskSessionKeysForTaskLike('task-8'), key)).toBe(false)
+    expect(like(taskSessionKeysForTeamLike('team-9'), key)).toBe(true)
+    expect(like(taskSessionKeysForTeamLike('team-8'), key)).toBe(false)
+    expect(like(TASK_SESSION_KEYS_LIKE, key)).toBe(true)
+    // The agent sweep that already existed covers it, so an agent delete does.
+    expect(like(nativeTeamSessionKeysForAgentLike('a1'), key)).toBe(true)
+  })
+
+  it('stays out of the leader and room sweeps', () => {
+    const key = taskSessionSettingKey('a1', 'team-9', 'task-7')
+    expect(like(nativeTeamSessionKeysForTeamLike('team-9'), key)).toBe(false)
+    expect(like(nativeTeamSessionRoomKeysForTeamLike('team-9'), key)).toBe(false)
+    expect(like(TASK_SESSION_KEYS_LIKE, nativeTeamSessionSettingKey('a1', 'team-9'))).toBe(false)
+    expect(like(TASK_SESSION_KEYS_LIKE, nativeTeamSessionSettingKey('a1', 'team-9', 'r'))).toBe(
+      false,
+    )
+  })
+
+  it('round-trips its value, and reads anything malformed as no pointer', () => {
+    const p = { sessionId: 's-1', runtime: 'codex', ticketHash: 'h', seenAt: 42 }
+    expect(parseTaskSessionPointer(encodeTaskSessionPointer(p))).toEqual(p)
+    for (const bad of [
+      null,
+      '',
+      'not json',
+      '{}',
+      '{"sessionId":"","runtime":"codex","ticketHash":"h","seenAt":1}',
+      '{"sessionId":"s","runtime":"codex","ticketHash":"h","seenAt":"x"}',
+    ])
+      expect(parseTaskSessionPointer(bad)).toBeNull()
+  })
+})
+
+describe('taskResumeEligible', () => {
+  const home = '/home/x'
+  it('resumes Native, Codex and Hermes from their own home', () => {
+    for (const runtime of ['clawboo-native', 'codex', 'hermes'])
+      expect(taskResumeEligible({ runtime, homeDir: home, isTeamSession: true })).toBe(true)
+  })
+
+  it('needs that home, since the session lives in it', () => {
+    for (const runtime of ['clawboo-native', 'codex', 'hermes'])
+      expect(taskResumeEligible({ runtime, homeDir: null, isTeamSession: true })).toBe(false)
+  })
+
+  it('resumes Claude Code with no home: its sessions live with the team folder every team run starts in', () => {
+    expect(taskResumeEligible({ runtime: 'claude-code', homeDir: null, isTeamSession: true })).toBe(
+      true,
+    )
+  })
+
+  it('never resumes OpenClaw: its runtime session is the team session itself', () => {
+    expect(taskResumeEligible({ runtime: 'openclaw', homeDir: home, isTeamSession: true })).toBe(
+      false,
+    )
+  })
+
+  it('only on a team session, and never for an unknown runtime', () => {
+    expect(taskResumeEligible({ runtime: 'codex', homeDir: home, isTeamSession: false })).toBe(
+      false,
+    )
+    expect(taskResumeEligible({ runtime: null, homeDir: home, isTeamSession: true })).toBe(false)
+    expect(taskResumeEligible({ runtime: 'mock', homeDir: home, isTeamSession: true })).toBe(false)
   })
 })

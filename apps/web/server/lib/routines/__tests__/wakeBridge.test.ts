@@ -409,6 +409,12 @@ describe('dispatchRoutine: why a fire failed', () => {
     })
     expect(outcome).toMatchObject({ ok: false, errorClass: 'RateLimited', transient: true })
     expect(getTask(db, outcome.taskId!)?.status).toBe('blocked')
+    // On the event log too, which is what the browser alerts wake up on.
+    expect(
+      listEvents(db, { taskId: outcome.taskId!, kinds: ['status_changed'] }).map((e) =>
+        JSON.parse(e.data),
+      ),
+    ).toContainEqual({ to: 'blocked', reason: 'routine_fire_failed' })
     expect(
       getComments(db, outcome.taskId!)
         .map((c) => c.body)

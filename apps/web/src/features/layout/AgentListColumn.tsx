@@ -36,6 +36,7 @@ import { useBooZeroStore, identifyBooZero, isBooZeroEligibleForTeam } from '@/st
 import { isHiddenGatewayDefault } from '@/lib/hiddenSystemAgent'
 import { NAV_VIEW_LABELS } from '@/lib/navLabels'
 import { ThemeToggle } from '@/features/theme/ThemeToggle'
+import { OpenOnAnotherDeviceButton } from '@/features/access/OpenOnAnotherDevice'
 import { getActivityVerb } from '@/lib/agentActivityVerb'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useChatStore } from '@/stores/chat'
@@ -986,10 +987,11 @@ export function AgentListColumn() {
         </button>
       </div>
 
-      {/* Footer — theme toggle. The GitHub Star CTA lives in the top bar, so the
-          footer is reserved for the theme preference. */}
+      {/* Footer: a sign-in link for a second browser or a phone, then the theme
+          toggle. The GitHub Star CTA lives in the top bar. */}
       <div className="mx-3 my-1.5 border-t border-border" />
       <div className="flex flex-col gap-0.5 px-2 pb-3">
+        <OpenOnAnotherDeviceButton />
         <ThemeToggle />
       </div>
 

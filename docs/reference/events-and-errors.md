@@ -172,7 +172,7 @@ A task moved to another status. `to` is always present.
 Some writers add fields the typed shape does not declare:
 
 - `by: 'person'` marks a move a person made on the board.
-- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), or `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too).
+- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
 
 ### comment_added
 
@@ -292,6 +292,8 @@ A task-runner run reached its turn limit or filled its context, and continued in
 Every approval card is a row in the `tool_call_approvals` table, shown under **Needs you** on the Board (see [Approvals](/using/approvals)). Each row writes one `approval_requested` when it is created and one `approval_resolved` when it settles. The events name the call but never carry its arguments, its reason or the command text: those stay on the row, because nothing prunes the event log and every **Activity** feed reads it.
 
 The envelope carries the agent that asked, its team when Clawboo has a row for that agent, the task the approval gates when known, and the tenant.
+
+To follow approvals as they happen instead of polling the queue, open `GET /api/obs/stream?kinds=approval_requested,approval_resolved`. See [Following approvals](/reference/rest-api/observability#following-approvals).
 
 ### approval_requested
 

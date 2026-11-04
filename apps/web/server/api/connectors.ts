@@ -71,6 +71,7 @@ import {
 import { clearOAuth, isAuthorized } from '../lib/connectors/oauthStore'
 import { launchDir } from '../lib/cwdGuard'
 import { getDb } from '../lib/db'
+import { effectiveSetting } from '../lib/operatorSettings'
 import { redactValue } from '../lib/redact'
 import { isTransient, retryTransient } from '../lib/connectors/transientRetry'
 
@@ -374,6 +375,7 @@ function toConnectable(def: ConnectorDefinition, args: string[]): ConnectableDef
         ? { perAgentProfileFlag: def.launch.perAgentProfileFlag }
         : {}),
       ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
+      ...(def.launch.chromeSwitchArg ? { chromeSwitchArg: def.launch.chromeSwitchArg } : {}),
     },
     egressAllow: def.egressAllow,
     trifecta: def.trifecta,
@@ -627,8 +629,15 @@ export function connectorsPathSuggestionsGET(req: Request, res: Response): void 
  * chosen: `desiredState: 'connected'` is restored by the sweep below, and
  * `'disconnected'` is a deliberate Disconnect that must stay disconnected. This
  * tests for the ROW, not its state, so it cannot undo either.
+ *
+ * AND NOT WHEN TURNED OFF. Each browser is a resident process, and on a machine
+ * with no browser installed it cannot browse anyway. `disableBrowserAutostart`
+ * (the person's own setting, or an administrator's pin through
+ * `CLAWBOO_DISABLE_BROWSER_AUTOSTART` or the operator file) skips this step.
+ * Browsers someone connected are still restored by the sweep.
  */
 export async function ensureBrowserConnectedAtBoot(db: ClawbooDb): Promise<number> {
+  if (effectiveSetting('disableBrowserAutostart', db).value) return 0
   let started = 0
   for (const def of connectorsByCategory('browser')) {
     if (getConnector(db, connectorInstanceId(def.slug))) continue

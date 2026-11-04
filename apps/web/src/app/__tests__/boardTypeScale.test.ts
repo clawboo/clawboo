@@ -1,4 +1,6 @@
-// Keeps the Board on its closed type scale and its two text colours.
+// Keeps the Board on its closed type scale and its two text colours, and with
+// it the shared chrome every panel uses (PanelHeader, the section label) and
+// the browser alerts the board offers.
 //
 // The board sets type only through the role utilities: `text-micro` (11),
 // `text-xs` (12), `text-compact` (13), `text-sm` (14), `text-base` (16),
@@ -16,6 +18,12 @@ import { describe, expect, it } from 'vitest'
 
 const SRC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..')
 const BOARD = path.join(SRC, 'features', 'board')
+/** Outside the board folder, on the same scale. */
+const ALSO = [
+  path.join(SRC, 'features', 'shared', 'PanelHeader.tsx'),
+  path.join(SRC, 'features', 'shared', 'sectionLabel.ts'),
+  ...sourceFiles(path.join(SRC, 'features', 'alerts')),
+]
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -38,9 +46,13 @@ describe('the Board type scale', () => {
     expect(sourceFiles(BOARD).length).toBeGreaterThan(10)
   })
 
+  it('covers the shared chrome and the alerts too', () => {
+    expect(ALSO.length).toBeGreaterThanOrEqual(5)
+  })
+
   it('sets every size from the scale and every text colour from a token', () => {
     const violations: string[] = []
-    for (const file of sourceFiles(BOARD)) {
+    for (const file of [...sourceFiles(BOARD), ...ALSO]) {
       readFileSync(file, 'utf8')
         .split('\n')
         .forEach((line, i) => {

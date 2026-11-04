@@ -143,6 +143,68 @@ describe('the team-run claim on the Tasks URL', () => {
   })
 })
 
+describe("the run's own task on the Tasks URL", () => {
+  const onTask = {
+    teamId: 'T',
+    agentId: 'A',
+    delegate: true,
+    boundTaskId: 'task-1',
+    attachSecret: SECRET,
+  }
+
+  it('rides the Tasks URL inside its signature, so it can be neither moved nor stripped', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'tasks', onTask))
+    expect(url.searchParams.get('scopeTaskId')).toBe('task-1')
+    const sig = url.searchParams.get('scopeSig')!
+    const claim = { teamId: 'T', agentId: 'A', teamRun: true }
+    expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-1' }, sig)).toBe(true)
+    expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-2' }, sig)).toBe(false)
+    expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
+  })
+
+  /** What the code before the bound task (c7d062ce) minted for the same run:
+   *  pinned, so "unchanged" is checked against the old code, not the new. */
+  const BEFORE = {
+    tasks:
+      'http://x/api/mcp/tasks?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+    memory:
+      'http://x/api/mcp/memory?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+    tools:
+      'http://x/api/mcp/tools?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+    teamchat:
+      'http://x/api/mcp/teamchat?roomTeamId=T&postAuthorAgentId=A&delegate=1&scopeSig=4c83478a053c745ca5d1027514a5a843698b4a42b894903bfc03cfa7da7a7113&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+  }
+
+  it('stays off every other URL, whose bytes are what they were before it', () => {
+    for (const server of ['memory', 'tools', 'teamchat'] as const)
+      expect(mcpHttpUrl('http://x', server, onTask)).toBe(BEFORE[server])
+  })
+
+  it('is not the memory provenance task id, and does not turn on memory provenance', () => {
+    const memory = new URL(mcpHttpUrl('http://x', 'memory', onTask))
+    expect(memory.searchParams.has('provTaskId')).toBe(false)
+    expect(memory.searchParams.has('provSig')).toBe(false)
+    // The executor's provenance stamp binds no task for the Tasks tools.
+    const stamped = new URL(
+      mcpHttpUrl('http://x', 'tasks', {
+        teamId: 'T',
+        agentId: 'A',
+        taskId: 'task-9',
+        attachSecret: SECRET,
+      }),
+    )
+    expect(stamped.searchParams.has('scopeTaskId')).toBe(false)
+    expect(stamped.searchParams.get('scopeSig')).toBe(
+      signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false }),
+    )
+  })
+
+  it('leaves the Tasks URL of a run with no task byte-identical to before', () => {
+    const withoutTask = { ...onTask, boundTaskId: undefined }
+    expect(mcpHttpUrl('http://x', 'tasks', withoutTask)).toBe(BEFORE.tasks)
+  })
+})
+
 describe('signAttachAccess / verifyAttachAccess (the control-plane access token)', () => {
   it('round-trips, and is deterministic so configs stay byte-stable', () => {
     const token = signAttachAccess(SECRET)

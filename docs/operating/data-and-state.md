@@ -29,6 +29,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 ├── clawboo.db                  the database
 ├── clawboo.db-wal, -shm        SQLite working files for the database
 ├── settings.json               the OpenClaw Gateway link
+├── access-token                the dashboard's access token
 ├── api-port.txt                the port the server is using
 ├── server.log, server.log.1    server output, when clawboo started the server
 ├── gateway.log, gateway.pid    an OpenClaw Gateway that Clawboo started
@@ -52,7 +53,8 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 | Path                                 | What it holds                                                                                                                                                               | Safe to delete?                             | What you lose                                                                                    |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `clawboo.db`, `-wal`, `-shm`         | Teams, agents, the board, chats, memory, routines, budgets, most dashboard settings, and the secret that signs MCP attach URLs                                              | Only to start over, with the server stopped | All of that. Attach URLs you copied by hand stop working.                                        |
-| `settings.json`                      | The Gateway URL and token, and when you dismissed the first-run screen. The access token is never read from here, only from `STUDIO_ACCESS_TOKEN`                           | Yes                                         | The saved Gateway link. Clawboo falls back to the Gateway details in OpenClaw's `openclaw.json`. |
+| `settings.json`                      | The Gateway URL and token, and when you dismissed the first-run screen. The access token is never read from here                                                            | Yes                                         | The saved Gateway link. Clawboo falls back to the Gateway details in OpenClaw's `openclaw.json`. |
+| `access-token`                       | The dashboard's access token when `STUDIO_ACCESS_TOKEN` is unset, made on the first start and readable only by you. The Clawboo desktop app can share it                    | Yes, with the server stopped                | Every browser's sign-in. The next start makes a new token; run `clawboo open` to sign in again.  |
 | `api-port.txt`                       | The port of the running server                                                                                                                                              | Yes                                         | Usually nothing: `clawboo` also scans ports 18790 to 18809.                                      |
 | `server.log`, `server.log.1`         | Output of a server that `clawboo` started                                                                                                                                   | Yes                                         | Old log lines.                                                                                   |
 | `gateway.log`, `gateway.pid`         | Output and process id of an OpenClaw Gateway that Clawboo started                                                                                                           | Yes                                         | Old log lines. Clawboo finds the Gateway by its port instead.                                    |
@@ -156,7 +158,7 @@ The copy holds your vault and its key and your agents' signed-in browser profile
 
 <Note>
 
-With `STUDIO_ACCESS_TOKEN` set, run `clawboo stop` and `clawboo restart` from a shell that has the server's token, so they can identify the server through the access gate. Without it, they print its port and a command that stops it by port, then exit without stopping it. Run that command, or stop Clawboo through the service manager that runs it (systemd, Docker), and start it again [directly](/operating/deployment#start-the-server-directly) or through that service manager. `clawboo backup` works either way because it reads the database file directly. See the [CLI reference](/reference/cli#token-gated-installs).
+With your own `STUDIO_ACCESS_TOKEN` on the server, run `clawboo stop` and `clawboo restart` from a shell that has that token, so they can identify the server through the access gate. A server on its per-install token needs nothing: they read `access-token`. Without it, they print its port and a command that stops it by port, then exit without stopping it. Run that command, or stop Clawboo through the service manager that runs it (systemd, Docker), and start it again [directly](/operating/deployment#start-the-server-directly) or through that service manager. `clawboo backup` works either way because it reads the database file directly. See the [CLI reference](/reference/cli#token-gated-installs).
 
 </Note>
 

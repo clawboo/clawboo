@@ -7,7 +7,7 @@ keywords: ['misc', 'personality', 'skills', 'exec-settings', 'exec-allowlist', '
 
 Per-agent settings that live outside the agent's files: personality slider values, installed skills, and, for OpenClaw agents, command-execution settings and standing exec grants. Use this page when you script agent setup or audit what an OpenClaw agent may run without asking.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. Every route is on the general rate limit; the revoke also counts against the stricter sensitive limit (see the [REST API overview](/reference/rest-api/index)). Errors use `{ "error": "<message>" }` unless a section shows otherwise.
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). Every route is on the general rate limit; the revoke also counts against the stricter sensitive limit (see the [REST API overview](/reference/rest-api/index)). Errors use `{ "error": "<message>" }` unless a section shows otherwise.
 
 A Clawboo Native agent's command access is a separate switch, `/api/agents/:agentId/shell`, documented in the [Agents API](/reference/rest-api/agents).
 

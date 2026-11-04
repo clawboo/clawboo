@@ -7,7 +7,7 @@
 // that tell "still ours" from "somebody else's process wearing our number".
 
 import { execFileSync } from 'node:child_process'
-import { readlinkSync } from 'node:fs'
+import { readFileSync, readlinkSync } from 'node:fs'
 import os from 'node:os'
 
 /**
@@ -49,6 +49,109 @@ export function currentPidNamespace(): string | null {
   }
 }
 
+/** What `currentInitStart` reads, so a test can stand in for `/proc`. */
+export interface ProcView {
+  platform: NodeJS.Platform
+  pid: number
+  readlink: (path: string) => string
+  readFile: (path: string) => string
+}
+
+const liveProc = (): ProcView => ({
+  platform: process.platform,
+  pid: process.pid,
+  readlink: (p) => readlinkSync(p),
+  readFile: (p) => readFileSync(p, 'utf8'),
+})
+
+/**
+ * When pid 1 of this PID namespace started, or null where there is none to tell.
+ *
+ * The namespace alone does not tell one run of a container from the next: the
+ * kernel hands a namespace's id out again once the namespace is gone, so a
+ * restarted container can come back with the id it had. Its pid 1 is new, and
+ * started later. Read from `/proc/1/stat` and kept as the kernel reports it
+ * (clock ticks after boot), since it is only ever compared with itself. macOS
+ * and Windows have no PID namespaces, so null there.
+ *
+ * Only from a `/proc` that belongs to this namespace. Given the host's, `/proc/1`
+ * is the HOST's init, which outlives every restart of the container. `/proc/self`
+ * names the reader by its pid in the namespace `/proc` belongs to, so it matches
+ * `process.pid` exactly when that namespace is ours.
+ */
+export function currentInitStart(proc: ProcView = liveProc()): number | null {
+  if (proc.platform !== 'linux') return null
+  try {
+    if (proc.readlink('/proc/self') !== String(proc.pid)) return null
+    return parseStatStartTime(proc.readFile('/proc/1/stat'))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Field 22 (`starttime`) of a `/proc/<pid>/stat` line, or null when unreadable.
+ *
+ * Field 2 is the command name in parentheses, and it may hold spaces and
+ * parentheses of its own, so the fields are counted from the LAST `)`.
+ */
+export function parseStatStartTime(stat: string): number | null {
+  const close = stat.lastIndexOf(')')
+  if (close === -1) return null
+  // What follows the name starts at field 3.
+  const raw = stat
+    .slice(close + 1)
+    .trim()
+    .split(/\s+/)[22 - 3]
+  if (raw === undefined || !/^\d+$/.test(raw)) return null
+  const ticks = Number(raw)
+  return Number.isSafeInteger(ticks) ? ticks : null
+}
+
+/**
+ * Which run of the system a recorded pid belongs to.
+ *
+ * `bootAt` is the KERNEL's boot. Inside a container that is the host's, so a
+ * container that restarts keeps it, and every pid it recorded before the
+ * restart would still look current. The PID namespace and its pid 1 are what
+ * change. On macOS and Windows both are null, which leaves `bootAt` alone. On
+ * Linux a null means it could not be read, and a reap must not take two such
+ * nulls for a match (see `linuxBootUnreadable`).
+ */
+export interface BootIdentity {
+  /** See `currentBootAt`. */
+  bootAt: number
+  /** See `currentPidNamespace`. */
+  pidNamespace: string | null
+  /** See `currentInitStart`. */
+  initStart: number | null
+}
+
+export function currentBootIdentity(): BootIdentity {
+  return {
+    bootAt: currentBootAt(),
+    pidNamespace: currentPidNamespace(),
+    initStart: currentInitStart(),
+  }
+}
+
+/**
+ * Whether this is a Linux host that could not read its PID namespace or its
+ * pid 1 (`hidepid`, no `/proc/self/ns`, a `/proc` that is not this namespace's).
+ * Its boot identity then cannot tell a restarted container from this one, so a
+ * reap must leave every pid alone.
+ */
+export function linuxBootUnreadable(
+  boot: Pick<BootIdentity, 'pidNamespace' | 'initStart'>,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'linux' && (boot.pidNamespace === null || boot.initStart === null)
+}
+
+/** The log's reason when `linuxBootUnreadable` holds. */
+export const LINUX_BOOT_UNREADABLE =
+  'this host could not read its PID namespace or when that namespace started'
+
 /**
  * The dispositive identity check: WHEN did the process holding this pid start.
  *
@@ -63,10 +166,21 @@ export interface StartTimes {
   ok: boolean
   /** Epoch ms per pid, for the pids the probe could answer for. */
   times: Map<number, number>
+  /** Why the probe could not answer, when `ok` is false. */
+  error?: string
 }
 
-/** No answer at all. */
-const NO_START_TIMES: StartTimes = { ok: false, times: new Map() }
+/** The first line of what a failed probe said, for the log. */
+function probeError(err: unknown): string {
+  const { stderr, message } = err as { stderr?: unknown; message?: unknown }
+  const said =
+    typeof stderr === 'string' && stderr.trim() !== ''
+      ? stderr
+      : typeof message === 'string'
+        ? message
+        : String(err)
+  return (said.trim().split('\n')[0] ?? '').slice(0, 200)
+}
 
 /**
  * When the processes currently holding these pids started.
@@ -144,7 +258,7 @@ export function processStartTimes(pids: readonly number[]): StartTimes {
       process.platform !== 'win32' &&
       status === 1 &&
       (typeof stderr !== 'string' || stderr.trim() === '')
-    return noneExist ? { ok: true, times } : NO_START_TIMES
+    return noneExist ? { ok: true, times } : { ok: false, times: new Map(), error: probeError(err) }
   }
   return { ok: true, times }
 }

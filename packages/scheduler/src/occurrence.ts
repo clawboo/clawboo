@@ -1,27 +1,35 @@
 // Next-occurrence math — the ONLY croner import in the monorepo. Swapping the
 // tick library changes exactly this file: every consumer (the ledger, the
 // ticker, the REST layer) deals in precomputed epoch-ms timestamps.
+//
+// A cron expression is wall-clock time, so it needs a zone. Every function here
+// takes an optional IANA zone name; without one, croner evaluates in the
+// process's own zone. A `once@` spec is an absolute instant and ignores it.
 
 import { Cron } from 'croner'
 
 import { InvalidCronSpecError } from './errors'
 import { parseCronSpec } from './spec'
 
-/**
- * The next fire time strictly after `fromMs`, or null when the spec will never
- * fire again (a spent `once@`, or an expression with no future occurrence).
- * Throws InvalidCronSpecError on a malformed spec.
- */
-export function nextOccurrence(spec: string, fromMs: number): number | null {
-  const parsed = parseCronSpec(spec)
-  if (parsed.kind === 'once') return parsed.atMs > fromMs ? parsed.atMs : null
-  let cron: Cron
+function buildCron(spec: string, expr: string, timeZone: string | undefined): Cron {
   try {
-    cron = new Cron(parsed.expr)
+    return timeZone ? new Cron(expr, { timezone: timeZone }) : new Cron(expr)
   } catch (err) {
     throw new InvalidCronSpecError(spec, err instanceof Error ? err.message : String(err))
   }
-  const next = cron.nextRun(new Date(fromMs))
+}
+
+/**
+ * The next fire time strictly after `fromMs`, or null when the spec will never
+ * fire again (a spent `once@`, or an expression with no future occurrence).
+ * A cron expression is read as wall-clock time in `timeZone` (an IANA name),
+ * or in the process's zone when none is given.
+ * Throws InvalidCronSpecError on a malformed spec.
+ */
+export function nextOccurrence(spec: string, fromMs: number, timeZone?: string): number | null {
+  const parsed = parseCronSpec(spec)
+  if (parsed.kind === 'once') return parsed.atMs > fromMs ? parsed.atMs : null
+  const next = buildCron(spec, parsed.expr, timeZone).nextRun(new Date(fromMs))
   return next ? next.getTime() : null
 }
 
@@ -29,8 +37,8 @@ export function nextOccurrence(spec: string, fromMs: number): number | null {
  * Validate a spec without needing a meaningful `from` anchor — the
  * registration-boundary probe. Throws InvalidCronSpecError when malformed.
  */
-export function probeCronSpec(spec: string): void {
-  nextOccurrence(spec, 0)
+export function probeCronSpec(spec: string, timeZone?: string): void {
+  nextOccurrence(spec, 0, timeZone)
 }
 
 /** The runs one window holds, as projected by `occurrencesInWindows`. */
@@ -56,6 +64,8 @@ export interface OccurrenceWindowOptions {
   countCap?: number
   /** How many run times each window reports. Default 8. */
   timesCap?: number
+  /** The IANA zone a cron expression is read in. Default: the process's zone. */
+  timeZone?: string
 }
 
 /**
@@ -89,12 +99,7 @@ export function occurrencesInWindows(
   if (parsed.kind === 'once') {
     next = (fromMs) => (parsed.atMs > fromMs ? parsed.atMs : null)
   } else {
-    let cron: Cron
-    try {
-      cron = new Cron(parsed.expr)
-    } catch (err) {
-      throw new InvalidCronSpecError(spec, err instanceof Error ? err.message : String(err))
-    }
+    const cron = buildCron(spec, parsed.expr, opts.timeZone)
     next = (fromMs) => cron.nextRun(new Date(fromMs))?.getTime() ?? null
   }
 

@@ -40,6 +40,7 @@ import {
   ROUTINE_OPENCLAW_EXECUTOR,
   type OperatorClientLike,
 } from '../openclawDispatch'
+import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { noteHumanMove } from '../../teamChat/humanMove'
 
 // ── Local clone of the adapter package's unpublished FakeGatewayClient ──────
@@ -914,6 +915,73 @@ describe('dispatchConnectedSubstrate', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  describe('with every run slot taken', () => {
+    let slots: RunSlots
+    beforeEach(() => {
+      slots = createRunSlots(1)
+      setRunSlotsForTests(slots)
+    })
+    afterEach(() => setRunSlotsForTests(null))
+
+    it('waits for a slot before it claims its task, then runs', async () => {
+      const agentRow = seedAgent()
+      const run = seedRoutine(agentRow.id)
+      const taskId = seedTask()
+      const client = new FakeOperatorClient()
+      const other = slots.tryAcquire()!
+
+      const outcome = dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: client as unknown as OperatorClientLike,
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      // Queued: unclaimed, nothing sent, nothing failed.
+      expect(getTask(db, taskId)?.status).toBe('todo')
+      expect(listExecutions(db, taskId)).toEqual([])
+      expect(client.calls.some((c) => c.method === 'chat.send')).toBe(false)
+
+      other.release()
+      await vi.waitFor(() => expect(client.calls.some((c) => c.method === 'chat.send')).toBe(true))
+      const sessionKey = `agent:gw-${agentRow.id}:clawboo-routine-${run.id}`
+      client.emit(
+        chatFrame(sessionKey, 'final', { message: { role: 'assistant', content: 'swept' } }),
+      )
+      await expect(outcome).resolves.toMatchObject({ ok: true, taskId })
+      expect(getTask(db, taskId)?.status).toBe('done')
+      expect(slots.stats()).toEqual({ size: 1, running: 0, queued: 0 })
+    })
+
+    it("a person's move while it waits ends the fire, which did not fail", async () => {
+      const agentRow = seedAgent()
+      const run = seedRoutine(agentRow.id)
+      const taskId = seedTask()
+      const client = new FakeOperatorClient()
+      const other = slots.tryAcquire()!
+
+      const outcome = dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: client as unknown as OperatorClientLike,
+      })
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(updateStatus(db, taskId, 'cancelled', { actor: 'person' }).ok).toBe(true)
+      noteHumanMove(db, { taskId, teamId: 'team-1', from: 'todo', to: 'cancelled' })
+
+      await expect(outcome).resolves.toEqual({ ok: true, taskId })
+      expect(slots.stats().queued).toBe(0)
+      expect(listExecutions(db, taskId)).toEqual([])
+      expect(client.calls).toEqual([])
+      other.release()
+    })
   })
 
   describe('a person moving the card while the run goes', () => {

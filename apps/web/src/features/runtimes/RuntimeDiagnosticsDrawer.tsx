@@ -62,6 +62,7 @@ export interface RuntimeDiagnosticsTarget {
   connectionState?: ConnectionState
   installed?: boolean
   binPath?: string | null
+  binSource?: 'cli' | 'agent-sdk' | null
   authKind?: string
   envVar?: string | null
   hasCredential?: boolean
@@ -351,7 +352,7 @@ export function RuntimeDiagnosticsDrawer({
                 ) : (
                   <>
                     {kv(
-                      'CLI',
+                      target.binSource === 'agent-sdk' ? 'Agent SDK binary' : 'CLI',
                       target.installed ? (target.binPath ?? 'installed') : 'not installed',
                     )}
                     {target.authKind === 'oauth'

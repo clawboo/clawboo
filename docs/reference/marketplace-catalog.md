@@ -44,12 +44,12 @@ When you deploy, Clawboo saves an agent's three texts on the new agent and write
 
 The catalog is not part of the npm package. Only the built-in pack ships inside Clawboo; your Clawboo server downloads the rest:
 
-1. The first time the dashboard asks for the catalog, the server downloads the catalog index from the Clawboo repository on GitHub, waiting up to 5 seconds.
+1. The first time the dashboard asks for the catalog, the server downloads the catalog index for its own version from the Clawboo repository on GitHub, waiting up to 5 seconds. A release reads the index as it was at its release tag (`clawboo@<version>`); a development build reads the `main` branch's.
 2. For each pack the index lists, it reads a copy saved in `~/.clawboo/catalog/`, or downloads one. It checks the pack's SHA-256 digest before reading it and skips a pack that does not match. Saved packs are keyed by their digest, so an unchanged pack is downloaded once.
 3. It merges every pack that passed with the built-in pack, which is always included, so the catalog is never empty.
 4. It keeps the result in memory for 6 hours. After that, the next request asks GitHub whether the index changed and rebuilds the catalog.
 
-A pack published upstream can therefore take up to 6 hours, or a server restart, to appear. The request carries no account or usage data; it only asks for the published files.
+A pack merged upstream therefore reaches a released Clawboo with the next release, and a development build within 6 hours or a server restart. A release whose tag has no index reads `main`'s instead. The request carries no account or usage data; it only asks for the published files.
 
 <Note>
 
@@ -57,7 +57,7 @@ The 6-hour hold also applies to a download that failed. If GitHub could not be r
 
 </Note>
 
-- The index URL is `https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json`. Set `CLAWBOO_CATALOG_INDEX_URL` to serve the same files from a mirror.
+- The index URL is `https://raw.githubusercontent.com/clawboo/clawboo/refs/tags/clawboo%40<version>/catalog/dist/v1/index.json` for a release, and the same path on `refs/heads/main` for a development build. Set `CLAWBOO_CATALOG_INDEX_URL`, or `catalogIndexUrl` in the [operator settings file](/operating/deployment#pin-settings-for-everyone), to serve the same files from a mirror.
 - When the server runs from a repository checkout that has `catalog/dist/v1/`, it reads the catalog from those files instead of GitHub.
 - An index in a newer format than your Clawboo can read shows only the built-in pack. A single pack it cannot read is left out, and the rest still show.
 

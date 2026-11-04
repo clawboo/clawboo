@@ -9,6 +9,7 @@ import { Router, type Router as RouterType } from 'express'
 import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
+import { accessLaunchCodePOST } from './access'
 import { approvalsGET, approvalsPOST } from './approvals'
 import {
   chatHistoryGET,
@@ -37,6 +38,7 @@ import {
   approveDevicePOST,
 } from './system'
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
+import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import { systemCapabilitiesGET } from './systemCapabilities'
 import {
   teamsGET,
@@ -191,6 +193,8 @@ import {
   schedulesDELETE,
   schedulesListGET,
   schedulesOccurrencesGET,
+  schedulesTimeZoneGET,
+  schedulesTimeZonePUT,
   schedulesRunPOST,
   schedulesRunsGET,
   schedulesUpdatePATCH,
@@ -218,6 +222,10 @@ router.use('/api', generalLimiter)
 // Settings
 router.get('/api/settings', settingsGET)
 router.post('/api/settings', settingsPOST)
+
+// One-time sign-in codes for `clawboo open` and "Open on another device". Each
+// one is a session credential, so minting takes the sensitive limiter.
+router.post('/api/access/launch-code', sensitiveLimiter, accessLaunchCodePOST)
 
 // Approvals
 router.get('/api/approvals', approvalsGET)
@@ -293,6 +301,10 @@ router.post('/api/system/approve-device', sensitiveLimiter, approveDevicePOST)
 router.get('/api/system/self-version', selfVersionGET)
 router.get('/api/system/capabilities', systemCapabilitiesGET)
 router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
+// Settings an administrator can pin (operator file or environment), and a
+// person's own value for the ones the dashboard offers. Pins are read-only here.
+router.get('/api/system/operator-settings', operatorSettingsGET)
+router.put('/api/system/operator-settings/:key', sensitiveLimiter, operatorSettingsPUT)
 
 // Teams
 router.get('/api/teams', teamsGET)
@@ -549,6 +561,8 @@ router.post('/api/governance/budgets/:scope/:scopeId/resume', budgetsResumePOST)
 // Gateway cron (operator WS-RPC); writes routed by owner. The Routines view's backend.
 router.get('/api/schedules', schedulesListGET)
 router.get('/api/schedules/occurrences', schedulesOccurrencesGET)
+router.get('/api/schedules/time-zone', schedulesTimeZoneGET)
+router.put('/api/schedules/time-zone', schedulesTimeZonePUT)
 router.post('/api/schedules', schedulesCreatePOST)
 router.post('/api/schedules/:id/run', schedulesRunPOST)
 router.get('/api/schedules/:id/runs', schedulesRunsGET)

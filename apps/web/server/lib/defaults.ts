@@ -87,4 +87,6 @@ export const OPERATIONAL_DEFAULTS = {
   },
   mcpProbeIntervalMs: { value: 60_000, env: 'CLAWBOO_MCP_PROBE_MS', home: 'mcpSupervisor.ts' },
   apiPortStart: { value: 18790, env: 'CLAWBOO_API_PORT_START', home: 'portUtils.ts' },
+  /** Agent runs executing at once across the server; the rest wait for a slot. */
+  maxConcurrentRuns: { value: 8, env: 'CLAWBOO_MAX_CONCURRENT_RUNS', home: 'runSlots.ts' },
 } as const

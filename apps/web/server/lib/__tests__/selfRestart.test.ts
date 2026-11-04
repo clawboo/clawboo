@@ -20,13 +20,17 @@ vi.mock('node:child_process', () => ({
 import { restartIntoLatest } from '../selfRestart'
 
 describe('restartIntoLatest', () => {
+  const execArgv = process.execArgv
   beforeEach(() => {
     spawnState.calls = []
     vi.useFakeTimers()
+    // The test runner starts its workers with node options of its own.
+    process.execArgv = []
   })
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllEnvs()
+    process.execArgv = execArgv
   })
 
   it('starts the successor in a directory that exists, on the same port, then exits', () => {
@@ -49,5 +53,32 @@ describe('restartIntoLatest', () => {
     expect(exit).not.toHaveBeenCalled()
     vi.advanceTimersByTime(400)
     expect(exit).toHaveBeenCalledWith(0)
+  })
+
+  describe('node options', () => {
+    it('starts the successor with the node options this server was started with', () => {
+      process.execArgv = ['--max-old-space-size=4096', '--enable-source-maps']
+      restartIntoLatest(18790, { exit: vi.fn() })
+
+      expect(spawnState.calls[0]!.args).toEqual([
+        '--max-old-space-size=4096',
+        '--enable-source-maps',
+        process.argv[1],
+      ])
+    })
+
+    it('leaves out the inspector, whose port this server still holds', () => {
+      process.execArgv = [
+        '--inspect=9229',
+        '--max-old-space-size=4096',
+        '--inspect-brk',
+        '--inspect-port',
+        '9230',
+        '--inspect-wait=9231',
+      ]
+      restartIntoLatest(18790, { exit: vi.fn() })
+
+      expect(spawnState.calls[0]!.args).toEqual(['--max-old-space-size=4096', process.argv[1]])
+    })
   })
 })

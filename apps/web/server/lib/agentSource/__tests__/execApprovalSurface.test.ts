@@ -125,6 +125,21 @@ describe('startExecApprovalSurface', () => {
     expect(rows()).toHaveLength(1)
   })
 
+  it('puts a new request on the event log once, without the command', () => {
+    // The live views (the browser alerts among them) learn of the wait from
+    // the event log. A redelivery is not news, and the command text stays on
+    // the approval row.
+    const h = makeSource()
+    startExecApprovalSurface(h.source, () => 'clawboo-row-1')
+    h.frame(requestFrame('ap-6', 'curl https://example.com/secret-path'))
+    h.frame(requestFrame('ap-6', 'curl https://example.com/secret-path'))
+    const events = listEvents(db, { kinds: ['approval_requested'] })
+    expect(events).toHaveLength(1)
+    expect(events[0]?.agentId).toBe('clawboo-row-1')
+    expect(JSON.parse(events[0]!.data)).toMatchObject({ approvalId: 'ap-6', kind: 'exec' })
+    expect(events[0]!.data).not.toContain('secret-path')
+  })
+
   it('clears the card when another surface answers first', () => {
     // The Gateway tells every surface when any one of them resolves. Without
     // this, a card answered in the browser would sit here looking pending.

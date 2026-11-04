@@ -79,7 +79,7 @@ Where they start depends on the path:
 
 Clawboo creates the team's folder the first time a run needs it, readable only by your user account. If it cannot create the folder, the run does not start. The folder only sets where these runtimes start; it fences nothing in.
 
-Before starting them, Clawboo removes its own secrets from the environment it passes on: the dashboard access token, the OpenClaw Gateway token and the key that unlocks Clawboo's saved keys. It also removes a list of common cloud and code-hosting tokens, and the variables that tie a process to a Claude Code session, such as `CLAUDECODE` and `CLAUDE_CODE_SESSION_ID`, so a Clawboo started from a terminal inside Claude Code does not hand that session to its agents. This works by name and is best effort. A runtime can still read credential files on disk, such as `~/.openclaw/.env`, where keys saved on the **Providers** page are copied in plain text.
+Before starting them, Clawboo removes its own secrets from the environment it passes on: a dashboard access token set as `STUDIO_ACCESS_TOKEN`, the OpenClaw Gateway token and the key that unlocks Clawboo's saved keys. The per-install access token is never in the environment at all, but it is a file in `~/.clawboo` that these runtimes can read. It also removes a list of common cloud and code-hosting tokens, and the variables that tie a process to a Claude Code session, such as `CLAUDECODE` and `CLAUDE_CODE_SESSION_ID`, so a Clawboo started from a terminal inside Claude Code does not hand that session to its agents. This works by name and is best effort. A runtime can still read credential files on disk, such as `~/.openclaw/.env`, where keys saved on the **Providers** page are copied in plain text.
 
 Claude Code starts without your own Claude Code setup: your `~/.claude` settings, plugins, hooks, MCP servers and memory do not apply. It still loads the Claude Code files of the folder it starts in, such as a repository's `CLAUDE.md` and `.claude/settings.json`. Leaving your setup out is not a sandbox: Claude Code can still read any file your user account can, `~/.claude` included.
 
@@ -158,7 +158,7 @@ An image in an agent's markdown never loads on its own. In chat, a task's report
 ## What this does not cover
 
 - **Clawboo sandboxes no runtime.** A worktree is a starting folder. The network, files outside it and other programs stay within reach of Claude Code, Codex and Hermes.
-- **Approvals guard against a confused or misled model, not against programs on your computer.** With no access token set, any program on your computer can call Clawboo's API, including a command an agent runs, and it could answer an approval card itself. Setting `STUDIO_ACCESS_TOKEN` closes the API to other user accounts, and Clawboo never hands the token to the agents it starts. A program running as you can still read your files, including Clawboo's database and key vault, so nothing in Clawboo fully contains it. See [Security](/operating/security).
+- **Approvals guard against a confused or misled model, not against programs on your computer.** The access token, which every install has unless you turn it off, closes Clawboo's API to other user accounts, and Clawboo never hands the token to the agents it starts. It does not stop a program running as you: an agent, or a command it runs, can read `~/.clawboo/access-token` as easily as it can read the database, then call the API and answer an approval card itself. With the token turned off (`STUDIO_ACCESS_TOKEN=` set blank), any program on your computer can call the API, under any user account. Nothing in Clawboo fully contains a program running as you. See [Security](/operating/security).
 - **Clawboo does not limit where agents connect.** Runtimes reach their providers, and anything else on the network, directly. Only connector calls pass through Clawboo.
 
 ## A safer setup
@@ -168,7 +168,7 @@ An image in an agent's markdown never loads on its own. In chat, a task's report
 - **Connect only accounts you would hand to the agent yourself.** Share each connector only with the agents that need it, at **Read** unless they must change things.
 - **Turn on shell commands sparingly.** Leave Clawboo Native shell commands off unless an agent needs them, and keep OpenClaw agents on **Ask for Unknown** or **Always Ask**.
 - **Put a budget on spend**, and switch it to **hard cap** when money matters: see [Budgets and spend](/using/budgets-and-spend).
-- **Set an access token** before you open Clawboo to other computers, and to keep other user accounts on this one out of the API: see [Self-host securely](/guides/self-host-securely).
+- **Keep the access token on.** It keeps other user accounts on this computer out of the API, and covers you before you open Clawboo to other computers: see [Self-host securely](/guides/self-host-securely).
 
 <Accordion title="Under the hood">
 

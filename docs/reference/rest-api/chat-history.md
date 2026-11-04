@@ -7,7 +7,7 @@ keywords: ['misc', 'chat-history', 'transcript', 'reset context', '/reset', 'cha
 
 Stored chat transcripts, one session at a time. The server stores most chat turns here itself as they happen, the dashboard also saves entries through `POST`, and it reads a chat back a page at a time. Use this page when you read or archive conversations outside the dashboard.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All four routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All four routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
 
 ## Routes
 

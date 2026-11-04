@@ -61,7 +61,7 @@ curl -s http://127.0.0.1:18790/api/teams
 curl -s http://127.0.0.1:18790/api/agents
 ```
 
-Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. With an access token set, add `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` to these requests and to the next one.
+Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. Add the access cookie to these requests and to the next one: `-b "clawboo_access=$(cat ~/.clawboo/access-token)"` on a default install, or `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` when you set that variable. Leave it out only when `STUDIO_ACCESS_TOKEN=` is set blank.
 
 </Step>
 <Step title="Get a signed attach URL">
@@ -139,15 +139,17 @@ A stdio bin is different: it runs as you, the operator. Tasks, Memory and TeamCh
 
 The runs Clawboo starts for a team chat (a turn, a hand-off, a plan step) carry one more signed mark, `teamRun=1`, on their Tasks, Memory and Tools URLs. The team engine claims and moves those tasks itself, so those runs get no claims and no status writes except `block_task` on the agent's own task. The mark is inside the signature, and no URL such a run holds is signed without it, so a runtime that edits its own config cannot win the writes back. You cannot mint such a URL from `/api/mcp/config`.
 
+A run on a board task also carries that task on its Tasks URL, as `scopeTaskId`, inside the same signature. `get_task` and `add_comment` use it when a call names no task, and so does `block_task` on a team run. It is a default, not a permission: it opens no task the run could not already reach, and a runtime that edits it breaks the signature, so the session is served as unverified. It is separate from the Memory URL's `provTaskId`, which records where a memory came from.
+
 ## The attach token
 
-Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters once you set `STUDIO_ACCESS_TOKEN`:
+Every URL from `GET /api/mcp/config` carries an `attachToken`, the same value for every URL on an install. It matters whenever the access gate is on, which is every install unless `STUDIO_ACCESS_TOKEN=` is set blank:
 
 - A request to one of the four server paths without the access cookie is let in only when its token is valid and it came straight to the server's loopback port: from `127.0.0.1` or `::1`, with none of the headers a proxy adds (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `X-Real-IP`).
 - `/api/mcp/config` always needs the cookie, because it signs the identity you ask for. So does `POST /api/mcp/attach-secret/rotate`.
 - Treat an attach URL like a password. Anyone who has it and can reach the loopback port can use the servers as the identity it carries.
 
-With no access token set, the bind is the only boundary: anything that can reach the server's port can use these servers and `/api/mcp/config`.
+With the access token turned off (`STUDIO_ACCESS_TOKEN=` set blank), the bind is the only boundary: anything that can reach the server's port can use these servers and `/api/mcp/config`.
 
 <Note>
 
@@ -157,13 +159,16 @@ The attach token, and the rule that an unsigned TeamChat session gets no tools, 
 
 <Accordion title="If an attach URL leaks">
 
-The token and the signatures never change on their own. To replace them, ask Clawboo to make a new signing secret. The server keeps running. With an access token set, add `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`:
+The token and the signatures never change on their own. To replace them, ask Clawboo to make a new signing secret. The server keeps running. The request needs the access cookie; on a default install it is the token in `~/.clawboo/access-token`:
 
 ```bash
-curl -s -X POST http://127.0.0.1:18790/api/mcp/attach-secret/rotate
+curl -s -X POST -b "clawboo_access=$(cat ~/.clawboo/access-token)" \
+  http://127.0.0.1:18790/api/mcp/attach-secret/rotate
 ```
 
-You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it when an access token is set.
+When you set `STUDIO_ACCESS_TOKEN` yourself, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"` instead. With the gate turned off, leave the cookie out.
+
+You should see `"ok":true` and a `gateway` value. Every URL you copied stops working at once, so get new ones from `/api/mcp/config`. Clawboo's own runtimes get new URLs on their next run. `gateway` says what happened to a local OpenClaw Gateway's URLs: `updated` means it has the new ones; `retrying` means it did not take them yet and Clawboo asks again over the next few minutes; `not-connected` means it gets them the next time Clawboo connects to it. If it still has the old ones after that, restart the Clawboo server so it connects again. A run already in progress keeps its old URLs: for the rest of that run Clawboo's servers treat it as an unsigned caller, or refuse it while the access gate is on.
 
 </Accordion>
 
@@ -238,7 +243,7 @@ This URL carries no scope, so the list has no claim or status tools.
 <AccordionGroup>
 <Accordion title="401 Clawboo access token required, on an MCP URL">
 
-**What it means:** the access token is set, and the request had no cookie and no valid attach token, or it did not come straight to the loopback port.
+**What it means:** the access gate is on, and the request had no cookie and no valid attach token, or it did not come straight to the loopback port.
 
 **Fix:** copy the URL again from `/api/mcp/config` (sending the cookie). A URL from another install, from before a data reset, or from a version without attach tokens has no valid token. Point the agent at `127.0.0.1` directly, not through a proxy. If the agent's environment sets `HTTP_PROXY` or `HTTPS_PROXY`, add `127.0.0.1` and `localhost` to its `NO_PROXY`.
 
