@@ -1120,6 +1120,7 @@ describe('TaskDetailDrawer: review fixes', () => {
     severity: 'crash',
     justification: 'The deterministic gate failed: `exit 1` exited 1.',
   }
+  const GATE_LINE = '[crash] deterministic gate: The deterministic gate failed: `exit 1` exited 1.'
 
   /** How the last attempt's review went. */
   type Review = { ran: boolean; outcome?: 'reviewed' | 'empty' | 'errored' }
@@ -1127,8 +1128,9 @@ describe('TaskDetailDrawer: review fixes', () => {
   /** A verdict carrying these debt notes, in the shape the server stores it. */
   function debtVerdict(
     debtNotes: DebtNote[],
-    status: 'pass' | 'completed_with_debt' = 'completed_with_debt',
+    status: 'pass' | 'fail' | 'completed_with_debt' = 'completed_with_debt',
     review: Review = { ran: true, outcome: 'reviewed' },
+    commandPassed = true,
   ): string {
     return JSON.stringify(
       verificationResultSchema.parse({
@@ -1137,7 +1139,12 @@ describe('TaskDetailDrawer: review fixes', () => {
           {
             attempt: 3,
             at: 0,
-            deterministic: { command: 'pnpm test', exitCode: 0, passed: true, durationMs: 10 },
+            deterministic: {
+              command: 'pnpm test',
+              exitCode: commandPassed ? 0 : 1,
+              passed: commandPassed,
+              durationMs: 10,
+            },
             critic: {
               ...review,
               findings:
@@ -1271,6 +1278,47 @@ describe('TaskDetailDrawer: review fixes', () => {
     expect(within(verification).queryAllByRole('listitem')).toHaveLength(0)
     expect(within(verification).queryByText(/Token logged in plain text/)).toBeNull()
     expect(within(verification).queryByText('Not reviewed again')).toBeNull()
+  })
+
+  it('lists the open issues a failed check still carries under the failure', async () => {
+    // Failed on the reviewer's findings, so the command passed and its old item is
+    // no longer true.
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_progress',
+        verification: debtVerdict([TOKEN_NOTE, GATE_NOTE], 'fail'),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByTestId('task-verdict')).toHaveTextContent(/^Failed$/)
+    expect(
+      within(verification).getByText('Still open from an earlier pass with debt'),
+    ).toBeInTheDocument()
+    expect(within(verification).queryByText('Not reviewed again')).toBeNull()
+    expect(
+      within(verification)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([TOKEN_LINE])
+  })
+
+  it("keeps the failed command's item on a check whose command failed", async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_progress',
+        verification: debtVerdict([TOKEN_NOTE, GATE_NOTE], 'fail', { ran: false }, false),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(
+      within(verification)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([TOKEN_LINE, GATE_LINE])
   })
 
   it('keeps warning words in the text color and puts the amber on a mark', async () => {

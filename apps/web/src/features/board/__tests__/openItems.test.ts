@@ -25,7 +25,13 @@ describe('openItemsOf', () => {
     expect(openItemsOf(pass)).toEqual([])
   })
 
-  it('lists nothing on a failed check', () => {
-    expect(openItemsOf({ status: 'fail', debtNotes: [token] })).toEqual([])
+  it("lists a failed check's items, with the command's only while it still fails", () => {
+    const fail = (passed: boolean) => ({
+      status: 'fail',
+      attempts: [{ deterministic: { passed } }],
+      debtNotes: [token, gate],
+    })
+    expect(openItemsOf(fail(false))).toEqual([token, gate])
+    expect(openItemsOf(fail(true))).toEqual([token])
   })
 })

@@ -72,6 +72,7 @@ interface Verdict {
     deterministic?: {
       command?: string
       commandSource?: 'configured' | 'scaffold' | 'agent' | 'none'
+      passed?: boolean
     }
     critic?: {
       ran?: boolean
@@ -773,14 +774,16 @@ export function TaskDetailDrawer({
                             {line.text}
                           </div>
                         ) : null}
-                        {/* A pass can carry open items its review did not check
-                            again; it lists them under a note saying so. */}
+                        {/* A pass or a fail can carry open items from an earlier
+                            pass with debt; each lists them under a note saying so. */}
                         {openItems.length > 0 && (
                           <>
-                            {verdict.status === 'pass' ? (
+                            {verdict.status === 'pass' || verdict.status === 'fail' ? (
                               <div className="text-xs font-medium text-foreground">
                                 <WarnMark />
-                                Not reviewed again
+                                {verdict.status === 'pass'
+                                  ? 'Not reviewed again'
+                                  : 'Still open from an earlier pass with debt'}
                               </div>
                             ) : null}
                             <ul className="board-reason list-disc pl-4 text-xs">
