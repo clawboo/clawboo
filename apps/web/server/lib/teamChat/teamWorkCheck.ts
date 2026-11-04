@@ -25,6 +25,7 @@ import {
   getAncestors,
   getTask,
   getTaskVerification,
+  listExecutions,
   recordSpend,
   updateStatus,
   type ClawbooDb,
@@ -41,7 +42,7 @@ import { adapterFactoryFor, type RuntimeRunContext } from '../runtimes'
 import { isOrchestratableRuntimeId } from '../runtimes/descriptor'
 import { estimateRunCostUsd, estimateTokensFromChars } from '../runtimes/estimateCost'
 import { sanitizeAgentId } from '../runtimes/identityHome'
-import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
+import { ensureTeamWorkdir, teamWorkdirFor, teamWorkdirPath } from '../runtimes/teamWorkdir'
 import { recordRunTokens } from '../runTokenLog'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from '../verification'
 import { readTeamVerifyCommand } from '../verification/teamVerifyCommand'
@@ -66,6 +67,17 @@ const historyMutex = new KeyedMutex()
 /** `<clawboo home>/team-folder-history/<team>.git`. */
 export function teamFolderHistoryDir(teamId: string): string {
   return path.join(resolveClawbooDir(), 'team-folder-history', `${sanitizeAgentId(teamId)}.git`)
+}
+
+/** Forget where a task's work began: a person marked it Done or cancelled it, so
+ *  it is not checked again. Best-effort; a team with no history has nothing to drop. */
+export async function dropTeamFolderBase(teamId: string, taskId: string): Promise<void> {
+  const gitDir = teamFolderHistoryDir(teamId)
+  if (!existsSync(path.join(gitDir, 'HEAD'))) return
+  const folder = teamWorkdirPath(teamId)
+  await historyMutex
+    .run(gitDir, () => historyGit(gitDir, folder, ['update-ref', '-d', baseRef(taskId)]))
+    .catch(() => undefined)
 }
 
 const baseRef = (taskId: string): string => `refs/clawboo/base/${assertSafeTaskId(taskId)}`
@@ -268,8 +280,15 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
         await dropBase(target.folder, taskId)
         return null
       }
-      return () => check(taskId, agentId, target, base, head, diff)
+      // The run this check is for: the task's latest execution now, as the run
+      // that just ended. A newer one means the task is being run again.
+      const runId = latestRun(taskId)
+      return () => check(taskId, agentId, target, base, head, diff, runId)
     },
+  }
+
+  function latestRun(taskId: string): string | null {
+    return listExecutions(db, taskId).at(-1)?.id ?? null
   }
 
   async function check(
@@ -279,11 +298,17 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     base: string,
     head: string,
     diff: DiffStat,
+    runId: string | null,
   ): Promise<WorkCheckResult> {
     // In review while it is checked, as on the task runner: the board shows the
     // check running, and the stale sweep (which watches `in_progress`) leaves it.
     // A task that cannot enter review was moved by a person meanwhile.
     if (!updateStatus(db, taskId, 'in_review').ok) return { verdict: 'decided' }
+    // This check still speaks for the task: still in review, and not run again
+    // since (a person's Retry, or the engine giving up on this check, ends it).
+    // Asked before the verdict is written and before every card move.
+    const stillMine = (): boolean =>
+      getTask(db, taskId)?.status === 'in_review' && latestRun(taskId) === runId
     const reviewerModel = process.env['CLAWBOO_REVIEWER_MODEL'] || target.model
     const reviewer = reviewerFor(target.runtime)
     const verdict = await verifyTask({
@@ -306,14 +331,16 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       reviewerModel,
       mcpBaseUrl: opts.mcpBaseUrl,
       onReviewerSpend: (spend) => chargeReview(taskId, agentId, reviewerModel, spend),
+      shouldRecord: stillMine,
     })
 
-    // A person moved the card while it was checked (to Done, Cancelled or
-    // Blocked): their move stands, nothing here moves it again, and the verdict
-    // stays on the task as a record. Only Done and Cancelled end the task's
-    // history; a Blocked task can be retried and is then measured from its start.
-    const now = getTask(db, taskId)?.status
-    if (now !== 'in_review') {
+    // Superseded while it ran: a person moved the card (to Done, Cancelled or
+    // Blocked), or the task is being run again. That stands, nothing here moves
+    // the card, and no verdict was written. Only Done and Cancelled end the
+    // task's history; a Blocked task can be retried and is then measured from
+    // its start.
+    if (!stillMine()) {
+      const now = getTask(db, taskId)?.status
       if (now === 'done' || now === 'cancelled') await dropBase(target.folder, taskId)
       return { verdict: 'decided' }
     }

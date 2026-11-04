@@ -79,6 +79,10 @@ export interface VerifyTaskInput {
   reviewSha?: string
   /** False: record the gate's run only on the task, not in VERIFICATION.md. */
   evidence?: boolean
+  /** Asked before the verdict is written: false when the check no longer speaks
+   *  for the task (a person moved it, or it is being run again), so nothing is
+   *  recorded and the verdict is only returned. */
+  shouldRecord?: () => boolean
 }
 
 function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): StructuredError {
@@ -248,6 +252,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     debtNotes,
     updatedAt: Date.now(),
   }
+  if (input.shouldRecord && !input.shouldRecord()) return result
   setTaskVerification(db, taskId, result)
   appendAudit(db, {
     eventType: 'verification',

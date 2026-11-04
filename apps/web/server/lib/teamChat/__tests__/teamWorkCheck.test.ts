@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   agents,
   claimTask,
+  createExecutionProcess,
   createTask,
   getComments,
   getTask,
@@ -31,10 +32,12 @@ import type {
   TaskHandle,
 } from '@clawboo/executor'
 import type { WorkCheckResult } from '@clawboo/team-orchestration'
+import { execGit } from '@clawboo/worktrees'
 
 import { getDb, getDbPath, resetDb } from '../../db'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import { teamVerifyCommandSettingKey } from '../../verification/teamVerifyCommand'
+import { noteHumanMove } from '../humanMove'
 import { createTeamWorkCheck, teamFolderHistoryDir } from '../teamWorkCheck'
 
 const TEAM = 'T'
@@ -300,6 +303,57 @@ describe('team chat work check', () => {
 
     expect(await running).toEqual({ verdict: 'decided' })
     expect(getTask(db, id)?.status).toBe('blocked')
+    // Nor is its verdict written over the task: a Retry would start clean.
+    expect(getTaskVerification(db, id)).toBeNull()
+  })
+
+  it('records nothing once another run of the task has started', async () => {
+    setCommand('sleep 1; exit 1')
+    const wc = check()
+    const id = startTask()
+    createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+    await wc.begin(id, AGENT)
+    await writeFile(path.join(folder, 'parser.ts'), 'x\n')
+    const running = runCheck(wc, id)
+    await new Promise((r) => setTimeout(r, 300))
+    // The engine gave up on this check, and the task was run again since.
+    createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+
+    expect(await running).toEqual({ verdict: 'decided' })
+    expect(getTaskVerification(db, id)).toBeNull()
+    expect(getTask(db, id)?.status).toBe('in_review')
+  })
+
+  it('forgets where a task began once a person marks it Done or cancels it', async () => {
+    setCommand('true')
+    const wc = check()
+    const done = startTask('one')
+    const cancelled = startTask('two')
+    await wc.begin(done, AGENT)
+    await wc.begin(cancelled, AGENT)
+    const hasBase = (taskId: string): Promise<boolean> =>
+      execGit(folder, [
+        '--git-dir',
+        teamFolderHistoryDir(TEAM),
+        'rev-parse',
+        '--verify',
+        '-q',
+        `refs/clawboo/base/${taskId}`,
+      ]).then(
+        () => true,
+        () => false,
+      )
+    expect(await hasBase(done)).toBe(true)
+
+    updateStatus(db, done, 'done', { humanOverride: true })
+    noteHumanMove(db, { taskId: done, teamId: TEAM, from: 'in_progress', to: 'done' })
+    updateStatus(db, cancelled, 'cancelled')
+    noteHumanMove(db, { taskId: cancelled, teamId: TEAM, from: 'in_progress', to: 'cancelled' })
+    for (let i = 0; i < 50 && ((await hasBase(done)) || (await hasBase(cancelled))); i++)
+      await new Promise((r) => setTimeout(r, 20))
+
+    expect(await hasBase(done)).toBe(false)
+    expect(await hasBase(cancelled)).toBe(false)
   })
 
   it("measures a person's Retry from where the task first began", async () => {

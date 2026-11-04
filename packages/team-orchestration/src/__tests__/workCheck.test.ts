@@ -46,6 +46,8 @@ function makeHarness(
     needsCheck?: boolean | (() => boolean)
     /** The check itself throws. */
     checkThrows?: boolean
+    /** Preparing the check itself fails. */
+    prepareRejects?: boolean
   } = {},
 ) {
   let clock = 1_000_000
@@ -65,6 +67,7 @@ function makeHarness(
       const needs =
         typeof opts.needsCheck === 'function' ? opts.needsCheck() : opts.needsCheck !== false
       if (!needs) return null
+      if (opts.prepareRejects) throw new Error('history unreadable')
       return async () => {
         // The server moves the card to In review while the check runs.
         await board.updateStatus(taskId, 'in_review')
@@ -501,5 +504,75 @@ describe('team-chat work check', () => {
     await h.engine.personMovedTask(id, 'done')
 
     expect(h.aborted).toEqual([])
+  })
+
+  it("a check a person's move superseded never finishes the task, and the next run's result does", async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'old result'))
+    await settle()
+    // A person parks it, then retries it: a new run starts on the same session.
+    await h.board.updateStatus(id, 'blocked')
+    await h.engine.personMovedTask(id, 'blocked')
+    await h.board.updateStatus(id, 'todo')
+    expect(await h.engine.dispatchTask(id)).toBe('started')
+    expect(h.toWorker()).toHaveLength(2)
+
+    h.checks[0]!.resolve({ verdict: 'pass' }) // the old check answers late
+    await settle()
+    expect(statusOf(h.board, id)).toBe('in_progress')
+
+    await h.engine.onEvent(sk('a2'), doneEvent('r3', 'new result'))
+    await settle()
+    expect(h.checks).toHaveLength(2)
+    h.checks[1]!.resolve({ verdict: 'pass' })
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('done')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('new result')
+  })
+
+  it('a check that cannot even be prepared leaves the task for a person, not in done', async () => {
+    const h = makeHarness({ prepareRejects: true })
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()[0]!.task).toContain('history unreadable')
+  })
+
+  it('a board write that fails while parking a task does not leave the session under check', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const update = h.board.updateStatus.bind(h.board)
+    h.board.updateStatus = async (taskId, status) => {
+      if (status === 'blocked') throw new Error('database is locked')
+      return update(taskId, status)
+    }
+    await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+
+    expect(h.engine.checksInFlight()).toBe(0)
+  })
+
+  it("a person's move during the check does not drop what the agent's other turn hands off", async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    await h.board.updateStatus(id, 'done')
+    await h.engine.personMovedTask(id, 'done')
+    const before = h.board.created.length
+
+    await h.engine.onEvent(
+      sk('a2'),
+      doneEvent('chat-1', '<delegate to="@Boo Zero">review the parser change</delegate>'),
+    )
+
+    expect(h.board.created.length).toBe(before + 1)
   })
 })

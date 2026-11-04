@@ -746,13 +746,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // has not ended. `resume()` replays only the pending rows outside it, so a row
   // is sent again only by the next engine for the room, never twice by this one.
   const reportUpsInHand = new Set<string>()
-  // Session -> the task whose finished work is being checked (see WorkCheck). The
-  // session stays bound to the task meanwhile; keyed by task, so a session a
+  // Session -> the task whose finished work is being checked (see WorkCheck),
+  // and which check: a person's move ends the check's say over the task, and a
+  // later check of the same task (after a Retry) is another one. The session
+  // stays bound to the task meanwhile; keyed by task too, so a session a
   // person's move freed and the pump rebound is not mistaken for one under check.
-  const checking = new Map<string, string>()
+  const checking = new Map<string, { taskId: string; check: number }>()
+  let nextCheck = 0
   const isChecking = (sessionKey: string): boolean => {
-    const taskId = checking.get(sessionKey)
-    return taskId !== undefined && sessionToTask.get(sessionKey) === taskId
+    const c = checking.get(sessionKey)
+    return c !== undefined && sessionToTask.get(sessionKey) === c.taskId
   }
   // Session -> a fix round waiting for another turn on the session to end. The
   // session stays under check until it goes out (see runWorkCheck).
@@ -1730,13 +1733,21 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // a stopped run is closed below as it always was.
     if (deps.workCheck && !stopChangedFor(sessionKey)) {
       const agentId = deps.agentIdForSession(sessionKey)
-      checking.set(sessionKey, taskId)
-      const check = agentId ? await deps.workCheck.prepare(taskId, agentId).catch(() => null) : null
+      const mark = { taskId, check: ++nextCheck }
+      checking.set(sessionKey, mark)
+      // A prepare that fails is a check that could not run, never "nothing to
+      // check": the work would otherwise reach Done unchecked.
+      const check = agentId
+        ? await deps.workCheck
+            .prepare(taskId, agentId)
+            .catch((err: unknown) => () => Promise.reject(err))
+        : null
       if (check) {
-        void runWorkCheck(sessionKey, taskId, summary, check)
+        // Detached, so nothing awaits it: it settles every path itself.
+        void runWorkCheck(sessionKey, taskId, summary, check, mark.check).catch(() => undefined)
         return
       }
-      checking.delete(sessionKey)
+      if (checking.get(sessionKey) === mark) checking.delete(sessionKey)
       // A person's move that landed meanwhile already freed the session.
       if (sessionToTask.get(sessionKey) !== taskId) return
     }
@@ -1749,6 +1760,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     taskId: string,
     summary: string,
     check: () => Promise<WorkCheckResult>,
+    checkId: number,
   ): Promise<void> {
     // A check that cannot run, or never answers, cannot pass the work, and the
     // board would refuse `done` over an earlier failed attempt anyway: the task
@@ -1776,10 +1788,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       deadline.clear()
     }
     const endCheck = (): void => {
-      if (checking.get(sessionKey) === taskId) checking.delete(sessionKey)
+      if (checking.get(sessionKey)?.check === checkId) checking.delete(sessionKey)
     }
-    // A person's move freed the session meanwhile, and their move is the outcome.
-    if (sessionToTask.get(sessionKey) !== taskId) {
+    // Superseded: a person's move ended this check's say over the task (it may
+    // even be running again, with a check of its own to come), or the session was
+    // freed. Their move is the outcome, and this answer is not the task's.
+    if (checking.get(sessionKey)?.check !== checkId || sessionToTask.get(sessionKey) !== taskId) {
       endCheck()
       return
     }
@@ -1798,13 +1812,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       else await startFixRound(sessionKey, taskId, summary, result.fixNote)
       return
     }
-    if (parkedByEngine && result.verdict === 'failed') {
-      await deps.board.addComment(taskId, result.reason, 'system').catch(() => undefined)
-      await deps.board.updateStatus(taskId, 'blocked')
-    }
     // Still marked as checked until the result is written: the card is In review
     // until then, and `resume()` must not take it for a check a restart cut short.
+    // Ended whatever happens, so a failed board write cannot leave the session
+    // under check for good.
     try {
+      if (parkedByEngine && result.verdict === 'failed') {
+        await deps.board.addComment(taskId, result.reason, 'system').catch(() => undefined)
+        await deps.board.updateStatus(taskId, 'blocked')
+      }
       await finishCompletion(
         sessionKey,
         taskId,
@@ -1837,7 +1853,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (sessionToTask.get(sessionKey) !== p.taskId) {
       // A person's move freed the session; their move is the outcome.
       pendingFix.delete(sessionKey)
-      if (checking.get(sessionKey) === p.taskId) checking.delete(sessionKey)
+      if (checking.get(sessionKey)?.taskId === p.taskId) checking.delete(sessionKey)
       return
     }
     if (deps.isSessionOccupied?.(sessionKey)) return
@@ -2423,7 +2439,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   async function resume(): Promise<void> {
     replayReportUps()
     const all = await deps.board.listTasks(deps.teamId)
-    const checkingTasks = new Set(checking.values())
+    const checkingTasks = new Set([...checking.values()].map((c) => c.taskId))
     for (const t of all) {
       const assignee = typeof t.assigneeAgentId === 'string' ? t.assigneeAgentId : null
       if (t.status === 'in_review' && deps.workCheck && !checkingTasks.has(t.id)) {
@@ -2703,13 +2719,21 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const wasRunning = sessionKey !== null
 
     if (sessionKey) {
-      // Under check, the task's run is over: a run live on the session now is
-      // another turn's, and the person's move is not about it.
-      if (isChecking(sessionKey)) pendingFix.delete(sessionKey)
-      else deps.abortSession?.(sessionKey)
-      // Arms the late-replay guard too: the aborted run's last summary must not
-      // seed new delegations.
-      forgetSession(sessionKey)
+      if (isChecking(sessionKey)) {
+        // Under check, the task's run is over: a run live on the session now is
+        // another turn's, and the person's move is not about it. The move ends
+        // the check's say over the task, so its answer can no longer finish it
+        // (see runWorkCheck). No late-replay guard either: nothing was aborted,
+        // and that other turn's hand-offs must still go out.
+        pendingFix.delete(sessionKey)
+        checking.delete(sessionKey)
+        dropSessionTracking(sessionKey)
+      } else {
+        deps.abortSession?.(sessionKey)
+        // Arms the late-replay guard too: the aborted run's last summary must not
+        // seed new delegations.
+        forgetSession(sessionKey)
+      }
       if (pendingStart.get(sessionKey) === taskId) pendingStart.delete(sessionKey)
     }
     const execId = taskToExec.get(taskId)
