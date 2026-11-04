@@ -13,7 +13,7 @@ OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so th
 
 </Note>
 
-An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** below also count against a limit of 60 a minute. The `curl` examples assume the access gate is off (the default on a loopback install); with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each call (see [Authentication](/reference/rest-api/index#authentication)).
+An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** below also count against a limit of 60 a minute. Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 

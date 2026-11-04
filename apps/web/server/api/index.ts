@@ -9,6 +9,7 @@ import { Router, type Router as RouterType } from 'express'
 import { generalLimiter, sensitiveLimiter } from '../lib/rateLimit'
 
 import { settingsGET, settingsPOST } from './settings'
+import { accessLaunchCodePOST } from './access'
 import { approvalsGET, approvalsPOST } from './approvals'
 import {
   chatHistoryGET,
@@ -220,6 +221,10 @@ router.use('/api', generalLimiter)
 // Settings
 router.get('/api/settings', settingsGET)
 router.post('/api/settings', settingsPOST)
+
+// One-time sign-in codes for `clawboo open` and "Open on another device". Each
+// one is a session credential, so minting takes the sensitive limiter.
+router.post('/api/access/launch-code', sensitiveLimiter, accessLaunchCodePOST)
 
 // Approvals
 router.get('/api/approvals', approvalsGET)

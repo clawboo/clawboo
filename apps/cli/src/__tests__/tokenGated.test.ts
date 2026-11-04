@@ -100,10 +100,18 @@ async function track(server: Promise<FakeServer>): Promise<FakeServer> {
   return s
 }
 
+/** What the real server writes once it is listening: the only port the token goes to. */
+function writePortFile(port: number): void {
+  const dir = process.env['CLAWBOO_HOME']!
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'api-port.txt'), String(port))
+}
+
 describe('a token-gated dashboard', () => {
   it('reports the server it just started as started when the launcher holds the token', async () => {
     process.env['STUDIO_ACCESS_TOKEN'] = TOKEN
     const gated = await track(gatedDashboard(TOKEN))
+    writePortFile(gated.port)
     const realExists = fs.existsSync
     // Pretend the bundled server.js sits next to the launcher, as it does in a
     // published install. `fork` is mocked; the fake server stands in for it.
@@ -119,6 +127,7 @@ describe('a token-gated dashboard', () => {
   it('is found by discovery, so stop, restart and attach can use it', async () => {
     process.env['STUDIO_ACCESS_TOKEN'] = ` ${TOKEN} `
     const gated = await track(gatedDashboard(TOKEN))
+    writePortFile(gated.port)
     process.env['CLAWBOO_API_PORT'] = String(gated.port)
 
     expect(await probeDashboard('127.0.0.1', gated.port, 1_000)).toBe('clawboo')
@@ -139,6 +148,7 @@ describe('a token-gated dashboard', () => {
   it('sends the token only to a port that answered with the access gate refusal', async () => {
     process.env['STUDIO_ACCESS_TOKEN'] = TOKEN
     const gated = await track(gatedDashboard(TOKEN))
+    writePortFile(gated.port)
     // Something else in the port window that also refuses with a JSON 401.
     const other = await track(
       listen((_req, res) => sendJson(res, 401, { error: 'Unauthorized' }), []),

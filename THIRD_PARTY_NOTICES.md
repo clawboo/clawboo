@@ -41,6 +41,7 @@ aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.m
 | `remark-gfm`                | MIT        |
 | `culori`                    | MIT        |
 | `lucide-react`              | ISC        |
+| `qrcode.react`              | ISC        |
 | `simple-icons`              | CC0-1.0    |
 | `tailwindcss`               | MIT        |
 | `pino`, `ws`                | MIT        |

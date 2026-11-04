@@ -7,7 +7,7 @@ keywords: ['misc', 'cost records', 'cost-records', 'tokens used', 'fleet', 'spen
 
 Read and write token cost records, the 30-day summary the **Tokens Used** panel shows, and the fleet overview the **Fleet** panel shows. Use this page when you build your own spend report or health dashboard.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All four routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All four routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index). Errors use `{ "error": "<message>" }`.
 
 ## Routes
 

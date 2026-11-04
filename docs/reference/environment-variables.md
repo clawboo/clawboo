@@ -22,7 +22,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | -------------------------------------- | --------------------------------- | ------------------------------------------------------------ |
 | **Access and network**                 |                                   |                                                              |
 | `HOST`                                 | `127.0.0.1`                       | Address the dashboard listens on                             |
-| `STUDIO_ACCESS_TOKEN`                  | unset                             | Turns on the access gate for `/api/*`                        |
+| `STUDIO_ACCESS_TOKEN`                  | per-install token file            | The access token for `/api/*`; blank turns the gate off      |
 | `CLAWBOO_ALLOW_INSECURE`               | unset                             | Allows a wide bind with no token                             |
 | `CLAWBOO_ALLOWED_ORIGINS`              | loopback only                     | Extra browser origins allowed to call the API                |
 | `CLAWBOO_ALLOWED_HOSTS`                | loopback and the bind host        | Extra `Host` header values the server accepts                |
@@ -95,27 +95,28 @@ The network address the dashboard listens on.
 - Default: `127.0.0.1`, so only this machine can connect
 - Example: `HOST=0.0.0.0`
 
-Any address other than loopback (`localhost`, `127.x.x.x`, `::1`) exposes the dashboard to your network. The server then refuses to start, exiting with code 1, unless `STUDIO_ACCESS_TOKEN` holds a valid token or `CLAWBOO_ALLOW_INSECURE=1` is set. Prefer `0.0.0.0` to a single LAN address: Clawboo's own agents reach its MCP servers at `127.0.0.1`, which a single-address bind does not answer. A wide bind without `CLAWBOO_ALLOWED_ORIGINS` also logs a warning that browsers on other machines will be blocked.
+Any address other than loopback (`localhost`, `127.x.x.x`, `::1`) exposes the dashboard to your network. The server then refuses to start, exiting with code 1, when the access gate is off (`STUDIO_ACCESS_TOKEN` set blank), unless `CLAWBOO_ALLOW_INSECURE=1` is set. A default install has its per-install token, so it starts. Prefer `0.0.0.0` to a single LAN address: Clawboo's own agents reach its MCP servers at `127.0.0.1`, which a single-address bind does not answer. A wide bind without `CLAWBOO_ALLOWED_ORIGINS` also logs a warning that browsers on other machines will be blocked.
 
 `HOSTNAME` is ignored. Docker, systemd and many CI runners set it automatically, so widening the bind always takes an explicit `HOST`. [Self-host securely](/guides/self-host-securely) walks through reaching Clawboo from another machine.
 
 ### STUDIO_ACCESS_TOKEN
 
-A shared secret that turns on the access gate.
+The access token, in place of the per-install one.
 
 - Type: string of letters, digits, `.`, `_`, `~` and `-`
-- Default: unset, so the gate is off
+- Default: unset, so the server uses the per-install token in `~/.clawboo/access-token` (under `CLAWBOO_HOME`), and makes it on the first start
+- Blank (`STUDIO_ACCESS_TOKEN=`): no token, so the access gate is off and every `/api/*` route is open to anything that can reach the server. `pnpm dev` sets it blank unless your shell sets it.
 - Example: `STUDIO_ACCESS_TOKEN=$(openssl rand -hex 32)`, saved somewhere you can reuse it
 
-With a token set, every `/api/*` request and the Gateway WebSocket need the `clawboo_access` cookie. Open `http://<host>:<port>/?access_token=<token>` once to get it: the right token sets an HttpOnly cookie (scoped to your `CLAWBOO_BASE_PATH`, `SameSite=Lax`, and `Secure` when the request arrives with `X-Forwarded-Proto: https`) and redirects to the same address without the token. A wrong token answers 401 `Invalid Clawboo access token.` and a missing cookie answers 401 `Clawboo access token required. Open /?access_token=<token> once to set a cookie.` The page shell and its static files load without the cookie.
+Every `/api/*` request and the Gateway WebSocket need the `clawboo_access` cookie, with this token or the per-install one. `clawboo` opens the browser with a one-time sign-in link that sets it, and `clawboo open` does the same for a running server. With a token you know, you can also open `http://<host>:<port>/?access_token=<token>` once: the right token sets an HttpOnly cookie (scoped to your `CLAWBOO_BASE_PATH`, `SameSite=Lax`, and `Secure` when the request arrives with `X-Forwarded-Proto: https`) and redirects to the same address without the token. A wrong token answers 401 `Invalid Clawboo access token.` and a missing cookie answers 401 ``Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.`` The page shell and its static files load without the cookie. [Security](/operating/security#the-access-token) covers one-time links and the token file.
 
-Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI reaches a gated server with the `STUDIO_ACCESS_TOKEN` from its own shell; see [Token-gated installs](/reference/cli#token-gated-installs).
+Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI uses the same token as the server: this variable from its own shell, or the token file when it is unset; see [Token-gated installs](/reference/cli#token-gated-installs).
 
 <Warning>
 Use only letters, digits, `.`, `_`, `~` and `-`. With any other character, such as the `+`, `/` or `=` in a base64 token, the server logs `SECURITY: refusing to start` with the character and the allowed set, and exits with code 1, on every bind. `CLAWBOO_ALLOW_INSECURE=1` does not skip this. On 0.5.0 and older, such a token turns the gate off with only a warning, which behind a reverse proxy on the same machine leaves every `/api/*` route open.
 </Warning>
 
-With no token set, the first request that reaches the server through a reverse proxy logs a one-time `SECURITY:` warning, because such a proxy delivers every request from `127.0.0.1`. [Security](/operating/security) explains what the gate does and does not protect.
+With the gate off, the first request that reaches the server through a reverse proxy logs a one-time `SECURITY:` warning, because such a proxy delivers every request from `127.0.0.1`. [Security](/operating/security) explains what the gate does and does not protect.
 
 ### CLAWBOO_ALLOW_INSECURE
 

@@ -13,7 +13,7 @@ The two sources stay separate. A Routine schedules team work on any runtime: a m
 
 </Note>
 
-Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo-routine:<routine-id>` or `openclaw-gateway-cron:<gateway-job-id>`. The `:id` path segment is URL-decoded and sent to the source it names; an id that matches no source answers **404**. Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address). The `curl` examples assume the access gate is off; with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` (see [Authentication](/reference/rest-api/index#authentication)).
+Every schedule has a **composite `id`** of the form `<source>:<rawId>`: `clawboo-routine:<routine-id>` or `openclaw-gateway-cron:<gateway-job-id>`. The `:id` path segment is URL-decoded and sent to the source it names; an id that matches no source answers **404**. Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 
