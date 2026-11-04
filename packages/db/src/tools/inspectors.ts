@@ -126,10 +126,26 @@ export const riskClassifierInspector: Inspector = (_call, descriptor, ctx): Insp
 // ─── The dashboard ───────────────────────────────────────────────────────────
 
 let dashboardPorts: ReadonlySet<number> = new Set()
+let dashboardHosts: ReadonlySet<string> = new Set()
 
-/** The ports the Clawboo dashboard listens on. The server sets them at boot. */
-export function setDashboardPorts(ports: readonly number[]): void {
+/** A host as the URL parser writes it, without a trailing dot, or null. */
+function canonicalHost(host: string): string | null {
+  const raw = host.trim()
+  if (!raw) return null
+  try {
+    const bracketed = raw.includes(':') && !raw.startsWith('[') ? `[${raw}]` : raw
+    return new URL(`http://${bracketed}`).hostname.replace(/\.$/, '')
+  } catch {
+    return null
+  }
+}
+
+/** The ports the Clawboo dashboard listens on, and the address it is bound to
+ *  (`HOST`), which counts as the dashboard on those ports even when it is not
+ *  a loopback address. The server sets them at boot. */
+export function setDashboardPorts(ports: readonly number[], hosts: readonly string[] = []): void {
   dashboardPorts = new Set(ports)
+  dashboardHosts = new Set(hosts.flatMap((host) => canonicalHost(host) ?? []))
 }
 
 const isLoopbackHost = (host: string): boolean => {
@@ -162,9 +178,10 @@ function asciiTail(run: string): string {
   return run.slice(i)
 }
 
-const opensLoopback = (host: string, port: string): boolean => {
+const opensDashboard = (host: string, port: string): boolean => {
   try {
-    return isLoopbackHost(new URL(`http://${host}:${port}`).hostname)
+    const hostname = new URL(`http://${host}:${port}`).hostname
+    return isLoopbackHost(hostname) || dashboardHosts.has(hostname.replace(/\.$/, ''))
   } catch {
     return false // Not a host this browser could open.
   }
@@ -175,9 +192,9 @@ function scanForDashboard(text: string): boolean {
     const host = m[1]!
     const port = m[2]!
     if (!dashboardPorts.has(Number(port))) continue
-    if (opensLoopback(host, port)) return true
+    if (opensDashboard(host, port)) return true
     const tail = asciiTail(host)
-    if (tail && tail !== host && opensLoopback(tail, port)) return true
+    if (tail && tail !== host && opensDashboard(tail, port)) return true
   }
   return false
 }

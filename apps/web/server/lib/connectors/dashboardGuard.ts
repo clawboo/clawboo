@@ -8,11 +8,14 @@
 // navigate or a click, nothing would stand in the way.
 //
 // So both browser connectors are launched with the dashboard's loopback
-// origins blocked, built from the port this server really listens on. Each of
-// those servers says its block is not a security boundary, which is why the
-// broker also refuses any connector call whose arguments name the dashboard
-// (packages/db/src/tools/inspectors.ts). Other loopback ports stay reachable:
-// testing a local app is a normal reason to run a browser.
+// origins and its bind address blocked, built from the port and address this
+// server really listens on. Each of those servers says its block is not a
+// security boundary, which is why the broker also refuses any connector call
+// whose arguments name the dashboard (packages/db/src/tools/inspectors.ts).
+// Other loopback ports stay reachable: testing a local app is a normal reason
+// to run a browser. Neither layer knows a name that reaches the server through
+// a reverse proxy or one listed in CLAWBOO_ALLOWED_HOSTS; there the access
+// token is the only check.
 //
 // Chrome rewrites a URL's host before either server matches it, so most
 // spellings need no entry of their own: 127.1, 2130706433, 0x7f000001 and
@@ -34,12 +37,21 @@ export function setDashboardPort(port: number, bindHost?: string): void {
   dashboardBindHost = bindHost ?? null
 }
 
-/** A 127.x.x.x address other than 127.0.0.1 that the server is bound to. */
-function loopbackAlias(bindHost: string | null): string | null {
-  if (!bindHost) return null
+const IPV4 = /^\d+\.\d+\.\d+\.\d+$/
+
+/** Hosts every list below carries, whatever the server is bound to. */
+const ALWAYS_LISTED = new Set(['127.0.0.1', '0.0.0.0', '[::1]', '[::]', 'localhost'])
+
+/** The address the server is bound to, as Chrome writes it, when the lists
+ *  below do not already carry it: a loopback alias such as 127.0.0.2, or a LAN
+ *  address or name. The origin guard trusts it, so it is the dashboard too. */
+function boundAddress(bindHost: string | null): string | null {
+  const raw = bindHost?.trim()
+  if (!raw) return null
   try {
-    const host = new URL(`http://${bindHost}`).hostname
-    return /^127\.\d+\.\d+\.\d+$/.test(host) && host !== '127.0.0.1' ? host : null
+    const bracketed = raw.includes(':') && !raw.startsWith('[') ? `[${raw}]` : raw
+    const host = new URL(`http://${bracketed}`).hostname.replace(/\.$/, '')
+    return ALWAYS_LISTED.has(host) ? null : host
   } catch {
     return null
   }
@@ -50,19 +62,33 @@ const ipv4Mapped = (ipv4: string): string => new URL(`http://[::ffff:${ipv4}]`).
 
 /** Every host, as Chrome writes it, that reaches the dashboard's port. */
 function blockedHosts(style: 'origins' | 'urlPatterns', bindHost: string | null): string[] {
-  const alias = loopbackAlias(bindHost)
-  const ipv4 = ['127.0.0.1', ...(alias ? [alias] : []), '0.0.0.0']
+  const bound = boundAddress(bindHost)
+  const ipv4 = ['127.0.0.1', ...(bound && IPV4.test(bound) ? [bound] : []), '0.0.0.0']
   return [
     // Playwright reads each origin as a glob over the URL, so `127.*` covers
-    // every 127.x.x.x address. A URL pattern cannot say that: its parser reads
-    // `127.` as the address 0.0.0.127, and Chrome's network rules ignore a
-    // regexp group. Chrome DevTools gets 127.0.0.1 and the address the server
-    // is bound to; the broker's inspector refuses the rest of 127/8.
-    ...(style === 'origins' ? ['127.*', '0.0.0.0'] : ipv4),
+    // every 127.x.x.x address. The glob does not check that the rest is
+    // numeric, so it also refuses a name such as 127.example.com on this port.
+    // That is deliberate: such a name on the dashboard's port is rare, and
+    // names like 127.0.0.1.nip.io resolve to loopback. Spelling out numeric
+    // octets would take a 256-way brace list per octet.
+    //
+    // A URL pattern cannot say 127/8: its parser reads `127.` as the address
+    // 0.0.0.127, and Chrome's network rules ignore a regexp group. So Chrome
+    // DevTools blocks 127.0.0.1 and the address the server is bound to, but
+    // not the rest of 127/8. The broker's inspector refuses a call that names
+    // any 127.x.x.x address, but it reads only call arguments, so a click or a
+    // redirect to 127.0.0.2 on a 0.0.0.0 bind is not stopped. There the origin
+    // guard answers only the page's GETs (it refuses that Origin on a POST or
+    // a WebSocket), and with an access token those get a 401 too.
+    ...(style === 'origins' ? ['127.*', ...ipv4.filter((host) => !host.startsWith('127.'))] : ipv4),
     // An IPv4-mapped address connects to the IPv4 listener. Playwright parses
     // each entry as a URL, which rejects a `*` inside brackets, so these are
-    // exact, and the inspector refuses the mapped forms of the rest of 127/8.
+    // exact, and only the inspector refuses the mapped forms of the rest of
+    // 127/8 (the origin guard does not trust them as a Host).
     ...ipv4.map(ipv4Mapped),
+    // A bound IPv6 address, or a name, which Chrome keeps with or without a
+    // trailing dot.
+    ...(bound && !IPV4.test(bound) ? (bound.startsWith('[') ? [bound] : [bound, `${bound}.`]) : []),
     '[::1]',
     '[::]',
     'localhost',

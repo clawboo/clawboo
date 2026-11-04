@@ -43,6 +43,7 @@ describe('dashboardInspector', () => {
     'http://127.0.0.2:18790/',
     'http://app.localhost:18790/',
     'http://[::ffff:127.0.0.1]:18790/',
+    'http://[::ffff:127.0.0.2]:18790/',
     'http://[::ffff:0.0.0.0]:18790/',
   ])('refuses %s', async (url) => {
     expect(await decide({ url })).toBe('deny')
@@ -61,6 +62,17 @@ describe('dashboardInspector', () => {
     ['a line break inside the address', 'http://127.0.\n0.1:18790/'],
   ])('refuses %s', async (_label, url) => {
     expect(await decide({ url })).toBe('deny')
+  })
+
+  it('refuses the address the server is bound to, loopback or not', async () => {
+    setDashboardPorts([18790], ['192.168.1.5'])
+    expect(await decide({ url: 'http://192.168.1.5:18790/' })).toBe('deny')
+    expect(await decide({ url: 'http://3232235781:18790/' })).toBe('deny')
+    expect(await decide({ url: 'http://192.168.1.5:3000/' })).toBe('allow')
+    setDashboardPorts([18790], ['fe80::1'])
+    expect(await decide({ url: 'http://[fe80::1]:18790/' })).toBe('deny')
+    setDashboardPorts([18790], ['clawboo.lan'])
+    expect(await decide({ url: 'http://CLAWBOO.lan.:18790/' })).toBe('deny')
   })
 
   it('still refuses a plain name run into other text', async () => {

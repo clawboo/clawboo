@@ -280,11 +280,12 @@ async function main() {
   // header — a forged Host must never redirect a runtime's Tasks/Memory/Tools/TeamChat
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
-  // Agents' browsers are launched with this port's loopback origins blocked,
-  // and the broker refuses connector calls that name them: the dashboard has no
-  // access check on loopback (see lib/connectors/dashboardGuard.ts).
+  // Agents' browsers are launched with this port's loopback origins and the
+  // bind address blocked, and the broker refuses connector calls that name
+  // them: the dashboard has no access check on loopback (see
+  // lib/connectors/dashboardGuard.ts).
   setDashboardPort(port, hostname)
-  setDashboardPorts([port])
+  setDashboardPorts([port], [hostname])
   // The base-path middleware STRIPS the prefix from `req.url` before routing, so
   // a route that needs to build an absolute-on-this-origin redirect cannot
   // recover it from the request. Publishing the validated value is how a route

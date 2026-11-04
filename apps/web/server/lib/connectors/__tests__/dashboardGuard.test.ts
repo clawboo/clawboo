@@ -101,6 +101,19 @@ describe('blockDashboardArgs', () => {
   })
 
   it.each([
+    // HOST=192.168.1.5 (needs an access token or CLAWBOO_ALLOW_INSECURE=1):
+    // the origin guard trusts the bind address, so it is the dashboard too.
+    ['192.168.1.5', 'http://192.168.1.5:18790/'],
+    ['192.168.1.5', 'http://3232235781:18790/'],
+    ['192.168.1.5', 'http://[::ffff:192.168.1.5]:18790/'],
+    ['fe80::1', 'http://[fe80::1]:18790/'],
+    ['clawboo.lan', 'http://Clawboo.lan.:18790/'],
+  ])('blocks the bind address %s as %s in both browsers', (bindHost, url) => {
+    expect(blocks(PLAYWRIGHT, url, bindHost)).toBe(true)
+    expect(blocks(DEVTOOLS, url, bindHost)).toBe(true)
+  })
+
+  it.each([
     'http://127.0.0.1:3000/',
     'http://localhost:3000/',
     'http://dash.localhost:3000/',
