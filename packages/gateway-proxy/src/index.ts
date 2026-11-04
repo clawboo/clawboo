@@ -10,6 +10,16 @@ export {
 export type { OriginGuard, OriginGuardOptions } from './origin-guard'
 export { createOriginGuard } from './origin-guard'
 
+// How the guards read a request's path, for any other check that must agree
+// with them and with the router.
+export {
+  anyPathUnder,
+  everyPathUnder,
+  isOriginFormTarget,
+  requestPathReadings,
+  targetPath,
+} from './request-path'
+
 export type { GatewayProxyHandle, ProxyOptions, UpstreamSettings } from './proxy'
 export { createGatewayProxy } from './proxy'
 

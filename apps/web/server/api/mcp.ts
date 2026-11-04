@@ -15,6 +15,7 @@ import {
   type MemoryProvenance,
   type MemoryScope,
 } from '@clawboo/db'
+import { requestPathReadings } from '@clawboo/gateway-proxy'
 import {
   buildAttachConfig,
   createMemoryServer,
@@ -92,7 +93,9 @@ const MCP_TRANSPORT_PATHS = new Set<string>(MCP_SERVER_NAMES.map((s) => `/api/mc
  * makes every remote request look like loopback; the gate lets the address count
  * only AGAINST a request. Only the transport mounts accept the token,
  * so a runtime holding a token still cannot reach `/api/mcp/config` and sign
- * itself an identity it was not given. Fails closed on an unreadable secret.
+ * itself an identity it was not given. Every reading of the path (as sent, as
+ * resolved, as routed) must be a transport mount, so a path that only resolves
+ * to one is refused. Fails closed on an unreadable secret.
  */
 export function carriesAttachToken(req: IncomingMessage): boolean {
   let url: URL
@@ -101,7 +104,8 @@ export function carriesAttachToken(req: IncomingMessage): boolean {
   } catch {
     return false
   }
-  if (!MCP_TRANSPORT_PATHS.has(url.pathname)) return false
+  const readings = requestPathReadings(req)
+  if (!readings.every((p) => p !== null && MCP_TRANSPORT_PATHS.has(p))) return false
   const token = url.searchParams.get('attachToken')
   if (!token) return false
   try {

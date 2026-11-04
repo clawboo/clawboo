@@ -90,7 +90,10 @@ describe('mintLaunchCode', () => {
     const { gate } = gateAt(5_000)
     const minted = gate.mintLaunchCode()
     expect(minted).not.toBeNull()
-    expect(minted!.code).toMatch(/^[A-Za-z0-9_-]{32,}$/)
+    // Exactly 32: the dashboard's paste box takes nothing else, so it can never
+    // mistake the 43-character access token for a code and send it on
+    // (apps/web/src/features/access/pastedSignIn.ts).
+    expect(minted!.code).toMatch(/^[A-Za-z0-9_-]{32}$/)
     expect(minted!.code).not.toContain(TOKEN)
     expect(minted!.expiresAt).toBe(5_000 + 120_000)
   })
@@ -301,6 +304,57 @@ describe('?access_code= with no fetch metadata at all', () => {
     expect(reply.statusCode).toBe(302)
     expect(reply.body).not.toContain('<script>')
     expect(reply.headers['set-cookie']).toBeUndefined()
+  })
+})
+
+describe("the locked screen's POST of a pasted link", () => {
+  // The dashboard's locked screen submits a pasted link's code as a form POST to
+  // its own page, with a mark that the redirect must keep so the next page can
+  // tell whether it worked (apps/web/src/features/access/pastedSignIn.ts). It is
+  // the sign-in page's own path, so a pasted link is exactly as strong as one
+  // that was opened: once, within two minutes, for the same cookie.
+  const pasted = (code: string) => `/?signin=pasted&access_code=${code}`
+  for (const [name, headers] of [
+    [
+      'from an HTTPS or loopback page',
+      { ...FORM_POST, ...PAGE_LOAD, 'sec-fetch-site': 'same-origin' },
+    ],
+    ['from a plain-HTTP page, which sends no fetch metadata', FORM_POST],
+  ] as const) {
+    it(`signs in once ${name}, and keeps the mark on the way back`, () => {
+      const { gate } = gateAt()
+      const { code } = gate.mintLaunchCode()!
+      const posted = open(gate, pasted(code), {}, headers, 'POST')
+      expect(posted.statusCode).toBe(303)
+      expect(posted.headers['set-cookie']).toContain(`clawboo_access=${TOKEN}`)
+      expect(posted.headers['location']).toBe('http://localhost:18790/?signin=pasted')
+      // A POST is never answered with the sign-in page, so the code is never
+      // the address of a page the browser shows.
+      expect(posted.body).toBe('')
+
+      const again = open(gate, pasted(code), {}, headers, 'POST')
+      expect(again.statusCode).toBe(303)
+      expect(again.headers['set-cookie']).toBeUndefined()
+      expect(again.headers['location']).toBe('http://localhost:18790/?signin=pasted')
+    })
+  }
+
+  it('sets no cookie for an expired code, and still comes back with the mark', () => {
+    const { gate, clock } = gateAt()
+    const { code, expiresAt } = gate.mintLaunchCode()!
+    clock.now = expiresAt
+    const posted = open(gate, pasted(code), {}, FORM_POST, 'POST')
+    expect(posted.statusCode).toBe(303)
+    expect(posted.headers['set-cookie']).toBeUndefined()
+    expect(posted.headers['location']).toBe('http://localhost:18790/?signin=pasted')
+  })
+
+  it('scopes the cookie to the mount and comes back under it', () => {
+    const { gate } = gateAt(1_000_000, { basePath: '/clawboo' })
+    const { code } = gate.mintLaunchCode()!
+    const posted = open(gate, pasted(code), {}, FORM_POST, 'POST')
+    expect(posted.headers['set-cookie']).toContain('Path=/clawboo')
+    expect(posted.headers['location']).toBe('http://localhost:18790/clawboo/?signin=pasted')
   })
 })
 

@@ -371,7 +371,7 @@ async function main() {
   app.locals['accessGate'] = accessGate
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
-  // of it. The guards below decide what to protect with `startsWith('/api/')` and
+  // of it. The guards below protect a request whose path is under `/api/` and
   // fail OPEN otherwise, so they must only ever see root-form paths; stripping
   // here is what lets them keep their existing checks and cover the prefixed
   // surface too. A pass-through when no prefix is configured.
