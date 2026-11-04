@@ -154,6 +154,9 @@ export function agentChatStreamGET(req: Request, res: Response): void {
   })
   res.write(': connected\n\n')
   res.flushHeaders?.()
+  // Where this connection starts, so a reconnect before the first stored row
+  // resumes here (see the same frame in teamChatStream.ts).
+  res.write(`event: cursor\nid: ${cursor}\ndata: ${JSON.stringify({ cursor })}\n\n`)
 
   let closed = false
 

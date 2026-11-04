@@ -5,7 +5,7 @@
 // each refusal is pinned here. Real-filesystem tests in a temp dir; the git
 // status parser is covered against a real `git status` run.
 
-import { mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, mkdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -247,6 +247,13 @@ describe('readFileAt', () => {
 
   it('refuses to read a directory', async () => {
     await expect(readFileAt(root, 'src')).rejects.toThrow('Not a file.')
+  })
+
+  it('refuses a hard link, which names a file outside under a path inside', async () => {
+    // A hard link has the same device and inode under both names, so only the
+    // link count tells it apart.
+    await link(path.join(outside, 'secret.txt'), path.join(root, 'hard.txt'))
+    await expect(readFileAt(root, 'hard.txt')).rejects.toThrow('Hard-linked files are not served.')
   })
 })
 

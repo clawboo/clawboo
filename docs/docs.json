@@ -151,7 +151,8 @@
               "operating/security",
               "operating/data-and-state",
               "operating/mcp-servers",
-              "operating/production-defaults"
+              "operating/production-defaults",
+              "operating/supported-versions"
             ]
           }
         ]

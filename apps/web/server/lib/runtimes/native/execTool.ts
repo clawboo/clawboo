@@ -31,6 +31,7 @@ import {
   createApproval,
   getApproval,
   toolCallApprovals,
+  withWriteRetry,
   type ClawbooDb,
 } from '@clawboo/db'
 import { and, eq } from 'drizzle-orm'
@@ -108,13 +109,23 @@ async function awaitDecision(
     const row = getApproval(db, id)
     // A row that vanished is not an allow. Anything unrecognised fails closed.
     if (!row) return 'expired'
-    if (row.status !== 'pending') {
-      if (row.status === 'allow_once' || row.status === 'allow_always') return 'allow'
-      return row.status === 'deny' ? 'deny' : 'expired'
+    if (row.status !== 'pending') return decisionOf(row.status)
+    if (row.expiresAt <= Date.now()) {
+      // Close the card now that nothing waits on it, rather than leaving it
+      // pending until the reaper finds it. An answer that landed between the
+      // read above and that write is still the answer.
+      if (retirePendingApproval(db, id)) return 'expired'
+      const settled = getApproval(db, id)
+      return settled && settled.status !== 'pending' ? decisionOf(settled.status) : 'expired'
     }
-    if (row.expiresAt <= Date.now()) return 'expired'
     await new Promise((r) => setTimeout(r, POLL_MS))
   }
+}
+
+/** A settled row's status as the tool acts on it. Only an explicit allow runs. */
+function decisionOf(status: string): 'allow' | 'deny' | 'expired' {
+  if (status === 'allow_once' || status === 'allow_always') return 'allow'
+  return status === 'deny' ? 'deny' : 'expired'
 }
 
 /**
@@ -282,23 +293,29 @@ export function buildExecTool(deps: ExecToolDeps): NativeLocalTool[] {
 }
 
 /**
- * Mark an abandoned card as expired, never as denied.
+ * Mark an abandoned card as expired, never as denied. True when this call
+ * expired it.
  *
  * The `status = 'pending'` predicate is the whole guard: a decision that landed
- * in the same instant as the abort must win, because it was a real answer from a
- * real person and this is only cleanup.
+ * in the same instant as the abort or the expiry must win, because it was a real
+ * answer from a real person and this is only cleanup. Retried on a busy lock,
+ * since only the reaper, up to a day later, closes a card left pending here.
  */
-export function retirePendingApproval(db: ClawbooDb, id: string): void {
+export function retirePendingApproval(db: ClawbooDb, id: string): boolean {
   try {
-    const retired = db
-      .update(toolCallApprovals)
-      .set({ status: 'expired', resolvedAt: Date.now() })
-      .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
-      .returning()
-      .all()
+    const retired = withWriteRetry(() =>
+      db
+        .update(toolCallApprovals)
+        .set({ status: 'expired', resolvedAt: Date.now() })
+        .where(and(eq(toolCallApprovals.id, id), eq(toolCallApprovals.status, 'pending')))
+        .returning()
+        .all(),
+    )
     for (const row of retired) emitEvent(db, approvalEvent(db, 'approval_resolved', row))
+    return retired.length > 0
   } catch (err) {
-    log.debug({ err, id }, 'could not retire an abandoned approval')
+    log.warn({ err, id }, 'could not retire an abandoned approval')
+    return false
   }
 }
 

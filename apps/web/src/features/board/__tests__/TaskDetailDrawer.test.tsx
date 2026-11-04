@@ -408,6 +408,35 @@ describe('TaskDetailDrawer', () => {
     expect(await screen.findByText('clawboo/task-t1')).toBeInTheDocument()
   })
 
+  it('says when a task file was cut at the read limit', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'in_review' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () =>
+        HttpResponse.json({
+          ok: true,
+          workspace: { branch: 'clawboo/task-t1', worktreePath: '/tmp/wt' },
+          sorFiles: { 'task-progress.md': 'the start of a long log', 'TASK.md': 'short' },
+          sorFilesTruncated: ['task-progress.md'],
+          diffStat: { filesChanged: 0, insertions: 0, deletions: 0 },
+          diff: '',
+        }),
+      ),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+
+    const cut = await screen.findByText('Showing the first 256 KB. The file is longer.')
+    expect(cut.closest('details')).toHaveTextContent('task-progress.md')
+    expect(screen.getAllByText('Showing the first 256 KB. The file is longer.')).toHaveLength(1)
+  })
+
   it('surfaces the reviewer runtime + model on the verification verdict', async () => {
     server.use(
       http.get('/api/board/t1', () =>

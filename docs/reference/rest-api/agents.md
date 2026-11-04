@@ -1044,19 +1044,20 @@ Connection: keep-alive
 X-Accel-Buffering: no
 ```
 
-then sends a `: connected` comment, any stored rows already past the cursor, and the last `status` published for the chat, so a client that reconnects learns about a turn that ended while no stream was open.
+then sends a `: connected` comment, a `cursor` event with the row id it starts from, any stored rows already past the cursor, and the last `status` published for the chat, so a client that reconnects learns about a turn that ended while no stream was open.
 
 ### Event catalog
 
 | Frame           | When                                    | Shape                                                             |
 | --------------- | --------------------------------------- | ----------------------------------------------------------------- |
 | `: connected`   | Immediately on open                     | SSE comment (ignored by `EventSource`)                            |
+| `event: cursor` | Once, right after `: connected`         | `id: <row id>` line + `{ cursor }`: where this connection starts  |
 | entry data      | Per new stored row (every 750 ms)       | `id: <row id>` line + `data: <json>` line (the stored chat entry) |
 | `event: delta`  | Per streamed piece of the reply         | `{ sessionKey, runId, text }`; `text` is the whole reply so far   |
 | `event: status` | When a turn starts or ends, and on open | `{ agentId, status: 'running' \| 'idle' \| 'error' }`             |
 | `: keepalive`   | Every 20 s while open                   | SSE comment (keeps the connection warm)                           |
 
-`delta` and `status` frames carry no `id:` line, so they never move the resume cursor. The stored rows are the record; the deltas only let a reply appear as it is written.
+The `cursor` event gives an `EventSource` a resume point before any row arrives, so a connection that drops first still reconnects from where it started instead of the newest row at that moment. A client needs no listener for it. `delta` and `status` frames carry no `id:` line, so they never move the resume cursor. The stored rows are the record; the deltas only let a reply appear as it is written.
 
 ### Example
 

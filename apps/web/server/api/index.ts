@@ -37,6 +37,7 @@ import {
   approveDevicePOST,
 } from './system'
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
+import { systemCapabilitiesGET } from './systemCapabilities'
 import {
   teamsGET,
   teamsPOST,
@@ -290,6 +291,7 @@ router.post('/api/system/approve-device', sensitiveLimiter, approveDevicePOST)
 // probes the npm registry server-side (cached, fail-silent); the apply installs
 // clawboo@latest and restarts into it (global installs only).
 router.get('/api/system/self-version', selfVersionGET)
+router.get('/api/system/capabilities', systemCapabilitiesGET)
 router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
 
 // Teams
