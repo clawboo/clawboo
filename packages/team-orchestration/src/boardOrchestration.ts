@@ -1906,14 +1906,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
-  /** Move a task whose check could not run to Blocked. False only while the move
-   *  fails and the task is still the check's (In progress or In review); a task a
-   *  person moved meanwhile, or one that is gone, needs no move. */
+  /** Move a task whose check could not run to Blocked. False while the move fails
+   *  and the task is still the check's (In progress or In review) or cannot be
+   *  read; a task a person moved meanwhile needs no move. */
   async function parkFailedCheck(taskId: string): Promise<boolean> {
     if (await deps.board.updateStatus(taskId, 'blocked').catch(() => false)) return true
-    const detail = await deps.board.getTask(taskId).catch(() => undefined)
-    if (detail === undefined) return false // unread: try again
-    const status = detail?.task.status
+    // Unread: try again. The server's client answers a failed read with null, and
+    // a task row is never deleted (only marked dropped), so null is never "gone".
+    const detail = await deps.board.getTask(taskId).catch(() => null)
+    if (!detail) return false
+    const status = detail.task.status
     return status !== 'in_progress' && status !== 'in_review'
   }
 
@@ -2151,8 +2153,27 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await closeBlocked(checkFailure)
       return
     }
-    const ok = await deps.board.updateStatus(taskId, 'done')
-    if (!ok && deps.workCheck) {
+    // Work that failed its check never ends in Done, even when the move to
+    // Blocked before this (the host's, or the engine's) did not hold: the task
+    // is parked here instead. Not parked and still the check's, nothing is
+    // written over it and its run stays open: the next `resume()` hands an In
+    // review task to a person, and the board's stale sweep releases an In
+    // progress one. A task released meanwhile is handled as below.
+    let ok = false
+    if (checkFailure) {
+      if (await deps.board.updateStatus(taskId, 'blocked').catch(() => false)) {
+        await closeBlocked(checkFailure)
+        return
+      }
+      const held = (await deps.board.getTask(taskId).catch(() => null))?.task.status
+      if (!held || held === 'in_progress' || held === 'in_review') {
+        taskToExec.delete(taskId)
+        taskReflectTo.delete(taskId)
+        taskTitle.delete(taskId)
+        return
+      }
+    } else ok = await deps.board.updateStatus(taskId, 'done')
+    if (!ok && deps.workCheck && !checkFailure) {
       // Not released but held. Unchecked, the board refuses `done` over a check
       // that failed on an earlier attempt (this one's change could not be
       // measured). Checked and passed, no verdict stands in the way, so the write

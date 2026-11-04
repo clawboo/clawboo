@@ -757,4 +757,86 @@ describe('team-chat work check', () => {
     expect(before.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
     expect(before.updates()).toHaveLength(1)
   })
+
+  /** A board whose move to Blocked fails while it is `down`, and whose reads
+   *  then answer null, as the server's client does for a failed read. */
+  function failingBoard(h: ReturnType<typeof makeHarness>, readFailures: number) {
+    const update = h.board.updateStatus.bind(h.board)
+    const read = h.board.getTask.bind(h.board)
+    const state = { down: true, reads: 0 }
+    h.board.updateStatus = async (taskId, status) => {
+      if (status === 'blocked' && state.down) {
+        state.reads = readFailures
+        return false
+      }
+      return update(taskId, status)
+    }
+    h.board.getTask = async (taskId) => {
+      if (state.reads > 0) {
+        state.reads -= 1
+        return null
+      }
+      return read(taskId)
+    }
+    return state
+  }
+
+  it('a check whose park fails and whose task cannot be read once never reaches Done', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const board = failingBoard(h, 1)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.engine.checksInFlight()).toBe(1)
+    expect(h.updates()).toHaveLength(0)
+
+    board.down = false
+    await h.engine.sweepStaleSessions()
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain("did not pass the team's check")
+  })
+
+  it('a check whose task cannot be read for a while keeps waiting, short of Done', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const board = failingBoard(h, Number.POSITIVE_INFINITY)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    for (let i = 0; i < 3; i++) await h.engine.sweepStaleSessions()
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.engine.checksInFlight()).toBe(1)
+    expect(h.board.completed).toHaveLength(0)
+    expect(h.updates()).toHaveLength(0)
+
+    board.down = false
+    board.reads = 0
+    await h.engine.sweepStaleSessions()
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.engine.checksInFlight()).toBe(0)
+  })
+
+  it('a failed check whose task the host did not park still never reaches Done', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    // The host's move to Blocked did not land: the card is still In review.
+    h.checks[0]!.resolve({ verdict: 'failed', reason: 'npm test still exits 1.' })
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('npm test still exits 1.')
+  })
 })

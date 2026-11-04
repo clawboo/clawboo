@@ -116,7 +116,9 @@ would lose to its own claim, and one that completed the task would complete it t
   `check_failed` too, and so does a `done` the board refuses while the task is still `in_progress` or
   `in_review` (as `done_refused` when the check had passed). A check that cannot run whose move to `blocked` the
   board refuses stays under check, short of `done`, and the sweep tries the move again until it lands or a person
-  moves the card. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
+  moves the card (a task it cannot read counts as still the check's). Work that failed its check is never written
+  `done`: if neither the host's move to `blocked` nor the engine's lands, its run is left open for `resume()` or the
+  board's stale sweep. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
   that unloads idle engines. `resume()` hands a task left `in_review` with a running engine execution and no check
   of its own (a restart or teardown cut it short) to a person and tells its delegator (`check_interrupted`); it
   closes that execution only once the move to `blocked` lands, so a failed move is tried again by the next
