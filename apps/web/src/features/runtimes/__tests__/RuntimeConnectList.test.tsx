@@ -234,12 +234,24 @@ describe('RuntimeConnectList: a Hermes without its live mode', () => {
         })
       }),
     )
-    const onChanged = vi.fn()
+    // The status re-read is held open, so the button must stay busy until it lands.
+    let releaseRefetch: () => void = () => {}
+    const onChanged = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          releaseRefetch = r
+        }),
+    )
     renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: true }, onChanged)
     await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
     await userEvent.click(screen.getByTestId('runtime-hermes-update'))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     expect(installs).toBe(1)
+    expect(screen.getByTestId('runtime-hermes-update')).toHaveTextContent('Updating Hermes…')
+    releaseRefetch()
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime-hermes-update')).toHaveTextContent('Update Hermes'),
+    )
   })
 
   it('a failed update says why and lets you try again', async () => {

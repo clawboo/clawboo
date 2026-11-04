@@ -21,6 +21,7 @@ vi.mock('../hermesAcpCheck', () => ({
 
 import {
   HERMES_ACP_RECHECK_MS,
+  HERMES_ACP_RETRY_MS,
   checkHermesAcp,
   hermesTransport,
   markHermesAcpMissing,
@@ -92,6 +93,24 @@ describe('hermesTransport', () => {
     const calls = check.calls
     expect(peekHermesAcp(Date.now() + HERMES_ACP_RECHECK_MS)).toBe(false)
     expect(check.calls).toBe(calls + 1)
+  })
+
+  it('asks again within a minute when the last check could not tell', async () => {
+    check.answer = null
+    await checkHermesAcp()
+    const at = Date.now()
+    const calls = check.calls
+    expect(peekHermesAcp(at + HERMES_ACP_RETRY_MS - 1_000)).toBeNull()
+    expect(check.calls).toBe(calls)
+    check.answer = false
+    expect(peekHermesAcp(at + HERMES_ACP_RETRY_MS + 1_000)).toBeNull()
+    expect(check.calls).toBe(calls + 1)
+    await checkHermesAcp()
+    expect(peekHermesAcp()).toBe(false)
+    // A definite answer keeps the long window.
+    const settled = check.calls
+    peekHermesAcp(Date.now() + HERMES_ACP_RETRY_MS + 1_000)
+    expect(check.calls).toBe(settled)
   })
 
   it('a reset (after an install) forgets the answer, including a check still running', async () => {

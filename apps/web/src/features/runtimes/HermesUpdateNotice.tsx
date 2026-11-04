@@ -18,6 +18,7 @@ export function HermesUpdateNotice({ onChanged }: { onChanged: () => void | Prom
   const [error, setError] = useState<string | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
 
+  // Unmounting only closes the stream: the server runs an update to the end.
   useEffect(() => () => controllerRef.current?.abort(), [])
 
   function handleUpdate(): void {

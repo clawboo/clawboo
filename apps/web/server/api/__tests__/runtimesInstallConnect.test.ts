@@ -93,6 +93,10 @@ vi.mock('../../lib/runtimes/hermesAcpCheck', () => ({
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
 interface FakeChild {
   killed: boolean
+  /** Unset by default, which the install guard reads as a child that has ended.
+   *  A test that needs a child still running sets both to null. */
+  exitCode?: number | null
+  signalCode?: string | null
   kill: () => void
   stdout: { on: (e: string, h: (c: Buffer) => void) => void }
   stderr: { on: (e: string, h: (c: Buffer) => void) => void }
@@ -184,11 +188,14 @@ interface Mock {
   body: () => unknown
   events: () => Record<string, unknown>[]
   ended: Promise<void>
+  /** The client goes away: runs the route's `close` handlers. */
+  close: () => void
 }
 function mockRes(): Mock {
   let code = 200
   let payload: unknown
   const events: Record<string, unknown>[] = []
+  const onClose: (() => void)[] = []
   let resolveEnd!: () => void
   const ended = new Promise<void>((r) => (resolveEnd = r))
   const res = {
@@ -213,11 +220,21 @@ function mockRes(): Mock {
     end() {
       resolveEnd()
     },
-    on() {
+    on(e: string, h: () => void) {
+      if (e === 'close') onClose.push(h)
       return this
     },
   } as unknown as Response
-  return { res, statusCode: () => code, body: () => payload, events: () => events, ended }
+  return {
+    res,
+    statusCode: () => code,
+    body: () => payload,
+    events: () => events,
+    ended,
+    close: () => {
+      for (const h of onClose) h()
+    },
+  }
 }
 const req = (over: Partial<Request> = {}): Request =>
   ({
@@ -403,6 +420,58 @@ describe('runtimes install/connect REST', () => {
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
     expect(peekHermesAcp()).toBe(true)
+  })
+
+  it('an update keeps running when its client goes away, then checks Hermes again', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes' // installed: an update
+    acpCheckState.answer = true
+    const before = acpCheckState.calls
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    const child = spawnState.children[0] as FakeChild
+    // The notice unmounted, or the tab closed: a reinstall cut short here could
+    // leave Hermes half replaced, so it is not stopped.
+    m.close()
+    expect(child.killed).toBe(false)
+    child.emitClose(0)
+    await m.ended
+    expect(acpCheckState.calls).toBe(before + 1)
+    expect(peekHermesAcp()).toBe(true)
+  })
+
+  it('a first install still stops when its client goes away', () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx' // no hermes yet
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    m.close()
+    expect((spawnState.children[0] as FakeChild).killed).toBe(true)
+  })
+
+  it('refuses a second install of a runtime while one is still running', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    const first = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), first.res)
+    const child = spawnState.children[0] as FakeChild
+    child.exitCode = null
+    child.signalCode = null
+    first.close()
+
+    const second = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), second.res)
+    expect(second.events()).toContainEqual(
+      expect.objectContaining({ type: 'error', code: 'INSTALL_RUNNING' }),
+    )
+    expect(spawnState.calls).toHaveLength(1)
+
+    // Once it ends, the next install goes ahead.
+    child.exitCode = 0
+    child.emitClose(0)
+    await first.ended
+    const third = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), third.res)
+    expect(spawnState.calls).toHaveLength(2)
   })
 
   it('a failed Hermes install keeps what was known about ACP', async () => {

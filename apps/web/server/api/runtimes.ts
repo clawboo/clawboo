@@ -203,6 +203,15 @@ export async function runtimesListGET(_req: Request, res: Response): Promise<voi
   }
 }
 
+/** The latest install of each runtime, read by the one-at-a-time guard. */
+const installs = new Map<NonOpenClawRuntimeId, { child: ChildProcess | null }>()
+
+/** An install's process has not exited yet. */
+function installRunning(ctl: { child: ChildProcess | null } | undefined): boolean {
+  const child = ctl?.child
+  return child != null && child.exitCode === null && child.signalCode === null
+}
+
 // ─── POST /api/runtimes/:id/install (SSE) ────────────────────────────────────
 // Installs the runtime's CLI. npm runtimes → `npm install -g <pkg>`; the pip
 // runtime → pipx-preferred with a PEP-668 `--break-system-packages` fallback.
@@ -226,13 +235,31 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
+
+  // One install per runtime at a time: an update outlives its client (below), so
+  // a second request could otherwise run over it.
+  if (installRunning(installs.get(id))) {
+    sendEvent(res, {
+      type: 'error',
+      code: 'INSTALL_RUNNING',
+      message: `${d.name} is already being installed. Wait for it to finish, then Re-check.`,
+    })
+    res.end()
+    return
+  }
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
-  // One res.on('close') handler kills whichever child is active (the pip path
-  // may spawn a second child for the PEP-668 retry).
+  // An install over one that is already there is an update. Stopped part way it
+  // can leave the runtime half replaced (`pipx install --force` reinstalls into
+  // the same environment), so it runs to the end when its client goes away (a
+  // closed panel, a reloaded tab). A first install has nothing to break, so it
+  // still stops with its client. The handler covers whichever child is active
+  // (the pip path may spawn a second one for the PEP-668 retry).
+  const updating = Boolean(d.healthBin && resolveRuntimeBin(d.healthBin))
   const ctl: { child: ChildProcess | null } = { child: null }
+  installs.set(id, ctl)
   res.on('close', () => {
-    if (ctl.child && !ctl.child.killed) ctl.child.kill()
+    if (!updating && ctl.child && !ctl.child.killed) ctl.child.kill()
   })
 
   if (d.packageManager === 'npm') installViaNpm(res, d, ctl)

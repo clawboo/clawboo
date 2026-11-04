@@ -26,6 +26,10 @@ const log = createLogger('hermes-transport')
  *  again (an update in between may have added it). */
 export const HERMES_ACP_RECHECK_MS = 10 * 60_000
 
+/** How soon a check that could not tell (a timeout, a crash on a slow start) is
+ *  asked again: until then the status can offer no update. */
+export const HERMES_ACP_RETRY_MS = 60_000
+
 let acpMissingUntil = 0
 
 const forcedTransport = (): string | undefined =>
@@ -73,13 +77,15 @@ export function checkHermesAcp(): Promise<boolean | null> {
 
 /**
  * Whether this Hermes has ACP, from the last check, without waiting: true, false,
- * or null while unknown. Starts a check when there is no answer or it is older
- * than the recheck window. Null, with no check, when the operator pinned the
- * quiet path (an update would change nothing).
+ * or null while unknown. Starts a check when there is no answer, when a definite
+ * one is older than the recheck window, or when one that could not tell is older
+ * than the retry window. Null, with no check, when the operator pinned the quiet
+ * path (an update would change nothing).
  */
 export function peekHermesAcp(now = Date.now()): boolean | null {
   if (forcedTransport() === 'quiet') return null
-  if (!acpCheck || now - acpCheck.at >= HERMES_ACP_RECHECK_MS) void checkHermesAcp()
+  const maxAge = acpCheck?.available === null ? HERMES_ACP_RETRY_MS : HERMES_ACP_RECHECK_MS
+  if (!acpCheck || now - acpCheck.at >= maxAge) void checkHermesAcp()
   return acpCheck?.available ?? null
 }
 
