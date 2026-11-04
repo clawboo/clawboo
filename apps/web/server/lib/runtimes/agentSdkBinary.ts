@@ -14,6 +14,8 @@
 //     exists, and on Linux tries the musl build first when Node runs without
 //     glibc. Mirrored here as of @anthropic-ai/claude-agent-sdk 0.3.268, with one
 //     check more: the file must be executable, because a run spawns it directly.
+//     Like the SDK's, this lookup is Node's own, so after the node_modules
+//     folders above the SDK it also searches NODE_PATH and the global folders.
 
 import { accessSync, constants, existsSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'

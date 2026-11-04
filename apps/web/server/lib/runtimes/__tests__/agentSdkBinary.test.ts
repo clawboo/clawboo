@@ -23,6 +23,9 @@ import {
   resolveAgentSdkBinary,
 } from '../agentSdkBinary'
 
+/** No published platform package has this architecture. */
+const ARCH = 'clawboo-test-arch'
+
 let root: string
 
 beforeEach(() => {
@@ -80,59 +83,66 @@ describe('the specifiers the SDK tries', () => {
 })
 
 describe('resolveAgentSdkBinary', () => {
+  // The lookup is Node's own (`createRequire().resolve()`), as in the SDK, so it
+  // also searches NODE_PATH and the global folders. A test runner started by
+  // pnpm has the repo's own packages on NODE_PATH, the real platform binary for
+  // the host among them, so these fixtures use an architecture no package exists
+  // for: only what a test plants can be found.
   it('finds the binary of an SDK installed next to clawboo (a global install)', () => {
     const nm = path.join(root, 'lib', 'node_modules')
-    installSdk(nm, ['linux-x64'])
+    installSdk(nm, [`linux-${ARCH}`])
     const found = resolveAgentSdkBinary({
       fromDir: clawbooDist(nm),
       platform: 'linux',
-      arch: 'x64',
+      arch: ARCH,
       preferMusl: false,
     })
-    expect(found).toBe(path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64', 'claude'))
+    expect(found).toBe(path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}`, 'claude'))
   })
 
   it('takes the musl build first on a Linux without glibc, as the SDK does', () => {
     const nm = path.join(root, 'node_modules')
-    installSdk(nm, ['linux-x64', 'linux-x64-musl'])
+    installSdk(nm, [`linux-${ARCH}`, `linux-${ARCH}-musl`])
     const from = clawbooDist(nm)
     const musl = resolveAgentSdkBinary({
       fromDir: from,
       platform: 'linux',
-      arch: 'x64',
+      arch: ARCH,
       preferMusl: true,
     })
     const glibc = resolveAgentSdkBinary({
       fromDir: from,
       platform: 'linux',
-      arch: 'x64',
+      arch: ARCH,
       preferMusl: false,
     })
-    expect(musl).toBe(path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl', 'claude'))
-    expect(glibc).toBe(path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64', 'claude'))
+    expect(musl).toBe(
+      path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}-musl`, 'claude'),
+    )
+    expect(glibc).toBe(path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}`, 'claude'))
   })
 
   it('falls back to the other Linux build when only that one is installed', () => {
     const nm = path.join(root, 'node_modules')
-    installSdk(nm, ['linux-x64-musl'])
+    installSdk(nm, [`linux-${ARCH}-musl`])
     expect(
       resolveAgentSdkBinary({
         fromDir: clawbooDist(nm),
         platform: 'linux',
-        arch: 'x64',
+        arch: ARCH,
         preferMusl: false,
       }),
-    ).toBe(path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64-musl', 'claude'))
+    ).toBe(path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}-musl`, 'claude'))
   })
 
   it('is null when the SDK has no binary for this platform (installed with --omit=optional)', () => {
     const nm = path.join(root, 'node_modules')
-    installSdk(nm, ['darwin-arm64'])
+    installSdk(nm, [`darwin-${ARCH}`])
     expect(
       resolveAgentSdkBinary({
         fromDir: clawbooDist(nm),
         platform: 'linux',
-        arch: 'x64',
+        arch: ARCH,
         preferMusl: false,
       }),
     ).toBeNull()
@@ -140,13 +150,13 @@ describe('resolveAgentSdkBinary', () => {
 
   it('is null when only the binary package is there and the SDK a run loads is not', () => {
     const nm = path.join(root, 'node_modules')
-    const name = `${AGENT_SDK_PACKAGE}-linux-x64`
+    const name = `${AGENT_SDK_PACKAGE}-linux-${ARCH}`
     writePackage(path.join(nm, ...name.split('/')), name, ['claude'])
     expect(
       resolveAgentSdkBinary({
         fromDir: clawbooDist(nm),
         platform: 'linux',
-        arch: 'x64',
+        arch: ARCH,
         preferMusl: false,
       }),
     ).toBeNull()
@@ -156,9 +166,9 @@ describe('resolveAgentSdkBinary', () => {
     'is null when the binary cannot be started (no execute bit)',
     () => {
       const nm = path.join(root, 'node_modules')
-      installSdk(nm, ['linux-x64'])
-      const bin = path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64', 'claude')
-      const opts = { platform: 'linux', arch: 'x64', preferMusl: false } as const
+      installSdk(nm, [`linux-${ARCH}`])
+      const bin = path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}`, 'claude')
+      const opts = { platform: 'linux', arch: ARCH, preferMusl: false } as const
       chmodSync(bin, 0o644)
       expect(resolveAgentSdkBinary({ fromDir: clawbooDist(nm), ...opts })).toBeNull()
       chmodSync(bin, 0o755)
@@ -171,7 +181,7 @@ describe('resolveAgentSdkBinary', () => {
     mkdirSync(from, { recursive: true })
     expect(findAgentSdkDir(from)).toBeNull()
     expect(
-      resolveAgentSdkBinary({ fromDir: from, platform: 'linux', arch: 'x64', preferMusl: false }),
+      resolveAgentSdkBinary({ fromDir: from, platform: 'linux', arch: ARCH, preferMusl: false }),
     ).toBeNull()
   })
 
@@ -181,7 +191,7 @@ describe('resolveAgentSdkBinary', () => {
       // pnpm links the SDK into the app's node_modules from its store, and the
       // platform package sits beside the SDK in the store, not in the app.
       const store = path.join(root, '.pnpm', 'sdk@1', 'node_modules')
-      installSdk(store, ['darwin-arm64'])
+      installSdk(store, [`darwin-${ARCH}`])
       const appModules = path.join(root, 'app', 'node_modules', '@anthropic-ai')
       mkdirSync(appModules, { recursive: true })
       symlinkSync(
@@ -194,10 +204,10 @@ describe('resolveAgentSdkBinary', () => {
         resolveAgentSdkBinary({
           fromDir: from,
           platform: 'darwin',
-          arch: 'arm64',
+          arch: ARCH,
           preferMusl: false,
         }),
-      ).toBe(path.join(store, '@anthropic-ai', 'claude-agent-sdk-darwin-arm64', 'claude'))
+      ).toBe(path.join(store, '@anthropic-ai', `claude-agent-sdk-darwin-${ARCH}`, 'claude'))
     },
   )
 
