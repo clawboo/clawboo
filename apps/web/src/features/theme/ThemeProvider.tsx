@@ -1,4 +1,5 @@
 import { createContext, useCallback, useEffect, useMemo, useState } from 'react'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
 export type ResolvedTheme = 'light' | 'dark'
@@ -20,7 +21,7 @@ function readStoredPreference(): ThemePreference {
   // Fresh installs (no stored value) default to LIGHT so onboarding happens in
   // light mode. Any explicit choice (light/dark/system) is respected thereafter.
   if (typeof window === 'undefined') return 'light'
-  const raw = window.localStorage.getItem(THEME_STORAGE_KEY)
+  const raw = scopedLocalStorage.getItem(THEME_STORAGE_KEY)
   if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
   return 'light'
 }
@@ -71,7 +72,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const setTheme = useCallback((next: ThemePreference) => {
     setThemeState(next)
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(THEME_STORAGE_KEY, next)
+      scopedLocalStorage.setItem(THEME_STORAGE_KEY, next)
     }
   }, [])
 

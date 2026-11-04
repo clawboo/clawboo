@@ -164,6 +164,7 @@ How it behaves:
 - The unprefixed `/api` stays available for the CLI and Clawboo's own runtimes, with the same checks.
 - `/` and the bare prefix redirect to `<prefix>/`. Any other unprefixed path answers 404 `Not found. This Clawboo is served under <prefix>/`.
 - The access cookie is scoped to the prefix, so other apps on the same hostname never receive it. The CLI adds the prefix to the URLs it prints.
+- What the dashboard keeps in the browser (theme, layout, board view, onboarding and tour progress, the browser alert choice) is stored under keys that start with the prefix, such as `/clawboo:clawboo.theme`, so two instances under different prefixes on one hostname keep their own. A key saved before the prefix existed moves to the first instance that reads it; two instances whose pages load at the same moment can each keep a copy. At the root, keys keep their old names.
 
 ### CLAWBOO_SECRETS_MASTER_KEY
 

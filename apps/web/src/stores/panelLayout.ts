@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // Which side cards are open beside a chat. Keyed per view: `agent:graph`,
 // `agent:tasks`, `agent:browser`, `agent:activity`, `agent:files`, `team:graph`,
@@ -32,7 +33,7 @@ const STORAGE_KEY = 'clawboo.panes'
 
 function readStored(): Partial<Record<PaneKey, boolean>> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = scopedLocalStorage.getItem(STORAGE_KEY)
     const parsed: unknown = raw ? JSON.parse(raw) : null
     return parsed && typeof parsed === 'object' ? (parsed as Partial<Record<PaneKey, boolean>>) : {}
   } catch {
@@ -42,7 +43,7 @@ function readStored(): Partial<Record<PaneKey, boolean>> {
 
 function writeStored(panes: Partial<Record<PaneKey, boolean>>): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(panes))
+    scopedLocalStorage.setItem(STORAGE_KEY, JSON.stringify(panes))
   } catch {
     // Private mode / blocked storage: the toggles still work, just not across reloads.
   }
@@ -69,21 +70,8 @@ export function usePaneOpen(key: PaneKey): boolean {
   return usePanelLayoutStore((s) => s.panes[key] ?? openByDefault(key))
 }
 
-/** A react-resizable-panels `LayoutStorage` that never throws: the library's
- *  default reads `localStorage` bare, which throws when storage is blocked. */
-export const safeLayoutStorage = {
-  getItem(key: string): string | null {
-    try {
-      return localStorage.getItem(key)
-    } catch {
-      return null
-    }
-  },
-  setItem(key: string, value: string): void {
-    try {
-      localStorage.setItem(key, value)
-    } catch {
-      // Sizes just aren't remembered.
-    }
-  },
-}
+/** A react-resizable-panels `LayoutStorage`. The library's default reads the
+ *  origin-wide `localStorage` bare, which throws when storage is blocked and
+ *  shares every size with the other instances on the origin; this one does
+ *  neither, and sizes it cannot store just aren't remembered. */
+export const safeLayoutStorage = scopedLocalStorage
