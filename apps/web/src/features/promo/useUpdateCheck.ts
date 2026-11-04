@@ -13,6 +13,11 @@ import { scopedLocalStorage } from '@/lib/clientStorage'
 // fail-silent), so the client cache here is just to avoid a fetch on every
 // mount. Dismiss is keyed to the LATEST version, so a dismissed chip reappears
 // only when a newer version ships.
+//
+// The chip shows only from an answer this page load received. A cached "update
+// available" can predate an administrator turning in-app updates off, or the
+// update having been applied, so a cache that would show the chip is checked
+// again first.
 
 export interface SelfVersionInfo {
   current: string
@@ -89,6 +94,9 @@ export interface UseUpdateCheck {
 export function useUpdateCheck(): UseUpdateCheck {
   const [info, setInfo] = useState<SelfVersionInfo | null>(() => readCache())
   const [dismissedVersion, setDismissedVersion] = useState<string | null>(() => readDismissed())
+  const [checked, setChecked] = useState(false)
+  // Read by the focus handler, which a state value would leave stale.
+  const checkedRef = useRef(false)
   // Prevents mount + focus + recheck from racing into concurrent fetches.
   const inflight = useRef(false)
 
@@ -103,6 +111,8 @@ export function useUpdateCheck(): UseUpdateCheck {
       if (typeof data.current !== 'string') return
       setInfo(data)
       writeCache(data)
+      checkedRef.current = true
+      setChecked(true)
     } catch {
       /* offline / endpoint absent — keep whatever we have, never nag */
     } finally {
@@ -110,13 +120,21 @@ export function useUpdateCheck(): UseUpdateCheck {
     }
   }, [])
 
+  // A cache that would show the chip is checked again until this page load has
+  // its own answer, so a first check that failed is retried on focus rather
+  // than leaving the chip hidden until the cache expires.
+  const unconfirmed = useCallback(
+    () => !checkedRef.current && readCache()?.updateAvailable === true,
+    [],
+  )
+
   useEffect(() => {
-    void fetchInfo()
-  }, [fetchInfo])
+    void fetchInfo(unconfirmed())
+  }, [fetchInfo, unconfirmed])
 
   // Refetch when the tab regains focus — catches "a new version shipped while I
   // was away". Cache-gated, so quick tab-switching doesn't hit the endpoint.
-  useRefreshOnVisible(() => void fetchInfo())
+  useRefreshOnVisible(() => void fetchInfo(unconfirmed()))
 
   const dismiss = useCallback(() => {
     const v = info?.latest ?? null
@@ -129,7 +147,7 @@ export function useUpdateCheck(): UseUpdateCheck {
   }, [fetchInfo])
 
   const shouldShow = Boolean(
-    info?.updateAvailable && info.latest && info.latest !== dismissedVersion,
+    checked && info?.updateAvailable && info.latest && info.latest !== dismissedVersion,
   )
 
   return { info, shouldShow, dismiss, recheck }

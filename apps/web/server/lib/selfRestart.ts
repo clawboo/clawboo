@@ -18,6 +18,10 @@
  * its (now-updated) version from the on-disk package.json instead of the stale
  * value the CLI injected at first launch.
  *
+ * The successor gets this process's node options (`process.execArgv`), so a
+ * server started as `node --max-old-space-size=4096 dist/server.js` keeps its
+ * heap limit across an update. NODE_OPTIONS rides along in the env already.
+ *
  * Only ever called for a `global` install (detectInstallMethod), where the
  * running entry path was replaced in place — so restarting into it runs new code.
  */
@@ -26,6 +30,27 @@ import { spawn } from 'node:child_process'
 import { liveCwd } from './cwdGuard'
 
 const FLUSH_DELAY_MS = 400
+
+/**
+ * Node options for the successor: this process's own, minus the inspector. Its
+ * port is still held by this process when the successor starts, and
+ * `--inspect-brk` would hold the successor at its first line waiting for a
+ * debugger, so the update would never come back up.
+ */
+export function successorNodeOptions(execArgv: readonly string[]): string[] {
+  const out: string[] = []
+  for (let i = 0; i < execArgv.length; i++) {
+    const arg = execArgv[i]!
+    // The two that take their port as a separate argument.
+    if (arg === '--inspect-port' || arg === '--debug-port') {
+      i += 1
+      continue
+    }
+    if (/^--(inspect|inspect-brk|inspect-wait|inspect-port|debug-port)(=|$)/.test(arg)) continue
+    out.push(arg)
+  }
+  return out
+}
 
 export interface SelfRestartDeps {
   log?: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void }
@@ -57,7 +82,7 @@ export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): voi
   delete env['CLAWBOO_VERSION']
 
   try {
-    const child = spawn(process.execPath, [entry], {
+    const child = spawn(process.execPath, [...successorNodeOptions(process.execArgv), entry], {
       // Never inherit this process's directory: after `npm install -g` it can be
       // inside the package folder that was just replaced, and the successor
       // would die while loading.

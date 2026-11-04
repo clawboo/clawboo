@@ -127,6 +127,14 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - Routines run in a time zone you choose, one for every routine on the install and independent of the server process. The routine dialog names it under **Runs**, with **Change** to pick another, and a change moves every routine's next run to the new zone. It starts as the server's zone, so nothing changes until you pick one. A server in a container, which runs in UTC unless `TZ` is set, can now run a 9:00 routine at 9:00 your time. A `once@` time typed in the dialog needs a `Z` or an offset.
 - Connectors and the shell commands you approve keep npm's prefix, cache and update-check settings (never an npm credential), so an approved `npm install -g` works on a server whose npm prefix points at a folder of its own. Connectors also start with npm's update check off.
 
+**Running Clawboo for a team**
+
+- **Pin settings for everyone.** Admins who deploy Clawboo for a team can pin settings in one file, `~/.clawboo/operator.json` or the file `CLAWBOO_OPERATOR_SETTINGS` names, or with each key's environment variable. **Settings** > **System** > **Deployment** shows a pinned setting as "Set by your administrator". A file Clawboo cannot trust stops the server at startup, and the file never holds secrets. See [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone).
+- **Turn the dashboard's updates off.** `CLAWBOO_DISABLE_SELF_UPDATE=1` removes the update chip, stops the npm check and refuses the in-app update. Without it, a global install the server's user cannot write, such as a root-owned `/usr/local`, is no longer offered the one-click update, which could only fail there.
+- **Keep the browsers from starting.** `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`, or the switch in **Settings** > **System** > **Deployment**, stops Playwright and Chrome DevTools starting on a new install. When the pinned version is already installed, each browser now starts from that copy instead of through `npx`, which kept an `npm exec` process running beside it and asked the registry on every start. Chrome DevTools runs with its usage statistics and update check off.
+- **A release reads its own catalog.** The Marketplace catalog comes from the release's tag on GitHub instead of the `main` branch, so content written for a newer version no longer reaches an older install. A development build still reads `main`.
+- **Updates keep node options.** After an update from the chip, the server restarts with the node options it was started with, such as `--max-old-space-size`.
+
 </Update>
 
 <Update label="0.5.0" description="2026-10-21">

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, type ReactNode } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { RefreshCw, Settings } from 'lucide-react'
 import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
@@ -9,6 +9,8 @@ import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
+import { DeploymentSettings } from './DeploymentSettings'
+import { SectionCard } from './SectionCard'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -29,32 +31,6 @@ interface SystemStatus {
     managedByClawboo: boolean
     uptimeMs: number | null
   }
-}
-
-// ─── Section card ────────────────────────────────────────────────────────────
-
-/** A clean card with a mono-uppercase section label above its body. */
-function SectionCard({
-  label,
-  children,
-  ...rest
-}: {
-  label: string
-  children: ReactNode
-  'data-testid'?: string
-}) {
-  return (
-    <section
-      className="rounded-2xl border border-border bg-surface p-5"
-      style={{ boxShadow: 'var(--shadow-raised)' }}
-      {...rest}
-    >
-      <h2 className="font-mono text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </h2>
-      <div className="mt-4">{children}</div>
-    </section>
-  )
 }
 
 // ─── Info row ────────────────────────────────────────────────────────────────
@@ -267,6 +243,9 @@ export function MaintenancePanel() {
 
           {/* Section 2: Command Approval */}
           <CommandApprovalDefault />
+
+          {/* Settings an administrator can pin for this install */}
+          <DeploymentSettings />
 
           {/* Section 3: System Info */}
           <SectionCard label="System Info">

@@ -43,7 +43,7 @@ import { killProcessTreeByPid } from '../runtimes/killTree'
 import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
-import { planConnectorSpawn } from './spawnPlan'
+import { planConnectorSpawn, type ConnectorSpawnPlan } from './spawnPlan'
 import { browserGuardArgs } from './dashboardGuard'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
@@ -281,9 +281,9 @@ async function performConnect(
 
   // A remote connector spawns nothing: no command to resolve, no process to
   // reap. `display` is the URL, which is still the thing consent is asked for.
-  const plan =
+  const plan: ConnectorSpawnPlan =
     launch.transport === 'streamable-http'
-      ? { command: launch.url, args: [] as string[], display: launch.url, unresolved: false }
+      ? { command: launch.url, args: [], env: {}, display: launch.url, unresolved: false }
       : planConnectorSpawn(launch)
   if (plan.unresolved) {
     throw new Error(`cannot find ${plan.command} on PATH. Is Node installed?`)
@@ -318,10 +318,14 @@ async function performConnect(
             },
             // The allowlist, never process.env. `declared` is the ONLY way a
             // credential reaches the child, and it comes from the vault rather
-            // than the ambient environment.
-            env: connectorChildEnv({
-              declared: resolveConnectorCredentials(def.slug, def.authInputs ?? []),
-            }),
+            // than the ambient environment. The plan adds only a known server's
+            // usage-statistics and update-check opt-outs.
+            env: {
+              ...connectorChildEnv({
+                declared: resolveConnectorCredentials(def.slug, def.authInputs ?? []),
+              }),
+              ...plan.env,
+            },
           })
   } catch (err) {
     // A handshake failure still SPAWNED something, for stdio. The transport's
@@ -419,11 +423,13 @@ async function performConnect(
     // about the connector changing. Pinning it made an nvm switch look identical
     // to a rug-pull and denied every call afterwards with no way back. The argv IS
     // resolved, because the operator's launch argument is the one part of it they
-    // chose and a change there is a real change of scope.
+    // chose and a change there is a real change of scope. It is the catalog's
+    // argv rather than the plan's, for the same reason as the command: a pinned
+    // browser started from its own bin runs the same package and version.
     const spec =
       launch.transport === 'streamable-http'
         ? { transport: launch.transport, url: launch.url }
-        : { transport: launch.transport, command: launch.command, args: plan.args }
+        : { transport: launch.transport, command: launch.command, args: [...launch.args] }
     const specHash = specDigest(spec)
     // Over the DISCOVERED list, including descriptions: a rug-pull that rewrites a
     // description to smuggle instructions changes nothing else.

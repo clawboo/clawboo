@@ -371,9 +371,12 @@ async function spawnReservedBrowser(
           command: plan.command,
         })
       },
-      env: connectorChildEnv({
-        declared: resolveConnectorCredentials(spec.slug, spec.authInputs ?? []),
-      }),
+      env: {
+        ...connectorChildEnv({
+          declared: resolveConnectorCredentials(spec.slug, spec.authInputs ?? []),
+        }),
+        ...plan.env,
+      },
     })
   } catch (err) {
     // A handshake failure still SPAWNED something. This path is likelier here

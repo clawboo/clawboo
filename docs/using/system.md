@@ -31,6 +31,7 @@ Use this page to update Clawboo, update OpenClaw and restart its Gateway, and fi
 | Turn browser alerts on or off                        | **Settings** > **System** > **Alerts**                                                             |
 | Restart the OpenClaw Gateway                         | **Settings** > **Runtimes** > **OpenClaw** > **Manage**                                            |
 | Set the default command approval for OpenClaw agents | **Settings** > **System** > **Command Approval**                                                   |
+| Stop the browsers starting on a new install          | **Settings** > **System** > **Deployment**                                                         |
 | Change one agent's command approval                  | The agent's page, **Details** > **Permissions**                                                    |
 | Change the default model for OpenClaw agents         | **Settings** > **Runtimes** > **OpenClaw** > **Manage** > **Default model**                        |
 | Add or remove a provider key                         | **Settings** > **Providers** (see [Connect providers and runtimes](/using/providers-and-runtimes)) |
@@ -57,13 +58,15 @@ The chip reads **Click to update**. Click it. It shows **Installing update…** 
 
 <Step title="Wait for the reload">
 
-The server restarts on the same port, and the page reloads into the new version. You should see the dashboard as you left it. This browser remembers the last update check for up to an hour, so the chip can show again in that time even though you are up to date: dismiss it with its **×**. `clawboo --version` in a terminal prints the version you now have.
+The server restarts on the same port, and the page reloads into the new version. You should see the dashboard as you left it. `clawboo --version` in a terminal prints the version you now have.
 
 </Step>
 
 </Steps>
 
 If the page has not come back after about 90 seconds, the chip reads "Update installed. Restart Clawboo to finish." Run `clawboo restart`.
+
+When Clawboo is installed in folders the server's user cannot write, such as a root-owned `/usr/local`, the chip reads **Copy command** instead: run the copied command with `sudo`, or update Clawboo the way it was installed.
 
 </Tab>
 
@@ -75,7 +78,7 @@ The chip reads **Copy command**. Click it to copy `npx clawboo@latest`, then run
 
 </Tabs>
 
-The **×** on the chip hides it until a newer version comes out. To update a global install from a terminal instead:
+The **×** on the chip hides it until a newer version comes out. When an administrator turned in-app updates off, no chip appears, and **Updates from the dashboard** reads **Off** in the [Deployment card](#deployment-settings). To update a global install from a terminal instead:
 
 ```bash
 npm install -g clawboo@latest
@@ -92,6 +95,7 @@ Open **Settings** > **System**, in the **System** group. The panel has three car
 
 - **Alerts**: **Alert me when something needs you** turns browser alerts on or off for this browser (two dashboards under different path prefixes on one address keep their own setting, while the browser's permission covers the whole address), and **Send a test alert** shows one so you can check that your browser and computer let it through. When the browser blocks notifications for the page, the card says how to allow them. In the Clawboo desktop app the card says that your computer's notifications tell you instead. What the alerts say and when they come is in [Get an alert outside the tab](/using/board#get-an-alert-outside-the-tab).
 - **Command Approval**: the default command approval for OpenClaw agents. It appears only while the dashboard is connected to an OpenClaw Gateway. See [Set the default command approval](#set-the-default-command-approval).
+- **Deployment**: settings an administrator can pin for everyone on this install. See [Deployment settings](#deployment-settings).
 - **System Info**: the installed **OpenClaw** version (or **Not installed**), the **Node.js** version Clawboo runs on, OpenClaw's **State Dir** (its folder, usually `~/.openclaw`), and **Config** (`openclaw.json`, or **Not found**). **Check for Updates** sits below them.
 
 **System Info** is read once when you open the panel, and again after an update.
@@ -122,6 +126,18 @@ A newer OpenClaw can refuse to start until `openclaw doctor --fix` updates data 
 
 If the repair fails, the error says so and includes the reason ("OpenClaw needs `openclaw doctor --fix`, and running it failed"). Run `openclaw doctor --fix` in a terminal to see what it needs, then start the Gateway again. Do the same if OpenClaw still asks for it after Clawboo ran it. When the Gateway fails to start for another reason, the error reads "Gateway did not start:" followed by OpenClaw's own reason. The Gateway's log is `~/.clawboo/gateway.log`.
 
+## Deployment settings
+
+The **Deployment** card shows three settings, and marks the ones an administrator pinned:
+
+| Setting                                 | What it does                                                                                                                                     |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Start the browsers on a new install** | When on (the default), Clawboo starts Playwright and Chrome DevTools at startup if neither has been connected yet. Each keeps a process running. |
+| **Updates from the dashboard**          | **On** unless an administrator turned the update chip off.                                                                                       |
+| **Marketplace catalog**                 | **Default** reads the catalog published with your version of Clawboo. An administrator can point it at a mirror.                                 |
+
+You can switch **Start the browsers on a new install** here; you should see "Saved". It is one setting for the whole install, so switching it changes it for everyone who uses this Clawboo. Browsers you already connected still come back after a restart either way. A setting your administrator pinned reads **Set by your administrator**, with a lock, and its switch cannot be moved. Admins pin settings with an operator settings file or environment variables; see [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone).
+
 ## Set the default command approval
 
 The **Command Approval** card sets what OpenClaw agents do before they run a shell command, when they have no setting of their own. It writes `tools.exec.ask` in OpenClaw's `openclaw.json`.
@@ -149,7 +165,8 @@ The [CLI reference](/reference/cli) covers `clawboo stop`, `clawboo restart` and
 
 <Accordion title="Under the hood">
 
-- The chip reads `GET /api/system/self-version`, and **Click to update** calls `POST /api/system/self-update`, which runs `npm install -g clawboo@latest` and restarts the server on the same port. It works only for a global install; an npx run gets the command to copy instead.
+- The chip reads `GET /api/system/self-version`, and **Click to update** calls `POST /api/system/self-update`, which runs `npm install -g clawboo@latest` and restarts the server on the same port. It works only for a global install whose folders the server's user can write; an npx run, a source checkout or another user's install gets the command to copy instead. With `CLAWBOO_DISABLE_SELF_UPDATE=1` (or `disableSelfUpdate` in the operator settings file) there is no chip, and the update route refuses.
+- The **Deployment** card reads `GET /api/system/operator-settings`, and its switch calls `PUT /api/system/operator-settings/disableBrowserAutostart`.
 - **Check for Updates** calls `POST /api/system/install-openclaw`. **Restart** calls `POST /api/system/gateway` with `{"action": "restart"}`, which waits up to 60 seconds for the Gateway's port.
 - **Command Approval** reads `GET /api/system/openclaw-config` and writes `PATCH /api/system/openclaw-config` with `{"exec": {"ask": "on-miss"}}` (or `off`, `always`).
 - See the [System API](/reference/rest-api/system) for every route.

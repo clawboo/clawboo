@@ -63,6 +63,7 @@ import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/res
 import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
+import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
@@ -149,6 +150,22 @@ async function main() {
     process.exit(1)
   }
   const basePath = basePathResult.basePath
+
+  // Settings an administrator pinned, in the operator file or the matching
+  // environment variables. Refuse to start on anything that cannot be trusted:
+  // carrying on would quietly drop pins they rely on, such as a disabled
+  // self-update.
+  try {
+    const operator = initOperatorSettings(process.env)
+    const pinned = Object.entries(operator.pins).map(([key, pin]) => `${key} (${pin.source})`)
+    if (pinned.length > 0) {
+      log.info({ file: operator.file, pinned }, 'Operator settings: pinned by the administrator')
+    }
+  } catch (err) {
+    if (!(err instanceof OperatorSettingsError)) throw err
+    log.error(`CONFIG: refusing to start. ${err.message}`)
+    process.exit(1)
+  }
 
   // If we were launched as a self-restart successor by an in-app update, the
   // exiting parent still holds the API port for a brief moment. Wait for it to

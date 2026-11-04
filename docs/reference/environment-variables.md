@@ -11,6 +11,8 @@ keywords:
     'OLLAMA_BASE_URL',
     'OTEL_EXPORTER_OTLP_ENDPOINT',
     'HOSTNAME',
+    'CLAWBOO_OPERATOR_SETTINGS',
+    'CLAWBOO_DISABLE_SELF_UPDATE',
     'CLAWBOO_MAX_CONCURRENT_RUNS',
   ]
 ---
@@ -38,7 +40,11 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes            |
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                    |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                      |
-| `CLAWBOO_CATALOG_INDEX_URL`            | GitHub raw URL                    | Where the marketplace catalog comes from                     |
+| `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                     |
+| **Pinned by an administrator**         |                                   |                                                              |
+| `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                   |
+| `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off         |
+| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install             |
 | **Provider keys**                      |                                   |                                                              |
 | `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes              |
 | `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings           |
@@ -256,11 +262,67 @@ Not used in development mode, where Vite serves the dashboard. If the files cann
 
 Where the marketplace catalog index comes from.
 
-- Type: URL
-- Default: `https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json`
+- Type: `http` or `https` URL, with no user name, password or credential parameter in it
+- Default: the index at the running release's tag, `https://raw.githubusercontent.com/clawboo/clawboo/refs/tags/clawboo%40<version>/catalog/dist/v1/index.json`. A development build (version `0.0.0-dev`) reads the `main` branch's index instead.
 - Example: `CLAWBOO_CATALOG_INDEX_URL=https://mirror.example.com/catalog/v1/index.json`
 
-A `catalog/dist/v1/` folder above the server, as in a source checkout, takes precedence. Pack files are fetched relative to the index, and each is checked against the index's digest before use. The index is cached for 6 hours. When it cannot be reached, the marketplace still shows the built-in pack.
+A `catalog/dist/v1/` folder above the server, as in a source checkout, takes precedence. Pack files are fetched relative to the index, and each is checked against the index's digest before use. The index is cached for 6 hours. When it cannot be reached, the marketplace still shows the built-in pack. When the release's tag has no index (GitHub answers 404), Clawboo reads the `main` branch's index for that refresh. An override is used as it is, with no fallback.
+
+The operator settings file key `catalogIndexUrl` sets the same thing; this variable wins over the file. A value Clawboo cannot use stops the server at startup (see [CLAWBOO_OPERATOR_SETTINGS](#clawboo_operator_settings)).
+
+## Pinned by an administrator
+
+An administrator who deploys Clawboo for a team can pin these settings for everyone, in one file or with these variables. **Settings** > **System** > **Deployment** shows a pinned setting as "Set by your administrator", and it cannot be changed there. [Run the Clawboo server](/operating/deployment#pin-settings-for-everyone) walks through the file.
+
+Which value wins, highest first: what Clawboo itself refuses (an in-app update of an install this user cannot write stays off whatever is pinned), then the key's variable, then the operator file, then a value saved in **Settings** > **System** > **Deployment** (one value for the whole install, not one per person), then the default.
+
+Every flag variable here takes `1` or `true` to turn the setting on and `0` or `false` to pin it off, in any letter case. Empty or unset pins nothing. Any other value stops the server at startup, exiting with code 1 and logging `CONFIG: refusing to start.` with the variable and the reason.
+
+### CLAWBOO_OPERATOR_SETTINGS
+
+Where the operator settings file is.
+
+- Type: path; a leading `~` is expanded and a relative path is resolved
+- Default: unset, so Clawboo looks for `<CLAWBOO_HOME>/operator.json` and runs without one when it is not there
+- Example: `CLAWBOO_OPERATOR_SETTINGS=/etc/clawboo/operator.json`
+
+The file is a JSON object of the keys below. Clawboo reads it once at startup and never writes it. It stops the server at startup, logging `CONFIG: refusing to start.` and the reason, when:
+
+- this variable names a file that does not exist, or a folder;
+- the file is not valid JSON, is not an object, or is larger than 64 KB;
+- any user on the machine can write it (on macOS and Linux);
+- it has a key Clawboo does not know, or a key whose value has the wrong type;
+- a key's name looks like a credential (containing `token`, `secret`, `password`, `apiKey`, `credential`, `privateKey` or `auth`), or a URL carries a user name, a password or a credential parameter. Keep keys in the vault or in the environment.
+
+| Key                       | Type    | Variable                            |
+| ------------------------- | ------- | ----------------------------------- |
+| `disableSelfUpdate`       | boolean | `CLAWBOO_DISABLE_SELF_UPDATE`       |
+| `disableBrowserAutostart` | boolean | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
+| `catalogIndexUrl`         | URL     | `CLAWBOO_CATALOG_INDEX_URL`         |
+
+Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
+
+### CLAWBOO_DISABLE_SELF_UPDATE
+
+Turns off updating Clawboo from the dashboard.
+
+- Type: flag
+- Default: unset, so a global install the server's user can write is offered the update
+- Example: `CLAWBOO_DISABLE_SELF_UPDATE=1`
+
+With it on, the dashboard shows no update chip, `GET /api/system/self-version` answers as it does with `?local=1` (no call to npm's registry, `latest` is `null`), and `POST /api/system/self-update` refuses with "In-app updates are turned off for this install by its administrator." Use it on an install that something else manages, such as a container image, a distro package or a service manager. Operator file key: `disableSelfUpdate`.
+
+Without it, the update is still refused on an install whose package folder, the folder holding it, or the folder npm links the `clawboo` command into (the prefix's `bin`) the server's user cannot write, such as a root-owned `/usr/local`. The chip there copies the update command instead.
+
+### CLAWBOO_DISABLE_BROWSER_AUTOSTART
+
+Stops Clawboo starting the browser connectors on an install that has never had one.
+
+- Type: flag
+- Default: unset, so Playwright and Chrome DevTools start when Clawboo starts, if neither has been connected or disconnected yet
+- Example: `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`
+
+Each browser keeps a process running, and on a machine with no browser installed it cannot browse anyway. With this on, they start only when someone connects them from **Connectors**. Browsers someone already connected still come back after a restart. Anyone using the dashboard can turn the same thing off for the whole install in **Settings** > **System** > **Deployment**, unless this variable or the file pins it. Operator file key: `disableBrowserAutostart`.
 
 ## Provider keys
 
@@ -582,18 +644,19 @@ Clawboo does not read `GATEWAY_AUTH_TOKEN` as its own setting. When `settings.js
 
 Clawboo sets these on processes it starts. Do not set them yourself.
 
-| Variable                                                | Set on                                     | Value                                                                                                                                                                                                                                  |
-| ------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAWBOO_VERSION`                                       | The server the CLI starts                  | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk. |
-| `CLAWBOO_LAUNCH_DIR`                                    | The server the CLI starts                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                             |
-| `CLAWBOO_MCP_BIN_DIR`                                   | The server the CLI starts (normal install) | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                 |
-| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`            | A restarted server                         | The port to keep; the new server waits up to 15 seconds for it to free.                                                                                                                                                                |
-| `NODE_ENV`                                              | The server the CLI starts                  | `production`                                                                                                                                                                                                                           |
-| `CODEX_HOME`, `HERMES_HOME`                             | Each Codex or Hermes run                   | That agent's own home folder under `~/.clawboo/runtimes/`                                                                                                                                                                              |
-| The runtime's provider key, such as `ANTHROPIC_API_KEY` | Each runtime run                           | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
-| `NO_PROXY`, `no_proxy`                                  | Each runtime run, when a proxy is set      | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
-| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`            | The `openclaw doctor --fix` repair run     | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
-| `CLAWBOO_DB_PATH`                                       | Stdio attach snippets                      | The dashboard's database file                                                                                                                                                                                                          |
+| Variable                                                                          | Set on                                     | Value                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAWBOO_VERSION`                                                                 | The server the CLI starts                  | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk. |
+| `CLAWBOO_LAUNCH_DIR`                                                              | The server the CLI starts                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                             |
+| `CLAWBOO_MCP_BIN_DIR`                                                             | The server the CLI starts (normal install) | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                 |
+| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`                                      | A restarted server                         | The port to keep; the new server waits up to 15 seconds for it to free. The new server also gets the old one's node options, such as `--max-old-space-size`, except the inspector's.                                                   |
+| `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | The Chrome DevTools connector              | `1`, which turns off its usage statistics and its daily check for a newer version. If the server's own environment sets either variable, that value is passed on instead.                                                              |
+| `NODE_ENV`                                                                        | The server the CLI starts                  | `production`                                                                                                                                                                                                                           |
+| `CODEX_HOME`, `HERMES_HOME`                                                       | Each Codex or Hermes run                   | That agent's own home folder under `~/.clawboo/runtimes/`                                                                                                                                                                              |
+| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                           | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
+| `NO_PROXY`, `no_proxy`                                                            | Each runtime run, when a proxy is set      | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
+| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`                                      | The `openclaw doctor --fix` repair run     | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
+| `CLAWBOO_DB_PATH`                                                                 | Stdio attach snippets                      | The dashboard's database file                                                                                                                                                                                                          |
 
 ## Testing and development
 
@@ -636,7 +699,7 @@ A connector also gets `npm_config_update_notifier=false` when neither spelling i
 
 <Accordion title="Source of truth">
 
-Server start: `apps/web/server/index.ts`, `lib/resolveHost.ts`, `lib/portUtils.ts`. Access: `packages/gateway-proxy/src/access-gate.ts`, `origin-guard.ts`. Paths and the base path: `packages/config/src/index.ts`, `basePath.ts`. Keys: `apps/web/server/lib/secretsVault.ts`, `lib/runtimes/descriptor.ts`. Runtime environments: `lib/runtimes/childEnv.ts`; connectors and approved commands: `packages/mcp/src/connector/env.ts`. Each timer's variable is read next to its default; [Limits and defaults](/reference/limits-and-defaults) gives the file and line.
+Server start: `apps/web/server/index.ts`, `lib/resolveHost.ts`, `lib/portUtils.ts`. Pinned settings: `lib/operatorSettings.ts`. Access: `packages/gateway-proxy/src/access-gate.ts`, `origin-guard.ts`. Paths and the base path: `packages/config/src/index.ts`, `basePath.ts`. Keys: `apps/web/server/lib/secretsVault.ts`, `lib/runtimes/descriptor.ts`. Runtime environments: `lib/runtimes/childEnv.ts`; connectors and approved commands: `packages/mcp/src/connector/env.ts`. Each timer's variable is read next to its default; [Limits and defaults](/reference/limits-and-defaults) gives the file and line.
 
 </Accordion>
 

@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 208 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 210 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -17,7 +17,7 @@ The Clawboo server answers JSON requests under `/api/` on the same port as the d
 | Cross-origin   | Browser requests from other origins are refused with `403` unless you allowlist them  |
 | Rate limits    | 3,000 requests a minute per client; 60 a minute across the sensitive routes           |
 | Streaming      | 9 routes answer with Server-Sent Events; one WebSocket route for the OpenClaw Gateway |
-| Routes         | 208: 95 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 8 `PUT` ([index](#route-index))     |
+| Routes         | 210: 96 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 `PUT` ([index](#route-index))     |
 
 Check that the server is up (the response carries `"ok": true` when no boot check failed). Without the cookie the answer is a `401` from the access gate, which also tells you Clawboo is running:
 
@@ -117,7 +117,7 @@ Two ceilings apply. Both count requests in memory, per client address, over a 60
 | Tier      | Limit                                                    | Applies to                                          | `429` body                                                                      |
 | --------- | -------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------- |
 | General   | 3,000 requests a minute                                  | Every `/api/*` request                              | `{ "error": "Too many requests. Wait a moment and retry." }`                    |
-| Sensitive | 60 requests a minute, one budget shared by all 26 routes | The routes listed below, on top of the general tier | `{ "error": "Too many requests for this operation. Wait a moment and retry." }` |
+| Sensitive | 60 requests a minute, one budget shared by all 29 routes | The routes listed below, on top of the general tier | `{ "error": "Too many requests for this operation. Wait a moment and retry." }` |
 
 Responses carry `RateLimit-Policy`, `RateLimit-Limit`, `RateLimit-Remaining` and `RateLimit-Reset` (IETF draft 6). A `429` also carries `Retry-After` in seconds. On a sensitive route these headers describe the sensitive budget. The dashboard's page and asset files have their own ceiling and do not count against the API.
 
@@ -128,10 +128,11 @@ The sensitive tier covers the routes that install software, rewrite runtime conf
 | Page                                                 | Sensitive routes                                                                                                                                                                                                                                                                                                                              |
 | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Agents](/reference/rest-api/agents)                 | `POST /api/agents/:agentId/shell`                                                                                                                                                                                                                                                                                                             |
+| [Teams](/reference/rest-api/teams)                   | `PUT /api/team-verify-command/:teamId`                                                                                                                                                                                                                                                                                                        |
 | [Memory](/reference/rest-api/memory)                 | `POST /api/memory/embedding/reindex`, `POST /api/memory/embedding/install`                                                                                                                                                                                                                                                                    |
 | [Connectors](/reference/rest-api/connectors)         | `POST /api/connectors/connect`; `PUT` and `DELETE /api/connectors/composio/key`; `POST /api/connectors/composio/apps/:slug/authorize`; `POST /api/connectors/custom`; `DELETE /api/connectors/custom/:slug`; `POST /api/connectors/:slug/disconnect`; `POST` and `DELETE /api/connectors/:slug/authorize`; `PUT /api/connectors/:slug/config` |
 | [Runtimes](/reference/rest-api/runtimes)             | `POST /api/auth/cli-login/:tool`; `POST /api/runtimes/:id/install`, `/connect`, `/disconnect`, `/logout`                                                                                                                                                                                                                                      |
-| [System](/reference/rest-api/system)                 | `POST /api/system/install-openclaw`, `/configure-openclaw`, `/auto-configure-openclaw`, `/gateway`, `/approve-device`, `/self-update`; `PATCH /api/system/openclaw-config`                                                                                                                                                                    |
+| [System](/reference/rest-api/system)                 | `POST /api/system/install-openclaw`, `/configure-openclaw`, `/auto-configure-openclaw`, `/gateway`, `/approve-device`, `/self-update`; `PATCH /api/system/openclaw-config`; `PUT /api/system/operator-settings/:key`                                                                                                                          |
 | [Agent settings](/reference/rest-api/agent-settings) | `POST /api/exec-allowlist/revoke`                                                                                                                                                                                                                                                                                                             |
 | [Authentication](#authentication)                    | `POST /api/access/launch-code`                                                                                                                                                                                                                                                                                                                |
 
@@ -182,7 +183,7 @@ A script or app that talks to more than one Clawboo server should not guess what
 
 ## Route index
 
-The router registers 208 routes: 95 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 8 `PUT`. Each belongs to one page:
+The router registers 210 routes: 96 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -203,7 +204,7 @@ The router registers 208 routes: 95 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 8 
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                      |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                      |
 | [Authentication](#authentication)                    | 1      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**                                                       |
-| [System](/reference/rest-api/system)                 | 12     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version, capabilities and update                      |
+| [System](/reference/rest-api/system)                 | 14     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version, capabilities and update, pinned settings     |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                              |
 
 Source of truth for maintainers: the router `apps/web/server/api/index.ts`, the middleware order in `apps/web/server/index.ts`, `apps/web/server/lib/rateLimit.ts`, and `packages/gateway-proxy/src/access-gate.ts` and `origin-guard.ts`. `apps/web/server/api/__tests__/clientContract.test.ts` pins every route and method, so removing or renaming one fails it unless the API revision goes up.

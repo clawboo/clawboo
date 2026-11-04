@@ -136,6 +136,8 @@ const PINNED_ROUTES = [
   'GET /api/system/self-version',
   'GET /api/system/capabilities',
   'POST /api/system/self-update',
+  'GET /api/system/operator-settings',
+  'PUT /api/system/operator-settings/:key',
   'GET /api/teams',
   'GET /api/teams/member-roles',
   'POST /api/teams',
