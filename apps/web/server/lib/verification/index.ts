@@ -71,6 +71,16 @@ export interface VerifyTaskInput {
   riskFlag?: boolean
   /** Told what the reviewer's run cost, so the caller can charge it. */
   onReviewerSpend?: (spend: ReviewerSpend) => void
+  /** The commit holding the work, for a checkout that is not a task worktree
+   *  (a team folder, whose history clawboo commits itself). Absent, the worktree's
+   *  work is committed here first. */
+  reviewSha?: string
+  /** False: record the gate's run only on the task, not in VERIFICATION.md. */
+  evidence?: boolean
+  /** Asked before the verdict is written: false when the check no longer speaks
+   *  for the task (a person moved it, or it is being run again), so nothing is
+   *  recorded and the verdict is only returned. */
+  shouldRecord?: () => boolean
 }
 
 function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): StructuredError {
@@ -148,6 +158,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     scaffoldCommit: input.worktree.baseCommit,
     repoPath: input.repoPath,
     timeoutMs: input.verifyTimeoutMs,
+    ...(input.evidence === false ? { evidence: false } : {}),
   })
 
   let critic: CriticVerdict = CRITIC_NOT_RUN
@@ -156,7 +167,8 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       input.riskFlag ??
       isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` })
     try {
-      const { head } = await commitWorktreeWork(input.repoPath, input.worktree)
+      const head =
+        input.reviewSha ?? (await commitWorktreeWork(input.repoPath, input.worktree)).head
       critic = await runCritic({
         repoPath: input.repoPath,
         reviewSha: head,
@@ -238,6 +250,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     debtNotes,
     updatedAt: Date.now(),
   }
+  if (input.shouldRecord && !input.shouldRecord()) return result
   setTaskVerification(db, taskId, result)
   appendAudit(db, {
     eventType: 'verification',

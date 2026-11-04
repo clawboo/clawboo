@@ -44,6 +44,7 @@ import {
   getTeamOrchestrator,
   isActiveTeamRoom,
   orchestratorKey,
+  roomsWithUnheldChecks,
   roomsWithUnheldReportUps,
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
@@ -677,6 +678,9 @@ async function main() {
         // building the room's engine sends them again.
         for (const r of roomsWithUnheldReportUps(db))
           wake.set(orchestratorKey(r.teamId, r.roomId), r)
+        // Rooms whose team-chat work check a restart cut short: building the
+        // room's engine hands those tasks to a person.
+        for (const r of roomsWithUnheldChecks(db)) wake.set(orchestratorKey(r.teamId, r.roomId), r)
         for (const { teamId, roomId } of wake.values()) {
           if (!isActiveTeamRoom(teamId, roomId)) continue
           getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
