@@ -3,9 +3,9 @@
 // a prefixed path.
 //
 // This is the security-load-bearing choice. The origin guard and the access gate
-// both decide whether to protect a request by testing `pathname.startsWith('/api/')`,
-// and those tests FAIL OPEN: a path they do not recognize is treated as a static
-// asset and waved through. Mounting the API at `${base}/api` while leaving those
+// both decide whether to protect a request by testing whether its path is under
+// `/api/` (read every way the router might read it), and those tests FAIL OPEN: a
+// path they do not recognize is treated as a static asset and waved through. Mounting the API at `${base}/api` while leaving those
 // tests matching `/api/` would therefore leave every prefixed API route
 // unauthenticated and unguarded. Stripping first means the guards keep their
 // existing, tested checks and cover both surfaces with no change at all.

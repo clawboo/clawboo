@@ -4,6 +4,8 @@ import { URL } from 'node:url'
 
 import { ACCESS_TOKEN_CHARSET, findUnsupportedTokenChar } from '@clawboo/config'
 
+import { anyPathUnder, everyPathUnder } from './request-path'
+
 // The token charset lives with the token resolver in @clawboo/config, so the
 // file the server and the desktop app share and the gate agree on one rule.
 // Re-exported by name for the gate's existing importers.
@@ -30,7 +32,7 @@ export interface AccessGateOptions {
   /**
    * The URL prefix the app is mounted under ('' = origin root), already normalized.
    *
-   * The gate runs BEHIND the base-path strip, so the pathnames it tests are always
+   * The gate runs BEHIND the base-path strip, so the paths it tests are always
    * root-form and its `/api/` checks need no change. This is used only where a
    * path leaves the gate: the cookie's `Path` (so a mount does not hand its
    * operator cookie to a sibling app on the same origin) and the post-exchange
@@ -40,9 +42,10 @@ export interface AccessGateOptions {
   /**
    * Admits a cookieless `/api/mcp/*` request from one of the server's own spawned
    * runtimes: return true when it carries the credential the server minted into
-   * that runtime's attach URL. Consulted only for `/api/mcp/*`, only when the
-   * cookie is missing or wrong, and only for a request that dialed the loopback
-   * port directly: never one from another host, and never one a proxy forwarded.
+   * that runtime's attach URL. Consulted only for a path that is `/api/mcp/*`
+   * however it is read (see request-path.ts), only when the cookie is missing or
+   * wrong, and only for a request that dialed the loopback port directly: never
+   * one from another host, and never one a proxy forwarded.
    * Omitted ⇒ `/api/mcp/*` needs the cookie like every other route.
    */
   authorizeRuntime?: (req: IncomingMessage) => boolean
@@ -247,6 +250,10 @@ function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
 
+/** Parses a path-only target. Only the path and query are ever read from it, so
+ *  the request's Host header plays no part (a bad one cannot break parsing). */
+const PARSE_BASE = 'http://clawboo.invalid'
+
 /** The body of every 401 for a missing or wrong cookie. Older launchers and the
  *  desktop app recognise the gate by "clawboo" and "token" in `error`; the
  *  dashboard reads `gate`. */
@@ -335,8 +342,17 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
   function handleHttp(req: IncomingMessage, res: ServerResponse): boolean {
     if (!enabled) return false
 
-    const host = req.headers.host || 'localhost'
-    const url = new URL(req.url ?? '/', `http://${host}`)
+    let url: URL
+    try {
+      url = new URL(req.url ?? '/', PARSE_BASE)
+    } catch {
+      // A target the URL parser cannot read is not a request any client sends,
+      // and its path cannot be read every way the router might. Refused.
+      res.statusCode = 400
+      res.setHeader('Content-Type', 'application/json')
+      res.end(JSON.stringify({ error: 'Bad request target.' }))
+      return true
+    }
     const provided = url.searchParams.get(queryParam)
 
     // ── Token provided in query string ──────────────────────────────────────
@@ -359,11 +375,14 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       return true
     }
 
-    // Lower-case the pathname before the prefix test as defense-in-depth: the gate
-    // package can't assume the host app enabled case-sensitive routing, so it folds
-    // case itself — an uppercased `/API/settings` must never evade the gate and reach
-    // a sensitive route unauthenticated.
-    const isApiPath = url.pathname.toLowerCase().startsWith('/api/')
+    // An API path is one whose path is under `/api/` however it is read: as sent,
+    // as the URL parser resolves it, or as the router matches it (see
+    // request-path.ts). They differ for dot segments and backslashes, and the
+    // router acts on its own reading, so the gate cannot pick just one. Letter
+    // case is folded too, as defense-in-depth: the gate package can't assume the
+    // host app enabled case-sensitive routing, so an uppercased `/API/settings`
+    // must never evade the gate and reach a sensitive route unauthenticated.
+    const isApiPath = anyPathUnder(req, '/api/')
 
     // ── Launch code in a page URL ───────────────────────────────────────────
     // `clawboo open` and the dashboard's "Open on another device" hand a browser
@@ -420,9 +439,11 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       // the whole control plane on the internet, /api/mcp/config included, and
       // that route mints signed agent identities. The address and the forwarding
       // headers now only ever take access away: a runtime dials loopback directly,
-      // so a token arriving any other way is refused.
+      // so a token arriving any other way is refused. Every reading of the path
+      // must be under `/api/mcp/`: one that only resolves there may be routed
+      // elsewhere.
       if (
-        url.pathname.toLowerCase().startsWith('/api/mcp/') &&
+        everyPathUnder(req, '/api/mcp/') &&
         isLoopbackPeer(req) &&
         !isForwardedRequest(req) &&
         authorizeRuntime?.(req) === true

@@ -100,7 +100,7 @@ The guard stops web pages in your own browser from using Clawboo. Your browser c
 - **Origin**, when the request has one, must exactly match an allowed origin. Those are `localhost`, `127.0.0.1` and `[::1]` at Clawboo's port (over `http` or `https`), the bind address at that port, and the entries in `CLAWBOO_ALLOWED_ORIGINS`.
 - **Sec-Fetch-Site**, when present, must be `same-origin`, `same-site` or `none`.
 
-A rejected request gets `403` with `{"error":"Cross-origin request blocked."}`, and a rejected WebSocket upgrade gets `403 Forbidden`. The dashboard page and its static files are not checked, because they hold no data.
+A rejected request gets `403` with `{"error":"Cross-origin request blocked."}`, and a rejected WebSocket upgrade gets `403 Forbidden`. The dashboard page and its static files are not checked, because they hold no data. A request whose target is a full URL instead of a path gets `400` with `{"error":"Bad request target."}` on every path. Browsers, reverse proxies and Clawboo's own clients always send a path.
 
 The two variables take comma-separated lists and only add entries; the loopback entries always stay. When you reach Clawboo by any other name or address, set both: `CLAWBOO_ALLOWED_HOSTS` for the name (`dash.example.com`) and `CLAWBOO_ALLOWED_ORIGINS` for the full origin (`https://dash.example.com`). Without them the dashboard page loads, but every API call fails with the 403 above.
 
@@ -170,7 +170,7 @@ A one-time link carries `?access_code=` instead of the token. The code works onc
 - The token and the cookie value are each hashed with SHA-256 and compared in constant time, so the check leaks neither timing nor length.
 - Launch codes are 24 random bytes as base64url, held in the server's memory only, as SHA-256 digests. At most 64 unused codes are kept; minting another drops the oldest. A restart forgets them all.
 - A token file that another app is still writing can read as empty for a moment, so an empty file is read again for up to half a second before the server refuses it.
-- The token check lowercases the path before it tests for `/api/`, and the API routes match letter case exactly, so `/API/settings` cannot slip past it.
+- The token check and the same-origin guard read a request's path every way the server does: as sent, as the URL parser resolves it, and as the router matches it, each in lower case. A request is an `/api/` request when any of those readings is under `/api/`, and the attach-token exception for the MCP servers applies only when all of them are. The API routes also match letter case exactly, so `/API/settings` cannot slip past either check.
 - The attach token is a hex HMAC-SHA256 keyed with a 32-byte secret stored in the database (`settings` key `mcp-attach-scope-secret`). It is the same in every attach URL on an install. Attach URLs that bind a team or an agent also carry a `scopeSig` signature over that scope.
 - When the server's environment sets `HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`, Clawboo adds `127.0.0.1`, `localhost` and `::1` to `NO_PROXY` for the agents it starts. Their MCP calls then never pass through that proxy.
 - The request log masks `attachToken`, `scopeSig` and `provSig` in every URL it records.

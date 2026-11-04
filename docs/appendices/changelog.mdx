@@ -54,6 +54,7 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 - **Images in an agent's text no longer load on their own.** In chat, a task's report and its comments, an image used to load from its address as soon as it was shown, so an agent steered by something it read could send data out in that address. It now shows as a link named after its alt text that opens only when you click it. An address that is not a web or same-site one is only named.
 - **A link in a worktree is never served.** The task drawer's preview checked a file and then opened it by name, so an agent could swap the file, or a folder above it, for a link to a file such as Clawboo's saved keys, and the preview sent that file. The preview, an agent's **Workspace** tab and the task drawer's task files now refuse a link or a hard-linked file and check after opening that the file is still inside the worktree. A task file longer than 256 KB says so in the drawer.
 - **API routes match letter case exactly**, and with no access token set, the server logs a one-time `SECURITY:` warning when a request arrives through a reverse proxy.
+- **The access token and the same-origin guard read a path the way the router does.** Both now check every request the server routes to an `/api/` route, however its path is written. A request whose target is a full URL instead of a path gets `400`; browsers, reverse proxies and Clawboo's own clients always send a path.
 
 **Rooms and chat**
 
