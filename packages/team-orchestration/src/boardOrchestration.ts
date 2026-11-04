@@ -432,6 +432,15 @@ export interface BoardOrchestratorDeps {
    * current turn ends. Omitted ⇒ only a session running a task counts as occupied.
    */
   isSessionOccupied?: (sessionKey: string) => boolean
+  /**
+   * Is the host holding this session's delivery in its run queue: accepted, but
+   * waiting for one of the process's run slots before it starts? The host settles
+   * such a delivery as delivered when it queues it, so the engine never waits on a
+   * slot (a lead's run waiting on its delegate's start while holding a slot would
+   * deadlock the cap). Queued is waiting, not silence, so the idle watchdog keeps
+   * the session's clock current instead of failing it. Omitted ⇒ nothing queues.
+   */
+  isRunQueued?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
   /** Append a visible narration entry to a session's transcript. Optional. */
@@ -1897,6 +1906,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
+      // Queued for a run slot: the run has not started, so its idle window starts
+      // when it does.
+      if (deps.isRunQueued?.(sk)) {
+        lastActivityAt.set(sk, tnow)
+        continue
+      }
       // A session inside a tool call (build/test/install) is legitimately silent,
       // so it gets the longer allowance instead of being failed at 8 minutes. So
       // does a delivery still waiting to start behind another run on the agent.

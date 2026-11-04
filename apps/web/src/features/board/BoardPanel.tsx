@@ -126,6 +126,7 @@ import {
 } from './calendar/calendarModel'
 import { useCalendarClock } from './calendar/useCalendarClock'
 import { useRoutineRuns } from './calendar/useRoutineRuns'
+import { scopedLocalStorage, scopedSessionStorage } from '@/lib/clientStorage'
 
 /** The since line's actions: quiet links in the header's subtitle. */
 /** The views, as the view switch lists them, with their keys: the Kanban board
@@ -249,7 +250,7 @@ const DEFAULT_PREFS: BoardViewPrefs = {
 
 function readPrefs(): BoardViewPrefs {
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY)
+    const raw = scopedLocalStorage.getItem(PREFS_KEY)
     if (!raw) return DEFAULT_PREFS
     const p = JSON.parse(raw) as Partial<BoardViewPrefs>
     return {
@@ -274,7 +275,7 @@ const EARLIER_KEY = 'clawboo.board.earlierOpen'
 
 function readEarlierChoice(): boolean | null {
   try {
-    const v = window.sessionStorage.getItem(EARLIER_KEY)
+    const v = scopedSessionStorage.getItem(EARLIER_KEY)
     return v === 'true' ? true : v === 'false' ? false : null
   } catch {
     return null
@@ -283,7 +284,7 @@ function readEarlierChoice(): boolean | null {
 
 function writeEarlierChoice(open: boolean): void {
   try {
-    window.sessionStorage.setItem(EARLIER_KEY, String(open))
+    scopedSessionStorage.setItem(EARLIER_KEY, String(open))
   } catch {
     // Blocked storage: the choice holds until the board closes.
   }
@@ -291,7 +292,7 @@ function writeEarlierChoice(open: boolean): void {
 
 function writePrefs(prefs: BoardViewPrefs): void {
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+    scopedLocalStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
   } catch {
     // Private mode or blocked storage: the view still works, it just forgets.
   }

@@ -3,6 +3,7 @@ import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
 import type { NodeChange, EdgeChange } from '@xyflow/react'
 import type { CapabilityRecord } from '@clawboo/capability-registry'
 import type { GraphNode, GraphEdge, LayoutData } from './types'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── Store shape ──────────────────────────────────────────────────────────────
 
@@ -198,12 +199,12 @@ export const useGraphStore = create<GraphStore>((set) => ({
   // persists in localStorage and overrides the default.
   atlasLayout:
     typeof window !== 'undefined' &&
-    window.localStorage.getItem('clawboo.atlas.layout') === 'top-down'
+    scopedLocalStorage.getItem('clawboo.atlas.layout') === 'top-down'
       ? 'top-down'
       : 'radial',
   setAtlasLayout: (v) => {
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem('clawboo.atlas.layout', v)
+      scopedLocalStorage.setItem('clawboo.atlas.layout', v)
     }
     set({ atlasLayout: v })
   },

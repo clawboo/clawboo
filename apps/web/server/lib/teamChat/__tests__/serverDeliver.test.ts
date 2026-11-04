@@ -1177,9 +1177,13 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
 
       lock.resolve()
       await held
+      // D2 waited for a run slot while D1 held a1's, so p2 resolved before D2
+      // reached adapter.start.
       await p2
-      for (let i = 0; i < 4; i++) await tick()
-      expect(adapter.startOptsLog.map((o) => o.message)).toEqual(['D2 the retry'])
+      await vi.waitFor(
+        () => expect(adapter.startOptsLog.map((o) => o.message)).toEqual(['D2 the retry']),
+        { timeout: 5000 },
+      )
     } finally {
       spy.mockRestore()
       lock.resolve()
