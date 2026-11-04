@@ -73,6 +73,8 @@ function scripted(running: number, opts: { holdRoute?: boolean } = {}) {
       left = Math.max(0, left - 1)
     },
     now: () => clock,
+    // The server's port still accepts connections.
+    listening: async () => true,
   }
   const stop: StopDeps = {
     isClawboo: async () => {
@@ -192,6 +194,19 @@ describe('drainDashboard', () => {
     )
     expect(outcome).toEqual({ status: 'lost', running: 4 })
     expect(n).toBe(5)
+  })
+
+  it('reports a server whose port closed mid-wait as gone, not lost', async () => {
+    const s = scripted(5)
+    let n = 0
+    const request: DrainDeps['request'] = async (method, route, body) =>
+      ++n > 2 ? null : s.drain.request(method, route, body)
+    const outcome = await drainDashboard(
+      PORT,
+      { owner: 'o', reason: 'stop', waitMs: 60_000 },
+      { ...s.drain, request, listening: async () => false },
+    )
+    expect(outcome).toEqual({ status: 'gone', running: 4 })
   })
 
   it('keeps waiting through a poll that fails once', async () => {
@@ -411,6 +426,37 @@ describe('stopAfterAgentRuns', () => {
     expect(s.order).toEqual([`DELETE /api/system/hold/clawboo-stop-${process.pid}`])
   })
 
+  it('stops nothing when the server stops answering with runs going, and releases its hold', async () => {
+    const s = scripted(5)
+    let n = 0
+    const request: DrainDeps['request'] = async (method, route, body) =>
+      method !== 'DELETE' && ++n > 2 ? null : s.drain.request(method, route, body)
+    const result = await stopAfterAgentRuns(
+      PORT,
+      { command: 'stop', waitMs: 60_000 },
+      { drain: { ...s.drain, request }, stop: s.stop },
+    )
+    expect(result).toEqual({ drain: { status: 'lost', running: 4 }, stop: null, released: true })
+    expect(s.order).not.toContain('stop')
+  })
+
+  it('finishes the stop when the server went away mid-wait', async () => {
+    const s = scripted(5)
+    let n = 0
+    const request: DrainDeps['request'] = async (method, route, body) =>
+      ++n > 2 ? null : s.drain.request(method, route, body)
+    const result = await stopAfterAgentRuns(
+      PORT,
+      { command: 'stop', waitMs: 60_000 },
+      {
+        drain: { ...s.drain, request, listening: async () => false },
+        stop: { ...s.stop, isClawboo: async () => false },
+      },
+    )
+    expect(result.drain).toEqual({ status: 'gone', running: 4 })
+    expect(result.stop).toMatchObject({ status: 'not-running' })
+  })
+
   it('says when a cancelled wait could not release its hold', async () => {
     const s = scripted(10)
     const cancel = new AbortController()
@@ -458,6 +504,41 @@ describe('the hold requests over HTTP', () => {
     server = null
     s.closeAllConnections()
     await new Promise<void>((resolve) => s.close(() => resolve()))
+  })
+
+  /** A server that answers every request with `status` and an HTML body. */
+  async function htmlServer(status: number, html: string): Promise<number> {
+    server = http.createServer((req, res) => {
+      req.resume()
+      req.on('end', () => {
+        res.statusCode = status
+        res.setHeader('Content-Type', 'text/html; charset=utf-8')
+        res.end(html)
+      })
+    })
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
+    return (server.address() as AddressInfo).port
+  }
+
+  it("reads an older server's HTML 404 for the hold as unsupported, so the stop goes on", async () => {
+    // What Express answers for a route it does not have: `clawboo restart`
+    // right after `npm install -g clawboo@latest` meets exactly this server.
+    const port = await htmlServer(
+      404,
+      '<!DOCTYPE html><html><body><pre>Cannot POST /api/system/hold</pre></body></html>',
+    )
+    vi.stubEnv('HOST', '')
+    const outcome = await drainDashboard(port, { owner: 'o', reason: 'restart', waitMs: 1_000 })
+    vi.unstubAllEnvs()
+    expect(outcome).toEqual({ status: 'unsupported' })
+  })
+
+  it("reads an older server's dashboard page as unsupported too", async () => {
+    const port = await htmlServer(200, '<!doctype html><html><head></head></html>')
+    vi.stubEnv('HOST', '')
+    const outcome = await drainDashboard(port, { owner: 'o', reason: 'stop', waitMs: 1_000 })
+    vi.unstubAllEnvs()
+    expect(outcome).toEqual({ status: 'unsupported' })
   })
 
   it('send the hold as JSON and release it by owner', async () => {

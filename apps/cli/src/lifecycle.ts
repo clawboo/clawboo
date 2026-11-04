@@ -412,6 +412,60 @@ export function removeRuntimePortFile(): void {
   }
 }
 
+/**
+ * What holds the port the server recorded in `api-port.txt`, for a stop or a
+ * restart that discovery found no Clawboo server for:
+ * - `none`: no record, nothing listening, or a program that answers and is not
+ *   Clawboo. The record is stale.
+ * - `live`: a Clawboo server answers there, with or without its access gate.
+ *   Discovery asked elsewhere (`CLAWBOO_API_PORT`), or asked too briefly.
+ * - `silent`: it accepts a connection and lets an HTTP request time out. That is
+ *   how a Clawboo server too busy to answer looks (the kernel accepts for it), so
+ *   it counts as one: its record stays, and no second server starts beside it.
+ *   Discovery cannot see it, so `--force` would not find it either.
+ *
+ * A port that accepts and then drops the connection is a program that does not
+ * speak HTTP, not a busy server, so it reads as `none`.
+ */
+export type RecordedPortState = 'none' | 'live' | 'silent'
+
+export interface RecordedPort {
+  /** The recorded port; null when there is no record. */
+  port: number | null
+  state: RecordedPortState
+}
+
+export async function inspectRecordedPort(
+  opts: { timeoutMs?: number } = {},
+): Promise<RecordedPort> {
+  const timeoutMs = opts.timeoutMs ?? 2_000
+  const port = readRuntimePort()
+  if (port === null) return { port, state: 'none' }
+  const host = dashboardHost()
+  if (!(await probePort(host, port, Math.min(timeoutMs, 1_000)))) return { port, state: 'none' }
+  try {
+    // No token is sent: the access gate's own refusal already says Clawboo.
+    const res = await fetch(`http://${urlHost(host)}:${port}/api/settings`, {
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { Accept: 'application/json' },
+    })
+    const ct = res.headers.get('content-type') ?? ''
+    const body: unknown = ct.includes('application/json')
+      ? await res.json().catch(() => null)
+      : null
+    if (res.status === 401 && isAccessGateError(body)) return { port, state: 'live' }
+    const clawboo =
+      res.ok &&
+      isRecord(body) &&
+      typeof body['gatewayUrl'] === 'string' &&
+      typeof body['hasToken'] === 'boolean'
+    return { port, state: clawboo ? 'live' : 'none' }
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === 'TimeoutError'
+    return { port, state: timedOut ? 'silent' : 'none' }
+  }
+}
+
 interface PortCandidate {
   port: number
   timeoutMs: number
@@ -827,6 +881,8 @@ export interface DrainDeps {
   /** Resolves after `ms`, or early when `signal` aborts. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
   now?: () => number
+  /** Does the server's port still accept connections? */
+  listening?: () => Promise<boolean>
 }
 
 export interface DrainOptions {
@@ -853,8 +909,14 @@ export type DrainOutcome =
   | { status: 'unsupported' }
   /** The server gave no usable answer to the hold, so whether runs are going is unknown. */
   | { status: 'unreachable' }
-  /** The server stopped answering mid-wait, several polls in a row. */
+  /**
+   * The server stopped answering mid-wait, several polls in a row, while still
+   * listening on its port. Runs were going at its last answer, so the caller
+   * stops nothing, as for `unreachable`.
+   */
   | { status: 'lost'; running: number }
+  /** The server's port closed mid-wait: it is gone, so the stop that follows kills nothing. */
+  | { status: 'gone'; running: number }
 
 function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
@@ -890,7 +952,9 @@ function dashboardRequest(port: number): NonNullable<DrainDeps['request']> {
  * here: the stop that follows ends it, and a caller that does not stop calls
  * `releaseDashboardHold`. A server with no hold route answers `unsupported`, and
  * the caller stops it as before; one that gives no usable answer to a few tries
- * answers `unreachable`, and the caller stops nothing.
+ * answers `unreachable`, and one that stops answering mid-wait while still on
+ * its port answers `lost`: the caller stops neither. One whose port closed
+ * answers `gone`.
  */
 export async function drainDashboard(
   port: number,
@@ -900,6 +964,7 @@ export async function drainDashboard(
   const request = deps.request ?? dashboardRequest(port)
   const sleep = deps.sleep ?? abortableSleep
   const now = deps.now ?? Date.now
+  const listening = deps.listening ?? (() => probePort(dashboardHost(), port, 500))
   const place = (): Promise<JsonReply | null> =>
     request('POST', '/api/system/hold', {
       owner: opts.owner,
@@ -947,7 +1012,13 @@ export async function drainDashboard(
     // One slow or refused poll is not the server gone: keep waiting on the last answer.
     if (next === null) {
       failedPolls += 1
-      if (failedPolls >= DRAIN_MAX_FAILED_POLLS) return { status: 'lost', running: state.running }
+      if (failedPolls >= DRAIN_MAX_FAILED_POLLS) {
+        // Silent but still listening: it may be busy with the very runs the wait
+        // is for, so this is no answer, not a finished drain.
+        return (await listening())
+          ? { status: 'lost', running: state.running }
+          : { status: 'gone', running: state.running }
+      }
       continue
     }
     failedPolls = 0
@@ -992,7 +1063,7 @@ export interface StopAfterRunsResult {
   drain: DrainOutcome | null
   /**
    * How the stop ended; null when nothing was stopped: the wait was cancelled,
-   * or the server could not be held (`unreachable`).
+   * or the server could not be held (`unreachable`) or went silent (`lost`).
    */
   stop: StopOutcome | null
   /**
@@ -1005,9 +1076,10 @@ export interface StopAfterRunsResult {
 /**
  * `clawboo stop` and `clawboo restart`: hold the server, wait for its agent runs
  * to finish (up to `waitMs`), then stop it. A cancelled wait releases the hold
- * and stops nothing, and so does a server that would not be held: stopping it
- * could interrupt runs nobody could see. A stop that leaves the server up for
- * any reason releases the hold too, so it starts new work again.
+ * and stops nothing, and so does a server that would not be held or went
+ * silent mid-wait: stopping it could interrupt runs nobody could see. A stop
+ * that leaves the server up for any reason releases the hold too, so it starts
+ * new work again.
  */
 export async function stopAfterAgentRuns(
   port: number,
@@ -1028,7 +1100,9 @@ export async function stopAfterAgentRuns(
       },
       deps.drain,
     )
-    if (drain.status === 'cancelled' || drain.status === 'unreachable') {
+    // Stop only a server whose runs could be seen: one that would not be held,
+    // or went silent with runs going, is left running for the person to decide.
+    if (drain.status === 'cancelled' || drain.status === 'unreachable' || drain.status === 'lost') {
       const released = await releaseDashboardHold(port, owner, deps.drain)
       return { drain, stop: null, released }
     }
