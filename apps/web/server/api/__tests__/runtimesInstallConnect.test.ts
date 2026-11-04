@@ -53,6 +53,13 @@ vi.mock('../../lib/runtimes/agentSdkBinary', () => ({
   resolveAgentSdkBinary: () => sdkState.binary,
 }))
 
+// ── Mock how this server was installed (the real probe reads process.argv). ──
+const installMethodState = vi.hoisted(() => ({ method: 'global' as 'global' | 'npx' | 'dev' }))
+vi.mock('../../lib/updateCheck', async (orig) => ({
+  ...(await orig<typeof import('../../lib/updateCheck')>()),
+  detectInstallMethod: () => installMethodState.method,
+}))
+
 // ── Mock the Codex login probe (real impl shells out to `codex login status`). ─
 const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
@@ -285,6 +292,7 @@ describe('runtimes install/connect REST', () => {
     platformState.bins = {}
     platformState.pythonOverride = null
     sdkState.binary = null
+    installMethodState.method = 'global'
     spawnState.calls = []
     spawnState.children = []
     runnerState.lastInput = null
@@ -328,19 +336,19 @@ describe('runtimes install/connect REST', () => {
   // ── install (npm) ──────────────────────────────────────────────────────────
   it('installs an npm runtime: spawns `npm install -g <pkg>`, completes', async () => {
     platformState.bins['npm'] = '/usr/bin/npm'
-    platformState.bins['claude'] = '/usr/bin/claude' // present post-install
+    platformState.bins['codex'] = '/usr/bin/codex' // present post-install
     const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: 'npm',
-      args: ['install', '-g', '@anthropic-ai/claude-code@2'],
+      args: ['install', '-g', '@openai/codex@0'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
   })
 
-  // ── Claude Code: the CLI or the Agent SDK's own binary ─────────────────────
+  // ── Claude Code: the Agent SDK and its own binary, never the CLI alone ──────
   const claudeRow = async (): Promise<Record<string, unknown>> => {
     const m = mockRes()
     await runtimesListGET(req(), m.res)
@@ -350,14 +358,19 @@ describe('runtimes install/connect REST', () => {
   }
   const SDK_BIN = '/opt/clawboo/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude'
 
-  it('Claude Code with only the CLI on PATH reads installed from the CLI', async () => {
+  it('Claude Code with only the CLI on PATH reads not installed: a run needs the Agent SDK', async () => {
     platformState.bins['claude'] = '/usr/local/bin/claude'
+    runtimesConnectPOST(
+      req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-cli-only' } }),
+      mockRes().res,
+    )
     const row = await claudeRow()
-    expect(row['installed']).toBe(true)
-    expect(row['binPath']).toBe('/usr/local/bin/claude')
-    expect(row['binSource']).toBe('cli')
-    expect(row['connectionState']).toBe('needs-auth')
-    expect(row['health']).toEqual({ ok: true })
+    expect(row['installed']).toBe(false)
+    expect(row['binPath']).toBeNull()
+    expect(row['binSource']).toBeNull()
+    // Even with a key: the team builder offers only a runtime that reads ready.
+    expect(row['connectionState']).toBe('not-installed')
+    expect((row['health'] as { ok: boolean }).ok).toBe(false)
   })
 
   it('Claude Code with only the Agent SDK’s own binary reads installed, and ready with a key', async () => {
@@ -410,6 +423,50 @@ describe('runtimes install/connect REST', () => {
     expect(
       m.events().some((e) => e['type'] === 'output' && String(e['line']).includes(SDK_BIN)),
     ).toBe(true)
+  })
+
+  it('Install fetches the Agent SDK a run loads, not the claude CLI', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    expect(spawnState.calls[0]).toEqual({
+      cmd: 'npm',
+      args: ['install', '-g', '@anthropic-ai/claude-agent-sdk@0.3'],
+    })
+    sdkState.binary = SDK_BIN // what the install put next to clawboo
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    await m.ended
+    const done = m.events().find((e) => e['type'] === 'complete')
+    expect(done).toEqual({ type: 'complete', success: true })
+  })
+
+  it('an SDK install that the server still cannot load says why', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    await m.ended
+    const done = m.events().find((e) => e['type'] === 'complete')
+    expect(done?.['success']).toBe(true)
+    expect(String(done?.['warning'])).toMatch(/next to Clawboo/)
+  })
+
+  it('refuses an SDK install a one-off npx run or a source checkout could not load', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    for (const [method, hint] of [
+      ['npx', /npm install -g clawboo @anthropic-ai\/claude-agent-sdk@0\.3/],
+      ['dev', /pnpm install/],
+    ] as const) {
+      installMethodState.method = method
+      const m = mockRes()
+      runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+      ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+      await m.ended
+      expect(spawnState.calls, method).toEqual([])
+      const err = m.events().find((e) => e['type'] === 'error')
+      expect(err?.['code'], method).toBe('SDK_NOT_LOADABLE')
+      expect(String(err?.['message']), method).toMatch(hint)
+    }
   })
 
   it('installing codex (also how it is updated) drops the cached model probe', async () => {
@@ -619,7 +676,7 @@ describe('runtimes install/connect REST', () => {
 
   // ── connect / disconnect ────────────────────────────────────────────────────
   it('connect writes the vault and NEVER echoes the key', () => {
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     const m = mockRes()
     runtimesConnectPOST(
       req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-SECRET-NEVER-ECHOED' } }),
@@ -793,7 +850,7 @@ describe('runtimes install/connect REST', () => {
 
   it('disconnecting Hermes leaves Clawboo Native and Claude Code their keys', async () => {
     platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-shared')
     setRuntimeSecret('OPENAI_API_KEY', 'sk-openai-shared')
     runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), mockRes().res)
@@ -835,7 +892,7 @@ describe('runtimes install/connect REST', () => {
   })
 
   it('a disconnected runtime connects again with the key it kept, without a re-paste', () => {
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-kept')
     runtimesDisconnectPOST(req({ params: { id: 'claude-code' } }), mockRes().res)
     expect(isRuntimeDisconnected('claude-code')).toBe(true)

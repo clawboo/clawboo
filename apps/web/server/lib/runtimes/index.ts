@@ -48,14 +48,14 @@ export function enabledRuntimeIds(): NonOpenClawRuntimeId[] {
 function cliHealth(d: RuntimeDescriptor): () => Promise<HealthResult> {
   // Resolve via PATH *and* well-known user-install dirs (pip --user / pipx) —
   // Hermes installs to the Python user-site bin, which is off the server's PATH.
-  // Claude Code is also healthy on the Agent SDK's own binary alone.
+  // Claude Code is healthy on the Agent SDK and its own binary, never a CLI.
   return async () =>
     resolveRuntimeInstall(d)
       ? { ok: true }
       : {
           ok: false,
           message: d.sdkBinary
-            ? `${String(d.healthBin)} not found on PATH or user-install dirs, and the Agent SDK's binary is not installed`
+            ? 'the Claude Agent SDK is not installed next to Clawboo, or its platform binary is missing'
             : `${String(d.healthBin)} not found on PATH or user-install dirs`,
         }
 }

@@ -26,13 +26,13 @@ Every agent on a team has its own runtime, the engine that does its thinking and
 
 Clawboo is installed and onboarding is done. At least two runtimes must read **Connected** in **Settings** > **Runtimes**. Each one needs:
 
-| Runtime        | What it needs                                                                                                                                    |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Clawboo Native | Built in. An API key from a supported provider, or a local Ollama model.                                                                         |
-| OpenClaw       | A local OpenClaw Gateway. **Set up OpenClaw** installs and starts one for you.                                                                   |
-| Claude Code    | The `claude` CLI, which Clawboo installs, and an Anthropic API key. A global npm install of Clawboo also needs `@anthropic-ai/claude-agent-sdk`. |
-| Codex          | The `codex` CLI, which Clawboo installs, and **Sign in with ChatGPT**.                                                                           |
-| Hermes         | Python 3.11 to 3.13 (Clawboo installs Hermes with pipx or pip), plus an OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in.               |
+| Runtime        | What it needs                                                                                                                                                                         |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | Built in. An API key from a supported provider, or a local Ollama model.                                                                                                              |
+| OpenClaw       | A local OpenClaw Gateway. **Set up OpenClaw** installs and starts one for you.                                                                                                        |
+| Claude Code    | The Claude Agent SDK next to Clawboo (`@anthropic-ai/claude-agent-sdk`, which a global install of Clawboo can install for you), and an Anthropic API key. A `claude` CLI is not used. |
+| Codex          | The `codex` CLI, which Clawboo installs, and **Sign in with ChatGPT**.                                                                                                                |
+| Hermes         | Python 3.11 to 3.13 (Clawboo installs Hermes with pipx or pip), plus an OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in.                                                    |
 
 For the click path per runtime, see [Providers and runtimes](/using/providers-and-runtimes).
 

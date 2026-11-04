@@ -20,16 +20,18 @@ export function resolveSdkBinary(d: RuntimeDescriptor): string | null {
 }
 
 /**
- * The binary that makes `d` installed, or null when there is none. The CLI is
- * found on PATH or in the user-install dirs; a runtime that runs on an SDK's own
- * binary (Claude Code) is also installed when that binary is present, found the
- * way the SDK finds it. A built-in runtime has no binary and is not probed here.
+ * The binary that makes `d` installed, or null when there is none. A runtime
+ * that runs on an SDK's own binary (Claude Code) is installed only when the SDK
+ * loads from the server and that binary is present, found the way the SDK finds
+ * it: its runs never start a CLI, so a CLI on PATH does not count. Any other
+ * runtime's CLI is found on PATH or in the user-install dirs. A built-in runtime
+ * has no binary and is not probed here.
  */
 export function resolveRuntimeInstall(d: RuntimeDescriptor): RuntimeInstall | null {
-  if (d.healthBin) {
-    const cli = resolveRuntimeBin(d.healthBin)
-    if (cli) return { path: cli, source: 'cli' }
+  if (d.sdkBinary) {
+    const sdk = resolveSdkBinary(d)
+    return sdk ? { path: sdk, source: 'agent-sdk' } : null
   }
-  const sdk = resolveSdkBinary(d)
-  return sdk ? { path: sdk, source: 'agent-sdk' } : null
+  const cli = d.healthBin ? resolveRuntimeBin(d.healthBin) : null
+  return cli ? { path: cli, source: 'cli' } : null
 }

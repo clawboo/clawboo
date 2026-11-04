@@ -33,7 +33,7 @@ To compare it with the other runtimes, see [Choose a runtime](/runtimes/index).
 Skip this step if you run Clawboo from source. On an npm install, install Clawboo and the SDK together:
 
 ```bash
-npm install -g clawboo @anthropic-ai/claude-agent-sdk
+npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3
 ```
 
 The SDK has to sit next to Clawboo, which is why both install globally. Clawboo does not ship it, because its Claude Code binary adds about 210 MB to every install. If Clawboo is already running, restart it with `clawboo restart`.
@@ -42,9 +42,9 @@ The SDK has to sit next to Clawboo, which is why both install globally. Clawboo 
 
 <Step title="Check the Claude Code row">
 
-Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` also counts as installed.
+Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run loads the SDK and starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` is not used and does not count: without the SDK the row reads **Not installed**.
 
-If the row reads **Not installed**, Clawboo found neither. Check that the SDK sits next to Clawboo (`npm ls -g @anthropic-ai/claude-agent-sdk`), and that npm installed its platform package: an install with `--omit=optional` leaves the binary out. Then run `clawboo restart`. The row's **Install** button installs the separate `claude` CLI (`npm install -g @anthropic-ai/claude-code@2`); a run still needs the SDK.
+If the row reads **Not installed**, on a global install of Clawboo click **Install**: it runs `npm install -g @anthropic-ai/claude-agent-sdk@0.3`, which puts the SDK next to Clawboo. A one-off `npx` run and a source checkout cannot load an SDK installed that way, so there the button explains what to run instead. If it still reads **Not installed**, check that the SDK sits next to Clawboo (`npm ls -g @anthropic-ai/claude-agent-sdk`) and that npm installed its platform package (an install with `--omit=optional` leaves the binary out), then run `clawboo restart`.
 
 </Step>
 
@@ -132,9 +132,9 @@ In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, the
 
 <Accordion title="The run failed: The Claude Code runtime needs @anthropic-ai/claude-agent-sdk">
 
-The full message continues "which this clawboo install does not ship". The row reads **Connected** because that only checks the `claude` command and your key; the Agent SDK is a separate package.
+The full message continues "which this clawboo install does not ship". The Agent SDK is missing or cannot load from this Clawboo, and the **Claude Code** row under **Runtimes** reads **Not installed**. Agents already on Claude Code still try to run and fail this way until it is installed.
 
-Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
+Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
 
 </Accordion>
 
@@ -170,7 +170,7 @@ The key check could not reach Anthropic from this computer. Check your network o
 
 <Accordion title="Permission denied. A global install may require elevated permissions.">
 
-npm could not write to its global folder. The message suggests `sudo npm install -g @anthropic-ai/claude-code@2`. A Node version manager such as nvm or fnm avoids the problem without `sudo`; install Node through one, then click **Install** again.
+npm could not write to its global folder. The message suggests `sudo npm install -g @anthropic-ai/claude-agent-sdk@0.3`. A Node version manager such as nvm or fnm avoids the problem without `sudo`; install Node through one, then click **Install** again.
 
 </Accordion>
 

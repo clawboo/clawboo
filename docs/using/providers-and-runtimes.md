@@ -190,7 +190,7 @@ Each of these is a separate program. Clawboo installs it for you from **Settings
 
 <Tab title="Claude Code">
 
-Needs an Anthropic API key. On an npm install of Clawboo, also install the Claude Agent SDK first: `npm install -g clawboo @anthropic-ai/claude-agent-sdk`. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
+Needs an Anthropic API key. On an npm install of Clawboo, also install the Claude Agent SDK first: `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
 
 </Tab>
 
