@@ -61,15 +61,17 @@ export interface SelfRestartDeps {
 /**
  * Launch a successor server on `port` and exit so it can take over the port.
  * Best-effort: if the launch fails we still exit (the user re-runs `clawboo`).
+ * Returns whether this process is about to exit: false only when there was no
+ * entry to relaunch and it keeps running.
  */
-export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): void {
+export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): boolean {
   const entry = process.argv[1]
   const doExit = deps.exit ?? ((code: number) => process.exit(code))
   if (!entry) {
     // No resolvable entry to relaunch — leave the current process running so the
     // user isn't dropped; they can restart manually to pick up the update.
     deps.log?.error('self-restart: no process entry to relaunch')
-    return
+    return false
   }
 
   const env: NodeJS.ProcessEnv = {
@@ -102,4 +104,5 @@ export function restartIntoLatest(port: number, deps: SelfRestartDeps = {}): voi
   // Give the SSE 'restarting' frame time to reach the browser, then exit so the
   // port frees and the waiting successor can bind it.
   setTimeout(() => doExit(0), FLUSH_DELAY_MS)
+  return true
 }

@@ -30,6 +30,7 @@ import {
 } from '@clawboo/db'
 
 import { encodeTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
+import { engineHold } from '../../engineHold'
 
 /** Ordered log of what the subscribers asked the orchestrator to do. The order
  *  records that the synchronous detach lands before the debounced pump. */
@@ -162,6 +163,23 @@ describe('board lifecycle subscribers', () => {
       await vi.advanceTimersByTimeAsync(5_000)
       expect(pumped).toEqual([TEAM])
     } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('wakes no team while the engine is held', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      const t = createTask(db, { title: 'released', teamId: TEAM })
+      claimTask(db, t.id, 'a2')
+      pumped.length = 0
+      engineHold().place('lifecycle-test')
+      releaseTask(db, t.id)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pumped).toEqual([])
+    } finally {
+      engineHold().release('lifecycle-test')
       vi.useRealTimers()
     }
   })

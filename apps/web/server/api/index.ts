@@ -40,6 +40,7 @@ import {
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
 import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import { systemCapabilitiesGET } from './systemCapabilities'
+import { systemHoldDELETE, systemHoldGET, systemHoldPOST } from './systemHold'
 import {
   teamsGET,
   teamsPOST,
@@ -301,6 +302,10 @@ router.post('/api/system/approve-device', sensitiveLimiter, approveDevicePOST)
 router.get('/api/system/self-version', selfVersionGET)
 router.get('/api/system/capabilities', systemCapabilitiesGET)
 router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
+// Drain and hold: stop starting new agent runs before a stop or an update.
+router.get('/api/system/hold', systemHoldGET)
+router.post('/api/system/hold', systemHoldPOST)
+router.delete('/api/system/hold/:owner', systemHoldDELETE)
 // Settings an administrator can pin (operator file or environment), and a
 // person's own value for the ones the dashboard offers. Pins are read-only here.
 router.get('/api/system/operator-settings', operatorSettingsGET)

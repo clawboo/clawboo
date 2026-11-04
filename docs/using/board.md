@@ -334,7 +334,7 @@ Clawboo does not merge the branch. Review it and merge it yourself.
 
 ### When work is checked
 
-Clawboo checks an agent's work in one case only: a run in its own git worktree that changed files. The check runs the task's verify command and, for a larger change or a handed-off task, a separate review by a model. Clawboo knows your project's test command only if you set the team's [work check](/using/teams#work-check); without one, the check fails until the `VERIFY_CMD` line in the worktree's `init.sh` names one. Work handed out in team chat, tasks you give from the board, and routines you create in the dashboard are not checked. A task with no check result reaches **Done** normally.
+Clawboo checks an agent's work in two cases: a run in its own git worktree that changed files, and team chat work (a hand-off, or a task you give from the board) that changed the team's folder on a team with a [work check](/using/teams#work-check), by an agent that works in that folder, so not an OpenClaw agent (see [which team chat work is checked](/concepts/verification#team-chat)). The check runs the verify command and, for a larger or risky change, or a task handed down from another task, a separate review by a model. Clawboo knows your project's test command only if you set the team's work check. Without one, a worktree's check fails until the `VERIFY_CMD` line in its `init.sh` names one, and team chat work is not checked. Agent routines you create in the dashboard are not checked. A task with no check result reaches **Done** normally.
 
 While a check runs, the card shows **Verifying**. A pass lands in **Done**, and a failed check sends the work back to the agent for another attempt. When the attempts run out, or the work passes with debt, the task goes to **Needs you**. It shows **Needs review** if its result cannot pass, or **Blocked** if it passed with debt. **Retry** runs the task again and clears the old result. See [Verification](/concepts/verification).
 
@@ -441,7 +441,7 @@ If an agent's run stops reporting, Clawboo ends it after a while and releases th
 
 <Accordion title="A task reached Done with no check mark">
 
-That is expected for most tasks. Clawboo checks work only for a run in its own git worktree that changed files, and a task with no check result reaches Done normally. See [When work is checked](#when-work-is-checked).
+That is expected for many tasks. Clawboo checks work only for a run in its own git worktree that changed files, and for team chat work that changed the team's folder on a team with a work check. A task with no check result reaches Done normally. See [When work is checked](#when-work-is-checked).
 
 </Accordion>
 
