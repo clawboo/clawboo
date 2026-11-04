@@ -17,10 +17,9 @@
 //   must leave a live engine's runs alone. A file per engine lets the reap ask
 //   whether the engine that wrote it is still running, and no engine ever
 //   rewrites another's records.
-// - FAIL CLOSED. A child is signalled only when the boot matches AND the process
-//   holding its pid is shown to have started before our record (within
-//   `CHILD_START_TIME_SLACK_MS`). The connector reap still signals when this host
-//   cannot report start times at all; this one does not: a runtime reap is a
+// - FAIL CLOSED, as the connector reap does. A child is signalled only when the
+//   boot matches AND the process holding its pid is shown to have started before
+//   our record (within `CHILD_START_TIME_SLACK_MS`). A runtime reap is a
 //   whole-tree kill of an agent, so a pid that cannot be shown to still be ours
 //   is left alone and counted.
 //
@@ -34,8 +33,10 @@ import { resolveClawbooDir } from '@clawboo/config'
 
 import {
   currentBootAt,
+  currentInitStart,
   currentPidNamespace,
   isAlive,
+  linuxBootUnreadable,
   MAX_TRUSTED_AGE_MS,
   processStartTimes,
   START_TIME_SLACK_MS,
@@ -68,6 +69,10 @@ interface EngineIdentity {
   /** See `currentPidNamespace`. Its pids mean these processes only inside it.
    *  Absent in a file that predates it, which the reap then leaves alone. */
   pidNamespace?: string | null
+  /** See `currentInitStart`. On Linux it tells this run of the namespace from an
+   *  earlier one the kernel gave the same id. Absent in a file that predates
+   *  it, which a Linux reap then leaves alone. */
+  initStart?: number | null
 }
 
 export interface RuntimePidEntry {
@@ -112,6 +117,7 @@ export function startRuntimePidRecord(): void {
     startedAt: Math.round(Date.now() - process.uptime() * 1000),
     bootAt: currentBootAt(),
     pidNamespace: currentPidNamespace(),
+    initStart: currentInitStart(),
   }
   // The start time is in the name so a later engine handed the same pid gets a
   // file of its own instead of overwriting this one.
@@ -176,6 +182,9 @@ function parseRecord(raw: unknown): RecordFile | null {
     (owner.pidNamespace !== undefined &&
       owner.pidNamespace !== null &&
       typeof owner.pidNamespace !== 'string') ||
+    (owner.initStart !== undefined &&
+      owner.initStart !== null &&
+      typeof owner.initStart !== 'number') ||
     !Array.isArray(list)
   ) {
     return null
@@ -244,7 +253,8 @@ function engineStillRunning(owner: EngineIdentity, probe: StartTimes): boolean {
 export interface RuntimeReapReport {
   killed: number
   /** Dropped UNSIGNALLED as no longer trustworthy: recorded under a different
-   *  boot, too old, or the pid now runs a process that started after our record. */
+   *  boot or an earlier run of this PID namespace, too old, or the pid now runs a
+   *  process that started after our record. */
   expired: number
   /** Alive but NOT signalled, because this host could not report when the
    *  process holding the pid started. Counted so the log shows the gap. */
@@ -252,7 +262,9 @@ export interface RuntimeReapReport {
   /** Files left alone because the engine that wrote them is still running. */
   liveEngines: number
   /** Files left alone because they were written in another PID namespace (or
-   *  do not say which), where their pids name different processes. */
+   *  do not say which), where their pids name different processes. On Linux,
+   *  also a file that does not say which run of this namespace wrote it, and
+   *  every file when this engine could not read its own namespace or pid 1. */
   foreign: number
 }
 
@@ -263,6 +275,10 @@ export interface RuntimeReapDeps {
   startTimes?: (pids: readonly number[]) => StartTimes
   /** Test seam for this process's PID namespace (see `currentPidNamespace`). */
   pidNamespace?: string | null
+  /** Test seam for when its pid 1 started (see `currentInitStart`). */
+  initStart?: number | null
+  /** Test seam for the platform both were read on. */
+  platform?: NodeJS.Platform
 }
 
 const killOrphanTree = (pid: number): void => killProcessTreeByPid(pid, { group: true })
@@ -289,9 +305,23 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
   // A file from another PID namespace is not ours to judge: its pids name other
   // processes here, and its owner may be running where this process cannot see
   // it. It stays as it is, for the engine that can read it.
+  //
+  // On Linux the namespace id alone is not enough: the kernel hands it out
+  // again once a namespace is gone, so a restarted container can come back with
+  // its old id. The file must also name the same pid 1. One that names another
+  // is an EARLIER RUN of this namespace, whose processes all died with it. One
+  // that does not say, or a host that cannot read its own, proves nothing, so
+  // that file is left alone too.
   const pidNamespace = deps.pidNamespace !== undefined ? deps.pidNamespace : currentPidNamespace()
-  const ours = (record: RecordFile): boolean =>
-    record.owner.pidNamespace !== undefined && record.owner.pidNamespace === pidNamespace
+  const initStart = deps.initStart !== undefined ? deps.initStart : currentInitStart()
+  const platform = deps.platform ?? process.platform
+  const standing = (owner: EngineIdentity): 'ours' | 'foreign' | 'earlierRun' => {
+    if (owner.pidNamespace === undefined || owner.pidNamespace !== pidNamespace) return 'foreign'
+    if (platform !== 'linux') return 'ours'
+    if (linuxBootUnreadable({ pidNamespace, initStart }, platform)) return 'foreign'
+    if (typeof owner.initStart !== 'number') return 'foreign'
+    return owner.initStart === initStart ? 'ours' : 'earlierRun'
+  }
 
   const now = Date.now()
   const bootAt = currentBootAt()
@@ -301,7 +331,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
   // the engines that might still be running, and the children worth asking about.
   const candidates = new Set<number>()
   for (const { record } of files) {
-    if (!record || !ours(record) || record.owner.bootAt !== bootAt) continue
+    if (!record || standing(record.owner) !== 'ours' || record.owner.bootAt !== bootAt) continue
     if (record.owner.pid !== process.pid && isAlive(record.owner.pid)) {
       candidates.add(record.owner.pid)
     }
@@ -316,13 +346,15 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       removeRecord(file)
       continue
     }
-    if (!ours(record)) {
+    const where = standing(record.owner)
+    if (where === 'foreign') {
       report.foreign += 1
       continue
     }
-    // A DIFFERENT BOOT: every child died with it, and the numbers have been
-    // handed out again. Nothing to signal.
-    if (record.owner.bootAt !== bootAt) {
+    // A DIFFERENT BOOT, or an earlier run of this PID namespace: every child
+    // died with it, and the numbers have been handed out again. Nothing to
+    // signal.
+    if (where === 'earlierRun' || record.owner.bootAt !== bootAt) {
       report.expired += record.children.length
       removeRecord(file)
       continue

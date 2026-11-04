@@ -795,12 +795,18 @@ async function main() {
     // A connector child outlives a HARD stop: a crash or a SIGKILL runs no
     // shutdown hook, and the child is a real process nobody is left holding. On
     // the next boot clawboo would spawn a second one and never learn about the
-    // first. Reaped BEFORE anything can connect, so the file cleared here is
+    // first. Reaped BEFORE anything can connect, so the records reaped here are
     // always the previous process's.
     safeStart('connector-reap', () => {
       const report = reapOrphanedConnectors((pid) => killProcessTreeByPid(pid))
       if (report.killed > 0 || report.expired > 0) {
         log.info(report, 'Connectors: reaped children left by a previous run')
+      }
+      if (report.unverified > 0) {
+        log.warn(
+          report,
+          'Connectors: left processes from a previous run running; this host could not show they are ours',
+        )
       }
     })
 
