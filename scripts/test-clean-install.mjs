@@ -1534,11 +1534,16 @@ async function assertSurvivesPackageReplacement(packageDir, envPath) {
   )
   await logFile.close()
 
+  // With no STUDIO_ACCESS_TOKEN the server locks itself with its per-install
+  // token, as a real install does, so it answers this read with the access
+  // gate's own 401. That is a server that started; anything else is not.
+  const startedAnswer = (res) =>
+    res?.ok === true || (res?.status === 401 && res.text.includes('"gate":"clawboo-access"'))
   const deadline = Date.now() + READY_TIMEOUT_MS
   let answered = false
   while (Date.now() < deadline && orphanProc.exitCode === null) {
     const res = await httpGet(`http://127.0.0.1:${port}/api/settings`).catch(() => null)
-    if (res?.ok) {
+    if (startedAnswer(res)) {
       answered = true
       break
     }
