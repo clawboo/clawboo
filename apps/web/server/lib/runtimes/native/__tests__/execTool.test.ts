@@ -28,21 +28,20 @@ const tool = (over: Partial<Parameters<typeof buildExecTool>[0]> = {}): NativeLo
   return built[0] ?? null
 }
 
-/** Answer the one pending card, the way a person clicking the button would. */
-function answer(decision: 'allow_once' | 'deny'): string | null {
-  const [row] = listPendingApprovals(db)
-  if (!row) return null
-  resolveApproval(db, row.id, decision)
-  return row.id
-}
-
-/** Poll until a card appears, then answer it. */
-async function answerWhenAsked(decision: 'allow_once' | 'deny'): Promise<void> {
-  for (let i = 0; i < 80; i += 1) {
-    if (answer(decision)) return
+/** Poll until the card is up, and return its id. Resolving the program is real
+ *  file I/O, so a fixed sleep loses the race on a loaded machine. */
+async function cardWhenAsked(): Promise<string> {
+  for (let i = 0; i < 200; i += 1) {
+    const [row] = listPendingApprovals(db)
+    if (row) return row.id
     await new Promise((r) => setTimeout(r, 25))
   }
   throw new Error('no approval was ever raised')
+}
+
+/** Answer the card once it is up, the way a person clicking the button would. */
+async function answerWhenAsked(decision: 'allow_once' | 'deny'): Promise<void> {
+  resolveApproval(db, await cardWhenAsked(), decision)
 }
 
 const never = new AbortController().signal
@@ -91,9 +90,7 @@ onPosix('nothing runs without a human', () => {
   it('raises a card and waits for it', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'hi'] }, { signal: never })
-    await new Promise((r) => setTimeout(r, 60))
-
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     expect(card?.toolName).toBe('run_command')
     expect(card?.agentId).toBe('boo-1')
     // The card is what the person reads, so the command has to be on it.
@@ -145,8 +142,7 @@ onPosix('a run that is stopped', () => {
     const controller = new AbortController()
     const t = tool()
     const p = t?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
-    await new Promise((r) => setTimeout(r, 60))
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     expect(card).toBeTruthy()
 
     controller.abort()
@@ -164,8 +160,7 @@ onPosix('a run that is stopped', () => {
     const controller = new AbortController()
     const t = tool()
     const p = t?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
-    await new Promise((r) => setTimeout(r, 60))
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     resolveApproval(db, card?.id ?? '', 'allow_once')
     controller.abort()
     await p
@@ -207,17 +202,6 @@ onPosix('the event log', () => {
     })
     for (const e of events) expect(e.raw).not.toContain('launch-codes')
   })
-
-  /** Poll until the card is up. Resolving the program is real file I/O, so a
-   *  fixed sleep loses the race on a loaded machine. */
-  async function cardWhenAsked(): Promise<string> {
-    for (let i = 0; i < 200; i += 1) {
-      const [row] = listPendingApprovals(db)
-      if (row) return row.id
-      await new Promise((r) => setTimeout(r, 25))
-    }
-    throw new Error('no approval was ever raised')
-  }
 
   it('announces a card retired by a stopped run as expired, once', async () => {
     const controller = new AbortController()
@@ -369,8 +353,7 @@ onPosix('a card nobody answers', () => {
   it('does NOT run the command when the card expires', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'must-not-appear'] }, { signal: never })
-    await new Promise((r) => setTimeout(r, 60))
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     // Move the deadline into the past, as the TTL would.
     db.update(toolCallApprovals)
       .set({ expiresAt: Date.now() - 1000 })
@@ -388,8 +371,7 @@ onPosix('a card nobody answers', () => {
     // does not know about must never be read as a person having said yes.
     const t = tool()
     const p = t?.run({ argv: ['echo', 'must-not-appear'] }, { signal: never })
-    await new Promise((r) => setTimeout(r, 60))
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     db.update(toolCallApprovals)
       .set({ status: 'something-new', resolvedAt: Date.now() })
       .where(eq(toolCallApprovals.id, card?.id ?? ''))
@@ -402,8 +384,7 @@ onPosix('a card nobody answers', () => {
   it('does not run a command whose card simply vanished', async () => {
     const t = tool()
     const p = t?.run({ argv: ['echo', 'must-not-appear'] }, { signal: never })
-    await new Promise((r) => setTimeout(r, 60))
-    const [card] = listPendingApprovals(db)
+    const card = getApproval(db, await cardWhenAsked())
     db.delete(toolCallApprovals)
       .where(eq(toolCallApprovals.id, card?.id ?? ''))
       .run()
