@@ -20,8 +20,10 @@ import { formatInterSessionMessage, oneLine } from '@clawboo/board-core'
  * marking its own task blocked because it needs a person. `'check_failed'` is the
  * team's check not passing the work (on its last attempt, or a check that could
  * not run), and `'check_interrupted'` a check a restart cut short; both leave the
- * task for a person too. The others are failures. All of these but the person's
- * decisions are ones the leader must act on rather than keep waiting for.
+ * task for a person too, as does `'done_refused'`: the work passed the check, but
+ * the board did not mark the task done. The others are failures. All of these but
+ * the person's decisions are ones the leader must act on rather than keep waiting
+ * for.
  */
 export type TaskUpdateOutcome =
   | 'done'
@@ -30,6 +32,7 @@ export type TaskUpdateOutcome =
   | 'blocked'
   | 'check_failed'
   | 'check_interrupted'
+  | 'done_refused'
   | 'error'
   | 'aborted'
   | 'timeout'
@@ -53,6 +56,8 @@ const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
   check_failed: "finished, but the work did not pass the team's check: it needs a person",
   check_interrupted:
     'finished, but its check was cut short, so the work was not checked: it needs a person',
+  done_refused:
+    "finished and the work passed the team's check, but the board did not mark it done: it needs a person",
   error: 'failed with an error',
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',
@@ -115,8 +120,12 @@ function resultSource(item: TaskUpdateItem): { from: string; kind: string } {
     return { from: 'clawboo', kind: 'board-note' }
   return {
     from: item.by,
+    // A blocked task and one the board would not mark done carry the agent's own
+    // result, not a failure reason.
     kind:
-      isTaskFailure(item.outcome) && item.outcome !== 'blocked' ? 'task-failure' : 'task-result',
+      isTaskFailure(item.outcome) && item.outcome !== 'blocked' && item.outcome !== 'done_refused'
+        ? 'task-failure'
+        : 'task-result',
   }
 }
 

@@ -545,17 +545,24 @@ describe('team-chat work check', () => {
     expect(h.updates()[0]!.task).toContain('history unreadable')
   })
 
-  it('a board write that fails while parking a task does not leave the session under check', async () => {
+  it('a board write that throws while parking a task is tried again, and the check then ends', async () => {
     const h = makeHarness({ checkThrows: true })
     const update = h.board.updateStatus.bind(h.board)
+    let locked = true
     h.board.updateStatus = async (taskId, status) => {
-      if (status === 'blocked') throw new Error('database is locked')
+      if (status === 'blocked' && locked) throw new Error('database is locked')
       return update(taskId, status)
     }
-    await delegate(h)
+    const id = await delegate(h)
     await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
     await settle()
+    expect(statusOf(h.board, id)).toBe('in_review')
 
+    locked = false
+    await h.engine.sweepStaleSessions()
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('blocked')
     expect(h.engine.checksInFlight()).toBe(0)
   })
 
@@ -621,20 +628,34 @@ describe('team-chat work check', () => {
     expect(h.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
   })
 
-  it('a check that cannot run, whose move to Blocked the board refuses, does not reach Done', async () => {
+  it('a check that cannot run, whose move to Blocked the board refuses, tries the move again', async () => {
     const h = makeHarness({ checkThrows: true })
     const update = h.board.updateStatus.bind(h.board)
+    let refusals = 2
     h.board.updateStatus = async (taskId, status) =>
-      status === 'blocked' ? false : update(taskId, status)
+      status === 'blocked' && refusals-- > 0 ? false : update(taskId, status)
     const id = await delegate(h)
     await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
     await settle()
+
+    // Not parked: the work is still the check's, short of Done, and nobody is
+    // told yet. The sweep tries the move again, refused once more.
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.engine.checksInFlight()).toBe(1)
+    await h.engine.sweepStaleSessions()
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.updates()).toHaveLength(0)
+
+    await h.engine.sweepStaleSessions()
+    await settle()
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
 
-    expect(statusOf(h.board, id)).not.toBe('done')
+    expect(statusOf(h.board, id)).toBe('blocked')
     expect(h.engine.checksInFlight()).toBe(0)
+    expect(h.board.completed.map((c) => c.outcome.status)).toEqual(['succeeded'])
     expect(h.updates()).toHaveLength(1)
     expect(h.updates()[0]!.task).toContain('index.lock')
+    expect(h.updates()[0]!.task).toContain("did not pass the team's check")
     // The task's run had ended; whatever runs on the session now is another turn.
     expect(h.aborted).toHaveLength(0)
   })
@@ -668,9 +689,35 @@ describe('team-chat work check', () => {
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
 
     expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.board.comments.map((c) => c.body).join('\n')).toContain('check passed')
     expect(h.updates()).toHaveLength(1)
-    expect(h.updates()[0]!.task).toContain('check passed')
-    expect(h.updates()[0]!.task).not.toMatch(/earlier attempt failed/i)
+    const update0 = h.updates()[0]!.task
+    expect(update0).toContain('did not mark it done')
+    // The agent did not block it, and no attempt failed.
+    expect(update0).not.toMatch(/marked it blocked/i)
+    expect(update0).not.toMatch(/earlier attempt failed/i)
+  })
+
+  it("a fix round that cannot start leaves the plan's later steps queued for a Retry", async () => {
+    const h = makeHarness()
+    await h.engine.onEvent(
+      sk('leader'),
+      doneEvent(
+        'r1',
+        '<plan><step to="@Bug Boo">write the parser</step><step to="@Bug Boo">document the parser</step></plan>',
+      ),
+    )
+    const [first, second] = h.board.created.map((t) => t.id)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    h.board.createExecution = async () => null
+    await h.board.updateStatus(first!, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+
+    expect(statusOf(h.board, first!)).toBe('blocked')
+    // As when a check fails for good: a person's Retry carries the plan on.
+    expect(statusOf(h.board, second!)).toBe('todo')
   })
 
   it('a check a restart cut short keeps its run open until the task is parked', async () => {
@@ -709,5 +756,87 @@ describe('team-chat work check', () => {
     expect(statusOf(before.board, id)).toBe('blocked')
     expect(before.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
     expect(before.updates()).toHaveLength(1)
+  })
+
+  /** A board whose move to Blocked fails while it is `down`, and whose reads
+   *  then answer null, as the server's client does for a failed read. */
+  function failingBoard(h: ReturnType<typeof makeHarness>, readFailures: number) {
+    const update = h.board.updateStatus.bind(h.board)
+    const read = h.board.getTask.bind(h.board)
+    const state = { down: true, reads: 0 }
+    h.board.updateStatus = async (taskId, status) => {
+      if (status === 'blocked' && state.down) {
+        state.reads = readFailures
+        return false
+      }
+      return update(taskId, status)
+    }
+    h.board.getTask = async (taskId) => {
+      if (state.reads > 0) {
+        state.reads -= 1
+        return null
+      }
+      return read(taskId)
+    }
+    return state
+  }
+
+  it('a check whose park fails and whose task cannot be read once never reaches Done', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const board = failingBoard(h, 1)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.engine.checksInFlight()).toBe(1)
+    expect(h.updates()).toHaveLength(0)
+
+    board.down = false
+    await h.engine.sweepStaleSessions()
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain("did not pass the team's check")
+  })
+
+  it('a check whose task cannot be read for a while keeps waiting, short of Done', async () => {
+    const h = makeHarness({ checkThrows: true })
+    const board = failingBoard(h, Number.POSITIVE_INFINITY)
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    for (let i = 0; i < 3; i++) await h.engine.sweepStaleSessions()
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.engine.checksInFlight()).toBe(1)
+    expect(h.board.completed).toHaveLength(0)
+    expect(h.updates()).toHaveLength(0)
+
+    board.down = false
+    board.reads = 0
+    await h.engine.sweepStaleSessions()
+    await settle()
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.engine.checksInFlight()).toBe(0)
+  })
+
+  it('a failed check whose task the host did not park still never reaches Done', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    // The host's move to Blocked did not land: the card is still In review.
+    h.checks[0]!.resolve({ verdict: 'failed', reason: 'npm test still exits 1.' })
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('npm test still exits 1.')
   })
 })
