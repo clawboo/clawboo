@@ -40,7 +40,6 @@ import {
   createBoardOrchestrator,
   createNudgeQueue,
   HUMAN_TURN,
-  REFLECT_WINDOW_MS,
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
@@ -49,6 +48,7 @@ import { hasRunForTask, resetRunSteers } from '../../runSteers'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 import { forwardPersonCommentToRun } from '../taskSteer'
+import { settle } from './settleCascade'
 
 const TEAM = 'T'
 const LEAD = 'lead'
@@ -155,17 +155,6 @@ class SteeredWorkerAdapter implements RuntimeAdapter {
   async writeContext(): Promise<void> {}
 }
 
-async function settle(until: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
-  }
-  for (let t = 0; t < budgetMs && !until(); t += 250) {
-    await vi.advanceTimersByTimeAsync(250)
-    await flush()
-  }
-  await flush()
-}
-
 describe('a person steering a running task', () => {
   let home: string
   let prevHome: string | undefined
@@ -253,7 +242,7 @@ describe('a person steering a running task', () => {
     await settle(() => {
       const t = listTasks(db, { teamId: TEAM })[0]
       return t?.status === 'in_progress' && hasRunForTask(t.id)
-    })
+    }, "the worker's run going live on its task")
     const task = listTasks(db, { teamId: TEAM })[0]!
     expect(engine.taskForSession(skFor(WORKER))).toBe(task.id)
 
@@ -266,7 +255,7 @@ describe('a person steering a running task', () => {
     expect(listUndeliveredInbox(db, WORKER, { teamId: TEAM })).toHaveLength(0)
 
     // Let the resumed run finish and the reflection reach the lead.
-    await settle(() => lead.messages.length >= 2)
+    await settle(() => lead.messages.length >= 2, "the lead's reflection turn")
 
     const after = listTasks(db, { teamId: TEAM })[0]!
     expect(after.status).toBe('done')

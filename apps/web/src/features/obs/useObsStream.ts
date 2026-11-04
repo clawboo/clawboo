@@ -39,6 +39,8 @@ export interface ObsStreamState {
 
 const MAX_EVENTS = 600 // bound the in-memory tail
 const DEFAULT_BACKFILL = 200
+/** How long to wait before reopening a stream the browser gave up on. */
+export const STREAM_REOPEN_MS = 5000
 
 function scopeParams(scope: ObsScope): URLSearchParams {
   const p = new URLSearchParams()
@@ -91,6 +93,7 @@ export function useObsStream(
     const seen = new Set<number>()
     let maxSeq = 0
     let es: EventSource | null = null
+    let reopen: ReturnType<typeof setTimeout> | null = null
     // Abort the in-flight backfill fetch on unmount so no request escapes the
     // component lifecycle (keeps strict-MSW tests clean + avoids a late setState).
     const backfillAbort = new AbortController()
@@ -112,8 +115,19 @@ export function useObsStream(
         if (!cancelled) setLive(true)
       }
       es.onerror = () => {
-        // EventSource reconnects on its own (resuming via Last-Event-ID).
-        if (!cancelled) setLive(false)
+        if (cancelled) return
+        setLive(false)
+        // EventSource reconnects on its own after a dropped connection
+        // (resuming via Last-Event-ID), but gives up for good on an HTTP error,
+        // such as a proxy's 502 while the server restarts. A tail that stays
+        // dead takes the fleet's live status and the browser alerts with it,
+        // so open a fresh one a little later from the last seq seen.
+        if (es?.readyState === EventSource.CLOSED && reopen === null) {
+          reopen = setTimeout(() => {
+            reopen = null
+            if (!cancelled) openStream()
+          }, STREAM_REOPEN_MS)
+        }
       }
       es.onmessage = (e) => {
         if (cancelled) return
@@ -170,6 +184,7 @@ export function useObsStream(
     return () => {
       cancelled = true
       backfillAbort.abort()
+      if (reopen !== null) clearTimeout(reopen)
       es?.close()
     }
   }, [scopeKey, enabled, limit])

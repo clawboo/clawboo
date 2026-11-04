@@ -1,5 +1,6 @@
 // Headless bridge: obs execution events → fleet status, so the graph is alive
-// during board runs.
+// during board runs. It also notes the newest event that may have changed what
+// needs a person, which is what the browser alerts listen for.
 //
 // Mounted once at the app root next to `GatewayBootstrap` (the same
 // renders-nothing, does-one-global-job shape). It has to be global rather than
@@ -12,6 +13,8 @@
 
 import { useEffect, useRef } from 'react'
 
+import { useAlertSignal } from '@/features/alerts/alertSignal'
+import { latestAlertTrigger } from '@/features/alerts/alertRules'
 import { useFleetStore } from '@/stores/fleet'
 import { useRunActivityStore } from '@/stores/runActivity'
 
@@ -60,6 +63,12 @@ export function RunStatusBridge(): null {
   // has to keep working.
   const appliedSeq = useRef(0)
   const folded = useRef<Set<string>>(new Set())
+
+  // The alerts read this tail rather than opening a second stream.
+  useEffect(() => {
+    const seq = latestAlertTrigger(events)
+    if (seq > 0) useAlertSignal.getState().note(seq)
+  }, [events])
 
   useEffect(() => {
     if (events.length === 0 || agentIdKey === '') return

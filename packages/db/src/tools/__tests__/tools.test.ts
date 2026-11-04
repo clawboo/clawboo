@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
 import { createDb, type ClawbooDb } from '../../db'
+import { listEvents } from '../../events/listEvents'
 import { defaultAvailabilityContext, evaluateAvailability } from '../availability'
 import { executeBrokeredCall } from '../broker'
 import { riskClassifierInspector, runInspectors } from '../inspectors'
@@ -562,6 +563,23 @@ describe('broker pipeline', () => {
     })
     expect(a.argsSummary).not.toContain('sk-abcdef1234567890')
     expect(a.argsSummary).toContain('[REDACTED]')
+  })
+
+  it('createApproval puts the wait on the event log, without the arguments', () => {
+    const a = createApproval(db, {
+      toolName: 'github_create_issue',
+      agentId: 'agent-1',
+      taskId: 'task-1',
+      args: { apiKey: 'sk-abcdef1234567890', title: 'secret plan' },
+      reason: 'r',
+    })
+    const events = listEvents(db, { kinds: ['approval_requested'] })
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ agentId: 'agent-1', taskId: 'task-1' })
+    const data = JSON.parse(events[0]!.data) as Record<string, unknown>
+    expect(data).toMatchObject({ approvalId: a.id, kind: 'tool', toolName: 'github_create_issue' })
+    expect(events[0]!.data).not.toContain('secret plan')
+    expect(events[0]!.data).not.toContain('sk-abcdef')
   })
 })
 

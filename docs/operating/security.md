@@ -210,6 +210,19 @@ This keeps a copy or backup of your Clawboo folder from carrying the key. It doe
 
 Agents work with your user account's permissions. Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off, so they can read and change any file you can, run commands and reach the network. A task's git worktree keeps its file changes apart, but it is not a sandbox. A run without a worktree starts in its team's folder (`~/.clawboo/workspaces/<team id>`). That covers every team-chat turn, every one-to-one chat with these agents, research and review tasks, and every Routine you make in the dashboard. The folder only sets where the run starts: from there these runtimes can still reach Clawboo's database and key vault. Clawboo Native agents run a shell command only when their **Let this Boo ask to run commands** switch is on and you approve that command. Coding runtimes and connectors do not inherit Clawboo's own secrets from the environment (an OpenClaw Gateway that Clawboo starts does), but they can read credential files on disk. Run untrusted work under a separate user account or in a virtual machine. [What agents can do](/concepts/permissions) has the details for each runtime.
 
+**Agents' browsers.** The Playwright and Chrome DevTools connectors drive a real Chrome on this computer, so Clawboo keeps them off the dashboard and off your files:
+
+- Each browser starts with the dashboard's port blocked on every loopback address and on the address set in `HOST`. Chrome applies the block when it looks up an address, so a redirect, a page's script or a WebSocket cannot reach the dashboard either.
+- Clawboo refuses any connector call that names the dashboard, and any `url` that would open a file on this computer, such as `~/.clawboo/access-token`.
+
+What this leaves open:
+
+- A name that reaches Clawboo through a reverse proxy, or one in `CLAWBOO_ALLOWED_HOSTS`, is not blocked. There the access token keeps an agent's browser out, because the browser has its own profile, without your sign-in cookie.
+- If the browser sends web traffic through a proxy server, such as one set in this computer's network settings, a redirect to a network address set in `HOST` can reach the dashboard through the proxy, which looks the address up itself. Chrome keeps loopback addresses off a proxy by default, so the dashboard's own loopback addresses stay blocked. There, too, only the access token keeps an agent out.
+- Other ports on this computer stay reachable, so a local web server that serves your files, or forwards to Clawboo, is open to agents' browsers.
+- With Admin access, Playwright's `browser_run_code_unsafe` runs code in the Playwright server itself, outside these checks.
+- A browser connector you add yourself gets none of this.
+
 ## The OpenClaw Gateway device key
 
 When Clawboo connects to an OpenClaw Gateway, its server signs the handshake with an Ed25519 device key stored in `~/.clawboo/proxy-device-identity.json`, readable only by you. The key identifies Clawboo to the Gateway and nothing else: it plays no part in signing in to the dashboard, which is the access token's job. The Gateway token stays on the server too. The browser never receives it, and `GET /api/settings` reports only whether one is set. To connect a Gateway, see [OpenClaw](/runtimes/openclaw).

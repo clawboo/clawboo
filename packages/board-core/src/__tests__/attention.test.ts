@@ -31,6 +31,49 @@ describe('taskAttention: blocked tasks always need a person', () => {
     expect(taskAttention({ status: 'blocked', execs: [] })?.reason).toBe('blocked')
     expect(taskAttention({ status: 'blocked', execs: runs('succeeded') })?.reason).toBe('blocked')
   })
+
+  it("says when the block is a person's own move, by the run that started last", () => {
+    const ran = (at: number) => ({ status: 'succeeded', startedAt: at, createdAt: at - 5 })
+    // Moved to Blocked after the last run started, or with no run at all.
+    expect(taskAttention({ status: 'blocked', execs: [ran(1000)], personMovedAt: 2000 })).toEqual({
+      reason: 'blocked',
+      failedRuns: 0,
+      byPerson: true,
+    })
+    expect(taskAttention({ status: 'blocked', execs: [], personMovedAt: 2000 })?.byPerson).toBe(
+      true,
+    )
+    // A run started after the person's move, so the block is that run's call.
+    expect(taskAttention({ status: 'blocked', execs: [ran(3000)], personMovedAt: 2000 })).toEqual({
+      reason: 'blocked',
+      failedRuns: 0,
+    })
+    // A run that only has a claim or a creation time still counts as started.
+    expect(
+      taskAttention({
+        status: 'blocked',
+        execs: [{ status: 'succeeded', claimedAt: 3000 }],
+        personMovedAt: 2000,
+      })?.byPerson,
+    ).toBeUndefined()
+    // Never moved by a person.
+    expect(taskAttention({ status: 'blocked', execs: [ran(1000)] })?.byPerson).toBeUndefined()
+  })
+
+  it("does not mark a failure or a check as the person's, whoever moved the card", () => {
+    const failed = [{ status: 'failed', startedAt: 1000 }]
+    expect(
+      taskAttention({ status: 'blocked', execs: failed, personMovedAt: 2000 })?.byPerson,
+    ).toBeUndefined()
+    expect(
+      taskAttention({
+        status: 'blocked',
+        execs: [],
+        verificationBlocked: true,
+        personMovedAt: 2000,
+      })?.byPerson,
+    ).toBeUndefined()
+  })
 })
 
 describe('taskAttention: a todo task needs a person only when nothing will fire it', () => {

@@ -136,6 +136,27 @@ describe('RuntimeDiagnosticsDrawer', () => {
     expect(await screen.findByText('3')).toBeInTheDocument() // skills count
   })
 
+  it('names the Agent SDK’s binary when Claude Code is installed through it', async () => {
+    const sdkBin = '/opt/clawboo/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude'
+    render(
+      <RuntimeDiagnosticsDrawer
+        target={target({
+          id: 'claude-code',
+          name: 'Claude Code',
+          runtimeClass: 'wrapped-oneshot',
+          installed: true,
+          binPath: sdkBin,
+          binSource: 'agent-sdk',
+        })}
+        onClose={noop}
+        onRecheck={noop}
+      />,
+    )
+    expect(await screen.findByTestId('runtime-diagnostics-drawer')).toBeInTheDocument()
+    expect(screen.getByText('Agent SDK binary')).toBeInTheDocument()
+    expect(screen.getByText(sdkBin)).toBeInTheDocument()
+  })
+
   it('shows credential PRESENCE (env-var name) — never a value (leak guard)', async () => {
     const SECRET = 'sk-ant-LEAK-CANARY-zzz'
     render(

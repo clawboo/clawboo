@@ -104,7 +104,7 @@ test.describe('Teams', () => {
     await page.locator('[data-testid="settings-nav-system"]').click()
 
     // MaintenancePanel renders this subtitle
-    await expect(page.getByText('Manage your OpenClaw installation')).toBeVisible({
+    await expect(page.getByText('Alerts and your OpenClaw installation')).toBeVisible({
       timeout: 10_000,
     })
   })

@@ -128,6 +128,10 @@ export const debtNoteSchema = z.object({
 })
 export type DebtNote = z.infer<typeof debtNoteSchema>
 
+/** The `criterion` of the debt note a red deterministic gate leaves at exhaustion.
+ *  A later pass ran the gate green, so it never carries this note. */
+export const GATE_DEBT_CRITERION = 'deterministic gate'
+
 /**
  * The full verification record stored on a task (one TEXT cell). `attempts`
  * carries the history, so the `in_review → done` gate is a single-row read.

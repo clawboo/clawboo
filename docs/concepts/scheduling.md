@@ -22,7 +22,7 @@ A **routine** is work Clawboo starts on a schedule. Each time it fires, it hands
 ## How a routine fires
 
 - **The routine is a row in Clawboo's database.** It holds who the routine goes to, its schedule, its instructions, its status and the time of its next run.
-- **The schedule** is a cron expression, such as `0 9 * * 1-5` for weekdays at 9:00, or a single time written as `once@` followed by an ISO date and time. Cron times use the time zone of the machine the Clawboo server runs on.
+- **The schedule** is a cron expression, such as `0 9 * * 1-5` for weekdays at 9:00, or a single time written as `once@` followed by an ISO date and time. Cron times use the routine time zone: the zone of the machine the Clawboo server runs on, until you pick another in the routine dialog (see [Routines](/using/routines#the-time-zone)).
 - **The ticker**, a timer inside the Clawboo server, wakes when the next routine is due, and at least once a minute. Each time, it finds the routines that are due, claims each one so that it fires only once, and hands it on. Routines that fall due together fire side by side. Nothing fires while the Clawboo server is stopped.
 - **Run now** queues a routine immediately, and the ticker fires it straight away.
 

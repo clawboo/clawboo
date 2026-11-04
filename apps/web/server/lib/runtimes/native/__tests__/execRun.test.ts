@@ -168,6 +168,36 @@ describePosix('runApprovedCommand', () => {
     }
   })
 
+  it('keeps npm’s prefix and cache for an approved command, and no npm credential', async () => {
+    // A server whose user cannot write npm's built-in prefix points npm at its
+    // own directory. Dropping that made an approved `npm install -g` fail.
+    const planted: Record<string, string> = {
+      npm_config_prefix: '/tmp/clawboo-npm-prefix-probe',
+      NPM_CONFIG_CACHE: '/tmp/clawboo-npm-cache-probe',
+      npm_config__authToken: 'npm-credential-probe',
+    }
+    const saved = new Map<string, string | undefined>()
+    for (const k of [...Object.keys(planted), 'npm_config_update_notifier']) {
+      saved.set(k, process.env[k])
+    }
+    Object.assign(process.env, planted)
+    delete process.env['npm_config_update_notifier']
+    try {
+      const res = await run(['printenv'])
+      expect(res.output).toContain('npm_config_prefix=/tmp/clawboo-npm-prefix-probe')
+      expect(res.output).toContain('NPM_CONFIG_CACHE=/tmp/clawboo-npm-cache-probe')
+      expect(res.output).not.toContain('npm-credential-probe')
+      // The update check stays as the operator configured it: only a connector
+      // launch turns it off.
+      expect(res.output).not.toMatch(/^npm_config_update_notifier=/m)
+    } finally {
+      for (const [k, v] of saved) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  })
+
   it('does not re-parse the argv through a shell', async () => {
     // `shell: true` would make these operators, which is the property this whole
     // tier exists to refuse. As argv items they are literal text.

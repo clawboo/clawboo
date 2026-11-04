@@ -64,6 +64,7 @@ import {
   runnerRerunFor,
   type RunnerRerun,
 } from '../lib/runnerRerun'
+import { taskRunSteering } from '../lib/runSteers'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
@@ -133,6 +134,8 @@ export function boardGetGET(req: Request, res: Response): void {
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
         runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
+        // How the run on it takes a comment right now, for the composer's hint.
+        runSteering: taskRunSteering(taskId),
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
@@ -806,6 +809,15 @@ export async function boardWorkspaceProvisionPOST(req: Request, res: Response): 
         res.status(404).json({ ok: false, error: 'task not found' })
         return
       }
+      if (result.reason === 'unsafe_to_rebuild') {
+        res.status(409).json({
+          ok: false,
+          error: 'unsafe_to_rebuild',
+          worktreePath: result.worktreePath,
+          message: `Refusing to replace ${result.worktreePath}: ${result.why}.`,
+        })
+        return
+      }
       res.status(422).json({ ok: false, error: 'no_isolation', isolation: result.isolation })
       return
     }
@@ -899,13 +911,19 @@ export function boardExecutionsGET(req: Request, res: Response): void {
 
 // ─── GET /api/board/:taskId/workspace/detail ─────────────────────────────────
 // The task-detail drawer's Workspace tab: SoR file contents + the unified diff
-// (baseline vs working tree, SoR bookkeeping excluded).
+// (baseline vs working tree, SoR bookkeeping excluded). Most tasks never get a
+// worktree, and the drawer asks on every open, so a known task without one is
+// an ordinary answer (`ok: false`), not a 404; only an unknown task is.
 export async function boardWorkspaceDetailGET(req: Request, res: Response): Promise<void> {
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const detail = await readWorktreeDetail(taskId)
     if (!detail.ok) {
-      res.status(404).json({ error: 'workspace not found' })
+      if (!getTask(getDb(), taskId)) {
+        res.status(404).json({ error: 'task not found' })
+        return
+      }
+      res.json({ ok: false, reason: 'no_workspace' })
       return
     }
     res.json(detail)
@@ -1040,21 +1058,30 @@ export async function boardWorkspacePreviewGET(req: Request, res: Response): Pro
       res.redirect(302, `${base}${req.baseUrl}${req.path}/${search}`)
       return
     }
+    // Opened before any header is set, so a refused open answers as an error.
+    const opened = await openPreviewStream(found)
+    if (!opened.ok) {
+      res.status(opened.status).json({ ok: false, error: opened.error })
+      return
+    }
     res.setHeader('Content-Type', found.contentType)
-    res.setHeader('Content-Length', String(found.size))
+    res.setHeader('Content-Length', String(opened.size))
     // A worktree changes under a running agent, so a cached asset would show a
     // stale build seconds after the fix landed.
     res.setHeader('Cache-Control', 'no-store')
     // Belt and braces on top of the content-type allowlist: never let a
     // previewed file be re-sniffed into something executable.
     res.setHeader('X-Content-Type-Options', 'nosniff')
-    const stream = openPreviewStream(found.absPath)
+    const { stream } = opened
     stream.on('error', () => {
       if (!res.headersSent) res.status(500).json({ error: 'preview read failed' })
       else res.end()
     })
+    // A client that leaves mid-stream would otherwise keep the file open.
+    res.on('close', () => stream.destroy())
     stream.pipe(res)
   } catch (err) {
+    log.error({ err }, 'serving a preview file failed')
     res.status(500).json({ error: String(err) })
   }
 }
