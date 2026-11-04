@@ -191,24 +191,26 @@ describe('saved secret values', () => {
 
   it('keeps a value that overlaps itself cheap to mask across a long output', () => {
     // Every start position of a periodic value is a match, so recording each one
-    // separately made millions of spans for a few megabytes of text.
-    const periodic = 'ab'.repeat(8)
-    const plain = ['q7Lm2ZxW', '9tRb4VcN'].join('')
-    const text = `<${'ab'.repeat(2_000_000)}>`
-    const time = (value: string): number => {
-      values = new Set([value])
-      const started = performance.now()
-      scrubResultSummary(text, text.length)
-      return performance.now() - started
+    // separately made one span per start, all held and sorted before the merge.
+    // Counted rather than timed, so a loaded machine cannot fail it: the largest
+    // span list sorted in the pass has to stay at the number of runs, here one,
+    // however long the output is.
+    values = new Set(['ab'.repeat(8)])
+    const text = `<${'ab'.repeat(200_000)}>`
+    const sort = Array.prototype.sort
+    let largest = 0
+    Array.prototype.sort = function <T>(this: T[], compare?: (a: T, b: T) => number): T[] {
+      largest = Math.max(largest, this.length)
+      return sort.call(this, compare) as T[]
     }
-    time(plain)
-    const baseline = time(plain)
-    const overlapping = time(periodic)
-    expect(scrubResultSummary(text, text.length)).toBe('<[REDACTED]>')
-    // The scan itself still visits every start; only the bookkeeping must not grow.
-    // Measured: about 5x the baseline once runs fold, about 40x when every start
-    // was kept and sorted.
-    expect(overlapping).toBeLessThan(baseline * 12 + 100)
+    let out: string
+    try {
+      out = scrubResultSummary(text, text.length)
+    } finally {
+      Array.prototype.sort = sort
+    }
+    expect(out).toBe('<[REDACTED]>')
+    expect(largest).toBeLessThanOrEqual(1)
   })
 
   it('stays fast on a large output', () => {

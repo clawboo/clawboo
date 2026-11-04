@@ -87,6 +87,23 @@ describe('two instances on one origin', () => {
     })
   })
 
+  it("keeps one instance's browser alert choice out of another", async () => {
+    await asInstance('/a', async () => {
+      const { useAlertPrefs } = await import('@/features/alerts/alertPrefs')
+      useAlertPrefs.getState().setChoice('on')
+    })
+    expect(localStorage.getItem('/a:clawboo.alerts.needsYou')).toBe('on')
+    await asInstance('/b', async () => {
+      const { useAlertPrefs } = await import('@/features/alerts/alertPrefs')
+      expect(useAlertPrefs.getState().choice).toBeNull()
+      useAlertPrefs.getState().setChoice('off')
+    })
+    await asInstance('/a', async () => {
+      const { useAlertPrefs } = await import('@/features/alerts/alertPrefs')
+      expect(useAlertPrefs.getState().choice).toBe('on')
+    })
+  })
+
   it('moves a key stored before the prefix into the first instance that reads it', async () => {
     localStorage.setItem('clawboo.tour.shown', '1')
     localStorage.setItem('clawboo:chat:session:v1', JSON.stringify({ a1: 'agent:a1:old' }))

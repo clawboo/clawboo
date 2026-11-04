@@ -6,6 +6,8 @@
 
 import { create } from 'zustand'
 
+import { scopedLocalStorage } from '@/lib/clientStorage'
+
 export type AlertChoice = 'on' | 'off'
 
 /** What alerts can do here, in the order the checks run. */
@@ -24,7 +26,7 @@ const STORAGE_KEY = 'clawboo.alerts.needsYou'
 
 function readChoice(): AlertChoice | null {
   try {
-    const v = localStorage.getItem(STORAGE_KEY)
+    const v = scopedLocalStorage.getItem(STORAGE_KEY)
     return v === 'on' || v === 'off' ? v : null
   } catch {
     return null
@@ -33,8 +35,8 @@ function readChoice(): AlertChoice | null {
 
 function writeChoice(choice: AlertChoice | null): void {
   try {
-    if (choice) localStorage.setItem(STORAGE_KEY, choice)
-    else localStorage.removeItem(STORAGE_KEY)
+    if (choice) scopedLocalStorage.setItem(STORAGE_KEY, choice)
+    else scopedLocalStorage.removeItem(STORAGE_KEY)
   } catch {
     // Private mode or blocked storage: the choice holds for this visit only.
   }
