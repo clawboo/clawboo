@@ -166,6 +166,7 @@ When a team-chat check cannot finish, the task waits in **Needs you** with a com
 - **Clawboo restarts, or the chat is closed,** while the check runs. The task moves once Clawboo is running again.
 - **The check does not answer within 30 minutes.** The verify command itself is stopped after 10.
 - **The check cannot run**, for example because the folder's history is missing, or a fix round can no longer be checked after an earlier attempt failed.
+- **A fix round cannot be started**, for example because the board could not record its run. The comment says why.
 
 If Clawboo cannot record the team folder when a task starts, the task is not checked, and a comment on it says so. Pressing **Stop** during a check lets it finish: a pass still lands in **Done**, and a failure starts no fix round. If a person moves the card while its check runs, the check's result is dropped and the card stays where they put it. After a person's **Retry** of a task that failed its check, the task is measured again from where it first began, so a retry that changes nothing is still checked. Deleting a team deletes its folder's history too.
 

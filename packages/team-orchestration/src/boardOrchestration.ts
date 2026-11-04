@@ -26,7 +26,7 @@ import { createSuspendDetector, setAwakeTimeout, type RuntimeEvent } from '@claw
 import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
 import { classifyError, isAccountError } from '@clawboo/obs'
 
-import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
+import type { BoardClient, BoardTask, CompleteExecutionOutcome, ExecutionRef } from './boardClient'
 import { DeliveryRefusedError } from './deliveryRefused'
 import {
   buildTaskUpdateMessage,
@@ -1935,17 +1935,31 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     fixNote: string,
   ): Promise<void> {
     const agentId = deps.agentIdForSession(sessionKey)
-    const detail = await deps.board.getTask(taskId)
+    let detail: Awaited<ReturnType<BoardClient['getTask']>>
+    let exec: ExecutionRef | null
     const prevExec = taskToExec.get(taskId)
-    if (prevExec) {
-      taskToExec.delete(taskId)
-      const compacted = deps.compact ? deps.compact(summary) : summary
-      await deps.board.completeExecution(prevExec, {
-        status: 'succeeded',
-        summary: compacted.slice(0, 20_000),
-      })
+    let prevClosed = false
+    try {
+      detail = await deps.board.getTask(taskId)
+      if (prevExec) {
+        taskToExec.delete(taskId)
+        const compacted = deps.compact ? deps.compact(summary) : summary
+        await deps.board.completeExecution(prevExec, {
+          status: 'succeeded',
+          summary: compacted.slice(0, 20_000),
+        })
+        prevClosed = true
+      }
+      exec = agentId && detail ? await deps.board.createExecution(taskId, 'openclaw') : null
+    } catch (err) {
+      // A fix round that cannot be set up is a failed run, not one still going:
+      // the task goes to a person with the reason. A first run that could not be
+      // closed is the task's again, so the failure closes it.
+      if (prevExec && !prevClosed && !taskToExec.has(taskId)) taskToExec.set(taskId, prevExec)
+      const why = err instanceof Error ? err.message : String(err)
+      await failForSession(sessionKey, 'error', `Could not start the fix round: ${why}`)
+      return
     }
-    const exec = agentId && detail ? await deps.board.createExecution(taskId, 'openclaw') : null
     if (!agentId || !detail || !exec) {
       await releaseClaimed(taskId, sessionKey)
       return

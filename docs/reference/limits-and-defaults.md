@@ -36,7 +36,7 @@ Limits on running work count only the time the computer is awake. When a laptop 
 | Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:106`   |
 | Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:64`    |
 | The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:91,98` |
-| Time a delegated task waits for a free run slot                                      | Not counted      | No        | `packages/team-orchestration/src/boardOrchestration.ts:2400`  |
+| Time a delegated task waits for a free run slot                                      | Not counted      | No        | `packages/team-orchestration/src/boardOrchestration.ts:2414`  |
 | How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:69`         |
 | Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:54`    |
 | Times a task update is sent again when its run never finished                        | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:123`   |

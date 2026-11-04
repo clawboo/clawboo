@@ -575,4 +575,49 @@ describe('team-chat work check', () => {
 
     expect(h.board.created.length).toBe(before + 1)
   })
+
+  it('a fix round that cannot be set up leaves the task for a person, with the reason', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    // The fix round waits behind the agent's other turn, then cannot open its run.
+    h.occupied.add(sk('a2'))
+    await h.board.updateStatus(id, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+    h.board.createExecution = async () => {
+      throw new Error('database is locked')
+    }
+    h.occupied.delete(sk('a2'))
+    await h.engine.onEvent(sk('a2'), doneEvent('chat-1', 'sure, happy to help'))
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(h.toWorker()).toHaveLength(1)
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.board.comments.map((c) => c.body).join('\n')).toContain('database is locked')
+    expect(h.updates()).toHaveLength(1)
+    expect(h.updates()[0]!.task).toContain('database is locked')
+  })
+
+  it('a fix round whose first run cannot be closed still has that run closed, and the task goes to a person', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    const complete = h.board.completeExecution.bind(h.board)
+    let refusals = 1
+    h.board.completeExecution = async (execId, outcome) => {
+      if (refusals-- > 0) throw new Error('database is locked')
+      return complete(execId, outcome)
+    }
+    await h.board.updateStatus(id, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+
+    expect(h.toWorker()).toHaveLength(1)
+    expect(statusOf(h.board, id)).toBe('blocked')
+    expect(h.board.completed.map((c) => c.outcome.status)).toEqual(['failed'])
+  })
 })

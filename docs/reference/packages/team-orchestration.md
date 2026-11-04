@@ -107,7 +107,8 @@ would lose to its own claim, and one that completed the task would complete it t
   the idle watchdog skips it, and its other turns' terminals are not the task's. The check answers `pass` (the
   task is completed as usual), `retry` with a fix note (the first execution closes as succeeded and a new one
   delivers the note plus the task's brief; while `isSessionOccupied` reports another turn the session stays under
-  check and the fix round waits for that turn's end, and after a Stop none starts), `failed` (the host blocked the
+  check and the fix round waits for that turn's end, and after a Stop none starts; a fix round whose board writes
+  fail before it is sent fails the session with the error, like a rejected delivery), `failed` (the host blocked the
   task; the delegator's `[Task Update]` has the outcome `check_failed`) or `decided` (a person moved the card). A
   check a person's move overtook finishes nothing, even when the task is running again. A `prepare` that rejects, a
   check that throws, or one that has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
