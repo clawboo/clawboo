@@ -3,7 +3,7 @@
 // outside all of them is still refused before anything is removed.
 
 import { existsSync } from 'node:fs'
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, utimes, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -119,5 +119,28 @@ describe('pause and complete across several roots', () => {
     expect(existsSync(mine.worktreePath)).toBe(false)
     expect(existsSync(theirs.worktreePath)).toBe(true)
     expect(await isWorktreeRegistered(repo, theirs.worktreePath)).toBe(true)
+  })
+
+  it('GC counts only owned folders toward maxCount', async () => {
+    // The folder the caller does not own is the newer one. Counted, it would take
+    // the one slot and push the owned folder over the cap.
+    const mine = await provisionUnderWorkRoot('t1')
+    const theirs = await provisionUnderWorkRoot('t2')
+    const now = Date.now()
+    await utimes(theirs.worktreePath, new Date(now), new Date(now))
+    await utimes(mine.worktreePath, new Date(now - 60_000), new Date(now - 60_000))
+
+    const res = await gcWorktrees({
+      repoPath: repo,
+      rootDir: workRoot,
+      maxAgeMs: 60 * 60 * 1000,
+      maxCount: 1,
+      now,
+      owns: (taskId) => taskId === 't1',
+    })
+
+    expect(res.reaped).toEqual([])
+    expect(existsSync(mine.worktreePath)).toBe(true)
+    expect(existsSync(theirs.worktreePath)).toBe(true)
   })
 })

@@ -151,7 +151,7 @@ Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this
 
 - `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`): to see whether you signed in with `codex login`. Each Codex agent then runs with its own home under `~/.clawboo/runtimes/`.
 - `~/.hermes/auth.json` (or `$HERMES_HOME/auth.json`): to see whether you signed in to Hermes.
-- The work folder (`CLAWBOO_WORK_DIR`, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`): task worktrees the board records there, which Clawboo pauses, completes, checks and cleans up where they are. New ones still go in `~/.clawboo`; see [The work folder](/operating/data-and-state#the-work-folder).
+- The work folder (`CLAWBOO_WORK_DIR`, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`): task worktrees the board records there, which Clawboo pauses, completes, checks and cleans up where they are. New ones still go in `CLAWBOO_HOME` (`~/.clawboo` by default); see [The work folder](/operating/data-and-state#the-work-folder).
 - `~/.claude`: Claude Code agents run with your real home folder and save their session files under `~/.claude/projects`. Clawboo starts them without your own settings, MCP servers and memory files from there.
 
 <Accordion title="Under the hood">
