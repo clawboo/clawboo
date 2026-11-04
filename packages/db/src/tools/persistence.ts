@@ -9,7 +9,7 @@ import { randomUUID } from 'node:crypto'
 import { and, desc, eq, gt, lt, lte } from 'drizzle-orm'
 
 import type { ToolClass } from './toolClass'
-import { withWriteRetry } from '../board/contention'
+import { immediateWrite, withWriteRetry } from '../board/contention'
 import type { ClawbooDb } from '../db'
 import {
   toolCallApprovals,
@@ -243,21 +243,22 @@ export function resolveApproval(
   id: string,
   decision: ApprovalDecision,
 ): DbToolCallApproval | null {
-  const now = Date.now()
-  const changed = withWriteRetry(
-    () =>
-      db
-        .update(toolCallApprovals)
-        .set({ status: decision, resolvedAt: now })
-        .where(
-          and(
-            eq(toolCallApprovals.id, id),
-            eq(toolCallApprovals.status, 'pending'),
-            gt(toolCallApprovals.expiresAt, now),
-          ),
-        )
-        .run().changes,
-  )
+  const changed = immediateWrite(db, (tx) => {
+    // The clock is read once the write lock is held. An answer that waited out
+    // a busy lock past the deadline is late, whenever it was sent.
+    const now = Date.now()
+    return tx
+      .update(toolCallApprovals)
+      .set({ status: decision, resolvedAt: now })
+      .where(
+        and(
+          eq(toolCallApprovals.id, id),
+          eq(toolCallApprovals.status, 'pending'),
+          gt(toolCallApprovals.expiresAt, now),
+        ),
+      )
+      .run().changes
+  })
   if (changed === 0) expirePendingApproval(db, id, { pastDeadlineOnly: true })
   const row = getApproval(db, id)
   // Announced BEFORE the mint below. Only the call that did the resolving gets

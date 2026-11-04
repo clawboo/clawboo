@@ -5,8 +5,10 @@
 // path in the db layer, and pin that the arguments never ride along.
 
 import { mkdtempSync, rmSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import path from 'node:path'
+import { Worker } from 'node:worker_threads'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
@@ -208,6 +210,39 @@ describe('resolveApproval', () => {
     expect(resolved.map((e) => e.data)).toEqual([
       { approvalId: a.id, decision: 'expired', kind: 'tool', toolName: 'gh_comment' },
     ])
+  })
+
+  it('refuses an answer that waited out a busy lock past the deadline', async () => {
+    // Another connection holds the write lock and moves the deadline to just
+    // ahead of now. The answer below is sent before that deadline but can only
+    // write after the lock is released, which is after it.
+    const a = createApproval(db, { toolName: 'gh_comment', agentId: 'boo-1', args: {} })
+    const worker = new Worker(
+      `const { parentPort, workerData } = require('node:worker_threads')
+       const Database = require(workerData.driver)
+       const conn = new Database(workerData.dbPath)
+       conn.exec('BEGIN IMMEDIATE')
+       conn.prepare('UPDATE tool_call_approvals SET expires_at = ? WHERE id = ?')
+         .run(Date.now() + 300, workerData.id)
+       parentPort.postMessage('locked')
+       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900)
+       conn.exec('COMMIT')
+       conn.close()`,
+      {
+        eval: true,
+        workerData: {
+          // __filename is provided by vitest for this CommonJS package.
+          driver: createRequire(__filename).resolve('better-sqlite3'),
+          dbPath: path.join(dir, 'test.db'),
+          id: a.id,
+        },
+      },
+    )
+    const exited = new Promise((resolve) => worker.once('exit', resolve))
+    await new Promise((resolve) => worker.once('message', resolve))
+
+    expect(resolveApproval(db, a.id, 'allow_once')?.status).toBe('expired')
+    await exited
   })
 })
 

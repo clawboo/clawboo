@@ -334,7 +334,7 @@ A second answer to the same card changes nothing and writes nothing.
 }
 ```
 
-A card stays pending past its `expiresAt` only when nothing was left waiting on it, for example because Clawboo stopped while the card was open. The dashboard stops showing it at `expiresAt`. A late answer to it is refused and expires it at once; otherwise the reaper expires it 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`.
+A connector call, Native command or hand-off card (`kind: 'tool'`) stays pending past its `expiresAt` only when nothing was left waiting on it, for example because Clawboo stopped while the card was open. The dashboard stops showing it at `expiresAt`. A late answer to it is refused and expires it at once; otherwise the reaper expires it 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. An OpenClaw command's copy (`kind: 'exec'`) can stay pending for up to 30 seconds past its `expiresAt`, until the next sweep. An answer to it in that time goes to the Gateway, which decides whether it still counts.
 
 ## Error events
 
