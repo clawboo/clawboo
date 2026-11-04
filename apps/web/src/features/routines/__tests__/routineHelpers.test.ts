@@ -95,6 +95,15 @@ describe('cron validation', () => {
     )
   })
 
+  it('asks for an offset on a once@ time, which the browser and server would read apart', () => {
+    expect(cronError('once@2099-12-01T09:00:00')).toMatch(/Z or an offset/)
+    expect(cronError('once@2099-12-01 09:00')).toMatch(/Z or an offset/)
+    expect(cronError('once@2099-12-01T09:00:00Z')).toBeNull()
+    expect(cronError('once@2099-12-01T09:00:00+05:30')).toBeNull()
+    // A date alone means UTC midnight to both.
+    expect(cronError('once@2099-12-01')).toBeNull()
+  })
+
   it('explains an empty, unreadable, or spent schedule', () => {
     expect(cronError('  ')).toMatch(/Enter a cron expression/)
     expect(cronError('every tuesday')).toMatch(/not a cron expression/)

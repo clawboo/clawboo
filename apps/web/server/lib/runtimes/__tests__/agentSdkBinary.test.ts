@@ -2,7 +2,15 @@
 // real package layouts on disk: a global npm install, a musl Linux, a pnpm
 // store reached through a symlink, and each piece missing in turn.
 
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -24,11 +32,12 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** A package folder with a package.json, plus any files named. */
+/** A package folder with a package.json, plus any files named (executable,
+ *  as npm installs a package's binary). */
 function writePackage(dir: string, name: string, files: string[] = []): void {
   mkdirSync(dir, { recursive: true })
   writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name, version: '0.0.0' }))
-  for (const f of files) writeFileSync(path.join(dir, f), '')
+  for (const f of files) writeFileSync(path.join(dir, f), '', { mode: 0o755 })
 }
 
 /** `<nm>/@anthropic-ai/claude-agent-sdk` and the platform packages named. */
@@ -143,6 +152,20 @@ describe('resolveAgentSdkBinary', () => {
     ).toBeNull()
   })
 
+  it.skipIf(process.platform === 'win32')(
+    'is null when the binary cannot be started (no execute bit)',
+    () => {
+      const nm = path.join(root, 'node_modules')
+      installSdk(nm, ['linux-x64'])
+      const bin = path.join(nm, '@anthropic-ai', 'claude-agent-sdk-linux-x64', 'claude')
+      const opts = { platform: 'linux', arch: 'x64', preferMusl: false } as const
+      chmodSync(bin, 0o644)
+      expect(resolveAgentSdkBinary({ fromDir: clawbooDist(nm), ...opts })).toBeNull()
+      chmodSync(bin, 0o755)
+      expect(resolveAgentSdkBinary({ fromDir: clawbooDist(nm), ...opts })).toBe(bin)
+    },
+  )
+
   it('is null when nothing is installed above the server', () => {
     const from = path.join(root, 'app', 'dist')
     mkdirSync(from, { recursive: true })
@@ -175,6 +198,20 @@ describe('resolveAgentSdkBinary', () => {
           preferMusl: false,
         }),
       ).toBe(path.join(store, '@anthropic-ai', 'claude-agent-sdk-darwin-arm64', 'claude'))
+    },
+  )
+
+  // With no options it looks up from its own module, as the driver's import
+  // does. This checkout depends on the SDK, and an install of it brings the
+  // platform package for the machine it runs on.
+  const moduleDir = path.resolve(__dirname, '..')
+  it.skipIf(findAgentSdkDir(moduleDir) === null)(
+    'with no options, finds the binary of the SDK this server loads',
+    () => {
+      const found = resolveAgentSdkBinary()
+      expect(found).not.toBeNull()
+      expect(found).toBe(resolveAgentSdkBinary({ fromDir: moduleDir }))
+      expect(found).toContain(`claude-agent-sdk-${process.platform}-${process.arch}`)
     },
   )
 })

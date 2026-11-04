@@ -348,9 +348,25 @@ describe('runtimes install/connect REST', () => {
     sdkState.binary = SDK_BIN
     const m = mockRes()
     runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    // Finish a spawned install at once, so a regression fails here and fast.
+    ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
     await m.ended
     expect(spawnState.calls).toEqual([])
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  it('Install fetches no CLI when the SDK’s binary is there, even with a CLI on PATH too', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    platformState.bins['claude'] = '/usr/local/bin/claude'
+    sdkState.binary = SDK_BIN
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+    await m.ended
+    expect(spawnState.calls).toEqual([])
+    expect(
+      m.events().some((e) => e['type'] === 'output' && String(e['line']).includes(SDK_BIN)),
+    ).toBe(true)
   })
 
   it('installing codex (also how it is updated) drops the cached model probe', async () => {

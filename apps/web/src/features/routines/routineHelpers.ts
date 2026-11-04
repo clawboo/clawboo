@@ -70,6 +70,19 @@ export function humanCron(spec: string): string {
   return PRESET_LABEL.get(spec.trim()) ?? formatScheduleLabel(spec)
 }
 
+/**
+ * A `once@` date and time with no `Z` or offset. The browser and the server
+ * would each read it in their own zone, so it could fire at another moment than
+ * the form shows. A date alone is fine: both read it as UTC midnight.
+ */
+export function onceWithoutOffset(spec: string): boolean {
+  const trimmed = spec.trim()
+  if (!isOnceSpec(trimmed)) return false
+  const iso = trimmed.slice(ONCE_PREFIX.length)
+  const hasTime = /\d[T ]\d/i.test(iso)
+  return hasTime && !/(z|[+-]\d{2}(:?\d{2})?)$/i.test(iso)
+}
+
 /** Why a typed cron expression cannot be used, or null when it can. `timeZone`
  *  is the zone the server reads cron in (the browser's when not given). */
 export function cronError(spec: string, timeZone?: string): string | null {
@@ -77,6 +90,9 @@ export function cronError(spec: string, timeZone?: string): string | null {
   if (!trimmed) return 'Enter a cron expression, for example 30 8 * * 1-5.'
   try {
     probeCronSpec(trimmed)
+    if (onceWithoutOffset(trimmed)) {
+      return 'End a once@ time with Z or an offset such as +05:30, so it means the same moment everywhere.'
+    }
     if (nextOccurrence(trimmed, Date.now(), timeZone) == null) {
       return 'This schedule never runs again.'
     }

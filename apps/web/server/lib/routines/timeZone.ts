@@ -7,15 +7,8 @@
 // setting of its own: an IANA name in the settings table, independent of the
 // process, changed from where a routine's time is chosen.
 
-import {
-  getSetting,
-  rearmIdleScheduledRuns,
-  setSetting,
-  settings,
-  type ClawbooDb,
-} from '@clawboo/db'
+import { getSetting, rearmIdleScheduledRuns, type ClawbooDb } from '@clawboo/db'
 import { isOnceSpec, nextOccurrence } from '@clawboo/scheduler'
-import { eq } from 'drizzle-orm'
 
 export const SCHEDULER_TIME_ZONE_KEY = 'scheduler-time-zone'
 
@@ -79,32 +72,33 @@ export function routineTimeZone(db: ClawbooDb): string | undefined {
 }
 
 /**
- * Store the scheduler zone (null follows the host again), then move every armed
- * routine's next run onto the new zone's wall clock. Without that, each
- * routine's next fire would still be the instant worked out in the old zone.
- * Returns the zone now in force. Throws RangeError on a name that is not a zone.
+ * Store the scheduler zone (null follows the host again) and move every armed
+ * routine's next run onto the new zone's wall clock, in one transaction: either
+ * both land or neither does, so a failed write leaves the old zone and the old
+ * runs, and a retry does the whole change again. Returns the zone now in force.
+ * Throws RangeError on a name that is not a zone.
  */
 export function writeSchedulerTimeZone(
   db: ClawbooDb,
   raw: string | null,
   now = Date.now(),
 ): SchedulerTimeZone {
-  const before = readSchedulerTimeZone(db).timeZone
-  if (raw === null) {
-    db.delete(settings).where(eq(settings.key, SCHEDULER_TIME_ZONE_KEY)).run()
+  const stored = raw === null ? null : normalizeTimeZone(raw)
+  if (raw !== null && !stored) throw new RangeError(`not a time zone: ${raw}`)
+  const setting = { key: SCHEDULER_TIME_ZONE_KEY, value: stored }
+  const host = hostTimeZone()
+  if ((stored ?? host) === readSchedulerTimeZone(db).timeZone) {
+    // The same zone under another setting (the host's, now named): no run moves.
+    rearmIdleScheduledRuns(db, () => null, { now, setting })
   } else {
-    const zone = normalizeTimeZone(raw)
-    if (!zone) throw new RangeError(`not a time zone: ${raw}`)
-    setSetting(db, SCHEDULER_TIME_ZONE_KEY, zone)
-  }
-  const after = readSchedulerTimeZone(db)
-  if (after.timeZone !== before) {
-    const zone = routineTimeZone(db)
+    // Undefined, not the host's name, when following the host: the exact
+    // arithmetic an install with nothing stored uses.
+    const zone = stored ?? undefined
     rearmIdleScheduledRuns(
       db,
       (spec) => (isOnceSpec(spec) ? null : nextOccurrence(spec, now, zone)),
-      now,
+      { now, setting },
     )
   }
-  return after
+  return readSchedulerTimeZone(db)
 }

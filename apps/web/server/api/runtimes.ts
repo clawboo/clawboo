@@ -31,7 +31,7 @@ import {
   peekCodexModels,
 } from '../lib/runtimes/codexModels'
 import { isHermesCodexAuthPresent } from '../lib/runtimes/hermesAuth'
-import { resolveRuntimeInstall } from '../lib/runtimes/installProbe'
+import { resolveRuntimeInstall, resolveSdkBinary } from '../lib/runtimes/installProbe'
 import { resolveWindowsSpawn } from '../lib/runtimes/winSpawn'
 import { nativeCompatProvider } from '../lib/runtimes/native/nativeProviders'
 import { isNativeOllamaConnected } from '../lib/runtimes/native/nativeProviderDefaults'
@@ -225,12 +225,13 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
   res.flushHeaders()
 
   // Runs use the Agent SDK's own binary, so with it present a CLI install would
-  // fetch a second copy that no run starts.
-  const existing = resolveRuntimeInstall(d)
-  if (existing?.source === 'agent-sdk') {
+  // fetch a second copy that no run starts. Checked directly: a CLI on PATH as
+  // well would otherwise win the install probe and hide it.
+  const sdkBinary = resolveSdkBinary(d)
+  if (sdkBinary) {
     sendEvent(res, {
       type: 'output',
-      line: `${d.name} already runs on the Agent SDK's own binary: ${existing.path}`,
+      line: `${d.name} already runs on the Agent SDK's own binary: ${sdkBinary}`,
     })
     sendEvent(res, { type: 'complete', success: true })
     res.end()

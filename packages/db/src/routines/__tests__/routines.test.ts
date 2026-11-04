@@ -9,7 +9,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createDb, type ClawbooDb } from '../../db'
+import { createDb, getSetting, type ClawbooDb } from '../../db'
 import { createTask, getTask } from '../../board/repository'
 import { appendEvent } from '../../events/appendEvent'
 import { listRoutineFires } from '../history'
@@ -557,11 +557,9 @@ describe('re-arming every armed routine at once', () => {
     claimScheduledRun(db, running.id)
     markRunRunning(db, running.id)
 
-    const moved = rearmIdleScheduledRuns(
-      db,
-      (spec) => (spec.startsWith('once@') ? null : 90_000),
-      10_000,
-    )
+    const moved = rearmIdleScheduledRuns(db, (spec) => (spec.startsWith('once@') ? null : 90_000), {
+      now: 10_000,
+    })
     expect(moved).toBe(1)
     expect(getScheduledRun(db, idle.id)).toMatchObject({ status: 'idle', nextRunAt: 90_000 })
     expect(getScheduledRun(db, once.id)).toMatchObject({ status: 'idle', nextRunAt: 70_000 })
@@ -571,11 +569,50 @@ describe('re-arming every armed routine at once', () => {
 
   it('leaves a row alone when working out its next run throws', () => {
     const row = register({ nextRunAt: 50_000 })
-    const moved = rearmIdleScheduledRuns(db, () => {
-      throw new Error('bad spec')
-    })
+    const moved = rearmIdleScheduledRuns(
+      db,
+      () => {
+        throw new Error('bad spec')
+      },
+      { now: 10_000 },
+    )
     expect(moved).toBe(0)
     expect(getScheduledRun(db, row.id)?.nextRunAt).toBe(50_000)
+  })
+
+  it('leaves a routine that is already due for the ticker to fire', () => {
+    const due = register({ nextRunAt: 5_000 })
+    const ahead = register({ nextRunAt: 50_000 })
+    expect(rearmIdleScheduledRuns(db, () => 90_000, { now: 10_000 })).toBe(1)
+    expect(getScheduledRun(db, due.id)?.nextRunAt).toBe(5_000)
+    expect(getScheduledRun(db, ahead.id)?.nextRunAt).toBe(90_000)
+  })
+
+  it('writes the setting with the moved runs, and neither when the pass fails', () => {
+    const row = register({ nextRunAt: 50_000 })
+    const setting = { key: 'scheduler-time-zone', value: 'Pacific/Kiritimati' }
+
+    // Any failing write aborts the whole pass, the setting included.
+    db.$client.exec(
+      `CREATE TRIGGER refuse_rearm BEFORE UPDATE OF next_run_at ON scheduled_runs
+       BEGIN SELECT RAISE(ABORT, 'refused'); END`,
+    )
+    expect(() => rearmIdleScheduledRuns(db, () => 90_000, { now: 10_000, setting })).toThrow(
+      /refused/,
+    )
+    expect(getSetting(db, setting.key)).toBeNull()
+    expect(getScheduledRun(db, row.id)?.nextRunAt).toBe(50_000)
+
+    db.$client.exec('DROP TRIGGER refuse_rearm')
+    expect(rearmIdleScheduledRuns(db, () => 90_000, { now: 10_000, setting })).toBe(1)
+    expect(getSetting(db, setting.key)).toBe('Pacific/Kiritimati')
+    expect(getScheduledRun(db, row.id)?.nextRunAt).toBe(90_000)
+
+    rearmIdleScheduledRuns(db, () => 95_000, {
+      now: 10_000,
+      setting: { key: setting.key, value: null },
+    })
+    expect(getSetting(db, setting.key)).toBeNull()
   })
 })
 

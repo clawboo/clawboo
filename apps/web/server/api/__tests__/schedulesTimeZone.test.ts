@@ -176,4 +176,20 @@ describe('the scheduler time zone', () => {
     putZone(null)
     expect(clockIn(HOST, getScheduledRun(getDb(), armed)!.nextRunAt!)).toBe('09:00')
   })
+
+  it('keeps the old zone when moving the runs fails, so a retry does the whole change', async () => {
+    const armed = await createDaily()
+    const before = getScheduledRun(getDb(), armed)!.nextRunAt
+    getDb().$client.exec(
+      `CREATE TRIGGER refuse_rearm BEFORE UPDATE OF next_run_at ON scheduled_runs
+       BEGIN SELECT RAISE(ABORT, 'refused'); END`,
+    )
+    expect(putZone(OTHER).status).toBe(500)
+    expect(getZone()).toEqual({ timeZone: HOST, hostTimeZone: HOST, configured: false })
+    expect(getScheduledRun(getDb(), armed)!.nextRunAt).toBe(before)
+
+    getDb().$client.exec('DROP TRIGGER refuse_rearm')
+    expect(putZone(OTHER).status).toBe(200)
+    expect(clockIn(OTHER, getScheduledRun(getDb(), armed)!.nextRunAt!)).toBe('09:00')
+  })
 })

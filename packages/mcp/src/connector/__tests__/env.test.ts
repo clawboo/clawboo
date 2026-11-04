@@ -140,7 +140,7 @@ describe('connectorChildEnv', () => {
   it('allows no name that could carry an npm credential', () => {
     for (const name of CONNECTOR_ENV_ALLOWLIST) {
       if (!name.toLowerCase().startsWith('npm_config_')) continue
-      expect(name, name).not.toMatch(/auth|token/i)
+      expect(name, name).not.toMatch(/auth|token|pass|secret/i)
     }
   })
 

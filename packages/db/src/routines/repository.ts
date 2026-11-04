@@ -8,10 +8,10 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, inArray, isNotNull, lte } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import { scheduledRuns, tasks, type DbScheduledRun, type DbTask } from '../schema'
+import { scheduledRuns, settings, tasks, type DbScheduledRun, type DbTask } from '../schema'
 import { immediateWrite, withWriteRetry } from '../board/contention'
 import { canUserSetRoutineStatus, type ScheduledRunStatus } from './state-machine'
 
@@ -482,24 +482,46 @@ export function reconcileScheduledRuns(
 
 // ─── Re-arming after a schedule-wide change ─────────────────────────────────
 
+export interface RearmIdleScheduledRunsOptions {
+  /** Default: now. Only runs still ahead of it move. */
+  now?: number
+  /**
+   * A settings row written in the same transaction: the change that moves the
+   * routines (the time zone cron is read in) and the moved runs land together or
+   * not at all. `value: null` deletes the row.
+   */
+  setting?: { key: string; value: string | null }
+}
+
 /**
  * Recompute the next run of every armed idle routine with `rearm(cronSpec)`, in
  * one BEGIN IMMEDIATE pass. For a change that moves every routine's next fire at
- * once, such as the time zone cron is read in. Only `idle` rows holding a next
- * run are touched: a paused or parked row is disarmed and re-arms on resume, and
- * a queued, claimed or running row re-arms from its own outcome. A `rearm` that
- * throws or returns null leaves the row as it was. Returns how many rows moved.
+ * once, such as the time zone cron is read in. Only `idle` rows whose next run is
+ * still ahead are touched: one already due is the ticker's to fire, a paused or
+ * parked row is disarmed and re-arms on resume, and a queued, claimed or running
+ * row re-arms from its own outcome. A `rearm` that throws or returns null leaves
+ * the row as it was. Returns how many rows moved.
  */
 export function rearmIdleScheduledRuns(
   db: ClawbooDb,
   rearm: (cronSpec: string) => number | null,
-  now = Date.now(),
+  opts: RearmIdleScheduledRunsOptions = {},
 ): number {
+  const now = opts.now ?? Date.now()
   return immediateWrite(db, (tx) => {
+    if (opts.setting) {
+      const { key, value } = opts.setting
+      if (value === null) tx.delete(settings).where(eq(settings.key, key)).run()
+      else
+        tx.insert(settings)
+          .values({ key, value, updatedAt: now })
+          .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: now } })
+          .run()
+    }
     const rows = tx
       .select()
       .from(scheduledRuns)
-      .where(and(eq(scheduledRuns.status, 'idle'), isNotNull(scheduledRuns.nextRunAt)))
+      .where(and(eq(scheduledRuns.status, 'idle'), gt(scheduledRuns.nextRunAt, now)))
       .all() as DbScheduledRun[]
     let moved = 0
     for (const row of rows) {

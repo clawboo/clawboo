@@ -11,7 +11,23 @@ import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 import { useViewStore } from '@/stores/view'
 import { RoutinesPanel } from '../RoutinesPanel'
-import { formatWhen, nextRunPreview } from '../routineHelpers'
+import {
+  browserTimeZone,
+  formatWhen,
+  nextRunPreview,
+  sameTimeZone,
+  timeZoneLabel,
+} from '../routineHelpers'
+
+/** The first of `candidates` that is neither the runner's own zone nor one of
+ *  `taken`, so a test about a zone other than the person's holds anywhere. */
+function zoneOtherThanMine(candidates: string[], taken: string[] = []): string {
+  const zone = candidates.find(
+    (z) => !sameTimeZone(z, browserTimeZone()) && !taken.some((t) => sameTimeZone(t, z)),
+  )
+  if (!zone) throw new Error('no candidate zone differs from the runner')
+  return zone
+}
 
 // The design-system confirm() is mocked so the delete flow can be driven without
 // rendering the app-root <ConfirmDialog>.
@@ -371,6 +387,22 @@ describe('RoutinesPanel detail', () => {
     expect(screen.getByTestId('routine-dialog')).toBeInTheDocument()
   })
 
+  it('names the routine time zone beside its schedule when it is not the person’s', async () => {
+    const SERVER = zoneOtherThanMine(['Pacific/Kiritimati', 'Pacific/Pago_Pago'])
+    server.use(
+      http.get('/api/schedules/time-zone', () =>
+        HttpResponse.json({ timeZone: SERVER, hostTimeZone: SERVER, configured: false }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<RoutinesPanel />)
+    await user.click(await screen.findByTestId('schedule-open-clawboo-routine:r-agent'))
+    const dialog = await screen.findByTestId('routine-dialog')
+    expect(await within(dialog).findByTestId('routine-schedule-zone')).toHaveTextContent(
+      `, ${timeZoneLabel(SERVER)} time`,
+    )
+  })
+
   it('edits a routine and sends only what changed', async () => {
     const patched = vi.fn()
     server.use(
@@ -603,8 +635,9 @@ describe('RoutinesPanel create', () => {
   })
 
   it('says which time zone a routine’s time is in, and changes it for every routine', async () => {
-    // A zone no test runner is in, so it always differs from the browser's.
-    const SERVER = 'Pacific/Kiritimati'
+    // Zones other than the runner's own, so the person's time always differs.
+    const SERVER = zoneOtherThanMine(['Pacific/Kiritimati', 'Pacific/Pago_Pago'])
+    const PICKED = zoneOtherThanMine(['America/Bogota', 'Asia/Tokyo'], [SERVER])
     const saved = vi.fn()
     server.use(
       http.get('/api/schedules/time-zone', () =>
@@ -627,7 +660,9 @@ describe('RoutinesPanel create', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Daily · 9am' }))
 
     const line = await within(dialog).findByTestId('routine-time-zone')
-    expect(line).toHaveTextContent("Times are in Kiritimati (the server's time zone).")
+    expect(line).toHaveTextContent(
+      `Times are in ${timeZoneLabel(SERVER)} (the server's time zone).`,
+    )
     // The preview reads the spec on the server zone's clock, and gives it in
     // the person's own time as well.
     const next = nextRunPreview('0 9 * * *', Date.now(), SERVER)!
@@ -638,18 +673,36 @@ describe('RoutinesPanel create', () => {
     await user.click(within(dialog).getByTestId('routine-time-zone-change'))
     await user.click(within(dialog).getByTestId('routine-time-zone-select'))
     // The list holds every zone; its search box takes the focus when it opens.
-    await user.paste('Bogota')
-    await user.click(await screen.findByRole('option', { name: 'America/Bogota' }))
-    await waitFor(() => expect(saved).toHaveBeenCalledWith({ timeZone: 'America/Bogota' }))
+    await user.paste(timeZoneLabel(PICKED))
+    await user.click(await screen.findByRole('option', { name: PICKED }))
+    await waitFor(() => expect(saved).toHaveBeenCalledWith({ timeZone: PICKED }))
     await waitFor(() =>
       expect(within(dialog).getByTestId('routine-time-zone')).toHaveTextContent(
-        'Times are in Bogota.',
+        `Times are in ${timeZoneLabel(PICKED)}.`,
       ),
     )
-    const moved = nextRunPreview('0 9 * * *', Date.now(), 'America/Bogota')!
+    const moved = nextRunPreview('0 9 * * *', Date.now(), PICKED)!
     expect(within(dialog).getByTestId('routine-next-preview')).toHaveTextContent(
-      formatWhen(moved, 'America/Bogota'),
+      formatWhen(moved, PICKED),
     )
+  })
+
+  it('shows no next run it cannot be sure of when the routine time zone is unknown', async () => {
+    server.use(
+      http.get('/api/schedules/time-zone', () =>
+        HttpResponse.json({ error: 'unavailable' }, { status: 500 }),
+      ),
+    )
+    const user = userEvent.setup()
+    render(<RoutinesPanel />)
+    await user.click(await screen.findByTestId('routine-create-open'))
+    const dialog = await screen.findByTestId('routine-dialog')
+    await user.type(within(dialog).getByTestId('routine-instructions'), 'Do it.')
+    await user.click(within(dialog).getByRole('button', { name: 'Daily · 9am' }))
+    // The browser's own zone could give another time than the one the server arms.
+    await waitFor(() => expect(within(dialog).getByTestId('routine-submit')).toBeEnabled())
+    expect(within(dialog).queryByTestId('routine-next-preview')).toBeNull()
+    expect(within(dialog).queryByTestId('routine-time-zone')).toBeNull()
   })
 
   it('a refused create keeps the dialog open with the reason', async () => {

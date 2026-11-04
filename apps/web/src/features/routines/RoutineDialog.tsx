@@ -26,6 +26,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { isOnceSpec } from '@clawboo/scheduler'
+
 import { Button, IconButton } from '@/features/shared/Button'
 import { Chip } from '@/features/shared/Chip'
 import { Modal } from '@/features/shared/Modal'
@@ -206,6 +208,18 @@ function RoutineTimeZone({
   )
 }
 
+/** The zone a routine's schedule is read in, said beside it when it is not the
+ *  person's own, so "Daily · 9am" is not read as their 9am. */
+function RoutineZoneNote() {
+  const { zone } = useSchedulerTimeZone()
+  if (!zone || sameTimeZone(zone.timeZone, browserTimeZone())) return null
+  return (
+    <span data-testid="routine-schedule-zone" title={zone.timeZone}>
+      , {timeZoneLabel(zone.timeZone)} time
+    </span>
+  )
+}
+
 // ─── The form ────────────────────────────────────────────────────────────────
 
 function RoutineForm({
@@ -311,8 +325,8 @@ function RoutineForm({
     !!chosenTeam &&
     agentsForTeam(directory.agents, chosenTeam.id).length === 0
 
-  // The zone the server reads cron in. Until it answers, the preview reads the
-  // spec in the browser's own zone.
+  // The zone the server reads cron in. The preview waits for it: worked out in
+  // any other zone, its time could differ from the one the server arms.
   const { zone: schedulerZone, save: saveSchedulerZone } = useSchedulerTimeZone()
   const timeZone = schedulerZone?.timeZone
   const otherZone = timeZone != null && !sameTimeZone(timeZone, browserTimeZone())
@@ -320,7 +334,8 @@ function RoutineForm({
   const checkSchedule = isNew || values.cron.trim() !== initial.cron.trim()
   const problem = routineFormProblem(values, { checkSchedule })
   const scheduleProblem = checkSchedule ? cronError(values.cron, timeZone) : null
-  const next = scheduleProblem ? null : nextRunPreview(values.cron, Date.now(), timeZone)
+  const next =
+    scheduleProblem || !schedulerZone ? null : nextRunPreview(values.cron, Date.now(), timeZone)
   const lead = directory.booZeroName ?? "the team's lead"
 
   return (
@@ -746,6 +761,7 @@ function RoutineDetails({
 
         <DetailRow label="Schedule">
           <span>{humanCron(record.cronSpec)}</span>
+          {routine && !isOnceSpec(record.cronSpec) ? <RoutineZoneNote /> : null}
           <span className="text-foreground/50">
             {record.nextRunAt != null
               ? ` · next ${untilLabel(record.nextRunAt)} (${formatWhen(record.nextRunAt)})`

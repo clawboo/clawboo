@@ -12,9 +12,10 @@
 //  2. The binary: the SDK resolves `<sdk>-<platform>-<arch>[-musl]/claude[.exe]`
 //     with `createRequire(<its own module>).resolve()`, takes the first that
 //     exists, and on Linux tries the musl build first when Node runs without
-//     glibc. Mirrored here as of @anthropic-ai/claude-agent-sdk 0.3.268.
+//     glibc. Mirrored here as of @anthropic-ai/claude-agent-sdk 0.3.268, with one
+//     check more: the file must be executable, because a run spawns it directly.
 
-import { existsSync, realpathSync } from 'node:fs'
+import { accessSync, constants, existsSync, realpathSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 
@@ -81,6 +82,17 @@ export function findAgentSdkDir(fromDir: string): string | null {
   }
 }
 
+/** Whether the binary could be started. On Windows this checks only that the
+ *  file exists, which is all X_OK means there. */
+function isExecutable(file: string): boolean {
+  try {
+    accessSync(file, constants.X_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export interface ResolveAgentSdkBinaryOptions {
   /** Where the SDK is looked up from. Default: this module's directory. */
   fromDir?: string | null
@@ -107,7 +119,7 @@ export function resolveAgentSdkBinary(opts: ResolveAgentSdkBinaryOptions = {}): 
   for (const specifier of candidates) {
     try {
       const found = resolve(specifier)
-      if (existsSync(found)) return found
+      if (existsSync(found) && isExecutable(found)) return found
     } catch {
       // Not installed for this platform; the SDK moves on to the next one too.
     }

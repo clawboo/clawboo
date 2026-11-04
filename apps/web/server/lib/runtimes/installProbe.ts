@@ -14,6 +14,11 @@ export interface RuntimeInstall {
   source: RuntimeBinSource
 }
 
+/** The SDK's own binary for a runtime whose runs start one, or null. */
+export function resolveSdkBinary(d: RuntimeDescriptor): string | null {
+  return d.sdkBinary === 'claude-agent-sdk' ? resolveAgentSdkBinary() : null
+}
+
 /**
  * The binary that makes `d` installed, or null when there is none. The CLI is
  * found on PATH or in the user-install dirs; a runtime that runs on an SDK's own
@@ -25,9 +30,6 @@ export function resolveRuntimeInstall(d: RuntimeDescriptor): RuntimeInstall | nu
     const cli = resolveRuntimeBin(d.healthBin)
     if (cli) return { path: cli, source: 'cli' }
   }
-  if (d.sdkBinary === 'claude-agent-sdk') {
-    const sdk = resolveAgentSdkBinary()
-    if (sdk) return { path: sdk, source: 'agent-sdk' }
-  }
-  return null
+  const sdk = resolveSdkBinary(d)
+  return sdk ? { path: sdk, source: 'agent-sdk' } : null
 }

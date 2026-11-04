@@ -631,7 +631,7 @@ The time zone Routines are worked out in. A cron spec is wall-clock time, so `0 
 
 ## `PUT /api/schedules/time-zone`
 
-Set the time zone Routines are worked out in, for every Routine on the install. It is stored in Clawboo's database, independent of the server process, so it survives a restart. Each armed Routine's next run moves to the new zone's clock at once; a paused Routine, or one stopped after a failure, takes the new zone when it is resumed, and one that is running takes it when the run ends.
+Set the time zone Routines are worked out in, for every Routine on the install. It is stored in Clawboo's database, independent of the server process, so it survives a restart. Each armed Routine's next run moves to the new zone's clock in the same write as the setting, so a failed request changes neither. A Routine already due keeps its run; a paused Routine, or one stopped after a failure, takes the new zone when it is resumed, and one that is running takes it when the run ends.
 
 - **Request body**: `{ "timeZone": string | null }`. An IANA zone name such as `America/New_York` sets that zone. The name is kept as given, apart from letter case (`utc` is stored as `UTC`). `null` goes back to the server's own zone.
 
