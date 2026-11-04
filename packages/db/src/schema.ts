@@ -1080,6 +1080,35 @@ export const agentInbox = sqliteTable(
 
 export type DbAgentInboxRow = typeof agentInbox.$inferSelect
 
+// report_up_outbox: the team chat's durable `[Task Update]` outbox. A row is
+// one result the engine queued for whoever handed the work off; it stays
+// pending (settled_at NULL) until the recipient's run that carried it ends, a
+// Stop drops it, or it is given up. The room's next engine replays the pending
+// rows after a restart. See src/reportUps.ts.
+export const reportUpOutbox = sqliteTable(
+  'report_up_outbox',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id').notNull(),
+    /** The chat room; null is the team's own group chat. */
+    roomId: text('room_id'),
+    /** Null resolves to the room's lead when it is sent. */
+    recipientAgentId: text('recipient_agent_id'),
+    taskId: text('task_id'),
+    /** The engine's `ReportUp` item, as JSON. */
+    payload: text('payload').notNull(),
+    /** Times it was sent again after a restart. */
+    replays: integer('replays').notNull().default(0),
+    createdAt: integer('created_at').notNull(),
+    settledAt: integer('settled_at'),
+    /** 'delivered' | 'stopped' | 'gave_up'. */
+    settledHow: text('settled_how'),
+  },
+  (t) => [index('idx_report_up_outbox_pending').on(t.teamId, t.roomId, t.settledAt)],
+)
+
+export type DbReportUpOutboxRow = typeof reportUpOutbox.$inferSelect
+
 export const teamChat = sqliteTable(
   'team_chat',
   {

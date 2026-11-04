@@ -182,6 +182,10 @@ export interface ServerDeliverDeps {
   onEvent: (sessionKey: string, event: RuntimeEvent, run: RunStamp) => Promise<void>
   /** The engine's `onSessionClosed` — called when a drain ends without a terminal. */
   onSessionClosed: (sessionKey: string, run: RunStamp) => Promise<void>
+  /** The engine's `onRunNotStarted`: a delivery whose `deliver` had already
+   *  resolved (it waited in the queue) could not start its run. Called only for
+   *  one that carries report-ups. */
+  onRunNotStarted?: (run: RunStamp) => void
   /** The engine's `taskForSession`, used to attribute a delegated run's mission
    *  spend, as framing's second witness, and by the start gate to check that a
    *  task run's session still holds its task. */
@@ -840,7 +844,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const ticketHash = briefTask ? ticketHashOf(briefTask) : null
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
-    const stamp: RunStamp = { reportForTaskId, stopGen: deliveredGen }
+    // The durable report-ups a `[Task Update]` carries ride the stamp, so the
+    // engine settles them when THIS run ends, not whichever run ends next.
+    const reportUpIds = origin.kind === 'system' ? origin.reportUpIds : undefined
+    const stamp: RunStamp = {
+      reportForTaskId,
+      stopGen: deliveredGen,
+      ...(reportUpIds?.length ? { reportUpIds } : {}),
+    }
     // A follow-up holds work too: it neither resumes the agent's user-facing
     // session nor overwrites its pointer.
     const holdsWork = isTaskRun || reportForTaskId !== null
@@ -1570,6 +1581,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               log.error({ err, sessionKey: targetSessionKey }, 'queued delivery failed to settle')
             })
         }),
+      // Queued behind the recipient's run, this delivery already resolved for
+      // the engine, so a start that fails now (however it fails, a throw while
+      // setting the run up included) never reaches the engine's retry. The
+      // report-ups it carries are handed back instead (see `onRunNotStarted`).
+      {
+        onQueuedFailure: () => {
+          if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+        },
+      },
     )
   }
 }

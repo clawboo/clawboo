@@ -24,8 +24,14 @@ export interface NudgeQueue {
    * boundary. `markBusy` is applied SYNCHRONOUSLY before awaiting `send` so a
    * second `deliver` in the same tick queues instead of double-sending. An
    * immediate send REJECTS to the caller on failure (the session is un-busied).
+   * A QUEUED send has no caller left to reject to, so its failure (a rejection,
+   * or a throw) goes to `onQueuedFailure` instead.
    */
-  deliver(sessionKey: string, send: () => Promise<void>): Promise<void>
+  deliver(
+    sessionKey: string,
+    send: () => Promise<void>,
+    opts?: { onQueuedFailure?: (err: unknown) => void },
+  ): Promise<void>
   /**
    * Mark a session busy (call on any non-terminal event of a run). Re-arms the
    * wedge with `wedgeTimeoutMs` when given, else the queue's own: a run inside one
@@ -65,7 +71,20 @@ export function createNudgeQueue(opts?: {
 }): NudgeQueue {
   const defaultWedgeMs = opts?.wedgeTimeoutMs ?? DEFAULT_WEDGE_TIMEOUT_MS
   const busy = new Set<string>()
-  const queues = new Map<string, Array<() => Promise<void>>>()
+  interface Queued {
+    send: () => Promise<void>
+    onQueuedFailure?: (err: unknown) => void
+  }
+  const queues = new Map<string, Queued[]>()
+
+  /** Run a queued send; a throw counts as a rejection, so it cannot escape markIdle. */
+  const runQueued = (q: Queued): Promise<void> => {
+    try {
+      return q.send()
+    } catch (err) {
+      return Promise.reject(err)
+    }
+  }
   const wedgeTimers = new Map<string, AwakeTimer>()
   /** Bumped by `reset()`: a send flushed before it no longer owns its session. */
   let generation = 0
@@ -102,7 +121,13 @@ export function createNudgeQueue(opts?: {
     busy.add(sessionKey)
     armWedge(sessionKey)
     const gen = generation
-    void next().catch(() => {
+    void runQueued(next).catch((err: unknown) => {
+      // Its sender already moved on, so it is told here.
+      try {
+        next.onQueuedFailure?.(err)
+      } catch {
+        /* the hook is best-effort */
+      }
       // It never started a run, so no `done` will free the session: free it here
       // and let the next queued send go. Not after a reset, which handed the
       // session to whatever was delivered since.
@@ -117,10 +142,14 @@ export function createNudgeQueue(opts?: {
   }
 
   return {
-    async deliver(sessionKey, send) {
+    async deliver(sessionKey, send, deliverOpts) {
       if (busy.has(sessionKey)) {
         const q = queues.get(sessionKey) ?? []
-        q.push(send)
+        q.push(
+          deliverOpts?.onQueuedFailure
+            ? { send, onQueuedFailure: deliverOpts.onQueuedFailure }
+            : { send },
+        )
         queues.set(sessionKey, q)
         return
       }
@@ -152,7 +181,7 @@ export function createNudgeQueue(opts?: {
       for (const t of wedgeTimers.values()) t.clear()
       wedgeTimers.clear()
       for (const q of queues.values()) {
-        for (const send of q) void send().catch(() => undefined)
+        for (const queued of q) void runQueued(queued).catch(() => undefined)
       }
       queues.clear()
       busy.clear()

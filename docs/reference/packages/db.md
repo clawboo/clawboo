@@ -41,9 +41,10 @@ of state. Each table is documented on [Database schema](/reference/database-sche
 statement in it is `IF NOT EXISTS`. `src/schema.ts` is the Drizzle type layer over the same tables: queries use it,
 nothing applies it as a migration, and `schemaSource.test.ts` keeps the two in step.
 
-The package entry point re-exports a Drizzle table object and its row types for almost every table. Two stay
-internal behind their accessors: `agent_inbox` (use `enqueueInbox` and the other inbox functions) and
-`tool_result_blobs` (use `putToolResult` and `readToolResult`).
+The package entry point re-exports a Drizzle table object and its row types for almost every table. Three stay
+internal behind their accessors: `agent_inbox` (use `enqueueInbox` and the other inbox functions),
+`report_up_outbox` (use `recordReportUp` and the other report-up functions) and `tool_result_blobs` (use
+`putToolResult` and `readToolResult`).
 
 ## Opening a database
 
@@ -111,6 +112,7 @@ Everything is exported from the package entry point; the source folders below ar
 | `routines/`      | the routines ledger and fire history                                                   | `registerScheduledRun`, `queueDueRuns`, `claimScheduledRun`, `recordRunOutcome`, `routineSurvivesFailure`, `listRoutineFires`                                                   | [scheduler](/reference/packages/scheduler)             |
 | `teamChat/`      | the agents' peer channel (`team_chat`), which TeamChat MCP tools post to               | `postToRoom`, `readRoom`, `resolveRoomForTeam`                                                                                                                                  | [How agents talk to each other](/concepts/peer-chat)   |
 | `inbox.ts`       | each agent's mailbox of updates, alerts and signals                                    | `enqueueInbox`, `listUndeliveredInbox`, `packInboxRows`, `markInboxDelivered`, `reapOrphanInbox`                                                                                | [The executor runner](/internals/executor-runner)      |
+| `reportUps.ts`   | the team chat's `[Task Update]` items until their recipient's run has heard them       | `recordReportUp`, `listPendingReportUps`, `settleReportUps`, `listRoomsWithPendingReportUps`, `reapReportUps`                                                                   | [Delegation](/concepts/delegation-and-orchestration)   |
 | `chat/`          | the dashboard's chat transcript (`chat_messages`)                                      | `listRecentChatMessages`, `listChatMessagesSince`, `latestChatMessageId`                                                                                                        | [Work with your team in chat](/using/team-chat)        |
 
 A few modules carry rules worth knowing before you change them:

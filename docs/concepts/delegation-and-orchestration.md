@@ -86,6 +86,8 @@ A task you give an agent yourself, with **New task** on the board, reports to no
 
 If a result arrives when no run is listening, it waits in the agent's mailbox. The agent reads it when its next run starts or, while it is running, alongside the answer to its next call to one of Clawboo's task or peer-room tools.
 
+A task update survives a restart of Clawboo. It is saved as soon as the task finishes, and it counts as delivered only once the run that received it has finished. If that run never finishes, the update is sent again. That covers Clawboo stopping or restarting before then, for example while the update waited for the lead to finish another turn, and also a run that failed or could not start. While Clawboo keeps running it is sent again within about half a minute; after a restart, shortly after Clawboo starts. It is sent again up to 3 times; after that it is given up, and the recipient's chat says the results are on the board.
+
 ## How each runtime signals a hand-off
 
 Each runtime hands work off in its own way. Clawboo reads only these structured signals, never intent guessed from prose.
@@ -137,7 +139,7 @@ A teammate on a team chat run can also mark its own task blocked when it cannot 
 
 ## Stop, and your own moves
 
-Pressing **Stop** in a chat halts that chat's running work. Tasks it was running go back to To do without counting as failures, and they do not restart on their own: Needs you shows them as **Stopped**. Work that had been handed out but had not started yet never starts.
+Pressing **Stop** in a chat halts that chat's running work. Tasks it was running go back to To do without counting as failures, and they do not restart on their own: Needs you shows them as **Stopped**. Work that had been handed out but had not started yet never starts. A task update that was waiting for its recipient's turn, or whose run the Stop ended, is dropped and is not sent again, even after a restart; the result stays on the task's card.
 
 Moving a card yourself outranks the run. Clawboo stops the run working on that task. When you mark the task Done or cancel it, whoever handed it off is told, and a cancelled task's waiting steps are cancelled with it. A late result from the stopped run is kept as a comment and changes nothing else. See [The board](/concepts/the-board).
 
@@ -152,6 +154,7 @@ Everything on this page happens in team chat, which is how most work runs. Clawb
 - **The chat's backstop.** Each chat also ends a run whose finish it never sees, after 10 minutes of silence, so messages queued behind the run are not stuck. While the run is inside one tool call it waits 25 minutes instead, a minute past the engine's own allowance, so a long build or a command that prints nothing is not cut off at 10 (`TOOL_CALL_WEDGE_MS` in `serverDeliver.ts`).
 - **No sub-agents.** Every delegated run carries a blocklist of `sessions_send`, `sessions_spawn` and `sessions_yield`. OpenClaw cannot block tools per message, so Clawboo denies `sessions_spawn` and `sessions_yield` in the Gateway's `tools.deny` and repeats the team contract in each OpenClaw turn.
 - **Mailbox.** Undelivered notices live in the agent's durable mailbox with the kinds `task_update`, `alert` and `signal`.
+- **Report-ups.** Each `[Task Update]` item is written to the `report_up_outbox` table when the engine queues it. The update's turn origin names the rows it carries, the run's stamp hands them back to the engine, and the engine settles them when that run finishes, when a Stop drops them, or when delivery gives up. A run that ends any other way, or never starts, leaves its rows unsettled. The engine's 30-second sweep queues unsettled rows it does not hold, and so does `resume()` when a chat's engine is built again, after a restart or after an idle chat was unloaded; each try is counted. The dispatch pump builds the engine for any chat that holds unsettled rows and has none loaded.
 
 See [Executor runner](/internals/executor-runner) for the other path and [team-orchestration](/reference/packages/team-orchestration) for the engine package.
 

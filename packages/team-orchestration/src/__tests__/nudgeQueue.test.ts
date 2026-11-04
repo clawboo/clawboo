@@ -37,6 +37,35 @@ describe('createNudgeQueue', () => {
     expect(sent).toEqual(['a', 'b'])
   })
 
+  it('tells the sender when a queued send fails, however it fails, but not an immediate one', async () => {
+    const nq = createNudgeQueue()
+    const failed: unknown[] = []
+    const onQueuedFailure = (err: unknown): void => {
+      failed.push(err)
+    }
+    // Immediate: the caller hears the rejection itself.
+    await expect(
+      nq.deliver('s0', async () => Promise.reject(new Error('now')), { onQueuedFailure }),
+    ).rejects.toThrow('now')
+    expect(failed).toEqual([])
+
+    nq.markBusy('s1')
+    await nq.deliver('s1', async () => Promise.reject(new Error('rejected')), { onQueuedFailure })
+    await nq.deliver(
+      's1',
+      () => {
+        throw new Error('threw while setting up')
+      },
+      { onQueuedFailure },
+    )
+    nq.markIdle('s1')
+    await new Promise((r) => setImmediate(r))
+    nq.markIdle('s1')
+    await new Promise((r) => setImmediate(r))
+
+    expect(failed.map((e) => (e as Error).message)).toEqual(['rejected', 'threw while setting up'])
+  })
+
   it('isBusy reports a run in flight and a send queued behind it, until both are done', async () => {
     const nq = createNudgeQueue()
     expect(nq.isBusy('s1')).toBe(false)

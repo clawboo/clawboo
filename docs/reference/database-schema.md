@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 35 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 36 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
 
 To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
 
@@ -52,6 +52,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`skills`](#skills)                             | Capabilities and skills  | Skills added to agents                           |
 | [`team_chat`](#team_chat)                       | Peer room and mailbox    | Posts in the agents' own peer room               |
 | [`agent_inbox`](#agent_inbox)                   | Peer room and mailbox    | Each agent's mailbox                             |
+| [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient    |
 | [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
 | [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
 | [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                    |
@@ -681,7 +682,7 @@ Indexes: `idx_skills_source` (`source`), `idx_skills_category` (`category`).
 
 ## Peer room and mailbox
 
-The agents' peer room behind the TeamChat MCP server, and each agent's mailbox. Neither is the dashboard's team chat.
+The agents' peer room behind the TeamChat MCP server, each agent's mailbox, and the team chat's outbox of task updates. None of them is the dashboard's team chat.
 
 ### team_chat
 
@@ -718,6 +719,25 @@ Each agent's mailbox of coordination notices. A notice is delivered once, by whi
 | `tenant_id`     | `TEXT`              | Unused                                                                                           |
 
 Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
+
+### report_up_outbox
+
+The team chat engine's `[Task Update]` items, one row per result waiting to reach whoever handed the work off. A row is written when the engine queues it and settled when the recipient's run that carried it finishes, when a Stop drops it, or when it is given up. An unsettled row whose run never finished is sent again, by the running engine or, after a restart, by the chat's next engine. Settled rows are deleted after 7 days; unsettled rows are deleted after 30 days, or as soon as their team is gone.
+
+| Column               | Type                           | Notes                                             |
+| -------------------- | ------------------------------ | ------------------------------------------------- |
+| `id`                 | `TEXT`, PK                     |                                                   |
+| `team_id`            | `TEXT`, not null               |                                                   |
+| `room_id`            | `TEXT`                         | The chat room; null for the team's own chat       |
+| `recipient_agent_id` | `TEXT`                         | Null means the room's lead at the time it is sent |
+| `task_id`            | `TEXT`                         | The task the update reports on                    |
+| `payload`            | `TEXT`, not null               | The engine's item as JSON                         |
+| `replays`            | `INTEGER`, not null, default 0 | Times it was sent again; given up after 3         |
+| `created_at`         | `INTEGER`, not null            |                                                   |
+| `settled_at`         | `INTEGER`                      | Null while pending                                |
+| `settled_how`        | `TEXT`                         | `delivered`, `stopped` or `gave_up`               |
+
+Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
 
 ## Spend, budgets and audit
 

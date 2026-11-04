@@ -114,6 +114,14 @@ const RECENTLY_TERMINATED_TTL_MS = 60_000
  *  before the recipient is told via a terminal narration. Bounded → loop-safe. */
 const MAX_REFLECT_ATTEMPTS = 3
 
+/**
+ * Times a durable report-up is sent again because the run that carried it never
+ * finished: the process died or shut down, or the run ended on an error. Past
+ * this it is given up and the recipient's chat is told the results are on the
+ * board, so an update whose run keeps failing cannot be sent forever.
+ */
+export const MAX_REPORT_UP_REPLAYS = 3
+
 /** Age after which a dedupe / recently-terminated entry is reaped (bounds memory
  *  on a long-lived team-chat orchestrator; comfortably past any run window). */
 const PROCESSED_TTL_MS = 2 * DELEGATION_IDLE_TIMEOUT_MS
@@ -381,6 +389,54 @@ export function extractSignals(
   return EMPTY
 }
 
+/**
+ * One result waiting to reach whoever handed the work off: an item of a batched
+ * `[Task Update]`. It is everything the batcher needs to rebuild the message, so
+ * an item read back after a restart renders exactly as it would have before.
+ */
+export interface ReportUp {
+  /** The recipient; null resolves to the room's lead when it is sent. */
+  toAgentId: string | null
+  by: string
+  title?: string
+  summary: string
+  outcome?: TaskUpdateOutcome
+  /** The task this item reports on. */
+  taskId?: string
+  /** The closed task the recipient was running when it delegated this work:
+   *  marks a follow-up. */
+  forTaskId?: string
+}
+
+/**
+ * How a durable report-up was closed:
+ *  • `delivered` a run that carried it finished;
+ *  • `stopped`   a person's Stop dropped it before the recipient heard it;
+ *  • `gave_up`   it could not be delivered, and the recipient's chat was told.
+ */
+export type ReportUpSettlement = 'delivered' | 'stopped' | 'gave_up'
+
+/**
+ * The durable outbox behind the `[Task Update]` round-trip. Every report-up is
+ * written here when it is queued and stays pending until it is settled, so a
+ * restart that loses the in-memory batch or a delivery still queued behind the
+ * recipient's run loses nothing: the next engine for the room reads the pending
+ * ones back in `resume()` and sends them again. Synchronous, like the host's
+ * SQLite; each call is best-effort and must not throw.
+ */
+export interface ReportUpOutbox {
+  /** Store a report-up as it is queued. Null when it could not be written. */
+  record(item: ReportUp): string | null
+  /** Unsettled report-ups for this engine's room, oldest first, each with how
+   *  many times it was already sent again. */
+  pending(): Array<{ id: string; item: ReportUp; replays: number }>
+  /** Count one more replay of each. False when the write failed. */
+  markReplayed(ids: string[]): boolean
+  /** Close each that is still pending (the first settlement wins). False when
+   *  the write failed. */
+  settle(ids: string[], how: ReportUpSettlement): boolean
+}
+
 export interface BoardOrchestratorDeps {
   teamId: string
   board: BoardClient
@@ -443,8 +499,10 @@ export interface BoardOrchestratorDeps {
   isRunQueued?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
-  /** Append a visible narration entry to a session's transcript. Optional. */
-  narrate?: (sessionKey: string, text: string, kind?: NarrationKind) => void
+  /** Append a visible narration entry to a session's transcript. Optional.
+   *  Returns false when an `alert` could not be written anywhere, so the engine
+   *  does not give up a report-up nobody was told about. */
+  narrate?: (sessionKey: string, text: string, kind?: NarrationKind) => boolean | void
   /**
    * Compact a child's report-up summary before it becomes a board comment /
    * `[Task Update]`. Pass-through-safe + failure-preserving.
@@ -494,6 +552,14 @@ export interface BoardOrchestratorDeps {
    * contract suite), every gap counts as awake time.
    */
   sweepIntervalMs?: number
+  /**
+   * The durable store for `[Task Update]` items (see {@link ReportUpOutbox}).
+   * The host must hand `origin.reportUpIds` back on the stamp of the run it
+   * delivers, so the engine can settle them when that run ends, and call
+   * `onRunNotStarted` when a delivery it accepted never started. Omitted ⇒
+   * report-ups live in memory only and a restart can lose them.
+   */
+  reportUps?: ReportUpOutbox
 }
 
 export interface BoardOrchestrator {
@@ -598,6 +664,14 @@ export interface BoardOrchestrator {
     to: string,
     opts?: { cancelledDependents?: Array<{ id: string; title?: string | null }> },
   ): Promise<void>
+  /**
+   * A delivery the host had accepted (its `deliver` resolved, with the message
+   * queued behind the recipient's run) never started a run. The report-ups it
+   * carried (`run.reportUpIds`) go back to pending, and the next sweep sends them
+   * again. A start that fails while `deliver` is still pending is the engine's
+   * own retry path; the host does not report it here.
+   */
+  onRunNotStarted(run: RunStamp): void
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
 }
@@ -630,21 +704,22 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // `toAgentId` is the recipient: a sub-task reports to its IMMEDIATE delegator
   // (so a mid-chain delegator isn't left standing); a top-level task reports to
   // the leader. `null` ⇒ resolve to the leader at flush time.
-  const reflectQueue: Array<{
-    toAgentId: string | null
-    by: string
-    title?: string
-    summary: string
-    outcome?: TaskUpdateOutcome
-    /** The task this item reports on. */
-    taskId?: string
-    /** The closed task the recipient was running when it delegated this work:
-     *  marks a follow-up. */
-    forTaskId?: string
-    /** Delivery-retry counter (bounded by MAX_REFLECT_ATTEMPTS). */
-    attempts?: number
-  }> = []
+  const reflectQueue: Array<
+    ReportUp & {
+      /** Delivery-retry counter (bounded by MAX_REFLECT_ATTEMPTS). */
+      attempts?: number
+      /** Its row in the durable outbox, when the host keeps one. */
+      outboxId?: string
+    }
+  > = []
   let reflectTimer: ReturnType<typeof setTimeout> | null = null
+  // Outbox ids THIS engine holds: queued, being flushed, or handed to a run that
+  // has not ended. `resume()` replays only the pending rows outside it, so a row
+  // is sent again only by the next engine for the room, never twice by this one.
+  const reportUpsInHand = new Set<string>()
+  // Held outbox ids whose settlement could not be written yet, with what they
+  // were settled as. The sweep writes them (see retrySettlements).
+  const settleLater = new Map<string, ReportUpSettlement>()
 
   const now = deps.now ?? (() => Date.now())
   // Baselined at creation, so a sleep before the first sweep is caught too.
@@ -1380,20 +1455,123 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
   }
 
-  function enqueueReflection(item: {
-    toAgentId: string | null
-    by: string
-    title?: string
-    summary: string
-    outcome?: TaskUpdateOutcome
-    taskId?: string
-    forTaskId?: string
-  }): void {
+  function enqueueReflection(item: ReportUp): void {
     // Failures must reach the recipient even with an empty summary; successes
     // need substance (the empty-success placeholder is applied by the caller).
     if (!item.summary.trim() && (item.outcome == null || item.outcome === 'done')) return
-    reflectQueue.push(item)
+    // Written BEFORE it waits on the batch window, so from here on a restart
+    // cannot lose it: the next engine for the room reads it back in `resume()`.
+    const outboxId = deps.reportUps?.record(item) ?? null
+    if (outboxId) reportUpsInHand.add(outboxId)
+    reflectQueue.push(outboxId ? { ...item, outboxId } : item)
     if (!reflectTimer) reflectTimer = setTimeout(() => void flushReflection(), REFLECT_WINDOW_MS)
+  }
+
+  /** Close durable report-ups this engine holds (see {@link ReportUpSettlement}).
+   *  An id it no longer holds is left alone: after a `reset()`, a run the host
+   *  cancelled at teardown still reports its ending here, and settling its rows
+   *  would lose an update that never ran. They stay pending for the next engine.
+   *  An id is let go only once its settlement is written, so a failed write never
+   *  lets this engine send the row a second time. */
+  function settleReportUps(ids: readonly string[], how: ReportUpSettlement): void {
+    const held = ids.filter((id) => reportUpsInHand.has(id))
+    if (held.length === 0) return
+    if (!deps.reportUps?.settle(held, how)) {
+      // Still held, so this engine never resends it; the sweep writes it later.
+      for (const id of held) settleLater.set(id, how)
+      return
+    }
+    for (const id of held) {
+      reportUpsInHand.delete(id)
+      settleLater.delete(id)
+    }
+  }
+
+  /** Write the settlements whose write failed (see settleReportUps). Run by the
+   *  sweep, so a later engine does not resend an update that was delivered. */
+  function retrySettlements(): void {
+    if (!deps.reportUps || settleLater.size === 0) return
+    const byHow = new Map<ReportUpSettlement, string[]>()
+    for (const [id, how] of settleLater) byHow.set(how, [...(byHow.get(how) ?? []), id])
+    for (const [how, ids] of byHow) {
+      if (!deps.reportUps.settle(ids, how)) continue
+      for (const id of ids) {
+        settleLater.delete(id)
+        reportUpsInHand.delete(id)
+      }
+    }
+  }
+
+  /** The session a report-up goes to now, or null when it cannot reach its
+   *  recipient yet. A null recipient is the room's lead, and a room may have
+   *  none for a while. */
+  const sessionOfRecipient = (item: ReportUp): string | null => {
+    const toId = item.toAgentId ?? deps.leaderAgentId()
+    return toId ? deps.sessionKeyForAgent(toId) : null
+  }
+  const routable = (item: ReportUp): boolean => sessionOfRecipient(item) !== null
+
+  /**
+   * The run that carried these report-ups is over. Only a run that finished
+   * heard them. One that a Stop cut short dropped them. Any other ending (a
+   * crash, a kill at shutdown, a provider error, a run that never started)
+   * lets them go back to pending, so the next sweep, or the next engine after a
+   * restart, sends them again, counted against {@link MAX_REPORT_UP_REPLAYS}.
+   */
+  function closeReportUpRun(run: RunStamp | undefined, finished: boolean): void {
+    if (!run?.reportUpIds?.length) return
+    if (finished) settleReportUps(run.reportUpIds, 'delivered')
+    else if (run.stopGen !== deps.stopGen()) settleReportUps(run.reportUpIds, 'stopped')
+    else for (const id of run.reportUpIds) reportUpsInHand.delete(id)
+  }
+
+  /** The outbox ids a batch of reflections carries. */
+  const outboxIdsOf = (items: ReadonlyArray<{ outboxId?: string }>): string[] =>
+    items.flatMap((i) => (i.outboxId ? [i.outboxId] : []))
+
+  /**
+   * Queue again every report-up the outbox still holds that this engine does
+   * not: the ones a previous process (or an evicted engine for this room) took
+   * with it, and the ones whose run here ended without finishing (see
+   * {@link closeReportUpRun}). Each is counted, and one already sent again
+   * {@link MAX_REPORT_UP_REPLAYS} times is given up instead, with an alert in the
+   * recipient's chat. No await between reading the outbox and claiming the rows,
+   * so two concurrent `resume()` calls never both send one. Run by `resume()` and
+   * by every sweep.
+   */
+  function replayReportUps(): void {
+    if (!deps.reportUps) return
+    // One that cannot reach its recipient now (a room with no lead yet) stays
+    // pending and uncounted: a later sweep sends it once it can.
+    const rows = deps.reportUps
+      .pending()
+      .filter((r) => !reportUpsInHand.has(r.id) && routable(r.item))
+    if (rows.length === 0) return
+    const replay = rows.filter((r) => r.replays < MAX_REPORT_UP_REPLAYS)
+    const exhausted = rows.filter((r) => r.replays >= MAX_REPORT_UP_REPLAYS)
+    // A count that could not be written is not spent: the next sweep tries again.
+    if (replay.length > 0 && deps.reportUps.markReplayed(replay.map((r) => r.id))) {
+      for (const r of replay) {
+        reportUpsInHand.add(r.id)
+        reflectQueue.push({ ...r.item, outboxId: r.id })
+      }
+      armReflectTimer()
+    }
+    // Given up only once the recipient's chat says so: a row whose alert could
+    // not be written stays pending, and the next sweep tries the alert again.
+    const perSession = new Map<string, string[]>()
+    for (const r of exhausted) {
+      const toSk = sessionOfRecipient(r.item)
+      if (toSk) perSession.set(toSk, [...(perSession.get(toSk) ?? []), r.id])
+    }
+    for (const [toSk, ids] of perSession) {
+      const told = deps.narrate?.(
+        toSk,
+        `${ids.length} task update(s) could not be delivered to this session after ${MAX_REPORT_UP_REPLAYS} more tries. The results are on the board.`,
+        'alert',
+      )
+      if (told !== false) deps.reportUps.settle(ids, 'gave_up')
+    }
   }
 
   function armReflectTimer(): void {
@@ -1491,13 +1669,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       deps.narrate?.(toSk, message)
       const toId = deps.agentIdForSession(toSk)
       if (toId) {
+        // The run that carries the update settles its outbox rows when it ends.
+        const reportUpIds = outboxIdsOf(group)
+        const origin: TurnOrigin =
+          g.forTaskId || reportUpIds.length > 0
+            ? {
+                kind: 'system',
+                ...(g.forTaskId ? { forTaskId: g.forTaskId } : {}),
+                ...(reportUpIds.length > 0 ? { reportUpIds } : {}),
+              }
+            : SYSTEM_TURN
         try {
-          await deps.deliver(
-            toSk,
-            toId,
-            message,
-            g.forTaskId ? { kind: 'system', forTaskId: g.forTaskId } : SYSTEM_TURN,
-          )
+          await deps.deliver(toSk, toId, message, origin)
         } catch {
           // Delivery rejected (a transient chat.send failure) — re-queue for a
           // bounded retry rather than silently dropping the recipient's update
@@ -1512,11 +1695,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             // is a real coordination failure, not routine narration — mark it
             // `alert` so the host surfaces it to the user instead of filing it in
             // a tracelog nobody reads.
-            deps.narrate?.(
+            const told = deps.narrate?.(
               toSk,
               `${group.length} task update(s) could not be delivered to this session — the results are on the board.`,
               'alert',
             )
+            // Given up only once someone was told. Otherwise the rows go back
+            // to pending and a later sweep sends them again.
+            if (told !== false) settleReportUps(outboxIdsOf(group), 'gave_up')
+            else for (const id of outboxIdsOf(group)) reportUpsInHand.delete(id)
           }
         }
       }
@@ -1904,6 +2091,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
     for (const [s, ts] of recentlyTerminated)
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
+    // Settlements whose write failed are written now; report-ups whose run ended
+    // without finishing are sent again.
+    retrySettlements()
+    replayReportUps()
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
       // Queued for a run slot: the run has not started, so its idle window starts
@@ -1947,6 +2138,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
   /** A session's observer ended while a delegation was still in flight. */
   async function onSessionClosed(sessionKey: string, run?: RunStamp): Promise<void> {
+    // The run that carried these report-ups ended without finishing.
+    closeReportUpRun(run, false)
     if (run?.reportForTaskId) {
       await recordFollowUp(
         sessionKey,
@@ -1966,6 +2159,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
   /** Re-attach to durable in-flight work after a (re)mount — see the interface. */
   async function resume(): Promise<void> {
+    replayReportUps()
     const all = await deps.board.listTasks(deps.teamId)
     for (const t of all) {
       const assignee = typeof t.assigneeAgentId === 'string' ? t.assigneeAgentId : null
@@ -2009,11 +2203,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   async function onEvent(sessionKey: string, event: RuntimeEvent, run?: RunStamp): Promise<void> {
     const reportFor = run?.reportForTaskId ?? null
     const wasTaskRun = reportFor === null && sessionToTask.has(sessionKey)
+    const terminal = event.kind === 'done' || (event.kind === 'error' && event.fatal)
+    // The run that carried these report-ups is over. Settled first, so a throw
+    // while handling the event cannot leave them held.
+    if (terminal) closeReportUpRun(run, event.kind === 'done' && event.reason === 'success')
     await handleEvent(sessionKey, event, run)
     // A NON-task turn (a user turn, a reflection) just ended on a session that had
     // work waiting behind it: a task that could not be bound while the turn was in
     // flight. Fire it now. (A task run's own terminal already pumps.)
-    const terminal = event.kind === 'done' || (event.kind === 'error' && event.fatal)
     if (terminal && !wasTaskRun && waitingOnTurn.delete(sessionKey)) await pumpReady(sessionKey)
   }
 
@@ -2327,6 +2524,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // first (they were scheduled pre-Stop, so their gen check would pass).
     for (const t of deferredFires) clearTimeout(t)
     deferredFires.clear()
+    // Report-ups already handed to the host die with the Stop (the host drops
+    // its queued deliveries and aborts the runs), so a restart must not bring
+    // them back. Ones still waiting on the batch window go out as before.
+    const queued = new Set(outboxIdsOf(reflectQueue))
+    settleReportUps(
+      [...reportUpsInHand].filter((id) => !queued.has(id)),
+      'stopped',
+    )
     // A Stop outranks an earlier "run this now": the person halted the team.
     forceFire.clear()
     // Tracked runs: cancel the open execution NOW; the abort's later
@@ -2374,6 +2579,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     detachTask,
     dispatchTask,
     personMovedTask,
+    onRunNotStarted: (run) => closeReportUpRun(run, false),
     taskForSession: (sessionKey) => sessionToTask.get(sessionKey) ?? null,
     execForSession: (sessionKey) => {
       const taskId = sessionToTask.get(sessionKey)
@@ -2384,12 +2590,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       // child result isn't silently lost on a team-switch / reconnect that lands
       // inside the 3 s batch window. `flushReflection` synchronously drains the
       // queue (the delivery is fire-and-forget against the still-alive adapter).
+      // Items the outbox holds are left out: they stay pending and the room's
+      // next engine sends them, so flushing them here too would send them twice.
+      const unheld = reflectQueue.filter((i) => !i.outboxId)
+      reflectQueue.splice(0, reflectQueue.length, ...unheld)
       if (reflectQueue.length > 0) void flushReflection()
       if (reflectTimer) {
         clearTimeout(reflectTimer)
         reflectTimer = null
       }
       reflectQueue.length = 0
+      // Unsettled rows stay pending in the outbox: the next engine replays them.
+      reportUpsInHand.clear()
+      settleLater.clear()
       sessionToTask.clear()
       sessionStartGen.clear()
       taskToExec.clear()
