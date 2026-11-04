@@ -323,7 +323,7 @@ Click a run to see the routine's schedule in plain words, where it goes, its nex
 
 When an agent routine runs, it becomes a task card on that day. A team routine posts to the team's General chat, and the tasks the team creates appear as they are made.
 
-Only routines that will run show runs. A paused routine, one halted after a failed run, and a one-time routine that already ran have none, and neither do the OpenClaw Gateway's own scheduled jobs. **Routine runs** under **Display** shows or hides the runs, and its note says how many are coming up on screen. Times are in your local time, and when the server runs in another time zone, the schedule names that zone.
+Only routines that will run show runs. A paused routine, one halted after a failed run, and a one-time routine that already ran have none, and neither do the OpenClaw Gateway's own scheduled jobs. **Routine runs** under **Display** shows or hides the runs, and its note says how many are coming up on screen. Times are in your local time, and when routines run in another time zone (see [the time zone](/using/routines#the-time-zone)), the schedule names that zone.
 
 ## Views and the calendar
 

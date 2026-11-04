@@ -40,15 +40,11 @@ The SDK has to sit next to Clawboo, which is why both install globally. Clawboo 
 
 </Step>
 
-<Step title="Install Claude Code">
+<Step title="Check the Claude Code row">
 
-Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Claude Code** row, click **Install**, then **Install** in the panel that opens. Clawboo runs this and shows its output:
+Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. You should see the **Claude Code** row read **Needs key**, or **Connected** if an Anthropic key is already saved. A Claude Code run starts the SDK's own `claude` binary, which came with the SDK in the step above, so there is nothing more to install. A `claude` CLI on your `PATH` also counts as installed.
 
-```bash
-npm install -g @anthropic-ai/claude-code@2
-```
-
-You should see the row change to **Needs key**, or to **Connected** if an Anthropic key is already saved. If Claude Code is already installed on this computer, the row shows that state straight away.
+If the row reads **Not installed**, Clawboo found neither. Check that the SDK sits next to Clawboo (`npm ls -g @anthropic-ai/claude-agent-sdk`), and that npm installed its platform package: an install with `--omit=optional` leaves the binary out. Then run `clawboo restart`. The row's **Install** button installs the separate `claude` CLI (`npm install -g @anthropic-ai/claude-code@2`); a run still needs the SDK.
 
 </Step>
 

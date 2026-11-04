@@ -34,15 +34,17 @@ how-to on [Run work on a schedule with routines](/using/routines).
 | A Clawboo routine                  | a cron expression (five or six fields) or a one-shot `once@<ISO-8601>`                                                                        | `parseCronSpec`, `probeCronSpec`, `nextOccurrence`, `isOnceSpec` |
 | A `ScheduleRecord` from any source | the routine forms, plus the Gateway's `every:<ms>` (optionally `@anchor:<ms>`), `at:<iso>`, and a cron expression with an `@tz:<zone>` suffix | `encodeCronSpec`, `decodeCronSpec`                               |
 
-`nextOccurrence(spec, fromMs)` returns the next run strictly after `fromMs`, or `null` when the spec will never fire
-again (a spent one-shot). `probeCronSpec` validates a spec when it is registered, and both throw
-`InvalidCronSpecError` for a malformed one. Every other part of the system (the routines ledger, the ticker, the
+`nextOccurrence(spec, fromMs, timeZone?)` returns the next run strictly after `fromMs`, or `null` when the spec will
+never fire again (a spent one-shot). A cron expression is wall-clock time read in `timeZone`, an IANA name; without
+one it is read in the process's own zone. A one-shot is a fixed instant and ignores it. The server passes the
+scheduler time zone (`GET /api/schedules/time-zone`) whenever one is set. `probeCronSpec(spec, timeZone?)`
+validates a spec when it is registered, and both throw `InvalidCronSpecError` for a malformed one. Every other part of the system (the routines ledger, the ticker, the
 REST layer) stores precomputed epoch-millisecond times, so a change of cron library touches one file,
 `src/occurrence.ts`.
 
 ## The calendar projection
 
-`occurrencesInWindows(spec, bounds, { after, first, countCap, timesCap })` spreads a spec's future runs over
+`occurrencesInWindows(spec, bounds, { after, first, countCap, timesCap, timeZone })` spreads a spec's future runs over
 consecutive windows, where window `i` runs from `bounds[i]` up to `bounds[i + 1]`. The board calendar sends the
 viewer's local midnights as the bounds, which keeps daylight-saving days right, and `GET /api/schedules/occurrences`
 serves the result. Each window reports a capped `count`, a `more` flag when the cap was hit, and the first few run
