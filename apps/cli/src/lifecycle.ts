@@ -98,16 +98,12 @@ function urlHost(host: string): string {
  * May the access token go to this port? Only at the dashboard host, and only to
  * the port the server recorded in the private api-port.txt. Any other port
  * answering with the gate's refusal could be another user's program imitating
- * it, so the per-install token never reaches it; the desktop app follows the
- * same rule. One exception: a STUDIO_ACCESS_TOKEN set in this shell may go to
- * the port CLAWBOO_API_PORT names, since the person chose both, for a server
- * whose api-port.txt this shell cannot see (a container, another CLAWBOO_HOME).
+ * it, so no token reaches it, not even one set in this shell: CLAWBOO_API_PORT
+ * stays set while the server is down, when anyone could listen on that port.
+ * The desktop app follows the same rule.
  */
 function mayReceiveToken(host: string, port: number): boolean {
-  if (host !== dashboardHost()) return false
-  if (port === readRuntimePort()) return true
-  const shellToken = (process.env['STUDIO_ACCESS_TOKEN'] ?? '').trim()
-  return shellToken !== '' && port === readPortEnv('CLAWBOO_API_PORT')
+  return host === dashboardHost() && port === readRuntimePort()
 }
 
 /**

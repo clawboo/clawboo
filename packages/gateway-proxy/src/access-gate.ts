@@ -146,6 +146,30 @@ function hasFetchMetadata(req: IncomingMessage): boolean {
   )
 }
 
+/**
+ * True when this POST is the sign-in page's own form being submitted: a
+ * form-encoded body, fetch metadata (when the browser sends any) of a
+ * same-origin page navigation, and an Origin (when sent) of this very origin.
+ * A fetch(), a frame, another site's form or a script's POST is none of these,
+ * so it cannot spend a code even if it holds one.
+ */
+function isSignInFormPost(req: IncomingMessage): boolean {
+  const type = String(req.headers['content-type'] ?? '').toLowerCase()
+  if (!type.startsWith('application/x-www-form-urlencoded')) return false
+  if (hasFetchMetadata(req)) {
+    const header = (name: string): string => String(req.headers[name] ?? '').toLowerCase()
+    if (header('sec-fetch-mode') !== 'navigate' || header('sec-fetch-dest') !== 'document') {
+      return false
+    }
+    const site = header('sec-fetch-site')
+    if (site !== '' && site !== 'same-origin') return false
+  }
+  const origin = req.headers.origin
+  if (origin === undefined) return true
+  const own = `${requestIsHttps(req) ? 'https' : 'http'}://${req.headers.host ?? ''}`
+  return String(origin).toLowerCase() === own.toLowerCase()
+}
+
 /** The only shape a minted launch code has, so nothing else is ever echoed into a page. */
 const LAUNCH_CODE_SHAPE = /^[A-Za-z0-9_-]{16,256}$/
 
@@ -348,7 +372,7 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
     // and dead within minutes. Never on an /api/ path, where it would let a
     // script holding a code skip the cookie; there it is ignored, and not spent.
     // A code is spent by a page load (see isPageLoad), or by the POST from the
-    // sign-in page below. A request with no fetch metadata at all (a phone on a
+    // sign-in page below (see isSignInFormPost). A request with no fetch metadata at all (a phone on a
     // plain-HTTP LAN address, an older browser, a link previewer) gets that page
     // instead of being spent. Anything else (a fetch, a frame) is redirected
     // without the cookie and leaves the code for the browser. A spent, expired
@@ -361,7 +385,9 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
         res.statusCode = 200
         res.setHeader('Content-Type', 'text/html; charset=utf-8')
         res.setHeader('Cache-Control', 'no-store')
-        res.setHeader('Referrer-Policy', 'no-referrer')
+        // Not no-referrer: under it a browser sends `Origin: null` on the form's
+        // POST, which isSignInFormPost refuses. The page links nowhere else.
+        res.setHeader('Referrer-Policy', 'same-origin')
         res.setHeader(
           'Content-Security-Policy',
           "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
@@ -372,7 +398,8 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       url.searchParams.delete(codeParam)
       // 303 after the POST, so the browser follows with a GET.
       res.statusCode = posted ? 303 : 302
-      if ((posted || isPageLoad(req)) && redeemLaunchCode(offeredCode)) {
+      const spends = posted ? isSignInFormPost(req) : isPageLoad(req)
+      if (spends && redeemLaunchCode(offeredCode)) {
         res.setHeader('Set-Cookie', accessCookie(req))
       }
       res.setHeader('Location', buildRedirectUrl(req, basePath + url.pathname + url.search))

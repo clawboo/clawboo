@@ -72,13 +72,14 @@ test.describe('a launch code without fetch metadata', () => {
     expect(page.headers()['set-cookie']).toBeUndefined()
     expect(await page.text()).toContain('method="post"')
 
-    const signedIn = await phone.post(url, { maxRedirects: 0 })
+    // The form's POST: form-encoded, as the sign-in page's button sends it.
+    const signedIn = await phone.post(url, { form: {}, maxRedirects: 0 })
     expect(signedIn.status()).toBe(303)
     expect(signedIn.headers()['set-cookie']).toContain('clawboo_access=')
     expect((await phone.get(`${API_BASE}/api/settings`)).status()).toBe(200)
 
     const late = await playwright.request.newContext({ storageState: SIGNED_OUT })
-    const again = await late.post(url, { maxRedirects: 0 })
+    const again = await late.post(url, { form: {}, maxRedirects: 0 })
     expect(again.headers()['set-cookie']).toBeUndefined()
     await late.dispose()
     await phone.dispose()

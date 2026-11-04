@@ -11,6 +11,12 @@ import { createAccessGate } from '../access-gate'
 
 const TOKEN = 'super-secret-token-value'
 
+/** What the sign-in page's form sends from a plain-HTTP page: no fetch metadata. */
+const FORM_POST = {
+  'content-type': 'application/x-www-form-urlencoded',
+  origin: 'http://localhost:18790',
+}
+
 /** What a browser sends when it loads a page: a top-level navigation. */
 const PAGE_LOAD = {
   'sec-fetch-mode': 'navigate',
@@ -233,14 +239,61 @@ describe('?access_code= with no fetch metadata at all', () => {
   it('signs in on the POST from that page, once', () => {
     const { gate } = gateAt()
     const { code } = gate.mintLaunchCode()!
-    const posted = open(gate, `/board?access_code=${code}`, {}, {}, 'POST')
+    const posted = open(gate, `/board?access_code=${code}`, {}, FORM_POST, 'POST')
     expect(posted.statusCode).toBe(303)
     expect(posted.headers['set-cookie']).toContain(`clawboo_access=${TOKEN}`)
     expect(posted.headers['location']).toBe('http://localhost:18790/board')
-    const again = open(gate, `/board?access_code=${code}`, {}, {}, 'POST')
+    const again = open(gate, `/board?access_code=${code}`, {}, FORM_POST, 'POST')
     expect(again.statusCode).toBe(303)
     expect(again.headers['set-cookie']).toBeUndefined()
   })
+
+  it('accepts the form POST a browser sends on an HTTPS or loopback page too', () => {
+    const { gate } = gateAt()
+    const { code } = gate.mintLaunchCode()!
+    const posted = open(
+      gate,
+      `/?access_code=${code}`,
+      { ...PAGE_LOAD, 'sec-fetch-site': 'same-origin' },
+      FORM_POST,
+      'POST',
+    )
+    expect(posted.headers['set-cookie']).toBeDefined()
+  })
+
+  it('sends Origin on the POST, by allowing it with a same-origin referrer policy', () => {
+    // With `Referrer-Policy: no-referrer`, a browser sends `Origin: null` on the
+    // form's POST, which the Origin check would refuse.
+    const { gate } = gateAt()
+    const { code } = gate.mintLaunchCode()!
+    const page = open(gate, `/?access_code=${code}`, {}, {})
+    expect(page.headers['referrer-policy']).toBe('same-origin')
+  })
+
+  // Only the sign-in page's own form spends a code by POST. Anything else, even
+  // a request that somehow holds the code, is redirected without the cookie and
+  // leaves the code live.
+  for (const [name, headers] of [
+    ['a fetch() POST', { ...FORM_POST, 'sec-fetch-mode': 'cors', 'sec-fetch-dest': 'empty' }],
+    [
+      'a POST from a frame',
+      { ...FORM_POST, 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'iframe' },
+    ],
+    ['a POST from another site', { ...FORM_POST, 'sec-fetch-site': 'cross-site' }],
+    ['a POST from another origin', { ...FORM_POST, origin: 'http://evil.example' }],
+    ['a POST whose origin is hidden', { ...FORM_POST, origin: 'null' }],
+    ['a JSON POST', { 'content-type': 'application/json', origin: 'http://localhost:18790' }],
+    ['a POST with no body type', { origin: 'http://localhost:18790' }],
+  ] as const) {
+    it(`does not spend a code on ${name}`, () => {
+      const { gate } = gateAt()
+      const { code } = gate.mintLaunchCode()!
+      const posted = open(gate, `/?access_code=${code}`, {}, headers, 'POST')
+      expect(posted.handled).toBe(true)
+      expect(posted.headers['set-cookie']).toBeUndefined()
+      expect(open(gate, `/?access_code=${code}`).headers['set-cookie']).toBeDefined()
+    })
+  }
 
   it('does not put a malformed code into the page', () => {
     const { gate } = gateAt()

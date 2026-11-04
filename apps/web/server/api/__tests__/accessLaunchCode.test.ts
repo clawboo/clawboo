@@ -149,7 +149,14 @@ describe('POST /api/access/launch-code on a locked server', () => {
     expect(page.status).toBe(200)
     expect(page.body).toContain(`action="?access_code=${code}"`)
 
-    const posted = await getPage(`${base}/?access_code=${code}`, {}, 'POST')
+    // A script's bare POST does not spend it; the page's form POST does.
+    const bare = await getPage(`${base}/?access_code=${code}`, {}, 'POST')
+    expect(bare.setCookie).toBeNull()
+    const posted = await getPage(
+      `${base}/?access_code=${code}`,
+      { 'content-type': 'application/x-www-form-urlencoded', origin: base },
+      'POST',
+    )
     expect(posted.status).toBe(303)
     expect(posted.setCookie).toContain(`clawboo_access=${TOKEN}`)
   })

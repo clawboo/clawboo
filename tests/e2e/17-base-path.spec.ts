@@ -384,7 +384,8 @@ test.describe('a server started with no STUDIO_ACCESS_TOKEN locks itself', () =>
         COREPACK_HOME,
       },
     })
-    expect(cli.status, cli.stderr).toBe(0)
+    // The CLI's notices go to stdout, so show both streams when it fails.
+    expect(cli.status, `${cli.stdout}\n${cli.stderr}`).toBe(0)
     const link = cli.stdout.trim()
     expect(link).toMatch(
       new RegExp(`^${server.origin}${BASE_PATH}/\\?access_code=[A-Za-z0-9_-]{32,}$`),

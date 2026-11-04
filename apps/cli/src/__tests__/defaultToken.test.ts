@@ -260,13 +260,15 @@ describe('who may receive the token', () => {
     expect(gated.seen.map((s) => s.cookie)).toEqual([''])
   })
 
-  it('sends a token set in this shell to the port CLAWBOO_API_PORT names', async () => {
-    // Both typed by the person, for a server whose api-port.txt this shell cannot
-    // see (a container, another CLAWBOO_HOME).
+  it('never sends a token set in this shell to a port that only CLAWBOO_API_PORT names', async () => {
+    // CLAWBOO_API_PORT often sits in a shell profile and stays set while the
+    // server is down, when another user can listen on that port and imitate the
+    // gate. Only the port the running server recorded gets a token.
     process.env['STUDIO_ACCESS_TOKEN'] = 'shell-token'
-    const gated = await track(gatedDashboard('shell-token'))
-    process.env['CLAWBOO_API_PORT'] = String(gated.port)
-    expect(await probeDashboard('127.0.0.1', gated.port, 1_000)).toBe('clawboo')
+    const impostor = await track(gatedDashboard('shell-token'))
+    process.env['CLAWBOO_API_PORT'] = String(impostor.port)
+    expect(await probeDashboard('127.0.0.1', impostor.port, 1_000)).toBe('gated')
+    expect(impostor.seen.map((s) => s.cookie)).toEqual([''])
   })
 
   it('never sends it to another host, even on the recorded port', async () => {
