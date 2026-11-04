@@ -39,8 +39,12 @@ export type TurnOrigin =
    *  `forTaskId`, present only when set, marks a FOLLOW-UP: the recipient
    *  delegated this work while running that task, which has since closed. Its
    *  reply is a report on that task for whoever gave it the task, not a message
-   *  to the user. The engine never sets it for the team lead. */
-  | { kind: 'system'; forTaskId?: string }
+   *  to the user. The engine never sets it for the team lead.
+   *
+   *  `reportUpIds`, present only when set, names the durable report-ups this
+   *  update carries. The host copies them onto the run's stamp, and the engine
+   *  settles them when that run ends. */
+  | { kind: 'system'; forTaskId?: string; reportUpIds?: string[] }
   /** A routine the person scheduled posted this into team chat on their behalf.
    *  It carries their words, so it frames like a human turn, but nobody is
    *  necessarily watching when it runs. */
@@ -134,10 +138,12 @@ export function classifyTurn(input: {
 
 /** What a run was delivered as, fixed at delivery and handed back to the engine
  *  with each of its events. `reportForTaskId` is the framing's `reportsForTask`,
- *  or null. `stopGen` is the host's stop generation at delivery. */
+ *  or null. `stopGen` is the host's stop generation at delivery. `reportUpIds`
+ *  is a system origin's `reportUpIds`: the durable report-ups this run carries. */
 export interface RunStamp {
   reportForTaskId: string | null
   stopGen: number
+  reportUpIds?: string[]
 }
 
 /**

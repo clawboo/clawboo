@@ -22,7 +22,13 @@
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
 import { compactToolResultMarkdown } from '@clawboo/compaction'
-import { enqueueInbox, getActiveRoom, type ClawbooDb } from '@clawboo/db'
+import {
+  enqueueInbox,
+  getActiveRoom,
+  listRoomsWithPendingReportUps,
+  reapReportUps,
+  type ClawbooDb,
+} from '@clawboo/db'
 import { createSuspendDetector, steeringOf } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
 import {
@@ -47,6 +53,7 @@ import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
+import { createReportUpOutbox } from './reportUpOutbox'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type RunEntry } from './serverDeliver'
@@ -235,6 +242,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // and refreshing the clock here would push out the eviction of an instance
     // whose runs have all finished — the case the idle TTL exists to reclaim.
     onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
+    onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     execForSession: (sk) => engineRef.current!.execForSession(sk),
     // The start gate reads it: a delivery made before a Stop or a dispose never
@@ -403,6 +411,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // (native mode) via the REST ToolApprovalQueue.
     isRiskyDelegation,
     requestDelegationApproval: (input) => resolveDelegationApproval(db, input),
+    // Every `[Task Update]` item is written to the room's durable outbox as it is
+    // queued and settled once the recipient's run that carried it finishes. One
+    // whose run never finished (a restart, an unload, a crash, a start that
+    // failed in the queue) stays pending, and this engine's sweep or the room's
+    // next engine sends it again.
+    reportUps: createReportUpOutbox(db, teamId, roomId),
   })
   engineRef.current = engine
 
@@ -559,8 +573,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
       // Queued (not-yet-started) deliveries must die with the Stop too: a
       // markIdle after the aborts would otherwise FLUSH them into brand-new
-      // post-Stop runs. Dropping them loses nothing durable — task updates and
-      // alerts live in the mailbox now, and stopped work is tombstoned below.
+      // post-Stop runs. Dropping them loses nothing durable: alerts live in the
+      // mailbox, a dropped task update is settled as stopped by markStopped (its
+      // result stays on the board), and stopped work is tombstoned below.
       // A delivery the queue already released but whose run has not started
       // (waiting on the agent's lock, or inside adapter.start) is refused by
       // serverDeliver's start gate on the bumped generation, so it dies with the
@@ -650,9 +665,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // adapter and starts a brand-new agent run. Draining here would spawn runs
       // whose events reach an already-reset engine and whose handles are absent
       // from the just-cleared abort map: unobservable, unstoppable work started
-      // by teardown. A queued `[Task Update]` is dropped instead; making it
-      // survive requires the durable mailbox (it must outlive the process, which
-      // an in-memory flush can't do regardless).
+      // by teardown. A queued `[Task Update]` is dropped here and survives in the
+      // durable report-up outbox: this room's next engine sends it again.
       nudge.reset()
     },
   }
@@ -695,6 +709,18 @@ export function getTeamOrchestrator(
 /** True when a team chat room has a live orchestrator (introspection / tests). */
 export function hasTeamOrchestrator(teamId: string, roomId: string | null = null): boolean {
   return instances.has(orchestratorKey(teamId, roomId))
+}
+
+/** Chat rooms holding report-ups no resident engine has: after a restart or an
+ *  eviction, building the room's engine replays them (its `resume()`). A
+ *  resident engine already holds its own, so its room is left out and its idle
+ *  clock is not refreshed by the scan. Expired and orphaned rows are reaped
+ *  first, so the scan never wakes a ghost. */
+export function roomsWithUnheldReportUps(
+  db: ClawbooDb,
+): Array<{ teamId: string; roomId: string | null }> {
+  reapReportUps(db)
+  return listRoomsWithPendingReportUps(db).filter((r) => !hasTeamOrchestrator(r.teamId, r.roomId))
 }
 
 /** The room a board task is driven from (its own active room, else the team's

@@ -9,11 +9,12 @@
 //   2. Wake-on-work — a delegation-derived task created or released outside a
 //      live engine (an MCP `create_task`, a sweep release) schedules a pump for
 //      its team within seconds instead of the 60-s interval.
-//   3. Mailbox writer — an executor-path terminal for a delegated task, landing
-//      while NO orchestrator instance is alive to reflect it, becomes a durable
-//      `agent_inbox` row for the delegator, delivered by the next digest /
-//      piggyback. This closes the "completed through the other door and nobody
-//      ever heard" vacuum.
+//   3. Mailbox writer — an executor-path terminal for a delegated task becomes
+//      a durable `agent_inbox` row for the delegator, whether or not an engine
+//      is resident, delivered by the next digest / piggyback. This closes the
+//      "completed through the other door and nobody ever heard" vacuum. The
+//      engine's own terminals are skipped: its `[Task Update]` is durable in the
+//      report-up outbox (./reportUpOutbox).
 //   4. Leader signal — while the team leader has a LIVE native run, a terminal
 //      for a delegated task is also pushed mid-run through the adapter's
 //      writeContext seam (ambient FYI; the engine's `[Task Update]` remains the

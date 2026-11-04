@@ -642,6 +642,26 @@ const SCHEMA_DDL = `
     );
     CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);
 
+    -- ── Durable report-ups: the team chat's [Task Update] outbox (src/reportUps.ts) ──
+    -- One row per result waiting to reach whoever handed the work off, written
+    -- when the engine queues it and settled once the recipient's run that
+    -- carried it ends (or a Stop drops it, or it is given up). A restart that
+    -- loses the in-memory batch loses no row: the room's next engine replays
+    -- the pending ones, counting each replay in replays.
+    CREATE TABLE IF NOT EXISTS report_up_outbox (
+      id                  TEXT    PRIMARY KEY,
+      team_id             TEXT    NOT NULL,
+      room_id             TEXT,
+      recipient_agent_id  TEXT,
+      task_id             TEXT,
+      payload             TEXT    NOT NULL,
+      replays             INTEGER NOT NULL DEFAULT 0,
+      created_at          INTEGER NOT NULL,
+      settled_at          INTEGER,
+      settled_how         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_report_up_outbox_pending ON report_up_outbox (team_id, room_id, settled_at);
+
     -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
     -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript
     -- in @clawboo/connector-catalog, this row is a configured INSTANCE, and a

@@ -43,6 +43,7 @@ import {
   getTeamOrchestrator,
   isActiveTeamRoom,
   orchestratorKey,
+  roomsWithUnheldReportUps,
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { pumpRunnerReruns } from './lib/runnerRerun'
@@ -633,6 +634,10 @@ async function main() {
         reapOrphanInbox(db)
         for (const a of listAgentsWithUndeliveredInbox(db))
           if (a.teamId) wake.set(orchestratorKey(a.teamId), { teamId: a.teamId, roomId: null })
+        // Rooms whose `[Task Update]`s a restart or an eviction left pending:
+        // building the room's engine sends them again.
+        for (const r of roomsWithUnheldReportUps(db))
+          wake.set(orchestratorKey(r.teamId, r.roomId), r)
         for (const { teamId, roomId } of wake.values()) {
           if (!isActiveTeamRoom(teamId, roomId)) continue
           getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })

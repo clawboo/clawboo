@@ -129,6 +129,8 @@ export * from './routines'
 export * from './teamChat'
 // ── Durable agent mailbox (the delivery plane) ──
 export * from './inbox'
+// ── Durable [Task Update] outbox (team chat report-ups) ──
+export * from './reportUps'
 
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'

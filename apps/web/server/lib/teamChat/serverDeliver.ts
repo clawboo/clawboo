@@ -138,6 +138,10 @@ export interface ServerDeliverDeps {
   onEvent: (sessionKey: string, event: RuntimeEvent, run: RunStamp) => Promise<void>
   /** The engine's `onSessionClosed` — called when a drain ends without a terminal. */
   onSessionClosed: (sessionKey: string, run: RunStamp) => Promise<void>
+  /** The engine's `onRunNotStarted`: a delivery whose `deliver` had already
+   *  resolved (it waited in the queue) could not start its run. Called only for
+   *  one that carries report-ups. */
+  onRunNotStarted?: (run: RunStamp) => void
   /** The engine's `taskForSession`, used to attribute a delegated run's mission
    *  spend, as framing's second witness, and by the start gate to check that a
    *  task run's session still holds its task. */
@@ -775,7 +779,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const runExecId = runTaskId !== null ? execForSession(targetSessionKey) : null
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
-    const stamp: RunStamp = { reportForTaskId, stopGen: deliveredGen }
+    // The durable report-ups a `[Task Update]` carries ride the stamp, so the
+    // engine settles them when THIS run ends, not whichever run ends next.
+    const reportUpIds = origin.kind === 'system' ? origin.reportUpIds : undefined
+    const stamp: RunStamp = {
+      reportForTaskId,
+      stopGen: deliveredGen,
+      ...(reportUpIds?.length ? { reportUpIds } : {}),
+    }
     // A follow-up holds work too: it neither resumes the agent's user-facing
     // session nor overwrites its pointer.
     const holdsWork = isTaskRun || reportForTaskId !== null
@@ -858,10 +869,25 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
 
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
-    return nudge.deliver(
+    // True once this `deliver` has resolved for the engine, which for a busy
+    // session is as soon as the message is queued. A start that fails after that
+    // never reaches the engine's retry, so the report-ups the delivery carries
+    // are handed back to it instead (see `onRunNotStarted`).
+    let accepted = false
+    const delivery = nudge.deliver(
       targetSessionKey,
       () =>
-        new Promise<void>((started, failStart) => {
+        new Promise<void>((resolveStart, rejectStart) => {
+          let settled = false
+          const started = (): void => {
+            settled = true
+            resolveStart()
+          }
+          const failStart = (e: Error): void => {
+            if (accepted && !settled && stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+            settled = true
+            rejectStart(e)
+          }
           const settleRefused = (why: 'stopped' | 'released'): void => {
             if (why === 'released') nudge.markIdle(targetSessionKey)
             started()
@@ -1254,5 +1280,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             .finally(() => stopBeat())
         }),
     )
+    void delivery.then(
+      () => {
+        accepted = true
+      },
+      () => undefined,
+    )
+    return delivery
   }
 }
