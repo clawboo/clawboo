@@ -328,6 +328,37 @@ describe('the operator file warning', () => {
     },
   )
 
+  it('warns whenever the settings come from the file on Windows, where owners cannot be read', () => {
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({
+        proxyIdentity: 'required',
+        proxyIdentityPublicKey: edPem,
+        proxyIdentityIssuer: 'https://proxy.example.com',
+        proxyIdentityAudience: 'clawboo',
+      }),
+    )
+    const file = path.join(home, 'operator.json')
+    chmodSync(file, 0o444)
+    try {
+      initOperatorSettings()
+      // No uid: what Windows gives. A read-only file still warns there, since
+      // the read-only flag is all Node can see and its owner can clear it.
+      const warning = proxyIdentityFileWarning({ uid: undefined })
+      expect(warning).toMatch(/cannot check on Windows who can change that file/)
+      expect(warning).toMatch(/every agent it runs/)
+    } finally {
+      // So the cleanup can delete it on Windows too.
+      chmodSync(file, 0o644)
+    }
+  })
+
+  it('says nothing on Windows when the lane is set only in the environment', () => {
+    stubLane()
+    initOperatorSettings()
+    expect(proxyIdentityFileWarning({ uid: undefined })).toBeNull()
+  })
+
   it('says nothing when the lane is set only in the environment', () => {
     stubLane()
     initOperatorSettings()
@@ -335,7 +366,9 @@ describe('the operator file warning', () => {
   })
 })
 
-describe('who can replace the operator file', () => {
+// Owners, mode bits and the sticky bit are POSIX; on Windows the check does
+// not use them (see the Windows case above).
+describe.skipIf(process.platform === 'win32')('who can replace the operator file', () => {
   const US = 501
   const ROOT = 0
   /** A fake filesystem: each path's owner, mode, and whether this user may write it. */

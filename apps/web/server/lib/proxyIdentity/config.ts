@@ -322,10 +322,7 @@ export function replaceableBy(file: string, uid: number, probe: PathProbe): bool
 }
 
 /** `replaceableBy` for this process, on the real filesystem. */
-function replaceableByUs(file: string): boolean {
-  const uid = process.getuid?.()
-  // No owners to compare on Windows: the file and its folder must not be writable.
-  if (uid === undefined) return writableByUs(file) || writableByUs(path.dirname(file))
+function replaceableByUs(file: string, uid: number): boolean {
   const probe: PathProbe = { stat: (p) => fs.lstatSync(p), writable: writableByUs }
   let real = file
   try {
@@ -342,14 +339,29 @@ function replaceableByUs(file: string): boolean {
  * replaceableBy). Agents run as that user, so one could put its own key there
  * and sign in as anyone after the next restart. Null when nothing is read from
  * such a file.
+ *
+ * On Windows (`uid` undefined) it cannot tell: Node reads neither owners nor ACLs
+ * there, and its writable check sees only the read-only flag, which the file's
+ * owner can clear. So it warns whenever the settings come from the file, and
+ * says it could not check.
  */
-export function proxyIdentityFileWarning(): string | null {
+export function proxyIdentityFileWarning(
+  { uid }: { uid: number | undefined } = { uid: process.getuid?.() },
+): string | null {
   const keys = (Object.keys(OPERATOR_KEYS) as OperatorKey[]).filter((k) =>
     k.startsWith('proxyIdentity'),
   )
   if (!keys.some((k) => effectiveSetting(k).source === 'file')) return null
   const file = operatorFileLocation().path
-  if (!replaceableByUs(file)) return null
+  if (uid === undefined) {
+    return (
+      `SECURITY: the proxy identity settings come from ${file}. Clawboo cannot check on ` +
+      "Windows who can change that file: if this server's own user can, so can every agent " +
+      'it runs. Let only administrators change the file and its folders, or set the ' +
+      "CLAWBOO_PROXY_IDENTITY variables in the service's environment instead."
+    )
+  }
+  if (!replaceableByUs(file, uid)) return null
   return (
     `SECURITY: the proxy identity settings come from ${file}, which this server's own user ` +
     'can change or replace, and so can every agent it runs. Keep the file, and every folder ' +
