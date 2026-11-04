@@ -428,6 +428,33 @@ describe('verification gate (real board + real git worktree)', () => {
     WORKTREE_TIMEOUT_MS,
   )
 
+  it(
+    "an attempt with no command configured keeps every open item, the command's included",
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      await writeFile(path.join(worktree.worktreePath, 'init.sh'), '#!/usr/bin/env bash\n', 'utf8')
+      seedPassWithDebt(taskId, [TOKEN_NOTE, GATE_NOTE])
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        maxFixCycles: 5,
+      })
+      expect(verdict.attempts[1]?.deterministic).toMatchObject({
+        command: '(none configured)',
+        passed: false,
+      })
+      expect(verdict.status).toBe('fail')
+      expect(verdict.debtNotes).toEqual([TOKEN_NOTE, GATE_NOTE])
+      expect(getTaskVerification(db, taskId)?.debtNotes).toEqual([TOKEN_NOTE, GATE_NOTE])
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
   it.each([
     ['ends in debt', 1, 'completed_with_debt', [TOKEN_NOTE.criterion, 'SQL built from user input']],
     ['fails', 5, 'fail', [TOKEN_NOTE.criterion]],
