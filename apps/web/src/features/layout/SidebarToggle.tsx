@@ -1,6 +1,7 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { useInSettingsModal } from '@/features/settings/settingsModalContext'
 import { useViewStore } from '@/stores/view'
+import { openPhoneNav, usePhoneLayout, usePhoneNav } from './phoneLayout'
 import { closePeek, openPeek, schedulePeekHide } from './sidebarPeek'
 
 /** The sidebar toggle. Open, it sits in the agent column's top row (or the team
@@ -43,11 +44,19 @@ export function SidebarToggle({
 
 /** The expand toggle a view puts at the start of its header. Renders only while
  *  the sidebar is collapsed (and never inside the Settings modal, which reuses
- *  the panels' headers). Hovering it peeks the sidebar; clicking docks it. */
+ *  the panels' headers). Hovering it peeks the sidebar; clicking docks it.
+ *  At phone width the sidebar never docks, so it always renders there, and a
+ *  tap opens the sidebar as a drawer over the view. */
 export function CollapsedSidebarToggle({ className }: { className?: string }) {
   const collapsed = useViewStore((s) => s.columnCollapsed)
+  const phone = usePhoneLayout()
+  const drawerOpen = usePhoneNav((s) => s.open)
   const inSettingsModal = useInSettingsModal()
-  if (!collapsed || inSettingsModal) return null
+  if (inSettingsModal) return null
+  if (phone) {
+    return <SidebarToggle collapsed={!drawerOpen} className={className} onClick={openPhoneNav} />
+  }
+  if (!collapsed) return null
   return (
     <SidebarToggle
       collapsed

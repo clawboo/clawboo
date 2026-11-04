@@ -134,12 +134,15 @@ export function GroupChatViewHeader({
           rest of the app so the GitHub Star pill lands at exactly the same
           screen coordinates (top:6 right:12) across every view. Team icon
           shrunk 30→24 px and the count pill moved inline (no vertical stack)
-          to fit comfortably in 44 px. */}
-      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-surface px-3">
+          to fit comfortably in 44 px. Tighter at phone width, where the card
+          toggles share the row with the room's name and members. */}
+      <div className="flex h-11 shrink-0 items-center gap-3 border-b border-border bg-surface px-3 max-sm:gap-2">
         <CollapsedSidebarToggle className="-mr-1" />
+        {/* Left out at phone width, where the room's name and members need the
+            room; the drawer's rail shows the team. */}
         {team && (
           <span
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[14px]"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[14px] max-sm:hidden"
             style={{ background: `${team.color}22` }}
           >
             {team.icon}

@@ -41,6 +41,8 @@ import { Skeleton } from '@/features/shared/Skeleton'
 import { Select } from '@/features/shared/Select'
 import { Spinner } from '@/features/shared/Spinner'
 import { hasOpenLayer } from '@/features/shared/useDismissableLayer'
+import { usePhoneLayout } from '@/features/layout/phoneLayout'
+import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
 import { RoutineDialog, type RoutineDirectory } from '@/features/routines/RoutineDialog'
 import { EMPTY_DIRECTORY, loadRoutineDirectory } from '@/features/routines/routineDirectory'
 
@@ -360,6 +362,7 @@ function attrValue(v: string): string {
 }
 
 export function BoardPanel() {
+  const phone = usePhoneLayout()
   const teams = useTeamStore((s) => s.teams)
   const selectedTeamId = useTeamStore((s) => s.selectedTeamId)
   const boardFocus = useViewStore((s) => s.boardFocus)
@@ -1943,6 +1946,9 @@ export function BoardPanel() {
           data-testid="board-header"
           className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-1"
         >
+          {/* The way back to the sidebar while it is collapsed, and at phone width,
+              where it is a drawer. Every other view's header carries one. */}
+          <CollapsedSidebarToggle className="-ml-2 -mr-1" />
           <h1 className="text-xl font-semibold tracking-tight text-foreground">Board</h1>
           <Select
             size="sm"
@@ -1994,7 +2000,7 @@ export function BoardPanel() {
               New task
               <kbd
                 aria-hidden
-                className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-white/20 px-1 text-micro font-medium"
+                className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded bg-white/20 px-1 text-micro font-medium max-sm:hidden"
                 style={{ fontFamily: 'inherit' }}
               >
                 C
@@ -2043,14 +2049,17 @@ export function BoardPanel() {
           ) : null}
           <div
             ref={scrollRef}
+            data-testid="board-scroll"
             // The calendar runs edge to edge: its date gutter sticks to the left edge,
             // and side padding would leave a strip beside it where scrolled cells show.
             // The scroll padding keeps a card brought into view clear of the sticky
-            // header and gutter.
+            // header and gutter, and puts a phone's snapped lane just past them.
             className={[
               'relative min-h-0 flex-1 overflow-auto',
               // The fallback lanes keep the Kanban board's side gutter.
               showCalendar ? '' : 'px-4 pb-8',
+              // At phone width each lane is a screen wide: a swipe lands on the next.
+              phone && showCalendar ? 'snap-x snap-mandatory' : '',
             ].join(' ')}
             style={
               showCalendar

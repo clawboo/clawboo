@@ -31,6 +31,7 @@ import {
 import { useDroppable } from '@dnd-kit/core'
 import { ChevronDown, ChevronRight, EyeOff, FoldVertical, Plus, UnfoldVertical } from 'lucide-react'
 
+import { usePhoneLayout } from '@/features/layout/phoneLayout'
 import type { BoardTask } from '@/lib/boardClient'
 import type { RoutineOccurrences } from '@/lib/schedulesClient'
 
@@ -85,6 +86,12 @@ export const KANBAN_PAD = 16
 /** Cards a cell of the Earlier row shows before "+N more", in every view. */
 const EARLIER_CAP = 3
 export const RAIL_W = 40
+/** A lane's track at phone width: the screen less the board's side gutter (or
+ *  the date gutter) and a strip of the next lane, so a swipe reads as "more this
+ *  way". The width itself is the grid's `--board-phone-lane`, set per view. */
+export const PHONE_LANE = 'var(--board-phone-lane)'
+/** How much of the next lane shows beside a phone-width one. */
+const PHONE_PEEK = 32
 const RUN_CAP = 2
 /** A seam's height: folded quiet days are a line, not a row. */
 const SEAM_H = 12
@@ -948,6 +955,7 @@ function NeedsYouColumn({
   needsYou,
   dragging,
   landing,
+  snap,
 }: {
   gridColumn: number
   rows: Row[]
@@ -960,6 +968,8 @@ function NeedsYouColumn({
    *  unless the drop would land the card here (a To do with no agent). */
   dragging: boolean
   landing: Landing | null
+  /** Phone width: the board snaps to this lane's start. */
+  snap: boolean
 }) {
   const landsHere = landing?.columnId === NEEDS_YOU_COLUMN
   const { total } = needsYou
@@ -971,7 +981,7 @@ function NeedsYouColumn({
       data-testid="board-column-needs-you"
       role="group"
       aria-label={`Needs you, ${items}`}
-      className="relative transition-opacity duration-150"
+      className={`relative transition-opacity duration-150${snap ? ' snap-start' : ''}`}
       style={{
         ...columnStyle(gridColumn, landsHere ? LANE_OVER : LANE),
         opacity: dragging && !landsHere ? DIM_WHILE_DRAGGING : 1,
@@ -1060,6 +1070,7 @@ function StatusColumn({
   onRunOpen,
   onNewTask,
   states,
+  snap,
 }: {
   column: CalendarColumn
   gridColumn: number
@@ -1090,6 +1101,8 @@ function StatusColumn({
   /** Opens New task; To do, where a new task lands, carries a "+" for it. */
   onNewTask?: () => void
   states: CardStates
+  /** Phone width: the board snaps to this lane's start. */
+  snap: boolean
 }) {
   const { setNodeRef, isOver: dndOver } = useDroppable({ id: column.id, disabled: dropDisabled })
   const over = (isOver || dndOver) && !dropDisabled && !own
@@ -1116,7 +1129,7 @@ function StatusColumn({
       data-testid={`board-column-${column.id}`}
       role="group"
       aria-label={`${column.label}, ${countLabel(count, 'task')}`}
-      className="relative transition-opacity duration-150"
+      className={`relative transition-opacity duration-150${snap ? ' snap-start' : ''}`}
       style={{
         ...columnStyle(gridColumn, over ? LANE_OVER : LANE),
         // A column that cannot take the card steps back while it is dragged.
@@ -1326,6 +1339,7 @@ export function CalendarGrid(props: CalendarGridProps) {
     onSeen,
     onNewTask,
   } = props
+  const phone = usePhoneLayout()
   const states = useMemo<CardStates>(
     () => ({ openTaskId, arrivedIds, settleId, openRunKey, unseenIds, onSeen, now }),
     [openTaskId, arrivedIds, settleId, openRunKey, unseenIds, onSeen, now],
@@ -1480,14 +1494,17 @@ export function CalendarGrid(props: CalendarGridProps) {
   const kanban = range == null
   // Fixed tracks for the gutter, Needs you and the rails; the status columns
   // share whatever a wide screen has left over, never going under their minimum.
+  // At phone width every open lane is a screen wide instead (see PHONE_LANE),
+  // and the board snaps from one to the next.
   const needsYouW = needsYouKey === null ? RAIL_W : NEEDS_YOU_W
   const tracks = columns.map((c) => {
     if (c.id === 'cancelled' && !cancelledOpen) return { css: `${RAIL_W}px`, min: RAIL_W }
+    if (phone) return { css: PHONE_LANE, min: 0 }
     return { css: `minmax(${COLUMN_MIN}px, 1fr)`, min: COLUMN_MIN }
   })
   const template = [
     ...(kanban ? [] : [`${GUTTER_W}px`]),
-    `${needsYouW}px`,
+    phone && needsYouKey !== null ? PHONE_LANE : `${needsYouW}px`,
     ...tracks.map((t) => t.css),
   ].join(' ')
   const minWidth =
@@ -1495,6 +1512,9 @@ export function CalendarGrid(props: CalendarGridProps) {
     needsYouW +
     tracks.reduce((n, t) => n + t.min, 0) +
     tracks.length * LANE_GAP
+  // What a phone-width lane leaves of the screen: the side gutter or the dates,
+  // the gap, and the strip of the next lane.
+  const phoneLane = `calc(100vw - ${(kanban ? KANBAN_PAD : GUTTER_W) + LANE_GAP + PHONE_PEEK}px)`
 
   return (
     <div
@@ -1511,7 +1531,11 @@ export function CalendarGrid(props: CalendarGridProps) {
         columnGap: LANE_GAP,
         paddingInline: kanban ? KANBAN_PAD : undefined,
         minHeight: `calc(var(--board-vh, 100vh) - ${BOTTOM_PAD}px)`,
-        minWidth,
+        // A phone's lanes are fixed tracks wider than the screen together, so the
+        // grid takes their width rather than the screen's.
+        ...(phone
+          ? { width: 'max-content', minWidth: '100%', ['--board-phone-lane' as string]: phoneLane }
+          : { minWidth }),
         background: 'var(--surface)',
       }}
     >
@@ -1586,6 +1610,7 @@ export function CalendarGrid(props: CalendarGridProps) {
         needsYou={needsYou}
         dragging={drag != null}
         landing={landing}
+        snap={phone}
       />
 
       {columns.map((column, i) => (
@@ -1617,6 +1642,7 @@ export function CalendarGrid(props: CalendarGridProps) {
           onRunOpen={onRunOpen}
           onNewTask={onNewTask}
           states={states}
+          snap={phone}
         />
       ))}
 

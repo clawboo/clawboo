@@ -20,6 +20,14 @@ describe('shouldShowGlobalTopBar', () => {
     expect(shouldShowGlobalTopBar({ type: 'groupChat', teamId: 't1' })).toBe(false)
   })
 
+  it('shows it over the Boo Zero view while there is no Boo Zero to show', () => {
+    // That view falls back to the welcome screen, which has no header of its own,
+    // so without the bar there is no sidebar toggle: at phone width, where the
+    // sidebar is a drawer, nothing could open it again.
+    expect(shouldShowGlobalTopBar({ type: 'booZero' }, { hasBooZero: false })).toBe(true)
+    expect(shouldShowGlobalTopBar({ type: 'booZero' }, { hasBooZero: true })).toBe(false)
+  })
+
   it('hides it for EVERY nav view — each dashboard hosts its own inline Star (no duplicate)', () => {
     for (const view of NAV_VIEWS) {
       expect(shouldShowGlobalTopBar({ type: 'nav', view })).toBe(false)

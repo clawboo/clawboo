@@ -27,6 +27,7 @@ import {
 } from '@/stores/panelLayout'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
+import { usePhoneLayout } from '@/features/layout/phoneLayout'
 
 // This view is on the eager path (ContentArea imports it statically), so both of
 // its heavy panes are lazy-loaded — otherwise they'd anchor their libraries to
@@ -123,8 +124,13 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
   const openCards = CARD_ORDER.filter((c) => isOpen[c])
   const anyCard = openCards.length > 0
   const [maximized, setMaximized] = useState<AgentCard | null>(null)
+  // At phone width the chat needs the whole screen, so the cards never sit
+  // beside it: a toggle shows one card over the chat instead, held here rather
+  // than in the saved open state, which belongs to the wide layout.
+  const phone = usePhoneLayout()
+  const [phoneCard, setPhoneCard] = useState<AgentCard | null>(null)
   // A maximized card that gets closed must not leave the view stuck maximized.
-  const shownMaximized = maximized && isOpen[maximized] ? maximized : null
+  const shownMaximized = phone ? phoneCard : maximized && isOpen[maximized] ? maximized : null
 
   const hPanelIds = useMemo(() => (anyCard ? ['chat', 'cards'] : ['chat']), [anyCard])
   const openKey = openCards.join(',')
@@ -148,9 +154,11 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
     )
   }
 
+  // At phone width, closing or restoring the card on screen goes back to the chat.
   const closeCard = (card: AgentCard) =>
-    usePanelLayoutStore.getState().setPaneOpen(PANE_OF[card], false)
-  const toggleMax = (card: AgentCard) => setMaximized((m) => (m === card ? null : card))
+    phone ? setPhoneCard(null) : usePanelLayoutStore.getState().setPaneOpen(PANE_OF[card], false)
+  const toggleMax = (card: AgentCard) =>
+    phone ? setPhoneCard(null) : setMaximized((m) => (m === card ? null : card))
 
   // Keyed by agentId so a pane that failed for ONE agent can't show its stale
   // card for the next one. The `booZero` view is why this is load-bearing: its
@@ -280,8 +288,102 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
     files: { icon: Folder, label: 'details', testId: 'pane-toggle-files' },
   }
 
+  // The chat with its header: the whole view at phone width, the left panel
+  // otherwise.
+  const chatColumn = (
+    <div className="flex h-full flex-col">
+      {/* Chat header: agent identity left; card toggles + GitHub Star
+                right. It belongs to the chat, so with the cards closed it spans
+                the full width and the toggles ride along to the right edge. */}
+      <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3">
+        <div className="flex min-w-0 items-center gap-2.5 max-sm:gap-1.5">
+          <CollapsedSidebarToggle className="-mr-0.5" />
+          {/* A phone keeps the name and leaves the face out. */}
+          <span className="flex shrink-0 max-sm:hidden">
+            <AgentBooAvatar agentId={agent.id} size={28} />
+          </span>
+          <h2
+            className="truncate text-[15px] font-semibold text-foreground"
+            style={{ letterSpacing: '-0.01em' }}
+          >
+            {agent.name}
+          </h2>
+          {/* At phone width the status words are left to the dot (and to a screen
+              reader), so the agent's name keeps its room beside the card toggles. */}
+          {!agent.sessionKey && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber/80 max-sm:sr-only">
+              No session
+            </span>
+          )}
+          {showDisconnected ? (
+            <span className="ml-0.5 flex items-center gap-2">
+              <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-amber/90">
+                <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber/80" />
+                <span className="max-sm:sr-only">
+                  {nativeKeyless ? 'Disconnected' : 'No provider key'}
+                </span>
+              </span>
+              <button
+                type="button"
+                data-testid="native-disconnected-chip"
+                onClick={() => useSettingsModalStore.getState().openSettings('runtimes')}
+                className="cursor-pointer whitespace-nowrap rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[10px] font-medium text-amber transition-colors hover:bg-amber/20"
+              >
+                Set up<span className="max-sm:sr-only"> in Runtimes</span> →
+              </button>
+            </span>
+          ) : (
+            <span
+              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+              aria-label={`Connection: ${connectionStatus}`}
+            >
+              <span
+                className={[
+                  'inline-block h-1.5 w-1.5 shrink-0 rounded-full',
+                  connectionStatus === 'connected'
+                    ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
+                    : // A retrying socket pulses: it distinguishes "coming back"
+                      // from a flat "not connected".
+                      connectionStatus === 'reconnecting'
+                      ? 'bg-amber/70 animate-pulse'
+                      : 'bg-amber/70',
+                ].join(' ')}
+              />
+              <span className="max-sm:sr-only">{connectionStatusLabel(connectionStatus)}</span>
+            </span>
+          )}
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          {CARD_ORDER.map((card) => (
+            <PaneToggle
+              key={card}
+              icon={toggles[card].icon}
+              label={toggles[card].label}
+              open={!phone && isOpen[card]}
+              onClick={() =>
+                phone
+                  ? setPhoneCard(card)
+                  : usePanelLayoutStore.getState().togglePane(PANE_OF[card])
+              }
+              testId={toggles[card].testId}
+            />
+          ))}
+          <span aria-hidden className="mx-1.5 h-4 w-px bg-border max-sm:hidden" />
+          <GitHubStarButton />
+        </div>
+      </div>
+      <div className="min-h-0 flex-1">
+        <ChatPanel agentId={agentId} hideHeader />
+      </div>
+    </div>
+  )
+
   if (shownMaximized) {
     return <div className="h-full bg-background p-2">{cardOf[shownMaximized]}</div>
+  }
+
+  if (phone) {
+    return <div className="h-full bg-background">{chatColumn}</div>
   }
 
   return (
@@ -293,80 +395,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
         onLayoutChanged={hLayout.onLayoutChanged}
       >
         <Panel id="chat" minSize={CHAT_MIN_PX}>
-          <div className="flex h-full flex-col">
-            {/* Chat header: agent identity left; card toggles + GitHub Star
-                right. It belongs to the chat, so with the cards closed it spans
-                the full width and the toggles ride along to the right edge. */}
-            <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3">
-              <div className="flex min-w-0 items-center gap-2.5">
-                <CollapsedSidebarToggle className="-mr-0.5" />
-                <AgentBooAvatar agentId={agent.id} size={28} />
-                <h2
-                  className="truncate text-[15px] font-semibold text-foreground"
-                  style={{ letterSpacing: '-0.01em' }}
-                >
-                  {agent.name}
-                </h2>
-                {!agent.sessionKey && (
-                  <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-amber/80">
-                    No session
-                  </span>
-                )}
-                {showDisconnected ? (
-                  <span className="ml-0.5 flex items-center gap-2">
-                    <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-amber/90">
-                      <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber/80" />
-                      {nativeKeyless ? 'Disconnected' : 'No provider key'}
-                    </span>
-                    <button
-                      type="button"
-                      data-testid="native-disconnected-chip"
-                      onClick={() => useSettingsModalStore.getState().openSettings('runtimes')}
-                      className="cursor-pointer rounded-full border border-amber/25 bg-amber/10 px-2 py-0.5 text-[10px] font-medium text-amber transition-colors hover:bg-amber/20"
-                    >
-                      Set up in Runtimes →
-                    </button>
-                  </span>
-                ) : (
-                  <span
-                    className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
-                    aria-label={`Connection: ${connectionStatus}`}
-                  >
-                    <span
-                      className={[
-                        'inline-block h-1.5 w-1.5 rounded-full',
-                        connectionStatus === 'connected'
-                          ? 'bg-mint shadow-[0_0_6px_rgb(var(--mint-rgb)/0.6)]'
-                          : // A retrying socket pulses — it distinguishes "coming back"
-                            // from a flat "not connected".
-                            connectionStatus === 'reconnecting'
-                            ? 'bg-amber/70 animate-pulse'
-                            : 'bg-amber/70',
-                      ].join(' ')}
-                    />
-                    {connectionStatusLabel(connectionStatus)}
-                  </span>
-                )}
-              </div>
-              <div className="flex shrink-0 items-center gap-1">
-                {CARD_ORDER.map((card) => (
-                  <PaneToggle
-                    key={card}
-                    icon={toggles[card].icon}
-                    label={toggles[card].label}
-                    open={isOpen[card]}
-                    onClick={() => usePanelLayoutStore.getState().togglePane(PANE_OF[card])}
-                    testId={toggles[card].testId}
-                  />
-                ))}
-                <span aria-hidden className="mx-1.5 h-4 w-px bg-border" />
-                <GitHubStarButton />
-              </div>
-            </div>
-            <div className="min-h-0 flex-1">
-              <ChatPanel agentId={agentId} hideHeader />
-            </div>
-          </div>
+          {chatColumn}
         </Panel>
 
         {anyCard && (

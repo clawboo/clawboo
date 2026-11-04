@@ -339,7 +339,10 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
             : 'The result shows on the task card, on the board and in the team chat.'}
         </p>
 
-        <div className="mt-5 flex items-center gap-2">
+        {/* Wraps on a phone, where "Send to <agent>" leaves no room beside More
+            options: Cancel and Send move to their own row, still on the right.
+            A name too long even for that row shortens inside Send. */}
+        <div className="mt-5 flex flex-wrap items-center gap-2">
           {!moreOpen ? (
             <Button
               variant="ghost"
@@ -350,7 +353,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
               More options
             </Button>
           ) : null}
-          <div className="ml-auto flex gap-2">
+          <div className="ml-auto flex min-w-0 gap-2">
             <Button variant="secondary" size="sm" onClick={onClose} disabled={submitting}>
               Cancel
             </Button>
@@ -360,9 +363,10 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
               size="sm"
               loading={submitting}
               disabled={!canSubmit}
+              className="min-w-0 shrink!"
             >
-              {!submitting && <Plus size={14} strokeWidth={2} />}
-              {agent ? `Send to ${agent.name}` : 'Create task'}
+              {!submitting && <Plus size={14} strokeWidth={2} className="shrink-0" />}
+              <span className="truncate">{agent ? `Send to ${agent.name}` : 'Create task'}</span>
             </Button>
           </div>
         </div>

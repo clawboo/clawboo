@@ -331,6 +331,35 @@ test.describe('the guards still enforce under the prefix', () => {
     await fresh.dispose()
   })
 
+  test('the installable app starts at the mount, and its manifest needs no cookie', async ({
+    browser,
+  }) => {
+    // Signed out, as a phone is when it first reads the manifest: a browser
+    // fetches it without cookies unless the link asks for them.
+    const context = await browser.newContext({ storageState: SIGNED_OUT })
+    const page = await context.newPage()
+    await page.goto(`${server.origin}${BASE_PATH}/`)
+    // The build rewrites the shell's root-absolute link against its relative
+    // base, so it resolves under the injected <base href>, not at the origin.
+    const link = page.locator('link[rel="manifest"]')
+    await expect(link).toHaveAttribute('crossorigin', 'use-credentials')
+    const href = await link.evaluate((el) => (el as HTMLLinkElement).href)
+    expect(new URL(href).pathname).toBe(`${BASE_PATH}/manifest.webmanifest`)
+
+    const res = await fetch(href)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toMatch(/^application\/manifest\+json/)
+    const manifest = (await res.json()) as { start_url: string; icons: { src: string }[] }
+    const start = new URL(manifest.start_url, href)
+    expect(start.pathname).toBe(`${BASE_PATH}/`)
+    expect(start.search).toBe('')
+    for (const icon of manifest.icons) {
+      const iconRes = await fetch(new URL(icon.src, href))
+      expect(iconRes.status, icon.src).toBe(200)
+    }
+    await context.close()
+  })
+
   test('a link pasted on the locked screen signs in under the mount', async ({ browser }) => {
     const minted = await fetch(`${server.origin}${BASE_PATH}/api/access/launch-code`, {
       method: 'POST',

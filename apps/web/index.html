@@ -14,6 +14,15 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
+    <!-- Installable as a web app. Every URL in the manifest is relative, so it
+         starts the installed app at whatever mount the server injected above.
+         `use-credentials` because a browser fetches a manifest without cookies
+         otherwise, and a sign-in proxy in front of the dashboard may need them.
+         theme-color is the light background; ThemeProvider follows the theme. -->
+    <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="apple-mobile-web-app-title" content="Clawboo" />
+
     <!-- Open Graph / social preview. Activates publicly once www.claw.boo serves the app + /og-card.jpg. -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="clawboo" />

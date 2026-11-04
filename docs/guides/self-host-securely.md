@@ -16,6 +16,10 @@ keywords:
     'HOST',
     'CLAWBOO_BASE_PATH',
     'path prefix',
+    'phone',
+    'install',
+    'home screen',
+    'web app',
   ]
 ---
 
@@ -321,6 +325,36 @@ location = /clawboo {
 With a trailing slash after the port, nginx strips the prefix, Clawboo redirects the page back to the prefix, and the browser loops until it gives up. Sign in at `https://apps.example.com/clawboo/?access_token=<your-token>`.
 
 Under a prefix, the dashboard, the API, the live streams and the Gateway WebSocket all live below it, and the prebuilt package needs no rebuild. The access cookie's path is the prefix, so other apps on the same host never receive it, and the dashboard's own browser storage is kept per prefix, so two Clawboo instances on one hostname keep separate themes, layouts and onboarding progress. The value may use only letters, digits, `.`, `_`, `~` and `-` between slashes, and its first part must not be `api`. An invalid value stops the server at startup with `SECURITY/CONFIG: CLAWBOO_BASE_PATH is invalid`.
+
+## Put the dashboard on your phone
+
+The dashboard installs as a web app: it opens from your phone's home screen in a window of its own, with no address bar. A phone's browser installs it only from a secure address: `https://`, or `http://localhost` and `http://127.0.0.1` on the phone itself, as through an SSH tunnel that runs on the phone. For any other address, set up [Option 2: Reverse proxy](#option-2-reverse-proxy) first; it works under a path prefix too. Over a plain `http://` network address, such as a network bind, the dashboard opens in the phone's browser, but the browser does not offer to install it.
+
+<Steps>
+
+<Step title="Sign in your phone">
+
+On your computer, open the dashboard and click **Open on another device** at the bottom of the sidebar. Scan its QR code with your phone's camera. The link signs in the phone's browser and carries a one-time code that works once, within two minutes, never the access token.
+
+</Step>
+
+<Step title="Add it to your home screen">
+
+- **Android, in Chrome:** open the browser menu and tap **Install app** or **Add to Home screen**.
+- **iPhone and iPad, in Safari:** tap the share button, then **Add to Home Screen**.
+
+The installed app opens at the dashboard's address, under your prefix if you serve Clawboo under one.
+
+</Step>
+
+</Steps>
+
+- **It signs in the way the browser does.** The installed app uses the same access cookie. Installing it puts the token in no address and stores no copy of it.
+- **Android shares the sign-in with Chrome.** An app installed from Chrome uses Chrome's cookies.
+- **iPhone and iPad keep it apart.** iOS gives a home-screen app storage of its own, apart from Safari's, and a sign-in link you tap opens in Safari rather than in the app, so the installed app can open on the locked screen, or lose its sign-in later. Sign it in there with the **Paste a sign-in link** box: in a signed-in browser, open **Open on another device** at the dashboard's address the phone uses, click **Copy link**, send the link to the phone, and paste it into the box within two minutes. See [The access token](/operating/security#the-access-token).
+- **No offline copy.** Clawboo ships no service worker. The installed app shows only live data, needs the server to be reachable, and keeps nothing from the API for offline use.
+
+[Where things live](/using/index#on-a-phone) lists what the dashboard lays out for a phone's width.
 
 ## Check that it worked
 

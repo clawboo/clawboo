@@ -6,6 +6,13 @@ export type ResolvedTheme = 'light' | 'dark'
 
 export const THEME_STORAGE_KEY = 'clawboo.theme'
 
+/** Each theme's `--background` (globals.css), for `<meta name="theme-color">`:
+ *  the title bar of an installed dashboard and a phone browser's toolbar. */
+export const THEME_COLORS: Record<ResolvedTheme, string> = {
+  light: '#f8fafc',
+  dark: '#0a0e1a',
+}
+
 export interface ThemeContextValue {
   /** Raw user preference (system | light | dark). */
   theme: ThemePreference
@@ -41,6 +48,9 @@ function applyThemeClass(resolved: ResolvedTheme) {
   const root = document.documentElement
   if (resolved === 'dark') root.classList.add('dark')
   else root.classList.remove('dark')
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', THEME_COLORS[resolved])
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
