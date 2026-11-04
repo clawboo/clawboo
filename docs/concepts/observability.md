@@ -106,7 +106,7 @@ Clawboo can also send its traces to an OpenTelemetry collector, such as Jaeger o
 <Accordion title="Under the hood">
 
 - The log is the `orchestration_events` table in Clawboo's SQLite database. Each row has an auto-increment `seq` (the order of events, and the cursor for the live stream), a UUID `id`, a timestamp, the kind, team, task, agent and runtime ids, trace and span ids, and a scrubbed JSON `data` field. A row with an unknown kind is stored as `error`.
-- The live stream is `GET /api/obs/stream`, a Server-Sent Events feed polled every 750 ms that resumes from `Last-Event-ID` or `?since=<seq>`. With no cursor it replays the scoped log from the start, then follows it.
+- The live stream is `GET /api/obs/stream`, a Server-Sent Events feed polled every 750 ms that resumes from `Last-Event-ID`, `?afterSeq=<seq>` or `?since=<seq>`, and that `?kinds=` narrows to some event kinds. With no cursor it replays the scoped log from the start, then follows it.
 - Only the server writes to the log. No route adds events from outside it, so board, cost and approval events cannot be forged over HTTP.
 - The MCP stdio servers write to this log only when they open the server's database. The attach configs Clawboo generates set `CLAWBOO_DB_PATH` so they do.
 - Errors are classified on both paths. A refused tool call is recognized as `PolicyDenied` only in the task runner; in team chat the same refusal is classified by its message.

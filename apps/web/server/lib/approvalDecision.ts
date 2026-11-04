@@ -56,5 +56,11 @@ export async function decideApproval(
 
   const updated = resolveApproval(db, id, decision)
   if (!updated) return { status: 404, body: { error: 'approval not found' } }
+  // A card past its deadline takes no answer, so this one counted for nothing.
+  // `pending` here means the card could not be marked expired; it is closed all
+  // the same.
+  if (updated.status === 'expired' || updated.status === 'pending') {
+    return { status: 409, body: { error: 'approval expired', approval: updated } }
+  }
   return { status: 200, body: { ok: true, approval: updated } }
 }

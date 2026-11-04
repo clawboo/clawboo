@@ -20,6 +20,7 @@ import { RuntimeConnectList } from '@/features/runtimes/RuntimeConnectList'
 import { OpenClawInlineSetup } from '@/features/runtimes/OpenClawInlineSetup'
 import { RUNTIME_ORDER, type RuntimeId } from '@/features/runtimes/runtimeCatalog'
 import { fetchRuntimes, type RuntimeStatus } from '@clawboo/control-client'
+import { useVisiblePolling } from '@/lib/useVisiblePolling'
 
 // Native has its own primary onboarding path (configureNative), so it isn't a
 // connectable row here — the rows are the wrapped CLI runtimes (+ OpenClaw),
@@ -57,6 +58,10 @@ export function AddRuntimesStep({
   useEffect(() => {
     void refresh()
   }, [refresh])
+  // Some status arrives only on a later read (the server reads Codex's models and
+  // checks Hermes's live mode in the background), so keep reading while the step
+  // shows, as the Runtimes panel in Settings does.
+  useVisiblePolling(() => void refresh(), 8000)
 
   return (
     <OnboardingScreen
