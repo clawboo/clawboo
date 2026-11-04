@@ -40,6 +40,9 @@ export interface RuntimeDescriptor {
   /** CLI binary whose presence `resolveRuntimeBin` probes for health.
    *  null = no binary (a built-in, in-process runtime). */
   healthBin: string | null
+  /** A runtime whose runs start an SDK's own platform binary rather than the
+   *  CLI: that binary being present also makes the runtime installed. */
+  sdkBinary?: 'claude-agent-sdk'
   /** How the CLI is installed. null = nothing to install (built-in). */
   packageManager: 'npm' | 'pip' | null
   /** Package to install (`npm install -g <pkg>` / `pip|pipx install <pkg>`). */
@@ -76,6 +79,9 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
     id: 'claude-code',
     name: 'Claude Code',
     healthBin: 'claude',
+    // Runs go through the Claude Agent SDK, which starts its own `claude` from a
+    // per-platform package. With the SDK there, no CLI is needed.
+    sdkBinary: 'claude-agent-sdk',
     packageManager: 'npm',
     // Pinned to the current MAJOR (latest patch/minor within it) so a future
     // major-version-incompatible or compromised publish is never auto-installed,

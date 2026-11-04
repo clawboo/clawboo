@@ -192,6 +192,8 @@ import {
   schedulesDELETE,
   schedulesListGET,
   schedulesOccurrencesGET,
+  schedulesTimeZoneGET,
+  schedulesTimeZonePUT,
   schedulesRunPOST,
   schedulesRunsGET,
   schedulesUpdatePATCH,
@@ -554,6 +556,8 @@ router.post('/api/governance/budgets/:scope/:scopeId/resume', budgetsResumePOST)
 // Gateway cron (operator WS-RPC); writes routed by owner. The Routines view's backend.
 router.get('/api/schedules', schedulesListGET)
 router.get('/api/schedules/occurrences', schedulesOccurrencesGET)
+router.get('/api/schedules/time-zone', schedulesTimeZoneGET)
+router.put('/api/schedules/time-zone', schedulesTimeZonePUT)
 router.post('/api/schedules', schedulesCreatePOST)
 router.post('/api/schedules/:id/run', schedulesRunPOST)
 router.get('/api/schedules/:id/runs', schedulesRunsGET)

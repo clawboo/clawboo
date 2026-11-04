@@ -280,6 +280,7 @@ export function RuntimesPanel() {
       connectionState: status?.connectionState,
       installed: status?.installed,
       binPath: status?.binPath,
+      binSource: status?.binSource,
       authKind: status?.authKind ?? entry.authKind,
       envVar: status?.envVar ?? entry.envVar ?? null,
       hasCredential: status?.hasCredential,

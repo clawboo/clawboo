@@ -47,7 +47,6 @@ import {
   buildTeamSessionKey,
   createBoardOrchestrator,
   createNudgeQueue,
-  REFLECT_WINDOW_MS,
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
@@ -57,6 +56,7 @@ import { nativeTeamSessionSettingKey } from '../nativeTeamSession'
 import { createServerBoardClient } from '../serverBoardClient'
 import { HUMAN_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
+import { settle } from './settleCascade'
 
 const TEAM = 'T'
 const LEAD = 'codex-lead'
@@ -121,52 +121,6 @@ class ScriptedCodex implements RuntimeAdapter {
 
 const done = (summary: string): RuntimeEvent =>
   ({ kind: 'done', reason: 'success', summary }) as RuntimeEvent
-
-/** True while a real fs request (an `fs` or `fs/promises` call) has not completed. */
-const fsInFlight = (): boolean =>
-  process.getActiveResourcesInfo().some((r) => r.startsWith('FSReq'))
-
-/** Run the cascade until `until()` holds: advance fake time in small steps, and never
- *  while a real fs request is in flight. The cascade mixes timer-gated stages (the 3s
- *  reflect batch) with real I/O (each run's home `mkdir`), and only the timers are
- *  fake. Stepping blind let fake time outrun the I/O: the old 90s fake budget (360
- *  steps) ran out in tens of milliseconds of real time, so a worker whose `mkdir` was
- *  slower than that on a Windows runner had not even started when the test asserted.
- *  Waiting out the I/O before each step keeps the two in production order on any
- *  runner, so the fake time used is fixed (a few reflect windows). Bounded by real
- *  time as well as fake time, and it throws naming `what` instead of letting the
- *  assertions run early. */
-async function settle(
-  until: () => boolean,
-  what: string,
-  fakeBudgetMs = 30 * REFLECT_WINDOW_MS,
-  realBudgetMs = 20_000,
-): Promise<void> {
-  const step = 250
-  const startedAt = performance.now()
-  const deadline = startedAt + realBudgetMs
-  // Real macrotask turns (I/O completions run between them) until no fs request is
-  // left in flight, so the caller also asserts on settled state.
-  const quiesce = async (): Promise<void> => {
-    do {
-      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
-    } while (fsInFlight() && performance.now() < deadline)
-  }
-  let fakeMs = 0
-  await quiesce()
-  while (!until()) {
-    if (fakeMs >= fakeBudgetMs || performance.now() >= deadline) {
-      const realMs = Math.round(performance.now() - startedAt)
-      throw new Error(
-        `settle: ${what} did not happen after ${fakeMs} ms fake / ${realMs} ms real` +
-          (fsInFlight() ? ' (an fs request is still in flight)' : ''),
-      )
-    }
-    await vi.advanceTimersByTimeAsync(step)
-    fakeMs += step
-    await quiesce()
-  }
-}
 
 describe('Codex-led cascade (delegate MCP tool → board → report-up → synthesis)', () => {
   let home: string
