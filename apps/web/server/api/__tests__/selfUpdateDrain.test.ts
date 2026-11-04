@@ -211,9 +211,12 @@ describe('POST /api/system/self-update drains first', () => {
 
   it('lets work start again when the server cannot relaunch and keeps running', () => {
     restartState.exits = false
-    const { child } = post()
+    const { child, frames } = post()
     child.emit('close', 0)
     expect(restartState.ports).toEqual([18790])
+    // It says to restart by hand, never `restarting`, which would leave the chip
+    // waiting for a new version that is not coming.
+    expect(types(frames)).toEqual(['progress', 'installed', 'installed-elsewhere'])
     expect(engineHold().isHeld()).toBe(false)
     // And a later update may run.
     post()

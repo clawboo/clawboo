@@ -48,6 +48,7 @@ import {
   stopAfterAgentRuns,
   stopDashboard,
   uiPath,
+  waitSecondsFrom,
   type StopOutcome,
 } from './lifecycle'
 
@@ -452,12 +453,13 @@ interface StopWaitOptions {
 }
 
 function parseWaitSeconds(value: string): number {
-  const seconds = Number(value)
-  if (!Number.isInteger(seconds) || seconds < 0) {
-    throw new InvalidArgumentError('Give a whole number of seconds, 0 or more.')
-  }
+  const seconds = waitSecondsFrom(value)
+  if (seconds === null) throw new InvalidArgumentError('Give a whole number of seconds, 0 or more.')
   return seconds
 }
+
+/** What the server does once a hold this command placed could not be released. */
+const HOLD_LAPSES = 'It starts new work again within a minute, when its hold lapses.'
 
 function agentRuns(n: number): string {
   return n === 1 ? '1 agent run' : `${n} agent runs`
@@ -482,7 +484,7 @@ async function stopWithReport(
   port: number,
   opts: StopWaitOptions,
   command: 'stop' | 'restart',
-): Promise<{ outcome: StopOutcome; spinner: Ora }> {
+): Promise<{ outcome: StopOutcome; spinner: Ora; released: boolean | null }> {
   const stopping = `Stopping Clawboo on port ${port}...`
   const waitMs = (opts.wait ?? DEFAULT_STOP_WAIT_SECONDS) * 1000
   let spinner = ora({
@@ -531,11 +533,26 @@ async function stopWithReport(
   } finally {
     process.removeListener('SIGINT', onInterrupt)
   }
+  if (result.drain?.status === 'unreachable') {
+    spinner.fail(
+      chalk.yellow(
+        'The server did not answer the request to hold its agent runs, so it was not stopped.',
+      ),
+    )
+    p.log.info(chalk.gray(`To stop it anyway: clawboo ${command} --force`))
+    process.exit(1)
+  }
   if (result.stop === null) {
-    spinner.info(chalk.gray('Cancelled. Clawboo keeps running and starts new work again.'))
+    spinner.info(
+      chalk.gray(
+        result.released === false
+          ? `Cancelled. Clawboo keeps running. ${HOLD_LAPSES}`
+          : 'Cancelled. Clawboo keeps running and starts new work again.',
+      ),
+    )
     process.exit(130)
   }
-  return { outcome: result.stop, spinner }
+  return { outcome: result.stop, spinner, released: result.released }
 }
 
 // ─── `clawboo stop` ───────────────────────────────────────────────────────────
@@ -576,7 +593,7 @@ async function runStop(opts: StopWaitOptions): Promise<void> {
     return
   }
 
-  const { outcome, spinner } = await stopWithReport(port, opts, 'stop')
+  const { outcome, spinner, released } = await stopWithReport(port, opts, 'stop')
 
   switch (outcome.status) {
     case 'stopped':
@@ -590,6 +607,7 @@ async function runStop(opts: StopWaitOptions): Promise<void> {
       return
     default:
       spinner.fail(chalk.yellow(describeStopFailure(outcome)))
+      if (released === false) p.log.info(chalk.gray(HOLD_LAPSES))
       printManualStopHint(port)
       process.exit(1)
   }
@@ -614,9 +632,10 @@ async function runRestart(opts: { open: boolean } & StopWaitOptions): Promise<vo
   if (port === null) {
     p.log.info(chalk.gray('No Clawboo server is running — starting one.'))
   } else {
-    const { outcome, spinner } = await stopWithReport(port, opts, 'restart')
+    const { outcome, spinner, released } = await stopWithReport(port, opts, 'restart')
     if (outcome.status === 'could-not-identify' || outcome.status === 'still-alive') {
       spinner.fail(chalk.yellow(describeStopFailure(outcome)))
+      if (released === false) p.log.info(chalk.gray(HOLD_LAPSES))
       printManualStopHint(port)
       // Deliberately do NOT start a replacement: a pinned start would throw on
       // the taken port, and an unpinned one would leave TWO dashboards running.

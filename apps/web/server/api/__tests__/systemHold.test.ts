@@ -112,6 +112,23 @@ describe('/api/system/hold', () => {
     expect(renewed.holds[0]!.expiresInMs).toBeGreaterThan(59_000)
   })
 
+  it("keeps the in-app update's owner id for the update alone", async () => {
+    const placed = await hold({ owner: 'self-update' })
+    expect(placed.status).toBe(400)
+    expect(String(placed.body['error'])).toMatch(/in-app update/)
+    expect(engineHold().isHeld()).toBe(false)
+
+    // The update's own hold cannot be released from outside it either.
+    engineHold().place('self-update', { reason: 'update' })
+    const refused = await release('self-update')
+    expect(refused.status).toBe(403)
+    expect(
+      engineHold()
+        .list()
+        .map((h) => h.owner),
+    ).toEqual(['self-update'])
+  })
+
   it('uses the default time to live when none is named', async () => {
     const placed = engineHoldStateSchema.parse((await hold({ owner: 'plain' })).body)
     expect(placed.holds[0]!.expiresAt - placed.holds[0]!.heldAt).toBe(60_000)

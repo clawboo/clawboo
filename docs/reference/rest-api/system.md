@@ -798,17 +798,17 @@ An update holds the server from its first event, under the owner id `self-update
 
 ### Event stream
 
-| `type`                | When                                                                            | Payload fields                                                                 |
-| --------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `unsupported`         | The update cannot run here (see `reason` above)                                 | `method`, `reason`, `command`, `message`                                       |
-| `progress`            | Install start                                                                   | `step: 'installing'`, `message`                                                |
-| `output`              | Each non-empty line of npm output                                               | `line`                                                                         |
-| `error`               | A spawn failure, or npm exits non-zero; at most one per stream                  | `code`, `message`, and on a non-zero exit `exitCode` and `detail`              |
-| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, or the API port is unknown | `version`, `message`                                                           |
-| `installed`           | npm exited 0 and the on-disk version changed                                    | `version`                                                                      |
-| `progress`            | Installed, and agent runs are still going (see above)                           | `step: 'waiting'`, `running`, `message`                                        |
-| `restarting`          | Just before the new server starts                                               | `port`, `version`, `interruptedRuns` (runs still going, `0` after a full wait) |
-| `forced`              | This request made an update that was waiting restart now                        | `message`                                                                      |
+| `type`                | When                                                                                                                   | Payload fields                                                                 |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `unsupported`         | The update cannot run here (see `reason` above)                                                                        | `method`, `reason`, `command`, `message`                                       |
+| `progress`            | Install start                                                                                                          | `step: 'installing'`, `message`                                                |
+| `output`              | Each non-empty line of npm output                                                                                      | `line`                                                                         |
+| `error`               | A spawn failure, or npm exits non-zero; at most one per stream                                                         | `code`, `message`, and on a non-zero exit `exitCode` and `detail`              |
+| `installed-elsewhere` | npm exited 0 but the on-disk version did not change, the API port is unknown, or the server cannot start its successor | `version`, `message`                                                           |
+| `installed`           | npm exited 0 and the on-disk version changed                                                                           | `version`                                                                      |
+| `progress`            | Installed, and agent runs are still going (see above)                                                                  | `step: 'waiting'`, `running`, `message`                                        |
+| `restarting`          | Just before the new server starts                                                                                      | `port`, `version`, `interruptedRuns` (runs still going, `0` after a full wait) |
+| `forced`              | This request made an update that was waiting restart now                                                               | `message`                                                                      |
 
 | `code`        | Meaning                                                                                  |
 | ------------- | ---------------------------------------------------------------------------------------- |
@@ -853,9 +853,9 @@ While the server is held:
 
 - A run that would start waits instead, in the same first-come queue that holds runs back when [`CLAWBOO_MAX_CONCURRENT_RUNS`](/reference/environment-variables) is reached. That covers board task runs, team chat turns, 1:1 chat turns with Clawboo Native, Claude Code, Codex and Hermes agents, the turns of a peer exchange and Routine runs on any runtime. A run that is waiting is not failed and does not count against any time limit.
 - Clawboo's Routines scheduler fires nothing. A Routine that falls due stays due and fires once the hold lifts, or after the next start.
-- The board's dispatch pump, which starts tasks agents handed to each other, skips its pass.
+- Team chat claims no board task. A task agents hand each other stays in To do instead of waiting `in_progress`, and the board's dispatch pump, which starts those tasks, skips its pass.
 
-When the last hold is released or lapses, the waiting runs start in order, the scheduler checks for due Routines and the pump runs a pass.
+When the last hold is released or lapses, the waiting runs start in order, the scheduler checks for due Routines and the pump runs a pass, which starts the tasks left in To do.
 
 The hold covers the runs this server starts. A 1:1 chat with an OpenClaw agent, and OpenClaw's own scheduled jobs and messaging channels, run inside the OpenClaw Gateway: they are neither held nor counted in `backgroundWork`, and stopping the server does not stop them.
 
@@ -916,11 +916,11 @@ Each entry in `holds`:
 
 Holds the server, or renews the hold this owner already placed. Body:
 
-| Field        | Type     | Required | Notes                                                                                                 |
-| ------------ | -------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `owner`      | `string` | Yes      | 1 to 128 letters, digits or `.` `_` `:` `@` `-`, starting with a letter or digit. Pick one per caller |
-| `ttlSeconds` | `number` | No       | How long the hold lives unless renewed: a whole number from 5 to 900. Default 60                      |
-| `reason`     | `string` | No       | Up to 200 characters, shown in `holds`. A renewal that leaves it out keeps the one given before       |
+| Field        | Type     | Required | Notes                                                                                                                                                          |
+| ------------ | -------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owner`      | `string` | Yes      | 1 to 128 letters, digits or `.` `_` `:` `@` `-`, starting with a letter or digit. Pick one per caller. `self-update` is the in-app update's own and is refused |
+| `ttlSeconds` | `number` | No       | How long the hold lives unless renewed: a whole number from 5 to 900. Default 60                                                                               |
+| `reason`     | `string` | No       | Up to 200 characters, shown in `holds`. A renewal that leaves it out keeps the one given before                                                                |
 
 | Status | When                          | Body                                   |
 | ------ | ----------------------------- | -------------------------------------- |
@@ -934,6 +934,7 @@ Releases the hold `owner` placed. No other owner's hold is touched.
 | Status | When                                                                     | Body                                                                                                   |
 | ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | `200`  | Released                                                                 | The same answer as `GET`                                                                               |
+| `403`  | `self-update`, the in-app update's own hold, which ends with the update  | `{ "error": "self-update is the in-app update's own hold. It ends with the update." }`                 |
 | `404`  | That owner holds no hold: it never placed one, released it, or it lapsed | `{ "error": "No hold is placed under that owner id. Only the owner that placed a hold releases it." }` |
 
 ### Example

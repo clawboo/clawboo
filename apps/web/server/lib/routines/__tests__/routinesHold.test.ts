@@ -19,7 +19,9 @@ import {
   type DbScheduledRun,
 } from '@clawboo/db'
 
-import { createRoutinesTicker } from '../ticker'
+import { getDb, resetDb } from '../../db'
+import { engineHold } from '../../engineHold'
+import { createRoutinesTicker, getRoutinesTicker, startRoutinesTicker } from '../ticker'
 
 let dir: string
 let db: ClawbooDb
@@ -106,5 +108,54 @@ describe('routines ticker while the engine is held', () => {
     await vi.advanceTimersByTimeAsync(5)
     expect(dispatched).toEqual([run.id])
     ticker.stop()
+  })
+})
+
+describe("the server's Routines ticker and the server's hold", () => {
+  let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
+  let home: string
+
+  beforeEach(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-ticker-boot-hold-'))
+    prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
+    process.env['HOME'] = home
+    // getDb() follows CLAWBOO_HOME before $HOME: sandbox both.
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+  })
+  afterEach(() => {
+    getRoutinesTicker()?.stop()
+    engineHold().release('ticker-test')
+    resetDb()
+    if (prevHome === undefined) delete process.env['HOME']
+    else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('fires a routine that fell due during the hold as soon as the hold lifts, with no rescan asked', async () => {
+    const serverDb = getDb()
+    const result = registerScheduledRun(serverDb, {
+      agentId: 'no-such-agent',
+      teamId: null,
+      cronSpec: '* * * * *',
+      taskTemplate: JSON.stringify({ title: 'Chore', kind: 'research', priority: 0 }),
+      nextRunAt: 1_000,
+    })
+    if (!result.ok) throw new Error('register failed')
+    const fired = (): boolean => listEvents(serverDb).some((e) => e.kind === 'routine_fired')
+
+    engineHold().place('ticker-test')
+    startRoutinesTicker({ log: noopLog, mcpBaseUrl: null })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(fired()).toBe(false)
+
+    // Only the release: the boot wiring turns it into a rescan.
+    engineHold().release('ticker-test')
+    const deadline = Date.now() + 5_000
+    while (!fired() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20))
+    expect(fired()).toBe(true)
   })
 })

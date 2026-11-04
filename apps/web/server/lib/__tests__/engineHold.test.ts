@@ -125,6 +125,20 @@ describe('engine holds', () => {
     expect(resumed).toHaveBeenCalledTimes(1)
   })
 
+  it('releases only the owner that asks, leaving every other hold in place', async () => {
+    const holds = createEngineHolds()
+    const resumed = vi.fn()
+    holds.onResume(resumed)
+    holds.place('updater')
+    holds.place('clawboo-stop-1')
+
+    expect(holds.release('clawboo-stop-1')).toBe(true)
+    expect(holds.list().map((h) => h.owner)).toEqual(['updater'])
+    expect(holds.isHeld()).toBe(true)
+    await flush()
+    expect(resumed).not.toHaveBeenCalled()
+  })
+
   it('runs no resume listener when a new hold arrives before the listeners do', async () => {
     const holds = createEngineHolds()
     const resumed = vi.fn()

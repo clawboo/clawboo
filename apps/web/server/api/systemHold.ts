@@ -18,6 +18,7 @@ import {
   HOLD_TTL_DEFAULT_MS,
   HOLD_TTL_MAX_MS,
   HOLD_TTL_MIN_MS,
+  SELF_UPDATE_HOLD_OWNER,
   engineHold,
 } from '../lib/engineHold'
 import { runSlots } from '../lib/runSlots'
@@ -76,6 +77,12 @@ export function systemHoldPOST(req: Request, res: Response): void {
     })
     return
   }
+  // The update's own hold ends with the update; another holder under its id
+  // would be released by it, and could release it.
+  if (owner === SELF_UPDATE_HOLD_OWNER) {
+    res.status(400).json({ error: `${owner} is the in-app update's own owner id. Pick another.` })
+    return
+  }
   let ttlMs = HOLD_TTL_DEFAULT_MS
   if (body.ttlSeconds !== undefined) {
     const ttl = body.ttlSeconds
@@ -108,6 +115,12 @@ export function systemHoldPOST(req: Request, res: Response): void {
 
 export function systemHoldDELETE(req: Request, res: Response): void {
   const owner = String(req.params['owner'] ?? '')
+  if (owner === SELF_UPDATE_HOLD_OWNER) {
+    res.status(403).json({
+      error: `${owner} is the in-app update's own hold. It ends with the update.`,
+    })
+    return
+  }
   if (!engineHold().release(owner)) {
     res.status(404).json({
       error:

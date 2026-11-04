@@ -100,9 +100,9 @@ export function UpdateChip() {
           if (phaseRef.current === 'restarting') return
           // Lost while the server waits for agent runs: the update is installed
           // and the restart still comes, within the server's wait of up to 10
-          // minutes, so keep watching for the new version.
+          // minutes, so keep watching for the new version. The chip stays in
+          // the waiting state: Restart now still works without this stream.
           if (phaseRef.current === 'waiting') {
-            setPhase('restarting')
             void pollThenReload(fromVersion, onPollTimeout, WAITING_RELOAD_TIMEOUT_MS)
             return
           }
@@ -114,11 +114,15 @@ export function UpdateChip() {
             case 'progress':
               // Installed, and waiting for agent runs to finish before it restarts.
               if (e.step === 'waiting') {
+                // Set now, not at the next render: an error that arrives first
+                // must already see the wait.
+                phaseRef.current = 'waiting'
                 setStatusText(e.message ?? 'Waiting for agent runs to finish.')
                 setPhase('waiting')
               }
               break
             case 'restarting':
+              phaseRef.current = 'restarting'
               setPhase('restarting')
               void pollThenReload(fromVersion, onPollTimeout)
               break
@@ -149,7 +153,14 @@ export function UpdateChip() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force: true }),
       },
-      {},
+      {
+        onError: (e: SSEEvent) => {
+          setStatusText(
+            `Restart now failed${e.message ? ` (${e.message})` : ''}. ` +
+              'The update still restarts once the agent runs finish.',
+          )
+        },
+      },
     )
   }, [])
 

@@ -33,9 +33,11 @@ import {
   readVersionFromDisk,
   selfUpdateRefusal,
 } from '../lib/updateCheck'
-import { engineHold } from '../lib/engineHold'
+import { SELF_UPDATE_HOLD_OWNER, engineHold } from '../lib/engineHold'
 import { runSlots, waitForRunsToFinish } from '../lib/runSlots'
 import { restartIntoLatest } from '../lib/selfRestart'
+
+export { SELF_UPDATE_HOLD_OWNER }
 
 function sendEvent(res: Response, data: Record<string, unknown>): void {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
@@ -48,8 +50,6 @@ const MANUAL_UPDATE = 'npm install -g clawboo@latest'
 
 /** How long an installed update waits for agent runs to finish before it restarts anyway. */
 export const SELF_UPDATE_RUN_WAIT_MS = 10 * 60_000
-/** The owner id of the hold an update places. */
-export const SELF_UPDATE_HOLD_OWNER = 'self-update'
 /** The longest an install holds agent work back. A stalled npm must not freeze it. */
 export const UPDATE_INSTALL_HOLD_MS = 5 * 60_000
 /** The update keeps its hold alive on this beat, with HOLD_TTL so it lapses soon after a crash. */
@@ -281,12 +281,20 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
     const restart = (interruptedRuns: number): void => {
       clearInterval(renew)
       if (keepalive) clearInterval(keepalive)
-      finish({ type: 'restarting', port, version: versionAfter, interruptedRuns })
-      // Launch the successor on the same port and exit so it can bind. The
-      // browser polls /api/system/capabilities and reloads once an engine on the
-      // new version answers. The hold, and `inProgress`, stay until this process
-      // exits. One that cannot relaunch keeps running: let work start again.
-      if (!restartIntoLatest(port)) giveUp()
+      // Launch the successor on the same port, then exit (a moment later) so it
+      // can bind. The browser polls /api/system/capabilities and reloads once an
+      // engine on the new version answers. The hold, and `inProgress`, stay until
+      // this process exits. A server that cannot relaunch keeps running on the old
+      // version, so it says so instead of `restarting`, and work starts again.
+      if (restartIntoLatest(port)) {
+        finish({ type: 'restarting', port, version: versionAfter, interruptedRuns })
+      } else {
+        finish({
+          type: 'installed-elsewhere',
+          version: versionAfter,
+          message: 'Update installed. Restart Clawboo to use it: clawboo',
+        })
+      }
     }
     if (forced || runSlots().stats().running === 0) {
       restart(forced ? runSlots().stats().running : 0)

@@ -188,6 +188,8 @@ describe('UpdateChip', () => {
     expect(consumeApiSSE.mock.calls[1]?.[0]).toBe('/api/system/self-update')
     expect(consumeApiSSE.mock.calls[1]?.[1]).toMatchObject({
       method: 'POST',
+      // Without it the server does not read `force` and refuses a second update.
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ force: true }),
     })
 
@@ -218,12 +220,54 @@ describe('UpdateChip', () => {
     )
     act(() => handlers.onError?.({ type: 'error', message: 'network error' }))
     expect(screen.queryByText(/network error/i)).not.toBeInTheDocument()
-    expect(screen.getByText(/restarting/i)).toBeInTheDocument()
+    // Still waiting, with Restart now: the server has not restarted yet.
+    expect(screen.getByTestId('update-chip-waiting')).toHaveTextContent(/waiting for 1 agent run/i)
+    expect(screen.getByTestId('update-chip-restart-now')).toBeInTheDocument()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_000)
     })
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('treats a stream lost right after the waiting frame, before a render, as the wait', () => {
+    setHook()
+    render(<UpdateChip />)
+    fireEvent.click(screen.getByTestId('update-chip-action'))
+    const handlers = consumeApiSSE.mock.calls[0]?.[2] as SSEHandlers
+    act(() => {
+      handlers.onEvent?.({
+        type: 'progress',
+        step: 'waiting',
+        running: 2,
+        message: 'Waiting for 2 agent runs to finish before restarting.',
+      })
+      handlers.onError?.({ type: 'error', message: 'network error' })
+    })
+    expect(screen.queryByText(/network error/i)).not.toBeInTheDocument()
+    expect(screen.getByTestId('update-chip-restart-now')).toBeInTheDocument()
+  })
+
+  it('says when Restart now failed, and keeps waiting', () => {
+    setHook()
+    render(<UpdateChip />)
+    fireEvent.click(screen.getByTestId('update-chip-action'))
+    const handlers = consumeApiSSE.mock.calls[0]?.[2] as SSEHandlers
+    act(() =>
+      handlers.onEvent?.({
+        type: 'progress',
+        step: 'waiting',
+        running: 1,
+        message: 'Waiting for 1 agent run to finish before restarting.',
+      }),
+    )
+    fireEvent.click(screen.getByTestId('update-chip-restart-now'))
+    const force = consumeApiSSE.mock.calls[1]?.[2] as SSEHandlers
+    act(() => force.onError?.({ type: 'error', message: 'Server returned 500' }))
+    expect(screen.getByTestId('update-chip-waiting')).toHaveTextContent(
+      'Restart now failed (Server returned 500). The update still restarts once the agent runs finish.',
+    )
+    expect(screen.getByTestId('update-chip-restart-now')).toBeInTheDocument()
   })
 
   it('the × dismisses via the hook', async () => {

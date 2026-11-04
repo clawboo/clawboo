@@ -172,7 +172,7 @@ npm install -g clawboo@latest
 systemctl --user restart clawboo
 ```
 
-`systemctl` stops the server at once, which interrupts the agent runs still going. To let them finish first, run `clawboo stop` before the restart, from a shell with the server's `STUDIO_ACCESS_TOKEN` if the service sets one. It waits for the runs, then stops the server, and `systemctl --user restart clawboo` starts it again. A stop script of your own can do the same through [Drain and hold](/reference/rest-api/system#drain-and-hold).
+`systemctl` stops the server at once, which interrupts the agent runs still going. To let them finish first, run `clawboo stop` before the restart, from a shell with the server's `STUDIO_ACCESS_TOKEN` if the service sets one. It waits up to 10 minutes for the runs, then stops the server, even with runs still going; for longer runs, give it more time with `--wait <seconds>`. `systemctl --user restart clawboo` then starts it again. A stop script of your own can do the same through [Drain and hold](/reference/rest-api/system#drain-and-hold).
 
 Skip the in-app update here. It replaces the server process itself, outside the service manager's control. Set `CLAWBOO_DISABLE_SELF_UPDATE=1` in the service's environment to remove the chip.
 

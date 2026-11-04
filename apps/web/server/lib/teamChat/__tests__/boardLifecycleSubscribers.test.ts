@@ -167,7 +167,7 @@ describe('board lifecycle subscribers', () => {
     }
   })
 
-  it('wakes no team while the engine is held: the server pumps once the hold lifts', async () => {
+  it('wakes no team while the engine is held', async () => {
     vi.useFakeTimers()
     try {
       const db = getDb()
