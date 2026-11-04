@@ -6,7 +6,7 @@
 import { EventEmitter } from 'node:events'
 
 import type { Request, Response } from 'express'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../lib/platform', () => ({
   isWindows: false,
@@ -47,7 +47,13 @@ vi.mock('node:child_process', () => ({
   },
 }))
 
-import { npmFailureEvent, selfUpdatePOST } from '../systemUpdate'
+import { engineHold } from '../../lib/engineHold'
+import {
+  SELF_UPDATE_HOLD_OWNER,
+  npmFailureEvent,
+  resetSelfUpdateForTests,
+  selfUpdatePOST,
+} from '../systemUpdate'
 
 function sseRes() {
   const frames: Record<string, unknown>[] = []
@@ -69,11 +75,14 @@ function sseRes() {
 }
 const req = { app: { locals: { apiPort: 18790 } } } as unknown as Request
 
+const started: FakeChild[] = []
+
 function start(): { child: FakeChild; frames: Record<string, unknown>[]; ends: () => number } {
   const child = new FakeChild()
   spawnState.child = child
   const { res, frames, ends } = sseRes()
   void selfUpdatePOST(req, res)
+  started.push(child)
   return { child, frames, ends }
 }
 
@@ -82,6 +91,13 @@ describe('POST /api/system/self-update', () => {
     spawnState.calls = []
     updateState.versions = ['0.4.0', '0.5.0']
     restartState.ports = []
+  })
+  afterEach(() => {
+    // End an install a test left running, and forget a restart: one update
+    // runs at a time.
+    for (const child of started.splice(0)) child.emit('close', 1)
+    resetSelfUpdateForTests()
+    engineHold().release(SELF_UPDATE_HOLD_OWNER)
   })
 
   it('runs npm in a directory that exists, never an inherited one', () => {

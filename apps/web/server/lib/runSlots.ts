@@ -20,8 +20,15 @@
 // doing nothing, and one agent's backlog could take the whole cap.
 //
 // The cap is per process. `CLAWBOO_MAX_CONCURRENT_RUNS` sets it once, at first use.
+//
+// A HELD ENGINE (see engineHold) grants no slot at all, however many are free:
+// every run start waits in the same queue, in the same order, and nothing else
+// changes for it. Runs holding a slot are untouched. When the hold lifts, the
+// queue hands out free slots as if they had just been released.
 
 import { createLogger } from '@clawboo/logger'
+
+import { engineHold } from './engineHold'
 
 const log = createLogger('run-slots')
 
@@ -71,6 +78,13 @@ export interface RunSlots {
    */
   acquire(request?: RunSlotRequest): Promise<RunSlot>
   stats(): RunSlotStats
+  /** Hand free slots to waiting runs. The engine hold calls it when it lifts. */
+  resume(): void
+}
+
+export interface RunSlotsOptions {
+  /** True while the engine is held: no slot is granted, free or not. Never held by default. */
+  held?: () => boolean
 }
 
 interface Waiter {
@@ -79,15 +93,17 @@ interface Waiter {
 }
 
 /** A first-come counting semaphore of `size` run slots, at most one per key. */
-export function createRunSlots(size: number): RunSlots {
+export function createRunSlots(size: number, options: RunSlotsOptions = {}): RunSlots {
   if (!Number.isInteger(size) || size < 1) {
     throw new RangeError(`run slots: size must be a whole number of at least 1, got ${size}`)
   }
+  const engineHeld = options.held ?? ((): boolean => false)
   let running = 0
   /** Keys a slot holder has now. */
   const heldKeys = new Set<string>()
-  // Invariant: while a slot is free, every waiter's key is held, so a run that
-  // can start right now never jumps one that could have started before it.
+  // Invariant: while a slot is free and the engine is not held, every waiter's
+  // key is held, so a run that can start right now never jumps one that could
+  // have started before it.
   const waiters: Waiter[] = []
 
   const keyFree = (key: string | null): boolean => key === null || !heldKeys.has(key)
@@ -109,6 +125,7 @@ export function createRunSlots(size: number): RunSlots {
 
   /** Give free slots to the oldest waiters whose key no slot holder has. */
   const grantWaiting = (): void => {
+    if (engineHeld()) return
     while (running < size) {
       const at = waiters.findIndex((w) => keyFree(w.key))
       if (at === -1) return
@@ -117,8 +134,13 @@ export function createRunSlots(size: number): RunSlots {
     }
   }
 
-  const tryAcquire = (key: string | null = null): RunSlot | null =>
-    running < size && keyFree(key) ? take(key) : null
+  const tryAcquire = (key: string | null = null): RunSlot | null => {
+    if (engineHeld()) return null
+    // A hold can lapse between two reads with runs still queued behind it: they
+    // go first, which restores the invariant.
+    grantWaiting()
+    return running < size && keyFree(key) ? take(key) : null
+  }
 
   return {
     size,
@@ -146,13 +168,17 @@ export function createRunSlots(size: number): RunSlots {
         }
         signal?.addEventListener('abort', onAbort, { once: true })
         waiters.push(waiter)
+        const isHeld = engineHeld()
         log.info(
-          { running, queued: waiters.length, size, agentBusy: !keyFree(key) },
-          'the run waits for a free run slot',
+          { running, queued: waiters.length, size, agentBusy: !keyFree(key), engineHeld: isHeld },
+          isHeld
+            ? 'the run waits: the engine is held and starts no new run'
+            : 'the run waits for a free run slot',
         )
       })
     },
     stats: () => ({ size, running, queued: waiters.length }),
+    resume: grantWaiting,
   }
 }
 
@@ -175,16 +201,77 @@ export function maxConcurrentRunsFromEnv(
 }
 
 let shared: RunSlots | null = null
+let stopFollowingHold: (() => void) | null = null
 
-/** The process's run slots, sized from the environment on first use. */
+/**
+ * The process's run slots, sized from the environment on first use. They follow
+ * the engine hold: held, they grant nothing; when it lifts, the queue resumes.
+ */
 export function runSlots(): RunSlots {
-  if (!shared) shared = createRunSlots(maxConcurrentRunsFromEnv())
+  if (!shared) {
+    const slots = createRunSlots(maxConcurrentRunsFromEnv(), {
+      held: () => engineHold().isHeld(),
+    })
+    stopFollowingHold = engineHold().onResume(() => slots.resume())
+    shared = slots
+  }
   return shared
 }
 
 /** TEST-ONLY: swap the process's run slots; null rebuilds them from the env on next use. */
 export function setRunSlotsForTests(slots: RunSlots | null): void {
+  stopFollowingHold?.()
+  stopFollowingHold = null
   shared = slots
+}
+
+export interface WaitForRunsOptions {
+  /** Stop waiting after this long, runs or not. */
+  timeoutMs: number
+  /** Stop waiting at once (a forced stop). */
+  signal?: AbortSignal
+  /** Called with the number of runs holding a slot, first at once and then each time it changes. */
+  onRunning?: (running: number) => void
+  /** How often to look. Defaults to 500 ms. */
+  pollMs?: number
+}
+
+export interface WaitForRunsResult {
+  /** Runs still holding a slot when the wait ended: 0 unless it timed out or was cut short. */
+  running: number
+  timedOut: boolean
+}
+
+/**
+ * Wait until no run holds one of the process's slots. What a drain waits for:
+ * hold the engine first, or new runs keep taking slots as old ones finish. Runs
+ * waiting in the queue are not waited for; while the engine is held they never
+ * start.
+ */
+export async function waitForRunsToFinish(opts: WaitForRunsOptions): Promise<WaitForRunsResult> {
+  const pollMs = opts.pollMs ?? 500
+  const deadline = Date.now() + opts.timeoutMs
+  let last = -1
+  for (;;) {
+    const { running } = runSlots().stats()
+    if (running !== last) {
+      last = running
+      opts.onRunning?.(running)
+    }
+    if (running === 0) return { running: 0, timedOut: false }
+    if (opts.signal?.aborted) return { running, timedOut: false }
+    const left = deadline - Date.now()
+    if (left <= 0) return { running, timedOut: true }
+    await new Promise<void>((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer)
+        opts.signal?.removeEventListener('abort', done)
+        resolve()
+      }
+      const timer = setTimeout(done, Math.min(pollMs, left))
+      opts.signal?.addEventListener('abort', done, { once: true })
+    })
+  }
 }
 
 /**

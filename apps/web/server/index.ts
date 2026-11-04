@@ -47,6 +47,7 @@ import {
   roomsWithUnheldReportUps,
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
+import { engineHeld, engineHold } from './lib/engineHold'
 import { pumpRunnerReruns } from './lib/runnerRerun'
 import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
@@ -646,6 +647,10 @@ async function main() {
   // MAX_AUTO_FIRES caps a permafailing one), and the atomic claim-409 arbitrates
   // any race with a live engine. Human/board-created cards WITHOUT the marker
   // stay manual by design. Best-effort, unref'd.
+  //
+  // A held engine (see engineHold) skips the pass: claiming tasks it cannot start
+  // would only leave them `in_progress` across the stop it is waiting for. When
+  // the hold lifts, a pass runs at once.
   safeStart('board-dispatch-pump', () => {
     const pumpMs = positiveIntEnv('CLAWBOO_DISPATCH_PUMP_MS', 60_000)
     const mcpBase = `http://127.0.0.1:${port}`
@@ -654,6 +659,7 @@ async function main() {
     // holding fireable work OR undelivered mail, so a restart is a pause).
     registerBoardLifecycleSubscribers({ mcpBaseUrl: mcpBase })
     const pump = (): void => {
+      if (engineHeld()) return
       try {
         const db = getDb()
         // Tasks the task runner ran re-fire through the runner, not team chat
@@ -692,6 +698,7 @@ async function main() {
     // First pass shortly after boot (let the registry / Boo Zero bootstrap land).
     setTimeout(pump, 10_000).unref()
     setInterval(pump, pumpMs).unref()
+    engineHold().onResume(pump)
   })
 
   // ── Agent registry (AgentSource) ────────────────────────────────────────────

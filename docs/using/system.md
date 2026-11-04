@@ -54,6 +54,8 @@ When a newer Clawboo is on npm, an **Update available** chip appears at the bott
 
 The chip reads **Click to update**. Click it. It shows **Installing update…** while npm installs `clawboo@latest`, then **Restarting…**.
 
+If agents are still working when the install finishes, the chip reads "Waiting for 2 agent runs to finish before restarting." (with the number that is left) and the server waits for them, up to 10 minutes, before it restarts. No new agent run starts in the meantime. **Restart now** restarts at once and interrupts the runs still going.
+
 </Step>
 
 <Step title="Wait for the reload">
@@ -165,7 +167,7 @@ The [CLI reference](/reference/cli) covers `clawboo stop`, `clawboo restart` and
 
 <Accordion title="Under the hood">
 
-- The chip reads `GET /api/system/self-version`, and **Click to update** calls `POST /api/system/self-update`, which runs `npm install -g clawboo@latest` and restarts the server on the same port. It works only for a global install whose folders the server's user can write; an npx run, a source checkout or another user's install gets the command to copy instead. With `CLAWBOO_DISABLE_SELF_UPDATE=1` (or `disableSelfUpdate` in the operator settings file) there is no chip, and the update route refuses.
+- The chip reads `GET /api/system/self-version`, and **Click to update** calls `POST /api/system/self-update`, which runs `npm install -g clawboo@latest`, waits for the agent runs going (see [Drain and hold](/reference/rest-api/system#drain-and-hold)) and restarts the server on the same port. **Restart now** sends the same request with `{"force": true}`. It works only for a global install whose folders the server's user can write; an npx run, a source checkout or another user's install gets the command to copy instead. With `CLAWBOO_DISABLE_SELF_UPDATE=1` (or `disableSelfUpdate` in the operator settings file) there is no chip, and the update route refuses.
 - The **Deployment** card reads `GET /api/system/operator-settings`, and its switch calls `PUT /api/system/operator-settings/disableBrowserAutostart`.
 - **Check for Updates** calls `POST /api/system/install-openclaw`. **Restart** calls `POST /api/system/gateway` with `{"action": "restart"}`, which waits up to 60 seconds for the Gateway's port.
 - **Command Approval** reads `GET /api/system/openclaw-config` and writes `PATCH /api/system/openclaw-config` with `{"exec": {"ask": "on-miss"}}` (or `off`, `always`).

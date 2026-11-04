@@ -148,7 +148,7 @@ Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME`
 
 <Tab title="In the dashboard">
 
-When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, restarts the server on the same port and reloads the page. The restarted server keeps the node options the old one started with, such as `--max-old-space-size`. For an `npx` run, a source checkout, or a global install whose folders the server's user cannot write (such as a root-owned `/usr/local`), the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
+When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, waits up to 10 minutes for the agent runs still going to finish (**Restart now** skips the wait), restarts the server on the same port and reloads the page. The restarted server keeps the node options the old one started with, such as `--max-old-space-size`. For an `npx` run, a source checkout, or a global install whose folders the server's user cannot write (such as a root-owned `/usr/local`), the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
 
 </Tab>
 
@@ -171,6 +171,8 @@ With your own `STUDIO_ACCESS_TOKEN` on the server, run `clawboo restart` from a 
 npm install -g clawboo@latest
 systemctl --user restart clawboo
 ```
+
+`systemctl` stops the server at once, which interrupts the agent runs still going. To let them finish first, run `clawboo stop` before the restart, from a shell with the server's `STUDIO_ACCESS_TOKEN` if the service sets one. It waits for the runs, then stops the server, and `systemctl --user restart clawboo` starts it again. A stop script of your own can do the same through [Drain and hold](/reference/rest-api/system#drain-and-hold).
 
 Skip the in-app update here. It replaces the server process itself, outside the service manager's control. Set `CLAWBOO_DISABLE_SELF_UPDATE=1` in the service's environment to remove the chip.
 

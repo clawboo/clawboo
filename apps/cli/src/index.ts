@@ -16,7 +16,7 @@
  * module would run `program.parse()`).
  */
 
-import { Command } from 'commander'
+import { Command, InvalidArgumentError } from 'commander'
 import chalk from 'chalk'
 import * as p from '@clack/prompts'
 import ora, { type Ora } from 'ora'
@@ -31,6 +31,7 @@ import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
 import { shouldOfferRestart } from './versionCheck'
 import {
+  DEFAULT_STOP_WAIT_SECONDS,
   dashboardHost,
   dashboardUrl,
   discoverDashboard,
@@ -44,6 +45,7 @@ import {
   readRuntimePort,
   removeRuntimePortFile,
   startDashboard,
+  stopAfterAgentRuns,
   stopDashboard,
   uiPath,
   type StopOutcome,
@@ -440,6 +442,102 @@ async function run(opts: LaunchOptions): Promise<void> {
   )
 }
 
+// ─── Waiting for agent runs ───────────────────────────────────────────────────
+
+interface StopWaitOptions {
+  /** Stop now, without waiting for agent runs. */
+  force?: boolean
+  /** The longest wait for agent runs, in seconds. */
+  wait?: number
+}
+
+function parseWaitSeconds(value: string): number {
+  const seconds = Number(value)
+  if (!Number.isInteger(seconds) || seconds < 0) {
+    throw new InvalidArgumentError('Give a whole number of seconds, 0 or more.')
+  }
+  return seconds
+}
+
+function agentRuns(n: number): string {
+  return n === 1 ? '1 agent run' : `${n} agent runs`
+}
+
+function formatWait(ms: number): string {
+  const total = Math.ceil(ms / 1000)
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes === 0) return `${seconds}s`
+  return seconds === 0 ? `${minutes}m` : `${minutes}m ${seconds}s`
+}
+
+/**
+ * Stop the server on `port` the way `clawboo stop` and `clawboo restart` do:
+ * wait for the agent runs going to finish first (see `stopAfterAgentRuns`),
+ * unless `--force`, with a spinner that says how many are left. Ctrl+C during
+ * the wait exits and leaves the server running. Returns the stop's outcome and
+ * the spinner, still spinning, for the caller to settle.
+ */
+async function stopWithReport(
+  port: number,
+  opts: StopWaitOptions,
+  command: 'stop' | 'restart',
+): Promise<{ outcome: StopOutcome; spinner: Ora }> {
+  const stopping = `Stopping Clawboo on port ${port}...`
+  const waitMs = (opts.wait ?? DEFAULT_STOP_WAIT_SECONDS) * 1000
+  let spinner = ora({
+    text: opts.force ? stopping : 'Checking for agent runs...',
+    color: 'cyan',
+  }).start()
+  let waited = false
+  const cancel = new AbortController()
+  const onInterrupt = (): void => cancel.abort()
+  process.once('SIGINT', onInterrupt)
+  let result: Awaited<ReturnType<typeof stopAfterAgentRuns>>
+  try {
+    result = await stopAfterAgentRuns(port, {
+      command,
+      force: opts.force,
+      waitMs,
+      signal: cancel.signal,
+      onWaiting: (running, leftMs) => {
+        waited = true
+        spinner.text =
+          `Waiting for ${agentRuns(running)} to finish (${formatWait(leftMs)} left). ` +
+          chalk.gray(`Ctrl+C cancels; clawboo ${command} --force stops now.`)
+      },
+      onStopping: (drain) => {
+        if (drain?.status === 'timed-out') {
+          spinner.warn(
+            chalk.yellow(
+              `Waited ${formatWait(waitMs)}; stopping ${agentRuns(drain.running)} still going.`,
+            ),
+          )
+        } else if (drain?.status === 'lost') {
+          spinner.warn(
+            chalk.yellow(
+              `The server stopped answering with ${agentRuns(drain.running)} still going; stopping it.`,
+            ),
+          )
+        } else if (waited) {
+          spinner.succeed(chalk.green('Agent runs finished'))
+        } else {
+          spinner.text = stopping
+          return
+        }
+        spinner = ora({ text: stopping, color: 'cyan' }).start()
+      },
+    })
+  } finally {
+    process.removeListener('SIGINT', onInterrupt)
+  }
+  if (result.stop === null) {
+    spinner.info(chalk.gray('Cancelled. Clawboo keeps running and starts new work again.'))
+    process.exit(130)
+  }
+  return { outcome: result.stop, spinner }
+}
+
 // ─── `clawboo stop` ───────────────────────────────────────────────────────────
 
 /**
@@ -448,8 +546,11 @@ async function run(opts: LaunchOptions): Promise<void> {
  *
  * Stopping something already stopped is not an error — this has to be safe to
  * run twice from a teardown script.
+ *
+ * Agent runs still going are waited for first (see `stopAfterAgentRuns`), unless
+ * `--force`.
  */
-async function runStop(): Promise<void> {
+async function runStop(opts: StopWaitOptions): Promise<void> {
   const { port, gatedPort } = await discoverDashboard()
   if (port === null && gatedPort !== null) {
     // It IS running — we just can't confirm it through the gate, and the safety
@@ -475,8 +576,7 @@ async function runStop(): Promise<void> {
     return
   }
 
-  const spinner = ora({ text: `Stopping Clawboo on port ${port}...`, color: 'cyan' }).start()
-  const outcome = await stopDashboard(port)
+  const { outcome, spinner } = await stopWithReport(port, opts, 'stop')
 
   switch (outcome.status) {
     case 'stopped':
@@ -502,7 +602,7 @@ async function runStop(): Promise<void> {
  * tab already open on that URL reconnects on its own. With nothing running it
  * just starts one (the systemd convention).
  */
-async function runRestart(opts: { open: boolean }): Promise<void> {
+async function runRestart(opts: { open: boolean } & StopWaitOptions): Promise<void> {
   const { port, gatedPort } = await discoverDashboard()
   if (port === null && gatedPort !== null) {
     printGatedNotice(gatedPort)
@@ -514,8 +614,7 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
   if (port === null) {
     p.log.info(chalk.gray('No Clawboo server is running — starting one.'))
   } else {
-    const spinner = ora({ text: `Stopping Clawboo on port ${port}...`, color: 'cyan' }).start()
-    const outcome = await stopDashboard(port)
+    const { outcome, spinner } = await stopWithReport(port, opts, 'restart')
     if (outcome.status === 'could-not-identify' || outcome.status === 'still-alive') {
       spinner.fail(chalk.yellow(describeStopFailure(outcome)))
       printManualStopHint(port)
@@ -718,18 +817,30 @@ program.action((opts: LaunchOptions, command: Command) => {
   run(opts).catch(fail)
 })
 
+const FORCE_HELP = 'Stop now, without waiting for agent runs to finish.'
+const WAIT_HELP = `Wait at most this many seconds for agent runs to finish (default ${DEFAULT_STOP_WAIT_SECONDS}).`
+
 program
   .command('stop')
-  .description('Stop the running Clawboo dashboard server.')
-  .action(() => {
-    runStop().catch(fail)
+  .description(
+    'Stop the running Clawboo dashboard server, after the agent runs going have finished.',
+  )
+  .option('--force', FORCE_HELP)
+  .option('--wait <seconds>', WAIT_HELP, parseWaitSeconds)
+  .action((opts: StopWaitOptions) => {
+    runStop(opts).catch(fail)
   })
 
 program
   .command('restart')
-  .description('Stop the running Clawboo dashboard server and start a fresh one on the same port.')
+  .description(
+    'Stop the running Clawboo dashboard server, after the agent runs going have finished, ' +
+      'and start a fresh one on the same port.',
+  )
   .option('--no-open', "Don't open the browser after restarting.")
-  .action((opts: { open: boolean }) => {
+  .option('--force', FORCE_HELP)
+  .option('--wait <seconds>', WAIT_HELP, parseWaitSeconds)
+  .action((opts: { open: boolean } & StopWaitOptions) => {
     runRestart(opts).catch(fail)
   })
 

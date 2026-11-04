@@ -165,6 +165,67 @@ describe('UpdateChip', () => {
     })
   })
 
+  it('says it is waiting for agent runs, and Restart now asks the server to stop waiting', () => {
+    setHook()
+    render(<UpdateChip />)
+    fireEvent.click(screen.getByTestId('update-chip-action'))
+    const handlers = consumeApiSSE.mock.calls[0]?.[2] as SSEHandlers
+    act(() => handlers.onEvent?.({ type: 'installed', version: '0.4.0' }))
+    act(() =>
+      handlers.onEvent?.({
+        type: 'progress',
+        step: 'waiting',
+        running: 2,
+        message: 'Waiting for 2 agent runs to finish before restarting.',
+      }),
+    )
+    expect(screen.getByTestId('update-chip-waiting')).toHaveTextContent(
+      'Waiting for 2 agent runs to finish before restarting.',
+    )
+
+    fireEvent.click(screen.getByTestId('update-chip-restart-now'))
+    expect(consumeApiSSE).toHaveBeenCalledTimes(2)
+    expect(consumeApiSSE.mock.calls[1]?.[0]).toBe('/api/system/self-update')
+    expect(consumeApiSSE.mock.calls[1]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ force: true }),
+    })
+
+    // The first stream reports the restart, as it does without a wait.
+    act(() => handlers.onEvent?.({ type: 'restarting', port: 18790, version: '0.4.0' }))
+    expect(screen.getByText(/restarting/i)).toBeInTheDocument()
+    expect(screen.queryByTestId('update-chip-restart-now')).not.toBeInTheDocument()
+  })
+
+  it('keeps watching for the new version when the stream drops while it waits', async () => {
+    vi.useFakeTimers()
+    const reload = vi.fn()
+    vi.stubGlobal('location', { ...window.location, reload })
+    fetchEngineCapabilities
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ version: '0.4.0', apiRevision: 1, supportFloor: '0.3', features: {} })
+    setHook()
+    render(<UpdateChip />)
+    fireEvent.click(screen.getByTestId('update-chip-action'))
+    const handlers = consumeApiSSE.mock.calls[0]?.[2] as SSEHandlers
+    act(() =>
+      handlers.onEvent?.({
+        type: 'progress',
+        step: 'waiting',
+        running: 1,
+        message: 'Waiting for 1 agent run to finish before restarting.',
+      }),
+    )
+    act(() => handlers.onError?.({ type: 'error', message: 'network error' }))
+    expect(screen.queryByText(/network error/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/restarting/i)).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000)
+    })
+    expect(reload).toHaveBeenCalledOnce()
+  })
+
   it('the × dismisses via the hook', async () => {
     const user = userEvent.setup()
     const { dismiss } = setHook()

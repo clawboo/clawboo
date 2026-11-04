@@ -21,8 +21,8 @@ The `clawboo` command starts the dashboard and manages the server behind it. Use
 | Command                 | What it does                                                        |
 | ----------------------- | ------------------------------------------------------------------- |
 | `clawboo`               | Find or start the dashboard server, then open it in your browser    |
-| `clawboo stop`          | Stop the running dashboard server                                   |
-| `clawboo restart`       | Stop the server and start a fresh one on the same port              |
+| `clawboo stop`          | Stop the running dashboard server once its agent runs have finished |
+| `clawboo restart`       | Stop the server the same way and start a fresh one on the same port |
 | `clawboo open`          | Open the running dashboard in your browser, signed in               |
 | `clawboo backup [dest]` | Write a one-file copy of the database, safe while the server runs   |
 | `clawboo --version`     | Print the CLI version (`-V` for short)                              |
@@ -51,7 +51,7 @@ The URL is `http://127.0.0.1:<port>`, or `http://127.0.0.1:<port><prefix>/` when
 | `--no-version-check` | Attach to a running server without comparing versions |
 | `-y`, `--yes`        | Restart an older running server without asking        |
 
-`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo restart` takes `--no-open`, `clawboo open` takes `--print`, `clawboo backup` takes `-f, --force`, and `clawboo stop` takes no flags. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
+`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo stop` takes `--force` and `--wait <seconds>`, `clawboo restart` takes those and `--no-open`, `clawboo open` takes `--print`, and `clawboo backup` takes `-f, --force`. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
 
 ### Version check
 
@@ -90,14 +90,22 @@ The server runs detached: it keeps running after `clawboo` exits or you close th
 
 ```bash
 clawboo stop
+clawboo stop --wait 120
+clawboo stop --force
 ```
 
-Stops the dashboard server that `clawboo` would open. To target one port, run `CLAWBOO_API_PORT=<port> clawboo stop`.
+Stops the dashboard server that `clawboo` would open, after the agent runs it is working on have finished. To target one port, run `CLAWBOO_API_PORT=<port> clawboo stop`.
+
+| Flag               | Effect                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `--force`          | Stop now, without waiting for agent runs to finish                                          |
+| `--wait <seconds>` | Wait at most this long for agent runs (default 600, ten minutes); `--wait 0` waits for none |
 
 1. It finds the server through [port discovery](#port-discovery) and confirms the port really is a Clawboo dashboard.
-2. It looks up the process listening on that port (`lsof` on macOS and Linux, `netstat -ano` on Windows) and sends it SIGTERM.
-3. It waits up to 4 seconds for the port to close. If it is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
-4. It prints "Clawboo stopped (pid N)", or "(pid N, forced)" when SIGKILL was needed.
+2. Unless you pass `--force`, it holds the server, so it starts no new agent run, and waits for the runs already going to finish. The spinner says how many are left and how long it will still wait. At the bound it prints "Waited 10m; stopping N agent runs still going." and stops anyway. See [Waiting for agent runs](#waiting-for-agent-runs).
+3. It looks up the process listening on that port (`lsof` on macOS and Linux, `netstat -ano` on Windows) and sends it SIGTERM.
+4. It waits up to 4 seconds for the port to close. If it is still open, it checks that the same process still holds it, sends SIGKILL, and waits up to 2 more seconds.
+5. It prints "Clawboo stopped (pid N)", or "(pid N, forced)" when SIGKILL was needed.
 
 With nothing running, it prints "No Clawboo server is running.", removes a leftover `api-port.txt` that names a dead server, and exits 0, so it is safe in teardown scripts. It never signals process 1, itself or its parent.
 
@@ -108,20 +116,23 @@ When the stop fails it exits 1 and prints a manual stop command after one of the
 - "Port N is held by a process this launcher refuses to signal."
 - "Could not identify the process listening on port N." (also printed when neither `lsof` nor `netstat` is available)
 
-Stopping the server interrupts any work in progress. On macOS and Linux the server first signals the runtime processes it started and waits up to 5 seconds for them, removes `api-port.txt` if it still names its port, and checkpoints the database. On Windows the stop ends the process at once, so none of that runs: `clawboo stop` removes the port file itself and the database recovers when it is next opened. Routines are re-armed when the server starts again. An OpenClaw Gateway that Clawboo started keeps running.
+Stopping the server interrupts the agent runs still going: all of them with `--force`, and the ones left when the wait runs out. On macOS and Linux the server first signals the runtime processes it started and waits up to 5 seconds for them, removes `api-port.txt` if it still names its port, and checkpoints the database. On Windows the stop ends the process at once, so none of that runs: `clawboo stop` removes the port file itself and the database recovers when it is next opened. Routines are re-armed when the server starts again. An OpenClaw Gateway that Clawboo started keeps running.
 
 ## clawboo restart
 
 ```bash
 clawboo restart
 clawboo restart --no-open
+clawboo restart --force
 ```
 
-Stops the server as `clawboo stop` does, then starts a new one on the same port, so a browser tab that is already open reconnects. It opens the browser the way `clawboo` does, with a one-time sign-in link on a server with an access token. Use it after `npm install -g clawboo@latest` (the running server keeps its old code until it restarts) or after you change an environment variable the server reads at startup.
+Stops the server as `clawboo stop` does, waiting for its agent runs first, then starts a new one on the same port, so a browser tab that is already open reconnects. It opens the browser the way `clawboo` does, with a one-time sign-in link on a server with an access token. Use it after `npm install -g clawboo@latest` (the running server keeps its old code until it restarts) or after you change an environment variable the server reads at startup.
 
-| Flag        | Effect                                   |
-| ----------- | ---------------------------------------- |
-| `--no-open` | Do not open the browser after restarting |
+| Flag               | Effect                                                            |
+| ------------------ | ----------------------------------------------------------------- |
+| `--no-open`        | Do not open the browser after restarting                          |
+| `--force`          | Stop the old server now, without waiting for agent runs to finish |
+| `--wait <seconds>` | Wait at most this long for agent runs (default 600)               |
 
 - The new server is pinned to the old port with `CLAWBOO_API_PORT` and waits up to 15 seconds for it to free (`CLAWBOO_AWAIT_PORT`). If something else took the port in between, the new server starts without the pin and picks a port the usual way.
 - With nothing running, it starts a server.
@@ -129,6 +140,22 @@ Stops the server as `clawboo stop` does, then starts a new one on the same port,
 - If the new server never answers, it prints "The previous server was stopped and could not be replaced. Nothing is running now." and exits 1.
 
 In a source checkout run with `pnpm dev`, the dev script supervises the server and may start it again on its own. Restart through the dev script there.
+
+## Waiting for agent runs
+
+`clawboo stop` and `clawboo restart` do not cut off an agent halfway through a task. Before they stop the server, they hold it through [`POST /api/system/hold`](/reference/rest-api/system#drain-and-hold) under the owner id `clawboo-stop-<pid>` or `clawboo-restart-<pid>`:
+
+- The held server starts no new agent run. A run that would start (a task, a chat turn, a Routine) waits instead, and runs already going carry on.
+- The command polls the server every second until no agent run is going, then stops it. It renews the hold every 20 seconds while it waits; the hold lasts 60 seconds, so a `clawboo stop` that is killed leaves the server free to start work again within a minute.
+- Press Ctrl+C during the wait to cancel. The command releases the hold, prints "Cancelled. Clawboo keeps running and starts new work again." and exits 130 without stopping anything.
+- If the stop then fails, the command releases the hold, so the server it could not stop starts new work again.
+- A server older than this feature cannot be held. The command then stops it at once, as before.
+
+Runs that were waiting to start when the server stops do not run then. Tasks agents handed to each other are picked up again after the next start, as after any restart. A chat message, or a task run you started, while the command waited has to be started again once the server is back.
+
+A 1:1 chat with an OpenClaw agent runs inside the OpenClaw Gateway, so the command neither holds nor waits for it, and the stop does not interrupt it.
+
+The `clawboo` launcher's own offer to restart an older server it finds does not wait: it stops that server at once.
 
 ## clawboo open
 
@@ -200,7 +227,7 @@ To restore, stop the server (`clawboo stop`) and copy the backup over `clawboo.d
 
 ## Exit codes
 
-Every command exits 0 on success and 1 on failure. Any command also exits 1 on Node older than 22.12 or when given an unknown subcommand.
+Every command exits 0 on success and 1 on failure. Any command also exits 1 on Node older than 22.12 or when given an unknown subcommand. `clawboo stop` and `clawboo restart` exit 130 when you cancel their wait for agent runs with Ctrl+C.
 
 | Command                 | Exits 0 when                                                        | Exits 1 when                                                                                                                                                                      |
 | ----------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

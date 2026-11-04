@@ -11,6 +11,15 @@
  * administrator turned updates off. Everything else gets an `unsupported`
  * event naming the reason, and the copy-command fallback. The chip hides its
  * "Update now" button in those cases anyway, so this is defense-in-depth.
+ *
+ * DRAIN FIRST. An update holds the engine (see lib/engineHold) from the start,
+ * so no new agent run starts while npm installs, and once the install lands it
+ * waits for the runs already going, up to SELF_UPDATE_RUN_WAIT_MS, before it
+ * restarts. `{ "force": true }` skips that wait: sent with a new update, it
+ * restarts as soon as the install lands; sent while an update is waiting, it
+ * makes that update restart now. A failed install releases the hold, and so
+ * does an install that runs past UPDATE_INSTALL_HOLD_MS: the hold then lapses
+ * and agent work goes on until the install lands.
  */
 import { spawn } from 'node:child_process'
 import type { Request, Response } from 'express'
@@ -24,6 +33,8 @@ import {
   readVersionFromDisk,
   selfUpdateRefusal,
 } from '../lib/updateCheck'
+import { engineHold } from '../lib/engineHold'
+import { runSlots, waitForRunsToFinish } from '../lib/runSlots'
 import { restartIntoLatest } from '../lib/selfRestart'
 
 function sendEvent(res: Response, data: Record<string, unknown>): void {
@@ -34,6 +45,32 @@ function sendEvent(res: Response, data: Record<string, unknown>): void {
 const MAX_KEPT_OUTPUT = 32_000
 
 const MANUAL_UPDATE = 'npm install -g clawboo@latest'
+
+/** How long an installed update waits for agent runs to finish before it restarts anyway. */
+export const SELF_UPDATE_RUN_WAIT_MS = 10 * 60_000
+/** The owner id of the hold an update places. */
+export const SELF_UPDATE_HOLD_OWNER = 'self-update'
+/** The longest an install holds agent work back. A stalled npm must not freeze it. */
+export const UPDATE_INSTALL_HOLD_MS = 5 * 60_000
+/** The update keeps its hold alive on this beat, with HOLD_TTL so it lapses soon after a crash. */
+const HOLD_RENEW_MS = 20_000
+const HOLD_TTL_MS = 60_000
+const SSE_KEEPALIVE_MS = 15_000
+
+/**
+ * The update in progress, if any: one at a time. It stays set once the restart
+ * begins, so nothing starts a second install while this process exits.
+ */
+let inProgress: { force(): void } | null = null
+
+/** TEST-ONLY: forget an update a test left in progress. */
+export function resetSelfUpdateForTests(): void {
+  inProgress = null
+}
+
+function runsText(n: number): string {
+  return n === 1 ? '1 agent run' : `${n} agent runs`
+}
 
 /**
  * The `error` event for an npm install that exited non-zero, carrying npm's
@@ -91,6 +128,52 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
     return
   }
 
+  const force = (req.body as { force?: unknown } | undefined)?.force === true
+  if (inProgress) {
+    if (force) {
+      inProgress.force()
+      sendEvent(res, {
+        type: 'forced',
+        message: 'The update in progress restarts without waiting for agent runs.',
+      })
+    } else {
+      sendEvent(res, {
+        type: 'error',
+        code: 'IN_PROGRESS',
+        message: 'An update is already in progress.',
+      })
+    }
+    res.end()
+    return
+  }
+
+  // Hold the engine from the start: no new agent run starts while npm installs,
+  // so the runs already going have that time to finish too.
+  let forced = force
+  const forceNow = new AbortController()
+  inProgress = {
+    force(): void {
+      forced = true
+      forceNow.abort()
+    },
+  }
+  let installing = true
+  const installHoldUntil = Date.now() + UPDATE_INSTALL_HOLD_MS
+  const holdEngine = (): void => {
+    // Past its bound, an install stops renewing and the hold lapses.
+    if (installing && Date.now() > installHoldUntil) return
+    engineHold().place(SELF_UPDATE_HOLD_OWNER, { ttlMs: HOLD_TTL_MS, reason: 'update' })
+  }
+  holdEngine()
+  const renew = setInterval(holdEngine, HOLD_RENEW_MS)
+  renew.unref?.()
+  /** The update ended without a restart: new runs may start again. */
+  const giveUp = (): void => {
+    clearInterval(renew)
+    engineHold().release(SELF_UPDATE_HOLD_OWNER)
+    inProgress = null
+  }
+
   const versionBefore = readVersionFromDisk()
   sendEvent(res, {
     type: 'progress',
@@ -114,6 +197,7 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
       windowsHide: isWindows,
     })
   } catch (err) {
+    giveUp()
     sendEvent(res, {
       type: 'error',
       code: 'SPAWN_THROW',
@@ -129,9 +213,11 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
     output = (output + text).slice(-MAX_KEPT_OUTPUT)
   }
   let finished = false
+  /** End the stream. Every end but a restart releases the hold. */
   const finish = (event: Record<string, unknown>): void => {
     if (finished) return
     finished = true
+    if (event['type'] !== 'restarting') giveUp()
     sendEvent(res, event)
     res.end()
   }
@@ -189,11 +275,44 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
     }
 
     sendEvent(res, { type: 'installed', version: versionAfter })
-    finish({ type: 'restarting', port, version: versionAfter })
-    // Launch the successor on the same port and exit so it can bind. The browser
-    // polls /api/system/capabilities and reloads once an engine on the new
-    // version answers.
-    restartIntoLatest(port)
+    installing = false
+    holdEngine()
+    let keepalive: ReturnType<typeof setInterval> | null = null
+    const restart = (interruptedRuns: number): void => {
+      clearInterval(renew)
+      if (keepalive) clearInterval(keepalive)
+      finish({ type: 'restarting', port, version: versionAfter, interruptedRuns })
+      // Launch the successor on the same port and exit so it can bind. The
+      // browser polls /api/system/capabilities and reloads once an engine on the
+      // new version answers. The hold, and `inProgress`, stay until this process
+      // exits. One that cannot relaunch keeps running: let work start again.
+      if (!restartIntoLatest(port)) giveUp()
+    }
+    if (forced || runSlots().stats().running === 0) {
+      restart(forced ? runSlots().stats().running : 0)
+      return
+    }
+    // Agent runs are going. Wait for them, as long as the bound allows, and say
+    // how many are left each time the number changes. A browser that closes now
+    // does not stop the restart: the new version is already on disk. A comment
+    // line now and then keeps a proxy from closing a stream that has gone quiet.
+    keepalive = setInterval(() => res.write(': keepalive\n\n'), SSE_KEEPALIVE_MS)
+    keepalive.unref?.()
+    void waitForRunsToFinish({
+      timeoutMs: SELF_UPDATE_RUN_WAIT_MS,
+      signal: forceNow.signal,
+      onRunning: (running) => {
+        if (running === 0) return
+        sendEvent(res, {
+          type: 'progress',
+          step: 'waiting',
+          running,
+          message: `Waiting for ${runsText(running)} to finish before restarting.`,
+        })
+      },
+    })
+      .catch(() => ({ running: runSlots().stats().running }))
+      .then(({ running }) => restart(running))
   })
 
   res.on('close', () => {
