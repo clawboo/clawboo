@@ -3,11 +3,23 @@
 // so without this check such a browser rendered a dashboard full of failed reads.
 // Instead it gets one screen that says how to get in, and nothing behind it loads.
 
-import { useEffect, useState } from 'react'
-import type { ReactNode } from 'react'
+import { useEffect, useId, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { Lock } from 'lucide-react'
 
 import { apiFetch, setResponseObserver } from '@clawboo/control-client'
+
+import { readInjectedBase } from '@/app/injectedBase'
+import { Button } from '@/features/shared/Button'
+
+import {
+  arrivedByRedirect,
+  hasPastedMark,
+  readPastedSignIn,
+  submitSignIn,
+  withoutPastedMark,
+  type PastedSignIn,
+} from './pastedSignIn'
 
 /**
  * Is this the access gate's refusal? The gate marks its 401 with
@@ -35,6 +47,21 @@ export function AccessLock({
   checkTimeoutMs?: number
 }) {
   const [state, setState] = useState<AccessState>('checking')
+  // A pasted link was just posted (see pastedSignIn.ts): the mark is on the
+  // address and the gate's redirect brought the page here. Read once, before any
+  // effect takes the mark off the address; Strict Mode runs effects twice.
+  const [fromPastedLink] = useState(
+    () => hasPastedMark(window.location.search) && arrivedByRedirect(),
+  )
+  // True when the first read found the lock, as opposed to a later read.
+  const [lockedAtStart, setLockedAtStart] = useState(false)
+
+  // The mark has done its job by the time this page loads: take it off the
+  // address before anything behind the lock reads it.
+  useEffect(() => {
+    const clean = withoutPastedMark(window.location.href)
+    if (clean !== null) window.history.replaceState(window.history.state, '', clean)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -55,7 +82,9 @@ export function AccessLock({
       } finally {
         clearTimeout(deadline)
       }
-      if (!cancelled) setState(next)
+      if (cancelled) return
+      setState(next)
+      setLockedAtStart(next === 'locked')
     })()
     return () => {
       cancelled = true
@@ -82,11 +111,14 @@ export function AccessLock({
   }, [state])
 
   if (state === 'checking') return null
-  if (state === 'locked') return <LockedScreen />
+  // Back on the locked screen right after posting a pasted link: the server
+  // refused the code. A lock that comes later is not about that link.
+  if (state === 'locked')
+    return <LockedScreen pastedLinkRefused={fromPastedLink && lockedAtStart} />
   return <>{children}</>
 }
 
-export function LockedScreen() {
+export function LockedScreen({ pastedLinkRefused = false }: { pastedLinkRefused?: boolean }) {
   return (
     <main
       data-testid="access-locked"
@@ -110,11 +142,115 @@ export function LockedScreen() {
           <span className="font-medium text-foreground/80">Open on another device</span> button
           makes one too.
         </p>
-        <p className="mt-3 text-sm text-muted-foreground">
+        <PasteSignIn refused={pastedLinkRefused} />
+        <p className="mt-4 text-sm text-muted-foreground">
           A sign-in link works once, within two minutes. If you just opened one and landed here, it
           had already been used or had expired.
         </p>
       </div>
     </main>
+  )
+}
+
+const REFUSED =
+  'That link did not sign you in. It had already been used, or its two minutes were up. ' +
+  'Make a new link and paste it straight away.'
+
+/** What to say about a pasted link that cannot be used. Names at most its address, never a code or token. */
+function problemWith(read: Exclude<PastedSignIn, { ok: true }>): string {
+  switch (read.reason) {
+    case 'empty':
+      return 'Paste a sign-in link first.'
+    case 'not-a-link':
+      return 'That is not a sign-in link. Paste the whole link, or the code after access_code=.'
+    case 'token':
+      return 'That looks like the access token, not a one-time code, so it was not sent. Paste a one-time sign-in link instead.'
+    case 'elsewhere':
+      return (
+        `That link is for ${read.linkOrigin}, and this dashboard is at ${window.location.origin}. ` +
+        'Make the link in a browser that has this address open.'
+      )
+    case 'other-dashboard':
+      return 'That link is for another dashboard at this address. Make the link in this one.'
+  }
+}
+
+/**
+ * A field to paste a one-time sign-in link into. An app added to an iPhone's
+ * home screen needs it: its cookies are its own, and a tapped link opens in
+ * Safari, which signs in Safari instead.
+ */
+function PasteSignIn({ refused }: { refused: boolean }) {
+  const fieldId = useId()
+  const hintId = useId()
+  const problemId = useId()
+  const [text, setText] = useState('')
+  const [problem, setProblem] = useState<string | null>(refused ? REFUSED : null)
+  const [signingIn, setSigningIn] = useState(false)
+
+  // A page the browser brings back from its back-forward cache keeps its last
+  // state, which would be a Sign in button still spinning.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent): void => {
+      if (event.persisted) setSigningIn(false)
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [])
+
+  const onSubmit = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    const base = readInjectedBase()
+    const read = readPastedSignIn(text, { origin: window.location.origin, base })
+    if (!read.ok) {
+      setProblem(problemWith(read))
+      return
+    }
+    setProblem(null)
+    setText('')
+    setSigningIn(true)
+    submitSignIn(read.code, base)
+  }
+
+  return (
+    <form noValidate onSubmit={onSubmit} className="mt-5 border-t border-border pt-4">
+      <label htmlFor={fieldId} className="block text-sm font-semibold text-foreground">
+        Paste a sign-in link
+      </label>
+      <p id={hintId} className="mt-1 text-sm text-muted-foreground">
+        Or just its code. An app added to a phone&apos;s home screen signs in here, because a link
+        you tap can open in the phone&apos;s browser instead.
+      </p>
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <input
+          id={fieldId}
+          type="text"
+          inputMode="url"
+          enterKeyHint="go"
+          autoComplete="off"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value)
+            setProblem(null)
+          }}
+          placeholder="https://…/?access_code=…"
+          aria-invalid={problem !== null}
+          aria-describedby={problem === null ? hintId : `${problemId} ${hintId}`}
+          // 16 px on a phone: iOS zooms the page into any smaller field.
+          className="h-11 w-full min-w-0 rounded-lg border border-border bg-background px-3 font-mono text-base text-foreground outline-none transition placeholder:text-foreground/30 focus:border-primary focus:ring-4 focus:ring-primary/15 sm:h-9 sm:flex-1 sm:text-[13px]"
+        />
+        <Button type="submit" variant="primary" loading={signingIn} className="max-sm:h-11">
+          Sign in
+        </Button>
+      </div>
+      {problem !== null && (
+        <p id={problemId} role="alert" className="mt-2 text-sm text-destructive">
+          {problem}
+        </p>
+      )}
+    </form>
   )
 }

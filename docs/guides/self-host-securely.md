@@ -222,13 +222,13 @@ The tunnel checks rules from first to last, so the deny rule must come before th
 
 </Tabs>
 
-Whatever the proxy, it must pass the `Host` your browser used and `X-Forwarded-Proto`. Clawboo checks `Host` against the allowlist, builds the redirect after sign-in from both, and marks the cookie `Secure` when `X-Forwarded-Proto` is `https`.
+Whatever the proxy, it must pass the `Host` your browser used and `X-Forwarded-Proto`. Clawboo checks `Host` against the allowlist, builds the redirect after sign-in from both, accepts a sign-in form only when its `Origin` matches both, and marks the cookie `Secure` when `X-Forwarded-Proto` is `https`.
 
 </Step>
 
 <Step title="Sign in once">
 
-Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private. To sign in a phone or another browser after that, use **Open on another device** at the bottom of the sidebar: its one-time link and QR code carry a code that works once, within two minutes, never the token.
+Open `https://dash.example.com/?access_token=<your-token>`. Clawboo sets a cookie and removes the token from the address bar, and you should see your dashboard. Each browser signs in once. The token appears in that first request's URL, so a proxy access log can record it; keep such logs private. To sign in a phone or another browser after that, use **Open on another device** at the bottom of the sidebar: its one-time link and QR code carry a code that works once, within two minutes, never the token. An app added to a phone's home screen signs in by pasting that link on its locked screen (see [Paste a sign-in link](/operating/security#the-access-token)).
 
 </Step>
 
