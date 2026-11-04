@@ -24,6 +24,8 @@ import { resolveClawbooDir } from '@clawboo/config'
 import {
   currentBootIdentity,
   isAlive,
+  LINUX_BOOT_UNREADABLE,
+  linuxBootUnreadable,
   MAX_TRUSTED_AGE_MS,
   processStartTimes,
   START_TIME_SLACK_MS,
@@ -107,16 +109,20 @@ export interface ReapReport {
    *  old, or now running something else. Reported separately so a surprising
    *  count is visible in the log. */
   expired: number
-  /** Alive but NOT signalled, because this host could not report when the
-   *  process holding the pid started. Counted so the log shows the gap. */
+  /** Alive but NOT signalled, because this host could not show the process
+   *  holding the pid is ours: it could not report when that process started,
+   *  or (on Linux) read its own boot identity. Kept in the file so a later
+   *  start that can check tries again, and counted so the log shows the gap. */
   unverified: number
-  /** Why the start times could not be read, when `unverified` is not zero. */
+  /** Why they could not be checked, when `unverified` is not zero. */
   unverifiedReason?: string
 }
 
 export interface ConnectorReapDeps {
   /** Test seam for this process's boot identity (see `currentBootIdentity`). */
   boot?: BootIdentity
+  /** Test seam for the platform the identity was read on. */
+  platform?: NodeJS.Platform
 }
 
 /**
@@ -126,7 +132,8 @@ export interface ConnectorReapDeps {
  * as null. On macOS and Windows, which have no PID namespaces, that matches,
  * so an older record is judged as it always was. On Linux it does not, and the
  * older record is dropped unsignalled: nothing in it says which run of the
- * namespace wrote it.
+ * namespace wrote it. A Linux host whose own fields are null matches nothing
+ * it can act on: see `linuxBootUnreadable`.
  */
 function sameBoot(entry: ConnectorPidEntry, here: BootIdentity): boolean {
   return (
@@ -137,9 +144,10 @@ function sameBoot(entry: ConnectorPidEntry, here: BootIdentity): boolean {
 }
 
 /**
- * Kill any connector child left behind by a previous run, then clear the file.
+ * Kill any connector child left behind by a previous run, then drop every
+ * record but the ones it could not check.
  *
- * Called once at boot, BEFORE anything can connect, so the file it clears is
+ * Called once at boot, BEFORE anything can connect, so the records it reaps are
  * always the previous process's and never this one's.
  */
 export function reapOrphanedConnectors(
@@ -151,8 +159,12 @@ export function reapOrphanedConnectors(
   let killed = 0
   let unverified = 0
   let expired = 0
+  const unchecked: ConnectorPidEntry[] = []
 
   const here = deps.boot ?? currentBootIdentity()
+  // On Linux, a boot identity this host could not read cannot tell a restarted
+  // container's pids from ours, so nothing is signalled and nothing is probed.
+  const bootUnreadable = linuxBootUnreadable(here, deps.platform)
   // ONE probe for the whole reap, over the pids still worth asking about, and
   // ONLY the live ones. A dead or out-of-range pid poisons the whole batch:
   // `ps -p` exits non-zero and prints NOTHING when any id is invalid, so one
@@ -161,7 +173,13 @@ export function reapOrphanedConnectors(
   // skipped below anyway.
   const probe = processStartTimes(
     entries
-      .filter((e) => sameBoot(e, here) && now - e.startedAt <= MAX_TRUSTED_AGE_MS && isAlive(e.pid))
+      .filter(
+        (e) =>
+          !bootUnreadable &&
+          sameBoot(e, here) &&
+          now - e.startedAt <= MAX_TRUSTED_AGE_MS &&
+          isAlive(e.pid),
+      )
       .map((e) => e.pid),
   )
 
@@ -190,9 +208,12 @@ export function reapOrphanedConnectors(
     // connector from a process that was handed its number later, so a host
     // that cannot report start times (no `ps`, or a probe that timed out)
     // signals nothing. Leaving one connector running is the lesser harm, and
-    // the count and the reason are reported so the log shows it.
-    if (!probe.ok) {
+    // the count and the reason are reported so the log shows it. The record is
+    // KEPT: a probe that timed out once can answer at the next start, and the
+    // boot, age and liveness checks above still bound how long it is tried.
+    if (bootUnreadable || !probe.ok) {
       unverified += 1
+      unchecked.push(entry)
       continue
     }
     // The probe ran: an id it has no entry for is not ours any more, and a
@@ -206,11 +227,12 @@ export function reapOrphanedConnectors(
     killed += 1
   }
 
-  writeAll([])
+  writeAll(unchecked)
+  const reason = bootUnreadable ? LINUX_BOOT_UNREADABLE : probe.error
   return {
     killed,
     expired,
     unverified,
-    ...(unverified > 0 && probe.error ? { unverifiedReason: probe.error } : {}),
+    ...(unverified > 0 && reason ? { unverifiedReason: reason } : {}),
   }
 }

@@ -118,6 +118,21 @@ describe('boot identity', () => {
     }
   })
 
+  it("reads pid 1's start only from a /proc that belongs to this PID namespace", () => {
+    // A container given the host's `/proc` would read the HOST's init there,
+    // which outlives every restart of the container. `/proc/self` names the
+    // reader by its pid in the namespace that `/proc` belongs to.
+    const stat = `1 (init) S 0 1 1 0 -1 4 8 6 1 1 4 3 1 5 20 0 1 0 4242 1 3\n`
+    const proc = (self: string) => ({
+      platform: 'linux' as const,
+      pid: 7,
+      readlink: (p: string) => (p === '/proc/self' ? self : 'pid:[4026531836]'),
+      readFile: () => stat,
+    })
+    expect(currentInitStart(proc('7'))).toBe(4242)
+    expect(currentInitStart(proc('31337'))).toBeNull()
+  })
+
   it('names the boot, the PID namespace and its pid 1 together', () => {
     expect(currentBootIdentity()).toEqual({
       bootAt: currentBootAt(),

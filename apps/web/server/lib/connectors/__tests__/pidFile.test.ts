@@ -22,8 +22,28 @@ const linuxHost = (): BootIdentity => ({
   initStart: 4_000,
 })
 
+/** Reap as a Linux host with this identity would. */
+const onLinux = (boot: BootIdentity) => ({ boot, platform: 'linux' as const })
+
 function writeEntries(entries: unknown[]): void {
   writeFileSync(connectorPidFilePath(), JSON.stringify(entries), 'utf8')
+}
+
+function readEntries(): { pid: number }[] {
+  return JSON.parse(readFileSync(connectorPidFilePath(), 'utf8')) as { pid: number }[]
+}
+
+/** Run with no `ps` (or PowerShell) on the PATH, as on a minimal image. */
+function withoutPs<T>(run: () => T): T {
+  const empty = mkdtempSync(path.join(os.tmpdir(), 'clawboo-no-ps-'))
+  const savedPath = process.env['PATH']
+  process.env['PATH'] = empty
+  try {
+    return run()
+  } finally {
+    process.env['PATH'] = savedPath
+    rmSync(empty, { recursive: true, force: true })
+  }
 }
 
 describe('connector pid file', () => {
@@ -209,7 +229,7 @@ describe('connector pid file', () => {
         pidNamespace: 'pid:[4026532999]',
       },
     ])
-    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), onLinux(here))
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
   })
@@ -222,7 +242,7 @@ describe('connector pid file', () => {
     writeEntries([
       { pid: process.pid, slug: 'memory', startedAt: Date.now(), ...here, initStart: 3_000 },
     ])
-    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), onLinux(here))
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
   })
@@ -233,7 +253,7 @@ describe('connector pid file', () => {
     const killed: number[] = []
     const here = linuxHost()
     writeEntries([{ pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt: here.bootAt }])
-    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), onLinux(here))
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
     expect(JSON.parse(readFileSync(connectorPidFilePath(), 'utf8'))).toEqual([])
@@ -245,9 +265,27 @@ describe('connector pid file', () => {
     const killed: number[] = []
     const here: BootIdentity = { ...linuxHost(), pidNamespace: null, initStart: null }
     writeEntries([{ pid: process.pid, slug: 'memory', startedAt: Date.now(), bootAt: here.bootAt }])
-    const report = reapOrphanedConnectors((pid) => killed.push(pid), { boot: here })
+    const report = reapOrphanedConnectors((pid) => killed.push(pid), {
+      boot: here,
+      platform: 'darwin',
+    })
     expect(killed).toEqual([process.pid])
     expect(report.killed).toBe(1)
+  })
+
+  it('NEVER signals on Linux when this host cannot read its own PID namespace or pid 1', () => {
+    // Under `hidepid`, or with no `/proc/self/ns`, one side of the identity
+    // reads as null. A record written there has the same null, so the two would
+    // match, and nothing would tell a restarted container's pids from ours.
+    for (const unread of [{ initStart: null }, { pidNamespace: null }]) {
+      const killed: number[] = []
+      const here: BootIdentity = { ...linuxHost(), ...unread }
+      writeEntries([{ pid: process.pid, slug: 'memory', startedAt: Date.now(), ...here }])
+      const report = reapOrphanedConnectors((pid) => killed.push(pid), onLinux(here))
+      expect(killed).toEqual([])
+      expect(report.unverified).toBe(1)
+      expect(report.unverifiedReason).toMatch(/PID namespace/)
+    }
   })
 
   it('NEVER signals a pid whose start time could not be checked, and says why', () => {
@@ -256,22 +294,28 @@ describe('connector pid file', () => {
     // the reap used to signal it anyway.
     const killed: number[] = []
     recordConnectorPid({ pid: process.pid, slug: 'memory', startedAt: Date.now() })
-    const empty = mkdtempSync(path.join(os.tmpdir(), 'clawboo-no-ps-'))
-    const savedPath = process.env['PATH']
-    process.env['PATH'] = empty
-    try {
-      const report = reapOrphanedConnectors((pid) => killed.push(pid))
-      expect(killed).toEqual([])
-      expect(report.killed).toBe(0)
-      expect(report.unverified).toBe(1)
-      expect(report.unverifiedReason).toMatch(/ENOENT/)
-    } finally {
-      process.env['PATH'] = savedPath
-      rmSync(empty, { recursive: true, force: true })
-    }
-    // Cleared all the same: a later start must not try again against a pid the
-    // OS may since have handed to something else.
-    expect(JSON.parse(readFileSync(connectorPidFilePath(), 'utf8'))).toEqual([])
+    const report = withoutPs(() => reapOrphanedConnectors((pid) => killed.push(pid)))
+    expect(killed).toEqual([])
+    expect(report.killed).toBe(0)
+    expect(report.unverified).toBe(1)
+    expect(report.unverifiedReason).toMatch(/ENOENT/)
+  })
+
+  it('keeps a record it could not check, so a later start that can check reaps it', () => {
+    // A probe can fail once and work the next time (a timeout on a loaded
+    // machine). Dropping the record would orphan that connector for good.
+    const killed: number[] = []
+    recordConnectorPid({ pid: process.pid, slug: 'memory', startedAt: Date.now() })
+    recordConnectorPid({ pid: 4_194_304, slug: 'context7', startedAt: Date.now() })
+    withoutPs(() => reapOrphanedConnectors((pid) => killed.push(pid)))
+    expect(killed).toEqual([])
+    // Only the one left unchecked: the dead pid is dropped as before.
+    expect(readEntries().map((e) => e.pid)).toEqual([process.pid])
+
+    const report = reapOrphanedConnectors((pid) => killed.push(pid))
+    expect(killed).toEqual([process.pid])
+    expect(report.killed).toBe(1)
+    expect(readEntries()).toEqual([])
   })
 
   it('treats a corrupt file as empty rather than throwing', () => {

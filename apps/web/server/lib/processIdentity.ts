@@ -49,6 +49,21 @@ export function currentPidNamespace(): string | null {
   }
 }
 
+/** What `currentInitStart` reads, so a test can stand in for `/proc`. */
+export interface ProcView {
+  platform: NodeJS.Platform
+  pid: number
+  readlink: (path: string) => string
+  readFile: (path: string) => string
+}
+
+const liveProc = (): ProcView => ({
+  platform: process.platform,
+  pid: process.pid,
+  readlink: (p) => readlinkSync(p),
+  readFile: (p) => readFileSync(p, 'utf8'),
+})
+
 /**
  * When pid 1 of this PID namespace started, or null where there is none to tell.
  *
@@ -58,11 +73,17 @@ export function currentPidNamespace(): string | null {
  * started later. Read from `/proc/1/stat` and kept as the kernel reports it
  * (clock ticks after boot), since it is only ever compared with itself. macOS
  * and Windows have no PID namespaces, so null there.
+ *
+ * Only from a `/proc` that belongs to this namespace. Given the host's, `/proc/1`
+ * is the HOST's init, which outlives every restart of the container. `/proc/self`
+ * names the reader by its pid in the namespace `/proc` belongs to, so it matches
+ * `process.pid` exactly when that namespace is ours.
  */
-export function currentInitStart(): number | null {
-  if (process.platform !== 'linux') return null
+export function currentInitStart(proc: ProcView = liveProc()): number | null {
+  if (proc.platform !== 'linux') return null
   try {
-    return parseStatStartTime(readFileSync('/proc/1/stat', 'utf8'))
+    if (proc.readlink('/proc/self') !== String(proc.pid)) return null
+    return parseStatStartTime(proc.readFile('/proc/1/stat'))
   } catch {
     return null
   }
@@ -93,7 +114,9 @@ export function parseStatStartTime(stat: string): number | null {
  * `bootAt` is the KERNEL's boot. Inside a container that is the host's, so a
  * container that restarts keeps it, and every pid it recorded before the
  * restart would still look current. The PID namespace and its pid 1 are what
- * change. On macOS and Windows both are null, which leaves `bootAt` alone.
+ * change. On macOS and Windows both are null, which leaves `bootAt` alone. On
+ * Linux a null means it could not be read, and a reap must not take two such
+ * nulls for a match (see `linuxBootUnreadable`).
  */
 export interface BootIdentity {
   /** See `currentBootAt`. */
@@ -111,6 +134,23 @@ export function currentBootIdentity(): BootIdentity {
     initStart: currentInitStart(),
   }
 }
+
+/**
+ * Whether this is a Linux host that could not read its PID namespace or its
+ * pid 1 (`hidepid`, no `/proc/self/ns`, a `/proc` that is not this namespace's).
+ * Its boot identity then cannot tell a restarted container from this one, so a
+ * reap must leave every pid alone.
+ */
+export function linuxBootUnreadable(
+  boot: Pick<BootIdentity, 'pidNamespace' | 'initStart'>,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === 'linux' && (boot.pidNamespace === null || boot.initStart === null)
+}
+
+/** The log's reason when `linuxBootUnreadable` holds. */
+export const LINUX_BOOT_UNREADABLE =
+  'this host could not read its PID namespace or when that namespace started'
 
 /**
  * The dispositive identity check: WHEN did the process holding this pid start.
