@@ -275,7 +275,10 @@ export function createAssertionVerifier(
       if (seen.has(jti)) return { ok: false, reason: 'replayed' }
       // Full: refuse rather than forget a token that could then be replayed.
       if (seen.size >= MAX_SEEN_TOKENS) return { ok: false, reason: 'replayed' }
-      seen.set(jti, ((payload.exp as number) + CLOCK_SKEW_SECONDS) * 1000)
+      // Kept until jose would refuse the token as expired. It reads the clock in
+      // whole seconds, so a fractional exp is good until ceil(exp) + skew; a
+      // record dropped at exp + skew would let the token through once more.
+      seen.set(jti, (Math.ceil(payload.exp as number) + CLOCK_SKEW_SECONDS) * 1000)
     }
 
     const name =

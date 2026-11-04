@@ -231,6 +231,20 @@ describe('binding to the request', () => {
     expect(await v.verify(at(token))).toEqual({ ok: false, reason: 'replayed' })
   })
 
+  it('remembers a token with a fractional exp for as long as it is still accepted', async () => {
+    // The clock is read in whole seconds, so exp NOW + 30.5 is still good at
+    // NOW + 35.6 (NOW + 35 is not past exp plus the 5 s skew allowance). Its
+    // record must outlive that, or the same token passes a second time.
+    let clock = NOW_MS
+    const v = createAssertionVerifier(config(), { now: () => clock })
+    const token = await sign(claims({ iat: NOW, exp: NOW + 30.5 }))
+    expect(await v.verify(at(token))).toMatchObject({ ok: true })
+    clock = (NOW + 35.6) * 1000
+    expect(await v.verify(at(token))).toEqual({ ok: false, reason: 'replayed' })
+    clock = (NOW + 36) * 1000
+    expect(await v.verify(at(token))).toEqual({ ok: false, reason: 'expired' })
+  })
+
   it('does not spend a token on a refused request', async () => {
     const v = verifier()
     const token = await sign(claims())
