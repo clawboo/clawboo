@@ -428,6 +428,37 @@ describe('verification gate (real board + real git worktree)', () => {
     WORKTREE_TIMEOUT_MS,
   )
 
+  it.each([
+    ['ends in debt', 1, 'completed_with_debt', [TOKEN_NOTE.criterion, 'SQL built from user input']],
+    ['fails', 5, 'fail', [TOKEN_NOTE.criterion]],
+  ])(
+    "an attempt whose command passed but whose review %s drops the command's open item",
+    async (_case, maxFixCycles, status, criteria) => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      seedPassWithDebt(taskId, [TOKEN_NOTE, GATE_NOTE])
+      const db = getDb()
+      const blocking = JSON.stringify({
+        findings: [{ severity: 'security', title: 'SQL built from user input', confidence: 0.9 }],
+      })
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        makeReviewerAdapter: () => new FakeReviewerAdapter(blocking),
+        maxFixCycles,
+      })
+      expect(verdict.status).toBe(status)
+      expect(verdict.attempts[1]?.deterministic.passed).toBe(true)
+      expect(verdict.debtNotes.map((d) => d.criterion)).toEqual(criteria)
+      expect(getTaskVerification(db, taskId)?.debtNotes.map((d) => d.criterion)).toEqual(criteria)
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
   it(
     'a completed_with_debt verdict over a RED gate routes to BLOCKED (never silently done)',
     async () => {

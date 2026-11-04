@@ -189,20 +189,20 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   const attemptNumber = priorAttempts.length + 1
   let status: VerificationResult['status'] = attemptStatus
   let structuredError: StructuredError | null = null
-  // An open item stays until a later attempt checks it again and passes. A green
-  // gate checks the gate's own item; only a review that completed checks the
-  // reviewer's, because a skipped, empty or errored review still lets the attempt
-  // pass without looking at anything. A fail or another pass with debt keeps them
-  // all (on a red gate the critic does not even run). `attempts` keeps every
-  // attempt's own record either way.
+  // An open item stays until a later attempt checks it again and that check
+  // passes. A green gate checks the gate's own item, even when the reviewer then
+  // fails the attempt. Only a pass whose review completed checks the reviewer's,
+  // because a skipped, empty or errored review still lets the attempt pass
+  // without looking at anything, and a review that fails has not shown the
+  // earlier items fixed. A red gate keeps them all (the critic does not even
+  // run). `attempts` keeps every attempt's own record either way.
   const priorNotes = prior?.debtNotes ?? []
   const reviewCompleted = critic.ran && critic.outcome === 'reviewed'
-  const debtNotes: DebtNote[] =
-    attemptStatus !== 'pass'
-      ? [...priorNotes]
-      : reviewCompleted
-        ? []
-        : priorNotes.filter((n) => n.criterion !== GATE_DEBT_CRITERION)
+  const debtNotes: DebtNote[] = !det.passed
+    ? [...priorNotes]
+    : attemptStatus === 'pass' && reviewCompleted
+      ? []
+      : priorNotes.filter((n) => n.criterion !== GATE_DEBT_CRITERION)
 
   if (attemptStatus === 'fail') {
     structuredError = structuredErrorFor(det, critic)
