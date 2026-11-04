@@ -179,7 +179,7 @@ The panel shows the install output and the reason. A permission error means npm 
 
 <Accordion title="The browser didn't open">
 
-Open the address the terminal printed after "Clawboo opened at", usually `http://localhost:18790`.
+Run `clawboo open --print` and open the one-time link it prints, within two minutes. The address alone, usually `http://127.0.0.1:18790`, shows "This dashboard is locked to your computer" until a browser signs in.
 
 </Accordion>
 

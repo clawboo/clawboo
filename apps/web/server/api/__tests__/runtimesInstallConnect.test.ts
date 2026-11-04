@@ -45,6 +45,21 @@ vi.mock('../../lib/platform', () => ({
   },
 }))
 
+// ── Mock the Agent SDK binary probe: control whether the SDK's own platform
+// binary is "there" (this checkout really has one, so the default is absent). ─
+const sdkState = vi.hoisted(() => ({ binary: null as string | null }))
+vi.mock('../../lib/runtimes/agentSdkBinary', () => ({
+  AGENT_SDK_PACKAGE: '@anthropic-ai/claude-agent-sdk',
+  resolveAgentSdkBinary: () => sdkState.binary,
+}))
+
+// ── Mock how this server was installed (the real probe reads process.argv). ──
+const installMethodState = vi.hoisted(() => ({ method: 'global' as 'global' | 'npx' | 'dev' }))
+vi.mock('../../lib/updateCheck', async (orig) => ({
+  ...(await orig<typeof import('../../lib/updateCheck')>()),
+  detectInstallMethod: () => installMethodState.method,
+}))
+
 // ── Mock the Codex login probe (real impl shells out to `codex login status`). ─
 const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
@@ -74,9 +89,29 @@ vi.mock('../../lib/runtimes/codexModels', () => ({
   },
 }))
 
+// ── Mock `hermes acp --check` (real impl spawns Hermes in a throwaway home). ──
+const acpCheckState = vi.hoisted(() => ({
+  answer: null as boolean | null,
+  calls: 0,
+  /** When set, a check waits for this before it answers. */
+  gate: null as Promise<void> | null,
+}))
+vi.mock('../../lib/runtimes/hermesAcpCheck', () => ({
+  runHermesAcpCheck: async () => {
+    acpCheckState.calls += 1
+    const answer = acpCheckState.answer
+    if (acpCheckState.gate) await acpCheckState.gate
+    return answer
+  },
+}))
+
 // ── Mock the process spawner: record argv + hand back a controllable child. ──
 interface FakeChild {
   killed: boolean
+  /** Unset by default, which the install guard reads as a child that has ended.
+   *  A test that needs a child still running sets both to null. */
+  exitCode?: number | null
+  signalCode?: string | null
   kill: () => void
   stdout: { on: (e: string, h: (c: Buffer) => void) => void }
   stderr: { on: (e: string, h: (c: Buffer) => void) => void }
@@ -155,6 +190,12 @@ import {
   canRunNativeProvider,
   isNativeOllamaRemoved,
 } from '../../lib/runtimes/native/nativeProviderDefaults'
+import {
+  checkHermesAcp,
+  hermesTransport,
+  peekHermesAcp,
+  resetHermesTransport,
+} from '../../lib/runtimes/hermesTransport'
 
 interface Mock {
   res: Response
@@ -162,11 +203,14 @@ interface Mock {
   body: () => unknown
   events: () => Record<string, unknown>[]
   ended: Promise<void>
+  /** The client goes away: runs the route's `close` handlers. */
+  close: () => void
 }
 function mockRes(): Mock {
   let code = 200
   let payload: unknown
   const events: Record<string, unknown>[] = []
+  const onClose: (() => void)[] = []
   let resolveEnd!: () => void
   const ended = new Promise<void>((r) => (resolveEnd = r))
   const res = {
@@ -191,11 +235,21 @@ function mockRes(): Mock {
     end() {
       resolveEnd()
     },
-    on() {
+    on(e: string, h: () => void) {
+      if (e === 'close') onClose.push(h)
       return this
     },
   } as unknown as Response
-  return { res, statusCode: () => code, body: () => payload, events: () => events, ended }
+  return {
+    res,
+    statusCode: () => code,
+    body: () => payload,
+    events: () => events,
+    ended,
+    close: () => {
+      for (const h of onClose) h()
+    },
+  }
 }
 const req = (over: Partial<Request> = {}): Request =>
   ({
@@ -237,10 +291,16 @@ describe('runtimes install/connect REST', () => {
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     platformState.bins = {}
     platformState.pythonOverride = null
+    sdkState.binary = null
+    installMethodState.method = 'global'
     spawnState.calls = []
     spawnState.children = []
     runnerState.lastInput = null
     codexAuthState.loggedIn = false
+    acpCheckState.answer = null
+    acpCheckState.calls = 0
+    acpCheckState.gate = null
+    resetHermesTransport()
     // Keep the hermes ChatGPT-login probe sandboxed (userHermesHome honours it).
     process.env['HERMES_HOME'] = path.join(home, '.hermes')
   })
@@ -276,16 +336,137 @@ describe('runtimes install/connect REST', () => {
   // ── install (npm) ──────────────────────────────────────────────────────────
   it('installs an npm runtime: spawns `npm install -g <pkg>`, completes', async () => {
     platformState.bins['npm'] = '/usr/bin/npm'
-    platformState.bins['claude'] = '/usr/bin/claude' // present post-install
+    platformState.bins['codex'] = '/usr/bin/codex' // present post-install
     const m = mockRes()
-    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    runtimesInstallPOST(req({ params: { id: 'codex' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: 'npm',
-      args: ['install', '-g', '@anthropic-ai/claude-code@2'],
+      args: ['install', '-g', '@openai/codex@0'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  // ── Claude Code: the Agent SDK and its own binary, never the CLI alone ──────
+  const claudeRow = async (): Promise<Record<string, unknown>> => {
+    const m = mockRes()
+    await runtimesListGET(req(), m.res)
+    return (m.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+      (r) => r['id'] === 'claude-code',
+    )!
+  }
+  const SDK_BIN = '/opt/clawboo/node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude'
+
+  it('Claude Code with only the CLI on PATH reads not installed: a run needs the Agent SDK', async () => {
+    platformState.bins['claude'] = '/usr/local/bin/claude'
+    runtimesConnectPOST(
+      req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-cli-only' } }),
+      mockRes().res,
+    )
+    const row = await claudeRow()
+    expect(row['installed']).toBe(false)
+    expect(row['binPath']).toBeNull()
+    expect(row['binSource']).toBeNull()
+    // Even with a key: the team builder offers only a runtime that reads ready.
+    expect(row['connectionState']).toBe('not-installed')
+    expect((row['health'] as { ok: boolean }).ok).toBe(false)
+  })
+
+  it('Claude Code with only the Agent SDK’s own binary reads installed, and ready with a key', async () => {
+    sdkState.binary = SDK_BIN
+    let row = await claudeRow()
+    expect(row['installed']).toBe(true)
+    expect(row['binPath']).toBe(SDK_BIN)
+    expect(row['binSource']).toBe('agent-sdk')
+    expect(row['connectionState']).toBe('needs-auth')
+    expect(row['health']).toEqual({ ok: true })
+
+    runtimesConnectPOST(
+      req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-sdk-only' } }),
+      mockRes().res,
+    )
+    row = await claudeRow()
+    expect(row['connectionState']).toBe('ready')
+  })
+
+  it('Claude Code with neither the CLI nor the SDK binary reads not installed', async () => {
+    const row = await claudeRow()
+    expect(row['installed']).toBe(false)
+    expect(row['binPath']).toBeNull()
+    expect(row['binSource']).toBeNull()
+    expect(row['connectionState']).toBe('not-installed')
+    expect((row['health'] as { ok: boolean }).ok).toBe(false)
+  })
+
+  it('Install fetches no second copy when the Agent SDK’s binary is already there', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    sdkState.binary = SDK_BIN
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    // Finish a spawned install at once, so a regression fails here and fast.
+    ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+    await m.ended
+    expect(spawnState.calls).toEqual([])
+    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  it('Install fetches no CLI when the SDK’s binary is there, even with a CLI on PATH too', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    platformState.bins['claude'] = '/usr/local/bin/claude'
+    sdkState.binary = SDK_BIN
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+    await m.ended
+    expect(spawnState.calls).toEqual([])
+    expect(
+      m.events().some((e) => e['type'] === 'output' && String(e['line']).includes(SDK_BIN)),
+    ).toBe(true)
+  })
+
+  it('Install fetches the Agent SDK a run loads, not the claude CLI', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    expect(spawnState.calls[0]).toEqual({
+      cmd: 'npm',
+      args: ['install', '-g', '@anthropic-ai/claude-agent-sdk@0.3'],
+    })
+    sdkState.binary = SDK_BIN // what the install put next to clawboo
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    await m.ended
+    const done = m.events().find((e) => e['type'] === 'complete')
+    expect(done).toEqual({ type: 'complete', success: true })
+  })
+
+  it('an SDK install that the server still cannot load says why', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    await m.ended
+    const done = m.events().find((e) => e['type'] === 'complete')
+    expect(done?.['success']).toBe(true)
+    expect(String(done?.['warning'])).toMatch(/next to Clawboo/)
+  })
+
+  it('refuses an SDK install a one-off npx run or a source checkout could not load', async () => {
+    platformState.bins['npm'] = '/usr/bin/npm'
+    for (const [method, hint] of [
+      ['npx', /npm install -g clawboo @anthropic-ai\/claude-agent-sdk@0\.3/],
+      ['dev', /pnpm install/],
+    ] as const) {
+      installMethodState.method = method
+      const m = mockRes()
+      runtimesInstallPOST(req({ params: { id: 'claude-code' } }), m.res)
+      ;(spawnState.children[0] as FakeChild | undefined)?.emitClose(0)
+      await m.ended
+      expect(spawnState.calls, method).toEqual([])
+      const err = m.events().find((e) => e['type'] === 'error')
+      expect(err?.['code'], method).toBe('SDK_NOT_LOADABLE')
+      expect(String(err?.['message']), method).toMatch(hint)
+    }
   })
 
   it('installing codex (also how it is updated) drops the cached model probe', async () => {
@@ -319,7 +500,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/pipx',
-      args: ['install', 'hermes-agent[anthropic,acp]<1'],
+      args: ['install', '--force', 'hermes-agent[anthropic,acp]<1'],
     })
     ;(spawnState.children[0] as FakeChild).emitClose(0)
     await m.ended
@@ -333,7 +514,7 @@ describe('runtimes install/connect REST', () => {
     runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
     expect(spawnState.calls[0]).toEqual({
       cmd: '/usr/bin/python3',
-      args: ['-m', 'pip', 'install', '--user', 'hermes-agent[anthropic,acp]<1'],
+      args: ['-m', 'pip', 'install', '--upgrade', '--user', 'hermes-agent[anthropic,acp]<1'],
     })
     const first = spawnState.children[0] as FakeChild
     first.emitStderr('error: externally-managed-environment')
@@ -344,6 +525,7 @@ describe('runtimes install/connect REST', () => {
         '-m',
         'pip',
         'install',
+        '--upgrade',
         '--user',
         '--break-system-packages',
         'hermes-agent[anthropic,acp]<1',
@@ -352,6 +534,95 @@ describe('runtimes install/connect REST', () => {
     ;(spawnState.children[1] as FakeChild).emitClose(0)
     await m.ended
     expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+  })
+
+  it('a Hermes install (also how it is updated) checks for ACP afresh before it reports done', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    acpCheckState.answer = false
+    await checkHermesAcp()
+    expect(hermesTransport()).toBe('quiet')
+
+    acpCheckState.answer = true
+    let release!: () => void
+    acpCheckState.gate = new Promise<void>((r) => (release = r))
+    const before = acpCheckState.calls
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(0)
+    // The old answer is gone at once, and the new one is read before `complete`.
+    expect(hermesTransport()).toBe('acp')
+    await vi.waitFor(() => expect(acpCheckState.calls).toBe(before + 1))
+    expect(m.events().some((e) => e['type'] === 'complete')).toBe(false)
+    release()
+    await m.ended
+    expect(m.events().some((e) => e['type'] === 'complete' && e['success'] === true)).toBe(true)
+    expect(peekHermesAcp()).toBe(true)
+  })
+
+  it('an update keeps running when its client goes away, then checks Hermes again', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes' // installed: an update
+    acpCheckState.answer = true
+    const before = acpCheckState.calls
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    const child = spawnState.children[0] as FakeChild
+    // The notice unmounted, or the tab closed: a reinstall cut short here could
+    // leave Hermes half replaced, so it is not stopped.
+    m.close()
+    expect(child.killed).toBe(false)
+    child.emitClose(0)
+    await m.ended
+    expect(acpCheckState.calls).toBe(before + 1)
+    expect(peekHermesAcp()).toBe(true)
+  })
+
+  it('a first install still stops when its client goes away', () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx' // no hermes yet
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    m.close()
+    expect((spawnState.children[0] as FakeChild).killed).toBe(true)
+  })
+
+  it('refuses a second install of a runtime while one is still running', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    const first = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), first.res)
+    const child = spawnState.children[0] as FakeChild
+    child.exitCode = null
+    child.signalCode = null
+    first.close()
+
+    const second = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), second.res)
+    expect(second.events()).toContainEqual(
+      expect.objectContaining({ type: 'error', code: 'INSTALL_RUNNING' }),
+    )
+    expect(spawnState.calls).toHaveLength(1)
+
+    // Once it ends, the next install goes ahead.
+    child.exitCode = 0
+    child.emitClose(0)
+    await first.ended
+    const third = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), third.res)
+    expect(spawnState.calls).toHaveLength(2)
+  })
+
+  it('a failed Hermes install keeps what was known about ACP', async () => {
+    platformState.bins['pipx'] = '/usr/bin/pipx'
+    platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+    acpCheckState.answer = false
+    await checkHermesAcp()
+    const m = mockRes()
+    runtimesInstallPOST(req({ params: { id: 'hermes' } }), m.res)
+    ;(spawnState.children[0] as FakeChild).emitClose(1)
+    await m.ended
+    expect(peekHermesAcp()).toBe(false)
+    expect(hermesTransport()).toBe('quiet')
   })
 
   it('hermes install reports PYTHON_MISSING when neither pipx nor python exist', async () => {
@@ -405,7 +676,7 @@ describe('runtimes install/connect REST', () => {
 
   // ── connect / disconnect ────────────────────────────────────────────────────
   it('connect writes the vault and NEVER echoes the key', () => {
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     const m = mockRes()
     runtimesConnectPOST(
       req({ params: { id: 'claude-code' }, body: { apiKey: 'sk-ant-SECRET-NEVER-ECHOED' } }),
@@ -480,6 +751,46 @@ describe('runtimes install/connect REST', () => {
     codexModelsState.peeked = false
   })
 
+  describe('Hermes without its ACP mode', () => {
+    const hermesStatus = async (): Promise<Record<string, unknown>> => {
+      const list = mockRes()
+      await runtimesListGET(req(), list.res)
+      return (list.body() as { runtimes: Record<string, unknown>[] }).runtimes.find(
+        (r) => r['id'] === 'hermes',
+      )!
+    }
+
+    it('reads acpMissing once checked, and its steering stops and resumes the run', async () => {
+      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+      acpCheckState.answer = false
+      // The list starts the check and does not wait for it: nothing claimed yet.
+      expect('acpMissing' in (await hermesStatus())).toBe(false)
+      expect(acpCheckState.calls).toBe(1)
+      await checkHermesAcp()
+      const hermes = await hermesStatus()
+      expect(hermes['acpMissing']).toBe(true)
+      expect(hermes['capabilities']).toMatchObject({
+        streaming: false,
+        steering: 'interrupt-resume',
+      })
+    })
+
+    it('a Hermes with ACP reads acpMissing false and live steering', async () => {
+      platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
+      acpCheckState.answer = true
+      await checkHermesAcp()
+      const hermes = await hermesStatus()
+      expect(hermes['acpMissing']).toBe(false)
+      expect(hermes['capabilities']).toMatchObject({ streaming: true, steering: 'live' })
+    })
+
+    it('a Hermes that is not installed is never checked', async () => {
+      const hermes = await hermesStatus()
+      expect('acpMissing' in hermes).toBe(false)
+      expect(acpCheckState.calls).toBe(0)
+    })
+  })
+
   it('GET /api/runtimes/codex/models returns the live list without the source detail', async () => {
     codexModelsState.list = {
       models: [{ id: 'gpt-6-sol', label: 'GPT-6-Sol' }],
@@ -539,7 +850,7 @@ describe('runtimes install/connect REST', () => {
 
   it('disconnecting Hermes leaves Clawboo Native and Claude Code their keys', async () => {
     platformState.bins['hermes'] = '/home/u/.local/bin/hermes'
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-shared')
     setRuntimeSecret('OPENAI_API_KEY', 'sk-openai-shared')
     runtimesDisconnectPOST(req({ params: { id: 'hermes' } }), mockRes().res)
@@ -581,7 +892,7 @@ describe('runtimes install/connect REST', () => {
   })
 
   it('a disconnected runtime connects again with the key it kept, without a re-paste', () => {
-    platformState.bins['claude'] = '/usr/bin/claude'
+    sdkState.binary = SDK_BIN // Claude Code is installed
     setRuntimeSecret('ANTHROPIC_API_KEY', 'sk-ant-kept')
     runtimesDisconnectPOST(req({ params: { id: 'claude-code' } }), mockRes().res)
     expect(isRuntimeDisconnected('claude-code')).toBe(true)

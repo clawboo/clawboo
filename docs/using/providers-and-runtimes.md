@@ -190,7 +190,7 @@ Each of these is a separate program. Clawboo installs it for you from **Settings
 
 <Tab title="Claude Code">
 
-Needs an Anthropic API key. On an npm install of Clawboo, also install the Claude Agent SDK first: `npm install -g clawboo @anthropic-ai/claude-agent-sdk`. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
+Needs an Anthropic API key. On an npm install of Clawboo, also install the Claude Agent SDK first: `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
 
 </Tab>
 
@@ -202,7 +202,7 @@ Needs a ChatGPT plan. Click **Sign in** on the row, then **Sign in with ChatGPT*
 
 <Tab title="Hermes">
 
-Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. See [Hermes](/runtimes/hermes).
+Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes installed without its live mode reads **Update available**; click **Update**, then **Update Hermes**. See [Hermes](/runtimes/hermes).
 
 </Tab>
 

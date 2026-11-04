@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   agents,
+  createRoom,
   listPendingReportUps,
   recordReportUp,
   settleReportUps,
@@ -47,7 +48,9 @@ import { createServerDeliver, type RunEntry } from '../serverDeliver'
 import {
   getTeamOrchestrator,
   resetTeamOrchestrators,
+  retireRoomOrchestrator,
   roomsWithUnheldReportUps,
+  writeTeamAlert,
 } from '../teamOrchestrator'
 
 const TEAM = 'T'
@@ -295,7 +298,10 @@ describe('a delivery carrying report-ups that never starts', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  function deliverWith(notStarted: RunStamp[]): {
+  function deliverWith(
+    notStarted: RunStamp[],
+    makeAdapter: () => RuntimeAdapter = () => new FailingStart([]),
+  ): {
     deliver: ReturnType<typeof createServerDeliver>
     nudge: ReturnType<typeof createNudgeQueue>
   } {
@@ -314,7 +320,7 @@ describe('a delivery carrying report-ups that never starts', () => {
       stopGen: () => 0,
       leaderAgentId: () => LEAD,
       persistTurn: () => undefined,
-      makeAdapterForAgent: () => new FailingStart([]),
+      makeAdapterForAgent: makeAdapter,
     })
     return { deliver, nudge }
   }
@@ -329,6 +335,21 @@ describe('a delivery carrying report-ups that never starts', () => {
     expect(notStarted).toEqual([])
 
     nudge.markIdle(skFor(LEAD)) // its run ends; the queued update tries to start
+    for (let i = 0; i < 20 && notStarted.length === 0; i++)
+      await new Promise((r) => setImmediate(r))
+
+    expect(notStarted).toEqual([{ reportForTaskId: null, stopGen: 0, reportUpIds: ['ru-1'] }])
+  })
+
+  it('hands them back too when setting up the queued run throws before it starts', async () => {
+    const notStarted: RunStamp[] = []
+    const { deliver, nudge } = deliverWith(notStarted, () => {
+      throw new Error('could not build the adapter')
+    })
+    nudge.markBusy(skFor(LEAD))
+    await deliver(skFor(LEAD), LEAD, '[Task Update] done', update)
+
+    nudge.markIdle(skFor(LEAD))
     for (let i = 0; i < 20 && notStarted.length === 0; i++)
       await new Promise((r) => setImmediate(r))
 
@@ -432,5 +453,55 @@ describe('the report-up outbox', () => {
 
     getTeamOrchestrator(TEAM)
     expect(roomsWithUnheldReportUps(db)).toEqual([])
+  })
+
+  it('archiving a room drops its updates as stopped, whether or not its engine is loaded', async () => {
+    const loaded = createRoom(db, { teamId: TEAM, name: 'Loaded', memberIds: [] })
+    const idle = createRoom(db, { teamId: TEAM, name: 'Idle', memberIds: [] })
+    const a = createReportUpOutbox(db, TEAM, loaded.id).record({
+      toAgentId: null,
+      by: 'W',
+      summary: 's',
+    })!
+    const b = createReportUpOutbox(db, TEAM, idle.id).record({
+      toAgentId: null,
+      by: 'W',
+      summary: 's',
+    })!
+    const general = createReportUpOutbox(db, TEAM, null).record({
+      toAgentId: null,
+      by: 'W',
+      summary: 's',
+    })!
+    getTeamOrchestrator(TEAM, { roomId: loaded.id })
+
+    await retireRoomOrchestrator(TEAM, loaded.id)
+    await retireRoomOrchestrator(TEAM, idle.id)
+
+    expect(listPendingReportUps(db, TEAM, loaded.id)).toEqual([])
+    expect(listPendingReportUps(db, TEAM, idle.id)).toEqual([])
+    expect(listPendingReportUps(db, TEAM, null).map((r) => r.id)).toEqual([general])
+    // Already settled, so a second settlement wins nothing.
+    expect(settleReportUps(db, [a, b], 'delivered')).toEqual([])
+  })
+
+  it('reports whether a team alert reached the chat or the mailbox', () => {
+    db.insert(agents)
+      .values({
+        id: 'lead',
+        name: 'Lead',
+        gatewayId: 'lead',
+        teamId: TEAM,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .run()
+    expect(writeTeamAlert(db, { teamId: TEAM, roomId: null, agentId: 'lead', text: 'x' })).toBe(
+      true,
+    )
+    resetDb() // the database is gone: neither write can land
+    expect(writeTeamAlert(db, { teamId: TEAM, roomId: null, agentId: 'lead', text: 'x' })).toBe(
+      false,
+    )
   })
 })

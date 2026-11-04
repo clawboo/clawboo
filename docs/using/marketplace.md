@@ -150,7 +150,7 @@ The full message reads `Failed to install "<skill>": skill blocked: injection / 
 
 <Accordion title="Under the hood">
 
-- The server downloads the index from `https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json`, waits up to 5 seconds, and keeps the result for 6 hours. Set `CLAWBOO_CATALOG_INDEX_URL` to use a mirror instead.
+- The server downloads the index published with its own version, `https://raw.githubusercontent.com/clawboo/clawboo/refs/tags/clawboo%40<version>/catalog/dist/v1/index.json`, waits up to 5 seconds, and keeps the result for 6 hours. A development build reads the `main` branch's index, and so does a release whose tag has none. Set `CLAWBOO_CATALOG_INDEX_URL` to use a mirror instead.
 - A source checkout that contains a built `catalog/dist` folder reads the catalog from disk and downloads nothing.
 - Verified pack files are cached, keyed by their digest, in the `catalog` folder of Clawboo's data directory (`~/.clawboo/catalog/` by default).
 - The pack format, all 19 packs, their licenses and pinned commits are in the [Marketplace catalog reference](/reference/marketplace-catalog).

@@ -25,9 +25,11 @@ import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   enqueueInbox,
   getActiveRoom,
+  listPendingReportUps,
   listRoomsWithEngineTasksInReview,
   listRoomsWithPendingReportUps,
   reapReportUps,
+  settleReportUps,
   type ClawbooDb,
 } from '@clawboo/db'
 import { createSuspendDetector, steeringOf } from '@clawboo/executor'
@@ -57,7 +59,7 @@ import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { createReportUpOutbox } from './reportUpOutbox'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
-import { createServerDeliver, type RunEntry } from './serverDeliver'
+import { createServerDeliver, type QueuedRun, type RunEntry } from './serverDeliver'
 import { createTeamWorkCheck } from './teamWorkCheck'
 import { roomIdForTask, roomLeadId, roomMembers } from './roomRoster'
 
@@ -202,6 +204,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
   }
 
   const abortMap = new Map<string, RunEntry>()
+  /** Deliveries waiting for a run slot (see runSlots), cancelled by Stop and teardown. */
+  const queuedRuns = new Map<string, QueuedRun>()
   /** `(agent, alert text)` → last surfaced-at, so one problem is one chat line. */
   const alertsSeen = new Map<string, number>()
   const nudge = createNudgeQueue({
@@ -231,6 +235,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     mcpBaseUrl,
     nudge,
     abortMap,
+    queuedRuns,
     onEvent: (sk, ev, run) => {
       // ENGINE ACTIVITY IS ACTIVITY. The idle clock used to advance only on a
       // USER message, so a long autonomous cascade — the exact "kick it off and
@@ -319,6 +324,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // never bound behind someone else's reply, which would otherwise complete it
     // with that reply and let the task's own output surface in the chat.
     isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
+    isRunQueued: (sk) => queuedRuns.has(sk),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
     deliver: trackedDeliver,
     stopGen: () => serverStopGen,
@@ -338,35 +344,20 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         const now = Date.now()
         const lastAt = alertsSeen.get(dedupeKey)
         const isRepeat = lastAt !== undefined && now - lastAt < ALERT_DEDUPE_MS
-        alertsSeen.set(dedupeKey, now)
         for (const [k, ts] of alertsSeen) if (now - ts > ALERT_DEDUPE_MS) alertsSeen.delete(k)
-        if (alertAgentId && !isRepeat) {
-          try {
-            persistTeamChatEntry(db, {
-              teamId,
-              roomId,
-              agentId: alertAgentId,
-              text,
-              role: 'system',
-              kind: 'meta',
-            })
-          } catch (err) {
-            log.error({ err, teamId, agentId: alertAgentId }, 'team alert persist failed')
-          }
-          // Durable copy: the chat line informs the HUMAN; the mailbox row makes
-          // the AGENT hear it too (next digest / MCP piggyback), and it survives
-          // eviction and restarts.
-          try {
-            enqueueInbox(db, { agentId: alertAgentId, teamId, kind: 'alert', body: text })
-          } catch (err) {
-            log.error({ err, teamId, agentId: alertAgentId }, 'team alert inbox write failed')
-          }
-        }
+        // Told: shown within the window already, or written now. The engine gives
+        // up a report-up only once someone was told, so a write that failed is
+        // not remembered either: its retry must not be taken for a repeat.
+        const told =
+          isRepeat ||
+          (alertAgentId !== null &&
+            writeTeamAlert(db, { teamId, roomId, agentId: alertAgentId, text }))
+        if (told) alertsSeen.set(dedupeKey, now)
         log.warn(
           { teamId, agentId: alertAgentId, alert: text, suppressed: isRepeat },
           'team coordination alert',
         )
-        return
+        return told
       }
       // Board→leader reflections (the per-task "✓ <agent> completed" marker + the
       // batched "[Task Update]" envelope) are INTERNAL orchestration signals, not
@@ -404,6 +395,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     abortSession: (sk) => {
       const e = abortMap.get(sk)
       if (e) void e.adapter.abort(e.run).catch(() => undefined)
+      else queuedRuns.get(sk)?.cancel()
     },
     // Risky-delegation approval gate (parity with the retired browser binding): a
     // destructive/secret-touching delegation is surfaced on the leader's approval
@@ -440,6 +432,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
   // Idle watchdog: fail a delegate gone silent past the engine's
   // DELEGATION_IDLE_TIMEOUT_MS so the leader is never left standing.
   const sweep = setInterval(() => {
+    // Runs waiting for a slot are work in hand: the team is not idle while they wait.
+    if (queuedRuns.size > 0) touch()
     // A rejected sweep used to be a bare `void` — an unhandled rejection with no
     // trace. The watchdog is the only thing that fails a silent delegate, so its
     // failing silently is precisely the case an operator needs to see.
@@ -577,6 +571,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // failure).
       serverStopGen++
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
+      // Runs waiting for a slot never start; each tells the engine it ended aborted,
+      // which releases its task to `todo` like any stopped run.
+      for (const [, q] of queuedRuns) q.cancel()
       // Queued (not-yet-started) deliveries must die with the Stop too: a
       // markIdle after the aborts would otherwise FLUSH them into brand-new
       // post-Stop runs. Dropping them loses nothing durable: alerts live in the
@@ -638,7 +635,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // would ever learn the cascade stopped. Say so in the transcript FIRST —
       // the board rows stay `in_progress` and the engine's `resume()` re-attaches
       // them when the team is next opened.
-      const stranded = [...abortMap.keys()]
+      const stranded = [...abortMap.keys(), ...queuedRuns.keys()]
         .map((sk) => agentIdFromSessionKey(sk))
         .filter((id): id is string => id !== null)
       if (stranded.length > 0) {
@@ -665,6 +662,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       }
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
       abortMap.clear()
+      for (const [, q] of queuedRuns) q.cancel()
       engine.reset()
       // NOT `nudge.drain()`. The queue's drain fires each queued `send` closure,
       // and in THIS host a send is `serverDeliver`'s closure — it builds an
@@ -716,6 +714,28 @@ export function getTeamOrchestrator(
 /** True when a team chat room has a live orchestrator (introspection / tests). */
 export function hasTeamOrchestrator(teamId: string, roomId: string | null = null): boolean {
   return instances.has(orchestratorKey(teamId, roomId))
+}
+
+/** Write a team coordination alert to the team chat and to the agent's mailbox:
+ *  the chat line informs the person, and the mailbox row makes the agent hear it
+ *  too (next digest / MCP piggyback) and survives eviction and restarts. True
+ *  when at least one of the two writes landed. */
+export function writeTeamAlert(
+  db: ClawbooDb,
+  alert: { teamId: string; roomId: string | null; agentId: string; text: string },
+): boolean {
+  const { teamId, roomId, agentId, text } = alert
+  let landed = false
+  // Logs and returns false itself when the insert fails.
+  if (persistTeamChatEntry(db, { teamId, roomId, agentId, text, role: 'system', kind: 'meta' }))
+    landed = true
+  try {
+    enqueueInbox(db, { agentId, teamId, kind: 'alert', body: text })
+    landed = true
+  } catch (err) {
+    log.error({ err, teamId, agentId }, 'team alert inbox write failed')
+  }
+  return landed
 }
 
 /** Chat rooms holding report-ups no resident engine has: after a restart or an
@@ -778,14 +798,26 @@ export function hasTaskOrchestrator(teamId: string, taskId: string, db?: Clawboo
 export async function retireRoomOrchestrator(teamId: string, roomId: string): Promise<void> {
   const key = orchestratorKey(teamId, roomId)
   const inst = instances.get(key)
-  if (!inst) return
-  // Out of the map first, so nothing reaches the instance while it winds down.
-  instances.delete(key)
+  if (inst) {
+    // Out of the map first, so nothing reaches the instance while it winds down.
+    instances.delete(key)
+    try {
+      await inst.orchestrator.stop()
+      inst.dispose()
+    } catch (err) {
+      log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
+    }
+  }
+  // No engine builds an archived room, so its report-ups would never be sent.
+  // Archiving stops the room's work, so they are dropped as a Stop drops them;
+  // the results stay on their cards. Done whether or not an engine was loaded:
+  // rows a previous process left pending belong to the room too.
   try {
-    await inst.orchestrator.stop()
-    inst.dispose()
+    const db = getDb()
+    const ids = listPendingReportUps(db, teamId, roomId).map((r) => r.id)
+    if (ids.length > 0) settleReportUps(db, ids, 'stopped')
   } catch (err) {
-    log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
+    log.error({ err, teamId, roomId }, "could not settle the archived room's report-ups")
   }
 }
 

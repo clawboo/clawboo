@@ -38,9 +38,13 @@ export interface RuntimeDescriptor {
   /** Friendly display name. */
   name: string
   /** CLI binary whose presence `resolveRuntimeBin` probes for health.
-   *  null = no binary (a built-in, in-process runtime). */
+   *  null = no CLI to probe: a built-in, in-process runtime, or one whose runs
+   *  start an SDK's own binary (`sdkBinary`). */
   healthBin: string | null
-  /** How the CLI is installed. null = nothing to install (built-in). */
+  /** A runtime whose runs load an SDK and start that SDK's own platform binary:
+   *  it is installed exactly when both are there, whatever CLI is on PATH. */
+  sdkBinary?: 'claude-agent-sdk'
+  /** How the runtime is installed. null = nothing to install (built-in). */
   packageManager: 'npm' | 'pip' | null
   /** Package to install (`npm install -g <pkg>` / `pip|pipx install <pkg>`). */
   pkg: string | null
@@ -75,13 +79,17 @@ export const RUNTIME_DESCRIPTORS: Record<NonOpenClawRuntimeId, RuntimeDescriptor
   'claude-code': {
     id: 'claude-code',
     name: 'Claude Code',
-    healthBin: 'claude',
+    // A run loads the Claude Agent SDK and the SDK starts its own `claude` from
+    // a per-platform package; a `claude` CLI on PATH is never used. So the SDK
+    // is what makes Claude Code installed, and what Install fetches.
+    healthBin: null,
+    sdkBinary: 'claude-agent-sdk',
     packageManager: 'npm',
-    // Pinned to the current MAJOR (latest patch/minor within it) so a future
-    // major-version-incompatible or compromised publish is never auto-installed,
-    // mirroring the OpenClaw `@^2026.5` discipline. Bump deliberately on review.
-    pkg: '@anthropic-ai/claude-code@2',
-    installCommand: 'npm install -g @anthropic-ai/claude-code@2',
+    // Pinned to the SDK's current 0.3 line (latest patch within it), the one the
+    // driver is built against, so a future 0.4 or a compromised publish is never
+    // auto-installed. Bump deliberately on review, together with apps/web.
+    pkg: '@anthropic-ai/claude-agent-sdk@0.3',
+    installCommand: 'npm install -g @anthropic-ai/claude-agent-sdk@0.3',
     builtIn: false,
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',

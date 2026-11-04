@@ -39,20 +39,21 @@ no repository path (`workspace_unavailable`) rather than run it without isolatio
 The package's default root is `<repo>/.clawboo/worktrees`, but the server always passes its own: task worktrees
 live at `<clawboo home>/worktrees/<hash of the repo path>/<task id>` and review checkouts under
 `<clawboo home>/reviews/`, so nothing is created inside your repository. Each task gets the branch
-`clawboo/task-<task id>`.
+`clawboo/task-<task id>`. The server also acts on a task worktree the board records under the work folder's
+`worktrees/<hash of the repo path>/` (see [The work folder](/operating/data-and-state#the-work-folder)).
 
 ## The lifecycle
 
-| Function                  | What it does                                                                                                                                                                                                                                               |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `provisionWorktree`       | Branches from a commit (never the dirty working tree), writes the working files and commits them as the baseline. It clears leftovers of an earlier attempt, reuses a branch that already exists, checks that git registered the folder, and retries once. |
-| `resumeWorktree`          | Re-attaches a paused task's branch at its tip, keeping earlier commits. Throws when the branch is gone.                                                                                                                                                    |
-| `loadWorktree`            | Rebuilds the handle for a task that already has a worktree.                                                                                                                                                                                                |
-| `pauseWorktree`           | Commits any uncommitted work, removes the worktree folder and keeps the branch.                                                                                                                                                                            |
-| `commitWorktreeWork`      | Commits without removing anything; the critic's checkpoint before a review.                                                                                                                                                                                |
-| `completeWorktree`        | Diffs against the baseline, ignoring the working files. With no change it removes the worktree and the branch; otherwise the branch stays for a person to merge.                                                                                           |
-| `gcWorktrees`             | Reaps worktrees by age and by count (defaults: 72 hours, 25 worktrees), commits before it drops one, skips active tasks, and keeps going past a failure. It touches only the worktree root.                                                                |
-| `provisionReviewWorktree` | A detached checkout at one commit for the read-only reviewer, so there is no branch to push. It replaces any earlier checkout at the same path.                                                                                                            |
+| Function                  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provisionWorktree`       | Branches from a commit (never the dirty working tree), writes the working files and commits them as the baseline. It clears leftovers of an earlier attempt, reuses a branch that already exists, checks that git registered the folder, and retries once. A leftover that could hold work throws `UnsafeWorktreeError` instead (see [Path safety](#path-safety)).                                                                                          |
+| `resumeWorktree`          | Re-attaches a paused task's branch at its tip, keeping earlier commits. A registered checkout of the task branch with no uncommitted changes is kept as it is, files git ignores included. Throws when the branch is gone, throws `RegistrationUnknownError` before touching anything when `git worktree list` fails, and throws `UnsafeWorktreeError` rather than replace any other folder at the path that could hold work.                               |
+| `loadWorktree`            | Rebuilds the handle for a task that already has a worktree.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `pauseWorktree`           | Commits any uncommitted work, removes the worktree folder and keeps the branch.                                                                                                                                                                                                                                                                                                                                                                             |
+| `commitWorktreeWork`      | Commits without removing anything; the critic's checkpoint before a review.                                                                                                                                                                                                                                                                                                                                                                                 |
+| `completeWorktree`        | Diffs against the baseline, ignoring the working files. With no change it removes the worktree and the branch; otherwise the branch stays for a person to merge.                                                                                                                                                                                                                                                                                            |
+| `gcWorktrees`             | Reaps worktrees by age and by count (defaults: 72 hours, 25 worktrees), skips active tasks, and keeps going past a failure. A checkout git lists is committed to its branch first, then removed with any files git ignores. A folder git does not list is removed only when it holds nothing, and one git could not be asked about (`git worktree list` failed) is always kept. Kept folders are reported with a reason. It touches only the worktree root. |
+| `provisionReviewWorktree` | A detached checkout at one commit for the read-only reviewer, so there is no branch to push. It replaces any earlier checkout at the same path.                                                                                                                                                                                                                                                                                                             |
 
 Clawboo never merges a task branch; finished work waits on `clawboo/task-<task id>`.
 
@@ -84,14 +85,28 @@ These functions remove folders recursively and run commands, so every path they 
 - **Task folders stay under the root.** `worktreePathFor(repo, taskId, rootDir)` resolves the task's folder and
   throws if it would land anywhere but one segment below the root.
 - **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
-  folder from the root and the task id, and throw if the stored record points somewhere else.
+  folder from the root and the task id, and throw if the stored record points somewhere else. `rootDir` may be a
+  list of roots, and then the record has to be the task's folder under one of them; an empty list refuses every
+  record. The server passes its own root and the work folder's.
+- **A replace never loses work.** Resume and a provision's clean-up of leftovers delete a task folder only when it
+  is missing, empty, or a checkout of the task's repository at a commit a branch holds, with nothing in
+  `git status --ignored`. Anything else throws `UnsafeWorktreeError` and the folder is left exactly as it was:
+  uncommitted changes, files git ignores (an `.env`, build output), a detached commit no branch holds, a separate
+  repository (its own `.git`, whose commits would go with it), or a folder git cannot read.
+- **GC goes by registration.** For a checkout git lists, GC commits any uncommitted changes to its branch, then
+  removes the folder; files git ignores are not committed and go with it. It skips a listed checkout that is a
+  separate repository, has its commit on no branch, or has changes on a detached HEAD. A folder git does not
+  list is removed only under the rule above, and a folder whose registration git could not report is always
+  kept. With `owns`, GC leaves alone, and does not count, any folder the callback rejects; the server passes it for
+  the work folder's roots and accepts only checkouts its board records there.
 - **Review checkouts stay in the review folder.** `removeReviewWorktree(repo, worktree, rootDir)` throws before it
   removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
   `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
   its own path the same way. Its `repoPath` may be a bare repository, such as the history the server keeps of a team
   folder (see [How work is checked](/concepts/verification#checks-in-team-chat)).
-- **Verify commands run in Clawboo's folder only.** The server's verification gate refuses a worktree path outside
-  Clawboo's state folder before it runs `VERIFY_CMD`.
+- **Verify commands run in Clawboo's folders only.** The server's verification gate refuses a worktree path outside
+  Clawboo's state folder and the work folder's `worktrees/` and `reviews/`, or one whose real path leaves them, before
+  it runs `VERIFY_CMD` in that real path.
 
 ## Helpers you will reach for
 
@@ -103,6 +118,9 @@ These functions remove folders recursively and run commands, so every path they 
   `stderr` and `args`. The Workspace tab's git status and file diffs use it.
 - **Diffs.** `diffStat` and `worktreeDiff` compare a worktree with its baseline, and `isDetached` confirms a review
   checkout has no branch.
+- **Registration.** `worktreeRegistration(repo, path)` answers `registered`, `unregistered`, or `unknown` when
+  `git worktree list` itself failed. `isWorktreeRegistered` is the yes-or-no form, with `unknown` as no; anything
+  that removes a folder on the answer uses the three-way form.
 
 ## Who uses it
 

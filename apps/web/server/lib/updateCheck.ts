@@ -21,6 +21,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { effectiveSetting } from './operatorSettings'
+
 // ─── Current (running) version ────────────────────────────────────────────────
 
 /**
@@ -94,6 +96,95 @@ export function detectInstallMethod(): InstallMethod {
   // (e.g. `apps/web/server/index.ts` under tsx) is a dev checkout.
   if (!/\/dist\/server\.js$/.test(entry)) return 'dev'
   return 'global'
+}
+
+/**
+ * The folder `npm install -g` links the `clawboo` command into, for a package
+ * installed in `globalModules`, or null when that is not npm's global layout:
+ * `<prefix>/lib/node_modules` links into `<prefix>/bin`, and on Windows
+ * `<prefix>/node_modules` into `<prefix>` itself.
+ */
+function globalBinDir(globalModules: string): string | null {
+  if (path.basename(globalModules) !== 'node_modules') return null
+  const parent = path.dirname(globalModules)
+  if (process.platform === 'win32') return parent
+  return path.basename(parent) === 'lib' ? path.join(path.dirname(parent), 'bin') : null
+}
+
+/**
+ * Whether this user can replace the running global install. `npm install -g`
+ * swaps the package folder inside the global `node_modules` and relinks the
+ * `clawboo` command in the prefix's `bin`, so all three have to be writable. A
+ * root-owned prefix, a container image run as another user, or a distro
+ * package fails here, and an in-app update there is either a permission error
+ * or a copy that no longer matches what installed it.
+ */
+export function isInstallWritable(entry: string | undefined = process.argv[1]): boolean {
+  if (!entry) return false
+  const packageRoot = path.resolve(path.dirname(entry), '..')
+  const globalModules = path.dirname(packageRoot)
+  try {
+    fs.accessSync(packageRoot, fs.constants.W_OK)
+    fs.accessSync(globalModules, fs.constants.W_OK)
+    const bin = globalBinDir(globalModules)
+    // A `bin` that is not there yet is created inside the prefix.
+    if (bin) fs.accessSync(fs.existsSync(bin) ? bin : path.dirname(bin), fs.constants.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export type SelfUpdateRefusalReason = 'disabled' | 'not-writable' | 'npx' | 'dev'
+
+export interface SelfUpdateRefusal {
+  reason: SelfUpdateRefusalReason
+  method: InstallMethod
+  message: string
+}
+
+/**
+ * Why an in-app update cannot run here, or null when it can. Precedence follows
+ * the operator settings: the code's floor (only a global install this user can
+ * write is ever updated in place) holds whatever an administrator pins, and an
+ * administrator can turn updates off where the floor would allow them.
+ */
+export function selfUpdateRefusal(
+  method: InstallMethod = detectInstallMethod(),
+): SelfUpdateRefusal | null {
+  // First, so the person is told who to ask rather than how to work around it.
+  if (effectiveSetting('disableSelfUpdate').value) {
+    return {
+      reason: 'disabled',
+      method,
+      message:
+        'In-app updates are turned off for this install by its administrator. Ask them to update it.',
+    }
+  }
+  if (method === 'npx') {
+    return {
+      reason: 'npx',
+      method,
+      message:
+        'This is an npx run (ephemeral). Install globally to enable in-app updates: npm install -g clawboo@latest',
+    }
+  }
+  if (method === 'dev') {
+    return {
+      reason: 'dev',
+      method,
+      message: 'In-app update is only available for a global install.',
+    }
+  }
+  if (!isInstallWritable()) {
+    return {
+      reason: 'not-writable',
+      method,
+      message:
+        "This install's files belong to another user, so Clawboo cannot update itself. Update it the way it was installed, for example: sudo npm install -g clawboo@latest",
+    }
+  }
+  return null
 }
 
 /** The exact command a user runs to update, tailored to their install shape. */
@@ -210,7 +301,10 @@ export interface SelfVersionOptions {
 
 export async function computeSelfVersion(opts: SelfVersionOptions = {}): Promise<SelfVersionInfo> {
   const current = getCurrentVersion()
-  const latest = opts.skipRegistry ? null : await fetchLatestClawbooVersion()
+  // An install whose administrator turned updates off answers the way
+  // `?local=1` does: no registry call, so no chip and nothing offered.
+  const disabled = effectiveSetting('disableSelfUpdate').value
+  const latest = opts.skipRegistry || disabled ? null : await fetchLatestClawbooVersion()
   const method = detectInstallMethod()
   // A dev checkout reads as "0.0.0*"; never nag a developer about updates.
   const isRealVersion = !current.startsWith('0.0.0')
@@ -221,7 +315,7 @@ export async function computeSelfVersion(opts: SelfVersionOptions = {}): Promise
     updateAvailable,
     updateCommand: buildUpdateCommand(method),
     installMethod: method,
-    applyable: method === 'global',
+    applyable: selfUpdateRefusal(method) === null,
     isDeprecated: /^0\.1\./.test(current),
     // `checkedAt` describes when `latest` was fetched, so a skipped (or failed)
     // probe reports null rather than a timestamp for a value we aren't returning.

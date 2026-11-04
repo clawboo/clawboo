@@ -10,6 +10,7 @@ import {
   createTask,
   getComments,
   getTask,
+  listEvents,
   setTaskRunnerInputs,
   tasks,
   type ClawbooDb,
@@ -145,6 +146,10 @@ describe('a rerun that does not start', () => {
         'The rerun on Claude Code did not start: a budget it counts against is paused at its hard cap.',
       ],
     ])
+    // On the event log too, which is what the browser alerts wake up on.
+    expect(
+      listEvents(db, { taskId: task.id, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
+    ).toEqual([{ to: 'blocked', reason: 'rerun_not_started' }])
   })
 
   it('does the same when the run throws, for example a timed-out wait for the agent', async () => {

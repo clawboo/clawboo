@@ -186,6 +186,31 @@ describe('team folder API', () => {
       expect(file.body()).toMatchObject({ ok: true, binary: false, content: 'step one' })
     })
 
+    it('lists and reads a team folder kept in the work folder, through a link at its old path', async () => {
+      // The newer layout keeps team folders under the work folder and leaves a
+      // link where each one was.
+      const moved = path.join(`${clawbooHome}-work`, 'teams', 'T')
+      await mkdir(path.join(moved, 'docs'), { recursive: true })
+      await writeFile(path.join(moved, 'docs', 'moved.md'), 'kept')
+      await rm(folder('T'), { recursive: true, force: true })
+      await symlink(moved, folder('T'), 'junction')
+
+      const ws = fakeRes()
+      agentWorkspacesGET(req({ agentId: 'cx' }), ws.res)
+      expect((ws.body() as { teamFolder: { onDisk: boolean } }).teamFolder.onDisk).toBe(true)
+
+      const tree = fakeRes()
+      await agentTeamFolderTreeGET(req({ agentId: 'cx' }, { dir: 'docs' }), tree.res)
+      expect(tree.body()).toMatchObject({
+        ok: true,
+        entries: [{ name: 'moved.md', kind: 'file' }],
+      })
+
+      const file = fakeRes()
+      await agentTeamFolderFileGET(req({ agentId: 'cx' }, { path: 'docs/moved.md' }), file.res)
+      expect(file.body()).toMatchObject({ ok: true, content: 'kept' })
+    })
+
     it('refuses a path that leaves the folder', async () => {
       await writeFile(path.join(clawbooHome, 'secret.txt'), 'no')
       const r = fakeRes()

@@ -17,7 +17,12 @@
 // worktree" when there is no worktree is worse than silence: the agent will go
 // looking, find nothing, and conclude the note is noise.
 
+import { oneLine } from '@clawboo/board-core'
 import type { AttemptSummary } from '@clawboo/db'
+import {
+  RUN_CLOSED_FINISHED_BY_PERSON,
+  RUN_CLOSED_RESULT_AFTER_RELEASE,
+} from '@clawboo/team-orchestration'
 
 export interface ResumeNoteInput {
   /** Derived from the task's execution ledger. */
@@ -43,9 +48,14 @@ export interface ResumeNoteInput {
 export function buildResumeNote(input: ResumeNoteInput): string | null {
   if (input.fixCycle) return null
   const { attempts } = input
-  if (attempts.lastKind !== 'crash') return null
+  // A watchdog timeout interrupted its run too (the team engine stopped it), so
+  // it gets the same note it got before the attempt reader told it apart from a
+  // crash (K17). It records no work, so it gets the honest variant.
+  if (attempts.lastKind !== 'crash' && attempts.lastKind !== 'timeout') return null
 
-  const reason = attempts.lastCrashReason?.trim()
+  const reason = (
+    attempts.lastKind === 'crash' ? attempts.lastCrashReason : attempts.lastReason
+  )?.trim()
   const why = reason ? ` (${reason})` : ''
   const nth =
     attempts.crashAttempts > 1
@@ -69,3 +79,56 @@ export function buildResumeNote(input: ResumeNoteInput): string | null {
     .filter(Boolean)
     .join('\n')
 }
+
+/** The longest reason the last-attempt line quotes. */
+const MAX_REASON_CHARS = 400
+
+/**
+ * The "last attempt" line of a team engine run's ticket block, or null when
+ * there is nothing to say (a first run, or one after a run that finished).
+ *
+ * The engine's runs have no worktree, but a coding agent works in the team's
+ * folder, which outlives the run, so the executor's "nothing to pick up, start
+ * from the beginning" would be wrong here: an interrupted or stopped run may
+ * have done part of the work. A watchdog timeout is not a crash (K17): the
+ * process was alive and the engine stopped it.
+ */
+export function buildLastAttemptNote(attempts: AttemptSummary): string | null {
+  // One line, bounded, without its own closing full stop: the sentence around
+  // it supplies the punctuation.
+  const reason = attempts.lastReason
+    ? oneLine(attempts.lastReason, MAX_REASON_CHARS).replace(/[.\s]+$/, '')
+    : null
+  const checkFirst =
+    'It may have done part of the work: check what is already done (the files it worked on, comments on this task) before you redo anything with a side effect.'
+  let line: string
+  switch (attempts.lastKind) {
+    case null:
+    case 'success':
+      return null
+    case 'crash':
+      line = `The last attempt was cut off before it reported: the process running it stopped${reason ? ` (${reason})` : ''}. ${checkFirst}`
+      break
+    case 'timeout':
+      line = `The last attempt went quiet and was stopped${reason ? ` (${reason})` : ''}. ${checkFirst}`
+      break
+    case 'error':
+      line = `The last attempt failed: ${reason || 'no reason was recorded'}.`
+      break
+    case 'cancelled':
+      if (attempts.lastReason === RUN_CLOSED_RESULT_AFTER_RELEASE)
+        return 'The last attempt finished after the task had been taken back from it; its result is kept as a comment on this task.'
+      if (attempts.lastReason === RUN_CLOSED_FINISHED_BY_PERSON)
+        return 'A person finished this task while the last attempt was running.'
+      // No reason: a person's Stop. It may have caught the task queued rather
+      // than running (the Stop marks waiting work too), so claim no attempt.
+      if (!reason) return 'A person stopped this task earlier; it is running again now.'
+      return `The last attempt was stopped: ${uncapitalize(reason.replace(/^Stopped:\s*/, ''))}.`
+  }
+  const failed = attempts.crashAttempts + attempts.errorAttempts
+  if (failed > 1)
+    line += ` It has failed ${failed} times in a row: if the same thing is going wrong again, say so in your report instead of repeating it.`
+  return line
+}
+
+const uncapitalize = (s: string): string => (s ? s[0]!.toLowerCase() + s.slice(1) : s)

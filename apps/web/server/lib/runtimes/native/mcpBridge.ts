@@ -48,6 +48,9 @@ export interface McpBridgeOptions {
    *  still gets none of the writes the engine owns (see the Tasks server's
    *  `teamRun`), as the HTTP runtimes' signed team-run URLs do. */
   teamRun?: boolean
+  /** The board task the run works on: the Tasks tools use it when a call leaves
+   *  taskId out, as the HTTP runtimes' signed Tasks URLs say. */
+  boundTaskId?: string | null
   /**
    * The run's authoritative memory scope — bound onto the in-process Memory
    * server so native saves are team-shared + reads team-limited, matching the
@@ -104,6 +107,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
                 boundScope: {
                   ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
                   ...(opts.agentId ? { agentId: opts.agentId } : {}),
+                  ...(opts.boundTaskId ? { taskId: opts.boundTaskId } : {}),
                 },
               }
             : {}),

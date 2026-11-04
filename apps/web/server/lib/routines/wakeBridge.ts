@@ -164,7 +164,16 @@ function setAsideFailedFireTask(
 ): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
-    if (!updateStatus(db, taskId, 'blocked').ok) return
+    const moved = updateStatus(db, taskId, 'blocked')
+    if (!moved.ok) return
+    // The event log is what live views follow; the status write reaches only
+    // the in-process bus.
+    emitEvent(db, {
+      kind: 'status_changed',
+      taskId,
+      teamId: moved.task?.teamId ?? null,
+      data: { to: 'blocked', reason: 'routine_fire_failed' },
+    })
     // The next run is said as a condition: the routine can be deleted while its
     // fire runs, and this note is written before the outcome is recorded.
     addComment(

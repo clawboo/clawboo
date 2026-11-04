@@ -27,6 +27,9 @@ export interface RuntimeStatus {
   name?: string
   installed?: boolean
   binPath?: string | null
+  /** Where `binPath` came from: the runtime's CLI, or (Claude Code) the Agent
+   *  SDK's own binary, which is what a run starts. */
+  binSource?: 'cli' | 'agent-sdk' | null
   authKind?: 'api-key' | 'oauth' | 'none'
   envVar?: string | null
   hasCredential?: boolean
@@ -48,6 +51,10 @@ export interface RuntimeStatus {
   updateRequired?: boolean
   /** Codex-only: the installed CLI's version, when known. */
   cliVersion?: string | null
+  /** Hermes-only: this Hermes was installed without its ACP mode (the `acp`
+   *  extra), so its runs report only at the end and a comment mid-run stops and
+   *  resumes them. Reinstalling adds it. Absent until Hermes has been asked. */
+  acpMissing?: boolean
   installCommand?: string | null
   builtIn?: boolean
   docsUrl?: string
@@ -58,6 +65,10 @@ export interface RuntimeStatus {
     worktrees?: boolean
     resume?: boolean
     toolApproval?: boolean
+    /** How a comment reaches a running task: `live` joins the turn,
+     *  `interrupt-resume` stops and resumes the run, `none` (or absent) waits for
+     *  the next run. Hermes's follows the way its runs go now. */
+    steering?: 'live' | 'interrupt-resume' | 'none'
     models?: string[]
     // Integration-depth seam (executor Capabilities). `runtimeClass` drives the
     // diagnostics depth badge; the rest render the native-correct facts. All

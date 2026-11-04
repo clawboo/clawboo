@@ -61,11 +61,11 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     id: 'claude-code',
     name: 'Claude Code',
     blurb:
-      "Anthropic's coding agent (Claude Agent SDK). Paste an API key, or use your logged-in CLI.",
+      "Anthropic's coding agent, run through the Claude Agent SDK. Connect an Anthropic API key.",
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',
     keyPlaceholder: 'sk-ant-…',
-    installCommand: 'npm install -g @anthropic-ai/claude-code',
+    installCommand: 'npm install -g @anthropic-ai/claude-agent-sdk@0.3',
     docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },

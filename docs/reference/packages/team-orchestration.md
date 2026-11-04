@@ -66,7 +66,7 @@ would lose to its own claim, and one that completed the task would complete it t
   chat shows.
 - **One task per session.** A session works one task at a time. A message for a busy session waits in the nudge
   queue (`createNudgeQueue`) and goes out at its next turn boundary. A queued message whose run never starts frees
-  the session for the next one.
+  the session for the next one, and its sender hears of it through `deliver`'s `onQueuedFailure` option.
 - **A refused delivery says why.** When `deliver` rejects, the engine fails the task at once instead of waiting for
   the watchdog. A host that decided not to start the run, such as the web server when a hard-cap budget is paused,
   rejects with a `DeliveryRefusedError`, and its message becomes the task's failure comment and what the delegator
@@ -94,9 +94,12 @@ would lose to its own claim, and one that completed the task would complete it t
   delivery whose start failed) puts them back to pending. A Stop also settles the items already handed to the host,
   and delivery that runs out of retries gives them up. `resume()` and every `sweepStaleSessions` queue each pending
   item the engine does not hold, so a room's next engine sends it again and this one never sends it twice. An
-  engine settles only items it still holds, and lets one go only once its settlement is written, so after `reset()`
-  a run cancelled at teardown leaves its items for the next engine; `reset()` does not flush them either. An item
-  already sent again `MAX_REPORT_UP_REPLAYS` times is given up instead, with an `alert` narration to its recipient.
+  engine settles only items it still holds, and lets one go only once its settlement is written (the sweep writes a
+  settlement that failed), so after `reset()` a run cancelled at teardown leaves its items for the next engine;
+  `reset()` does not flush them either. An item whose recipient cannot be reached yet (a room with no lead) waits
+  without being counted. An item already sent again `MAX_REPORT_UP_REPLAYS` times is given up instead, with an
+  `alert` narration to its recipient, and only once that narration is written: `narrate` returns false for an alert
+  that reached nowhere, and the item stays pending until a later sweep's alert lands.
 - **Work is checked before it is done.** With `workCheck`, the engine calls `begin(taskId, agentId)` before it
   delivers a fresh run of a task (a fix round is not one), and `prepare` when the run ends with `done: success`.
   `prepare` returns null when there is nothing to check; otherwise the engine runs the returned check without
@@ -106,7 +109,8 @@ would lose to its own claim, and one that completed the task would complete it t
   delivers the note plus the task's brief; while `isSessionOccupied` reports another turn the session stays under
   check and the fix round waits for that turn's end, and after a Stop none starts), `failed` (the host blocked the
   task; the delegator's `[Task Update]` has the outcome `check_failed`) or `decided` (a person moved the card). A
-  check that throws, or has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
+  check a person's move overtook finishes nothing, even when the task is running again. A `prepare` that rejects, a
+  check that throws, or one that has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
   `check_failed` too, and so does a `done` the board refuses while the task is still `in_progress` or
   `in_review`. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
   that unloads idle engines. `resume()` hands a task left `in_review` with a running engine execution and no check

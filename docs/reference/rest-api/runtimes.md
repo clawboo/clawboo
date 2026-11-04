@@ -13,7 +13,7 @@ OpenClaw runs as its own Gateway process that Clawboo starts and talks to, so th
 
 </Note>
 
-An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** below also count against a limit of 60 a minute. The `curl` examples assume the access gate is off (the default on a loopback install); with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each call (see [Authentication](/reference/rest-api/index#authentication)).
+An unknown `:id` answers **404** `{ "error": "unknown runtime '<id>'" }`. Request bodies are JSON (up to 2 MB). Every route counts against the general [rate limit](/reference/rest-api/index#rate-limits) of 3,000 requests a minute per client address; routes marked **sensitive** below also count against a limit of 60 a minute. Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)).
 
 ## Routes
 
@@ -82,6 +82,7 @@ Lists every runtime with its capabilities, live health, and install and credenti
     name: string
     installed: boolean
     binPath: string | null
+    binSource: 'cli' | 'agent-sdk' | null
     builtIn: boolean
     authKind: 'api-key' | 'oauth' | 'none'
     envVar: string | null
@@ -90,6 +91,7 @@ Lists every runtime with its capabilities, live health, and install and credenti
     loggedIn: boolean // Codex only
     updateRequired?: boolean // Codex only, once its model list has been read
     cliVersion?: string | null // Codex only, once its model list has been read
+    acpMissing?: boolean // Hermes only, once Hermes has been asked
     codexAuth: boolean // Hermes only
     ollamaConnected: boolean // Clawboo Native only
     installCommand: string | null
@@ -111,32 +113,34 @@ Lists every runtime with its capabilities, live health, and install and credenti
 }
 ```
 
-`steering` is `live` for Claude Code, Codex and Clawboo Native (a comment joins the running turn) and `interrupt-resume` for Hermes (the run is stopped and resumed with the comment). `toolApproval: true` does not mean Clawboo asks before a tool runs: the coding runtimes run with their own approval prompts off (see [What agents can do](/concepts/permissions)).
+`steering` is `live` for Claude Code, Codex and Clawboo Native (a comment joins the running turn). Hermes's follows the way its runs go now: `live` over its ACP mode, `interrupt-resume` (the run is stopped and resumed with the comment) when Hermes has no ACP mode or runs are pinned to `hermes chat`, and `streaming` goes with it. `toolApproval: true` does not mean Clawboo asks before a tool runs: the coding runtimes run with their own approval prompts off (see [What agents can do](/concepts/permissions)).
 
 The status fields:
 
-| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                                     |
-| -------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `installed`          | all            | Always `true` for the built-in Clawboo Native. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes).                                                                                                                                  |
-| `binPath`            | CLI runtimes   | The resolved CLI path, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                                         |
-| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                                      |
-| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                                           |
-| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                                |
-| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                                      |
-| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                                   |
-| `updateRequired`     | Codex          | The installed Codex CLI cannot read your ChatGPT plan's current model list, so its runs fail until it is updated. Present on a signed-in Codex once a model list read has run; the list request starts that read and does not wait for it. Reinstalling with `POST /api/runtimes/codex/install` updates it. |
-| `cliVersion`         | Codex          | The installed Codex CLI's version, from the same read, or `null`.                                                                                                                                                                                                                                           |
-| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value.               |
-| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                                 |
+| Field                | Runtimes       | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| -------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `installed`          | all            | Always `true` for the built-in Clawboo Native. Claude Code is installed when the Claude Agent SDK loads from the server and its own `claude` binary is present, found the way the SDK finds it: its platform package (`@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, the musl build first on a Linux without glibc). A run starts that binary and never a `claude` CLI, so a CLI on `PATH` does not count. Otherwise, whether the CLI resolves on `PATH` or in a known user install folder (where `pip --user` and `pipx` put Hermes). |
+| `binPath`            | CLI runtimes   | The resolved CLI path, for Claude Code the Agent SDK's binary, or `null`. Always `null` for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `binSource`          | CLI runtimes   | Where `binPath` came from: `agent-sdk` for Claude Code, `cli` for the others. `null` with no binary, and for Clawboo Native.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `envVar`             | key runtimes   | The vault slot a connect writes by default: `ANTHROPIC_API_KEY` for Claude Code and Clawboo Native, `OPENROUTER_API_KEY` for Hermes, `null` for Codex.                                                                                                                                                                                                                                                                                                                                                                                      |
+| `hasCredential`      | key runtimes   | A key resolves for any variable the runtime reads (listed under disconnect below), from the server's environment, the vault, or `~/.openclaw/.env`. After a disconnect nothing counts until the runtime is connected again. Hermes also counts a ChatGPT sign-in.                                                                                                                                                                                                                                                                           |
+| `hasVaultCredential` | key runtimes   | Like `hasCredential`, but counts the vault only, so a key that exists only in the server's shell does not look like a key you connected. The first-run check reads this one.                                                                                                                                                                                                                                                                                                                                                                |
+| `loggedIn`           | Codex          | Codex is installed and `codex login status` reports a ChatGPT sign-in.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `codexAuth`          | Hermes         | Hermes holds a usable ChatGPT sign-in in its own `auth.json` (in `~/.hermes`, or `HERMES_HOME` when set).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `updateRequired`     | Codex          | The installed Codex CLI cannot read your ChatGPT plan's current model list, so its runs fail until it is updated. Present on a signed-in Codex once a model list read has run; the list request starts that read and does not wait for it. Reinstalling with `POST /api/runtimes/codex/install` updates it.                                                                                                                                                                                                                                 |
+| `cliVersion`         | Codex          | The installed Codex CLI's version, from the same read, or `null`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `acpMissing`         | Hermes         | Hermes was installed without its ACP mode (the `acp` extra), so its runs use `hermes chat`: no live output, and a comment stops and resumes the run. Read from `hermes acp --check`, run in a throwaway home at most once every ten minutes (after a minute when the last check could not tell); the list request starts it and does not wait for it. Absent until Hermes has been asked, when Hermes is not installed, and with `CLAWBOO_HERMES_TRANSPORT=quiet`. Reinstalling with `POST /api/runtimes/hermes/install` adds the mode.     |
+| `disconnectPlan`     | all            | What a full disconnect would do to the saved keys: `{ removes: string[], keeps: { envVar, sharedWith }[] }`. `removes` lists the saved keys only this runtime reads; `keeps` lists the saved keys another runtime also reads, with those runtimes' names. Variable names only, never a value.                                                                                                                                                                                                                                               |
+| `ollamaConnected`    | Clawboo Native | Local Ollama is set up: you picked it (a connect with `provider: "ollama"`), or no choice is recorded, `OLLAMA_BASE_URL` is set, and you have not disconnected the runtime.                                                                                                                                                                                                                                                                                                                                                                 |
 
 `connectionState` is derived like this:
 
-| Condition                        | `connectionState`                                                                      |
-| -------------------------------- | -------------------------------------------------------------------------------------- |
-| The CLI is not installed         | `not-installed`                                                                        |
-| `authKind: 'none'`               | `ready`                                                                                |
-| `authKind: 'oauth'` (Codex)      | `ready` when `loggedIn`, else `needs-login`                                            |
-| `authKind: 'api-key'` (the rest) | `ready` when `hasCredential` (Clawboo Native: or `ollamaConnected`), else `needs-auth` |
+| Condition                                                           | `connectionState`                                                                      |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| The CLI is not installed (Claude Code: the Agent SDK or its binary) | `not-installed`                                                                        |
+| `authKind: 'none'`                                                  | `ready`                                                                                |
+| `authKind: 'oauth'` (Codex)                                         | `ready` when `loggedIn`, else `needs-login`                                            |
+| `authKind: 'api-key'` (the rest)                                    | `ready` when `hasCredential` (Clawboo Native: or `ollamaConnected`), else `needs-auth` |
 
 With `CLAWBOO_ENABLE_MOCK_RUNTIME=1`, `runtimes[]` also lists a `clawboo-mock` fault-injection runtime for development. It is not in `available[]`. `POST /api/runtimes/clawboo-mock/run` runs a task on it; the other `:id` routes answer **404** for it.
 
@@ -156,13 +160,13 @@ curl http://localhost:18790/api/runtimes
 
 ## `POST /api/runtimes/:id/install`
 
-Installs the runtime's CLI, pinned to a major version:
+Installs the runtime, pinned to a major version (for Claude Code, a 0.x minor line):
 
-- Claude Code: `npm install -g @anthropic-ai/claude-code@2`.
+- Claude Code: `npm install -g @anthropic-ai/claude-agent-sdk@0.3`, the SDK every Claude Code run loads, not the `claude` CLI. It reaches the server only when Clawboo itself is a global install; from `npx` or a source checkout the stream sends one `SDK_NOT_LOADABLE` error and installs nothing.
 - Codex: `npm install -g @openai/codex@0`.
-- Hermes: `pipx install 'hermes-agent[anthropic,acp]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below.
+- Hermes: `pipx install --force 'hermes-agent[anthropic,acp]<1'`, with pipx pointed at the newest Python from 3.11 to 3.13 it finds (a newer Python such as 3.14 is passed over). With none in that range, pipx uses its own default Python. Without pipx it runs `python -m pip install --upgrade --user` with that Python, and retries once with `--break-system-packages` when pip reports an externally managed environment. Without pipx and without a Python in the range, it stops with one of the Python codes below. `--force` and `--upgrade` make the same request update an installed Hermes. After a Hermes install succeeds, the server forgets what it knew about Hermes's ACP mode and asks again with `hermes acp --check` before it sends `complete`, so a status read after `complete` already reports the new `acpMissing`.
 
-Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, the install process is killed.
+Clawboo Native is built in, so it answers **400** before any stream opens. If the client closes the connection, a first install is stopped. An install over one that is already there (an update) runs to the end instead, since stopping it part way can leave the runtime half replaced. One install of a runtime runs at a time: a request while one is running answers with an `INSTALL_RUNNING` error. When Claude Code already has the Agent SDK's own binary, the stream sends one `output` line naming it and `complete`, and installs nothing: a run starts that binary, so the CLI would be a second copy no run uses.
 
 - **Path params**: `id`.
 - **Request body**: none.
@@ -179,27 +183,29 @@ Clawboo Native is built in, so it answers **400** before any stream opens. If th
 
 #### Event catalog
 
-| `type`     | When                                                             | Payload fields                                     |
-| ---------- | ---------------------------------------------------------------- | -------------------------------------------------- |
-| `progress` | Install start, the pipx path, and the externally managed retry   | `step` (`'installing'` \| `'retrying'`), `message` |
-| `output`   | Each non-empty stdout or stderr line                             | `line`                                             |
-| `error`    | Tooling missing, permission denied, spawn failure, non-zero exit | `code`, `message`                                  |
-| `complete` | The process exits 0                                              | `success: true`, optional `warning`                |
+| `type`     | When                                                                                         | Payload fields                                     |
+| ---------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------- |
+| `progress` | Install start, the pipx path, and the externally managed retry                               | `step` (`'installing'` \| `'retrying'`), `message` |
+| `output`   | Each non-empty stdout or stderr line                                                         | `line`                                             |
+| `error`    | Tooling missing, permission denied, spawn failure, non-zero exit, an install already running | `code`, `message`                                  |
+| `complete` | The process exits 0                                                                          | `success: true`, optional `warning`                |
 
 The `error` codes:
 
-| `code`               | Meaning                                                                        |
-| -------------------- | ------------------------------------------------------------------------------ |
-| `NPM_MISSING`        | `npm` not found (Claude Code, Codex)                                           |
-| `PYTHON_MISSING`     | No Python with pip or pipx found (Hermes)                                      |
-| `PYTHON_TOO_OLD`     | Every Python found is older than 3.11, and no pipx (Hermes)                    |
-| `PYTHON_UNSUPPORTED` | No Python from 3.11 to 3.13 found, at least one is newer, and no pipx (Hermes) |
-| `EACCES`             | The npm or pipx error output mentioned `EACCES` or "permission denied"         |
-| `SPAWN_THROW`        | The spawn call threw                                                           |
-| `SPAWN_ERROR`        | The child process emitted an error                                             |
-| `EXIT_<code>`        | The process exited with a non-zero code (for example `EXIT_1`)                 |
+| `code`               | Meaning                                                                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NPM_MISSING`        | `npm` not found (Claude Code, Codex)                                                                                                                  |
+| `SDK_NOT_LOADABLE`   | Claude Code only: this server runs from `npx` or a source checkout, which cannot load an SDK installed globally. The message says what to run instead |
+| `PYTHON_MISSING`     | No Python with pip or pipx found (Hermes)                                                                                                             |
+| `PYTHON_TOO_OLD`     | Every Python found is older than 3.11, and no pipx (Hermes)                                                                                           |
+| `PYTHON_UNSUPPORTED` | No Python from 3.11 to 3.13 found, at least one is newer, and no pipx (Hermes)                                                                        |
+| `EACCES`             | The npm or pipx error output mentioned `EACCES` or "permission denied"                                                                                |
+| `SPAWN_THROW`        | The spawn call threw                                                                                                                                  |
+| `SPAWN_ERROR`        | The child process emitted an error                                                                                                                    |
+| `EXIT_<code>`        | The process exited with a non-zero code (for example `EXIT_1`)                                                                                        |
+| `INSTALL_RUNNING`    | An install of this runtime is still running; nothing new was started                                                                                  |
 
-An `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message suggests the same command with `sudo`. When the install succeeds but the CLI still cannot be found, `complete` carries a `warning` that suggests restarting the server.
+An `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message suggests the same command with `sudo`. When the install succeeds but the runtime still reads not installed, `complete` carries a `warning`. For Claude Code it says this Clawboo cannot load the SDK, which has to sit next to Clawboo, and to install both with the npm Clawboo was installed with, then run `clawboo restart`. For the other runtimes it says the CLI is not on `PATH` or in the known user-install folders yet, and suggests restarting the server.
 
 Example frames:
 
@@ -534,7 +540,7 @@ This route is one of the two ways work runs through Clawboo's task runner (the o
 }
 ```
 
-A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A `research` or `review` task gets no worktree and starts in its team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`workspaces/_no-team` for a task with no team); if that folder cannot be created, the run is refused with `workspace_unavailable` too. A worktree keeps file changes apart; neither it nor the team's folder is a sandbox (see [What agents can do](/concepts/permissions)).
+A `code` task (or any kind other than `research` and `review`) changes files, so it needs a worktree. A task that already has a worktree reuses it, rebuilding it from the task branch if it was cleaned up. A checkout still on the task branch with nothing uncommitted is reused as it is. A rebuild never replaces a folder that holds uncommitted changes, files git ignores, a commit no branch holds, a separate repository, or contents git cannot read: the run is refused with `workspace_unavailable`, and the task moves to `blocked` with a `[blocked: worktree kept]` comment naming the folder. When git does not answer the check, the run is refused the same way, nothing is changed, and the task goes back to `todo`. Otherwise, with no `repoPath`, or when the worktree cannot be created, the run is refused with `workspace_unavailable`: the task gets a `[blocked: no isolation]` comment and goes back to `todo`. A `research` or `review` task gets no worktree and starts in its team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`workspaces/_no-team` for a task with no team); if that folder cannot be created, the run is refused with `workspace_unavailable` too. A worktree keeps file changes apart; neither it nor the team's folder is a sandbox (see [What agents can do](/concepts/permissions)).
 
 ### Responses
 

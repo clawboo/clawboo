@@ -116,6 +116,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
+      byPerson?: true // for blocked: a person moved it there and no run has started since
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -167,7 +168,7 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   title: string                 // required, 1 to 500 chars
   description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
   teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
@@ -249,7 +250,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/retry
 
 ## `POST /api/board/:taskId/assign`
 
-Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started.
+Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started. When the agent is not the one it was bound to, every agent's saved session on the task is cleared, so the new agent starts fresh and so does an earlier one if the task comes back to it. Assigning it to the same agent again keeps that agent's session, like a retry.
 
 A task with `runnerInputs` starts through the task runner, on the new agent's runtime, with the saved repository and isolation kind; the saved model is kept only when the runtime is the same. An agent on a runtime the runner cannot run, such as OpenClaw, and a task with no `runnerInputs`, start in team chat. See `retry` above.
 
@@ -291,7 +292,15 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
 
 ```ts
 {
-  task: DbTask & { attention; runCost; runningSince } // shape as in GET /api/board
+  task: DbTask & {
+    attention
+    runCost
+    runningSince // shape as in GET /api/board
+    // How the run working on the task takes a comment now: the run's own way,
+    // which can differ from its runtime's (a Hermes run that fell back to
+    // `hermes chat` stops and resumes). null when no run is registered here.
+    runSteering: 'live' | 'interrupt-resume' | 'none' | null
+  }
   comments: Array<{
     id: string
     taskId: string
@@ -414,7 +423,7 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ```ts
 {
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal, -1 low; held to that range
   title?: string                // 1 to 500 chars
   description?: string          // up to 20000 chars
   humanOverride?: boolean        // move to done despite a failed check (audited); only with status 'done'
@@ -466,10 +475,10 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ### Example
 
 ```bash
-# Bump priority + retitle
+# Make it urgent + retitle
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
   -H 'Content-Type: application/json' \
-  -d '{"priority":5,"title":"Updated title"}'
+  -d '{"priority":2,"title":"Updated title"}'
 
 # Ship despite a non-promotable verdict (audited)
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
@@ -849,7 +858,7 @@ curl -X POST http://localhost:18790/api/board/<failed-task-id>/cancel-dependents
 
 Creates a git worktree and a `clawboo/task-<id>` branch for a task that changes files, writes the task files into it, and records the worktree and branch on the task. The task files are `TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh` and `VERIFICATION.md` (plus `AGENT_HANDOFF.json` once someone writes a handoff); the other workspace routes read them. The worktree lives outside your repo, at `<clawboo home>/worktrees/<repo hash>/<taskId>`, so it never shows up in the repo's own `git status`. A worktree keeps file changes apart; it is not a sandbox (see [What agents can do](/concepts/permissions)).
 
-The task `kind` decides whether a worktree is made: `code` (the default) and any unknown kind get one; `research` and `review` are refused with **422**. Asking again for a task that already has a live worktree reuses it.
+The task `kind` decides whether a worktree is made: `code` (the default) and any unknown kind get one; `research` and `review` are refused with **422**. Asking again for a task that already has a live worktree reuses it and returns the path the task records for it.
 
 - **Path params**: `taskId`.
 - **Request body**:
@@ -881,6 +890,12 @@ The task `kind` decides whether a worktree is made: `code` (the default) and any
 
 ```ts
 { ok: false, error: 'no_isolation', isolation: 'none' }
+```
+
+**`409 Conflict`**: a folder is already at the task's worktree path and replacing it could lose work, because it has uncommitted changes or git cannot read it. The folder is left as it is:
+
+```ts
+{ ok: false, error: 'unsafe_to_rebuild', worktreePath: string, message: string }
 ```
 
 **`200 OK`**: the worktree was provisioned (or an existing one reused):
@@ -972,7 +987,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace
 
 ## `PATCH /api/board/:taskId/workspace`
 
-Pauses or completes a task's worktree.
+Pauses or completes a task's worktree: the checkout the task records, which has to be the task's folder under `<clawboo home>/worktrees/<repo hash>/` or the work folder's `worktrees/<repo hash>/` (see [The work folder](/operating/data-and-state#the-work-folder)). A recorded path anywhere else answers **500** with `Error: worktree path does not belong to task <taskId>: <path>`, and nothing is removed.
 
 - **`pause`**: commits any uncommitted work, removes the worktree and keeps the branch. The workspace stays `active` and can be resumed.
 - **`complete`** with an empty diff: removes the worktree and branch and moves the task to `done`. A task in `todo` (released by a pause, or never claimed) moves through `in_progress` first; a `blocked` task stays `blocked`. There is nothing to check, so the check is skipped. The task files do not count toward the diff, so a run that only updated its own progress or handoff is still empty.
@@ -1115,17 +1130,23 @@ curl -X POST http://localhost:18790/api/board/<task-id>/workspace/handoff \
 
 ## `GET /api/board/:taskId/workspace/detail`
 
-The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff.
+The task drawer's workspace view: the contents of the task files that exist (`TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh`, `VERIFICATION.md`, `AGENT_HANDOFF.json`), plus the unified diff and diff stats against the starting commit, with the task files left out of the diff. The files are read the way the [workspace file view](#the-workspace-file-view) reads one, up to 256 KB each, so a task file that is a symbolic link, or that is not text, is left out, and a longer one holds only its first 256 KB and is named in `sorFilesTruncated`.
 
 - **Path params**: `taskId`.
 - **Request body**: none.
 
 ### Responses
 
-**`404 Not Found`**: no workspace row (or it has no worktree path):
+**`404 Not Found`**: no task with that id:
 
 ```json
-{ "error": "workspace not found" }
+{ "error": "task not found" }
+```
+
+**`200 OK`** with `ok: false`: the task exists but has no checkout of its own (no workspace row, or one with no worktree path). Most tasks never get one, so this is the ordinary answer for them:
+
+```json
+{ "ok": false, "reason": "no_workspace" }
 ```
 
 **`200 OK`**: the task files and the diff (`diffStat` and `diff` are empty when the worktree is paused or git is unavailable):
@@ -1135,6 +1156,7 @@ The task drawer's workspace view: the contents of the task files that exist (`TA
   ok: true
   workspace: DbWorkspace        // shape as in GET .../workspace
   sorFiles: Record<string, string>   // task file contents, keyed by file name
+  sorFilesTruncated: string[]        // names of the files cut at 256 KB
   diffStat: { filesChanged: number, insertions: number, deletions: number, dirty: boolean } | null
   diff: string                  // unified diff without the task files; '' when unavailable
 }
@@ -1158,7 +1180,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace/detail
 
 Four read-only routes behind an agent's **Workspace** tab. They serve a task's worktree: one directory level, one file, one file's diff, and the git status behind the change badges. Nothing here writes.
 
-The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
+The worktree path comes from the stored workspace row, never from the request. Every relative path is kept inside the worktree in three ways: absolute paths and `..` segments are refused; the resolved path must sit inside the root (so a sibling such as `<root>-evil` cannot pass as `<root>`); and symlinks are refused outright, with the path checked again after resolving any symlinked parent folder. The agent can change the worktree while it is read, so a file is opened without following a link, and checked again after the open: its path must still resolve to itself and name the same file, with one name. A file or folder swapped for a link after the first check is refused too. On Linux the check after the open also asks the kernel where the open file is, which a folder swapped back and forth during the check cannot fool; on macOS and Windows that last case is a race the server can lose. A file with more than one hard link is refused as well, since a hard link can give a file outside the worktree a name inside it; a git checkout never makes one, though a package manager's store can. Backslashes, control characters and paths over 1024 characters are refused too. A refused path answers **400** `{ "ok": false, "error": "<what is wrong>" }`.
 
 When the workspace itself cannot be read, all four answer `{ "ok": false, "error": "<message>", "reason": "<reason>" }`:
 
@@ -1212,7 +1234,7 @@ curl 'http://localhost:18790/api/board/<task-id>/workspace/file?path=src/index.t
 Serves the files in a task's worktree as a static website, so the task drawer's **Preview** can show the page an agent built next to the diff. It only serves files: it never runs a build or a dev server. The drawer checks for a preview every 10 seconds while it is open.
 
 - `GET /api/board/:taskId/preview` and `GET /api/board/:taskId/preview/<path>` serve the same tree. A folder (including the bare route) serves its `index.html`. A folder URL without a trailing slash answers `302` to the same URL with a `/` added (the base path and query are kept), so the page's relative links resolve.
-- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no absolute paths, `..`, symlinks, backslashes or control characters, and at most 1024 characters.
+- Paths follow the same rules as the [workspace file view](#the-workspace-file-view): no `..`, symlinks, hard-linked files, backslashes or control characters, and at most 1024 characters. Leading slashes are dropped, so `preview//index.html` is the worktree's `index.html`, never a path from the root of the disk.
 - `Content-Type` comes from a fixed list: `html`/`htm`, `css`, `js`/`mjs`, `json`/`map`, `txt` and `md` (as `text/plain`), `svg`, `png`, `jpg`/`jpeg`, `gif`, `webp`, `avif`, `ico`, `woff`/`woff2`, `ttf`, `otf`, `mp4`, `webm`, `wasm`. Anything else is sent as `application/octet-stream`, which a browser downloads rather than runs.
 - Every file is sent with `Content-Length`, `Cache-Control: no-store` and `X-Content-Type-Options: nosniff`, and streamed.
 - Every response, redirects and errors included, carries `Content-Security-Policy: sandbox allow-same-origin`.
@@ -1236,7 +1258,7 @@ The page is served from the dashboard's own origin, so a script in it could call
 
 **`413 Payload Too Large`**: a file over 8 MB: `{ "ok": false, "error": "That file is too large to preview." }`
 
-**`500 Internal Server Error`**: `{ "error": "<message>" }` (or `preview read failed` when the file cannot be read).
+**`500 Internal Server Error`**: `{ "error": "<message>" }`, including when a file that is there cannot be opened (no permission, no file descriptors left), or `preview read failed` when reading it fails partway.
 
 ### Example
 
@@ -1258,7 +1280,7 @@ Most error bodies are `{ "error": "<message>" }`. The exceptions:
 - `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`, `room_archived`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
 - The workspace file view adds `reason` to its misses and answers a refused path with `{ "ok": false, "error": "<message>" }`.
 - The preview routes answer `{ "ok": false, "error": "<message>" }` on `400`, `404` and `413`.
-- `GET /api/board/:taskId/workspace` and `/workspace/detail` answer a missing workspace with a bare `{ "error": "workspace not found" }`.
+- `GET /api/board/:taskId/workspace` answers a missing workspace with a bare `{ "error": "workspace not found" }`. `/workspace/detail` answers a task without one with `200` and `{ "ok": false, "reason": "no_workspace" }`, and an unknown task with `404` and `{ "error": "task not found" }`.
 
 An unknown `taskId` on a comment, or an unknown `parentTaskId` on a create, is a `500` from the database's foreign key, not a `404`.
 

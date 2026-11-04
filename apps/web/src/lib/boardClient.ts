@@ -290,6 +290,21 @@ export interface CreateTaskForAgentInput {
   parentTaskId?: string
 }
 
+/** Set a task's priority, a person's change from the task drawer. The server
+ *  holds it to the four named levels. True when the change was saved. */
+export async function updateTaskPriority(taskId: string, priority: number): Promise<boolean> {
+  try {
+    const r = await apiFetch(`/api/board/${encodeURIComponent(taskId)}`, {
+      method: 'PATCH',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ priority }),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
 /** Create a task for one agent on a team. Resolves null on any failure. */
 export async function createTaskForAgent(
   input: CreateTaskForAgentInput,
@@ -444,6 +459,8 @@ export interface WorkspaceDetail {
     status?: string
   }
   sorFiles?: Record<string, string>
+  /** Task files cut at the server's 256 KB read limit. */
+  sorFilesTruncated?: string[]
   diffStat?: DiffStat | null
   diff?: string
 }

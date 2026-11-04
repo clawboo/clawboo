@@ -39,6 +39,7 @@ import { createStaleTaskSweep } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
+import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
   isActiveTeamRoom,
@@ -56,13 +57,15 @@ import { startSessionActivityWatcher } from './lib/agentSource/sessionActivityWa
 import {
   resolveApiPort,
   writeApiPortFile,
+  getApiPortFilePath,
   removeApiPortFileIfOwned,
   waitForPortFree,
 } from './lib/portUtils'
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
-import { accessTokenRefusal } from './lib/accessTokenRefusal'
+import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe } from './lib/bootProbe'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
+import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
@@ -150,6 +153,22 @@ async function main() {
   }
   const basePath = basePathResult.basePath
 
+  // Settings an administrator pinned, in the operator file or the matching
+  // environment variables. Refuse to start on anything that cannot be trusted:
+  // carrying on would quietly drop pins they rely on, such as a disabled
+  // self-update.
+  try {
+    const operator = initOperatorSettings(process.env)
+    const pinned = Object.entries(operator.pins).map(([key, pin]) => `${key} (${pin.source})`)
+    if (pinned.length > 0) {
+      log.info({ file: operator.file, pinned }, 'Operator settings: pinned by the administrator')
+    }
+  } catch (err) {
+    if (!(err instanceof OperatorSettingsError)) throw err
+    log.error(`CONFIG: refusing to start. ${err.message}`)
+    process.exit(1)
+  }
+
   // If we were launched as a self-restart successor by an in-app update, the
   // exiting parent still holds the API port for a brief moment. Wait for it to
   // free before resolveApiPort — which throws on an explicit-but-taken
@@ -171,16 +190,21 @@ async function main() {
 
   // ── Access gate ───────────────────────────────────────────────────────────
 
-  // Fail-closed: a token the gate cannot use stops the boot on every bind, with or
-  // without CLAWBOO_ALLOW_INSECURE (see accessTokenRefusal).
-  const tokenRefusal = accessTokenRefusal(process.env['STUDIO_ACCESS_TOKEN'])
-  if (tokenRefusal) {
-    log.error({ hostname, port }, tokenRefusal)
+  // STUDIO_ACCESS_TOKEN when set (blank turns the gate off), else the per-install
+  // token in <CLAWBOO_HOME>/access-token, shared with the desktop app and created
+  // on the first start. Fail-closed: a token the gate cannot use, or a token file
+  // that cannot be trusted, stops the boot on every bind, with or without
+  // CLAWBOO_ALLOW_INSECURE (see bootAccessToken). The token is never logged, and
+  // one read from the file never reaches a child: children get the environment.
+  const bootToken = resolveBootAccessToken(process.env)
+  if (!bootToken.ok) {
+    log.error({ hostname, port }, bootToken.message)
     process.exit(1)
   }
+  log.info({ source: bootToken.source }, 'Access gate token source')
 
   const accessGate = createAccessGate({
-    token: process.env['STUDIO_ACCESS_TOKEN'],
+    token: bootToken.token,
     // Scopes the operator cookie to the mount and prefixes the post-exchange
     // redirect, so sharing an origin with another app does not share the cookie.
     basePath,
@@ -282,16 +306,19 @@ async function main() {
   // header — a forged Host must never redirect a runtime's Tasks/Memory/Tools/TeamChat
   // traffic. Mirrors the `http://127.0.0.1:${port}` the boot/ticker callers use.
   app.locals['apiPort'] = port
-  // Agents' browsers are launched with this port's loopback origins blocked,
-  // and the broker refuses connector calls that name them: the dashboard has no
-  // access check on loopback (see lib/connectors/dashboardGuard.ts).
-  setDashboardPort(port)
-  setDashboardPorts([port])
+  // Agents' browsers are launched with this port's loopback origins and the
+  // bind address blocked, and the broker refuses connector calls that name
+  // them: the dashboard has no access check on loopback (see
+  // lib/connectors/dashboardGuard.ts).
+  setDashboardPort(port, hostname)
+  setDashboardPorts([port], [hostname])
   // The base-path middleware STRIPS the prefix from `req.url` before routing, so
   // a route that needs to build an absolute-on-this-origin redirect cannot
   // recover it from the request. Publishing the validated value is how a route
   // rebuilds a Location without reaching for the raw `req.originalUrl`.
   app.locals['basePath'] = basePath
+  // POST /api/access/launch-code mints its one-time sign-in codes from this gate.
+  app.locals['accessGate'] = accessGate
 
   // Base-path strip, BEFORE the origin guard, and nothing may be mounted ahead
   // of it. The guards below decide what to protect with `startsWith('/api/')` and
@@ -473,6 +500,18 @@ async function main() {
     }
   } catch (err) {
     log.error({ err }, 'Board: moving tasks out of archived rooms failed (non-fatal)')
+  }
+
+  // ── Task resume pointers nothing will read again ───────────────────────────
+  // A task's own events clear its pointers as it finishes, is cancelled or is
+  // given to someone else. This catches what they could not: a task an MCP stdio
+  // server finished from another process, or one that finished while this server
+  // was down. Best-effort; never blocks boot.
+  try {
+    const swept = sweepTaskSessionPointers(getDb())
+    if (swept > 0) log.info({ swept }, 'Board: dropped task resume pointers nothing will resume')
+  } catch (err) {
+    log.error({ err }, 'Board: sweeping task resume pointers failed (non-fatal)')
   }
 
   // ── Worktrees: GC stale worktrees on startup ────────────────────────────────
@@ -739,8 +778,16 @@ async function main() {
 
     // Publish the chosen port for external tools (CLI, Vite proxy fallback,
     // e2e helpers). Best-effort: if writing fails, downstream consumers can
-    // still discover the port via the CLAWBOO_API_PORT env var.
-    writeApiPortFile(port)
+    // still discover the port via the CLAWBOO_API_PORT env var. Said out loud,
+    // since the clawboo command sends the access token only to this file's port.
+    if (!writeApiPortFile(port)) {
+      log.warn(
+        { port, file: getApiPortFilePath() },
+        'Could not write the port file. The clawboo command finds this server through it ' +
+          'and sends its access token only to the port it names, so it cannot sign in to ' +
+          'this server until the file can be written.',
+      )
+    }
 
     log.info({ url: browserUrl }, `Clawboo ready — open in browser: ${browserUrl}`)
 
@@ -757,12 +804,18 @@ async function main() {
     // A connector child outlives a HARD stop: a crash or a SIGKILL runs no
     // shutdown hook, and the child is a real process nobody is left holding. On
     // the next boot clawboo would spawn a second one and never learn about the
-    // first. Reaped BEFORE anything can connect, so the file cleared here is
+    // first. Reaped BEFORE anything can connect, so the records reaped here are
     // always the previous process's.
     safeStart('connector-reap', () => {
       const report = reapOrphanedConnectors((pid) => killProcessTreeByPid(pid))
       if (report.killed > 0 || report.expired > 0) {
         log.info(report, 'Connectors: reaped children left by a previous run')
+      }
+      if (report.unverified > 0) {
+        log.warn(
+          report,
+          'Connectors: left processes from a previous run running; this host could not show they are ours',
+        )
       }
     })
 

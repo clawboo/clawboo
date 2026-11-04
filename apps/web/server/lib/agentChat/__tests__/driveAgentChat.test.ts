@@ -36,6 +36,7 @@ import type {
 
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
 import { getDb, resetDb } from '../../db'
+import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../../runtimes/types'
@@ -973,5 +974,59 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     const notice = rowsFor(directChatSessionKey('codex-w', 'codex'))
     expect(notice.map((r) => r.kind)).toEqual(['meta'])
     expect(notice[0]?.text).toMatch(/could not create the working folder/)
+  })
+
+  describe('with every run slot taken', () => {
+    let slots: RunSlots
+    beforeEach(() => {
+      slots = createRunSlots(1)
+      setRunSlotsForTests(slots)
+    })
+    afterEach(() => setRunSlotsForTests(null))
+
+    it('a turn waits for a slot, then runs and commits its reply', async () => {
+      seedAgent('codex-q', 'codex')
+      const other = slots.tryAcquire()!
+      const adapter = quickDone()
+      const turn = driveAgentChat({
+        db,
+        agentId: 'codex-q',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      for (let i = 0; i < 5; i++) await tick()
+      expect(adapter.startCalls).toBe(0)
+      expect(slots.stats().queued).toBe(1)
+
+      other.release()
+      await turn
+      expect(adapter.startCalls).toBe(1)
+      expect(rowsFor(directChatSessionKey('codex-q', 'codex')).map((r) => r.text)).toEqual(['ok'])
+      expect(slots.stats()).toEqual({ size: 1, running: 0, queued: 0 })
+    })
+
+    it('Stop cancels a turn still waiting for a slot, and stays silent', async () => {
+      seedAgent('codex-q', 'codex')
+      const other = slots.tryAcquire()!
+      const adapter = quickDone()
+      const turn = driveAgentChat({
+        db,
+        agentId: 'codex-q',
+        message: 'q',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      for (let i = 0; i < 5; i++) await tick()
+      expect(slots.stats().queued).toBe(1)
+
+      await stopAgentChat('codex-q')
+      await turn
+      expect(slots.stats().queued).toBe(0)
+      other.release()
+      for (let i = 0; i < 5; i++) await tick()
+      expect(adapter.startCalls).toBe(0)
+      expect(rowsFor(directChatSessionKey('codex-q', 'codex'))).toEqual([])
+    })
   })
 })

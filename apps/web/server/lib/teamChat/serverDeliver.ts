@@ -24,6 +24,7 @@ import {
   agents,
   getAncestors,
   getSetting,
+  getTask,
   listUndeliveredInbox,
   markInboxDelivered,
   recordExecutionUsage,
@@ -66,6 +67,7 @@ import { getRegistry } from '../agentSource/registry'
 import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import { runSlots, type RunSlot } from '../runSlots'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
 import { openclawAgentModel } from '../openclawAgentModel'
@@ -81,8 +83,16 @@ import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
-import { buildServerTeamContext } from './contextPreamble'
-import { nativeTeamSessionSettingKey, teamResumeEligible } from './nativeTeamSession'
+import { buildServerTeamContext, buildTicketBlock } from './contextPreamble'
+import {
+  encodeTaskSessionPointer,
+  nativeTeamSessionSettingKey,
+  taskResumeEligible,
+  taskSessionSettingKey,
+  teamResumeEligible,
+  type TaskSessionPointer,
+} from './nativeTeamSession'
+import { readTaskSessionPointer, taskPointerWantedFor, ticketHashOf } from './taskSessionPointers'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { inboxRowBelongsToRoom } from './roomRoster'
 import { buildPeerCatchup } from './peerCatchup'
@@ -105,6 +115,23 @@ const NATIVE_RUNTIME = 'clawboo-native'
  */
 export const TOOL_CALL_WEDGE_MS = OPEN_TOOL_CALL_TIMEOUT_MS + 60_000
 
+/** Where a run records the session it ended with, so the next run resumes it. */
+interface ResumePointerWrite {
+  /** The settings key. */
+  key: string
+  /** The value to store for the session id the run ended with. */
+  encode: (sessionId: string) => string
+  /** A failed run that tried to resume most likely holds a dead handle, so it
+   *  clears the pointer. A task run that was stopped part way or ran out of
+   *  turns keeps it: its session is sound, the run was only cut short. */
+  keepUnlessError: boolean
+  /** Asked before writing. A task finished or cancelled while its run went on
+   *  has had its pointers cleared, and the stopped run must not write one back. */
+  wanted?: () => boolean
+}
+
+type DoneReason = Extract<RuntimeEvent, { kind: 'done' }>['reason']
+
 /** A live run tracked for Stop / wedge — keyed by sessionKey in the abort map. */
 export interface RunEntry {
   adapter: RuntimeAdapter
@@ -120,6 +147,18 @@ export interface RunEntry {
   serverAbortReason?: string | null
 }
 
+/** A delivery waiting in the process's run queue (see runSlots), keyed by sessionKey
+ *  in the host's queued map from the moment it queues until its run starts. */
+export interface QueuedRun {
+  /** Take it out of the queue (Stop, teardown). It never starts. */
+  cancel(): void
+}
+
+/** How often a queued delivery re-marks its session busy, well inside the nudge
+ *  queue's 10-minute wedge timer, which would otherwise force-idle the session and
+ *  let the next delivery start a second run on it. */
+const QUEUED_KEEPALIVE_MS = 60_000
+
 export interface ServerDeliverDeps {
   db: ClawbooDb
   teamId: string
@@ -133,6 +172,11 @@ export interface ServerDeliverDeps {
   /** sessionKey → live run, so `stop()` / the wedge can abort it. Populated here
    *  (in the send closure) and evicted in `drainRun` on the run's terminal. */
   abortMap: Map<string, RunEntry>
+  /** sessionKey → a delivery waiting for a run slot, so `stop()` can cancel it and the
+   *  engine's watchdog can tell waiting from silence. Populated here when every slot
+   *  is taken; evicted when the run starts or the delivery ends. Omitted in tests
+   *  that do not look at it. */
+  queuedRuns?: Map<string, QueuedRun>
   /** The engine's event sink: the orchestrator's `onEvent`. `run` is the stamp
    *  fixed when this run was delivered. */
   onEvent: (sessionKey: string, event: RuntimeEvent, run: RunStamp) => Promise<void>
@@ -249,6 +293,7 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 /** Build the engine's `deliver(targetSessionKey, targetAgentId, message)`. */
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
+  const queuedRuns = deps.queuedRuns ?? new Map<string, QueuedRun>()
   const execForSession = deps.execForSession
   const chatRoomId = deps.chatRoomId ?? null
   const stopGen = deps.stopGen
@@ -382,9 +427,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
        *  into the input-token ESTIMATE so an OpenClaw / no-USD run's cost reflects its
        *  real prompt size, not just the short task text. */
       contextChars: number
-      /** The leader session-resume pointer key to update on the terminal, or
-       *  null when this run is not an eligible leader/user-facing team turn. */
-      resumePointerKey: string | null
+      /** The resume pointer to update on the terminal: the leader's, for an
+       *  eligible leader/user-facing team turn, or the run's own task's, for a
+       *  task run whose runtime can resume. Null otherwise. */
+      resumePointer: ResumePointerWrite | null
       /** True when THIS run was started with a resume handle (ctx.resume) — drives
        *  the stale-pointer self-heal: a FAILED resumed run clears the pointer so the
        *  next turn starts fresh instead of looping through identical failures
@@ -400,6 +446,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       /** The agent's configured model, used to price an estimate when the run's cost
        *  events name none. */
       model: string | null
+      /** Give the run's slot back (see runSlots). Called once the run is over, before
+       *  the session's next delivery flushes and before the engine reacts to the
+       *  terminal, so whatever that starts can take the slot. */
+      releaseRunSlot: () => void
     },
   ): Promise<void> {
     let sawTerminal = false
@@ -519,6 +569,40 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const evictOwnEntry = (): void => {
       if (abortMap.get(sessionKey)?.run === run) abortMap.delete(sessionKey)
     }
+    /**
+     * Record the session this run ended with, so the next run resumes it, or
+     * clear the pointer. Called once, on the run's first terminal and BEFORE
+     * markIdle: the next queued delivery, which the nudge flushes on markIdle,
+     * reads the pointer to build ctx.resume, so a write after the drain would
+     * let a rapidly-sent message 2 resume message 0's transcript and drop this
+     * turn. The harness awaited saveSessionTranscript before its terminal, so
+     * the session file exists. `null` is a stream that died with no terminal.
+     */
+    const settleResumePointer = async (reason: DoneReason | null): Promise<void> => {
+      const pointer = obs.resumePointer
+      if (!pointer || !adapter.sessionCodec) return
+      const sound =
+        reason === 'success' ||
+        (pointer.keepUnlessError && (reason === 'aborted' || reason === 'max_turns'))
+      try {
+        if (!sound && obs.resumeAttempted) {
+          // Stale-pointer self-heal (mirrors executorRunner's clear-on-failed-
+          // resume): a run that TRIED to resume and failed most likely holds a
+          // dead handle (codex `exec resume <unknown-id>` is a hard exit 1), so
+          // writing it back would send every later run through the same failure.
+          // Clear it; the next run starts fresh.
+          setSetting(db, pointer.key, '')
+          return
+        }
+        // A stream that died with no terminal may still have its run going.
+        if (reason === null || (pointer.wanted && !pointer.wanted())) return
+        const blob = await adapter.sessionCodec.serialize(run)
+        const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
+        if (sid) setSetting(db, pointer.key, pointer.encode(sid))
+      } catch {
+        // Best-effort: a missing or unparseable id means the next run starts fresh.
+      }
+    }
 
     // Drain idle guard: a wedged adapter iterator must not hang this drain (and
     // with it the agent's home mutex + the engine's view of the session) forever.
@@ -594,41 +678,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const killed = takeServerAbortReason()
             if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
           }
-          // Leader continuity: persist THIS turn's harness session id so the NEXT team
-          // turn resumes it. Done HERE (on the terminal, BEFORE markIdle) so the next
-          // queued delivery — which the nudge flushes on markIdle and which reads the
-          // pointer to build ctx.resume — sees the FRESH id. Doing it after the drain
-          // would race: a rapidly-sent message 2 would read the stale pointer and resume
-          // message 0's transcript, dropping this turn. The harness already awaited
-          // saveSessionTranscript before emitting `done`, so the session file exists.
-          // Non-null resumePointerKey ⇒ an eligible leader / user-facing team turn.
-          if (obs.resumePointerKey && adapter.sessionCodec) {
-            if (ev.reason !== 'success' && obs.resumeAttempted) {
-              // Stale-pointer self-heal (structural, mirrors executorRunner's
-              // clear-on-failed-resume): a FAILED turn that TRIED to resume most
-              // likely holds a dead handle — codex `exec resume <unknown-id>` is a
-              // hard exit-1 — so writing it back would loop every subsequent turn
-              // through the same failure. Clear it; the next turn starts fresh.
-              try {
-                setSetting(db, obs.resumePointerKey, '')
-              } catch {
-                /* best-effort */
-              }
-            } else {
-              try {
-                const blob = await adapter.sessionCodec.serialize(run)
-                const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
-                if (sid) setSetting(db, obs.resumePointerKey, sid)
-              } catch {
-                // A missing/unparseable id just means the next turn starts fresh.
-              }
-            }
-          }
         }
         // Per-tool runtime detail → the obs activity terminal (all runtimes).
         emitRunObs(sessionKey, agentId, obs.runtime, ev)
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
         if (terminal) {
+          // On the FIRST terminal: every runtime ends a failed run with a fatal
+          // `error` before its `done`, and this loop stops at the first one.
+          await settleResumePointer(ev.kind === 'done' ? ev.reason : 'error')
           // A fatal-error terminal never reaches the `done` persist above — commit the
           // partial streamed text (what the user already watched) so it survives the
           // failure instead of vanishing with the stream.
@@ -650,6 +707,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // one CLEARING delta — empty text tells the client to drop its StreamingCard
           // (nothing will ever replace it, so leaving it lingers-then-vanishes).
           if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+          obs.releaseRunSlot()
           // Evict THIS run's abort entry BEFORE markIdle — this run is terminal, so
           // its handle is dead weight, and markIdle synchronously flushes the
           // session's next QUEUED delivery: for a mutex-less runtime (ephemeral
@@ -719,6 +777,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // Ordered last: a partial committed just above replaces the StreamingCard on
       // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+      await settleResumePointer(null)
+      obs.releaseRunSlot()
       evictOwnEntry()
       if (ownsSlot()) nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')
@@ -777,6 +837,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // The run's own execution row, read with its task: the engine opens it right
     // before it calls deliver, and forgets it when the run ends.
     const runExecId = runTaskId !== null ? execForSession(targetSessionKey) : null
+    // The title and description the brief carries, hashed now, when the brief was
+    // written: an edit made while this waits in the queue reaches the ticket block
+    // but not the brief, so the session it starts has seen the older text.
+    const briefTask = runTaskId !== null ? getTask(db, runTaskId) : null
+    const ticketHash = briefTask ? ticketHashOf(briefTask) : null
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
     // The durable report-ups a `[Task Update]` carries ride the stamp, so the
@@ -815,7 +880,14 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // bookkeeping; it cannot un-bake duplicated context. It also meant anything
     // arriving while the delivery sat in the queue was missed, which is the exact
     // opposite of "currency is a property of the runner".
-    const renderWaiting = (): {
+    //
+    // A task run's ticket block (see contextPreamble's `buildTicketBlock`) is
+    // rendered at the same moment and placed between the stable team preamble and
+    // the envelope: the preamble stays a byte-stable prefix for the provider's
+    // prompt cache, and everything that changes from run to run comes after it.
+    const renderWaiting = (
+      ticketBlock: string | null,
+    ): {
       teamContext: string | null
       digestIds: string[]
       roomId: string | null
@@ -858,7 +930,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         ],
       })
       return {
-        teamContext: [baseTeamContext, envelope].filter(Boolean).join('\n\n') || null,
+        teamContext: [baseTeamContext, ticketBlock, envelope].filter(Boolean).join('\n\n') || null,
         // Only rows that actually FIT get marked — a row truncated out of the
         // budget was not delivered and rides the next digest.
         digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
@@ -869,32 +941,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
 
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
-    // True once this `deliver` has resolved for the engine, which for a busy
-    // session is as soon as the message is queued. A start that fails after that
-    // never reaches the engine's retry, so the report-ups the delivery carries
-    // are handed back to it instead (see `onRunNotStarted`).
-    let accepted = false
-    const delivery = nudge.deliver(
+    return nudge.deliver(
       targetSessionKey,
       () =>
-        new Promise<void>((resolveStart, rejectStart) => {
-          let settled = false
-          const started = (): void => {
-            settled = true
-            resolveStart()
-          }
-          const failStart = (e: Error): void => {
-            if (accepted && !settled && stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
-            settled = true
-            rejectStart(e)
-          }
-          const settleRefused = (why: 'stopped' | 'released'): void => {
-            if (why === 'released') nudge.markIdle(targetSessionKey)
-            started()
-          }
-          // Rendered HERE: this runs when the queue releases the delivery, so the
-          // context reflects state at start time rather than at enqueue time.
-          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
+        new Promise<void>((started, failStart) => {
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -934,6 +984,24 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // The resume handle THIS run was started with (ctx.resume) — drives the
           // drain's stale-pointer self-heal on a failed resumed run.
           let resumeHandle: string | null = null
+          // A task run's own session on its task, from its last run there, when
+          // its runtime can resume one (see `taskResumeEligible`). A pointer
+          // another runtime wrote is never handed to this one.
+          let taskPointer: TaskSessionPointer | null = null
+          const readTaskPointer = (
+            runtime: string | null,
+            home: string | null,
+          ): TaskSessionPointer | null => {
+            if (runTaskId === null || !runtime) return null
+            const eligible = taskResumeEligible({
+              runtime,
+              homeDir: home,
+              isTeamSession: isTeamSessionKey(targetSessionKey),
+            })
+            if (!eligible) return null
+            const p = readTaskSessionPointer(db, targetAgentId, teamId, runTaskId)
+            return p && p.runtime === runtime ? p : null
+          }
           if (makeAdapterForAgent) {
             // Test path: the adapter is injected. Its caps still pick the mutex: a
             // persistent home takes the home mutex, and the connected mutex engages
@@ -958,15 +1026,18 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               homeKind === 'persistent'
                 ? runtimeIdentityHomePath(resolvedRuntime ?? adapter.id, targetAgentId)
                 : null
-            resumeHandle = teamResumeEligible({
-              runtime: resolvedRuntime,
-              homeDir,
-              isTeamSession: isTeamSessionKey(targetSessionKey),
-              isTaskRun: holdsWork,
-            })
-              ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
-                null
-              : null
+            taskPointer = readTaskPointer(resolvedRuntime, homeDir)
+            resumeHandle =
+              taskPointer?.sessionId ??
+              (teamResumeEligible({
+                runtime: resolvedRuntime,
+                homeDir,
+                isTeamSession: isTeamSessionKey(targetSessionKey),
+                isTaskRun: holdsWork,
+              })
+                ? getSetting(db, nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)) ||
+                  null
+                : null)
           } else {
             const runtime = resolvedRuntime
             // native + the coding runtimes (claude-code / codex / hermes), PLUS
@@ -1030,7 +1101,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // reads its OWN config (no top-level `model`), so scope to non-native.
               const codingModel =
                 runtime !== NATIVE_RUNTIME ? parseCodingModelConfig(row?.execConfig ?? null) : null
-              resumeHandle = teamResumeId
+              // A task run resumes its own session on the task instead; a leader
+              // turn never runs a task, so at most one of the two is set.
+              taskPointer = readTaskPointer(runtime, homeDir)
+              resumeHandle = taskPointer?.sessionId ?? teamResumeId
               // Claude Code / Codex / Hermes / Native start in the team's own
               // folder, not the server's working directory (clawboo's state dir).
               // For Native the folder is also what turns on its file tools.
@@ -1039,18 +1113,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 ...(workdir ? { cwd: workdir } : {}),
                 model: codingModel?.model ?? null,
                 ...(codingModel?.provider ? { providerHint: codingModel.provider } : {}),
-                resume: teamResumeId,
+                resume: resumeHandle,
                 mcpBaseUrl,
                 // `delegate: true` = THIS run is orchestrator-driven, so the engine IS
                 // observing its tool-calls — it rides the TeamChat attach URL and
                 // exposes the `team_delegate` signal tool (how a coding-runtime LEADER
                 // delegates; the engine's DELEGATE_TOOL_NAME_RE branch turns the call
                 // into a board task). executorRunner runs never set it.
+                //
+                // `boundTaskId`: a task run's own task, signed onto its Tasks URL so
+                // the Tasks tools use it when a call leaves taskId out. Not the
+                // provenance `taskId`, which would change how memories get promoted.
                 memoryScope: {
                   teamId,
                   agentId: targetAgentId,
                   delegate: true,
                   attachSecret: getMcpAttachSecret(db),
+                  ...(runTaskId !== null ? { boundTaskId: runTaskId } : {}),
                 },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
@@ -1061,23 +1140,181 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // const so TS narrows them cleanly inside the closures below.
           const capturedHomeDir = homeDir
           const capturedWorkdir = workdir
-          // The native leader session-resume pointer to update on the terminal (the
-          // amnesia fix) — non-null ONLY for an eligible native leader / user-facing team
-          // turn (a delegated child keeps its own executor-handoff continuity). Threaded
-          // into the drain so the write lands BEFORE markIdle, closing the rapid-message
-          // race (see drainRun's `done` handler). Read side is ctx.resume above.
-          const resumePointerKey = teamResumeEligible({
-            runtime: resolvedRuntime,
-            homeDir: capturedHomeDir,
-            isTeamSession: isTeamSessionKey(targetSessionKey),
-            isTaskRun: holdsWork,
-          })
-            ? nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId)
-            : null
+
+          // When this run's context was built: recorded with the session's
+          // pointer on the terminal, with the brief's ticket hash. Set by
+          // `renderRunContext`.
+          let seenAt = 0
+          /**
+           * The context the run starts with: the stable preamble, a task run's
+           * ticket block, then what is waiting. Called inside runJob, with the
+           * run's slot and the agent's lock held and right before the start, so
+           * a run that waited (for a slot, or behind another of its agent's runs:
+           * the task runner, a routine) starts from the board as it is then, not
+           * as it was when the queue released it. After the resume decision
+           * above, because a resumed session is told what changed.
+           */
+          const renderRunContext = (): ReturnType<typeof renderWaiting> => {
+            seenAt = Date.now()
+            let ticketBlock: string | null = null
+            if (
+              runTaskId !== null &&
+              isTeamSessionKey(targetSessionKey) &&
+              (origin.kind === 'delegation' || origin.kind === 'assignment')
+            ) {
+              try {
+                ticketBlock = buildTicketBlock(db, targetAgentId, {
+                  taskId: runTaskId,
+                  execId: runExecId,
+                  origin,
+                  briefHash: ticketHash,
+                  resumed: taskPointer
+                    ? {
+                        ticketHash: taskPointer.ticketHash,
+                        seenAt: taskPointer.seenAt,
+                        endedAt: taskPointer.endedAt ?? null,
+                      }
+                    : null,
+                })
+              } catch (err) {
+                // The brief still goes out: a run without its ticket block is the
+                // old behavior, not a failure.
+                log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
+              }
+            }
+            return renderWaiting(ticketBlock)
+          }
+
+          // The resume pointer to update on the terminal. Threaded into the drain
+          // so the write lands BEFORE markIdle, closing the rapid-message race (see
+          // the drain's `settleResumePointer`). Read side is ctx.resume above.
+          //  · A task run whose runtime can resume: its own pointer on the task,
+          //    recording what this session saw (the ticket hash and `seenAt`) and
+          //    when its run ended.
+          //  · An eligible leader / user-facing team turn (the amnesia fix): the
+          //    leader's pointer, holding the bare session id.
+          const taskPointerRuntime =
+            runTaskId !== null &&
+            resolvedRuntime &&
+            ticketHash !== null &&
+            taskResumeEligible({
+              runtime: resolvedRuntime,
+              homeDir: capturedHomeDir,
+              isTeamSession: isTeamSessionKey(targetSessionKey),
+            })
+              ? resolvedRuntime
+              : null
+          const resumePointer: ResumePointerWrite | null =
+            taskPointerRuntime !== null && runTaskId !== null && ticketHash !== null
+              ? {
+                  key: taskSessionSettingKey(targetAgentId, teamId, runTaskId),
+                  encode: (sessionId) =>
+                    encodeTaskSessionPointer({
+                      sessionId,
+                      runtime: taskPointerRuntime,
+                      ticketHash,
+                      seenAt,
+                      // Encoded as the run ends.
+                      endedAt: Date.now(),
+                    }),
+                  keepUnlessError: true,
+                  wanted: () => taskPointerWantedFor(getTask(db, runTaskId), targetAgentId),
+                }
+              : teamResumeEligible({
+                    runtime: resolvedRuntime,
+                    homeDir: capturedHomeDir,
+                    isTeamSession: isTeamSessionKey(targetSessionKey),
+                    isTaskRun: holdsWork,
+                  })
+                ? {
+                    key: nativeTeamSessionSettingKey(targetAgentId, teamId, chatRoomId),
+                    encode: (sessionId) => sessionId,
+                    keepUnlessError: false,
+                  }
+                : null
           // A connected substrate serializes on the SHARED per-gateway-agent mutex —
           // cross-subsystem (routines / runTeamExchange / other teams' orchestrators)
           // AND Boo-Zero-in-N-teams (the one OpenClaw agent that spans teams).
           const connectedKey = homeKind === 'connected' && row ? connectedAgentKey(row) : null
+
+          // The process-wide run cap (see runSlots), keyed on the agent lock this run
+          // takes. A delegated task's delivery that finds every slot taken is settled
+          // as delivered at once: the engine awaits it, often from inside a lead's
+          // drain that holds a slot, and waiting there for a slot only that lead can
+          // free would stall both. From then on, what happens to it reaches the
+          // engine the way a run's own ending would. Any other delivery (a person's
+          // or a routine's message, a task update) waits for its slot unsettled:
+          // nothing holding a slot awaits it, and its caller keeps its own handling
+          // of a failure to start.
+          const slotKey = capturedHomeDir ?? connectedKey ?? null
+          let settledEarly = false
+          let queuedEntry: QueuedRun | null = null
+          let keepBusy: ReturnType<typeof setInterval> | null = null
+          let runSlot: RunSlot | null = null
+          let runStarted = false
+          /** Out of the run queue: the run started, or the delivery ended without one. */
+          const leaveQueue = (): void => {
+            if (keepBusy) clearInterval(keepBusy)
+            keepBusy = null
+            if (queuedEntry && queuedRuns.get(targetSessionKey) === queuedEntry)
+              queuedRuns.delete(targetSessionKey)
+            queuedEntry = null
+          }
+          /**
+           * A delivery settled early ended without a run. A released task needs
+           * nothing from the engine, which already let go of it. A Stop releases the
+           * task cleanly and a failure to start fails it, but only while the session
+           * still holds that task: a Stop can free the session for a newer task while
+           * this delivery waited for its agent's lock, and an ending meant for this
+           * one would then fail the newer task.
+           */
+          const endQueued = async (outcome: 'stopped' | 'released' | Error): Promise<void> => {
+            const ownsSession = stopGen() === deliveredGen
+            if (outcome === 'released') {
+              if (ownsSession) nudge.markIdle(targetSessionKey)
+              return
+            }
+            if (outcome !== 'stopped') {
+              // A refusal has already put its reason in the chat.
+              if (chatVisible && !(outcome instanceof DeliveryRefusedError)) {
+                const provider = loadAgentConfig(db, targetAgentId)?.primaryProvider
+                deps.persistMeta?.(
+                  targetSessionKey,
+                  runFailureText(outcome.message, resolvedRuntime, provider),
+                )
+              }
+              if (ownsSession) nudge.markIdle(targetSessionKey)
+            }
+            if (runTaskId === null || taskForSession(targetSessionKey) !== runTaskId) return
+            const base = { runId: '', sessionId: null, ts: Date.now(), seq: 0 }
+            const ending: RuntimeEvent =
+              outcome === 'stopped'
+                ? { ...base, kind: 'done', reason: 'aborted', summary: '' }
+                : { ...base, kind: 'error', code: null, message: outcome.message, fatal: true }
+            try {
+              await onEvent(targetSessionKey, ending, stamp)
+            } catch (err) {
+              log.error(
+                { err, sessionKey: targetSessionKey },
+                'engine rejected the end of a queued run',
+              )
+            }
+          }
+          const settleStarted = (): void => {
+            if (!settledEarly) started()
+          }
+          const settleFailed = (err: Error): void => {
+            if (!settledEarly) failStart(err)
+            else if (!runStarted) void endQueued(err)
+          }
+          const settleRefused = (why: 'stopped' | 'released'): void => {
+            if (settledEarly) {
+              void endQueued(why)
+              return
+            }
+            if (why === 'released') nudge.markIdle(targetSessionKey)
+            started()
+          }
 
           // Set once the agent's lock is held: from then on runJob settles the
           // delivery itself.
@@ -1116,7 +1353,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 budgetNoticeShown.add(targetAgentId)
                 deps.persistMeta?.(targetSessionKey, text)
               }
-              failStart(new DeliveryRefusedError(text))
+              settleFailed(new DeliveryRefusedError(text))
               return
             }
             if (capturedWorkdir) {
@@ -1124,7 +1361,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 await ensureTeamWorkdir(capturedWorkdir)
               } catch (e) {
                 // Never fall back to the server's working directory.
-                failStart(
+                settleFailed(
                   new Error(
                     `could not create the team's working folder ${capturedWorkdir}: ${e instanceof Error ? e.message : String(e)}`,
                   ),
@@ -1132,10 +1369,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 return
               }
             }
+            // Rendered HERE, with the run's slot and its agent's lock held and every
+            // gate passed, so the context is the state at start time: anything that
+            // arrived while the delivery waited (in the nudge queue, for a run slot
+            // or for the lock) rides this turn. A task run's ticket block and its
+            // `seenAt` are built with it (see renderRunContext).
+            const { teamContext, digestIds, roomId, throughSeq } = renderRunContext()
             let run: RunHandle
             try {
               run = await adapter.start(
-                { taskId: null, teamId },
+                // Every adapter ignores this argument today; the agent learns its
+                // task from the ticket block and its Tasks URL. Passed truthfully
+                // all the same, as the task runner does.
+                { taskId: runTaskId, teamId },
                 {
                   agentId: targetAgentId,
                   sessionKey: targetSessionKey,
@@ -1159,9 +1405,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 settleRefused(why)
                 return
               }
+              // A start that tried to resume and threw most likely holds a dead
+              // handle, as the drain's self-heal assumes of a failed resumed run:
+              // clear it, so the next run starts fresh instead of failing the same way.
+              if (resumeHandle !== null && resumePointer) {
+                try {
+                  setSetting(db, resumePointer.key, '')
+                } catch {
+                  /* best-effort */
+                }
+              }
               // Immediate-send failure → the engine fails the task now rather than
               // waiting out the 8-minute watchdog (the nudge un-busies the session).
-              failStart(e instanceof Error ? e : new Error(String(e)))
+              settleFailed(e instanceof Error ? e : new Error(String(e)))
               return
             }
             // Gate 3, with no await before abortMap.set: a run refused after it
@@ -1169,7 +1425,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // a refused delivery consumes no inbox rows or cursor.
             const after = refusal()
             if (after) {
-              started()
+              // A delivery settled early has to tell the engine itself that a Stop
+              // ended it.
+              if (!settledEarly) started()
+              else if (after === 'stopped') void endQueued('stopped')
               await discardRun(adapter, run)
               // A Stop during the discard reset the queue, so the slot is no
               // longer this delivery's to free.
@@ -1179,6 +1438,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            runStarted = true
+            leaveQueue()
             budgetNoticeShown.delete(targetAgentId)
             // The run STARTED with the catch-up in its context, so the cursor may
             // advance — and only now. Advancing at render time would let a failed
@@ -1212,7 +1473,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // `deliver` resolves HERE — after start, BEFORE the drain — so the
             // engine's `await deps.deliver` doesn't serialize the cascade. The home /
             // connected mutex (when held) stays held for the WHOLE drain below.
-            started()
+            settleStarted()
             // A task run can be steered while it works: a person commenting on
             // the task reaches it through the per-task registry (see runSteers).
             const steerHandle =
@@ -1222,12 +1483,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 runtime: resolvedRuntime,
                 message,
                 contextChars: teamContext ? teamContext.length : 0,
-                resumePointerKey,
+                resumePointer,
                 resumeAttempted: resumeHandle != null,
                 chatVisible,
                 stamp,
                 execId: runExecId,
                 model: configuredModel,
+                releaseRunSlot: () => runSlot?.release(),
               })
             } finally {
               steerHandle?.release()
@@ -1261,31 +1523,73 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           const stopBeat = beatTaskId
             ? startTaskHeartbeat(db, beatTaskId, { assigneeAgentId: targetAgentId })
             : (): void => undefined
-          void job()
-            .catch((e: unknown) => {
-              // A lock wait that timed out never reached runJob's gates. After a
-              // Stop or a release that is a refused start too, not a failure of
-              // whatever task holds the session now.
-              if (!jobRan) {
-                const why = refusal()
-                if (why) {
-                  settleRefused(why)
-                  return
+          const runWithSlot = (slot: RunSlot): void => {
+            runSlot = slot
+            void job()
+              .catch((e: unknown) => {
+                // A lock wait that timed out never reached runJob's gates. After a
+                // Stop or a release that is a refused start too, not a failure of
+                // whatever task holds the session now.
+                if (!jobRan) {
+                  const why = refusal()
+                  if (why) {
+                    settleRefused(why)
+                    return
+                  }
                 }
-              }
-              // runJob settles `started`/`failStart` itself; this catch only guards an
-              // unexpected throw before/around that so it isn't an unhandled rejection.
-              failStart(e instanceof Error ? e : new Error(String(e)))
+                // runJob settles the delivery itself; this catch only guards an
+                // unexpected throw before/around that so it isn't an unhandled rejection.
+                settleFailed(e instanceof Error ? e : new Error(String(e)))
+              })
+              .finally(() => {
+                slot.release()
+                leaveQueue()
+                stopBeat()
+              })
+          }
+          // The slot comes BEFORE the agent's lock (see runSlots), so a delivery
+          // waiting for one holds nothing a running agent needs.
+          const slot = runSlots().tryAcquire(slotKey)
+          if (slot) {
+            runWithSlot(slot)
+            return
+          }
+          if (runTaskId !== null) {
+            settledEarly = true
+            started()
+          }
+          const cancel = new AbortController()
+          queuedEntry = { cancel: () => cancel.abort() }
+          queuedRuns.set(targetSessionKey, queuedEntry)
+          keepBusy = setInterval(() => {
+            if (stopGen() === deliveredGen) nudge.markBusy(targetSessionKey)
+          }, QUEUED_KEEPALIVE_MS)
+          keepBusy.unref?.()
+          runSlots()
+            .acquire({ key: slotKey, signal: cancel.signal })
+            .then(
+              (granted) => runWithSlot(granted),
+              () => {
+                // Taken out of the queue by a Stop, a teardown or the engine letting
+                // go of the task: it never starts.
+                leaveQueue()
+                stopBeat()
+                settleRefused(refusal() ?? 'released')
+              },
+            )
+            .catch((err: unknown) => {
+              log.error({ err, sessionKey: targetSessionKey }, 'queued delivery failed to settle')
             })
-            .finally(() => stopBeat())
         }),
-    )
-    void delivery.then(
-      () => {
-        accepted = true
+      // Queued behind the recipient's run, this delivery already resolved for
+      // the engine, so a start that fails now (however it fails, a throw while
+      // setting the run up included) never reaches the engine's retry. The
+      // report-ups it carries are handed back instead (see `onRunNotStarted`).
+      {
+        onQueuedFailure: () => {
+          if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+        },
       },
-      () => undefined,
     )
-    return delivery
   }
 }

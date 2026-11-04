@@ -107,11 +107,17 @@ It depends on the runtime:
 
 A git worktree keeps a task's file changes apart from your other files, but it is not a sandbox. For work you do not trust, run Clawboo as a separate user or in a virtual machine. See [What agents can do](/concepts/permissions).
 
+### Why does my browser say the dashboard is locked to my computer?
+
+That browser is not signed in. Every Clawboo server has an access token, and a browser needs a sign-in once. `clawboo` signs in the browser it opens, so this screen appears in a different browser, after the token changed, or when you open a sign-in link a second time (each works once, within two minutes). Run `clawboo open` on the computer running Clawboo to open a signed-in browser. See [Security](/operating/security#the-access-token).
+
 ### Can I open Clawboo from another computer, or share it with a colleague?
 
-Clawboo is built for one person on one computer, with no user accounts or roles. Out of the box it listens only on that computer. To open it from somewhere else, follow [Reach Clawboo from another machine](/guides/self-host-securely). An SSH tunnel is the simplest way. Anything wider needs an access token (`STUDIO_ACCESS_TOKEN`), and anyone who has the token can do everything you can.
+Clawboo is built for one person on one computer, with no user accounts or roles. Out of the box it listens only on that computer, and its dashboard is locked with an access token that only your user account can read. To open it from somewhere else, follow [Reach Clawboo from another machine](/guides/self-host-securely). An SSH tunnel is the simplest way. Anyone who has the token, or a live one-time sign-in link, can do everything you can.
 
-Use only letters, digits, `.`, `_`, `~` and `-` in the token: with any other character the server refuses to start. It also refuses to start on a network address with no token.
+To open the dashboard in another browser, use **Open on another device** at the bottom of the sidebar, or run `clawboo open --print` on the computer running Clawboo. Either gives a one-time link that works once, within two minutes. A phone needs the server to be reachable from it first, which the guide covers.
+
+If you choose your own token (`STUDIO_ACCESS_TOKEN`), use only letters, digits, `.`, `_`, `~` and `-`: with any other character the server refuses to start. It also refuses to start on a network address with the token turned off.
 
 <Warning>
 
@@ -170,7 +176,7 @@ clawboo stop
 clawboo restart
 ```
 
-`clawboo stop` is safe to run when nothing is running. `clawboo restart` starts a fresh server on the same port and opens your browser. With npx, run `npx clawboo@latest stop`. On a server protected by `STUDIO_ACCESS_TOKEN`, run them from a shell that has the server's token. Without it, both commands refuse and print a command that stops the server by its port. See the [CLI reference](/reference/cli).
+`clawboo stop` is safe to run when nothing is running. `clawboo restart` starts a fresh server on the same port and opens your browser. With npx, run `npx clawboo@latest stop`. On a server you started with your own `STUDIO_ACCESS_TOKEN`, run them from a shell that has that token. Without it, both commands refuse and print a command that stops the server by its port. A server on its per-install token needs nothing: the commands read the token file. See the [CLI reference](/reference/cli).
 
 ### How do I update Clawboo?
 
@@ -185,7 +191,7 @@ clawboo restart
 
 ### How do I reset Clawboo?
 
-An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database. If the server uses an access token, run `clawboo stop` from a shell that has the token, or stop the server with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. Delete files only after it has stopped.
+An upgrade needs no reset: a newer Clawboo adds what it needs to your database when it opens it. Reset only to wipe data, because a reset deletes data you cannot get back. Stop the server first, or it keeps serving the old database. If you started the server with your own `STUDIO_ACCESS_TOKEN`, run `clawboo stop` from a shell that has that token, or stop the server with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. Delete files only after it has stopped.
 
 To reset only the data, delete the database and its two side files. The `&&` deletes them only if `clawboo stop` succeeds:
 

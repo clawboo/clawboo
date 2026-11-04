@@ -7,7 +7,7 @@
 // background install survives. A single Continue advances (there is no separate
 // "skip"), and nothing here can strand (the native runtime is already connected).
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -35,6 +35,42 @@ function renderStep(overrides: Partial<Parameters<typeof AddRuntimesStep>[0]> = 
 }
 
 describe('AddRuntimesStep', () => {
+  it('reads the runtimes again while it shows, so a status that arrives later appears', async () => {
+    // The server answers some status (a Hermes without its live mode) only on a
+    // later read, so a single read on mount would show Connected for good.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      let reads = 0
+      server.use(
+        http.get('/api/runtimes', () => {
+          reads += 1
+          return HttpResponse.json({
+            runtimes: [
+              {
+                id: 'hermes',
+                connectionState: 'ready',
+                ...(reads > 1 ? { acpMissing: true } : {}),
+              },
+            ],
+            available: [],
+          })
+        }),
+      )
+      renderStep()
+      expect(await screen.findByTestId('runtime-list-row-hermes-toggle')).toHaveTextContent(
+        /Manage/i,
+      )
+      expect(screen.queryByText('Update available')).not.toBeInTheDocument()
+      act(() => {
+        vi.advanceTimersByTime(8_000)
+      })
+      expect(await screen.findByText('Update available')).toBeInTheDocument()
+      expect(reads).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('lists every runtime as a row, each unconnected row with an explicit CTA toggle (no pill, no chevron)', async () => {
     noRuntimes()
     renderStep()

@@ -80,7 +80,10 @@ offers no dynamic client registration, because Clawboo cannot sign itself in the
 ingests untrusted content and can send data out; the grant rules use the union of these across a run. If the server
 will not start without a path or value only a person can supply, set `requiresUserArgument` and describe it in
 `userArgument` (with `replacesArg` when the args hold a placeholder to replace). A browser connector also declares
-`perAgentProfileFlag` in its `launch`, so each agent gets its own browser profile.
+`perAgentProfileFlag` in its `launch`, so each agent gets its own browser profile, and `blockOriginsArg` and
+`chromeSwitchArg`, which say how the server takes a list of origins to block and one extra Chrome switch. Clawboo uses
+those two to keep the browser off the dashboard and off local files; check them against the server's `--help` when
+you move the pin.
 
 When the server marks tools destructive that are not, list the ones that are in `destructiveTools` (raw tool
 names). A listed tool needs admin access; an unlisted one is treated as a write, whatever the server's own

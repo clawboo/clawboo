@@ -26,7 +26,7 @@ Use this page when something in Clawboo does not work. Start with the five quick
 
 <Step title="Check that the server is running">
 
-Run `clawboo` in a terminal (`npx clawboo@latest` if you use npx). It finds the Clawboo server that is already running, or starts one, then opens your browser and prints the address after **Clawboo opened at**. Use that address. It is `http://localhost:18790` unless that port was taken.
+Run `clawboo` in a terminal (`npx clawboo@latest` if you use npx). It finds the Clawboo server that is already running, or starts one, then opens your browser and prints the address after **Clawboo opened at**. Use that address. It is `http://127.0.0.1:18790` unless that port was taken.
 
 If the command prints a message instead, look it up under [Install and launch](#install-and-launch).
 
@@ -106,9 +106,9 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 
 ### A Clawboo server is running on port N, but it requires an access token.
 
-**What it means:** this install sets `STUDIO_ACCESS_TOKEN`, so the server answers only requests that carry its access cookie. The shell you ran the command in does not have that token, or has a different one, so the command cannot use the server. It does not start a second server.
+**What it means:** the server was started with a `STUDIO_ACCESS_TOKEN`, so it answers only requests that carry that token as its access cookie. The shell you ran the command in does not have that token, or has a different one, so the command cannot use the server. It does not start a second server. (A server on its per-install token needs nothing from the shell: the command reads `~/.clawboo/access-token`.)
 
-**Fix:** set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo stop` and `clawboo restart` then work too. To open the dashboard, visit `http://localhost:<port>/?access_token=<your token>` once in your browser, with the port the message names. Without the token, `clawboo stop` and `clawboo restart` refuse to touch this server; they print a command that stops it by its port.
+**Fix:** set `STUDIO_ACCESS_TOKEN` to the server's token in this shell and run the command again; `clawboo open`, `clawboo stop` and `clawboo restart` then work too. To open the dashboard, visit `http://localhost:<port>/?access_token=<your token>` once in your browser, with the port the message names. Without the token, `clawboo stop` and `clawboo restart` refuse to touch this server; they print a command that stops it by its port.
 
 **Prevent it:** run `clawboo` from a shell that has the server's token, or manage the server with its own terminal or a service manager. See [Token-gated installs](/reference/cli#token-gated-installs).
 
@@ -150,7 +150,7 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 
 **What it means:** Clawboo could not open a browser, for example on a computer without a screen. The server runs anyway.
 
-**Fix:** open the address printed after **Clawboo opened at**, usually `http://localhost:18790`.
+**Fix:** run `clawboo open --print` and open the one-time link it prints, within two minutes. The address printed after **Clawboo opened at**, usually `http://127.0.0.1:18790`, shows the locked screen until a browser signs in.
 
 </Accordion>
 
@@ -359,6 +359,14 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 </Accordion>
 
+<Accordion title="Hermes reads Update available">
+
+**What it means:** this Hermes was installed without its live mode (the `acp` extra). Its agents still run, but a run shows its work only when it finishes, and a comment sent mid-run stops the run and resumes it.
+
+**Fix:** click **Update** on the **Hermes** row, then **Update Hermes**. When the row reads **Connected**, the next run is live. More in [Hermes](/runtimes/hermes).
+
+</Accordion>
+
 <Accordion title="Permission denied. A global install may require elevated permissions.">
 
 **What it means:** npm cannot write to its global folder while installing Claude Code or Codex. For OpenClaw the message reads "Permission denied. Your Node.js installation may require sudo for global installs."
@@ -556,6 +564,14 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 </Accordion>
 
+<Accordion title="[blocked: worktree kept] The worktree at <path> could not be rebuilt without losing work">
+
+**What it means:** the task ran again and its worktree folder had to be rebuilt from the task branch, but the folder holds something the rebuild would delete: uncommitted changes, files git ignores (such as an `.env` file), a commit no branch holds, a separate git repository, or contents git cannot read. The comment says which. Clawboo left the folder as it is, did not start the run, and moved the task to **Needs you**.
+
+**Fix:** open the folder the comment names. Commit or copy what you need from it, or remove it, then move the task back to **To do**. A `[not started: worktree unchecked]` comment is the milder case: git did not answer when Clawboo checked the folder, nothing was changed, and the task can run again as it is.
+
+</Accordion>
+
 <Accordion title="Couldn’t load the board.">
 
 **What it means:** the board's first read failed, usually because the Clawboo server is not answering.
@@ -634,26 +650,33 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 **Fix:** wait a minute, then try again. The usual cause is a script or tool calling the API in a tight loop, or a page that keeps reloading: stop it. Behind a reverse proxy every request arrives from the same address, so all your browsers and tools share one allowance. The limits are in [Limits and defaults](/reference/limits-and-defaults#network-and-http).
 
+### This dashboard is locked to your computer
+
+**What it means:** this browser is not signed in to Clawboo. The server has an access token, which every install does unless you turn it off, and this browser has no access cookie, or the token changed. A sign-in link works once, within two minutes, so opening one a second time also lands here.
+
+**Fix:** run `clawboo open` on the computer running Clawboo: it opens a signed-in browser. On a computer with no browser, run `clawboo open --print` and open the one-time link it prints. From a browser that is signed in, **Open on another device** at the bottom of the sidebar makes a link for another browser.
+
 ### Clawboo access token required
 
-**What it means:** the server runs with `STUDIO_ACCESS_TOKEN`, and this browser has no access cookie yet (a 401). "Invalid Clawboo access token." means the token in the address does not match the server's.
+**What it means:** a request to the API had no access cookie, or the wrong one (a 401). Scripts see this; the dashboard shows the locked screen above instead. "Invalid Clawboo access token." means the token in an `?access_token=` address does not match the server's.
 
-**Fix:** open your Clawboo address once with `?access_token=<your token>` added. Check the token for missing or extra characters.
+**Fix:** in a browser, follow the entry above, or open your Clawboo address once with `?access_token=<your token>` added, checking the token for missing or extra characters. In a script, send the cookie as shown under [Authentication](/reference/rest-api/index#authentication).
 
 ### SECURITY: refusing to start
 
-**What it means:** the server exits with code 1 rather than leave the API open. Either `HOST` makes it listen on a network address and it has no access token, or `STUDIO_ACCESS_TOKEN` has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops it on any address (the message names the character).
+**What it means:** the server exits with code 1 rather than leave the API open. One of three things is wrong: `HOST` makes it listen on a network address with the access token turned off (`STUDIO_ACCESS_TOKEN=` set blank); `STUDIO_ACCESS_TOKEN` has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops it on any address (the message names the character); or the token file, `~/.clawboo/access-token`, is not one Clawboo can trust (the message names the file and says why).
 
 **Fix:** the message says which case it is.
 
-- **A character the token cannot use:** replace the token with one made by `openssl rand -hex 24` (output from `openssl rand -base64` can contain `+`, `/` or `=`), or unset `STUDIO_ACCESS_TOKEN`. Unsetting `HOST` does not help here.
-- **A network address with no token:** set `STUDIO_ACCESS_TOKEN` (letters, digits, `.`, `_`, `~` and `-` only), or unset `HOST` to listen on this computer only.
+- **A character the token cannot use:** replace the token with one made by `openssl rand -hex 24` (output from `openssl rand -base64` can contain `+`, `/` or `=`), or unset `STUDIO_ACCESS_TOKEN` to use the per-install token. Unsetting `HOST` does not help here.
+- **A network address with the token off:** set a token (letters, digits, `.`, `_`, `~` and `-` only) or unset `STUDIO_ACCESS_TOKEN` to use the per-install one, or unset `HOST` to listen on this computer only.
+- **The token file:** it is not a regular file, others can read it and Clawboo could not change that, or it does not hold a valid token. Delete it; the next start makes a new one, and every browser signs in again with `clawboo open`.
 
 ### Agents lost their Clawboo tools after setting HOST
 
 **What it means:** `HOST` names a single network address, so the server stops answering on `127.0.0.1`, the address Clawboo's own agents use to reach its tools. Their calls to the board, memory and team chat fail.
 
-**Fix:** use `HOST=0.0.0.0`, which answers on every address including `127.0.0.1`, or keep the default and reach Clawboo through an SSH tunnel. Either way, set an access token. See [Reach Clawboo from another machine](/guides/self-host-securely).
+**Fix:** use `HOST=0.0.0.0`, which answers on every address including `127.0.0.1`, or keep the default and reach Clawboo through an SSH tunnel. Either way, keep the access token on. See [Reach Clawboo from another machine](/guides/self-host-securely).
 
 ### More remote-access messages
 
@@ -669,9 +692,9 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 <Accordion title="SECURITY: a request reached this server through a reverse proxy">
 
-**What it means:** a request came through a proxy and the server has no access token, so anyone who can reach the proxy can use the dashboard and the API. The warning appears once per server start and never blocks a request.
+**What it means:** a request came through a proxy and the server's access token is turned off (`STUDIO_ACCESS_TOKEN=` set blank), so anyone who can reach the proxy can use the dashboard and the API. The warning appears once per server start and never blocks a request.
 
-**Fix:** set `STUDIO_ACCESS_TOKEN` and restart, unless the proxy itself checks every request.
+**Fix:** set a token, or unset `STUDIO_ACCESS_TOKEN` to use the per-install one, and restart, unless the proxy itself checks every request.
 
 </Accordion>
 
@@ -685,7 +708,7 @@ On clawboo 0.5.0 and older, a reverse proxy on the same machine leaves every `/a
 
 <Accordion title="clawboo stop says the server requires an access token">
 
-**What it means:** the server is protected by an access token, and the shell you ran `clawboo stop` in does not have that token, so the command cannot confirm the server.
+**What it means:** the server was started with a `STUDIO_ACCESS_TOKEN`, and the shell you ran `clawboo stop` in does not have that token, so the command cannot confirm the server.
 
 **Fix:** set `STUDIO_ACCESS_TOKEN` to the server's token in that shell and run `clawboo stop` again. Or stop the server with Ctrl+C in its terminal, with your service manager, or with the command that `clawboo stop` prints. See [Token-gated installs](/reference/cli#token-gated-installs).
 
@@ -748,7 +771,7 @@ Include:
 Take out:
 
 - Provider keys. They start with `sk-`, `sk-ant-`, `sk-or-` and similar.
-- Your `STUDIO_ACCESS_TOKEN`, and any address containing `access_token=`.
+- Your `STUDIO_ACCESS_TOKEN`, the contents of `~/.clawboo/access-token`, and any address containing `access_token=` or a live `access_code=`.
 - MCP attach URLs, which carry signatures, and the OpenClaw Gateway token.
 - Anything copied from `~/.openclaw/.env` or `~/.clawboo/secrets`.
 
