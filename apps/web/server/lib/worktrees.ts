@@ -5,7 +5,10 @@
 // retain); GC marks reaped workspaces stale.
 //
 // Worktrees live OUTSIDE the user's repo (under the clawboo state dir, namespaced
-// by a repo-path hash) so they never pollute the repo's own `git status`.
+// by a repo-path hash) so they never pollute the repo's own `git status`. A
+// checkout recorded under the work folder (`workDir.ts`), where the newer layout
+// keeps them, is acted on where it is recorded; new ones still go under the
+// state dir.
 
 import crypto from 'node:crypto'
 import { existsSync } from 'node:fs'
@@ -42,6 +45,7 @@ import {
   RegistrationUnknownError,
   UnsafeWorktreeError,
   worktreeDiff,
+  worktreePathFor,
   writeHandoff,
   type AgentHandoff,
   type AgentHandoffInput,
@@ -60,22 +64,65 @@ import type { RuntimeRunContext } from './runtimes'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
 import { readTeamVerifyCommand } from './verification/teamVerifyCommand'
 import { notifyVerificationParked } from './teamChat/inboxNotices'
+import { realPathOf, workDirSpellings } from './workDir'
 import { readFileAt } from './workspaceFs'
+
+function repoHash(repoPath: string): string {
+  return crypto.createHash('sha1').update(path.resolve(repoPath)).digest('hex').slice(0, 12)
+}
 
 /**
  * Worktree root for a repo — under the clawboo state dir, namespaced by a hash
  * of the repo path so multiple repos never collide and (critically) so worktrees
- * are NOT created inside the user's repo tree.
+ * are NOT created inside the user's repo tree. Every new checkout goes here.
  */
 function worktreeRootForRepo(repoPath: string): string {
-  const hash = crypto.createHash('sha1').update(path.resolve(repoPath)).digest('hex').slice(0, 12)
-  return path.join(resolveClawbooDir(), 'worktrees', hash)
+  return path.join(resolveClawbooDir(), 'worktrees', repoHash(repoPath))
+}
+
+/** The work folder's worktree roots for `repoPath`, in each of its spellings. */
+function workFolderRootsForRepo(repoPath: string): string[] {
+  const hash = repoHash(repoPath)
+  return workDirSpellings().map((dir) => path.join(dir, 'worktrees', hash))
+}
+
+/**
+ * Every root a recorded checkout of `repoPath` may be under: the state dir's
+ * (first, where new ones go) and the work folder's, in each of its spellings.
+ * Pause and complete refuse a record under none of them.
+ */
+function worktreeRootsForRepo(repoPath: string): string[] {
+  return [...new Set([worktreeRootForRepo(repoPath), ...workFolderRootsForRepo(repoPath)])]
+}
+
+/** The root `recorded` is the task's folder under, or null when it is under none. */
+function rootOfRecordedCheckout(repoPath: string, taskId: string, recorded: string): string | null {
+  const wanted = path.resolve(recorded)
+  return (
+    worktreeRootsForRepo(repoPath).find(
+      (root) => worktreePathFor(repoPath, taskId, root) === wanted,
+    ) ?? null
+  )
+}
+
+/** The roots GC sweeps for `repoPath`: each folder once, however it is spelled,
+ *  by the first spelling in {@link worktreeRootsForRepo}. */
+function gcRootsForRepo(repoPath: string): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const root of worktreeRootsForRepo(repoPath)) {
+    // Not there: GC finds nothing in it, so the spelling is key enough.
+    const key = realPathOf(root) ?? root
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(root)
+  }
+  return out
 }
 
 /** Detached review checkouts live OUTSIDE the user repo too (the critic gate). */
 function reviewRootForRepo(repoPath: string): string {
-  const hash = crypto.createHash('sha1').update(path.resolve(repoPath)).digest('hex').slice(0, 12)
-  return path.join(resolveClawbooDir(), 'reviews', hash)
+  return path.join(resolveClawbooDir(), 'reviews', repoHash(repoPath))
 }
 
 function scaffoldFromTask(db: ClawbooDb, task: DbTask): TaskScaffoldInput {
@@ -146,7 +193,10 @@ export async function provisionTaskWorkspace(
     (await isWorktreeRegistered(input.repoPath, existing.worktreePath))
   ) {
     updateWorkspaceStatus(db, existing.id, 'active', { lastUsedAt: Date.now() })
-    const worktree = await loadWorktree({ repoPath: input.repoPath, taskId, rootDir })
+    // The checkout git just confirmed, at its recorded path (which may be under
+    // the work folder), not one rebuilt under the state dir.
+    const loaded = await loadWorktree({ repoPath: input.repoPath, taskId, rootDir })
+    const worktree = { ...loaded, worktreePath: existing.worktreePath }
     return { ok: true, worktree, workspaceId: existing.id, isolation }
   }
 
@@ -166,9 +216,13 @@ export async function provisionTaskWorkspace(
   }
   let workspaceId: string
   if (existing) {
-    // Reuse the prior (stale / reaped) row instead of inserting a duplicate —
-    // the worktree path + branch are deterministic per (repo, task).
-    updateWorkspaceStatus(db, existing.id, 'active', { lastUsedAt: Date.now() })
+    // Reuse the prior (stale / reaped) row instead of inserting a duplicate,
+    // and record where the checkout is now: the row may have named another
+    // place, such as the work folder, and pause and complete act on the row.
+    updateWorkspaceStatus(db, existing.id, 'active', {
+      lastUsedAt: Date.now(),
+      worktreePath: worktree.worktreePath,
+    })
     workspaceId = existing.id
   } else {
     const ws = createWorkspace(db, taskId, input.repoPath, {
@@ -194,7 +248,10 @@ export async function provisionTaskWorkspace(
  * `unsafe_to_rebuild` when a folder at the path could hold work that replacing
  * it would lose (no fallback: a provision would replace it the same way), and
  * `registration_unknown` when git could not say whether the checkout is
- * registered (nothing was changed; no fallback either).
+ * registered (nothing was changed; no fallback either). The checkout is rebuilt
+ * where the row records it when that is the task's folder under a known root
+ * (the work folder's included); otherwise under the state dir, and the row is
+ * updated to name it.
  */
 export async function resumeTaskWorkspace(
   taskId: string,
@@ -208,9 +265,15 @@ export async function resumeTaskWorkspace(
     const worktree = await resumeWorktree({
       repoPath,
       taskId,
-      rootDir: worktreeRootForRepo(repoPath),
+      rootDir:
+        rootOfRecordedCheckout(repoPath, taskId, ws.worktreePath) ?? worktreeRootForRepo(repoPath),
     })
-    updateWorkspaceStatus(db, ws.id, 'active', { lastUsedAt: Date.now() })
+    // The same path when it was rebuilt where recorded; the state dir's when the
+    // recorded one is under no known root, which pause and complete would refuse.
+    updateWorkspaceStatus(db, ws.id, 'active', {
+      lastUsedAt: Date.now(),
+      worktreePath: worktree.worktreePath,
+    })
     setTaskWorkspaceRefs(db, taskId, {
       worktreeRef: worktree.worktreePath,
       branchRef: worktree.branch,
@@ -362,16 +425,19 @@ export async function actOnTaskWorkspace(
   const db = getDb()
   const ws = getWorkspaceForTask(db, taskId)
   if (!ws || !ws.worktreePath || !ws.branch) return { ok: false, reason: 'not_found' }
-  const rootDir = worktreeRootForRepo(ws.repoPath)
-  const worktree = await loadWorktree({ repoPath: ws.repoPath, taskId, rootDir })
+  // The checkout the row records, under the state dir or the work folder. Pause
+  // and complete refuse it unless it is the task's folder under one of those.
+  const roots = worktreeRootsForRepo(ws.repoPath)
+  const loaded = await loadWorktree({ repoPath: ws.repoPath, taskId, rootDir: roots[0] })
+  const worktree: Worktree = { ...loaded, worktreePath: ws.worktreePath }
 
   if (action === 'pause') {
-    const pause = await pauseWorktree(ws.repoPath, worktree, rootDir)
+    const pause = await pauseWorktree(ws.repoPath, worktree, roots)
     updateWorkspaceStatus(db, ws.id, 'active', { lastUsedAt: Date.now() })
     return { ok: true, action: 'pause', pause }
   }
 
-  const complete = await completeWorktree(ws.repoPath, worktree, rootDir)
+  const complete = await completeWorktree(ws.repoPath, worktree, roots)
 
   // `complete` ends a run, so the moves below start from `in_progress`. A task
   // back in `todo` (released by a pause hand-off, or never claimed) has no legal
@@ -506,9 +572,11 @@ export interface GcSummary {
 }
 
 /**
- * Sweep stale worktrees across every repo with active workspaces. Tasks that are
- * locked (`in_progress` / `in_review`) are skipped; reaped workspaces are marked
- * `stale`. Reaping commits-before-drop, so no uncommitted work is lost.
+ * Sweep stale worktrees across every repo with active workspaces, under the
+ * state dir and, for checkouts a row records there, the work folder. Tasks that
+ * are locked (`in_progress` / `in_review`) are skipped; a workspace whose
+ * recorded checkout a sweep removed is marked `stale`. Reaping
+ * commits-before-drop, so no uncommitted work is lost.
  */
 export async function gcTaskWorkspaces(
   opts: { maxAgeMs?: number; maxCount?: number } = {},
@@ -534,21 +602,42 @@ export async function gcTaskWorkspaces(
 
   const summary: GcSummary = { reaped: [], skipped: [], failed: [] }
   for (const [repoPath, list] of byRepo) {
-    const rootDir = worktreeRootForRepo(repoPath)
-    const r = await gcWorktrees({
-      repoPath,
-      rootDir,
-      maxAgeMs: opts.maxAgeMs,
-      maxCount: opts.maxCount,
-      isActive: isTaskActive,
-    })
-    for (const taskId of r.reaped) {
-      const ws = list.find((w) => w.taskId === taskId)
-      if (ws) updateWorkspaceStatus(db, ws.id, 'stale')
+    const stateRoot = worktreeRootForRepo(repoPath)
+    const workRoots = workFolderRootsForRepo(repoPath)
+    // The state dir is this install's alone. A work folder can be shared by two
+    // installs that set the same CLAWBOO_WORK_DIR, so there a folder is swept
+    // only when one of this install's rows records that very checkout; anything
+    // else, another install's included, is left alone and not counted.
+    // `taskId` is a folder name from disk, so it is matched against the rows
+    // before it is ever used to build a path.
+    const recordedInWorkFolder = (taskId: string): boolean =>
+      list.some((w) => {
+        if (w.taskId !== taskId || !w.worktreePath) return false
+        const recorded = path.resolve(w.worktreePath)
+        return workRoots.some((root) => worktreePathFor(repoPath, taskId, root) === recorded)
+      })
+    for (const rootDir of gcRootsForRepo(repoPath)) {
+      const r = await gcWorktrees({
+        repoPath,
+        rootDir,
+        maxAgeMs: opts.maxAgeMs,
+        maxCount: opts.maxCount,
+        isActive: isTaskActive,
+        ...(rootDir === stateRoot ? {} : { owns: recordedInWorkFolder }),
+      })
+      for (const taskId of r.reaped) {
+        // A folder named for the task can sit under one root while the row
+        // records a checkout under another; only a row whose own checkout is
+        // gone goes stale.
+        const ws = list.find((w) => w.taskId === taskId)
+        if (ws?.worktreePath && !existsSync(ws.worktreePath)) {
+          updateWorkspaceStatus(db, ws.id, 'stale')
+        }
+      }
+      summary.reaped.push(...r.reaped)
+      summary.skipped.push(...r.skipped)
+      summary.failed.push(...r.failed)
     }
-    summary.reaped.push(...r.reaped)
-    summary.skipped.push(...r.skipped)
-    summary.failed.push(...r.failed)
   }
   return summary
 }

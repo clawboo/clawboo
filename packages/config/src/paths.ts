@@ -3,6 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 const CLAWBOO_DIRNAME = '.clawboo'
+const CLAWBOO_WORK_DIRNAME = 'clawboo-work'
 
 export const resolveUserPath = (input: string): string => {
   const trimmed = input.trim()
@@ -54,4 +55,23 @@ export function resolveClawbooDir(env: NodeJS.ProcessEnv = process.env): string 
   const override = env['CLAWBOO_HOME']?.trim()
   if (override) return resolveUserPath(override)
   return path.join(resolveDefaultHomeDir(), CLAWBOO_DIRNAME)
+}
+
+/**
+ * The work folder: the place outside the data folder where agent work (team
+ * folders, task worktrees, review checkouts) goes in the newer layout.
+ * `CLAWBOO_WORK_DIR` sets it. Otherwise it sits beside `CLAWBOO_HOME` as
+ * `<CLAWBOO_HOME>-work`, so two installs keep their work apart, and without
+ * either it is `~/clawboo-work`.
+ *
+ * Nothing creates it yet: new work folders still go under the data folder. The
+ * server's readers of task checkouts (pause, complete, resume, the verify gate
+ * and GC) accept a checkout under either one.
+ */
+export function resolveWorkDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['CLAWBOO_WORK_DIR']?.trim()
+  if (override) return resolveUserPath(override)
+  const dataOverride = env['CLAWBOO_HOME']?.trim()
+  if (dataOverride) return `${resolveUserPath(dataOverride)}-work`
+  return path.join(resolveDefaultHomeDir(), CLAWBOO_WORK_DIRNAME)
 }

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { resolveClawbooDir, resolveDefaultHomeDir, resolveUserPath } from './paths'
 import { mkdirPrivateSync, writePrivateFileSync } from './privateFiles'
 
-export { resolveClawbooDir } from './paths'
+export { resolveClawbooDir, resolveWorkDir } from './paths'
 
 // The URL path prefix the whole app is served under. Re-exported by name (a
 // `export *` of a workspace dep breaks downstream bundling in this repo).
