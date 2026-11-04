@@ -122,25 +122,50 @@ class ScriptedCodex implements RuntimeAdapter {
 const done = (summary: string): RuntimeEvent =>
   ({ kind: 'done', reason: 'success', summary }) as RuntimeEvent
 
-/** Advance fake time in small steps (interleaving REAL macrotasks — fs I/O in the
- *  drains isn't timer-gated) until `until()` holds or the fake-time budget runs out.
- *  The cascade mixes timer-gated stages (the 3s reflect batch) with real-I/O stages
- *  (mkdir, sqlite), so under full-suite load on a slow CI runner the drains' I/O lags
- *  the fake-time advance. A single setImmediate per step and a tight budget let the
- *  cascade stall after the worker completes but before the leader's synthesis turn is
- *  delivered (leadStarts=1 not 2). Fix: a generous budget PLUS several real macrotask
- *  turns per step so the I/O keeps pace; the loop still exits the instant `until()`
- *  flips, so the fast (local) path is unchanged. */
-async function settle(until: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
+/** True while a real fs request (an `fs` or `fs/promises` call) has not completed. */
+const fsInFlight = (): boolean =>
+  process.getActiveResourcesInfo().some((r) => r.startsWith('FSReq'))
+
+/** Run the cascade until `until()` holds: advance fake time in small steps, and never
+ *  while a real fs request is in flight. The cascade mixes timer-gated stages (the 3s
+ *  reflect batch) with real I/O (each run's home `mkdir`), and only the timers are
+ *  fake. Stepping blind let fake time outrun the I/O: the old 90s fake budget (360
+ *  steps) ran out in tens of milliseconds of real time, so a worker whose `mkdir` was
+ *  slower than that on a Windows runner had not even started when the test asserted.
+ *  Waiting out the I/O before each step keeps the two in production order on any
+ *  runner, so the fake time used is fixed (a few reflect windows). Bounded by real
+ *  time as well as fake time, and it throws naming `what` instead of letting the
+ *  assertions run early. */
+async function settle(
+  until: () => boolean,
+  what: string,
+  fakeBudgetMs = 30 * REFLECT_WINDOW_MS,
+  realBudgetMs = 20_000,
+): Promise<void> {
   const step = 250
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+  const startedAt = performance.now()
+  const deadline = startedAt + realBudgetMs
+  // Real macrotask turns (I/O completions run between them) until no fs request is
+  // left in flight, so the caller also asserts on settled state.
+  const quiesce = async (): Promise<void> => {
+    do {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
+    } while (fsInFlight() && performance.now() < deadline)
   }
-  for (let t = 0; t < budgetMs && !until(); t += step) {
+  let fakeMs = 0
+  await quiesce()
+  while (!until()) {
+    if (fakeMs >= fakeBudgetMs || performance.now() >= deadline) {
+      const realMs = Math.round(performance.now() - startedAt)
+      throw new Error(
+        `settle: ${what} did not happen after ${fakeMs} ms fake / ${realMs} ms real` +
+          (fsInFlight() ? ' (an fs request is still in flight)' : ''),
+      )
+    }
     await vi.advanceTimersByTimeAsync(step)
-    await flush() // real macrotask flushes (I/O completions)
+    fakeMs += step
+    await quiesce()
   }
-  await flush() // let any last real I/O settle before the caller asserts
 }
 
 describe('Codex-led cascade (delegate MCP tool → board → report-up → synthesis)', () => {
@@ -278,7 +303,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     // the 3s reflect batch → the leader's synthesis turn persisting to chat. The
     // delegation-turn ack persists too now (streamed prose never vanishes), so wait
     // for BOTH leader turns — settling on the first would race the synthesis.
-    await settle(() => persisted.length >= 2)
+    await settle(() => persisted.length >= 2, "the leader's synthesis turn")
 
     // 1. The delegation became a DURABLE board task, ran on the worker, and is DONE.
     const tasks = listTasks(db, { teamId: TEAM })
@@ -398,7 +423,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     })
 
     await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser', HUMAN_TURN)
-    await settle(() => persisted.length >= 3)
+    await settle(() => persisted.length >= 3, "the lead's second synthesis")
 
     // 1. Only the lead's turns reach the chat: the ack and its two syntheses.
     expect(persisted.map((p) => p.text)).toEqual(['handed off', 'SYNTHESIS 1', 'SYNTHESIS 2'])
@@ -475,7 +500,10 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     })
 
     await deliver(skFor(LEAD), LEAD, 'follow-up message', HUMAN_TURN)
-    await settle(() => !getSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM)))
+    await settle(
+      () => !getSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM)),
+      'the stale pointer clear',
+    )
 
     // The failed resumed turn CLEARED the pointer — the next turn starts fresh
     // instead of resuming the dead handle again.
