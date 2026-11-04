@@ -84,6 +84,54 @@ export interface ScheduleActionResult {
   code?: string
 }
 
+/** The zone routines are worked out in. */
+export interface SchedulerTimeZone {
+  timeZone: string
+  /** The server's own zone, which applies while none is stored. */
+  hostTimeZone: string
+  /** True when a zone is stored, false when the server's applies. */
+  configured: boolean
+}
+
+function asSchedulerTimeZone(body: unknown): SchedulerTimeZone | null {
+  const b = (body ?? {}) as Record<string, unknown>
+  if (typeof b['timeZone'] !== 'string' || typeof b['hostTimeZone'] !== 'string') return null
+  return {
+    timeZone: b['timeZone'],
+    hostTimeZone: b['hostTimeZone'],
+    configured: b['configured'] === true,
+  }
+}
+
+/** The zone routines are worked out in, or null when it could not be read. */
+export async function fetchSchedulerTimeZone(): Promise<SchedulerTimeZone | null> {
+  try {
+    const res = await apiFetch('/api/schedules/time-zone')
+    if (!res.ok) return null
+    return asSchedulerTimeZone(await res.json())
+  } catch {
+    return null
+  }
+}
+
+/** Store the zone routines are worked out in; null follows the server's again. */
+export async function saveSchedulerTimeZone(
+  timeZone: string | null,
+): Promise<ScheduleActionResult & { value?: SchedulerTimeZone }> {
+  try {
+    const res = await apiFetch('/api/schedules/time-zone', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ timeZone }),
+    })
+    if (!res.ok) return parse(res)
+    const value = asSchedulerTimeZone(await res.json().catch(() => null))
+    return value ? { ok: true, value } : { ok: false, error: 'Unexpected reply from the server' }
+  } catch (err) {
+    return fail(err)
+  }
+}
+
 async function parse(res: Response): Promise<ScheduleActionResult> {
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>
   if (!res.ok) {

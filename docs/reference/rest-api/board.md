@@ -116,6 +116,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out
+      byPerson?: true // for blocked: a person moved it there and no run has started since
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -1136,10 +1137,16 @@ The task drawer's workspace view: the contents of the task files that exist (`TA
 
 ### Responses
 
-**`404 Not Found`**: no workspace row (or it has no worktree path):
+**`404 Not Found`**: no task with that id:
 
 ```json
-{ "error": "workspace not found" }
+{ "error": "task not found" }
+```
+
+**`200 OK`** with `ok: false`: the task exists but has no checkout of its own (no workspace row, or one with no worktree path). Most tasks never get one, so this is the ordinary answer for them:
+
+```json
+{ "ok": false, "reason": "no_workspace" }
 ```
 
 **`200 OK`**: the task files and the diff (`diffStat` and `diff` are empty when the worktree is paused or git is unavailable):
@@ -1273,7 +1280,7 @@ Most error bodies are `{ "error": "<message>" }`. The exceptions:
 - `{ "ok": false, "error": "<reason>" }` comes from: the claim (`not_found`, `conflict`); a status change on `PATCH /api/board/:taskId` (`not_found`, `illegal_transition`, `verification_required`, and `invalid_completed_at` as a `400`); every retry and assign failure (`task not found`, `agentId required`, `not_retryable`, `no_team`, `unassigned`, `agent_not_in_team`, `not_assignable`, `room_archived`); the dependency cycle (`409 task_dependency_cycle`); the provision route (`task not found`, and `no_isolation` with `isolation`); and the pause, complete and handoff `404`s (`workspace not found`).
 - The workspace file view adds `reason` to its misses and answers a refused path with `{ "ok": false, "error": "<message>" }`.
 - The preview routes answer `{ "ok": false, "error": "<message>" }` on `400`, `404` and `413`.
-- `GET /api/board/:taskId/workspace` and `/workspace/detail` answer a missing workspace with a bare `{ "error": "workspace not found" }`.
+- `GET /api/board/:taskId/workspace` answers a missing workspace with a bare `{ "error": "workspace not found" }`. `/workspace/detail` answers a task without one with `200` and `{ "ok": false, "reason": "no_workspace" }`, and an unknown task with `404` and `{ "error": "task not found" }`.
 
 An unknown `taskId` on a comment, or an unknown `parentTaskId` on a create, is a `500` from the database's foreign key, not a `404`.
 

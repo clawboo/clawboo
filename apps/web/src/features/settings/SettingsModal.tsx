@@ -95,7 +95,7 @@ const GROUPS: SettingsGroup[] = [
       {
         id: 'system',
         icon: SettingsIcon,
-        keywords: 'openclaw model api key gateway maintenance',
+        keywords: 'openclaw model api key gateway maintenance alerts notifications needs you',
       },
       {
         id: 'health',

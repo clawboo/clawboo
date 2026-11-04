@@ -172,7 +172,7 @@ A task moved to another status. `to` is always present.
 Some writers add fields the typed shape does not declare:
 
 - `by: 'person'` marks a move a person made on the board.
-- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), or `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too).
+- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
 
 ### comment_added
 

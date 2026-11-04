@@ -911,13 +911,19 @@ export function boardExecutionsGET(req: Request, res: Response): void {
 
 // ─── GET /api/board/:taskId/workspace/detail ─────────────────────────────────
 // The task-detail drawer's Workspace tab: SoR file contents + the unified diff
-// (baseline vs working tree, SoR bookkeeping excluded).
+// (baseline vs working tree, SoR bookkeeping excluded). Most tasks never get a
+// worktree, and the drawer asks on every open, so a known task without one is
+// an ordinary answer (`ok: false`), not a 404; only an unknown task is.
 export async function boardWorkspaceDetailGET(req: Request, res: Response): Promise<void> {
   try {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const detail = await readWorktreeDetail(taskId)
     if (!detail.ok) {
-      res.status(404).json({ error: 'workspace not found' })
+      if (!getTask(getDb(), taskId)) {
+        res.status(404).json({ error: 'task not found' })
+        return
+      }
+      res.json({ ok: false, reason: 'no_workspace' })
       return
     }
     res.json(detail)

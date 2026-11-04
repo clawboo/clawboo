@@ -33,6 +33,16 @@ describe('PanelHeader', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Board' })).toHaveClass('text-foreground')
   })
 
+  it('sizes the title from the type scale, not an inline size', () => {
+    const { rerender } = render(<PanelHeader title="Board" />)
+    const title = () => screen.getByRole('heading', { level: 1, name: 'Board' })
+    expect(title()).toHaveClass('text-section')
+    expect(title().getAttribute('style')).toBeNull()
+    rerender(<PanelHeader title="Board" size="md" />)
+    expect(title()).toHaveClass('text-lg')
+    expect(title()).not.toHaveClass('text-section')
+  })
+
   it('renders no subtitle line and no border by default', () => {
     const { container } = render(<PanelHeader title="Board" />)
     expect(container.querySelector('p')).toBeNull()

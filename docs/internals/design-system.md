@@ -152,6 +152,8 @@ The custom steps fill the gaps in Tailwind's default scale (`text-xs` 12, `text-
 | `--text-page`    | 28 / 34            | `text-page`    | Page titles                     |
 | `--text-hero`    | 40 / 46            | `text-hero`    | The welcome hero, big headlines |
 
+The board, `PanelHeader`, `SECTION_LABEL` and the browser alerts (`features/alerts`) keep to this scale and to the two text tokens, `text-foreground` and `text-muted-foreground`. `apps/web/src/app/__tests__/boardTypeScale.test.ts` holds them there: no arbitrary `text-[Npx]` size, no numeric inline `fontSize`, and no `text-foreground/N` opacity.
+
 Titles of 18px and up use `--font-display` (Inter, bold) with negative letter spacing; body text and small headings use `--font-body`; code, tool-call lines, timestamps and metric columns use Geist Mono. The `.font-data` class bundles mono with `tabular-nums`, so numeric columns (cost, tokens, ports, durations) line up and do not jitter as values change.
 
 ## Brand palette and team colors
