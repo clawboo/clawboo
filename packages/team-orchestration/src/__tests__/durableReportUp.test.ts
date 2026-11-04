@@ -80,7 +80,14 @@ type Delivered = { sessionKey: string; agentId: string; task: string; origin: Tu
 function boot(
   board: FakeBoard,
   outbox: MemoryOutbox,
-  opts: { rejectDeliveryTo?: string; stopGen?: () => number; known?: () => KnownAgent[] } = {},
+  opts: {
+    rejectDeliveryTo?: string
+    stopGen?: () => number
+    known?: () => KnownAgent[]
+    leader?: () => string | null
+    /** False: the alert could not be written anywhere. */
+    alertWrites?: () => boolean
+  } = {},
 ): {
   engine: ReturnType<typeof createBoardOrchestrator>
   delivered: Delivered[]
@@ -93,7 +100,7 @@ function boot(
     teamId: 't1',
     board,
     known: opts.known ?? (() => KNOWN),
-    leaderAgentId: () => 'leader',
+    leaderAgentId: opts.leader ?? (() => 'leader'),
     sessionKeyForAgent: sk,
     agentIdForSession,
     deliver: async (sessionKey, agentId, task, origin) => {
@@ -102,7 +109,9 @@ function boot(
     },
     stopGen: opts.stopGen ?? (() => 0),
     narrate: (sessionKey, text, kind) => {
-      if (kind === 'alert') alerts.push({ sessionKey, text })
+      if (kind !== 'alert') return
+      if (opts.alertWrites && !opts.alertWrites()) return false
+      alerts.push({ sessionKey, text })
     },
     reportUps: outbox,
   })
@@ -511,5 +520,85 @@ describe('durable report-up', () => {
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
 
     expect(only.updates()).toHaveLength(1)
+  })
+
+  it('a settlement whose write failed is written by a later sweep, so no later engine resends it', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const first = boot(board, outbox)
+    await delegateAndFinish(first.engine)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    outbox.failWrites = true
+    await first.engine.onEvent(
+      sk('leader'),
+      doneEvent('r3', 'summary'),
+      stampFor(first.updates()[0]!.origin),
+    )
+    outbox.failWrites = false
+    await first.engine.sweepStaleSessions()
+    expect(outbox.settledAs()).toEqual(['delivered'])
+    kill()
+
+    const second = boot(board, outbox)
+    await second.engine.resume()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(second.updates()).toHaveLength(0)
+  })
+
+  it('a room with no lead neither sends nor counts an update for its lead, and sends it once one is set', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    outbox.record({ toAgentId: null, by: 'Bug Boo', summary: 'fixed in parser.ts' })
+    for (let i = 0; i < MAX_REPORT_UP_REPLAYS + 1; i++) {
+      const noLead = boot(board, outbox, { leader: () => null })
+      await noLead.engine.resume()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      kill()
+    }
+    expect(outbox.settledAs()).toEqual([null])
+    expect([...outbox.rows.values()][0]!.replays).toBe(0)
+
+    let lead: string | null = null
+    const later = boot(board, outbox, { leader: () => lead })
+    await later.engine.resume()
+    lead = 'leader' // a lead joins the room
+    await later.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(later.updates()).toHaveLength(1)
+    expect(later.updates()[0]!.agentId).toBe('leader')
+  })
+
+  it('an update is given up only once the alert that says so is written', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const id = outbox.record({ toAgentId: 'leader', by: 'Bug Boo', summary: 'fixed' })
+    outbox.rows.get(id)!.replays = MAX_REPORT_UP_REPLAYS
+    let writes = false
+    const only = boot(board, outbox, { alertWrites: () => writes })
+    await only.engine.resume()
+    expect(outbox.settledAs()).toEqual([null])
+
+    writes = true
+    await only.engine.sweepStaleSessions()
+    expect(outbox.settledAs()).toEqual(['gave_up'])
+    expect(only.alerts).toHaveLength(1)
+  })
+
+  it('an update whose last delivery try failed, and whose alert could not be written, is tried again later', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    let writes = false
+    const only = boot(board, outbox, { rejectDeliveryTo: 'leader', alertWrites: () => writes })
+    await delegateAndFinish(only.engine)
+    for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(outbox.settledAs()).toEqual([null])
+
+    writes = true
+    for (let i = 0; i < MAX_REPORT_UP_REPLAYS + 1; i++) {
+      await only.engine.sweepStaleSessions()
+      for (let j = 0; j < 6; j++) await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    }
+    expect(outbox.settledAs()).toEqual(['gave_up'])
   })
 })

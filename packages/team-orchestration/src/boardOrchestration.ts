@@ -480,8 +480,10 @@ export interface BoardOrchestratorDeps {
   isSessionOccupied?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
-  /** Append a visible narration entry to a session's transcript. Optional. */
-  narrate?: (sessionKey: string, text: string, kind?: NarrationKind) => void
+  /** Append a visible narration entry to a session's transcript. Optional.
+   *  Returns false when an `alert` could not be written anywhere, so the engine
+   *  does not give up a report-up nobody was told about. */
+  narrate?: (sessionKey: string, text: string, kind?: NarrationKind) => boolean | void
   /**
    * Compact a child's report-up summary before it becomes a board comment /
    * `[Task Update]`. Pass-through-safe + failure-preserving.
@@ -696,6 +698,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // has not ended. `resume()` replays only the pending rows outside it, so a row
   // is sent again only by the next engine for the room, never twice by this one.
   const reportUpsInHand = new Set<string>()
+  // Held outbox ids whose settlement could not be written yet, with what they
+  // were settled as. The sweep writes them (see retrySettlements).
+  const settleLater = new Map<string, ReportUpSettlement>()
 
   const now = deps.now ?? (() => Date.now())
   // Baselined at creation, so a sleep before the first sweep is caught too.
@@ -1451,9 +1456,41 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  lets this engine send the row a second time. */
   function settleReportUps(ids: readonly string[], how: ReportUpSettlement): void {
     const held = ids.filter((id) => reportUpsInHand.has(id))
-    if (held.length === 0 || !deps.reportUps?.settle(held, how)) return
-    for (const id of held) reportUpsInHand.delete(id)
+    if (held.length === 0) return
+    if (!deps.reportUps?.settle(held, how)) {
+      // Still held, so this engine never resends it; the sweep writes it later.
+      for (const id of held) settleLater.set(id, how)
+      return
+    }
+    for (const id of held) {
+      reportUpsInHand.delete(id)
+      settleLater.delete(id)
+    }
   }
+
+  /** Write the settlements whose write failed (see settleReportUps). Run by the
+   *  sweep, so a later engine does not resend an update that was delivered. */
+  function retrySettlements(): void {
+    if (!deps.reportUps || settleLater.size === 0) return
+    const byHow = new Map<ReportUpSettlement, string[]>()
+    for (const [id, how] of settleLater) byHow.set(how, [...(byHow.get(how) ?? []), id])
+    for (const [how, ids] of byHow) {
+      if (!deps.reportUps.settle(ids, how)) continue
+      for (const id of ids) {
+        settleLater.delete(id)
+        reportUpsInHand.delete(id)
+      }
+    }
+  }
+
+  /** The session a report-up goes to now, or null when it cannot reach its
+   *  recipient yet. A null recipient is the room's lead, and a room may have
+   *  none for a while. */
+  const sessionOfRecipient = (item: ReportUp): string | null => {
+    const toId = item.toAgentId ?? deps.leaderAgentId()
+    return toId ? deps.sessionKeyForAgent(toId) : null
+  }
+  const routable = (item: ReportUp): boolean => sessionOfRecipient(item) !== null
 
   /**
    * The run that carried these report-ups is over. Only a run that finished
@@ -1485,7 +1522,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    */
   function replayReportUps(): void {
     if (!deps.reportUps) return
-    const rows = deps.reportUps.pending().filter((r) => !reportUpsInHand.has(r.id))
+    // One that cannot reach its recipient now (a room with no lead yet) stays
+    // pending and uncounted: a later sweep sends it once it can.
+    const rows = deps.reportUps
+      .pending()
+      .filter((r) => !reportUpsInHand.has(r.id) && routable(r.item))
     if (rows.length === 0) return
     const replay = rows.filter((r) => r.replays < MAX_REPORT_UP_REPLAYS)
     const exhausted = rows.filter((r) => r.replays >= MAX_REPORT_UP_REPLAYS)
@@ -1497,25 +1538,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       }
       armReflectTimer()
     }
-    if (
-      exhausted.length > 0 &&
-      deps.reportUps.settle(
-        exhausted.map((r) => r.id),
-        'gave_up',
+    // Given up only once the recipient's chat says so: a row whose alert could
+    // not be written stays pending, and the next sweep tries the alert again.
+    const perSession = new Map<string, string[]>()
+    for (const r of exhausted) {
+      const toSk = sessionOfRecipient(r.item)
+      if (toSk) perSession.set(toSk, [...(perSession.get(toSk) ?? []), r.id])
+    }
+    for (const [toSk, ids] of perSession) {
+      const told = deps.narrate?.(
+        toSk,
+        `${ids.length} task update(s) could not be delivered to this session after ${MAX_REPORT_UP_REPLAYS} more tries. The results are on the board.`,
+        'alert',
       )
-    ) {
-      const perSession = new Map<string, number>()
-      for (const r of exhausted) {
-        const toId = r.item.toAgentId ?? deps.leaderAgentId()
-        const toSk = toId ? deps.sessionKeyForAgent(toId) : null
-        if (toSk) perSession.set(toSk, (perSession.get(toSk) ?? 0) + 1)
-      }
-      for (const [toSk, n] of perSession)
-        deps.narrate?.(
-          toSk,
-          `${n} task update(s) could not be delivered to this session after ${MAX_REPORT_UP_REPLAYS} more tries. The results are on the board.`,
-          'alert',
-        )
+      if (told !== false) deps.reportUps.settle(ids, 'gave_up')
     }
   }
 
@@ -1640,12 +1676,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             // is a real coordination failure, not routine narration — mark it
             // `alert` so the host surfaces it to the user instead of filing it in
             // a tracelog nobody reads.
-            deps.narrate?.(
+            const told = deps.narrate?.(
               toSk,
               `${group.length} task update(s) could not be delivered to this session — the results are on the board.`,
               'alert',
             )
-            settleReportUps(outboxIdsOf(group), 'gave_up')
+            // Given up only once someone was told. Otherwise the rows go back
+            // to pending and a later sweep sends them again.
+            if (told !== false) settleReportUps(outboxIdsOf(group), 'gave_up')
+            else for (const id of outboxIdsOf(group)) reportUpsInHand.delete(id)
           }
         }
       }
@@ -2033,7 +2072,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
     for (const [s, ts] of recentlyTerminated)
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
-    // Report-ups whose run ended without finishing are sent again.
+    // Settlements whose write failed are written now; report-ups whose run ended
+    // without finishing are sent again.
+    retrySettlements()
     replayReportUps()
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
@@ -2536,6 +2577,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       reflectQueue.length = 0
       // Unsettled rows stay pending in the outbox: the next engine replays them.
       reportUpsInHand.clear()
+      settleLater.clear()
       sessionToTask.clear()
       sessionStartGen.clear()
       taskToExec.clear()

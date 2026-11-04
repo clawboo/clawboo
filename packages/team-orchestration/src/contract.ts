@@ -261,7 +261,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       isSessionBusy: (sessionKey) => opts?.busySessions?.has(sessionKey) ?? false,
       isSessionOccupied: (sessionKey) => opts?.occupiedSessions?.has(sessionKey) ?? false,
       onBoardChange: (c) => changes.push(c),
-      narrate: (sessionKey, text) => narrations.push({ sessionKey, text }),
+      narrate: (sessionKey, text) => {
+        narrations.push({ sessionKey, text })
+      },
       ...(opts?.caps ? { caps: opts.caps } : {}),
       ...(opts?.onCapHit ? { onCapHit: opts.onCapHit } : {}),
       ...(opts?.isRiskyDelegation ? { isRiskyDelegation: opts.isRiskyDelegation } : {}),

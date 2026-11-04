@@ -65,7 +65,7 @@ would lose to its own claim, and one that completed the task would complete it t
   chat shows.
 - **One task per session.** A session works one task at a time. A message for a busy session waits in the nudge
   queue (`createNudgeQueue`) and goes out at its next turn boundary. A queued message whose run never starts frees
-  the session for the next one.
+  the session for the next one, and its sender hears of it through `deliver`'s `onQueuedFailure` option.
 - **A refused delivery says why.** When `deliver` rejects, the engine fails the task at once instead of waiting for
   the watchdog. A host that decided not to start the run, such as the web server when a hard-cap budget is paused,
   rejects with a `DeliveryRefusedError`, and its message becomes the task's failure comment and what the delegator
@@ -93,9 +93,12 @@ would lose to its own claim, and one that completed the task would complete it t
   delivery whose start failed) puts them back to pending. A Stop also settles the items already handed to the host,
   and delivery that runs out of retries gives them up. `resume()` and every `sweepStaleSessions` queue each pending
   item the engine does not hold, so a room's next engine sends it again and this one never sends it twice. An
-  engine settles only items it still holds, and lets one go only once its settlement is written, so after `reset()`
-  a run cancelled at teardown leaves its items for the next engine; `reset()` does not flush them either. An item
-  already sent again `MAX_REPORT_UP_REPLAYS` times is given up instead, with an `alert` narration to its recipient.
+  engine settles only items it still holds, and lets one go only once its settlement is written (the sweep writes a
+  settlement that failed), so after `reset()` a run cancelled at teardown leaves its items for the next engine;
+  `reset()` does not flush them either. An item whose recipient cannot be reached yet (a room with no lead) waits
+  without being counted. An item already sent again `MAX_REPORT_UP_REPLAYS` times is given up instead, with an
+  `alert` narration to its recipient, and only once that narration is written: `narrate` returns false for an alert
+  that reached nowhere, and the item stays pending until a later sweep's alert lands.
 - **A person's move is final.** `personMovedTask` stops the run working on the card, closes its execution as
   cancelled, and tells the delegator when the person marked it done or cancelled it. A run that ends after that
   changes nothing. `markStopped` makes a Stop durable at once, so the ready-pump never re-fires stopped work.

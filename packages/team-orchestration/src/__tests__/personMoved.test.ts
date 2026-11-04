@@ -93,7 +93,9 @@ function makeHarness(opts: { occupied?: Set<string>; busy?: Set<string>; board?:
     isSessionBusy: (s) => opts.busy?.has(s) ?? false,
     isSessionOccupied: (s) => opts.occupied?.has(s) ?? false,
     onBoardChange: (c) => changes.push(c),
-    narrate: (_s, text) => narrations.push(text),
+    narrate: (_s, text) => {
+      narrations.push(text)
+    },
     abortSession: (s) => aborted.push(s),
   })
   return { board, delivered, changes, narrations, aborted, orchestrator }

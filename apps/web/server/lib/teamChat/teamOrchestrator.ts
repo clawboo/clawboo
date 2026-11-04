@@ -25,8 +25,10 @@ import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   enqueueInbox,
   getActiveRoom,
+  listPendingReportUps,
   listRoomsWithPendingReportUps,
   reapReportUps,
+  settleReportUps,
   type ClawbooDb,
 } from '@clawboo/db'
 import { createSuspendDetector, steeringOf } from '@clawboo/executor'
@@ -336,35 +338,20 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         const now = Date.now()
         const lastAt = alertsSeen.get(dedupeKey)
         const isRepeat = lastAt !== undefined && now - lastAt < ALERT_DEDUPE_MS
-        alertsSeen.set(dedupeKey, now)
         for (const [k, ts] of alertsSeen) if (now - ts > ALERT_DEDUPE_MS) alertsSeen.delete(k)
-        if (alertAgentId && !isRepeat) {
-          try {
-            persistTeamChatEntry(db, {
-              teamId,
-              roomId,
-              agentId: alertAgentId,
-              text,
-              role: 'system',
-              kind: 'meta',
-            })
-          } catch (err) {
-            log.error({ err, teamId, agentId: alertAgentId }, 'team alert persist failed')
-          }
-          // Durable copy: the chat line informs the HUMAN; the mailbox row makes
-          // the AGENT hear it too (next digest / MCP piggyback), and it survives
-          // eviction and restarts.
-          try {
-            enqueueInbox(db, { agentId: alertAgentId, teamId, kind: 'alert', body: text })
-          } catch (err) {
-            log.error({ err, teamId, agentId: alertAgentId }, 'team alert inbox write failed')
-          }
-        }
+        // Told: shown within the window already, or written now. The engine gives
+        // up a report-up only once someone was told, so a write that failed is
+        // not remembered either: its retry must not be taken for a repeat.
+        const told =
+          isRepeat ||
+          (alertAgentId !== null &&
+            writeTeamAlert(db, { teamId, roomId, agentId: alertAgentId, text }))
+        if (told) alertsSeen.set(dedupeKey, now)
         log.warn(
           { teamId, agentId: alertAgentId, alert: text, suppressed: isRepeat },
           'team coordination alert',
         )
-        return
+        return told
       }
       // Board→leader reflections (the per-task "✓ <agent> completed" marker + the
       // batched "[Task Update]" envelope) are INTERNAL orchestration signals, not
@@ -711,6 +698,28 @@ export function hasTeamOrchestrator(teamId: string, roomId: string | null = null
   return instances.has(orchestratorKey(teamId, roomId))
 }
 
+/** Write a team coordination alert to the team chat and to the agent's mailbox:
+ *  the chat line informs the person, and the mailbox row makes the agent hear it
+ *  too (next digest / MCP piggyback) and survives eviction and restarts. True
+ *  when at least one of the two writes landed. */
+export function writeTeamAlert(
+  db: ClawbooDb,
+  alert: { teamId: string; roomId: string | null; agentId: string; text: string },
+): boolean {
+  const { teamId, roomId, agentId, text } = alert
+  let landed = false
+  // Logs and returns false itself when the insert fails.
+  if (persistTeamChatEntry(db, { teamId, roomId, agentId, text, role: 'system', kind: 'meta' }))
+    landed = true
+  try {
+    enqueueInbox(db, { agentId, teamId, kind: 'alert', body: text })
+    landed = true
+  } catch (err) {
+    log.error({ err, teamId, agentId }, 'team alert inbox write failed')
+  }
+  return landed
+}
+
 /** Chat rooms holding report-ups no resident engine has: after a restart or an
  *  eviction, building the room's engine replays them (its `resume()`). A
  *  resident engine already holds its own, so its room is left out and its idle
@@ -760,14 +769,26 @@ export function hasTaskOrchestrator(teamId: string, taskId: string, db?: Clawboo
 export async function retireRoomOrchestrator(teamId: string, roomId: string): Promise<void> {
   const key = orchestratorKey(teamId, roomId)
   const inst = instances.get(key)
-  if (!inst) return
-  // Out of the map first, so nothing reaches the instance while it winds down.
-  instances.delete(key)
+  if (inst) {
+    // Out of the map first, so nothing reaches the instance while it winds down.
+    instances.delete(key)
+    try {
+      await inst.orchestrator.stop()
+      inst.dispose()
+    } catch (err) {
+      log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
+    }
+  }
+  // No engine builds an archived room, so its report-ups would never be sent.
+  // Archiving stops the room's work, so they are dropped as a Stop drops them;
+  // the results stay on their cards. Done whether or not an engine was loaded:
+  // rows a previous process left pending belong to the room too.
   try {
-    await inst.orchestrator.stop()
-    inst.dispose()
+    const db = getDb()
+    const ids = listPendingReportUps(db, teamId, roomId).map((r) => r.id)
+    if (ids.length > 0) settleReportUps(db, ids, 'stopped')
   } catch (err) {
-    log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
+    log.error({ err, teamId, roomId }, "could not settle the archived room's report-ups")
   }
 }
 

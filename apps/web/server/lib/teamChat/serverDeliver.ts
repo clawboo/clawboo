@@ -869,25 +869,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
 
     // Route through the nudge queue: idle session → send now; busy session →
     // FIFO-enqueue for the next turn boundary (never interrupts an in-flight run).
-    // True once this `deliver` has resolved for the engine, which for a busy
-    // session is as soon as the message is queued. A start that fails after that
-    // never reaches the engine's retry, so the report-ups the delivery carries
-    // are handed back to it instead (see `onRunNotStarted`).
-    let accepted = false
-    const delivery = nudge.deliver(
+    return nudge.deliver(
       targetSessionKey,
       () =>
-        new Promise<void>((resolveStart, rejectStart) => {
-          let settled = false
-          const started = (): void => {
-            settled = true
-            resolveStart()
-          }
-          const failStart = (e: Error): void => {
-            if (accepted && !settled && stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
-            settled = true
-            rejectStart(e)
-          }
+        new Promise<void>((started, failStart) => {
           const settleRefused = (why: 'stopped' | 'released'): void => {
             if (why === 'released') nudge.markIdle(targetSessionKey)
             started()
@@ -1279,13 +1264,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             })
             .finally(() => stopBeat())
         }),
-    )
-    void delivery.then(
-      () => {
-        accepted = true
+      // Queued behind the recipient's run, this delivery already resolved for
+      // the engine, so a start that fails now (however it fails, a throw while
+      // setting the run up included) never reaches the engine's retry. The
+      // report-ups it carries are handed back instead (see `onRunNotStarted`).
+      {
+        onQueuedFailure: () => {
+          if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+        },
       },
-      () => undefined,
     )
-    return delivery
   }
 }
