@@ -15,11 +15,11 @@ import {
   type BudgetCrossing,
   type BudgetStatus,
 } from '@clawboo/governance'
-import { and, desc, eq, type SQL } from 'drizzle-orm'
+import { and, desc, eq, sql, type SQL } from 'drizzle-orm'
 
 import { immediateWrite, withWriteRetry } from '../board/contention'
 import type { ClawbooDb } from '../db'
-import { budgets, type DbBudget } from '../schema'
+import { budgetReservations, budgets, type DbBudget } from '../schema'
 
 /** Budget scopes: per-agent lifetime, per-mission (a delegation tree's ROOT task),
  *  per-team; `tenant` is the dormant per-org seam. */
@@ -59,12 +59,17 @@ export function getBudget(db: ClawbooDb, scope: BudgetScope, scopeId: string): D
  * spend is accumulated in micro-cents so repeated tiny amounts are NOT floored to
  * 0. `spentUsdCents` (the whole-cent display + status mirror) is
  * `floor(spentMicroCents / MICRO_CENTS_PER_CENT)`.
+ *
+ * `holdId` names the run's budget reservation (see reservations.ts): the same
+ * transaction shrinks its hold on this budget by the spend, never below 0, so
+ * what the budget has committed (spend plus holds) counts the spend once.
  */
 export function recordSpend(
   db: ClawbooDb,
   scope: BudgetScope,
   scopeId: string,
   deltaCents: number,
+  opts: { holdId?: string | null } = {},
 ): RecordSpendResult | null {
   const deltaMicro = Math.max(0, Math.round(deltaCents * MICRO_CENTS_PER_CENT))
   return immediateWrite(db, (tx) => {
@@ -74,6 +79,20 @@ export function recordSpend(
       .where(and(eq(budgets.scope, scope), eq(budgets.scopeId, scopeId)))
       .get() as DbBudget | undefined
     if (!before) return null
+    if (opts.holdId && deltaMicro > 0) {
+      tx.update(budgetReservations)
+        .set({
+          heldMicroCents: sql`max(0, ${budgetReservations.heldMicroCents} - ${deltaMicro})`,
+          updatedAt: Date.now(),
+        })
+        .where(
+          and(
+            eq(budgetReservations.holdId, opts.holdId),
+            eq(budgetReservations.budgetId, before.id),
+          ),
+        )
+        .run()
+    }
     const mode = (before.mode as BudgetMode) === 'warn' ? 'warn' : 'cap'
     const newMicro = (before.spentMicroCents ?? 0) + deltaMicro
     const newSpentCents = Math.floor(newMicro / MICRO_CENTS_PER_CENT)

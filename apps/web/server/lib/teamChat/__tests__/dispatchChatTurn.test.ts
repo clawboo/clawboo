@@ -5,11 +5,13 @@
 // dispatch the exchange tests use), covering exchange-safety-001/002/004.
 
 import {
+  budgetReservations,
   chatMessages,
   createDb,
   getBudget,
   readRoom,
   recordSpend,
+  reserveBudgets,
   resolveRoomForTeam,
   setBudgetLimit,
   type ClawbooDb,
@@ -258,5 +260,91 @@ describe('dispatchChatTurn: a paused hard cap refuses the turn before it starts'
     expect(out.budgetStopped).toBeNull()
     expect(readRoom(db, { roomId })).toHaveLength(1)
     expect(notices()).toEqual([])
+  })
+})
+
+describe('dispatchChatTurn: budget holds', () => {
+  const holds = () => db.select().from(budgetReservations).all()
+
+  it('a turn beside another run against a nearly spent team cap is refused', async () => {
+    const teamId = 'tHeld'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'team', teamId, 95)
+    // A teammate's run is already going and holds 10 cents of the team's cap.
+    reserveBudgets(db, {
+      scopes: [{ scope: 'team', scopeId: teamId }],
+      estimateCents: 10,
+      runKind: 'team-chat',
+    })
+    let built = 0
+    const make = adapterFactory({ costUsd: 0.01 })
+    const out = await dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId,
+        teamId,
+        makeAdapter: (ctx) => {
+          built += 1
+          return make(ctx)
+        },
+      },
+      1,
+    )
+    expect(built).toBe(0)
+    expect(out.budgetStopped).toBe('team')
+    expect(readRoom(db, { roomId })).toHaveLength(0)
+    expect(holds()).toHaveLength(1)
+  })
+
+  it('holds its estimate for the turn and lets it go when the turn ends', async () => {
+    const teamId = 'tSettle'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 10_000, mode: 'cap' })
+    let heldDuringTurn = -1
+    const out = await dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId,
+        teamId,
+        makeAdapter: adapterFactory({
+          costUsd: 0.05,
+          onEvents: () => {
+            heldDuringTurn = holds().length
+          },
+        }),
+      },
+      1,
+    )
+    expect(out.budgetStopped).toBeNull()
+    expect(heldDuringTurn).toBe(1)
+    expect(holds()).toEqual([])
+    expect(getBudget(db, 'team', teamId)?.spentUsdCents).toBe(5)
+  })
+
+  it('the final gate refuses a turn whose cap paused while it got ready', async () => {
+    const teamId = 'tLate'
+    const roomId = resolveRoomForTeam(teamId)
+    setBudgetLimit(db, { scope: 'team', scopeId: teamId, limitUsdCents: 100, mode: 'cap' })
+    const make = adapterFactory({ costUsd: 0.05 })
+    const out = await dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId,
+        teamId,
+        // Built once the turn was let start; another run's spend pauses the cap then.
+        makeAdapter: (ctx) => {
+          recordSpend(db, 'team', teamId, 150)
+          return make(ctx)
+        },
+      },
+      1,
+    )
+    expect(out.budgetStopped).toBe('team')
+    expect(readRoom(db, { roomId })).toHaveLength(0)
+    expect(holds()).toEqual([])
   })
 })

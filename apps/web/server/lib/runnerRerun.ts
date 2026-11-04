@@ -52,6 +52,8 @@ function refusalWords(reason: Extract<RunTaskResult, { ok: false }>['reason']): 
   switch (reason) {
     case 'budget_paused':
       return 'a budget it counts against is paused at its hard cap'
+    case 'budget_held':
+      return 'a budget it counts against is close to its hard cap, and runs already going have set aside the rest of it'
     case 'too_deep':
       return 'it sits deeper in its task tree than a run may start'
     case 'connected_substrate':

@@ -223,6 +223,7 @@ On task-runner runs, `error` holds a code when Clawboo stopped or refused the ru
 | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `workspace_unavailable`   | `failed`                | A file-changing task had no repository, or its git worktree could not be created, so the run was refused             |
 | `budget_paused:<scope>`   | `cancelled`             | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap) |
+| `budget_held:<scope>`     | `cancelled`             | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start    |
 | `circuit_broken:<reason>` | `cancelled`             | A circuit breaker stopped the run; see the reasons below                                                             |
 | Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                          |
 
@@ -434,16 +435,16 @@ The fire failed. A failure that may pass by itself (a run that failed as `RateLi
 }
 ```
 
-| `message`, for example                             | Meaning                                                                                                                     |
-| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `dispatch refused: <reason>`                       | The task runner refused the run: `workspace_unavailable`, `budget_paused`, `too_deep`, `connected_substrate` or `not_found` |
-| `run <reason>: <summary>`                          | The run ended without success; `<reason>` is `max_turns`, `aborted` or `error`                                              |
-| `The agent "<name>" was removed.`                  | The routine's agent is archived                                                                                             |
-| `agent <id> not found`                             | The routine's agent no longer exists                                                                                        |
-| `The team "<name>" is archived.`                   | A team routine's team is archived                                                                                           |
-| `The team this routine posts to no longer exists.` | A team routine's team was deleted                                                                                           |
-| `invalid task template`                            | The stored routine could not be read                                                                                        |
-| `dispatch failed`                                  | The dispatch failed without a message                                                                                       |
+| `message`, for example                             | Meaning                                                                                                                                    |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `dispatch refused: <reason>`                       | The task runner refused the run: `workspace_unavailable`, `budget_paused`, `budget_held`, `too_deep`, `connected_substrate` or `not_found` |
+| `run <reason>: <summary>`                          | The run ended without success; `<reason>` is `max_turns`, `aborted` or `error`                                                             |
+| `The agent "<name>" was removed.`                  | The routine's agent is archived                                                                                                            |
+| `agent <id> not found`                             | The routine's agent no longer exists                                                                                                       |
+| `The team "<name>" is archived.`                   | A team routine's team is archived                                                                                                          |
+| `The team this routine posts to no longer exists.` | A team routine's team was deleted                                                                                                          |
+| `invalid task template`                            | The stored routine could not be read                                                                                                       |
+| `dispatch failed`                                  | The dispatch failed without a message                                                                                                      |
 
 ## Peer room events
 

@@ -79,7 +79,8 @@ import {
   type ResumeState,
 } from '@clawboo/worktrees'
 
-import { budgetPreflight } from './budgetPreflight'
+import { reserveRunBudget, type RunBudgetHold } from './budgetHold'
+import { budgetPreflight, budgetRefusalText } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
 import { RunQueueAbortedError, withRunSlot } from './runSlots'
@@ -236,6 +237,9 @@ export type RunTaskResult =
         | 'too_deep'
         | 'connected_substrate'
         | 'budget_paused'
+        // A hard cap is not paused, but the room left under it is held by runs
+        // already going (see budgetHold).
+        | 'budget_held'
         // Isolation was required for a file-mutating task but could not be
         // provisioned; the run is refused rather than executed un-isolated.
         | 'workspace_unavailable'
@@ -510,7 +514,11 @@ async function runTaskOnRuntimeInner(
         parentSpanId: parentTaskId ? spanIdFor(parentTaskId) : null,
       },
       (span) => runTaskInner(attempt, span, claimState),
-    )
+    ).finally(() => {
+      // However the attempt ended, its budget hold goes with it (see budgetHold).
+      claimState.hold?.release()
+      claimState.hold = null
+    })
 
   // Probe capabilities once (constructing the adapter is side-effect-free — no
   // process spawns until start()) to learn the integration class. A
@@ -616,6 +624,23 @@ interface ClaimState {
   stop?: RunStopHandle
   /** Where the live run is registered so a person's comment can steer it. */
   steer?: SteerSlot
+  /** The current attempt's budget hold, released when the attempt ends. */
+  hold?: RunBudgetHold | null
+}
+
+/** The scope whose hard cap is paused now, read before a run rotates to a fresh
+ *  session (see the rotation loop), or null. A read that fails lets it rotate,
+ *  as a failed spend write lets a run go on. */
+function pausedScopeBeforeRotation(
+  db: ClawbooDb,
+  scopes: { agentId: string; missionId: string | null; teamId: string | null | undefined },
+): BudgetStopScope | null {
+  try {
+    const pre = budgetPreflight(db, scopes)
+    return pre.blocked && pre.scope !== 'tenant' ? pre.scope : null
+  } catch {
+    return null
+  }
 }
 
 /** Point the task's steer registration at `run` (the first run, or a rotated
@@ -670,18 +695,22 @@ async function runTaskInner(
   if (integration.home.kind === 'connected') return { ok: false, reason: 'connected_substrate' }
 
   // Pre-flight cap gate: a paused CAP budget blocks the dispatch BEFORE the claim,
-  // so an over-budget run never mutates the board or spawns a process. Lands here
-  // (like the connected-substrate refusal) so the board is untouched. Only a
-  // cap-mode paused scope blocks; warn budgets never pause; uncapped runs proceed.
-  if (
-    budgetPreflight(db, {
-      agentId: assigneeAgentId,
-      missionId: missionRootId(db, taskId),
-      teamId: task.teamId,
-    }).blocked
-  ) {
-    return { ok: false, reason: 'budget_paused' }
+  // so an over-budget run never mutates the board or spawns a process, and so does
+  // a cap whose remaining room runs already going have set aside. Lands here (like
+  // the connected-substrate refusal) so the board is untouched. A run let start
+  // holds its estimate on every budget it counts toward until the attempt ends
+  // (see budgetHold). Only a cap-mode scope refuses; warn budgets never do;
+  // uncapped runs proceed.
+  const gate = reserveRunBudget(
+    db,
+    { agentId: assigneeAgentId, missionId: missionRootId(db, taskId), teamId: task.teamId },
+    { kind: 'task', ref: taskId },
+  )
+  if (gate.blocked) {
+    return { ok: false, reason: gate.reason === 'held' ? 'budget_held' : 'budget_paused' }
   }
+  const hold = gate.hold
+  claimState.hold = hold
 
   if (!input.fixCycle) {
     // Atomic claim — a lost claim is a conflict and is NEVER retried.
@@ -984,6 +1013,30 @@ async function runTaskInner(
       },
     )
   }
+  // The final gate, right before the model call: the budgets this run holds are
+  // read again, so a cap that paused while the run got ready (its folder, its
+  // memory, its prompt) refuses it now, before anything is spent. The task is
+  // claimed by now, so it goes back to To do with the reason, like a run a cap
+  // stopped.
+  const finalGate = hold.recheck()
+  if (finalGate.blocked) {
+    const error = `budget_${finalGate.reason}:${finalGate.scope}`
+    addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
+    const ledgerClosed = completeExecutionProcess(db, exec.id, { status: 'cancelled', error })
+    if (ledgerClosed)
+      emitEvent(db, {
+        kind: 'execution_completed',
+        traceId: span.traceId,
+        spanId: span.spanId,
+        taskId,
+        teamId: task.teamId,
+        agentId: assigneeAgentId,
+        runtime: runtimeId,
+        data: { execId: exec.id, status: 'cancelled', error },
+      })
+    releaseTask(db, taskId)
+    return { ok: false, reason: finalGate.reason === 'held' ? 'budget_held' : 'budget_paused' }
+  }
   let run = await startRun(baseSessionKey, assemblePrompt(''))
   pointSteerAt(claimState, taskId, adapter, run)
   // The run started with the digest in its context — mark the RENDERED rows
@@ -1110,9 +1163,11 @@ async function runTaskInner(
     // takes FRACTIONAL cents so sub-cent events are carried, not lost.
     nodeSpentCents += usdToCents(usd)
     const ledgerCents = usdToFractionalCents(usd)
-    const a = recordSpend(db, 'agent', assigneeAgentId, ledgerCents)
-    const m = missionId ? recordSpend(db, 'mission', missionId, ledgerCents) : null
-    const t = task.teamId ? recordSpend(db, 'team', task.teamId, ledgerCents) : null
+    // The run's own spend replaces its held estimate as it lands.
+    const spend = { holdId: hold.id }
+    const a = recordSpend(db, 'agent', assigneeAgentId, ledgerCents, spend)
+    const m = missionId ? recordSpend(db, 'mission', missionId, ledgerCents, spend) : null
+    const t = task.teamId ? recordSpend(db, 'team', task.teamId, ledgerCents, spend) : null
     // Track-and-warn: warn on any crossing first (cap + warn budgets alike). A
     // warn budget never reads 'paused', so the kill-switch below skips it.
     emitBudgetWarning('agent', a)
@@ -1551,6 +1606,19 @@ async function runTaskInner(
       doneReason === 'max_turns' ? 'max_turns' : watermark ? 'context_watermark' : null
 
     if (rotateReason && rotations < maxRotations) {
+      // A cap another run paused while this pass went would let the fresh session
+      // spend past it before its first cost report stopped it, so the run stops
+      // here instead, as at a pause it saw itself. Only a pause: this run was let
+      // start, and room other runs hold is not a reason to cut it short.
+      const pausedNow = pausedScopeBeforeRotation(db, {
+        agentId: assigneeAgentId,
+        missionId,
+        teamId: task.teamId,
+      })
+      if (pausedNow) {
+        stopForBudget = pausedNow
+        break
+      }
       rotations += 1
       // Rotation successors start FRESH: continuity rides the handoff note,
       // never the exhausted native session (resuming it would re-exhaust

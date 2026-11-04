@@ -65,6 +65,7 @@ import {
 import { resolveHost, isLoopbackHost, shouldRefuseInsecureBind } from './lib/resolveHost'
 import { resolveBootAccessToken } from './lib/bootAccessToken'
 import { runBootProbe } from './lib/bootProbe'
+import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
@@ -485,6 +486,18 @@ async function main() {
     }
   } catch (err) {
     log.error({ err }, 'Board: orphan reconciliation failed (non-fatal)')
+  }
+
+  // ── Budget holds no run can settle any more ────────────────────────────────
+  // A run holds its estimated cost on its budgets until it ends (see budgetHold).
+  // Holds left by a server that stopped without ending its runs (a crash, a force
+  // quit, a restart mid-run) would block parallel runs on those budgets for good,
+  // so they go here, before this server starts a run. A sweep that fails is tried
+  // again on a timer. Best-effort; never blocks boot.
+  try {
+    sweepLeftoverBudgetHolds(getDb())
+  } catch (err) {
+    log.error({ err }, 'Budgets: sweeping leftover holds failed (non-fatal)')
   }
 
   // ── Archived rooms: their unfinished tasks belong to the team's own chat ────

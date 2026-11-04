@@ -74,6 +74,8 @@ Everything else is an estimate: from token counts where the runtime reports them
 
 **For an OpenClaw agent routine**, a paused hard cap refuses the fire before it starts. OpenClaw reports no cost while it works, so Clawboo estimates the run from its text when it ends, whether it succeeded, failed, timed out or was stopped. If that estimate crosses the cap, the task gets the comment "Budget cap reached" and the routine's next fire is refused.
 
+**When runs go at the same time**, each one holds its estimated cost on every budget it counts toward from the moment it is let start until it ends, on every path above and in one-to-one chat. On a hard cap, a run that would go beside others starts only if the spend, what they still hold and its own estimate fit under the limit; a run going alone starts as before. Each run is checked again right before its model call. The estimate is the most one of the agent's last 10 runs cost, or 50 cents, so it can be wrong in either direction. [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time) has the details.
+
 When a hard cap stops a task-runner run, the run is cancelled and the task goes back to To do with the comment "Auto-paused: `<scope>` budget reached. Raise the cap (or resume) to continue." If the run was a routine fire, the routine then stops until you resume it, and the task the fire created waits in **Needs you** (see [How routines run](/concepts/scheduling)). When a hard cap stops a team-chat run, its task fails.
 
 ### Resuming and raising a budget

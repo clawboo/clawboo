@@ -14,6 +14,7 @@ import type { EventFrame } from '@clawboo/gateway-client'
 import type { RuntimeEvent } from '@clawboo/executor'
 import {
   agents,
+  budgetReservations,
   createDb,
   createTask,
   getComments,
@@ -24,6 +25,7 @@ import {
   reconcileStaleInProgress,
   recordSpend,
   registerScheduledRun,
+  reserveBudgets,
   setBudgetLimit,
   setTaskVerification,
   getBudget,
@@ -1045,5 +1047,207 @@ describe('dispatchConnectedSubstrate', () => {
       noteHumanMove(db, { taskId, teamId: 'team-1', from: 'in_progress', to: 'cancelled' })
       await expect(outcome).resolves.toEqual({ ok: true, taskId })
     })
+  })
+})
+
+describe('budget holds on a scheduled OpenClaw fire', () => {
+  const holds = () => db.select().from(budgetReservations).all()
+  /** An injected adapter whose run ends with a plain success. */
+  const quietAdapter = (onStart?: () => void) => {
+    const queue = createAsyncQueue<RuntimeEvent>({ max: 10 })
+    let started = 0
+    return {
+      started: () => started,
+      make: () => ({
+        start: async () => {
+          started += 1
+          onStart?.()
+          queue.push({
+            kind: 'done',
+            runId: 'run-1',
+            sessionId: 'sk',
+            ts: 1,
+            seq: 1,
+            reason: 'success',
+            summary: 'swept',
+          } as RuntimeEvent)
+          return { adapterId: 'openclaw', sessionKey: 'sk', runId: 'run-1' }
+        },
+        events: () => queue,
+        abort: async () => {},
+      }),
+    }
+  }
+
+  it('a fire beside another run against a nearly spent cap is refused and keeps its schedule', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'team', 'team-1', 95)
+    // A teammate's run is already going and holds 10 cents of the team's cap.
+    expect(
+      reserveBudgets(db, {
+        scopes: [{ scope: 'team', scopeId: 'team-1' }],
+        estimateCents: 10,
+        runKind: 'team-chat',
+      }).ok,
+    ).toBe(true)
+    const adapter = quietAdapter()
+
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      makeAdapter: adapter.make,
+    })
+
+    expect(outcome).toEqual({ ok: false, taskId, error: 'budget_held:team', transient: true })
+    expect(adapter.started()).toBe(0)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)).toEqual([])
+    expect(holds()).toHaveLength(1)
+  })
+
+  it('holds its estimate while it runs and lets it go when it ends', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 10_000, mode: 'cap' })
+    let heldWhileRunning = -1
+    const adapter = quietAdapter(() => {
+      heldWhileRunning = holds().length
+    })
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      makeAdapter: adapter.make,
+    })
+    expect(outcome.ok).toBe(true)
+    expect(heldWhileRunning).toBe(1)
+    expect(holds()).toEqual([])
+  })
+
+  it('the final gate refuses a fire whose cap paused while it got ready', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 100, mode: 'cap' })
+    const adapter = quietAdapter()
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      // Built after the claim; another run's spend pauses the cap at that moment.
+      makeAdapter: () => {
+        recordSpend(db, 'agent', agentRow.id, 150)
+        return adapter.make()
+      },
+    })
+    expect(outcome).toEqual({ ok: false, taskId, error: 'budget_paused:agent' })
+    expect(adapter.started()).toBe(0)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]).toMatchObject({
+      status: 'cancelled',
+      error: 'budget_paused:agent',
+    })
+    expect(holds()).toEqual([])
+  })
+
+  it('the final gate refuses a fire that the cap can no longer hold beside another run, and keeps its schedule', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 10_000, mode: 'cap' })
+    // Another run is going and holds half the cap; the start gate still admits this fire.
+    expect(
+      reserveBudgets(db, {
+        scopes: [{ scope: 'agent', scopeId: agentRow.id }],
+        estimateCents: 5_000,
+        runKind: 'team-chat',
+      }).ok,
+    ).toBe(true)
+    const adapter = quietAdapter()
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      makeAdapter: () => {
+        // The cap is lowered while the fire gets ready: still active, but the other
+        // run's hold and this fire's estimate no longer fit under it.
+        setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1_000 })
+        return adapter.make()
+      },
+    })
+    expect(outcome).toEqual({ ok: false, taskId, error: 'budget_held:agent', transient: true })
+    expect(adapter.started()).toBe(0)
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]).toMatchObject({
+      status: 'cancelled',
+      error: 'budget_held:agent',
+    })
+    // Only the other run's hold is left.
+    expect(holds()).toHaveLength(1)
+  })
+
+  it('a fire whose claim throws leaves no hold', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1000, mode: 'cap' })
+    db.$client.exec(
+      "CREATE TRIGGER claim_fails BEFORE UPDATE ON tasks BEGIN SELECT RAISE(ABORT, 'disk I/O error'); END",
+    )
+    const adapter = quietAdapter()
+    await expect(
+      dispatchConnectedSubstrate({
+        db,
+        run,
+        template: TEMPLATE,
+        agentRow,
+        taskId,
+        client: new FakeOperatorClient() as unknown as OperatorClientLike,
+        makeAdapter: adapter.make,
+      }),
+    ).rejects.toThrow('disk I/O error')
+    expect(adapter.started()).toBe(0)
+    expect(holds()).toEqual([])
+  })
+
+  it('a fire whose start fails leaves no hold', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    setBudgetLimit(db, { scope: 'agent', scopeId: agentRow.id, limitUsdCents: 1000, mode: 'cap' })
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+      makeAdapter: () => ({
+        start: async () => {
+          throw new Error('gateway refused')
+        },
+        events: () => createAsyncQueue<RuntimeEvent>({ max: 1 }),
+        abort: async () => {},
+      }),
+    })
+    expect(outcome.ok).toBe(false)
+    expect(holds()).toEqual([])
   })
 })

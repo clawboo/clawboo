@@ -1,7 +1,7 @@
 // Production defaults catalog: assert every shipped default has the locked value AND
 // is actually read by a consumer (the "every key is read by >=1 file" drift test).
-// All DEFAULTS keys are consumed in bootProbe.ts (the config snapshot) — and the
-// log level is honored by @clawboo/logger. The package-local operational defaults
+// All DEFAULTS keys are consumed in bootProbe.ts (the config snapshot), the task
+// runner or the budget holds, and the log level is honored by @clawboo/logger. The package-local operational defaults
 // are documented + verified to match their home modules.
 
 import { readFileSync } from 'node:fs'
@@ -21,6 +21,8 @@ describe('production defaults catalog', () => {
     expect(DEFAULTS.budgetPosture).toBe('track-and-warn')
     expect(DEFAULTS.budgetHardCapUsdCents).toBeNull() // no auto-pause until a user sets a cap
     expect(DEFAULTS.budgetWarnSoftPct).toBe(80)
+    expect(DEFAULTS.budgetReserveDefaultUsdCents).toBe(50)
+    expect(DEFAULTS.budgetReserveHistoryRuns).toBe(10)
     expect(DEFAULTS.gatewayProbeTimeoutMs).toBe(1500)
     expect(DEFAULTS.otelEnabledByDefault).toBe(false)
   })
@@ -28,7 +30,8 @@ describe('production defaults catalog', () => {
   it('every DEFAULTS key is read by >=1 consumer (no orphan defaults)', () => {
     const bootProbe = read('../bootProbe.ts')
     const executorRunner = read('../executorRunner.ts')
-    const consumers = `${bootProbe}\n${executorRunner}`
+    const budgetHold = read('../budgetHold.ts')
+    const consumers = `${bootProbe}\n${executorRunner}\n${budgetHold}`
     for (const key of Object.keys(DEFAULTS)) {
       expect(consumers.includes(`DEFAULTS.${key}`), `DEFAULTS.${key} is never read`).toBe(true)
     }

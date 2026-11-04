@@ -596,6 +596,12 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 **Fix:** open **Settings > Insights > Governance** and raise the budget's limit with **Set cap**, or click **Resume**. Then send your message again, or press **Retry** on the task. See [Resume or raise a budget](/using/budgets-and-spend#resume-or-raise-a-budget).
 
+### The team budget is close to its hard cap, and runs already going have set aside the rest of it, so this run did not start.
+
+**What it means:** the budget is not paused, but other runs were going against it, and what it has spent, plus what those runs hold, plus this run's estimate, would pass its limit. The word before "budget" names it: agent, team, or mission. Each run holds its estimated cost until it ends, so parallel runs cannot all start against a nearly spent cap.
+
+**Fix:** wait for the runs already going to finish, then send your message again or press **Retry** on the task. An agent routine refused this way keeps its schedule and runs at its next time. To let more run at once, raise the limit with **Set cap** in **Settings > Insights > Governance**. See [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time).
+
 ### My hard cap did not stop the team
 
 **What it means:** a paused hard cap refuses new runs, but a run already going finishes unless it is Clawboo Native on a priced model, which stops after its next model turn. Every other run is charged when it finishes, which can take the budget past 100%. If new messages still get answers, the budget is **warn only**, which never pauses.
@@ -614,7 +620,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 <Accordion title="Tokens Used shows zero for my agents">
 
-**What it means:** **Tokens Used** lists Clawboo Native, Claude Code, Codex and Hermes runs only from the release that added them, so their earlier work reads zero, and it does not count their one-to-one chats. An OpenClaw agent's turns count only when Clawboo's server sees them and can match them to an agent in Clawboo.
+**What it means:** **Tokens Used** lists Clawboo Native, Claude Code, Codex and Hermes runs only from the release that added them, so their earlier work reads zero, and their one-to-one chat turns only from the release that started counting them. An OpenClaw agent's turns count only when Clawboo's server sees them and can match them to an agent in Clawboo.
 
 **Fix:** see older costs on each task's card and, once you add a budget, on its row in **Settings > Insights > Governance**.
 

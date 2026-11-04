@@ -36,6 +36,15 @@ export const DEFAULTS = {
    *  Mirrors the governance math's soft tier so the two never drift. */
   budgetWarnSoftPct: SOFT_CAP_PERCENT,
 
+  /** What a run holds against its budgets while it goes (see budgetHold.ts) when
+   *  its agent has no recorded runs yet: 50 cents, an estimate on the high side
+   *  for one run, the safe direction for a cap. */
+  budgetReserveDefaultUsdCents: 50,
+
+  /** How many of an agent's latest recorded runs its hold is sized from: the
+   *  most any of them cost. */
+  budgetReserveHistoryRuns: 10,
+
   /** Boot probe: a fast, tight timeout for the OPTIONAL OpenClaw Gateway
    *  reachability check. A miss marks the registry stale (degraded), never fatal —
    *  SQLite still serves the last-synced agents. */
