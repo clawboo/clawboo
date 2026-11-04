@@ -205,7 +205,7 @@ The `error` codes:
 | `EXIT_<code>`        | The process exited with a non-zero code (for example `EXIT_1`)                                                                                        |
 | `INSTALL_RUNNING`    | An install of this runtime is still running; nothing new was started                                                                                  |
 
-An `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message suggests the same command with `sudo`. When the install succeeds but the CLI still cannot be found, `complete` carries a `warning` that suggests restarting the server.
+An `EACCES` frame does not end the stream: the exit code still decides the outcome, and its message suggests the same command with `sudo`. When the install succeeds but the runtime still reads not installed, `complete` carries a `warning`. For Claude Code it says this Clawboo cannot load the SDK, which has to sit next to Clawboo, and to install both with the npm Clawboo was installed with, then run `clawboo restart`. For the other runtimes it says the CLI is not on `PATH` or in the known user-install folders yet, and suggests restarting the server.
 
 Example frames:
 

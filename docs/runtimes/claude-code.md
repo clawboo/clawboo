@@ -132,9 +132,9 @@ In **Settings** > **Runtimes**, click **Manage** on the **Claude Code** row, the
 
 <Accordion title="The run failed: The Claude Code runtime needs @anthropic-ai/claude-agent-sdk">
 
-The full message continues "which this clawboo install does not ship". The row reads **Connected** because that only checks the `claude` command and your key; the Agent SDK is a separate package.
+The full message continues "which this clawboo install does not ship". The Agent SDK is missing or cannot load from this Clawboo, and the **Claude Code** row under **Runtimes** reads **Not installed**. Agents already on Claude Code still try to run and fail this way until it is installed.
 
-Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
+Install it next to Clawboo with `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`, run `clawboo restart`, then send the message or start the task again. If you started Clawboo with `npx`, switch to the global install first.
 
 </Accordion>
 
