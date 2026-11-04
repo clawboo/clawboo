@@ -1,5 +1,0 @@
----
-'clawboo': patch
----
-
-`GET /api/mcp/config` checks the identity it signs, and the attach secret can be replaced without a restart. The route answers `400` with `unknown team: <id>` when `scopeTeamId` names no team, and `agent <id> is not on team <team>` when `scopeAgentId` is a Clawboo agent from another team. An id no Clawboo agent uses is still signed as given, for an outside agent's own identity. New `POST /api/mcp/attach-secret/rotate` (access cookie required while the gate is on) replaces the secret behind every `attachToken`, `scopeSig` and `provSig`: every URL minted before stops verifying, in every Clawboo process on the database, since the secret is no longer cached per process. Clawboo's runtimes get new URLs on their next run. A connected local OpenClaw Gateway is re-registered at once and, if it refuses the write, again over the next few minutes; the answer's `gateway` field (`updated`, `retrying` or `not-connected`) says which. It replaces the documented `sqlite3 ... DELETE FROM settings` recipe.

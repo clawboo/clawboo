@@ -1,9 +1,0 @@
----
-'clawboo': patch
----
-
-Close an access-gate bypass on installs behind a reverse proxy on the same machine. With `STUDIO_ACCESS_TOKEN` set, the gate skipped the cookie for any `/api/mcp/*` request from a loopback address, so that Clawboo's own runtimes could reach their MCP servers. A proxy such as nginx, Caddy or a Cloudflare Tunnel connector forwards every request from `127.0.0.1`, so anyone who could reach the proxy could use the Tasks, Memory, Tools and TeamChat MCP servers without the token, and could ask `/api/mcp/config` to sign them an attach URL for any agent, and with it that agent's connector grants.
-
-A loopback address no longer admits anything on its own. Every MCP attach URL Clawboo writes now carries an `attachToken`, derived from the install's attach-signing secret, and a cookieless request to an MCP server needs it. The token only counts on a request that dialed the loopback port directly: it is refused from another host and on any request that came through a proxy. `/api/mcp/config` always needs the cookie. The runtimes Clawboo spawns, the verification critic included, get the token automatically, and keep loopback off any HTTP proxy configured in the server's environment (`NO_PROXY`). A local OpenClaw Gateway is re-registered with the token on the next connect; a remote one is never handed it.
-
-If you attached an agent yourself by URL on an install with the gate on, copy the URL again from `GET /api/mcp/config` (sending the access cookie): the old one carries no token and now gets a `401`. The Claude Code snippet now quotes the URL so its query survives the shell, and the request log masks the token and the attach signatures. The self-host guide now says a reverse proxy needs the access token unless it authenticates requests itself, and shows how to deny the four MCP server routes at nginx, Caddy and a Cloudflare Tunnel.
