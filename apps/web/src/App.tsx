@@ -2,6 +2,7 @@ import { Providers } from './app/providers'
 import { ToastContainer } from '@/features/ui/ToastContainer'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { RunStatusBridge } from '@/features/obs/RunStatusBridge'
+import { NeedsYouAlerts } from '@/features/alerts/NeedsYouAlerts'
 import { AppSidebar } from '@/features/layout/AppSidebar'
 import { ContentArea } from '@/features/layout/ContentArea'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
@@ -38,6 +39,9 @@ export function App() {
       <GatewayBootstrap />
       {/* Lights the fleet up during board runs, which no other status writer covers. */}
       <RunStatusBridge />
+      {/* Browser notifications for what needs the person, while the tab is in
+          the background. Opt-in, and quiet inside the desktop app. */}
+      <NeedsYouAlerts />
       {/* `--clawboo-titlebar-inset` (unset = 0) lets an embedder reserve a strip
           for its own title bar, such as an inset macOS one, so it never sits on
           the sidebar. The fallback lives here rather than on :root, so a value

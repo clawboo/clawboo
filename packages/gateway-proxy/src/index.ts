@@ -1,4 +1,4 @@
-export type { AccessGate, AccessGateOptions } from './access-gate'
+export type { AccessGate, AccessGateOptions, LaunchCode } from './access-gate'
 export {
   ACCESS_TOKEN_CHARSET,
   createAccessGate,

@@ -126,10 +126,26 @@ export const riskClassifierInspector: Inspector = (_call, descriptor, ctx): Insp
 // ─── The dashboard ───────────────────────────────────────────────────────────
 
 let dashboardPorts: ReadonlySet<number> = new Set()
+let dashboardHosts: ReadonlySet<string> = new Set()
 
-/** The ports the Clawboo dashboard listens on. The server sets them at boot. */
-export function setDashboardPorts(ports: readonly number[]): void {
+/** A host as the URL parser writes it, without a trailing dot, or null. */
+function canonicalHost(host: string): string | null {
+  const raw = host.trim()
+  if (!raw) return null
+  try {
+    const bracketed = raw.includes(':') && !raw.startsWith('[') ? `[${raw}]` : raw
+    return new URL(`http://${bracketed}`).hostname.replace(/\.$/, '')
+  } catch {
+    return null
+  }
+}
+
+/** The ports the Clawboo dashboard listens on, and the address it is bound to
+ *  (`HOST`), which counts as the dashboard on those ports even when it is not
+ *  a loopback address. The server sets them at boot. */
+export function setDashboardPorts(ports: readonly number[], hosts: readonly string[] = []): void {
   dashboardPorts = new Set(ports)
+  dashboardHosts = new Set(hosts.flatMap((host) => canonicalHost(host) ?? []))
 }
 
 const isLoopbackHost = (host: string): boolean => {
@@ -141,6 +157,7 @@ const isLoopbackHost = (host: string): boolean => {
     h === '0.0.0.0' ||
     h === '[::1]' ||
     h === '[::]' ||
+    h === '[::ffff:0:0]' ||
     /^\[::ffff:(127\.|7f)/.test(h)
   )
 }
@@ -148,22 +165,49 @@ const isLoopbackHost = (host: string): boolean => {
 // A host with an explicit port, with or without a scheme in front of it. A match
 // may only start where a host can start (the lookbehind), so a long run of host
 // characters with no port is read in linear time. The host is not length-capped:
-// a cap would let an over-long `*.localhost` name slip past unmatched.
-const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})/gi
+// a cap would let an over-long `*.localhost` name slip past unmatched. It takes
+// percent escapes and non-ASCII characters, which the URL parser turns into a
+// plain name (`%6c%6fcalhost`, and localhost in full-width letters, are
+// localhost), and a port of any length, because `:018790` is still port 18790.
+const HOST_PORT = /(?<![a-z0-9.%\u0080-\uffff-])(\[[0-9a-f:.]+\]|[a-z0-9.%\u0080-\uffff-]+):(\d+)/gi
 
-/** Whether a string names a dashboard address. The host is parsed the way a
- *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. */
-function namesDashboard(text: string): boolean {
+/** The plain-ASCII name at the end of a run, as a stricter reader takes it. */
+function asciiTail(run: string): string {
+  let i = run.length
+  while (i > 0 && /[a-z0-9.-]/i.test(run[i - 1]!)) i--
+  return run.slice(i)
+}
+
+const opensDashboard = (host: string, port: string): boolean => {
+  try {
+    const hostname = new URL(`http://${host}:${port}`).hostname
+    return isLoopbackHost(hostname) || dashboardHosts.has(hostname.replace(/\.$/, ''))
+  } catch {
+    return false // Not a host this browser could open.
+  }
+}
+
+function scanForDashboard(text: string): boolean {
   for (const m of text.matchAll(HOST_PORT)) {
-    if (!dashboardPorts.has(Number(m[1]))) continue
-    try {
-      const url = new URL(`http://${m[0]}`)
-      if (isLoopbackHost(url.hostname)) return true
-    } catch {
-      // Not a host this browser could open.
-    }
+    const host = m[1]!
+    const port = m[2]!
+    if (!dashboardPorts.has(Number(port))) continue
+    if (opensDashboard(host, port)) return true
+    const tail = asciiTail(host)
+    if (tail && tail !== host && opensDashboard(tail, port)) return true
   }
   return false
+}
+
+/** Whether a string names a dashboard address. The host is parsed the way a
+ *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. A URL
+ *  parser also drops every tab and line break, so `local<tab>host` is read
+ *  again without them. */
+function namesDashboard(text: string): boolean {
+  return (
+    scanForDashboard(text) ||
+    (/[\t\n\r]/.test(text) && scanForDashboard(text.replace(/[\t\n\r]/g, '')))
+  )
 }
 
 function argsNameDashboard(value: unknown, depth = 0): boolean {
@@ -190,8 +234,62 @@ export const dashboardInspector: Inspector = (call): InspectorDecision =>
     ? { kind: 'deny', reason: 'dashboard:agents may not open the Clawboo dashboard' }
     : { kind: 'allow' }
 
+// ─── Local files ─────────────────────────────────────────────────────────────
+
+/** Whether a browser handed this URL would open a file on this computer. */
+function opensLocalFile(url: string): boolean {
+  // A URL parser drops every tab and line break and skips leading spaces and
+  // control characters, so ` FILE:` and `fi<tab>le:` are file URLs too.
+  const text = url.replace(/[\t\n\r]/g, '')
+  let start = 0
+  while (start < text.length && text.charCodeAt(start) <= 0x20) start++
+  const s = text.slice(start)
+  return (
+    // view-source: shows the file it wraps. Any page's source is in a snapshot
+    // already, so every view-source: address goes.
+    /^(?:file|view-source):/i.test(s) ||
+    // Chrome on Windows opens a drive letter (`C:\`, `c|/`, a bare `C:`) or two
+    // leading slashes (`\\server\share`, `//server/share`) as a file URL. No
+    // URL scheme is one letter long, so nothing else starts that way.
+    /^[a-z][:|]/i.test(s) ||
+    /^[\\/]{2}/.test(s)
+  )
+}
+
+/** Only `url` arguments: text typed into a page may say anything. */
+function argsOpenLocalFile(value: unknown, depth = 0): boolean {
+  if (depth > 6 || !value || typeof value !== 'object') return false
+  if (Array.isArray(value)) return value.some((v) => argsOpenLocalFile(v, depth + 1))
+  return Object.entries(value).some(([key, v]) =>
+    key.toLowerCase() === 'url' && typeof v === 'string'
+      ? opensLocalFile(v)
+      : argsOpenLocalFile(v, depth + 1),
+  )
+}
+
+/**
+ * DENY a call whose `url` argument would open a file on this computer.
+ *
+ * A browser connector opens whatever URL it is handed, and reading a file is
+ * not a network request, so nothing that blocks the dashboard's address sees
+ * it. A file could be Clawboo's access token, its key vault or anything else
+ * this account can read. Chrome DevTools is also launched refusing file: and
+ * view-source:; Playwright refuses file: itself but not view-source:file:, and
+ * neither knows a Windows path. A page cannot navigate itself to either scheme,
+ * so a tool's `url` is the only way in: in both pinned browser connectors the
+ * argument that takes an address is called `url` (checked against
+ * playwright-mcp 0.0.79 and chrome-devtools-mcp 1.7.0; re-check when a pin
+ * moves). Arbitrary code, such as Playwright's `browser_run_code_unsafe`, is
+ * not covered; those tools need Admin.
+ */
+export const localFileInspector: Inspector = (call): InspectorDecision =>
+  argsOpenLocalFile(call.args)
+    ? { kind: 'deny', reason: 'local-file:agents may not open files on this computer' }
+    : { kind: 'allow' }
+
 export const defaultInspectors: Inspector[] = [
   dashboardInspector,
+  localFileInspector,
   securityInspector,
   scopeInspector,
   argClampInspector,

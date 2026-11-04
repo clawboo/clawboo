@@ -46,6 +46,7 @@ Other forms do not trigger it: "deleted", "deployment" and "secrets" pass, and s
 - **The Tasks card** beside a team chat and the **Tasks & Routines** card on an agent's page, under **Needs you**.
 - **Settings > Insights > Governance**, in the **Approval queue**. It lists every pending request from every team, or "No pending approvals".
 - **Settings > Workspace > Capabilities**, at the top of the panel, while something is waiting.
+- **A browser alert**, when you have turned alerts on and the Clawboo tab is in the background. Click it to open **Needs you** on the board. See [Get an alert outside the tab](/using/board#get-an-alert-outside-the-tab).
 
 Answer a request in any of these places and it clears from the others within a few seconds. A request that Clawboo cannot tie to an agent shows in every chat and under every board filter. Connector calls from OpenClaw agents arrive this way, because OpenClaw agents reach connectors without an agent identity.
 
@@ -106,7 +107,9 @@ Approve a command only when you understand it. An approved command runs on this 
 
 ## If nobody answers in time
 
-- **OpenClaw command.** The card goes away and Clawboo records the request as expired, not as a refusal. Clawboo's server keeps a copy of each request, so the card waits for you even while no browser tab is open. If an open tab received the request live, the agent's one-to-one chat in that tab also notes that the approval timed out.
+The card goes away and Clawboo records the request as expired, not as a refusal. Then:
+
+- **OpenClaw command.** Clawboo's server keeps a copy of each request, so the card waits for you even while no browser tab is open. If an open tab received the request live, the agent's one-to-one chat in that tab also notes that the approval timed out.
 - **Clawboo Native command.** The command does not run, and the agent cannot ask about another one for the rest of that run. The run waits while the card is open.
 - **Connector call.** The call is refused.
 - **Risky hand-off.** The hand-off is skipped and the leader is told. When the hand-off came from a task, that task gets the comment `Delegation to <name> not approved (<reason>); skipped.`
@@ -181,8 +184,8 @@ Set the board's team filter to **All teams**, or open the **Approval queue** in 
 - **Answers.** A tab with its own Gateway connection sends the answer straight to the Gateway (`exec.approval.resolve`). Every other answer goes through `POST /api/tools/approvals/:id/resolve`, which answers the Gateway first for an `exec` row. Answering twice is safe: the second answer changes nothing.
 - **Clawboo's own requests.** Connector calls, Clawboo Native commands and risky hand-offs are rows in the same table, and the dashboard checks for new ones every 3 seconds. Clawboo records answers as `allow_once`, `allow_always` and `deny`; OpenClaw's words are `allow-once`, `allow-always` and `deny`.
 - **Remembered answers.** A connector **Always** writes a standing rule bound to the access you shared, expiring after 30 days, and stopping the share deletes its rules. A risky hand-off is filed per leader under the scope `delegate:code` and marked never-remember, so every one raises a card.
-- **Cleanup.** Once an hour, Clawboo expires any request still pending after `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default). That cleanup does not lengthen the waits on this page.
-- **Event log.** Every request writes an `approval_requested` event, without the arguments or the command. An answer writes `approval_resolved`, and so does the expiry of an OpenClaw command or of a Native command whose run stopped. A connector call, Native command or hand-off that nobody answers writes its `approval_resolved` only when the hourly cleanup expires it, 24 to 25 hours after it was created. See [Approval events](/reference/events-and-errors#approval-events).
+- **Cleanup.** A connector call, Clawboo Native command or risky hand-off marks its own request `expired` as soon as it stops waiting. Once an hour, Clawboo also expires any request still pending after `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default), such as one left open when Clawboo stopped. That cleanup does not lengthen the waits on this page.
+- **Event log.** Every request writes an `approval_requested` event and its answer or expiry an `approval_resolved`, without the arguments or the command. A connector call, Native command or hand-off left open when Clawboo stopped writes its `approval_resolved` when someone tries to answer it, or when the hourly cleanup expires it 24 to 25 hours after it was created. See [Approval events](/reference/events-and-errors#approval-events).
 - **History.** `GET /api/approvals?agentId=<id>` lists the OpenClaw command decisions made from tabs with a Gateway connection, newest first.
 - Shapes and codes: [Governance API](/reference/rest-api/governance) and [Tools and MCP API](/reference/rest-api/tools-and-mcp). Every waiting time is in [Limits and defaults](/reference/limits-and-defaults).
 

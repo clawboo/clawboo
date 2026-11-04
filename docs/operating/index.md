@@ -27,7 +27,7 @@ Clawboo is one Node.js program. It serves the dashboard and the REST API on one 
 ## The default posture
 
 - **Only this machine can connect.** The server listens on `127.0.0.1` until you set `HOST`.
-- **There is no access token.** Anyone who can reach the server can use it until you set `STUDIO_ACCESS_TOKEN`. With `HOST` set to anything but a loopback address, the server refuses to start without one, but a reverse proxy on the same machine does not trip that check.
+- **The dashboard is locked with an access token.** The first start makes a per-install token in `~/.clawboo/access-token`, readable only by you, unless you set `STUDIO_ACCESS_TOKEN` yourself. `STUDIO_ACCESS_TOKEN=` set blank turns it off; then anyone who can reach the server can use it, and with `HOST` set to anything but a loopback address the server refuses to start, but a reverse proxy on the same machine does not trip that check.
 - **Browsers must use a local address.** The same-origin guard rejects API calls that arrive under another name, such as your proxy's domain, until you list it in `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`.
 - **State lives in `~/.clawboo`.** Clawboo also writes provider keys and OpenClaw settings in OpenClaw's `~/.openclaw` folder.
 - **Spend is tracked, not capped.** Budgets warn by default. A hard cap is something you turn on.

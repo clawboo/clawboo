@@ -42,7 +42,6 @@ import {
   createBoardOrchestrator,
   createNudgeQueue,
   DELEGATION_IDLE_TIMEOUT_MS,
-  REFLECT_WINDOW_MS,
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
@@ -50,6 +49,7 @@ import { getDb, resetDb } from '../../db'
 import { estimateRunCostUsdFromUsage } from '../../runtimes/estimateCost'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
+import { settle } from './settleCascade'
 
 const TEAM = 'T'
 const LEAD = 'codex-lead'
@@ -111,20 +111,6 @@ const doneEv = (reason: string, summary: string, costUsd?: number): RuntimeEvent
   ev({ kind: 'done', reason, summary, ...(costUsd !== undefined ? { costUsd } : {}) })
 const fatal = (message: string): RuntimeEvent =>
   ev({ kind: 'error', code: 'boom', message, fatal: true })
-
-/** Advance fake time in small steps, with real macrotask turns between them so the
- *  drains' sqlite and fs work keeps pace, until `until()` holds (see the same helper
- *  in codexLeaderCascade.test.ts). */
-async function settle(until: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
-  }
-  for (let t = 0; t < budgetMs && !until(); t += 250) {
-    await vi.advanceTimersByTimeAsync(250)
-    await flush()
-  }
-  await flush()
-}
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -255,7 +241,10 @@ describe('team run cost (real engine + real drain + real board)', () => {
     ])
     const id = assignTask()
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'done')
+    await settle(
+      () => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'done',
+      'the run closing with its cost, the task done',
+    )
 
     const expected = estimateRunCostUsdFromUsage({ model: 'gpt-4o', ...usage })
     const [row] = rowsOf(id)
@@ -280,7 +269,10 @@ describe('team run cost (real engine + real drain + real board)', () => {
     ])
     const id = assignTask()
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'blocked')
+    await settle(
+      () => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'blocked',
+      'the failed run closing with its cost, the task blocked',
+    )
 
     const [row] = rowsOf(id)
     expect(row!.status).toBe('failed')
@@ -298,7 +290,7 @@ describe('team run cost (real engine + real drain + real board)', () => {
     ])
     const id = assignTask()
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => h.worker.startOpts.length === 1)
+    await settle(() => h.worker.startOpts.length === 1, "the worker's run starting")
 
     // The person presses Stop while the run is still going.
     h.stopGen.value += 1
@@ -309,7 +301,7 @@ describe('team run cost (real engine + real drain + real board)', () => {
 
     // The run's own terminal arrives after the Stop closed its row.
     gate.resolve()
-    await settle(runClosedAndCosted(id, 0))
+    await settle(runClosedAndCosted(id, 0), "the late terminal's cost on the closed row")
 
     const rows = rowsOf(id)
     expect(rows).toHaveLength(1)
@@ -330,7 +322,7 @@ describe('team run cost (real engine + real drain + real board)', () => {
     ])
     const id = assignTask()
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => h.worker.startOpts.length === 1)
+    await settle(() => h.worker.startOpts.length === 1, "the worker's run starting")
     const sk = buildTeamSessionKey(WORKER, TEAM)!
 
     // The run goes quiet past the watchdog, which fails the task and forgets the
@@ -343,7 +335,7 @@ describe('team run cost (real engine + real drain + real board)', () => {
 
     // The run's own terminal arrives late. The row was named at deliver time.
     gate.resolve()
-    await settle(runClosedAndCosted(id, 0))
+    await settle(runClosedAndCosted(id, 0), "the late terminal's cost on the closed row")
 
     const rows = rowsOf(id)
     expect(rows).toHaveLength(1)
@@ -364,14 +356,20 @@ describe('team run cost (real engine + real drain + real board)', () => {
     ])
     const id = assignTask()
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'blocked')
+    await settle(
+      () => runClosedAndCosted(id, 0)() && getTask(db, id)?.status === 'blocked',
+      'the failed run closing with its cost, the task blocked',
+    )
     const first = rowsOf(id)[0]!.costUsd!
     expect(first).toBeGreaterThan(0)
 
     // A person retries it.
     updateStatus(db, id, 'todo')
     expect(await h.engine.dispatchTask(id)).toBe('started')
-    await settle(() => runClosedAndCosted(id, 1)() && getTask(db, id)?.status === 'done')
+    await settle(
+      () => runClosedAndCosted(id, 1)() && getTask(db, id)?.status === 'done',
+      'the retry closing with its cost, the task done',
+    )
 
     const rows = rowsOf(id)
     expect(rows).toHaveLength(2)

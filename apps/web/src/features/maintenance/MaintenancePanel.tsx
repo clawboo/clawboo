@@ -4,6 +4,7 @@ import { useConnectionStore } from '@/stores/connection'
 import { useToastStore } from '@/stores/toast'
 import { apiFetch, consumeApiSSE } from '@clawboo/control-client'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
+import { AlertsSetting } from '@/features/alerts/AlertsSetting'
 import { PanelHeader } from '@/features/shared/PanelHeader'
 import { Button } from '@/features/shared/Button'
 import { Select } from '@/features/shared/Select'
@@ -219,7 +220,7 @@ export function MaintenancePanel() {
     <div className="flex h-full flex-col bg-background text-foreground">
       <PanelHeader
         title="System"
-        subtitle="Manage your OpenClaw installation"
+        subtitle="Alerts and your OpenClaw installation"
         icon={Settings}
         actions={<GitHubStarButton />}
         border
@@ -235,13 +236,18 @@ export function MaintenancePanel() {
             header), and agent coordination is always on — the core of the product,
             not a togglable option. So none of those get a System-panel section. */}
 
-          {/* Section 1: Command Approval */}
+          {/* Section 1: Alerts (browser notifications for Needs you) */}
+          <SectionCard label="Alerts" data-testid="system-alerts">
+            <AlertsSetting />
+          </SectionCard>
+
+          {/* Section 2: Command Approval */}
           <CommandApprovalDefault />
 
           {/* Settings an administrator can pin for this install */}
           <DeploymentSettings />
 
-          {/* Section 2: System Info */}
+          {/* Section 3: System Info */}
           <SectionCard label="System Info">
             <div className="flex flex-col gap-2">
               <InfoRow label="OpenClaw" value={status?.openclaw.version ?? 'Not installed'} />

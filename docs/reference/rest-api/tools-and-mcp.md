@@ -24,7 +24,7 @@ The MCP routes speak the Model Context Protocol (JSON-RPC over Streamable HTTP),
 
 </Note>
 
-Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the approval resolve and the MCP transport; none is on the sensitive tier. Request bodies are JSON (up to 2 MB). Argument and result summaries are scrubbed when they are written; the approval queue and the audit log mask them again before they leave the server, and the `/api/tools*` routes mask their error messages. The `curl` examples assume the access gate is off. With `STUDIO_ACCESS_TOKEN` set, the `/api/tools*` routes, `GET /api/mcp/config` and `POST /api/mcp/attach-secret/rotate` need the access cookie (`-b 'clawboo_access=<token>'`, see [Authentication](/reference/rest-api/index#authentication)), and the MCP transport takes the `attachToken` described below.
+Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the approval resolve and the MCP transport; none is on the sensitive tier. Request bodies are JSON (up to 2 MB). Argument and result summaries are scrubbed when they are written; the approval queue and the audit log mask them again before they leave the server, and the `/api/tools*` routes mask their error messages. The `/api/tools*` routes, `GET /api/mcp/config` and `POST /api/mcp/attach-secret/rotate` need the access cookie (see [Authentication](/reference/rest-api/index#authentication)), and the MCP transport takes the `attachToken` described below.
 
 ## Routes
 
@@ -150,7 +150,7 @@ curl http://localhost:18790/api/tools/approvals
 
 Answers an approval. An unknown `decision` is a **400**. The route then loads the row and acts on its `kind`, because the two kinds are held by different things and released in different ways. The **404** means only that no row with that id exists; an approval that was already answered is not a 404.
 
-**A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending`; any other row (already answered, or marked `expired`) comes back unchanged with **200**, so check `status` in the response. A waiting broker sees the answer the next time it checks.
+**A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending` and its `expiresAt` has not passed. A row someone already answered comes back unchanged with **200**, so check `status` in the response. A row that has expired, or is still `pending` past its `expiresAt`, is refused with **409**, and a pending one is marked `expired` then. A waiting broker sees the answer the next time it checks.
 
 For a `tool` row, `allow_always` also creates a standing allow rule tied to the row's grant: later calls of the same tool under that grant run without asking, whatever their arguments, for 30 days. That covers a call with an external effect too. A call to a destructive tool is stored with `neverRemember: 1` and asks every time, even when a rule exists. No rule is made when the row has no `grantId`, when it has `neverRemember: 1`, or when this call did not change the row (it was already answered).
 
@@ -196,9 +196,22 @@ Clawboo makes no rule of its own for an `exec` row. An `allow_always` is passed 
   approval: {
     id: string
     kind: 'tool'
-    status: 'allow_once' | 'allow_always' | 'deny' | 'expired'
+    status: 'allow_once' | 'allow_always' | 'deny'
     resolvedAt: number | null // when the row was answered, which may be earlier than this call
     // ...and every other field shown under GET /api/tools/approvals
+  }
+}
+```
+
+**`409 Conflict`** (`kind: 'tool'`): the card's time ran out, so the answer was not recorded. `approval` is the row, with `status: 'expired'`:
+
+```ts
+{
+  error: 'approval expired'
+  approval: {
+    id: string
+    kind: 'tool'
+    status: 'expired' /* ...every other field */
   }
 }
 ```
@@ -322,14 +335,17 @@ Errors from the transport are JSON-RPC error bodies, `{ "jsonrpc": "2.0", "error
 
 ### Access: the `attachToken`
 
-With the access gate on (`STUDIO_ACCESS_TOKEN` set), a request to one of the twelve transport routes needs either the access cookie or an `attachToken` query parameter. The token is an HMAC-SHA256 the server derives from a per-install secret, and it is the same on every attach URL of an install. Clawboo writes it into every attach URL it builds: for the runtimes it starts, and in the `GET /api/mcp/config` snippet. It is checked on every request (`initialize` and the session's later `POST`, `GET` and `DELETE` alike), which is why it rides in the URL.
+With the access gate on (every install, unless `STUDIO_ACCESS_TOKEN` is set blank), a request to one of the twelve transport routes needs either the access cookie or an `attachToken` query parameter. The token is an HMAC-SHA256 the server derives from a per-install secret, and it is the same on every attach URL of an install. Clawboo writes it into every attach URL it builds: for the runtimes it starts, and in the `GET /api/mcp/config` snippet. It is checked on every request (`initialize` and the session's later `POST`, `GET` and `DELETE` alike), which is why it rides in the URL.
 
 The token counts only on a request that reached the loopback port directly. It is refused from another machine, and on any request that carries a proxy header (`Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` or `X-Real-IP`). It opens these twelve routes only: `GET /api/mcp/config` always needs the cookie while the gate is on, because it signs attach URLs. With the gate off, neither is needed. The server log masks `attachToken`, `scopeSig` and `provSig` values.
 
 Without either credential the gate answers **401**:
 
 ```json
-{ "error": "Clawboo access token required. Open /?access_token=<token> once to set a cookie." }
+{
+  "error": "Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.",
+  "gate": "clawboo-access"
+}
 ```
 
 Clawboo 0.5.0, the latest npm release, does not have this rule: on 0.5.0 any loopback request reaches every `/api/mcp/*` route, `/api/mcp/config` included, without the cookie. See [Security](/operating/security).

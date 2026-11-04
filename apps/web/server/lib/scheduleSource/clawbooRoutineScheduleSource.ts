@@ -47,6 +47,7 @@ import {
 import { eq, inArray } from 'drizzle-orm'
 
 import { getRoutinesTicker } from '../routines/ticker'
+import { routineTimeZone } from '../routines/timeZone'
 
 export interface ClawbooRoutineScheduleSourceDeps {
   /** The shared process connection (a thunk, so a sandbox swap is picked up
@@ -213,7 +214,7 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
             cronSpec: spec.cronSpec,
             taskTemplate: JSON.stringify({ ...template, target: resolved.target }),
             teamTaskId: template.teamTaskId ?? null,
-            nextRunAt: nextOccurrence(spec.cronSpec, Date.now()),
+            nextRunAt: nextOccurrence(spec.cronSpec, Date.now(), routineTimeZone(db)),
             tenantId: spec.tenantId ?? null,
           })
           if (!result.ok) {
@@ -244,7 +245,9 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
             // paused/error row is DISARMED (next_run_at NULL); changing its cron
             // spec must not silently re-arm it — resume re-arms via safeNext.
             patch.nextRunAt =
-              existing.status === 'idle' ? nextOccurrence(action.patch.cronSpec, Date.now()) : null
+              existing.status === 'idle'
+                ? nextOccurrence(action.patch.cronSpec, Date.now(), routineTimeZone(db))
+                : null
           }
           const current = parseTaskTemplate(existing.taskTemplate)
           const templatePatch =
@@ -303,7 +306,9 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
           if (!existing) throw new UnknownScheduleError(action.id)
           const to = action.kind === 'pause' ? ('paused' as const) : ('idle' as const)
           const result = setScheduledRunStatus(db, raw, to, {
-            ...(action.kind === 'resume' ? { nextRunAt: this.safeNext(existing.cronSpec) } : {}),
+            ...(action.kind === 'resume'
+              ? { nextRunAt: this.safeNext(db, existing.cronSpec) }
+              : {}),
           })
           if (!result.ok) {
             if (result.reason === 'not_found') throw new UnknownScheduleError(action.id)
@@ -341,9 +346,9 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
     return compositeOrRaw.startsWith(prefix) ? compositeOrRaw.slice(prefix.length) : compositeOrRaw
   }
 
-  private safeNext(cronSpec: string): number | null {
+  private safeNext(db: ClawbooDb, cronSpec: string): number | null {
     try {
-      return nextOccurrence(cronSpec, Date.now())
+      return nextOccurrence(cronSpec, Date.now(), routineTimeZone(db))
     } catch (err) {
       if (err instanceof InvalidCronSpecError) return null
       throw err

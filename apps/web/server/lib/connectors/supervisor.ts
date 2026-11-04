@@ -44,7 +44,7 @@ import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subpro
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn, type ConnectorSpawnPlan } from './spawnPlan'
-import { blockDashboardArgs } from './dashboardGuard'
+import { browserGuardArgs } from './dashboardGuard'
 
 /** What the catalog gives us, narrowed to what a connection needs. */
 export interface ConnectableDefinition {
@@ -71,6 +71,8 @@ export interface ConnectableDefinition {
         perAgentProfileFlag?: string
         /** How this browser takes a list of origins to block (see dashboardGuard). */
         blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
+        /** How this browser's Chrome takes a launch switch (see dashboardGuard). */
+        chromeSwitchArg?: { flag: string; style: 'joined' | 'playwrightConfig' }
       }
     | { transport: 'streamable-http'; url: string }
   /**
@@ -200,6 +202,7 @@ function spawnSpecFor(def: ConnectableDefinition): AgentBrowserSpawn {
     args: def.launch.args,
     profileFlag: def.launch.perAgentProfileFlag,
     ...(def.launch.blockOriginsArg ? { blockOriginsArg: def.launch.blockOriginsArg } : {}),
+    ...(def.launch.chromeSwitchArg ? { chromeSwitchArg: def.launch.chromeSwitchArg } : {}),
     ...(def.authInputs ? { authInputs: def.authInputs } : {}),
   }
 }
@@ -296,10 +299,11 @@ async function performConnect(
           })
         : await connectStdioConnector({
             command: plan.command,
-            // The dashboard block rides OUTSIDE the hashed spec, like the
-            // per-agent profile: it carries this server's port, and a port
-            // change must not read as the operator's spec having drifted.
-            args: [...plan.args, ...blockDashboardArgs(launch.blockOriginsArg)],
+            // The dashboard and local-file block rides OUTSIDE the hashed
+            // spec, like the per-agent profile: it carries this server's port,
+            // and a port change must not read as the operator's spec having
+            // drifted.
+            args: [...plan.args, ...browserGuardArgs(def.slug, launch)],
             // Recorded the moment the child exists, not once the handshake
             // succeeds. A cold `npx` install can hold the handshake open for
             // the better part of a minute, and a hard stop inside that window

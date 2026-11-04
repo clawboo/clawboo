@@ -41,6 +41,16 @@ describe('writeApiPortFile / readApiPortFile', () => {
     expect(readApiPortFile()).toBe(18790)
   })
 
+  it('says whether the write landed, since the clawboo command trusts only this file', () => {
+    expect(writeApiPortFile(18790)).toBe(true)
+    // A file where the folder should be: the write cannot land.
+    fs.rmSync(home, { recursive: true, force: true })
+    fs.writeFileSync(home, 'not a folder')
+    expect(writeApiPortFile(18790)).toBe(false)
+    fs.rmSync(home, { force: true })
+    fs.mkdirSync(home)
+  })
+
   it('reads null when the file is absent or unparseable', () => {
     expect(readApiPortFile()).toBeNull()
     fs.writeFileSync(path.join(home, 'api-port.txt'), 'not-a-port', 'utf8')

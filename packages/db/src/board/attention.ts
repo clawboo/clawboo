@@ -49,6 +49,7 @@ export function attentionForTasks(
         execs: ledgers.get(t.id) ?? [],
         verificationBlocked: verificationBlocks(t.verification),
         assigneeAgentId: t.assigneeAgentId,
+        personMovedAt: t.personMovedAt,
       }),
     )
   }

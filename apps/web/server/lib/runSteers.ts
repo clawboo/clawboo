@@ -13,12 +13,13 @@ import {
   steeringOf,
   type RunHandle,
   type RuntimeAdapter,
+  type SteeringMode,
   type SteerResult,
 } from '@clawboo/executor'
 
 /** The slice of an adapter a steer needs. A run whose adapter declares no
  *  steering (or has no `capabilities`) is never asked. */
-export type SteerTarget = Partial<Pick<RuntimeAdapter, 'capabilities' | 'steer'>>
+export type SteerTarget = Partial<Pick<RuntimeAdapter, 'capabilities' | 'steer' | 'runSteering'>>
 
 interface Entry {
   adapter: SteerTarget
@@ -53,6 +54,23 @@ export function registerRunSteer(
 /** True when some run working on `taskId` is registered. */
 export function hasRunForTask(taskId: string): boolean {
   return (byTask.get(taskId)?.size ?? 0) > 0
+}
+
+/**
+ * How the run working on `taskId` would take a comment now: the run's own way
+ * when its adapter can tell (a run that fell back to another transport keeps
+ * it), else the way its runtime declares. Null when no run is registered.
+ */
+export function taskRunSteering(taskId: string): SteeringMode | null {
+  const set = byTask.get(taskId)
+  if (!set || set.size === 0) return null
+  for (const { adapter, run } of set) {
+    if (!adapter.capabilities || !adapter.steer) continue
+    const declared = steeringOf(adapter.capabilities())
+    if (declared === 'none') continue
+    return adapter.runSteering?.(run) ?? declared
+  }
+  return 'none'
 }
 
 /**

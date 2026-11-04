@@ -9,6 +9,8 @@ keywords:
     'access token',
     'access gate',
     'STUDIO_ACCESS_TOKEN',
+    'access-token',
+    'clawboo open',
     'same-origin guard',
     'vault',
     'reverse proxy',
@@ -70,17 +72,17 @@ All three rules ignore letter case, because 0.5.0 also routes variants such as `
 
 ## What is protected by default, and what is not
 
-| Who could reach Clawboo                                  | Protected by default? | What protects it                                                                                                       |
-| -------------------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                    |
-| A web page open in your browser                          | Yes                   | The same-origin guard                                                                                                  |
-| Anyone who can reach a reverse proxy in front of Clawboo | No                    | The access token, or a proxy that authenticates every request                                                          |
-| Another user account on the same computer                | Partly                | Your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you; the API needs the access token |
-| Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                 |
+| Who could reach Clawboo                                  | Protected by default? | What protects it                                                                                             |
+| -------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                          |
+| A web page open in your browser                          | Yes                   | The same-origin guard                                                                                        |
+| Anyone who can reach a reverse proxy in front of Clawboo | Yes                   | The access token, unless you turn it off                                                                     |
+| Another user account on the same computer                | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you |
+| Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))       |
 
-The last three rows share one cause: anything that reaches Clawboo from `127.0.0.1` looks like you. Without `STUDIO_ACCESS_TOKEN`, it can call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs.
+Releases after 0.5.0 give every install an access token: without one, anything that reaches Clawboo from `127.0.0.1` looked like you, and could call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs. The token is in a file only your user account can read, so it closes the API to other user accounts and to anyone behind a reverse proxy. It does not stop a program running as you: an agent can read `~/.clawboo/access-token` as easily as it can read the database.
 
-So treat approvals and connector grants as controls against a confused or prompt-injected model, not against other code on your machine. Setting the token, even on a loopback-only install, closes the API to other user accounts. The coding runtimes and connectors Clawboo starts never receive the token, but a program running as you can still read your files, including Clawboo's database and key vault.
+So treat approvals and connector grants as controls against a confused or prompt-injected model, not against other code on your machine. The coding runtimes and connectors Clawboo starts never receive the token, but a program running as you can still read your files, including the token file, Clawboo's database and key vault.
 
 ## The loopback bind
 
@@ -88,7 +90,7 @@ Clawboo listens on `127.0.0.1` unless you set `HOST`. `localhost`, `::1` and any
 
 To listen on the network, set `HOST=0.0.0.0`. Do not bind one network address such as `HOST=192.168.1.10`. Clawboo's own agents and background jobs connect to `127.0.0.1`, and a single-address bind does not listen there, so agents lose their Clawboo tools and `clawboo` cannot find the server.
 
-A non-loopback bind without a working access token refuses to start: the server logs `SECURITY: refusing to start` and exits with code 1. On a network, a script can send any `Host` or `Origin` header, so the same-origin guard cannot stop it and the token is the only authentication. `CLAWBOO_ALLOW_INSECURE=1` overrides the refusal and logs a `SECURITY:` warning instead. Use it only on a network where you would leave the dashboard open to everyone.
+A non-loopback bind without a working access token refuses to start: the server logs `SECURITY: refusing to start` and exits with code 1. A default install always has one, so this happens only with the token turned off (`STUDIO_ACCESS_TOKEN=` set blank). On a network, a script can send any `Host` or `Origin` header, so the same-origin guard cannot stop it and the token is the only authentication. `CLAWBOO_ALLOW_INSECURE=1` overrides the refusal and logs a `SECURITY:` warning instead. Use it only on a network where you would leave the dashboard open to everyone.
 
 ## The same-origin guard (always on)
 
@@ -108,7 +110,13 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
 
 ## The access token
 
-`STUDIO_ACCESS_TOKEN` is an optional shared secret. Clawboo reads it from the environment when the server starts; a `studioAccessToken` entry in `settings.json` has no effect. When the token is set, every `/api/` path (in any letter case) and the Gateway WebSocket need the `clawboo_access` cookie. The dashboard page and static files load without it.
+The access token is a shared secret that every `/api/` path (in any letter case) and the Gateway WebSocket require, as the `clawboo_access` cookie. The dashboard page and static files load without it. The server picks its token when it starts, first match wins:
+
+1. **`STUDIO_ACCESS_TOKEN`**, when it is set in the environment. A `studioAccessToken` entry in `settings.json` has no effect.
+2. **Nothing, when `STUDIO_ACCESS_TOKEN` is set but blank** (`STUDIO_ACCESS_TOKEN=`). The server then runs with no token and every `/api/` route is open to anything that can reach it. `pnpm dev` runs this way.
+3. **The per-install token** in `~/.clawboo/access-token` (it follows `CLAWBOO_HOME`). The first start writes 32 random bytes there as base64url, readable only by you (mode `0600`, in a folder made `0700`). Later starts, and the server an in-app update starts, read the same file, so a signed-in browser stays signed in. The file is one per user account, not per app, so the Clawboo desktop app can use the same token.
+
+Clawboo narrows an existing token file to `0600` before it reads it, and checks and reads it through one open file, so the name cannot be pointed at another file in between. It refuses to start, logging `SECURITY: refusing to start` with the file's path, when the file is a link or not a regular file, stays readable by others, or does not hold a usable token. It also refuses when a new file comes out readable by others, as on a filesystem that ignores permissions, and when there is no home folder to keep it in (it never puts the token in the shared temp folder; set `CLAWBOO_HOME` there). It never overwrites the file; delete it to get a new token on the next start. Releases up to 0.5.0 have no per-install token: without `STUDIO_ACCESS_TOKEN`, the API is open.
 
 <Warning>
 
@@ -116,17 +124,33 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
 
 </Warning>
 
-**Sign in once per browser.** Open any Clawboo address with `?access_token=<token>` added, such as `https://dash.example.com/?access_token=<token>`. Clawboo checks the token, sets the cookie and redirects to the same address without the token. The cookie is `HttpOnly` and `SameSite=Lax`, its path is `/` (or your `CLAWBOO_BASE_PATH`), and it is `Secure` when the request carries `X-Forwarded-Proto: https`. The WebSocket accepts only the cookie.
+**Sign in once per browser.** A browser gets the cookie in one of these ways:
 
-| Request                                   | Answer                                                                                               |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `?access_token=` with the right token     | `302` redirect that sets the cookie                                                                  |
-| `?access_token=` with a wrong token       | `401` `{"error":"Invalid Clawboo access token."}`                                                    |
-| An `/api/` request without a valid cookie | `401` `{"error":"Clawboo access token required. Open /?access_token=<token> once to set a cookie."}` |
+- **`clawboo`, `clawboo restart` and `clawboo open`** open your browser with a one-time sign-in link. The terminal shows only the plain address.
+- **`clawboo open --print`** prints a one-time link for a browser that `clawboo` cannot open, such as on a computer with no desktop.
+- **Open on another device**, at the bottom of the dashboard's sidebar, shows a one-time link and, when the dashboard's address is one a phone can reach, a QR code of it.
+- **`?access_token=<token>`** added to any Clawboo address, such as `https://dash.example.com/?access_token=<token>`, signs in with the token itself.
 
-**One secret, full access.** Everyone who has the token can do everything you can. There are no accounts, roles or per-person revocation. To rotate the token, change the variable and restart the server; every browser then signs in again.
+Each sets the cookie and redirects to the same address without the code or token. The cookie is `HttpOnly` and `SameSite=Lax`, its path is `/` (or your `CLAWBOO_BASE_PATH`), and it is `Secure` when the request carries `X-Forwarded-Proto: https`. The WebSocket accepts only the cookie.
 
-**Agents do not receive it.** Clawboo removes the token from the environment of the coding runtimes, Clawboo Native shell commands and connectors it starts. The exception is an OpenClaw Gateway that you start from the dashboard: it inherits the server's whole environment, token included. Clawboo's own agents reach the MCP servers another way:
+A one-time link carries `?access_code=` instead of the token. The code works once, within two minutes, and only on a page address, never on an `/api/` path. A browser loading the link as a page spends it at once (the request's `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`). Browsers send those headers only to an HTTPS or loopback address, so a request without any of them, such as a phone opening a plain-HTTP network address, gets a page with a **Sign in** button instead, and the code is spent when the button posts it back. Only that form's POST counts: it must be form-encoded, any fetch metadata must be a same-origin page navigation, and any `Origin` must be the dashboard's own, so a script's or another site's POST does not spend a code. A chat app fetching a pasted link for its preview gets that page or a redirect, never submits it, and so leaves the code for the device you meant. A code that is used, expired or unknown redirects without setting the cookie, so the browser lands on the locked screen. A one-time link never carries the token, so the token stays out of its URL, the browser's history and the command line of the program that opens your browser. Other user accounts can usually read that command line, but a code read from it is spent the moment your browser uses it. The `?access_token=` form does put the token in the request URL, so request logs, such as a reverse proxy's, can record it. A browser without the cookie gets one screen, "This dashboard is locked to your computer", which names `clawboo open`.
+
+| Request                                    | Answer                                                                                                                                                                                |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?access_token=` with the right token      | `302` redirect that sets the cookie                                                                                                                                                   |
+| `?access_token=` with a wrong token        | `401` `{"error":"Invalid Clawboo access token."}`                                                                                                                                     |
+| `?access_code=` with a live code           | `302` redirect that sets the cookie                                                                                                                                                   |
+| `?access_code=` with no fetch metadata     | `200` sign-in page whose button posts the code; the code stays live until then                                                                                                        |
+| The sign-in page's form `POST`, live code  | `303` redirect that sets the cookie                                                                                                                                                   |
+| Any other `POST` to `?access_code=`        | `303` redirect, no cookie; the code stays live                                                                                                                                        |
+| `?access_code=` from a fetch or a frame    | `302` redirect, no cookie; the code stays live                                                                                                                                        |
+| `?access_code=` used, expired or unknown   | `302` redirect, no cookie                                                                                                                                                             |
+| An `/api/` request without a valid cookie  | `401` ``{"error":"Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.","gate":"clawboo-access"}`` |
+| `POST /api/access/launch-code` with cookie | `200` `{"gated":true,"code":"…","expiresAt":…,"expiresInMs":120000}`, or `{"gated":false}` on a server with no token                                                                  |
+
+**One secret, full access.** Everyone who has the token can do everything you can, and so can anyone who has a live one-time link. There are no accounts, roles or per-person revocation. To rotate the token, change the variable, or delete `~/.clawboo/access-token`, and restart the server; every browser then signs in again.
+
+**Agents do not receive it.** Clawboo removes `STUDIO_ACCESS_TOKEN` from the environment of the coding runtimes, Clawboo Native shell commands and connectors it starts, and the per-install token is never in any environment. The exception is an OpenClaw Gateway that you start from the dashboard: it inherits the server's whole environment, so it gets a `STUDIO_ACCESS_TOKEN` you set, but not the per-install token. A program running as you can still read the token file. Clawboo's own agents reach the MCP servers another way:
 
 - **From the release after 0.5.0**, every MCP attach URL Clawboo writes for its agents carries an `attachToken`, derived from a per-install secret in Clawboo's database. A request without the cookie reaches the four MCP servers (`/api/mcp/tasks`, `/api/mcp/memory`, `/api/mcp/tools`, `/api/mcp/teamchat`) only when all of these hold:
   - it carries a valid attach token;
@@ -137,13 +161,15 @@ The guard is not authentication. A script or `curl` can send any `Host` and `Ori
 
 - **On 0.5.0 and older**, any request from `127.0.0.1` reaches all of `/api/mcp/` without the cookie. See the advisory at the top of this page.
 
-**The proxy warning.** With no token set, the first request that carries one of those proxy headers makes the server log a one-time `SECURITY:` warning. It says that the dashboard and every `/api/` route are open to anyone who can reach the proxy. The warning never blocks a request.
+**The proxy warning.** With the token turned off, the first request that carries one of those proxy headers makes the server log a one-time `SECURITY:` warning. It says that the dashboard and every `/api/` route are open to anyone who can reach the proxy. The warning never blocks a request.
 
-**The `clawboo` command needs the token in its shell.** Its status check gets a `401` from a server that has a token. The command then asks that port once more with the `STUDIO_ACCESS_TOKEN` from its own shell as the access cookie. It sends the token only to a port whose `401` is the access gate's own, so another service in the port range never receives it, and it never puts the token in a URL or a command line. A server that `clawboo` starts inherits the shell's token, so the command sees it answer. From a shell without the server's token, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, then exit. See [Token-gated installs](/reference/cli#token-gated-installs).
+**The `clawboo` command finds the token the way the server does.** It uses the `STUDIO_ACCESS_TOKEN` in its own shell when one is set, nothing when it is set blank, and otherwise reads `~/.clawboo/access-token`; it never creates the file. Its status check gets a `401` from a server that has a token, and it then asks that port once more with the token as the access cookie. It sends the token only to a port whose `401` is the access gate's own, and only to the port the server recorded in `~/.clawboo/api-port.txt`, at `127.0.0.1`. So another service in the port range, or another user's program listening on `::1` or a spare port and imitating the gate, never receives it. It never puts the token in a URL or a command line. It dials and opens `127.0.0.1` rather than `localhost` for the same reason, or the loopback address `HOST` names (`::1`, or another `127.x` address) when that is all the server listens on. That holds for a `STUDIO_ACCESS_TOKEN` you set in the shell too: `CLAWBOO_API_PORT` alone never qualifies a port, since it stays set while the server is down, when anyone could listen there. If the server cannot write `api-port.txt`, it logs a warning saying the command cannot sign in to it. A server that `clawboo` starts inherits the shell's environment, so both pick the same token. When the server's token is neither of these, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, then exit. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 <Accordion title="Under the hood">
 
 - The token and the cookie value are each hashed with SHA-256 and compared in constant time, so the check leaks neither timing nor length.
+- Launch codes are 24 random bytes as base64url, held in the server's memory only, as SHA-256 digests. At most 64 unused codes are kept; minting another drops the oldest. A restart forgets them all.
+- A token file that another app is still writing can read as empty for a moment, so an empty file is read again for up to half a second before the server refuses it.
 - The token check lowercases the path before it tests for `/api/`, and the API routes match letter case exactly, so `/API/settings` cannot slip past it.
 - The attach token is a hex HMAC-SHA256 keyed with a 32-byte secret stored in the database (`settings` key `mcp-attach-scope-secret`). It is the same in every attach URL on an install. Attach URLs that bind a team or an agent also carry a `scopeSig` signature over that scope.
 - When the server's environment sets `HTTP_PROXY`, `HTTPS_PROXY` or `ALL_PROXY`, Clawboo adds `127.0.0.1`, `localhost` and `::1` to `NO_PROXY` for the agents it starts. Their MCP calls then never pass through that proxy.
@@ -210,6 +236,19 @@ This keeps a copy or backup of your Clawboo folder from carrying the key. It doe
 
 Agents work with your user account's permissions. Claude Code, Codex and Hermes run with their own sandboxes and approval prompts turned off, so they can read and change any file you can, run commands and reach the network. A task's git worktree keeps its file changes apart, but it is not a sandbox. A run without a worktree starts in its team's folder (`~/.clawboo/workspaces/<team id>`). That covers every team-chat turn, every one-to-one chat with these agents, research and review tasks, and every Routine you make in the dashboard. The folder only sets where the run starts: from there these runtimes can still reach Clawboo's database and key vault. Clawboo Native agents run a shell command only when their **Let this Boo ask to run commands** switch is on and you approve that command. Coding runtimes and connectors do not inherit Clawboo's own secrets from the environment (an OpenClaw Gateway that Clawboo starts does), but they can read credential files on disk. Run untrusted work under a separate user account or in a virtual machine. [What agents can do](/concepts/permissions) has the details for each runtime.
 
+**Agents' browsers.** The Playwright and Chrome DevTools connectors drive a real Chrome on this computer, so Clawboo keeps them off the dashboard and off your files:
+
+- Each browser starts with the dashboard's port blocked on every loopback address and on the address set in `HOST`. Chrome applies the block when it looks up an address, so a redirect, a page's script or a WebSocket cannot reach the dashboard either.
+- Clawboo refuses any connector call that names the dashboard, and any `url` that would open a file on this computer, such as `~/.clawboo/access-token`.
+
+What this leaves open:
+
+- A name that reaches Clawboo through a reverse proxy, or one in `CLAWBOO_ALLOWED_HOSTS`, is not blocked. There the access token keeps an agent's browser out, because the browser has its own profile, without your sign-in cookie.
+- If the browser sends web traffic through a proxy server, such as one set in this computer's network settings, a redirect to a network address set in `HOST` can reach the dashboard through the proxy, which looks the address up itself. Chrome keeps loopback addresses off a proxy by default, so the dashboard's own loopback addresses stay blocked. There, too, only the access token keeps an agent out.
+- Other ports on this computer stay reachable, so a local web server that serves your files, or forwards to Clawboo, is open to agents' browsers.
+- With Admin access, Playwright's `browser_run_code_unsafe` runs code in the Playwright server itself, outside these checks.
+- A browser connector you add yourself gets none of this.
+
 ## The OpenClaw Gateway device key
 
 When Clawboo connects to an OpenClaw Gateway, its server signs the handshake with an Ed25519 device key stored in `~/.clawboo/proxy-device-identity.json`, readable only by you. The key identifies Clawboo to the Gateway and nothing else: it plays no part in signing in to the dashboard, which is the access token's job. The Gateway token stays on the server too. The browser never receives it, and `GET /api/settings` reports only whether one is set. To connect a Gateway, see [OpenClaw](/runtimes/openclaw).
@@ -234,12 +273,12 @@ The limits count the connection's own address and ignore `X-Forwarded-For`, so b
 The rules in short; [Reach Clawboo from another machine](/guides/self-host-securely) has the steps.
 
 1. **Prefer an SSH tunnel.** Clawboo keeps listening on `127.0.0.1`, and SSH does the authentication.
-2. **Put the token behind every reverse proxy.** Set `STUDIO_ACCESS_TOKEN` unless the proxy authenticates every request itself. Also set `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`, forward `Host` and `X-Forwarded-Proto`, and deny `/api/mcp/` at the proxy.
-3. **For a network bind, use `HOST=0.0.0.0` with a token**, plus the two allowlists for the address people use. Plain `http://` sends the cookie unencrypted, so put TLS in front unless you trust the network.
+2. **Keep the token on behind every reverse proxy.** Never set `STUDIO_ACCESS_TOKEN` blank there unless the proxy authenticates every request itself. Setting your own `STUDIO_ACCESS_TOKEN` gives you a token you know, for signing in remotely. Also set `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`, forward `Host` and `X-Forwarded-Proto`, and deny `/api/mcp/` at the proxy.
+3. **For a network bind, use `HOST=0.0.0.0` with the token on**, plus the two allowlists for the address people use. Plain `http://` sends the cookie unencrypted, so put TLS in front unless you trust the network.
 
 <Warning>
 
-**A reverse proxy is not authentication.** nginx, Caddy and a Cloudflare Tunnel connector deliver every request from `127.0.0.1`, so to Clawboo the whole internet looks like a local caller. Without `STUDIO_ACCESS_TOKEN`, the dashboard and every `/api/` route are open to anyone who can reach the proxy, and the server starts without complaint. Set the token, or make the proxy authenticate every request (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access).
+**A reverse proxy is not authentication.** nginx, Caddy and a Cloudflare Tunnel connector deliver every request from `127.0.0.1`, so to Clawboo the whole internet looks like a local caller. With the token turned off (`STUDIO_ACCESS_TOKEN=` set blank), or on 0.5.0 and older without `STUDIO_ACCESS_TOKEN`, the dashboard and every `/api/` route are open to anyone who can reach the proxy, and the server starts without complaint. Keep the token on, or make the proxy authenticate every request (HTTP basic auth, an SSO proxy such as oauth2-proxy, Cloudflare Access).
 
 </Warning>
 
@@ -247,7 +286,7 @@ The rules in short; [Reach Clawboo from another machine](/guides/self-host-secur
 
 - **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access.
 - **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
-- **Local code is trusted.** Anything running as your user can read Clawboo's files and, without the token, use its API.
+- **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API.
 
 ## Related
 

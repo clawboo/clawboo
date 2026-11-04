@@ -414,7 +414,7 @@ curl -X POST http://localhost:18790/api/approvals \
 
 The budget, audit and delegation-approval routes answer validation errors as `{ "error": "<message>" }`, adding a zod `details` object on the budget routes. The budget and audit routes do not catch database errors: one reaches Express's default handler and comes back as an HTML `500`, not JSON. The delegation approval never answers `500`; it answers `timeout`. The `/api/approvals` routes answer `{ "ok": false, "error": "<message>" }`, and the `GET` adds `records: []` on its `500`.
 
-On the default loopback bind no token is needed for these routes, though the same-origin guard still refuses cross-origin browser requests. A non-loopback bind without `STUDIO_ACCESS_TOKEN` stops the server at startup unless `CLAWBOO_ALLOW_INSECURE=1` is set. With the token set, the access gate covers every route here. See the [REST API overview](/reference/rest-api/index) and [Security](/operating/security).
+The access gate covers every route here, with `STUDIO_ACCESS_TOKEN` or the per-install token, and the same-origin guard refuses cross-origin browser requests. With the token turned off (`STUDIO_ACCESS_TOKEN=` set blank), a non-loopback bind stops the server at startup unless `CLAWBOO_ALLOW_INSECURE=1` is set. See the [REST API overview](/reference/rest-api/index) and [Security](/operating/security).
 
 ## Related
 

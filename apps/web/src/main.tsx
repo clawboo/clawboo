@@ -8,6 +8,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from './App'
 import { installGlobalErrorHandlers } from './app/globalErrorHandlers'
+import { AccessLock } from './features/access/AccessLock'
 import { ErrorBoundary } from './features/shared/ErrorBoundary'
 import './app/globals.css'
 
@@ -26,7 +27,11 @@ createRoot(document.getElementById('root')!).render(
         mounts and globals.css is imported above, so the tokens resolve even if
         Providers never rendered. */}
     <ErrorBoundary variant="app" label="Clawboo">
-      <App />
+      {/* A browser without the access cookie gets one screen saying how to get
+          in, and nothing of the app mounts behind it. */}
+      <AccessLock>
+        <App />
+      </AccessLock>
     </ErrorBoundary>
   </StrictMode>,
 )

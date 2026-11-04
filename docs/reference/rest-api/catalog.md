@@ -7,7 +7,7 @@ keywords: ['misc', 'catalog', 'marketplace', 'packs', 'templates', 'CLAWBOO_CATA
 
 The agent and team templates the **Marketplace** browses, served as an index plus one document set per entry. Use this page when you build a catalog view of your own or check what a template deploys. These routes read files, not the database, and they never return an empty catalog.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All three routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All three routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
 
 ## Routes
 

@@ -1,7 +1,7 @@
 ---
 title: 'Update and maintain Clawboo'
 sidebarTitle: 'System'
-description: 'Update Clawboo from the Update available chip, update OpenClaw and restart its Gateway, set the default command approval, and find backups and logs.'
+description: 'Update Clawboo from the Update available chip, update OpenClaw and restart its Gateway, turn browser alerts on or off, set the default command approval, and find backups and logs.'
 icon: 'settings'
 keywords:
   [
@@ -13,12 +13,14 @@ keywords:
     'Check for Updates',
     'openclaw doctor',
     'Command Approval',
+    'alerts',
+    'notifications',
     'version',
     'logs',
   ]
 ---
 
-Use this page to update Clawboo, update OpenClaw and restart its Gateway, and find your backups and logs. It also covers the **System** panel in Settings, which shows your OpenClaw and Node.js versions, updates OpenClaw, and sets the default command approval for OpenClaw agents.
+Use this page to update Clawboo, update OpenClaw and restart its Gateway, and find your backups and logs. It also covers the **System** panel in Settings, which turns browser alerts on or off, shows your OpenClaw and Node.js versions, updates OpenClaw, and sets the default command approval for OpenClaw agents.
 
 ## Where things are
 
@@ -26,6 +28,7 @@ Use this page to update Clawboo, update OpenClaw and restart its Gateway, and fi
 | ---------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | Update Clawboo                                       | The **Update available** chip at the bottom left of the dashboard                                  |
 | Update OpenClaw                                      | **Settings** > **System** > **Check for Updates**                                                  |
+| Turn browser alerts on or off                        | **Settings** > **System** > **Alerts**                                                             |
 | Restart the OpenClaw Gateway                         | **Settings** > **Runtimes** > **OpenClaw** > **Manage**                                            |
 | Set the default command approval for OpenClaw agents | **Settings** > **System** > **Command Approval**                                                   |
 | Stop the browsers starting on a new install          | **Settings** > **System** > **Deployment**                                                         |
@@ -90,6 +93,7 @@ If the update fails, see [Troubleshooting](#troubleshooting).
 
 Open **Settings** > **System**, in the **System** group. The panel has three cards:
 
+- **Alerts**: **Alert me when something needs you** turns browser alerts on or off for this browser, and **Send a test alert** shows one so you can check that your browser and computer let it through. When the browser blocks notifications for the page, the card says how to allow them. In the Clawboo desktop app the card says that your computer's notifications tell you instead. What the alerts say and when they come is in [Get an alert outside the tab](/using/board#get-an-alert-outside-the-tab).
 - **Command Approval**: the default command approval for OpenClaw agents. It appears only while the dashboard is connected to an OpenClaw Gateway. See [Set the default command approval](#set-the-default-command-approval).
 - **Deployment**: settings an administrator can pin for everyone on this install. See [Deployment settings](#deployment-settings).
 - **System Info**: the installed **OpenClaw** version (or **Not installed**), the **Node.js** version Clawboo runs on, OpenClaw's **State Dir** (its folder, usually `~/.openclaw`), and **Config** (`openclaw.json`, or **Not found**). **Check for Updates** sits below them.

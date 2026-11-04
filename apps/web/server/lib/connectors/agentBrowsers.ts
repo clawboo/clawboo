@@ -44,7 +44,7 @@ import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subpro
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn } from './spawnPlan'
-import { blockDashboardArgs } from './dashboardGuard'
+import { browserGuardArgs } from './dashboardGuard'
 
 const log = createLogger('agent-browsers')
 
@@ -75,6 +75,8 @@ export interface AgentBrowserSpawn {
   profileFlag: string
   /** How this browser takes origins to block; the dashboard's are passed. */
   blockOriginsArg?: { flag: string; style: 'origins' | 'urlPatterns' }
+  /** How this browser's Chrome takes a launch switch; the host rules are passed. */
+  chromeSwitchArg?: { flag: string; style: 'joined' | 'playwrightConfig' }
   authInputs?: readonly DeclaredInput[]
 }
 
@@ -351,14 +353,9 @@ async function spawnReservedBrowser(
   // for one row under UNIQUE(slug), and every other agent's pin would then read
   // as spec drift with no way to recover, because the boot restore skips the
   // re-pin.
-  // The dashboard block is appended the same way, for the same reason: it
-  // carries this server's port, which is not the operator's choice.
-  const args = [
-    ...plan.args,
-    ...blockDashboardArgs(spec.blockOriginsArg),
-    spec.profileFlag,
-    profileDir,
-  ]
+  // The dashboard and local-file block is appended the same way, for the same
+  // reason: it carries this server's port, which is not the operator's choice.
+  const args = [...plan.args, ...browserGuardArgs(spec.slug, spec), spec.profileFlag, profileDir]
 
   let session: ConnectorSession
   try {

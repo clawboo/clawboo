@@ -24,6 +24,7 @@ import {
   setTaskVerification,
   getTaskVerification,
   getComments,
+  listEvents,
   updateStatus,
   updateWorkspaceStatus,
 } from '@clawboo/db'
@@ -35,6 +36,7 @@ import {
   gcTaskWorkspaces,
   getTaskWorkspace,
   provisionTaskWorkspace,
+  readWorktreeDetail,
   resumeTaskWorkspace,
   writeTaskHandoff,
 } from '../worktrees'
@@ -297,6 +299,10 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(getTask(db, taskId)?.status).toBe('blocked')
     expect(getTaskVerification(db, taskId)?.attempts).toHaveLength(2)
     expect(getComments(db, taskId).some((c) => /fix loop is exhausted/i.test(c.body))).toBe(true)
+    // On the event log too, which is what the browser alerts wake up on.
+    expect(
+      listEvents(db, { taskId, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
+    ).toContainEqual({ to: 'blocked', reason: 'verification_exhausted' })
 
     // `blocked -> todo` is one legal move, and it clears the verdict so a
     // re-queued task is not gated by the failure a human just reviewed.
@@ -356,6 +362,21 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(existsSync(path.join(resumed.worktree.worktreePath, SOR_FILES.task))).toBe(true)
     // The row is flipped back to active.
     expect(getWorkspaceForTask(db, taskId)?.status).toBe('active')
+  })
+
+  it('the drawer detail names the task files it cut at the read limit', async () => {
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(`provision failed: ${prov.reason}`)
+    await writeFile(
+      path.join(prov.worktree.worktreePath, SOR_FILES.progress),
+      'p'.repeat(300 * 1024),
+    )
+
+    const detail = await readWorktreeDetail(taskId)
+    expect(detail.sorFilesTruncated).toEqual([SOR_FILES.progress])
+    expect(detail.sorFiles?.[SOR_FILES.progress]).toHaveLength(256 * 1024)
+    expect(detail.sorFiles?.[SOR_FILES.task]).toEqual(expect.any(String))
   })
 
   it('provisionTaskWorkspace dedups — a repeat provision reuses the one active row', async () => {

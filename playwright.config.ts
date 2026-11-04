@@ -10,6 +10,18 @@ import os from 'node:os'
 const API_PORT = parseInt(process.env.CLAWBOO_API_PORT ?? '19999', 10)
 const API_BASE = `http://127.0.0.1:${API_PORT}`
 
+// ─── Access token ────────────────────────────────────────────────────────────
+//
+// A server with no STUDIO_ACCESS_TOKEN locks itself with a per-install token, so
+// the suite runs the way a real install does: behind the access gate. It sets a
+// fixed token instead, and every page and API request carries the matching
+// `clawboo_access` cookie (`use.storageState` below). The browser's own cookie
+// jar sends it, so it also reaches the Gateway WebSocket handshake. A spec that
+// needs a signed-out browser makes a context with empty storage. Exported to the
+// runner's env so fixtures' plain `fetch` calls can send it too.
+const ACCESS_TOKEN = 'clawboo-e2e-access-token'
+process.env.CLAWBOO_E2E_ACCESS_TOKEN = ACCESS_TOKEN
+
 // ─── Sandbox HOME + state dir ────────────────────────────────────────────────
 //
 // E2E runs would otherwise wipe the developer's real teams / agents because
@@ -109,6 +121,24 @@ export default defineConfig({
   use: {
     baseURL: API_BASE,
     trace: 'on-first-retry',
+    // The access cookie for the server below, for `page` and `request` alike.
+    // Cookies are not port-scoped, so the servers 17-base-path.spec.ts starts on
+    // other ports see it too; theirs either have no gate or a token of their own.
+    storageState: {
+      cookies: [
+        {
+          name: 'clawboo_access',
+          value: ACCESS_TOKEN,
+          domain: '127.0.0.1',
+          path: '/',
+          expires: -1,
+          httpOnly: true,
+          secure: false,
+          sameSite: 'Lax',
+        },
+      ],
+      origins: [],
+    },
   },
   projects: [
     {
@@ -118,6 +148,9 @@ export default defineConfig({
   ],
   webServer: {
     command: `CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web build:ui && CLAWBOO_API_PORT=${API_PORT} pnpm --filter @clawboo/web start`,
+    // A Clawboo route, so a reused server on this port must be Clawboo: it
+    // answers 401 here without the cookie, which Playwright counts as ready,
+    // while another program at `/` would pass a root check and fail later.
     url: `${API_BASE}/api/settings`,
     reuseExistingServer: !process.env.CI,
     // Bumped from 60s — a cold `vite build` takes 80–120s on the macOS
@@ -136,6 +169,8 @@ export default defineConfig({
       HOME: SANDBOX_HOME,
       OPENCLAW_STATE_DIR: SANDBOX_STATE_DIR,
       CLAWBOO_HOME: SANDBOX_CLAWBOO_DIR,
+      // The fixed token the cookie in `use.storageState` carries.
+      STUDIO_ACCESS_TOKEN: ACCESS_TOKEN,
       // Keep corepack off the sandbox HOME — see the COREPACK_HOME note above.
       COREPACK_HOME,
       COREPACK_ENABLE_DOWNLOAD_PROMPT: '0',
