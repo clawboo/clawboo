@@ -39,7 +39,8 @@ no repository path (`workspace_unavailable`) rather than run it without isolatio
 The package's default root is `<repo>/.clawboo/worktrees`, but the server always passes its own: task worktrees
 live at `<clawboo home>/worktrees/<hash of the repo path>/<task id>` and review checkouts under
 `<clawboo home>/reviews/`, so nothing is created inside your repository. Each task gets the branch
-`clawboo/task-<task id>`.
+`clawboo/task-<task id>`. The server also acts on a task worktree the board records under the work folder's
+`worktrees/<hash of the repo path>/` (see [The work folder](/operating/data-and-state#the-work-folder)).
 
 ## The lifecycle
 
@@ -84,7 +85,9 @@ These functions remove folders recursively and run commands, so every path they 
 - **Task folders stay under the root.** `worktreePathFor(repo, taskId, rootDir)` resolves the task's folder and
   throws if it would land anywhere but one segment below the root.
 - **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
-  folder from the root and the task id, and throw if the stored record points somewhere else.
+  folder from the root and the task id, and throw if the stored record points somewhere else. `rootDir` may be a
+  list of roots, and then the record has to be the task's folder under one of them; an empty list refuses every
+  record. The server passes its own root and the work folder's.
 - **A replace never loses work.** Resume and a provision's clean-up of leftovers delete a task folder only when it
   is missing, empty, or a checkout of the task's repository at a commit a branch holds, with nothing in
   `git status --ignored`. Anything else throws `UnsafeWorktreeError` and the folder is left exactly as it was:
@@ -99,8 +102,8 @@ These functions remove folders recursively and run commands, so every path they 
   removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
   `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
   its own path the same way.
-- **Verify commands run in Clawboo's folder only.** The server's verification gate refuses a worktree path outside
-  Clawboo's state folder before it runs `VERIFY_CMD`.
+- **Verify commands run in Clawboo's folders only.** The server's verification gate refuses a worktree path outside
+  Clawboo's state folder and the work folder's `worktrees/` and `reviews/` before it runs `VERIFY_CMD`.
 
 ## Helpers you will reach for
 

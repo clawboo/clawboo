@@ -73,6 +73,12 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 
 On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `workspaces/` instead, created readable only by you. It still has your account's full file access; see [What agents can do](/concepts/permissions).
 
+### The work folder
+
+A newer layout keeps task worktrees, review checkouts and team folders out of `~/.clawboo`, in a separate work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. This version still makes new worktrees, review checkouts and team folders in `~/.clawboo`.
+
+It does work with a task worktree the board records under the work folder's `worktrees/`, so a version that keeps them there can be rolled back to this one. Pausing and completing the task and its work check act on that checkout where it is, a paused one is rebuilt there, and the worktree cleanup sweeps the work folder's `worktrees/` too. The Workspace tab shows such a worktree, and a team folder whose `workspaces/<team id>` is a link into the work folder.
+
 ## What Clawboo writes in OpenClaw's folder
 
 OpenClaw keeps its state in `~/.openclaw` (`OPENCLAW_STATE_DIR` moves it). Clawboo writes there in these cases:

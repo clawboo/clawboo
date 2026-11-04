@@ -34,6 +34,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset |
 | **Folders**                            |                                   |                                                              |
 | `CLAWBOO_HOME`                         | `~/.clawboo`                      | Folder for everything Clawboo stores                         |
+| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder Clawboo also reads task worktrees from           |
 | `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes            |
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                    |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                      |
@@ -217,6 +218,16 @@ The folder for everything Clawboo stores.
 - Example: `CLAWBOO_HOME=/srv/clawboo`
 
 It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, worktrees, team folders, agent browser profiles and per-agent runtime homes. The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
+
+### CLAWBOO_WORK_DIR
+
+The work folder, where a newer layout keeps task worktrees, review checkouts and team folders.
+
+- Type: path; a leading `~` is expanded and a relative path is resolved
+- Default: `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`
+- Example: `CLAWBOO_WORK_DIR=/srv/clawboo-work`
+
+New worktrees, review checkouts and team folders still go in `CLAWBOO_HOME`. Clawboo works with a task worktree the board records under the work folder's `worktrees/`, and creates something there only to rebuild such a worktree after a pause. See [The work folder](/operating/data-and-state#the-work-folder).
 
 ### OPENCLAW_STATE_DIR
 

@@ -36,22 +36,32 @@ import type { CheckoutContents } from './git'
 import type { DiffStat, TaskScaffoldInput, Worktree } from './types'
 
 /**
+ * The roots a task's checkout may live under. One root, or none (the default
+ * root), is the usual case; a list names every root a recorded checkout may
+ * still be under, such as an older and a newer layout.
+ */
+export type WorktreeRoots = string | readonly string[] | undefined
+
+/**
  * The directory a worktree record owns, or a thrown error.
  *
  * `pauseWorktree` / `completeWorktree` recursively remove a directory named by a
- * stored record, so the location they act on is REBUILT here from the worktree
+ * stored record, so the location they act on is REBUILT here from a worktree
  * root and the task's validated id rather than taken from the record verbatim.
- * The record is still compared against the rebuilt path, so a record pointing
- * somewhere else fails loudly instead of quietly retargeting the remove.
+ * The record has to equal the rebuilt path under one of `rootDir`'s roots, so a
+ * record pointing anywhere else fails loudly instead of quietly retargeting the
+ * remove.
  */
-function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: string): string {
-  const expected = worktreePathFor(repoPath, worktree.taskId, rootDir)
-  if (path.resolve(worktree.worktreePath) !== expected) {
-    throw new Error(
-      `worktree path does not belong to task ${worktree.taskId}: ${worktree.worktreePath}`,
-    )
+function ownedWorktreeDir(worktree: Worktree, repoPath: string, rootDir?: WorktreeRoots): string {
+  const roots = typeof rootDir === 'string' || rootDir === undefined ? [rootDir] : rootDir
+  const recorded = path.resolve(worktree.worktreePath)
+  for (const root of roots) {
+    const expected = worktreePathFor(repoPath, worktree.taskId, root)
+    if (recorded === expected) return expected
   }
-  return expected
+  throw new Error(
+    `worktree path does not belong to task ${worktree.taskId}: ${worktree.worktreePath}`,
+  )
 }
 
 /**
@@ -314,12 +324,14 @@ export interface PauseResult {
 /**
  * Pause a worktree: commit any uncommitted work (so nothing is lost), drop the
  * worktree to free disk + process slots, and KEEP the branch. Resume re-creates
- * the worktree from the preserved branch.
+ * the worktree from the preserved branch. `rootDir` is the root, or the list of
+ * roots, the record's checkout may be under; a record under none of them throws
+ * before anything is touched.
  */
 export async function pauseWorktree(
   repoPath: string,
   worktree: Worktree,
-  rootDir?: string,
+  rootDir?: WorktreeRoots,
 ): Promise<PauseResult> {
   const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
   return mutex.run(worktreePath, async () => {
@@ -386,12 +398,13 @@ export interface CompleteResult {
  * Finish a worktree. **Empty diff → auto-cleanup** (remove worktree, delete
  * branch, prune) — no integration work to do. **Non-empty → retain** the
  * worktree + branch and return the diff-stat; the caller flips the task to
- * `in_review` and the branch awaits the verification/PR gate.
+ * `in_review` and the branch awaits the verification/PR gate. `rootDir` works
+ * as for {@link pauseWorktree}.
  */
 export async function completeWorktree(
   repoPath: string,
   worktree: Worktree,
-  rootDir?: string,
+  rootDir?: WorktreeRoots,
 ): Promise<CompleteResult> {
   const worktreePath = ownedWorktreeDir(worktree, repoPath, rootDir)
   return mutex.run(worktreePath, async () => {

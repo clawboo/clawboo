@@ -48,6 +48,7 @@ export {
   UnsafeWorktreeError,
   RegistrationUnknownError,
   type ProvisionOptions,
+  type WorktreeRoots,
   type ResumeOptions,
   type LoadOptions,
   type PauseResult,

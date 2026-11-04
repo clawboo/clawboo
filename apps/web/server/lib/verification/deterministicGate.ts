@@ -33,6 +33,7 @@ import { execGit, SOR_FILES } from '@clawboo/worktrees'
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
 import { killProcessTree } from '../runtimes/killTree'
+import { workDirSpellings } from '../workDir'
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 const TAIL_CHARS = 4_000
@@ -146,10 +147,12 @@ export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
   // Every task and review checkout clawboo provisions lives inside its own state
-  // directory. The verify command is worktree-authored and runs through a shell,
-  // so the directory it runs in, reads its command from, and appends evidence to
-  // is confirmed to be in there first: a path that resolves anywhere else is a
-  // broken record, not a place to run commands.
+  // directory, or, in the newer layout, under the work folder's `worktrees/` or
+  // `reviews/`. The verify command is worktree-authored and runs through a
+  // shell, so the directory it runs in, reads its command from, and appends
+  // evidence to is confirmed to be in one of those first: a path that resolves
+  // anywhere else is a broken record, not a place to run commands. The work
+  // folder's team folders are not checkouts, so the rest of it does not count.
   //
   // The check is written out here rather than shared from a helper on purpose.
   // A helper that validates and then RETURNS the path hands the caller a value
@@ -157,19 +160,27 @@ export async function runDeterministicGate(
   // static analysis; keeping the test and the use in one place means the thing
   // being spawned into is visibly the thing that was just tested.
   //
-  // Containment is ONE test: the resolved path has to start with the state root
-  // plus a trailing separator. The separator is what stops a sibling that merely
-  // shares the root's spelling (`~/.clawboo-old` against `~/.clawboo`) from
-  // reading as something inside it. The state root itself does not pass either,
-  // which is right: every checkout clawboo provisions lands several segments
-  // down (`worktrees/<repo-hash>/<task-id>`), so a path arriving equal to the
-  // root is the same broken record as one pointing outside, and earns the same
-  // answer.
-  const stateRoot = path.resolve(resolveClawbooDir())
-  const stateRootPrefix = stateRoot.endsWith(path.sep) ? stateRoot : stateRoot + path.sep
+  // Containment is a prefix test: the resolved path has to start with one of
+  // the roots plus a trailing separator. The separator is what stops a sibling
+  // that merely shares a root's spelling (`~/.clawboo-old` against
+  // `~/.clawboo`) from reading as something inside it. A root itself does not
+  // pass either, which is right: every checkout clawboo provisions lands below
+  // one (`worktrees/<repo-hash>/<task-id>`), so a path arriving equal to a root
+  // is the same broken record as one pointing outside, and earns the same
+  // answer. The work folder counts in each of its spellings, so a checkout
+  // recorded by the real path of a linked work folder passes too.
+  const rootPrefixes = [
+    path.resolve(resolveClawbooDir()),
+    ...workDirSpellings().flatMap((dir) => [
+      path.join(dir, 'worktrees'),
+      path.join(dir, 'reviews'),
+    ]),
+  ].map((root) => (root.endsWith(path.sep) ? root : root + path.sep))
   const worktreePath = path.resolve(input.worktreePath)
-  if (!worktreePath.startsWith(stateRootPrefix)) {
-    throw new Error(`worktree path is outside the clawboo state directory: ${worktreePath}`)
+  if (!rootPrefixes.some((prefix) => worktreePath.startsWith(prefix))) {
+    throw new Error(
+      `worktree path is outside the clawboo state directory and work folder: ${worktreePath}`,
+    )
   }
   const { command, source: commandSource } = await resolveVerifyCommand(
     worktreePath,
