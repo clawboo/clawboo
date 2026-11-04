@@ -59,11 +59,47 @@ export function laneRefusalBody(reason: LaneRefusal): string {
   })
 }
 
-function pathOf(url: string | undefined): string {
+/**
+ * The path of a request target as sent, without its query: an origin-form
+ * target as it is, an absolute-form one (`GET http://host/api/x HTTP/1.1`) by
+ * what follows its authority. Never resolved: Express routes this raw path,
+ * dot segments and all. Null for a target with no path (`*`, authority-form).
+ */
+export function targetPath(url: string | undefined): string | null {
   const raw = url ?? '/'
-  const q = raw.indexOf('?')
-  return q === -1 ? raw : raw.slice(0, q)
+  const end = raw.search(/[?#]/)
+  const target = end === -1 ? raw : raw.slice(0, end)
+  if (target.startsWith('/')) return target
+  const absolute = /^[a-z][a-z0-9+.-]*:\/\/[^/]*(\/.*)?$/i.exec(target)
+  return absolute ? (absolute[1] ?? '/') : null
 }
+
+/**
+ * Every reading of a request's path that some layer acts on: as sent; as the
+ * WHATWG URL parser resolves it, which is how the access gate reads it (dot
+ * segments removed, an absolute-form target cut to its path); and as the router
+ * matches it (`req.path`), when known. They differ for a dot segment: the gate
+ * reads `/api/files/x/../../../x` as `/x`, while the router still sends it to an
+ * `/api/` route. So the lane guards a request when ANY reading is under `/api/`,
+ * and lets a runtime's credential stand in for a token only when EVERY reading
+ * is under `/api/mcp/`.
+ */
+function pathReadings(url: string | undefined, routerPath?: string): Array<string | null> {
+  let resolved: string | null
+  try {
+    resolved = new URL(url ?? '/', 'http://clawboo.invalid').pathname
+  } catch {
+    resolved = null
+  }
+  const sent = targetPath(url)
+  return [sent, resolved, routerPath ?? sent]
+}
+
+/** Under `prefix`, letter case folded as the access gate folds it. */
+const under =
+  (prefix: string) =>
+  (path: string | null): boolean =>
+    path !== null && path.toLowerCase().startsWith(prefix)
 
 /** The token from the header, without a `Bearer ` prefix. Undefined when absent;
  *  '' when present but empty, or sent twice (Node joins repeats with a comma). */
@@ -106,17 +142,21 @@ export function createProxyIdentityLane(
   }
 
   function http(req: Request, res: Response, next: NextFunction): void {
-    // Root-form, after the base-path strip: the same test the access gate makes,
-    // case folded the same way so `/API/...` cannot step around it.
-    if (!pathOf(req.url).toLowerCase().startsWith('/api/')) {
+    // After the base-path strip, so `req.url` is root-form for an origin-form
+    // target. Every reading of it counts (see pathReadings): no letter case,
+    // dot segment or absolute-form target routes past the lane.
+    const readings = pathReadings(req.url, typeof req.path === 'string' ? req.path : undefined)
+    if (!readings.some(under('/api/'))) {
       next()
       return
     }
-    if (opts.isRuntimeRequest(req)) {
+    if (readings.every(under('/api/mcp/')) && opts.isRuntimeRequest(req)) {
       next()
       return
     }
-    const path = pathOf(req.originalUrl ?? req.url)
+    // The path as the request arrived, base path included: the one the proxy
+    // signed. An absolute-form target is cut to its path; nothing is resolved.
+    const path = targetPath(req.originalUrl ?? req.url) ?? ''
     void decide(req, path).then((decision) => {
       if (!decision.ok) {
         opts.onRefuse?.({ reason: decision.reason, method: req.method, path })
@@ -129,7 +169,7 @@ export function createProxyIdentityLane(
   }
 
   async function checkUpgrade(req: IncomingMessage): Promise<LaneDecision> {
-    const path = pathOf(req.url)
+    const path = targetPath(req.url) ?? ''
     const decision = await decide(req, path)
     if (!decision.ok)
       opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })

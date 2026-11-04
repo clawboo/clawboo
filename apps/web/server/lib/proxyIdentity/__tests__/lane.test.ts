@@ -8,7 +8,7 @@
 
 import { generateKeyPairSync } from 'node:crypto'
 import http from 'node:http'
-import type { AddressInfo } from 'node:net'
+import net, { type AddressInfo } from 'node:net'
 
 import express from 'express'
 import { SignJWT, type JWK } from 'jose'
@@ -59,6 +59,7 @@ async function assertion(method: string, path: string, key = ed.privateKey): Pro
 
 let server: http.Server | null = null
 let base = ''
+let port = 0
 let lane: ProxyIdentityLane
 
 async function start(opts: {
@@ -88,12 +89,18 @@ async function start(opts: {
   app.post('/api/mcp/tasks', (req, res) => {
     res.json({ runtime: true, person: req.person ?? null })
   })
+  // A wildcard route, which absorbs dot segments the way the board's preview
+  // route does: the raw path stays under /api/ while a resolved one leaves it.
+  app.all('/api/files/*splat', (req, res) => {
+    res.json({ files: true, person: req.person ?? null })
+  })
   app.get('/', (_req, res) => {
     res.send('page')
   })
   server = http.createServer(app)
   await new Promise<void>((r) => server!.listen(0, '127.0.0.1', () => r()))
-  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  port = (server.address() as AddressInfo).port
+  base = `http://127.0.0.1:${port}`
 }
 
 beforeEach(() => resetOperatorSettings())
@@ -118,6 +125,40 @@ async function get(
     body = { text }
   }
   return { status: res.status, body }
+}
+
+/**
+ * Send a request target exactly as written, over a raw socket: fetch and
+ * http.request normalize what they send, and an absolute-form target
+ * (`GET http://host/api/x HTTP/1.1`) or a dot segment is the point here.
+ */
+function raw(
+  target: string,
+  headers: Record<string, string> = {},
+  method = 'GET',
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const lines = [`${method} ${target} HTTP/1.1`, `Host: 127.0.0.1:${port}`, 'Connection: close']
+    for (const [name, value] of Object.entries(headers)) lines.push(`${name}: ${value}`)
+    if (method !== 'GET') lines.push('Content-Length: 0')
+    const socket = net.connect(port, '127.0.0.1', () =>
+      socket.write(`${lines.join('\r\n')}\r\n\r\n`),
+    )
+    let buf = ''
+    socket.on('data', (d) => (buf += d.toString()))
+    socket.on('error', reject)
+    socket.on('end', () => {
+      const status = Number(buf.split('\r\n')[0]?.split(' ')[1])
+      const text = buf.slice(buf.indexOf('\r\n\r\n') + 4)
+      let body: Record<string, unknown> = {}
+      try {
+        body = JSON.parse(text) as Record<string, unknown>
+      } catch {
+        body = { text }
+      }
+      resolve({ status, body })
+    })
+  })
 }
 
 const signed = async (method: string, path: string) => ({
@@ -224,6 +265,60 @@ describe('required', () => {
   })
 })
 
+describe('request targets that are not a plain path', () => {
+  it('refuses an absolute-form /api/ request without a token, as the router still routes it', async () => {
+    await start({ mode: 'required' })
+    for (const target of [
+      `http://127.0.0.1:${port}/api/access/identity`,
+      'HTTP://evil.example/api/access/identity',
+      'http://127.0.0.1/API/access/identity',
+    ]) {
+      expect(await raw(target)).toMatchObject({
+        status: 401,
+        body: { gate: 'clawboo-proxy-identity', reason: 'missing' },
+      })
+    }
+  })
+
+  it('accepts an absolute-form request with a good token for its path', async () => {
+    await start({ mode: 'required' })
+    const res = await raw(
+      `http://127.0.0.1:${port}/api/access/identity`,
+      await signed('GET', '/api/access/identity'),
+    )
+    expect(res).toMatchObject({ status: 200, body: { person: { id: 'user-42' } } })
+    const wrong = await raw(
+      `http://127.0.0.1:${port}/api/access/identity`,
+      await signed('GET', `http://127.0.0.1:${port}/api/board`),
+    )
+    expect(wrong).toMatchObject({ status: 401, body: { reason: 'binding' } })
+  })
+
+  it('refuses a dot-segment path the router keeps under /api/ even when it resolves outside', async () => {
+    await start({ mode: 'required' })
+    for (const target of ['/api/files/x/../../../x', '/api/files/x/%2e%2e/%2e%2e/%2e%2e/x']) {
+      expect(await raw(target)).toMatchObject({ status: 401, body: { reason: 'missing' } })
+    }
+    // Bound to the path as sent, which is the one the router matched.
+    const sent = '/api/files/x/../../../x'
+    expect(await raw(sent, await signed('GET', sent))).toMatchObject({
+      status: 200,
+      body: { files: true, person: { id: 'user-42' } },
+    })
+  })
+
+  it('refuses a runtime credential on a path that only resolves to /api/mcp/', async () => {
+    await start({ mode: 'required' })
+    // Resolved, this is /api/mcp/tasks; the router sends it to /api/files/*splat.
+    const res = await raw('/api/files/x/../../mcp/tasks', { 'x-test-attach': 'minted' }, 'POST')
+    expect(res).toMatchObject({ status: 401, body: { reason: 'missing' } })
+    // The real control-plane path still passes, absolute-form included.
+    expect(
+      await raw(`http://127.0.0.1:${port}/api/mcp/tasks`, { 'x-test-attach': 'minted' }, 'POST'),
+    ).toMatchObject({ status: 200, body: { runtime: true } })
+  })
+})
+
 describe('beside the access token', () => {
   it('still needs the access cookie: a good token alone is not enough', async () => {
     await start({ mode: 'required', accessToken: ACCESS_TOKEN })
@@ -273,6 +368,17 @@ describe('the Gateway connection', () => {
     })
     const good = await assertion('GET', '/api/gateway/ws')
     expect(await lane.checkUpgrade(upgrade({ 'clawboo-identity': good }))).toMatchObject({
+      ok: true,
+      person: { id: 'user-42' },
+    })
+  })
+
+  it('reads an absolute-form upgrade target by its path', async () => {
+    await start({ mode: 'required' })
+    const target = `http://127.0.0.1:${port}/api/gateway/ws`
+    expect(await lane.checkUpgrade(upgrade({}, target))).toEqual({ ok: false, reason: 'missing' })
+    const good = await assertion('GET', '/api/gateway/ws')
+    expect(await lane.checkUpgrade(upgrade({ 'clawboo-identity': good }, target))).toMatchObject({
       ok: true,
       person: { id: 'user-42' },
     })
