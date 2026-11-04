@@ -1,4 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import type { EngineCapabilities, SSEHandlers } from '@clawboo/control-client'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,10 +9,13 @@ import type { SelfVersionInfo, UseUpdateCheck } from '../useUpdateCheck'
 const hookState = vi.fn()
 vi.mock('../useUpdateCheck', () => ({ useUpdateCheck: (): UseUpdateCheck => hookState() }))
 
-// Mock the SSE client so clicking "Update now" doesn't hit a real endpoint.
+// Mock the SSE client so clicking "Update now" doesn't hit a real endpoint, and
+// the capabilities read the restart poll makes.
 const consumeApiSSE = vi.fn()
+const fetchEngineCapabilities = vi.fn<() => Promise<EngineCapabilities | null>>()
 vi.mock('@clawboo/control-client', () => ({
   consumeApiSSE: (...args: unknown[]) => consumeApiSSE(...args),
+  fetchEngineCapabilities: () => fetchEngineCapabilities(),
 }))
 
 import { UpdateChip } from '../UpdateChip'
@@ -25,6 +29,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.clearAllMocks()
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
 })
 
 function info(over: Partial<SelfVersionInfo> = {}): SelfVersionInfo {
@@ -109,6 +115,54 @@ describe('UpdateChip', () => {
     expect(writeText).toHaveBeenCalledWith('npx clawboo@latest')
     expect(consumeApiSSE).not.toHaveBeenCalled()
     expect(await screen.findByText(/copied/i)).toBeInTheDocument()
+  })
+
+  describe('after the server restarts into the update', () => {
+    function caps(version: string): EngineCapabilities {
+      return { version, apiRevision: 1, supportFloor: '0.3', features: {} }
+    }
+
+    /** Click update, then deliver the stream's `restarting` event. */
+    function restart(): void {
+      fireEvent.click(screen.getByTestId('update-chip-action'))
+      const handlers = consumeApiSSE.mock.calls[0]?.[2] as SSEHandlers
+      act(() => handlers.onEvent?.({ type: 'restarting', port: 18790, version: '0.4.0' }))
+    }
+
+    it('reloads only once an engine on a new version answers', async () => {
+      vi.useFakeTimers()
+      const reload = vi.fn()
+      // jsdom's location.reload cannot be spied on; swap the object (see ErrorBoundary.test).
+      vi.stubGlobal('location', { ...window.location, reload })
+      fetchEngineCapabilities
+        .mockResolvedValueOnce(null) // nothing listening yet
+        .mockResolvedValueOnce(caps('0.3.0')) // the old server, still on its way out
+        .mockResolvedValue(caps('0.4.0'))
+      setHook()
+      render(<UpdateChip />)
+      restart()
+
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(reload).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(1_000)
+      expect(reload).toHaveBeenCalledOnce()
+    })
+
+    it('asks for a manual restart when no new version ever answers', async () => {
+      vi.useFakeTimers()
+      const reload = vi.fn()
+      vi.stubGlobal('location', { ...window.location, reload })
+      fetchEngineCapabilities.mockResolvedValue(caps('0.3.0'))
+      setHook()
+      render(<UpdateChip />)
+      restart()
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(91_000)
+      })
+      expect(reload).not.toHaveBeenCalled()
+      expect(screen.getByText(/restart clawboo to finish/i)).toBeInTheDocument()
+    })
   })
 
   it('the × dismisses via the hook', async () => {

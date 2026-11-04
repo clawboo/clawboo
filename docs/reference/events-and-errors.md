@@ -38,7 +38,7 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`cost`](#cost)                               | Runs       | Spend and tokens reported during a run                         | Task runner, OpenClaw routine fires                                                | cost               |
 | [`session_rotated`](#session_rotated)         | Runs       | A run moved to a fresh session                                 | Task runner                                                                        | session rotated    |
 | [`approval_requested`](#approval_requested)   | Approvals  | An approval card opened                                        | Tool broker, Clawboo Native commands, risky hand-offs, OpenClaw command mirror     | approval           |
-| [`approval_resolved`](#approval_resolved)     | Approvals  | An approval card was answered or expired                       | Approval routes, OpenClaw command mirror, Clawboo Native commands, approval reaper | approval           |
+| [`approval_resolved`](#approval_resolved)     | Approvals  | An approval card was answered or expired                       | Approval routes, the same writers as `approval_requested`, and the approval reaper | approval           |
 | [`error`](#error)                             | Errors     | A failure, sorted into an [error class](#error-classes)        | Task runner, team engine                                                           | error              |
 | [`span_start`](#span_start)                   | Traces     | A task-runner run span opened                                  | Task runner                                                                        | (hidden)           |
 | [`span_end`](#span_end)                       | Traces     | A run span closed                                              | Task runner                                                                        | (hidden)           |
@@ -319,6 +319,7 @@ An approval card settled. Written by whichever of these got there first:
 - **A person's answer** through `POST /api/tools/approvals/:id/resolve` or `POST /api/capabilities/approve`. For an OpenClaw command, only once the Gateway has accepted it.
 - **Another surface's answer** to an OpenClaw command, which the Gateway reports to Clawboo's server.
 - **An OpenClaw deadline.** Every 30 seconds the server expires copied commands past the Gateway's deadline.
+- **A wait that ended unanswered.** A connector call, Clawboo Native command or risky hand-off that nobody answered is expired as soon as its wait ends, normally at the card's `expiresAt`.
 - **A stopped run.** A Clawboo Native command whose run stopped before anyone answered is expired.
 - **The approval reaper**, which runs hourly and expires pending approvals older than 24 hours (`CLAWBOO_APPROVAL_TTL_MS`).
 
@@ -333,7 +334,7 @@ A second answer to the same card changes nothing and writes nothing.
 }
 ```
 
-A connector call, Native command or hand-off that nobody answers stops waiting at `expiresAt` without writing an event. Its row stays pending, and its `approval_resolved` arrives only when the reaper expires it: 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. Treat a card past its `expiresAt` as closed.
+A connector call, Native command or hand-off card (`kind: 'tool'`) stays pending past its `expiresAt` only when nothing was left waiting on it, for example because Clawboo stopped while the card was open. The dashboard stops showing it at `expiresAt`. A late answer to it is refused and expires it at once; otherwise the reaper expires it 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. An OpenClaw command's copy (`kind: 'exec'`) can stay pending for up to 30 seconds past its `expiresAt`, until the next sweep. An answer to it in that time goes to the Gateway, which decides whether it still counts.
 
 ## Error events
 
