@@ -798,6 +798,35 @@ export const budgets = sqliteTable(
 export type DbBudget = typeof budgets.$inferSelect
 export type DbBudgetInsert = typeof budgets.$inferInsert
 
+// What a run that is going expects to spend, set aside on each budget it counts
+// toward until it ends (see governance/reservations.ts). One row per (hold, budget).
+export const budgetReservations = sqliteTable(
+  'budget_reservations',
+  {
+    id: text('id').primaryKey(),
+    holdId: text('hold_id').notNull(),
+    budgetId: text('budget_id')
+      .notNull()
+      .references(() => budgets.id, { onDelete: 'cascade' }),
+    // Still set aside: the estimate less what the run has spent so far, never below 0.
+    heldMicroCents: integer('held_micro_cents').notNull().default(0),
+    estimateMicroCents: integer('estimate_micro_cents').notNull().default(0),
+    runKind: text('run_kind').notNull(), // 'task' | 'team-chat' | 'chat' | 'routine' | 'exchange'
+    runRef: text('run_ref'),
+    // The server process holding it, for the boot sweep. Null: no owner recorded.
+    ownerPid: integer('owner_pid'),
+    ownerStartedAt: integer('owner_started_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('uniq_budget_reservations_hold').on(t.holdId, t.budgetId),
+    index('idx_budget_reservations_budget').on(t.budgetId),
+  ],
+)
+
+export type DbBudgetReservation = typeof budgetReservations.$inferSelect
+
 export const governanceAudit = sqliteTable(
   'governance_audit',
   {

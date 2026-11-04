@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 36 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 37 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
 
 To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
 
@@ -55,6 +55,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient    |
 | [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
 | [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
+| [`budget_reservations`](#budget_reservations)   | Spend, budgets and audit | What runs going hold against each budget         |
 | [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                    |
 | [`orchestration_events`](#orchestration_events) | Event log                | The event log                                    |
 | [`settings`](#settings)                         | Settings and layout      | Key and value settings                           |
@@ -86,6 +87,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | `workspaces.task_id`                                | `tasks.id`      | Refused while rows point at it     |
 | `execution_processes.task_id`                       | `tasks.id`      | Refused while rows point at it     |
 | `execution_processes.workspace_id`                  | `workspaces.id` | Refused while rows point at it     |
+| `budget_reservations.budget_id`                     | `budgets.id`    | The holds are deleted with it      |
 
 In the column tables below, `FK` marks these columns and `cascade` marks the ones deleted with their parent.
 
@@ -743,7 +745,7 @@ Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
 
 ### cost_records
 
-Per-agent token and spend records, which the **Tokens Used** panel reads. Rows come from `POST /api/cost-records`, from the server watching OpenClaw sessions, and from each Clawboo Native, Claude Code, Codex or Hermes run when the server settles its cost (task-runner and team-chat runs).
+Per-agent token and spend records, which the **Tokens Used** panel reads. Rows come from `POST /api/cost-records`, from the server watching OpenClaw sessions, and from each Clawboo Native, Claude Code, Codex or Hermes run when the server settles its cost (task-runner runs, team-chat runs and one-to-one chat turns). The latest rows for an agent also size the estimate its runs hold against a budget (see `budget_reservations`).
 
 | Column          | Type                             | Notes                                                                      |
 | --------------- | -------------------------------- | -------------------------------------------------------------------------- |
@@ -778,6 +780,26 @@ Spend budgets. Spend is tracked in whole and fractional cents so many tiny charg
 | `updated_at`        | `INTEGER`, not null                  |                                                                                                  |
 
 Indexes: `uniq_budgets_scope` (unique: `scope`, `scope_id`), `idx_budgets_status` (`status`).
+
+### budget_reservations
+
+What each run that is going holds against a budget it counts toward: its estimated cost, set aside from the moment it is let start until it ends, so runs that start together see each other (see [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time)). One row per run and budget. A run's recorded spend shrinks its row, and the row is deleted when the run ends. At startup the server deletes the rows of a server process that is no longer running, rows that name none, and rows older than 12 hours.
+
+| Column                 | Type                              | Notes                                                                               |
+| ---------------------- | --------------------------------- | ----------------------------------------------------------------------------------- |
+| `id`                   | `TEXT`, PK                        |                                                                                     |
+| `hold_id`              | `TEXT`, not null                  | The run's hold; one per run, shared by its rows                                     |
+| `budget_id`            | `TEXT`, not null, FK `budgets.id` | cascade                                                                             |
+| `held_micro_cents`     | `INTEGER`, not null, default `0`  | Still set aside, in ten-thousandths of a cent: the estimate less what the run spent |
+| `estimate_micro_cents` | `INTEGER`, not null, default `0`  | The estimate the run started with                                                   |
+| `run_kind`             | `TEXT`, not null                  | `task`, `routine`, `team-chat`, `chat` or `exchange`                                |
+| `run_ref`              | `TEXT`                            | The run's task or session key                                                       |
+| `owner_pid`            | `INTEGER`                         | The server process holding it                                                       |
+| `owner_started_at`     | `INTEGER`                         | When that process started, so a reused process id is not mistaken for it            |
+| `created_at`           | `INTEGER`, not null               |                                                                                     |
+| `updated_at`           | `INTEGER`, not null               |                                                                                     |
+
+Indexes: `uniq_budget_reservations_hold` (unique: `hold_id`, `budget_id`), `idx_budget_reservations_budget` (`budget_id`).
 
 ### governance_audit
 

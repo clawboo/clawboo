@@ -29,7 +29,8 @@ import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
-import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
+import { reserveRunBudget, type RunBudgetGate, type RunBudgetHold } from '../budgetHold'
+import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
@@ -40,9 +41,11 @@ import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
 import { persistNativeChatEntry } from '../runtimes/native/nativeDriver'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
+import { estimateTokensFromChars } from '../runtimes/estimateCost'
 import { createRunCostTally } from '../runtimes/runCostTally'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
+import { recordRunTokens } from '../runTokenLog'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
 import { publishAgentStatus } from '../teamChat/agentStatusBus'
 import { publishChatDelta } from '../teamChat/chatDeltaBus'
@@ -137,7 +140,9 @@ export interface DriveAgentChatParams {
  * this (it's detached: the reply streams via the SSE). Streams the running
  * assistant text to the per-session `chatDeltaBus` (the SSE's ephemeral delta
  * channel), commits the reply, and records the run's spend (agent scope; a paused
- * CAP budget refuses the turn, or aborts one already going). Turns for one agent
+ * CAP budget refuses the turn, or aborts one already going) and its cost record
+ * (Tokens Used). The turn holds its estimated cost on the agent's budget from the
+ * moment it is let start until it ends (see budgetHold). Turns for one agent
  * run one at a time: a persistent-home runtime on its home mutex (shared with team
  * runs and routines for the same agent), any other on a per-agent chat lock. Each
  * turn first takes one of the process's run slots, waiting for one when every slot
@@ -190,22 +195,25 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // for that Boo, starts there and asks a person before every command.
   const workdir = taskRunWorkdirFor(runtime, row?.teamId)
 
+  // The turn's hold on the agent's budget, released however the turn ends (see
+  // `runHeld` below).
+  let hold: RunBudgetHold | null = null
   const runJob = async (): Promise<void> => {
-    // A paused hard cap on the agent refuses the turn before it starts, as in team
-    // chat and the task runner. Only the agent's budget: it is the only one a 1:1
-    // turn is charged to. Read holding the lock, so a cap the turn ahead of this one
-    // paused is seen. A ledger read that fails lets the turn go, as a failed spend
-    // write does below.
-    let pre: BudgetPreflightResult = { blocked: false }
-    try {
-      pre = budgetPreflight(db, { agentId })
-    } catch {
-      // Never a silent non-response over the guardrail's own bookkeeping.
-    }
-    if (pre.blocked) {
-      persist(budgetRefusalText(pre.scope), true)
+    // The budget gate, as in team chat and the task runner: a paused hard cap on
+    // the agent refuses the turn before it starts, and so does one whose remaining
+    // room runs already going have set aside. Otherwise the turn holds its estimate
+    // on the budget until it ends. Only the agent's budget: it is the only one a
+    // 1:1 turn is charged to. Taken holding the lock, so a cap the turn ahead of
+    // this one paused is seen. A ledger read that fails lets the turn go, as a
+    // failed spend write does below.
+    const gate: RunBudgetGate = reserveRunBudget(db, { agentId }, { kind: 'chat', ref: sessionKey })
+    if (gate.blocked) {
+      persist(budgetRefusalText(gate.scope, gate.reason), true)
       return
     }
+    const turnHold = gate.hold
+    hold = turnHold
+    const holdId = turnHold.id
     if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
     // CONTINUATION, read while holding the lock: a message queued behind a running
     // turn must resume the session that turn just saved, not the one both turns saw
@@ -260,6 +268,14 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // team chat (see personaBlock); native and OpenClaw carry their own.
     const recall = priorSessionId ? null : await buildMemoryRecall(db, agentId)
     const context = [buildPersonaBlock(db, agentId, runtime), recall].filter(Boolean).join('\n\n')
+
+    // The final gate, right before the model call: a cap that paused while the turn
+    // got ready (its folder, its memory) refuses it now, before anything is spent.
+    const finalGate = turnHold.recheck()
+    if (finalGate.blocked) {
+      persist(budgetRefusalText(finalGate.scope, finalGate.reason), true)
+      return
+    }
 
     let run: RunHandle
     try {
@@ -318,7 +334,9 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
           let paused = false
           try {
-            const r = recordSpend(db, 'agent', agentId, usdToFractionalCents(ev.costUsd))
+            const r = recordSpend(db, 'agent', agentId, usdToFractionalCents(ev.costUsd), {
+              holdId,
+            })
             paused = r?.status === 'paused' && r.mode === 'cap'
           } catch {
             // A ledger failure must never end the run without its reply.
@@ -389,18 +407,32 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     publishAgentStatus(sessionKey, { agentId, status: failed ? 'error' : 'idle' })
 
     // Price what the cost events did not already charge (Codex and Claude Code
-    // report tokens or nothing, never a per-event USD).
+    // report tokens or nothing, never a per-event USD), and list the turn in Tokens
+    // Used the way a team-chat run is listed: the runtime's own figures where it
+    // gave them, tokens guessed from the text where it did not.
     try {
+      const inputChars = context.length + message.length
       const cost = costTally.settle({
         model: codingModel?.model ?? null,
-        inputChars: context.length + message.length,
+        inputChars,
         outputChars: acc.length,
       })
       if (cost.unbilledUsd > 0)
-        recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd))
+        recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd), { holdId })
+      recordRunTokens(db, {
+        agentId,
+        runtime,
+        model: costTally.model() ?? codingModel?.model ?? null,
+        inputTokens: cost.inputTokens ?? estimateTokensFromChars(inputChars),
+        outputTokens: cost.outputTokens ?? estimateTokensFromChars(acc.length),
+        costUsd: cost.costUsd,
+        sessionKey,
+      })
     } catch {
       // Best-effort: a ledger write never breaks the turn.
     }
+    // Settled: the real spend has replaced the estimate.
+    turnHold.release()
 
     // CONTINUATION: remember THIS turn's session id so the NEXT turn resumes it (the
     // harness saved the session before emitting its terminal). Only for a runtime
@@ -442,10 +474,19 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     waiting.delete(queue)
     if (waiting.size === 0 && queuedTurns.get(agentId) === waiting) queuedTurns.delete(agentId)
   }
+  // However the turn ends (refused, failed, stopped, gone quiet, or its own code
+  // throwing), its hold goes before the agent's lock does.
+  const runHeld = async (): Promise<void> => {
+    try {
+      await runJob()
+    } finally {
+      hold?.release()
+    }
+  }
   await withRunSlot(
     () => {
       leaveQueue()
-      return homeDispatchMutex.run(lockKey, runJob, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
+      return homeDispatchMutex.run(lockKey, runHeld, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
     },
     { key: lockKey, signal: queue.signal },
   )

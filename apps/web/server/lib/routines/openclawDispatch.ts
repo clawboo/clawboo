@@ -35,7 +35,8 @@ import { usdToFractionalCents } from '@clawboo/governance'
 import type { TaskTemplate } from '@clawboo/scheduler'
 import { KeyedMutex } from '@clawboo/worktrees'
 
-import { budgetPreflight } from '../budgetPreflight'
+import { reserveRunBudget, type RunBudgetHold } from '../budgetHold'
+import { budgetRefusalText } from '../budgetPreflight'
 import { openclawAgentModel } from '../openclawAgentModel'
 import { RunQueueAbortedError, withRunSlot } from '../runSlots'
 import { registerRunStop, type RunStopHandle } from '../runStops'
@@ -160,16 +161,31 @@ async function dispatchConnectedSubstrateInner(
   const missionId = missionRootId(db, taskId)
   // Pre-flight cap gate: a paused CAP budget blocks the NEXT fire. The connected
   // substrate reports no incremental cost, so this is the enforceable cap — the
-  // run never starts (no claim, no exec) when a relevant scope is already paused.
-  const pre = budgetPreflight(db, { agentId: run.agentId, missionId, teamId: run.teamId })
-  if (pre.blocked) {
-    return { ok: false, taskId, error: `budget_paused:${pre.scope}` }
+  // run never starts (no claim, no exec) when a relevant scope is already paused,
+  // or when runs already going have set aside the room left under it. A fire let
+  // start holds its estimate on each budget until it ends (see budgetHold).
+  const gate = reserveRunBudget(
+    db,
+    { agentId: run.agentId, missionId, teamId: run.teamId },
+    { kind: 'routine', ref: taskId },
+  )
+  if (gate.blocked) {
+    // Room set aside by runs already going clears as they finish: a failure that
+    // may pass by itself, so the routine keeps its schedule (see wakeBridge).
+    return {
+      ok: false,
+      taskId,
+      error: `budget_${gate.reason}:${gate.scope}`,
+      ...(gate.reason === 'held' ? { transient: true } : {}),
+    }
   }
+  const hold = gate.hold
 
   // Atomic claim — a lost claim means another worker owns the task; the work
   // is happening, so the fire is satisfied (drop, never retry).
   const claim = claimTask(db, taskId, run.agentId, 'openclaw')
   if (!claim.ok) {
+    hold.release()
     return claim.reason === 'conflict'
       ? { ok: true, taskId }
       : { ok: false, taskId, error: `claim failed: ${claim.reason ?? 'unknown'}` }
@@ -194,7 +210,7 @@ async function dispatchConnectedSubstrateInner(
   })
   const stop = registerRunStop(taskId, () => wakeOnStop())
   try {
-    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, stop, stopped)
+    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, stop, stopped, hold)
   } catch (err) {
     // Whatever the drain did not settle itself. The claim is ours, so hand the
     // task back instead of leaving it in progress with nothing driving it.
@@ -205,6 +221,8 @@ async function dispatchConnectedSubstrateInner(
     }
     return { ok: false, taskId, error: `run failed: ${errorText(err)}` }
   } finally {
+    // However the fire ended, its budget hold goes with it.
+    hold.release()
     stop.release()
     stopBeat()
   }
@@ -222,6 +240,7 @@ async function drainClaimedRoutineRun(
   missionId: string,
   stop: RunStopHandle,
   stopped: Promise<'stopped'>,
+  hold: RunBudgetHold,
 ): Promise<RoutineDispatchOutcome> {
   const { db, run, template, taskId, client } = input
 
@@ -305,7 +324,7 @@ async function drainClaimedRoutineRun(
     let pausedScope: BudgetScope | null = null
     for (const [scope, scopeId] of scopes) {
       if (!scopeId) continue
-      const r = recordSpend(db, scope, scopeId, cents)
+      const r = recordSpend(db, scope, scopeId, cents, { holdId: hold.id })
       if (!r) continue
       if (r.crossed !== 'none') {
         appendAudit(db, {
@@ -352,6 +371,18 @@ async function drainClaimedRoutineRun(
       `Budget cap reached (${pausedScope}). This run is recorded; the next scheduled fire is blocked until you raise the cap or resume.`,
       'system',
     )
+  }
+
+  // The final gate, right before the model call: a cap that paused while the fire
+  // got ready refuses it now, before anything is spent. The task is claimed, so it
+  // goes back for its next pickup with the reason.
+  const finalGate = hold.recheck()
+  if (finalGate.blocked) {
+    const error = `budget_${finalGate.reason}:${finalGate.scope}`
+    addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
+    settleExec({ status: 'cancelled', error }, { status: 'cancelled', error })
+    releaseTask(db, taskId)
+    return { ok: false, taskId, error, ...(finalGate.reason === 'held' ? { transient: true } : {}) }
   }
 
   let runHandle
@@ -444,9 +475,10 @@ async function drainClaimedRoutineRun(
         // every scope, abort on the first cap-mode pause. A usage-only event
         // (null USD) records $0 here; the tally prices it when the run settles.
         const cents = usdToFractionalCents(ev.costUsd ?? 0)
-        const a = recordSpend(db, 'agent', run.agentId, cents)
-        const m = recordSpend(db, 'mission', missionId, cents)
-        const t = run.teamId ? recordSpend(db, 'team', run.teamId, cents) : null
+        const spend = { holdId: hold.id }
+        const a = recordSpend(db, 'agent', run.agentId, cents, spend)
+        const m = recordSpend(db, 'mission', missionId, cents, spend)
+        const t = run.teamId ? recordSpend(db, 'team', run.teamId, cents, spend) : null
         if (a?.status === 'paused' && a.mode === 'cap') stopForBudget = 'agent'
         else if (m?.status === 'paused' && m.mode === 'cap') stopForBudget = 'mission'
         else if (t?.status === 'paused' && t.mode === 'cap') stopForBudget = 'team'

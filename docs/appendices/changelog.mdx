@@ -93,6 +93,8 @@ The next release gives a team chat rooms, lets you steer a task while an agent w
 **Budgets**
 
 - **Pick a budget by name.** In **Settings** > **Insights** > **Governance**, choose agent, team or mission, then the agent, team or board task from a list you can search. You no longer look up an id first, and each budget shows its name. The form no longer offers tenant, which nothing charges; a tenant budget you already have still shows.
+- **Runs that start together no longer overshoot a hard cap together.** Each run holds its estimated cost on its budgets from the moment it is let start until it ends, and is checked again right before it calls the model. On a nearly spent hard cap, a run that would go beside others starts only when all of them fit; otherwise it is refused with a notice saying the rest of the cap is set aside. A run going alone, and every warn-only budget, behave as before. Holds are estimates, so runs can still cost more than they held. See [Runs that go at the same time](/using/budgets-and-spend#runs-that-go-at-the-same-time).
+- **One-to-one chat shows in Tokens Used.** Every one-to-one turn with a Clawboo Native, Claude Code, Codex or Hermes agent writes the same cost record a team-chat run does, from the runtime's own figures or estimated from the text, whether or not the agent has a budget.
 
 **Fixes**
 

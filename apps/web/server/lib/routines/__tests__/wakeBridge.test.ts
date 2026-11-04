@@ -209,6 +209,26 @@ describe('dispatchRoutine', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('a run refused because other runs hold the cap keeps the schedule; a paused cap stops it', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const refusedWith = async (reason: 'budget_held' | 'budget_paused') =>
+      dispatchRoutine(seedRoutine('agent-cc'), {
+        db,
+        mcpBaseUrl: null,
+        runTask: async () => ({ ok: false, reason }),
+      })
+    expect(await refusedWith('budget_held')).toMatchObject({
+      ok: false,
+      error: 'dispatch refused: budget_held',
+      transient: true,
+    })
+    expect(await refusedWith('budget_paused')).toMatchObject({
+      ok: false,
+      error: 'dispatch refused: budget_paused',
+      transient: false,
+    })
+  })
+
   it('CONNECTED-SUBSTRATE: routes through the connected dispatcher, NEVER the one-shot runner', async () => {
     seedAgent('agent-oc', 'openclaw')
     const run = seedRoutine('agent-oc')

@@ -4,7 +4,7 @@
 // incremental cost (its spend lands only on the terminal). A warn-mode budget is
 // clamped to never read 'paused', so it never blocks here.
 
-import { getBudget, type BudgetScope, type ClawbooDb } from '@clawboo/db'
+import { getBudget, type BudgetRefusalReason, type BudgetScope, type ClawbooDb } from '@clawboo/db'
 
 export interface BudgetPreflightScopes {
   agentId?: string | null
@@ -38,7 +38,15 @@ export function budgetPreflight(
 
 /** The notice for a turn or run the gate refused, shared by the chat paths
  *  (team chat, rooms, one-to-one chat) so they say the same thing. A refused
- *  hand-off carries it too, after the board's "Run failed:" prefix. */
-export function budgetRefusalText(scope: BudgetScope): string {
+ *  hand-off carries it too, after the board's "Run failed:" prefix. `held`: the
+ *  cap is not paused, but runs already going have set aside the rest of it (see
+ *  budgetHold.ts). */
+export function budgetRefusalText(
+  scope: BudgetScope,
+  reason: BudgetRefusalReason = 'paused',
+): string {
+  if (reason === 'held') {
+    return `The ${scope} budget is close to its hard cap, and runs already going have set aside the rest of it, so this run did not start. Try again when they finish, or raise the cap in Governance.`
+  }
   return `The ${scope} budget is paused at its hard cap, so this run did not start. Raise the cap or resume it in Governance to continue.`
 }

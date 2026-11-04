@@ -398,11 +398,13 @@ export async function dispatchRoutine(
     // A lost claim means another worker already owns the task — the work is
     // happening; treat the fire as satisfied (drop, never retry).
     if (result.reason === 'conflict') return { ok: true, taskId: task.id }
+    // A cap whose room runs already going have set aside clears as they finish, so
+    // that refusal may pass by itself; every other refusal fails the same way again.
     return settle({
       ok: false,
       taskId: task.id,
       error: `dispatch refused: ${result.reason}`,
-      transient: false,
+      transient: result.reason === 'budget_held',
     })
   }
   // A person moved the card while it ran, which stopped the run. Their move is
