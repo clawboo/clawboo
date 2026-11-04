@@ -166,6 +166,7 @@ onPosix('a run that is stopped', () => {
     await p
     // The human's answer is still the answer of record.
     expect(listPendingApprovals(db)).toHaveLength(0)
+    expect(getApproval(db, card?.id ?? '')?.status).toBe('allow_once')
   })
 })
 
