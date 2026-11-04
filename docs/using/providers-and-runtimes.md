@@ -202,7 +202,7 @@ Needs a ChatGPT plan. Click **Sign in** on the row, then **Sign in with ChatGPT*
 
 <Tab title="Hermes">
 
-Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. See [Hermes](/runtimes/hermes).
+Needs Python 3.11 to 3.13 and one credential: an OpenRouter key (click **Connect** on the row), an Anthropic or OpenAI key you already connected, or a ChatGPT sign-in. A Hermes installed without its live mode reads **Update available**; click **Update**, then **Update Hermes**. See [Hermes](/runtimes/hermes).
 
 </Tab>
 

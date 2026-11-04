@@ -16,7 +16,7 @@ import {
   type ClawbooDb,
 } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { buildExecTool, MAX_COMMANDS_PER_RUN } from '../execTool'
 import type { NativeLocalTool } from '../fileTools'
@@ -231,6 +231,78 @@ onPosix('the event log', () => {
     expect(resolved.map((e) => e.data)).toEqual([
       { approvalId: cardId, decision: 'expired', kind: 'tool', toolName: 'run_command' },
     ])
+  })
+
+  it('expires and announces a card nobody answered as soon as it stops waiting', async () => {
+    // A card left pending here is answerable for nobody, and the log hears
+    // nothing until the reaper finds it a day later.
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'hi'] }, { signal: never })
+    const cardId = await cardWhenAsked()
+    db.update(toolCallApprovals)
+      .set({ expiresAt: Date.now() - 1000 })
+      .where(eq(toolCallApprovals.id, cardId))
+      .run()
+    const out = await p
+
+    expect(out?.output).toMatch(/nobody answered/i)
+    const row = getApproval(db, cardId)
+    expect(row?.status).toBe('expired')
+    expect(row?.resolvedAt).toEqual(expect.any(Number))
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data)).toEqual([
+      { approvalId: cardId, decision: 'expired', kind: 'tool', toolName: 'run_command' },
+    ])
+  })
+
+  it('runs the command when an answer lands as the card expires', async () => {
+    // Another process can record the answer between the tool's read of the row
+    // and its write closing the card. The answer on the row is the answer.
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'answered-in-time'] }, { signal: never })
+    const cardId = await cardWhenAsked()
+    db.update(toolCallApprovals)
+      .set({ expiresAt: Date.now() - 1000 })
+      .where(eq(toolCallApprovals.id, cardId))
+      .run()
+    const update = db.update.bind(db)
+    const spy = vi.spyOn(db, 'update').mockImplementationOnce((table) => {
+      db.$client
+        .prepare(
+          "UPDATE tool_call_approvals SET status = 'allow_once', resolved_at = ? WHERE id = ?",
+        )
+        .run(Date.now(), cardId)
+      return update(table)
+    })
+
+    try {
+      expect((await p)?.output).toContain('answered-in-time')
+    } finally {
+      spy.mockRestore()
+    }
+    expect(getApproval(db, cardId)?.status).toBe('allow_once')
+  })
+
+  it('retries closing an expired card when the database is busy', async () => {
+    const t = tool()
+    const p = t?.run({ argv: ['echo', 'hi'] }, { signal: never })
+    const cardId = await cardWhenAsked()
+    db.update(toolCallApprovals)
+      .set({ expiresAt: Date.now() - 1000 })
+      .where(eq(toolCallApprovals.id, cardId))
+      .run()
+    const spy = vi.spyOn(db, 'update').mockImplementationOnce(() => {
+      throw Object.assign(new Error('database is locked'), { code: 'SQLITE_BUSY' })
+    })
+
+    try {
+      await p
+    } finally {
+      spy.mockRestore()
+    }
+    expect(getApproval(db, cardId)?.status).toBe('expired')
+    const resolved = approvalEvents().filter((e) => e.kind === 'approval_resolved')
+    expect(resolved.map((e) => e.data['decision'])).toEqual(['expired'])
   })
 
   it('announces only the human answer when it beats the abort', async () => {

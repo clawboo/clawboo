@@ -35,6 +35,7 @@ import {
   gcTaskWorkspaces,
   getTaskWorkspace,
   provisionTaskWorkspace,
+  readWorktreeDetail,
   resumeTaskWorkspace,
   writeTaskHandoff,
 } from '../worktrees'
@@ -356,6 +357,21 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(existsSync(path.join(resumed.worktree.worktreePath, SOR_FILES.task))).toBe(true)
     // The row is flipped back to active.
     expect(getWorkspaceForTask(db, taskId)?.status).toBe('active')
+  })
+
+  it('the drawer detail names the task files it cut at the read limit', async () => {
+    const taskId = newClaimedCodeTask()
+    const prov = await provisionTaskWorkspace(taskId, { repoPath: repo, kind: 'code' })
+    if (!prov.ok) throw new Error(`provision failed: ${prov.reason}`)
+    await writeFile(
+      path.join(prov.worktree.worktreePath, SOR_FILES.progress),
+      'p'.repeat(300 * 1024),
+    )
+
+    const detail = await readWorktreeDetail(taskId)
+    expect(detail.sorFilesTruncated).toEqual([SOR_FILES.progress])
+    expect(detail.sorFiles?.[SOR_FILES.progress]).toHaveLength(256 * 1024)
+    expect(detail.sorFiles?.[SOR_FILES.task]).toEqual(expect.any(String))
   })
 
   it('provisionTaskWorkspace dedups — a repeat provision reuses the one active row', async () => {

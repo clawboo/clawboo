@@ -838,6 +838,11 @@ export function TaskDetailDrawer({
                             {name}
                           </summary>
                           <div className={`mt-1 ${CODE_BOX}`}>{content}</div>
+                          {workspace.sorFilesTruncated?.includes(name) ? (
+                            <div className="mt-1 text-xs text-muted-foreground">
+                              Showing the first 256 KB. The file is longer.
+                            </div>
+                          ) : null}
                         </details>
                       ))}
                     </div>

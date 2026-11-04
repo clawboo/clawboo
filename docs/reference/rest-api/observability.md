@@ -17,15 +17,15 @@ Every response that carries event payloads masks credential-shaped keys and valu
 
 ## Routes
 
-| Method | Path                       | Summary                                              | Stream? |
-| ------ | -------------------------- | ---------------------------------------------------- | ------- |
-| GET    | `/api/obs/events`          | Query the orchestration event feed                   | No      |
-| GET    | `/api/obs/traces/:traceId` | One reconstructed trace + aggregate metrics          | No      |
-| GET    | `/api/obs/errors`          | The error feed (filter to likely Clawboo bugs)       | No      |
-| GET    | `/api/obs/health`          | Each agent's state: working, idle, stalled or zombie | No      |
-| GET    | `/api/obs/graph`           | The task and delegation graph, built from the log    | No      |
-| GET    | `/api/obs/stream`          | SSE live-tail of the log, scoped by team/task/agent  | SSE     |
-| POST   | `/api/eval/smoke`          | Run the built-in eval smoke suite (no model calls)   | No      |
+| Method | Path                       | Summary                                                  | Stream? |
+| ------ | -------------------------- | -------------------------------------------------------- | ------- |
+| GET    | `/api/obs/events`          | Query the orchestration event feed                       | No      |
+| GET    | `/api/obs/traces/:traceId` | One reconstructed trace + aggregate metrics              | No      |
+| GET    | `/api/obs/errors`          | The error feed (filter to likely Clawboo bugs)           | No      |
+| GET    | `/api/obs/health`          | Each agent's state: working, idle, stalled or zombie     | No      |
+| GET    | `/api/obs/graph`           | The task and delegation graph, built from the log        | No      |
+| GET    | `/api/obs/stream`          | SSE live-tail of the log, scoped by team/task/agent/kind | SSE     |
+| POST   | `/api/eval/smoke`          | Run the built-in eval smoke suite (no model calls)       | No      |
 
 ---
 
@@ -294,25 +294,29 @@ curl "http://localhost:18790/api/obs/graph?teamId=<team-uuid>"
 
 ## `GET /api/obs/stream`
 
-A Server-Sent Events tail of the event log, optionally scoped to a team, task or agent. The route polls the log every 750 ms past a `seq` cursor and sends any new events. It reads the database, so it also sees events that another process writes to the same database file. Resume with the `EventSource` `Last-Event-ID` header or `?since=<seq>`.
+A Server-Sent Events tail of the event log, optionally scoped to a team, task or agent and narrowed to a list of event kinds. The route polls the log every 750 ms past a `seq` cursor and sends any new events. It reads the database, so it also sees events that another process writes to the same database file. Resume with the `EventSource` `Last-Event-ID` header, `?afterSeq=<seq>` or `?since=<seq>`.
 
-**Where it starts.** With no `Last-Event-ID` and no `since`, the cursor is `0`: the stream first replays the whole log for its scope, 500 events per poll, and only then follows new events. This is the opposite of the chat streams, which start at the newest message. To watch only new events, pass the newest `seq` as `since` (read it with `GET /api/obs/events?order=desc&limit=1`).
+**Where it starts.** With no cursor, the cursor is `0`: the stream first replays the whole log for its scope, 500 events per poll, and only then follows new events. This is the opposite of the chat streams, which start at the newest message. To watch only new events, pass the newest `seq` as `afterSeq` (read it with `GET /api/obs/events?order=desc&limit=1`).
 
 - **Path params**: none.
 - **Query params**:
 
-| Param     | Type   | Notes                                                                                            |
-| --------- | ------ | ------------------------------------------------------------------------------------------------ |
-| `teamId`  | string | Scope the tail to one team.                                                                      |
-| `taskId`  | string | Scope the tail to one board task.                                                                |
-| `agentId` | string | Scope the tail to one agent.                                                                     |
-| `since`   | number | Resume after this `seq`. An invalid or negative value means `0`. `Last-Event-ID` takes priority. |
+| Param      | Type   | Notes                                                                                                 |
+| ---------- | ------ | ----------------------------------------------------------------------------------------------------- |
+| `teamId`   | string | Scope the tail to one team.                                                                           |
+| `taskId`   | string | Scope the tail to one board task.                                                                     |
+| `agentId`  | string | Scope the tail to one agent.                                                                          |
+| `kinds`    | string | Comma-separated list of event kinds; empty/blank values dropped. Only events of these kinds are sent. |
+| `afterSeq` | number | Resume after this `seq`, the same cursor as on `GET /api/obs/events`.                                 |
+| `since`    | number | The same as `afterSeq`. Here it is a `seq`, not the time it means on `GET /api/obs/events`.           |
+
+The cursor is the first of `Last-Event-ID`, `afterSeq` and `since` that holds a number of `0` or more. A missing, malformed or negative value is skipped, and with none left the cursor is `0`. A browser's `EventSource` reconnects to the same URL with the last `id` it received as `Last-Event-ID`, so that header wins over the query.
 
 - **Request body**: none.
 
 <Note>
 
-This is an SSE route: there is no JSON response body, and the catalog below describes the frames. Each poll reads up to 500 events past the cursor, oldest first. The cursor only moves forward, so resuming from an old `since` or `Last-Event-ID` replays everything after it.
+This is an SSE route: there is no JSON response body, and the catalog below describes the frames. Each poll reads up to 500 matching events past the cursor, oldest first. The cursor only moves forward, so resuming from an old cursor replays everything in scope after it.
 
 </Note>
 
@@ -331,11 +335,11 @@ then emits a `: connected` comment frame and flushes any rows already past the c
 
 ### Event catalog
 
-| Frame         | When                                | Shape                                                                              |
-| ------------- | ----------------------------------- | ---------------------------------------------------------------------------------- |
-| `: connected` | Immediately on open                 | SSE comment (ignored by `EventSource`)                                             |
-| event data    | Per new log row (poll every 750 ms) | `id: <seq>` line + `data: <json>` line (the full event row, `data` field redacted) |
-| `: keepalive` | Every 20 s while open               | SSE comment (keeps the connection warm)                                            |
+| Frame         | When                                         | Shape                                                                              |
+| ------------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `: connected` | Immediately on open                          | SSE comment (ignored by `EventSource`)                                             |
+| event data    | Per new log row in scope (poll every 750 ms) | `id: <seq>` line + `data: <json>` line (the full event row, `data` field redacted) |
+| `: keepalive` | Every 20 s while open                        | SSE comment (keeps the connection warm)                                            |
 
 The `data:` payload is one stored event row, identical in shape to a `GET /api/obs/events` row, with its inner JSON `data` field masked (`••••`). The `id:` value is the row's `seq`; the browser sends it back as `Last-Event-ID` on auto-reconnect, so the tail resumes without gaps.
 
@@ -356,8 +360,28 @@ data: {"seq":4187,"id":"...","ts":1718450000000,"kind":"tool_call","taskId":"...
 curl -N "http://localhost:18790/api/obs/stream?taskId=<task-uuid>"
 
 # Resume from a known seq
-curl -N "http://localhost:18790/api/obs/stream?taskId=<task-uuid>&since=4187"
+curl -N "http://localhost:18790/api/obs/stream?taskId=<task-uuid>&afterSeq=4187"
+
+# Only approval requests and answers, for every team
+curl -N "http://localhost:18790/api/obs/stream?kinds=approval_requested,approval_resolved"
 ```
+
+### Following approvals
+
+A client that shows or forwards approval cards, such as a notifier or a mirror, can follow them on this stream instead of polling `GET /api/tools/approvals`:
+
+1. Read the newest `seq` with `GET /api/obs/events?order=desc&limit=1` (`0` when the log is empty).
+2. Read the open cards with [`GET /api/tools/approvals`](/reference/rest-api/tools-and-mcp).
+3. Open `GET /api/obs/stream?kinds=approval_requested,approval_resolved&afterSeq=<seq>`, with no team, task or agent scope.
+
+A card opened between steps 1 and 2 arrives in both the list and the stream, so match cards by `approvalId`, the row's `id` in the list. Each frame carries the agent, its team and the task (when known) on the row, and the approval id, kind and tool name in `data`. It never carries the call's arguments, its reason or the command text. See [Approval events](/reference/events-and-errors#approval-events) for both shapes.
+
+```text
+id: 5120
+data: {"seq":5120,"id":"...","ts":1718450000000,"kind":"approval_requested","teamId":"...","taskId":"...","agentId":"...","runtime":null,"traceId":null,"spanId":null,"parentSpanId":null,"correlationId":null,"data":"{\"approvalId\":\"...\",\"kind\":\"tool\",\"toolName\":\"files_delete\",\"toolClass\":\"destructive\",\"grantId\":null,\"connectorId\":null,\"expiresAt\":1718450300000}","tenantId":null,"createdAt":1718450000000}
+```
+
+A card stops being answerable at its `expiresAt`. See [`approval_resolved`](/reference/events-and-errors#approval_resolved) for when an unanswered card's event arrives.
 
 ---
 

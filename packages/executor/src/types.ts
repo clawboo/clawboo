@@ -225,6 +225,12 @@ export interface RuntimeAdapter {
    * other than `none`. Never throws: a failure is a `{ delivered: false }`.
    */
   steer?(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult>
+  /**
+   * How THIS run takes a steer, for an adapter whose runs can differ from what
+   * `capabilities().steering` says new runs get (a run that fell back to another
+   * transport keeps it). Absent: the run takes it the declared way.
+   */
+  runSteering?(run: RunHandle): SteeringMode
   readonly sessionCodec?: SessionCodec
   dispose?(): Promise<void>
 }

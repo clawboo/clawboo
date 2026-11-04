@@ -444,6 +444,8 @@ export interface WorkspaceDetail {
     status?: string
   }
   sorFiles?: Record<string, string>
+  /** Task files cut at the server's 256 KB read limit. */
+  sorFilesTruncated?: string[]
   diffStat?: DiffStat | null
   diff?: string
 }

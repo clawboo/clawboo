@@ -54,7 +54,7 @@ function mockRes(): { res: Response; done: Promise<{ code: number; body: unknown
 const req = (id: string, decision: string): Request =>
   ({ params: { id }, query: {}, body: { decision } }) as unknown as Request
 
-function seed(id: string, kind: 'exec' | 'tool'): void {
+function seed(id: string, kind: 'exec' | 'tool', expiresAt = Date.now() + 600_000): void {
   db.insert(toolCallApprovals)
     .values({
       id,
@@ -63,7 +63,7 @@ function seed(id: string, kind: 'exec' | 'tool'): void {
       status: 'pending',
       neverRemember: kind === 'exec' ? 1 : 0,
       createdAt: Date.now(),
-      expiresAt: Date.now() + 600_000,
+      expiresAt,
     })
     .run()
 }
@@ -195,6 +195,47 @@ describe('POST /api/tools/approvals/:id/resolve', () => {
     const { res, done } = mockRes()
     toolsApprovalResolvePOST(req('ap-exec-down', 'allow_once'), res)
     await done
+    expect(approvalEventsFromApi()).toEqual([])
+  })
+
+  it('refuses a late answer to a tool card and closes the card as expired', async () => {
+    // Past its deadline nothing is waiting on the card, so the answer would run
+    // nothing. Saying ok would tell the caller it counted.
+    seed('ap-late', 'tool', Date.now() - 1_000)
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(req('ap-late', 'allow_once'), res)
+
+    const answer = await done
+    expect(answer.code).toBe(409)
+    expect(answer.body).toMatchObject({
+      error: 'approval expired',
+      approval: { status: 'expired' },
+    })
+    expect(statusOf('ap-late')).toBe('expired')
+    expect(approvalEventsFromApi()).toEqual([
+      {
+        kind: 'approval_resolved',
+        data: {
+          approvalId: 'ap-late',
+          decision: 'expired',
+          kind: 'tool',
+          toolName: 'mcp__memory__save',
+        },
+      },
+    ])
+  })
+
+  it('refuses an answer to a tool card that already expired', async () => {
+    seed('ap-gone', 'tool')
+    db.update(toolCallApprovals)
+      .set({ status: 'expired', resolvedAt: Date.now() })
+      .where(eq(toolCallApprovals.id, 'ap-gone'))
+      .run()
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(req('ap-gone', 'deny'), res)
+
+    expect((await done).code).toBe(409)
+    expect(statusOf('ap-gone')).toBe('expired')
     expect(approvalEventsFromApi()).toEqual([])
   })
 
