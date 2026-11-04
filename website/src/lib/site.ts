@@ -25,7 +25,7 @@ export const site = {
   domain: 'www.claw.boo',
   install: 'npm install -g clawboo',
   tryInstall: 'npx clawboo@latest',
-  version: 'v0.5.0',
+  version: 'v0.6.0',
   tagline: 'Put a whole team of AI agents on it.',
   subhead:
     'Marketing, research, ops, content, code. Give one brief to a team of AI agents and watch them split it up, hand work between each other, and finish it on a board you can see.',

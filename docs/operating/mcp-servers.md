@@ -153,7 +153,7 @@ With the access token turned off (`STUDIO_ACCESS_TOKEN=` set blank), the bind is
 
 <Note>
 
-The attach token, and the rule that an unsigned TeamChat session gets no tools, ship in the next release after 0.5.0. On 0.5.0 and older, every request from this machine reaches `/api/mcp/` without the cookie, `/api/mcp/config` included, and an unsigned TeamChat session takes its author and room from tool arguments. If a reverse proxy on the same machine fronts one of those releases, deny all of `/api/mcp/` at the proxy. See [Security](/operating/security).
+The attach token, and the rule that an unsigned TeamChat session gets no tools, ship in 0.6.0. On 0.5.0 and older, every request from this machine reaches `/api/mcp/` without the cookie, `/api/mcp/config` included, and an unsigned TeamChat session takes its author and room from tool arguments. If a reverse proxy on the same machine fronts one of those releases, deny all of `/api/mcp/` at the proxy. See [Security](/operating/security).
 
 </Note>
 

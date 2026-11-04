@@ -58,7 +58,7 @@ A Claude subscription, no. Claude Code agents in Clawboo need an Anthropic API k
 
 Yes, with Ollama and Clawboo Native, and no key. Install Ollama and pull a chat model that can use tools, for example `ollama pull llama3.2`. Then choose **Ollama** in the setup wizard, or click **Use** on the Ollama row under **Settings > Runtimes > Clawboo Native > Manage**, then **Make default** on that row. Clawboo lists the models you have pulled and marks the ones that cannot use tools. If Ollama runs on another machine or port, set `OLLAMA_BASE_URL` before you start Clawboo. See [Run Clawboo without an API key](/guides/no-api-key).
 
-On the 0.5.0 release, choosing Ollama during setup is not saved, so a new team tries Anthropic instead. [Known issues](/appendices/known-issues) lists this with the other fixes that arrive in the next release.
+On the 0.5.0 release, choosing Ollama during setup is not saved, so a new team tries Anthropic instead. 0.6.0 fixes it; [Known issues](/appendices/known-issues) lists it with the other fixes in 0.6.0.
 
 ### Does Clawboo work on Windows?
 

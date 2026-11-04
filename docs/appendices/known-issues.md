@@ -21,7 +21,7 @@ This page lists what does not work yet in Clawboo, or works with a catch. Each e
 - **Open**: no fix exists yet.
 - **Fixed on main**: the fix is in the source code but not in an npm release yet. It ships with the next release.
 
-The latest npm release is 0.5.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
+The latest npm release is 0.6.0. Run `clawboo --version` to see which one you have. For error messages and their fixes, see [Troubleshooting](/help/troubleshooting).
 
 ## Security and access
 
@@ -33,9 +33,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What it affects:** a same-host proxy delivers every request from `127.0.0.1`, and these releases let any request from `127.0.0.1` reach every `/api/mcp/` path without the cookie. Anyone who can reach your proxy can use Clawboo's MCP servers (your boards, memory, team chat and tools). They can also ask `/api/mcp/config` for an attach URL signed as any of your agents, with that agent's connector grants.
 
-**What to do:** deny all of `/api/mcp/` at the proxy, not only the four MCP server routes, because `/api/mcp/config` is the one that signs attach URLs. [Security model](/operating/security) has the nginx, Caddy and Cloudflare Tunnel rules. Or upgrade once the next release is out.
+**What to do:** deny all of `/api/mcp/` at the proxy, not only the four MCP server routes, because `/api/mcp/config` is the one that signs attach URLs. [Security model](/operating/security) has the nginx, Caddy and Cloudflare Tunnel rules. Or upgrade to 0.6.0.
 
-**Status:** fixed on main. From the next release, a request without the cookie reaches an MCP server only with an attach token, only on a direct connection to `127.0.0.1`, and never through a proxy. `/api/mcp/config` always needs the cookie.
+**Status:** fixed in 0.6.0. From 0.6.0, a request without the cookie reaches an MCP server only with an attach token, only on a direct connection to `127.0.0.1`, and never through a proxy. `/api/mcp/config` always needs the cookie.
 
 </Warning>
 
@@ -47,7 +47,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** make a token from the allowed characters, for example with `openssl rand -hex 24`. Restart Clawboo and check that the dashboard asks for the token. See [Reach Clawboo from another machine](/guides/self-host-securely).
 
-**Status:** fixed on main. From the next release, such a token stops the server at startup on every bind, with a `SECURITY: refusing to start` error that names the character. `CLAWBOO_ALLOW_INSECURE=1` does not skip it.
+**Status:** fixed in 0.6.0. From 0.6.0, such a token stops the server at startup on every bind, with a `SECURITY: refusing to start` error that names the character. `CLAWBOO_ALLOW_INSECURE=1` does not skip it.
 
 ### Keys saved under Providers are also stored unencrypted for OpenClaw
 
@@ -67,7 +67,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** to remove a single key, use **Disconnect** on its row under **Settings** > **Providers**. To undo a runtime's disconnect, connect the keys again. See [Disconnect a key or a runtime](/using/providers-and-runtimes#disconnect-a-key-or-a-runtime).
 
-**Status:** fixed on main. From the next release, a runtime's **Disconnect** keeps any key another runtime also reads and only stops that runtime using it, and its dialog names each saved key it deletes and each one it keeps.
+**Status:** fixed in 0.6.0. From 0.6.0, a runtime's **Disconnect** keeps any key another runtime also reads and only stops that runtime using it, and its dialog names each saved key it deletes and each one it keeps.
 
 ## What agents can reach
 
@@ -89,7 +89,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** keep anything you do not want agents to follow out of `~/.claude`, or run Clawboo under a separate user account. See [Claude Code](/runtimes/claude-code).
 
-**Status:** fixed on main. From the next release, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
+**Status:** fixed in 0.6.0. From 0.6.0, Claude Code agents load only the Claude Code files of the folder they work in, such as a repository's `CLAUDE.md`. Your `~/.claude` settings, plugins, MCP servers and memory files, and Claude Code's auto memory, are left out.
 
 ### Clawboo Native shell commands are one approved command at a time
 
@@ -144,9 +144,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** tasks reach **Done** without a check result.
 
-**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files, and, from the next release, for team chat work that changed the team's folder on a team with a [work check](/using/teams#work-check). Other team chat work, agent Routines created in the app and OpenClaw work are never checked. When a task-runner check runs, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files, and, from 0.6.0, for team chat work that changed the team's folder on a team with a [work check](/using/teams#work-check). Other team chat work, agent Routines created in the app and OpenClaw work are never checked. When a task-runner check runs, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
 
-**What to do:** review results yourself. For runs that are checked, set the team's [work check](/using/teams#work-check) from the next release on, or name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
+**What to do:** review results yourself. For runs that are checked, set the team's [work check](/using/teams#work-check) (0.6.0 and later), or name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
 
 **Status:** open.
 
@@ -247,7 +247,7 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What to do:** stop and start that server the way you started it, for example with `Ctrl+C` in its terminal or through your service manager. To open a server you just started, visit `http://localhost:18790/?access_token=<token>` (use your port if it is not 18790). See [Run the Clawboo server](/operating/deployment) and [CLI reference](/reference/cli).
 
-**Status:** fixed on main. From the next release, the command uses the `STUDIO_ACCESS_TOKEN` set in the shell you run it from. With the server's token there, `clawboo` sees a server it just started and opens it, and `clawboo stop` and `clawboo restart` work. Without it, they print the same notice as before.
+**Status:** fixed in 0.6.0. From 0.6.0, the command uses the `STUDIO_ACCESS_TOKEN` set in the shell you run it from. With the server's token there, `clawboo` sees a server it just started and opens it, and `clawboo stop` and `clawboo restart` work. Without it, they print the same notice as before.
 
 ### One install serves one person
 
@@ -269,9 +269,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **Status:** open.
 
-## Issues in 0.5.0 that are fixed on main
+## Issues in 0.5.0 that are fixed in 0.6.0
 
-These problems affect the 0.5.0 release. They are fixed on main and ship with the next release, which the [changelog](/appendices/changelog) describes under **Unreleased**.
+These problems affect the 0.5.0 release. They are fixed in 0.6.0, which the [changelog](/appendices/changelog) describes.
 
 | What you see on 0.5.0                                                                                                                                                                                 | Area        |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
