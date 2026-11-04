@@ -3,9 +3,9 @@
 // a prefixed path.
 //
 // This is the security-load-bearing choice. The origin guard and the access gate
-// both decide whether to protect a request by testing `pathname.startsWith('/api/')`,
-// and those tests FAIL OPEN: a path they do not recognize is treated as a static
-// asset and waved through. Mounting the API at `${base}/api` while leaving those
+// both decide whether to protect a request by testing whether its path is under
+// `/api/` (read every way the router might read it), and those tests FAIL OPEN: a
+// path they do not recognize is treated as a static asset and waved through. Mounting the API at `${base}/api` while leaving those
 // tests matching `/api/` would therefore leave every prefixed API route
 // unauthenticated and unguarded. Stripping first means the guards keep their
 // existing, tested checks and cover both surfaces with no change at all.
@@ -87,6 +87,8 @@ export function createBasePathMiddleware(basePath: string): RequestHandler {
 
     // Everything else is outside the mount. 404 rather than fall through, so the
     // SPA exists at exactly one place and a stray path cannot reach the catch-all.
+    // That includes a target that is not a path (a full URL), which the origin
+    // guard refuses with 400 when there is no prefix.
     res.status(404).json({ error: `Not found. This Clawboo is served under ${prefix}` })
   }
 }
