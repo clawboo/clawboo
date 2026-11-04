@@ -2,8 +2,8 @@
 //
 //   GET /api/system/operator-settings        every key: its value, where it came
 //                                            from, and whether it is pinned
-//   PUT /api/system/operator-settings/:key   a person's own value, for the keys
-//                                            the dashboard offers
+//   PUT /api/system/operator-settings/:key   a value for the whole install, for
+//                                            the keys the dashboard offers
 //
 // READ-ONLY FOR PINS. Nothing here writes the operator file. A pinned key is
 // refused with 409, so the dashboard can say it is set by the administrator

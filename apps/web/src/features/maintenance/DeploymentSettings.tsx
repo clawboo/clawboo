@@ -74,18 +74,24 @@ function Value({ children }: { children: ReactNode }) {
 
 export function DeploymentSettings() {
   const [settings, setSettings] = useState<EffectiveSetting[] | null>(null)
+  const [loadFailed, setLoadFailed] = useState(false)
   const [busy, setBusy] = useState(false)
   const addToast = useToastStore((s) => s.addToast)
 
   useEffect(() => {
     let cancelled = false
     apiFetch(ENDPOINT)
-      .then((r) => (r.ok ? (r.json() as Promise<{ settings?: EffectiveSetting[] }>) : null))
-      .then((body) => {
-        if (!cancelled && Array.isArray(body?.settings)) setSettings(body.settings)
+      .then(async (r) => {
+        // A server that predates this route answers 404: show nothing rather
+        // than guess. Any other failure is said, not hidden.
+        if (r.status === 404) return
+        const body = r.ok ? ((await r.json()) as { settings?: unknown }) : null
+        if (cancelled) return
+        if (Array.isArray(body?.settings)) setSettings(body.settings as EffectiveSetting[])
+        else setLoadFailed(true)
       })
       .catch(() => {
-        // A server that predates this route: show nothing rather than guess.
+        if (!cancelled) setLoadFailed(true)
       })
     return () => {
       cancelled = true
@@ -125,7 +131,16 @@ export function DeploymentSettings() {
     [addToast, replace],
   )
 
-  if (!settings) return null
+  if (!settings) {
+    if (!loadFailed) return null
+    return (
+      <SectionCard label="Deployment" data-testid="deployment-settings">
+        <p className="text-[12px] text-muted-foreground" role="status">
+          These settings could not be loaded. Reopen this panel to try again.
+        </p>
+      </SectionCard>
+    )
+  }
   const byKey = new Map(settings.map((s) => [s.key, s]))
   const updates = byKey.get('disableSelfUpdate')
   const browsers = byKey.get('disableBrowserAutostart')

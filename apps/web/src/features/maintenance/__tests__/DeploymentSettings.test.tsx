@@ -115,4 +115,15 @@ describe('DeploymentSettings', () => {
     await waitFor(() => expect(apiFetch).toHaveBeenCalled())
     expect(container).toBeEmptyDOMElement()
   })
+
+  it.each([
+    ['answers 500', () => json({ error: 'boom' }, 500)],
+    ['cannot be reached', () => Promise.reject(new TypeError('Failed to fetch'))],
+  ])('says the settings could not be loaded when the server %s', async (_, answer) => {
+    apiFetch.mockImplementation(answer)
+    render(<DeploymentSettings />)
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'These settings could not be loaded.',
+    )
+  })
 })

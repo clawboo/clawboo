@@ -1,8 +1,8 @@
 // Settings an administrator pins for everyone who uses this install.
 //
 // Admins who deploy Clawboo for a team can pin settings in one file, or in the
-// environment variable that matches each key. A pinned setting wins over what a
-// person saves in the dashboard, which shows it as set by the administrator and
+// environment variable that matches each key. A pinned setting wins over a
+// value saved in the dashboard, which shows it as set by the administrator and
 // offers no way to change it.
 //
 // PRECEDENCE, highest first:
@@ -13,7 +13,9 @@
 //   2. The key's environment variable.
 //   3. The operator file: `CLAWBOO_OPERATOR_SETTINGS`, else
 //      `<CLAWBOO_HOME>/operator.json`.
-//   4. The person's own saved setting, for the keys the dashboard lets them set.
+//   4. A value saved in the dashboard, for the keys it offers. There is one
+//      value per install, not per person: anyone using the dashboard changes
+//      it for everyone.
 //   5. The default.
 //
 // FAIL-CLOSED. A file that cannot be read or parsed, an unknown key, a value of
@@ -23,8 +25,8 @@
 // would quietly drop the pins an administrator relies on, such as a disabled
 // self-update.
 //
-// READ-ONLY. Nothing here writes the file. A person's own choices go to the
-// database, never back into the administrator's file.
+// READ-ONLY. Nothing here writes the file. Values saved in the dashboard go to
+// the install's database, never back into the administrator's file.
 //
 // NO SECRETS. The file is meant to be readable by whoever manages the machine,
 // and the dashboard shows what it pins. A key that looks like a credential is
@@ -63,7 +65,7 @@ type Kind = keyof KindValue
 interface KeySpec {
   kind: Kind
   env: string
-  /** Whether a person can save their own value from the dashboard. */
+  /** Whether the dashboard offers a value of its own for this key. */
   userEditable: boolean
 }
 
@@ -108,9 +110,12 @@ export class OperatorSettingsError extends Error {
 
 /** Key names that would mean someone is storing a secret in the file. */
 const CREDENTIAL_KEY = /token|secret|passw(or)?d|api[-_]?key|credential|private[-_]?key|auth/i
-/** Query parameter names that carry a credential in a URL. */
+/**
+ * Query parameter names that carry a credential in a URL: `token`, `api_key`,
+ * `access_key` and any other `*_key`, `auth`, signed-URL signatures.
+ */
 const CREDENTIAL_PARAM =
-  /token|secret|passw(or)?d|api[-_]?key|credential|auth|^key$|^sig(nature)?$/i
+  /token|secret|passw(or)?d|api[-_]?key|credential|auth|signature|(^|[-_])key$|^sig$/i
 
 function parseUrl(raw: string, where: string): string {
   const value = raw.trim()
@@ -130,14 +135,22 @@ function parseUrl(raw: string, where: string): string {
       `${where} must not carry credentials. Remove the user name and password from the URL.`,
     )
   }
+  // The parameter is not named: a bare `?<token>` makes the token the name.
   for (const name of url.searchParams.keys()) {
     if (CREDENTIAL_PARAM.test(name)) {
       throw new OperatorSettingsError(
-        `${where} must not carry credentials. Remove the "${name}" parameter from the URL.`,
+        `${where} must not carry credentials. Remove the credential from the URL's query string.`,
       )
     }
   }
   return value
+}
+
+/** ` (line L, column C)` from a JSON.parse error, or nothing it can trust. */
+function jsonErrorPlace(err: unknown): string {
+  const message = err instanceof SyntaxError ? err.message : ''
+  const m = /line (\d+) column (\d+)/.exec(message)
+  return m ? ` (line ${m[1]}, column ${m[2]})` : ''
 }
 
 function parseFileValue(kind: Kind, raw: unknown, where: string): boolean | string {
@@ -230,12 +243,20 @@ export function readOperatorFile(env: NodeJS.ProcessEnv = process.env): Operator
     )
   }
 
+  let text: string
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    throw new OperatorSettingsError(`${label} cannot be read (${code ?? 'unknown error'}).`)
+  }
   let doc: unknown
   try {
-    doc = JSON.parse(fs.readFileSync(file, 'utf8'))
+    doc = JSON.parse(text)
   } catch (err) {
-    const reason = err instanceof SyntaxError ? err.message : String(err)
-    throw new OperatorSettingsError(`${label} is not valid JSON (${reason}).`)
+    // Only where, never the parser's own message: it quotes the text around
+    // the error, which can be a secret someone pasted in.
+    throw new OperatorSettingsError(`${label} is not valid JSON${jsonErrorPlace(err)}.`)
   }
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
     throw new OperatorSettingsError(`${label} must hold a JSON object.`)
@@ -308,7 +329,7 @@ export function operatorPin<K extends OperatorKey>(key: K): Pin<K> | undefined {
   return readOperatorEnv()[key] ?? cachedFile().pins[key]
 }
 
-// ─── A person's own setting ──────────────────────────────────────────────────
+// ─── A value saved in the dashboard ──────────────────────────────────────────
 
 const userSettingKey = (key: OperatorKey): string => `user-setting:${key}`
 
@@ -331,9 +352,9 @@ function readUserValue<K extends OperatorKey>(db: ClawbooDb, key: K): OperatorVa
 }
 
 /**
- * Save a person's own value. Refused for a key the dashboard does not offer,
- * and for one an administrator has pinned: their value would never apply, and
- * saving it would look like it had.
+ * Save a value from the dashboard, for the whole install. Refused for a key the
+ * dashboard does not offer, and for one an administrator has pinned: the value
+ * would never apply, and saving it would look like it had.
  */
 export function saveUserSetting<K extends OperatorKey>(
   key: K,
@@ -355,7 +376,7 @@ export interface EffectiveSetting<K extends OperatorKey = OperatorKey> {
   key: K
   value: OperatorValue<K>
   source: PinSource | 'user' | 'default'
-  /** Set by an administrator, so a person cannot change it. */
+  /** Set by an administrator, so the dashboard cannot change it. */
   pinned: boolean
   userEditable: boolean
   env: string

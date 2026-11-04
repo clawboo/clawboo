@@ -270,7 +270,7 @@ The operator settings file key `catalogIndexUrl` sets the same thing; this varia
 
 An administrator who deploys Clawboo for a team can pin these settings for everyone, in one file or with these variables. **Settings** > **System** > **Deployment** shows a pinned setting as "Set by your administrator", and it cannot be changed there. [Run the Clawboo server](/operating/deployment#pin-settings-for-everyone) walks through the file.
 
-Which value wins, highest first: what Clawboo itself refuses (an in-app update of an install this user cannot write stays off whatever is pinned), then the key's variable, then the operator file, then the person's own choice in the dashboard, then the default.
+Which value wins, highest first: what Clawboo itself refuses (an in-app update of an install this user cannot write stays off whatever is pinned), then the key's variable, then the operator file, then a value saved in **Settings** > **System** > **Deployment** (one value for the whole install, not one per person), then the default.
 
 Every flag variable here takes `1` or `true` to turn the setting on and `0` or `false` to pin it off, in any letter case. Empty or unset pins nothing. Any other value stops the server at startup, exiting with code 1 and logging `CONFIG: refusing to start.` with the variable and the reason.
 
@@ -308,7 +308,7 @@ Turns off updating Clawboo from the dashboard.
 
 With it on, the dashboard shows no update chip, `GET /api/system/self-version` answers as it does with `?local=1` (no call to npm's registry, `latest` is `null`), and `POST /api/system/self-update` refuses with "In-app updates are turned off for this install by its administrator." Use it on an install that something else manages, such as a container image, a distro package or a service manager. Operator file key: `disableSelfUpdate`.
 
-Without it, the update is still refused on an install whose package folder, or the folder holding it, the server's user cannot write, such as a root-owned `/usr/local`. The chip there copies the update command instead.
+Without it, the update is still refused on an install whose package folder, the folder holding it, or the folder npm links the `clawboo` command into (the prefix's `bin`) the server's user cannot write, such as a root-owned `/usr/local`. The chip there copies the update command instead.
 
 ### CLAWBOO_DISABLE_BROWSER_AUTOSTART
 
@@ -318,7 +318,7 @@ Stops Clawboo starting the browser connectors on an install that has never had o
 - Default: unset, so Playwright and Chrome DevTools start when Clawboo starts, if neither has been connected or disconnected yet
 - Example: `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`
 
-Each browser keeps a process running, and on a machine with no browser installed it cannot browse anyway. With this on, they start only when someone connects them from **Connectors**. Browsers someone already connected still come back after a restart. People can turn the same thing off themselves in **Settings** > **System** > **Deployment**, unless this variable or the file pins it. Operator file key: `disableBrowserAutostart`.
+Each browser keeps a process running, and on a machine with no browser installed it cannot browse anyway. With this on, they start only when someone connects them from **Connectors**. Browsers someone already connected still come back after a restart. Anyone using the dashboard can turn the same thing off for the whole install in **Settings** > **System** > **Deployment**, unless this variable or the file pins it. Operator file key: `disableBrowserAutostart`.
 
 ## Provider keys
 

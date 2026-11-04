@@ -11,7 +11,7 @@ vi.mock('../../platform', async (orig) => {
 })
 
 import { findExecutable } from '../../platform'
-import { nodeModulesBeside, planConnectorSpawn } from '../spawnPlan'
+import { displayToken, nodeModulesBeside, planConnectorSpawn } from '../spawnPlan'
 
 const mockFind = vi.mocked(findExecutable)
 
@@ -132,7 +132,11 @@ describe('a pinned browser package that is already installed', () => {
     )
     expect(plan.command).toBe(process.execPath)
     expect(plan.args).toEqual([path.join(pkgDir, 'cli.js'), '--headless'])
-    expect(plan.display).toContain(path.join(pkgDir, 'cli.js'))
+    // Each token as the display quotes it: a Windows path has backslashes, so
+    // it is shown quoted and escaped.
+    expect(plan.display).toBe(
+      [process.execPath, path.join(pkgDir, 'cli.js'), '--headless'].map(displayToken).join(' '),
+    )
     expect(plan.unresolved).toBe(false)
   })
 
@@ -237,6 +241,9 @@ describe('where an installed copy is looked for', () => {
 describe("chrome-devtools-mcp's usage statistics and update check", () => {
   beforeEach(() => {
     vi.stubEnv('npm_config_cache', path.join(os.tmpdir(), 'clawboo-spawnplan-no-cache'))
+    // Whatever the shell running the tests exports must not decide these.
+    vi.stubEnv('CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS', undefined)
+    vi.stubEnv('CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS', undefined)
   })
   afterEach(() => vi.unstubAllEnvs())
 

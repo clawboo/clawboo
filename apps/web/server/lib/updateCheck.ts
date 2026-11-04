@@ -99,18 +99,36 @@ export function detectInstallMethod(): InstallMethod {
 }
 
 /**
+ * The folder `npm install -g` links the `clawboo` command into, for a package
+ * installed in `globalModules`, or null when that is not npm's global layout:
+ * `<prefix>/lib/node_modules` links into `<prefix>/bin`, and on Windows
+ * `<prefix>/node_modules` into `<prefix>` itself.
+ */
+function globalBinDir(globalModules: string): string | null {
+  if (path.basename(globalModules) !== 'node_modules') return null
+  const parent = path.dirname(globalModules)
+  if (process.platform === 'win32') return parent
+  return path.basename(parent) === 'lib' ? path.join(path.dirname(parent), 'bin') : null
+}
+
+/**
  * Whether this user can replace the running global install. `npm install -g`
- * swaps the package folder inside the global `node_modules`, so both have to be
- * writable. A root-owned prefix, a container image run as another user, or a
- * distro package fails here, and an in-app update there is either a permission
- * error or a copy that no longer matches what installed it.
+ * swaps the package folder inside the global `node_modules` and relinks the
+ * `clawboo` command in the prefix's `bin`, so all three have to be writable. A
+ * root-owned prefix, a container image run as another user, or a distro
+ * package fails here, and an in-app update there is either a permission error
+ * or a copy that no longer matches what installed it.
  */
 export function isInstallWritable(entry: string | undefined = process.argv[1]): boolean {
   if (!entry) return false
   const packageRoot = path.resolve(path.dirname(entry), '..')
+  const globalModules = path.dirname(packageRoot)
   try {
     fs.accessSync(packageRoot, fs.constants.W_OK)
-    fs.accessSync(path.dirname(packageRoot), fs.constants.W_OK)
+    fs.accessSync(globalModules, fs.constants.W_OK)
+    const bin = globalBinDir(globalModules)
+    // A `bin` that is not there yet is created inside the prefix.
+    if (bin) fs.accessSync(fs.existsSync(bin) ? bin : path.dirname(bin), fs.constants.W_OK)
     return true
   } catch {
     return false

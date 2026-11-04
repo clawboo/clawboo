@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { upsertConnector } from '@clawboo/db'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const connectState = vi.hoisted(() => ({ slugs: [] as string[] }))
@@ -22,7 +23,7 @@ vi.mock('../../lib/connectors/supervisor', async (orig) => ({
 
 import { getDb, resetDb } from '../../lib/db'
 import { saveUserSetting } from '../../lib/operatorSettings'
-import { ensureBrowserConnectedAtBoot } from '../connectors'
+import { ensureBrowserConnectedAtBoot, restoreConnectorsAtBoot } from '../connectors'
 
 describe('ensureBrowserConnectedAtBoot', () => {
   let home: string
@@ -63,5 +64,48 @@ describe('ensureBrowserConnectedAtBoot', () => {
 
     vi.stubEnv('CLAWBOO_DISABLE_BROWSER_AUTOSTART', '0')
     await expect(ensureBrowserConnectedAtBoot(getDb())).resolves.toBe(2)
+  })
+})
+
+describe('restoreConnectorsAtBoot with the browser start turned off', () => {
+  let home: string
+
+  beforeEach(() => {
+    connectState.slugs = []
+    home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-autostart-restore-'))
+    vi.stubEnv('CLAWBOO_HOME', home)
+    resetDb()
+    getDb()
+  })
+  afterEach(() => {
+    resetDb()
+    vi.unstubAllEnvs()
+    rmSync(home, { recursive: true, force: true })
+  })
+
+  it('still brings back a browser someone connected', async () => {
+    upsertConnector(getDb(), {
+      id: 'conn:connector:clawboo-native:mcp:playwright',
+      slug: 'playwright',
+      catalogId: 'playwright',
+      displayName: 'Playwright',
+      transport: 'stdio',
+      spec: '{}',
+      specHash: 'h',
+      toolsHash: 't',
+      egressAllow: JSON.stringify(['*']),
+      trifecta: JSON.stringify({}),
+      health: 'ok',
+      healthDetail: null,
+      failures: 0,
+      tenantId: null,
+      desiredState: 'connected',
+    })
+    vi.stubEnv('CLAWBOO_DISABLE_BROWSER_AUTOSTART', '1')
+
+    await expect(restoreConnectorsAtBoot(getDb())).resolves.toBe(1)
+    expect(connectState.slugs).toEqual(['playwright'])
+    // And the opt-out still starts nothing new.
+    await expect(ensureBrowserConnectedAtBoot(getDb())).resolves.toBe(0)
   })
 })

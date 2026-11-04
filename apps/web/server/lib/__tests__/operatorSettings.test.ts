@@ -132,6 +132,17 @@ describe('refusing to start', () => {
     expect(refusal()).toMatch(/is not valid JSON/)
   })
 
+  it('on a file that is not JSON, without quoting the text around the error', () => {
+    // The parser's own message quotes the source near the error, and startup
+    // logs the refusal.
+    writeOperator('{\n  "disableSelfUpdate": true,\n  "mirror": ghp_DoNotEchoThis123\n}')
+    const message = refusal()
+    expect(message).toMatch(/is not valid JSON/)
+    // The parser's quote can stop partway through the value, so any of it counts.
+    expect(message).not.toContain('ghp_')
+    expect(message).not.toContain('"mirror"')
+  })
+
   it.each([['[]'], ['"text"'], ['null']])('on a file that is not an object (%s)', (doc) => {
     writeOperator(doc)
     expect(refusal()).toMatch(/must hold a JSON object/)
@@ -156,14 +167,32 @@ describe('refusing to start', () => {
 
   it.each([
     ['https://user:hunter2@mirror.example.com/i.json', 'user name and password'],
-    ['https://mirror.example.com/i.json?token=hunter2', '"token" parameter'],
-    ['https://mirror.example.com/i.json?api_key=hunter2', '"api_key" parameter'],
+    ['https://mirror.example.com/i.json?token=hunter2', 'query string'],
+    ['https://mirror.example.com/i.json?api_key=hunter2', 'query string'],
+    ['https://mirror.example.com/i.json?access_key=hunter2', 'query string'],
+    ['https://mirror.example.com/i.json?X-Amz-Signature=hunter2', 'query string'],
   ])('on a URL that carries a credential (%s)', (url, named) => {
     writeOperator({ catalogIndexUrl: url })
     const message = refusal()
     expect(message).toContain(named)
     expect(message).not.toContain('hunter2')
   })
+
+  it('on a URL whose query names a credential, without repeating the name', () => {
+    // A bare `?<token>` makes the token itself the parameter name.
+    writeOperator({ catalogIndexUrl: 'https://mirror.example.com/i.json?hunter2_token' })
+    const message = refusal()
+    expect(message).toMatch(/must not carry credentials/)
+    expect(message).not.toContain('hunter2')
+  })
+
+  it.each([['monkey'], ['keyboard'], ['v']])(
+    'accepts a URL whose query parameter only looks like one (%s)',
+    (name) => {
+      writeOperator({ catalogIndexUrl: `https://mirror.example.com/i.json?${name}=1` })
+      expect(() => initOperatorSettings()).not.toThrow()
+    },
+  )
 
   it.each([
     [{ disableSelfUpdate: 'yes' }, /"disableSelfUpdate".*must be true or false/],

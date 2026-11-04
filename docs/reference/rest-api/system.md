@@ -42,7 +42,7 @@ Three routes stream **Server-Sent Events** instead of returning a JSON body: `PO
 | GET    | `/api/system/capabilities`            | This server's version, API revision and feature flags           | general   | No                        |
 | POST   | `/api/system/self-update`             | Install `clawboo@latest` globally, then restart into it         | sensitive | SSE                       |
 | GET    | `/api/system/operator-settings`       | Settings an administrator can pin, and where each value is from | general   | No                        |
-| PUT    | `/api/system/operator-settings/:key`  | Save a person's own value for a setting nobody pinned           | sensitive | No                        |
+| PUT    | `/api/system/operator-settings/:key`  | Save a value for a setting nobody pinned, for the whole install | sensitive | No                        |
 
 ---
 
@@ -775,7 +775,7 @@ curl http://localhost:18790/api/system/capabilities
 
 Installs `clawboo@latest` globally and restarts the server into it. Streams **Server-Sent Events**; takes no request body.
 
-Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. A global install whose package folder, or the folder holding it, the server's user cannot write is refused too, as is any install whose administrator turned in-app updates off. Each gets one `unsupported` event naming the reason and the command to run instead (the chip hides its button in those cases anyway).
+Only a `global` install can update itself. An `npx` run lives in npm's `_npx` cache, so a global install lands somewhere the running copy cannot reach, and a dev checkout never updates itself. A global install whose package folder, the folder holding it, or the prefix's `bin` folder (where npm links the `clawboo` command) the server's user cannot write is refused too, as is any install whose administrator turned in-app updates off. Each gets one `unsupported` event naming the reason and the command to run instead (the chip hides its button in those cases anyway).
 
 | `reason`       | Why                                                                                   |
 | -------------- | ------------------------------------------------------------------------------------- |
@@ -834,14 +834,14 @@ The settings an administrator can pin for everyone on this install, with the val
 
 `200` with `{ "settings": [...] }`, one entry per key, in this order: `disableSelfUpdate`, `disableBrowserAutostart`, `catalogIndexUrl`.
 
-| Field          | Type                                             | Notes                                                                                                |
-| -------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| `key`          | `string`                                         | The operator settings file key                                                                       |
-| `value`        | `boolean \| string \| null`                      | The value in force. `catalogIndexUrl` is `null` when the default applies                             |
-| `source`       | `'environment' \| 'file' \| 'user' \| 'default'` | Where the value comes from: the key's variable, the operator file, a person's choice, or the default |
-| `pinned`       | `boolean`                                        | `true` when `source` is `environment` or `file`. The dashboard shows "Set by your administrator"     |
-| `userEditable` | `boolean`                                        | Whether `PUT` accepts a value for this key while it is not pinned                                    |
-| `env`          | `string`                                         | The key's environment variable                                                                       |
+| Field          | Type                                             | Notes                                                                                                               |
+| -------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| `key`          | `string`                                         | The operator settings file key                                                                                      |
+| `value`        | `boolean \| string \| null`                      | The value in force. `catalogIndexUrl` is `null` when the default applies                                            |
+| `source`       | `'environment' \| 'file' \| 'user' \| 'default'` | Where the value comes from: the key's variable, the operator file, a value saved from the dashboard, or the default |
+| `pinned`       | `boolean`                                        | `true` when `source` is `environment` or `file`. The dashboard shows "Set by your administrator"                    |
+| `userEditable` | `boolean`                                        | Whether `PUT` accepts a value for this key while it is not pinned                                                   |
+| `env`          | `string`                                         | The key's environment variable                                                                                      |
 
 ### Example
 
@@ -853,7 +853,7 @@ curl http://localhost:18790/api/system/operator-settings
 
 ## `PUT /api/system/operator-settings/:key`
 
-Saves a person's own value for a key the dashboard offers, today only `disableBrowserAutostart`. It never writes the operator file. Body: `{ "value": true }` or `{ "value": false }`.
+Saves a value for a key the dashboard offers, today only `disableBrowserAutostart`. There is one value per install, so it applies to everyone who uses it. It never writes the operator file. Body: `{ "value": true }` or `{ "value": false }`.
 
 ### Responses
 

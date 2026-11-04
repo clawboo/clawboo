@@ -2,7 +2,7 @@
 // answer can say "update available" after an administrator turned in-app updates
 // off, so the chip waits for this page load's own answer.
 
-import { cleanup, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { SelfVersionInfo } from '../useUpdateCheck'
@@ -61,6 +61,36 @@ describe('useUpdateCheck', () => {
     const { result } = renderHook(() => useUpdateCheck())
 
     await waitFor(() => expect(result.current.shouldShow).toBe(true))
+  })
+
+  it('asks again on focus when the first check failed, then shows the chip', async () => {
+    cache(info())
+    apiFetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(new Response(JSON.stringify(info())))
+    const { result } = renderHook(() => useUpdateCheck())
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    expect(result.current.shouldShow).toBe(false)
+
+    // The cache is still fresh, but this page load has no answer yet.
+    window.dispatchEvent(new Event('focus'))
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.shouldShow).toBe(true))
+  })
+
+  it('recovers through recheck after the first check failed', async () => {
+    cache(info())
+    apiFetch
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(new Response(JSON.stringify(info())))
+    const { result } = renderHook(() => useUpdateCheck())
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1))
+    // Let the failed request settle and release the in-flight guard.
+    await new Promise((r) => setTimeout(r, 0))
+
+    act(() => result.current.recheck())
+    await waitFor(() => expect(result.current.shouldShow).toBe(true))
+    expect(apiFetch).toHaveBeenCalledTimes(2)
   })
 
   it('reuses a cached "no update" without asking again', async () => {

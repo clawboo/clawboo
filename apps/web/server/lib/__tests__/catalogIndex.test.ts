@@ -4,6 +4,11 @@
 // that every checkout has. Here that tier is hidden, so the index has to come
 // over the network, and the network fails.
 
+import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getCatalogSnapshot, resetCatalogCache } from '../catalogIndex'
@@ -97,6 +102,43 @@ describe('where the catalog index comes from', () => {
 
     await getCatalogSnapshot()
     expect(urls()).toEqual([TAG_050, MAIN])
+  })
+
+  it("fetches a pack from main's tree after falling back to main's index", async () => {
+    vi.stubEnv('CLAWBOO_VERSION', '0.5.0')
+    // Fetched packs are cached under the Clawboo folder; keep this one out of it.
+    const home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-catalog-fallback-'))
+    vi.stubEnv('CLAWBOO_HOME', home)
+    const bundle = '{"fixture":"pack bytes"}'
+    const integrity = `sha256-${createHash('sha256').update(bundle, 'utf8').digest('base64')}`
+    const index = {
+      schemaVersion: 1,
+      packs: [
+        {
+          publisher: 'fixture',
+          slug: 'pack',
+          id: 'fixture/pack',
+          version: '1.0.0',
+          path: 'v1/packs/fixture/pack/1.0.0.json',
+          integrity,
+        },
+      ],
+    }
+    fetchMock
+      .mockResolvedValueOnce(new Response('404: Not Found', { status: 404 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(index), { status: 200 }))
+      .mockResolvedValueOnce(new Response(bundle, { status: 200 }))
+
+    try {
+      await getCatalogSnapshot()
+      expect(urls()).toEqual([
+        TAG_050,
+        MAIN,
+        'https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/packs/fixture/pack/1.0.0.json',
+      ])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it('does not fall back when the network is down, which main cannot fix', async () => {

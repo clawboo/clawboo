@@ -214,7 +214,11 @@ describe('an install that must not update itself', () => {
     process.argv[1] = entry
     vi.unstubAllEnvs()
     chmodSync(root, 0o755)
-    for (const dir of [path.join(root, 'lib'), path.join(root, 'lib', 'node_modules')]) {
+    for (const dir of [
+      path.join(root, 'lib'),
+      path.join(root, 'lib', 'node_modules'),
+      path.join(root, 'bin'),
+    ]) {
       try {
         chmodSync(dir, 0o755)
       } catch {
@@ -288,6 +292,25 @@ describe('an install that must not update itself', () => {
       const info = await computeSelfVersion()
       expect(info.installMethod).toBe('global')
       // Still told a newer version exists, but never offered the one-click path.
+      expect(info.updateAvailable).toBe(true)
+      expect(info.applyable).toBe(false)
+    },
+  )
+
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'a global install whose bin folder this user cannot write is not offered it either',
+    async () => {
+      // npm relinks the `clawboo` command in `<prefix>/bin` on every global
+      // install, so a read-only `bin` fails the update with EACCES.
+      globalInstall()
+      mkdirSync(path.join(root, 'bin'))
+      chmodSync(path.join(root, 'bin'), 0o555)
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async () => ({ ok: true, json: async () => ({ version: '9.9.9' }) })),
+      )
+
+      const info = await computeSelfVersion()
       expect(info.updateAvailable).toBe(true)
       expect(info.applyable).toBe(false)
     },

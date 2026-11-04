@@ -124,7 +124,7 @@ If the repair fails, the error says so and includes the reason ("OpenClaw needs 
 
 ## Deployment settings
 
-The **Deployment** card shows three settings and where each one's value comes from:
+The **Deployment** card shows three settings, and marks the ones an administrator pinned:
 
 | Setting                                 | What it does                                                                                                                                     |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -132,7 +132,7 @@ The **Deployment** card shows three settings and where each one's value comes fr
 | **Updates from the dashboard**          | **On** unless an administrator turned the update chip off.                                                                                       |
 | **Marketplace catalog**                 | **Default** reads the catalog published with your version of Clawboo. An administrator can point it at a mirror.                                 |
 
-You can switch **Start the browsers on a new install** yourself; you should see "Saved". Browsers you already connected still come back after a restart either way. A setting your administrator pinned reads **Set by your administrator**, with a lock, and its switch cannot be moved. Admins pin settings with an operator settings file or environment variables; see [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone).
+You can switch **Start the browsers on a new install** here; you should see "Saved". It is one setting for the whole install, so switching it changes it for everyone who uses this Clawboo. Browsers you already connected still come back after a restart either way. A setting your administrator pinned reads **Set by your administrator**, with a lock, and its switch cannot be moved. Admins pin settings with an operator settings file or environment variables; see [Pin settings for everyone](/operating/deployment#pin-settings-for-everyone).
 
 ## Set the default command approval
 

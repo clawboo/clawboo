@@ -51,8 +51,8 @@ export interface ConnectorSpawnPlan {
   unresolved: boolean
 }
 
-/** Quote a token for DISPLAY only. Never fed to a shell. */
-function displayToken(token: string): string {
+/** Quote a token for DISPLAY only. Never fed to a shell. Exported for tests. */
+export function displayToken(token: string): string {
   return /[\s"'`$&|;<>(){}[\]*?!\\]/.test(token) ? JSON.stringify(token) : token
 }
 
