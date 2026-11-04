@@ -126,10 +126,26 @@ export const riskClassifierInspector: Inspector = (_call, descriptor, ctx): Insp
 // ─── The dashboard ───────────────────────────────────────────────────────────
 
 let dashboardPorts: ReadonlySet<number> = new Set()
+let dashboardHosts: ReadonlySet<string> = new Set()
 
-/** The ports the Clawboo dashboard listens on. The server sets them at boot. */
-export function setDashboardPorts(ports: readonly number[]): void {
+/** A host as the URL parser writes it, without a trailing dot, or null. */
+function canonicalHost(host: string): string | null {
+  const raw = host.trim()
+  if (!raw) return null
+  try {
+    const bracketed = raw.includes(':') && !raw.startsWith('[') ? `[${raw}]` : raw
+    return new URL(`http://${bracketed}`).hostname.replace(/\.$/, '')
+  } catch {
+    return null
+  }
+}
+
+/** The ports the Clawboo dashboard listens on, and the address it is bound to
+ *  (`HOST`), which counts as the dashboard on those ports even when it is not
+ *  a loopback address. The server sets them at boot. */
+export function setDashboardPorts(ports: readonly number[], hosts: readonly string[] = []): void {
   dashboardPorts = new Set(ports)
+  dashboardHosts = new Set(hosts.flatMap((host) => canonicalHost(host) ?? []))
 }
 
 const isLoopbackHost = (host: string): boolean => {
@@ -141,6 +157,7 @@ const isLoopbackHost = (host: string): boolean => {
     h === '0.0.0.0' ||
     h === '[::1]' ||
     h === '[::]' ||
+    h === '[::ffff:0:0]' ||
     /^\[::ffff:(127\.|7f)/.test(h)
   )
 }
@@ -148,22 +165,49 @@ const isLoopbackHost = (host: string): boolean => {
 // A host with an explicit port, with or without a scheme in front of it. A match
 // may only start where a host can start (the lookbehind), so a long run of host
 // characters with no port is read in linear time. The host is not length-capped:
-// a cap would let an over-long `*.localhost` name slip past unmatched.
-const HOST_PORT = /(?<![a-z0-9.-])(?:\[[0-9a-f:.]+\]|[a-z0-9.-]+):(\d{1,5})/gi
+// a cap would let an over-long `*.localhost` name slip past unmatched. It takes
+// percent escapes and non-ASCII characters, which the URL parser turns into a
+// plain name (`%6c%6fcalhost`, and localhost in full-width letters, are
+// localhost), and a port of any length, because `:018790` is still port 18790.
+const HOST_PORT = /(?<![a-z0-9.%\u0080-\uffff-])(\[[0-9a-f:.]+\]|[a-z0-9.%\u0080-\uffff-]+):(\d+)/gi
 
-/** Whether a string names a dashboard address. The host is parsed the way a
- *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. */
-function namesDashboard(text: string): boolean {
+/** The plain-ASCII name at the end of a run, as a stricter reader takes it. */
+function asciiTail(run: string): string {
+  let i = run.length
+  while (i > 0 && /[a-z0-9.-]/i.test(run[i - 1]!)) i--
+  return run.slice(i)
+}
+
+const opensDashboard = (host: string, port: string): boolean => {
+  try {
+    const hostname = new URL(`http://${host}:${port}`).hostname
+    return isLoopbackHost(hostname) || dashboardHosts.has(hostname.replace(/\.$/, ''))
+  } catch {
+    return false // Not a host this browser could open.
+  }
+}
+
+function scanForDashboard(text: string): boolean {
   for (const m of text.matchAll(HOST_PORT)) {
-    if (!dashboardPorts.has(Number(m[1]))) continue
-    try {
-      const url = new URL(`http://${m[0]}`)
-      if (isLoopbackHost(url.hostname)) return true
-    } catch {
-      // Not a host this browser could open.
-    }
+    const host = m[1]!
+    const port = m[2]!
+    if (!dashboardPorts.has(Number(port))) continue
+    if (opensDashboard(host, port)) return true
+    const tail = asciiTail(host)
+    if (tail && tail !== host && opensDashboard(tail, port)) return true
   }
   return false
+}
+
+/** Whether a string names a dashboard address. The host is parsed the way a
+ *  browser parses it, so `2130706433` and `0x7f.1` read as 127.0.0.1. A URL
+ *  parser also drops every tab and line break, so `local<tab>host` is read
+ *  again without them. */
+function namesDashboard(text: string): boolean {
+  return (
+    scanForDashboard(text) ||
+    (/[\t\n\r]/.test(text) && scanForDashboard(text.replace(/[\t\n\r]/g, '')))
+  )
 }
 
 function argsNameDashboard(value: unknown, depth = 0): boolean {

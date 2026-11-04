@@ -359,6 +359,14 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 
 </Accordion>
 
+<Accordion title="Hermes reads Update available">
+
+**What it means:** this Hermes was installed without its live mode (the `acp` extra). Its agents still run, but a run shows its work only when it finishes, and a comment sent mid-run stops the run and resumes it.
+
+**Fix:** click **Update** on the **Hermes** row, then **Update Hermes**. When the row reads **Connected**, the next run is live. More in [Hermes](/runtimes/hermes).
+
+</Accordion>
+
 <Accordion title="Permission denied. A global install may require elevated permissions.">
 
 **What it means:** npm cannot write to its global folder while installing Claude Code or Codex. For OpenClaw the message reads "Permission denied. Your Node.js installation may require sudo for global installs."
@@ -553,6 +561,14 @@ If it still does not answer, go through [When an agent is not doing what you ask
 **What it means:** a run started through the API was for a task that changes files, and named no repository. The task comment starts with `[blocked: no isolation]`, and the task goes back to **To do**.
 
 **Fix:** pass a `repoPath` that points to a git repository, or start the task as a research or review task. See [Worktrees and handoff](/concepts/worktrees-and-handoff).
+
+</Accordion>
+
+<Accordion title="[blocked: worktree kept] The worktree at <path> could not be rebuilt without losing work">
+
+**What it means:** the task ran again and its worktree folder had to be rebuilt from the task branch, but the folder holds something the rebuild would delete: uncommitted changes, files git ignores (such as an `.env` file), a commit no branch holds, a separate git repository, or contents git cannot read. The comment says which. Clawboo left the folder as it is, did not start the run, and moved the task to **Needs you**.
+
+**Fix:** open the folder the comment names. Commit or copy what you need from it, or remove it, then move the task back to **To do**. A `[not started: worktree unchecked]` comment is the milder case: git did not answer when Clawboo checked the folder, nothing was changed, and the task can run again as it is.
 
 </Accordion>
 

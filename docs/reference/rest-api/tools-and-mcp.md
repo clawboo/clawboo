@@ -150,7 +150,7 @@ curl http://localhost:18790/api/tools/approvals
 
 Answers an approval. An unknown `decision` is a **400**. The route then loads the row and acts on its `kind`, because the two kinds are held by different things and released in different ways. The **404** means only that no row with that id exists; an approval that was already answered is not a 404.
 
-**A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending`; any other row (already answered, or marked `expired`) comes back unchanged with **200**, so check `status` in the response. A waiting broker sees the answer the next time it checks.
+**A `kind: 'tool'` row** is answered here. The answer is written only while the row is still `pending` and its `expiresAt` has not passed. A row someone already answered comes back unchanged with **200**, so check `status` in the response. A row that has expired, or is still `pending` past its `expiresAt`, is refused with **409**, and a pending one is marked `expired` then. A waiting broker sees the answer the next time it checks.
 
 For a `tool` row, `allow_always` also creates a standing allow rule tied to the row's grant: later calls of the same tool under that grant run without asking, whatever their arguments, for 30 days. That covers a call with an external effect too. A call to a destructive tool is stored with `neverRemember: 1` and asks every time, even when a rule exists. No rule is made when the row has no `grantId`, when it has `neverRemember: 1`, or when this call did not change the row (it was already answered).
 
@@ -196,9 +196,22 @@ Clawboo makes no rule of its own for an `exec` row. An `allow_always` is passed 
   approval: {
     id: string
     kind: 'tool'
-    status: 'allow_once' | 'allow_always' | 'deny' | 'expired'
+    status: 'allow_once' | 'allow_always' | 'deny'
     resolvedAt: number | null // when the row was answered, which may be earlier than this call
     // ...and every other field shown under GET /api/tools/approvals
+  }
+}
+```
+
+**`409 Conflict`** (`kind: 'tool'`): the card's time ran out, so the answer was not recorded. `approval` is the row, with `status: 'expired'`:
+
+```ts
+{
+  error: 'approval expired'
+  approval: {
+    id: string
+    kind: 'tool'
+    status: 'expired' /* ...every other field */
   }
 }
 ```

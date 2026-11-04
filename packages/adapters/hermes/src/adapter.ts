@@ -158,13 +158,17 @@ export class HermesAdapter implements RuntimeAdapter {
     await this.drivers.get(run.sessionKey)?.writeContext(key, value)
   }
 
+  /** The run's own driver decides: the process-wide transport can change while
+   *  a run started on the other one is still going. */
+  runSteering(run: RunHandle): 'live' | 'interrupt-resume' {
+    return (
+      this.drivers.get(run.sessionKey)?.steering?.() ??
+      (this.capabilities().steering === 'live' ? 'live' : 'interrupt-resume')
+    )
+  }
+
   async steer(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult> {
     const driver = this.drivers.get(run.sessionKey)
-    // The run's own driver decides: the process-wide transport can change while
-    // a run started on the other one is still going.
-    const mode =
-      driver?.steering?.() ??
-      (this.capabilities().steering === 'live' ? 'live' : 'interrupt-resume')
-    return steerThroughDriver(driver, text, mode, opts)
+    return steerThroughDriver(driver, text, this.runSteering(run), opts)
   }
 }

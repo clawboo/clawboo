@@ -49,6 +49,23 @@ function strParam(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }
 
+/** `kinds=a,b`: the kinds to match, or undefined (every kind) when none are named. */
+function kindsParam(v: unknown): OrchestrationEventKind[] | undefined {
+  const kinds = strParam(v)
+    ?.split(',')
+    .map((k) => k.trim())
+    .filter(Boolean) as OrchestrationEventKind[] | undefined
+  return kinds && kinds.length ? kinds : undefined
+}
+
+/** A `seq` cursor, or undefined when the value is absent, malformed or negative. */
+function seqParam(v: unknown): number | undefined {
+  const raw = strParam(v)
+  if (!raw) return undefined
+  const n = Number(raw)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
 /**
  * Clamp a caller-supplied row cap to `[1, DASHBOARD_EVENT_WINDOW]`, or undefined
  * to take the data layer's default. Forwarding the raw value let a single
@@ -112,23 +129,33 @@ function readRecentEvents(req: Request): OrchestrationEvent[] {
 }
 
 // ─── GET /api/obs/stream ─────────────────────────────────────────────────────
-// SSE live-tail of the event log, scoped by team / task / agent. A short-interval
-// DB-tail keyed on the monotonic `seq` cursor — cross-process-correct (catches
-// stdio-bin writes too) and indexed. Resume via the EventSource `Last-Event-ID`
-// header or `?since=<seq>`. Redaction-on-display reuses the read-feed masker.
+// SSE live-tail of the event log, scoped by team / task / agent and narrowed to
+// `kinds` when given. A short-interval DB-tail keyed on the monotonic `seq`
+// cursor: cross-process-correct (catches stdio-bin writes too) and indexed.
+// Resume via the EventSource `Last-Event-ID` header, `?afterSeq=<seq>` (the name
+// `/api/obs/events` uses) or `?since=<seq>`; the first valid one wins, so a
+// malformed header falls back to the query. Note `since` is a `seq` here but a
+// wall-clock time on `/api/obs/events`.
+//
+// `kinds` filters in SQL, so a client following only approvals neither receives
+// every tool call and chat post nor waits behind them after a reconnect.
+// Redaction-on-display reuses the read-feed masker.
 const STREAM_POLL_MS = 750
 const STREAM_KEEPALIVE_MS = 20_000
+const STREAM_BATCH = 500
 
 export function obsStreamGET(req: Request, res: Response): void {
-  const scope = {
+  const filter = {
     teamId: strParam(req.query['teamId']),
     taskId: strParam(req.query['taskId']),
     agentId: strParam(req.query['agentId']),
+    kinds: kindsParam(req.query['kinds']),
   }
-  const lastEventId =
-    typeof req.headers['last-event-id'] === 'string' ? req.headers['last-event-id'] : undefined
-  let cursor = Number(lastEventId ?? strParam(req.query['since']))
-  if (!Number.isFinite(cursor) || cursor < 0) cursor = 0
+  let cursor =
+    seqParam(req.headers['last-event-id']) ??
+    seqParam(req.query['afterSeq']) ??
+    seqParam(req.query['since']) ??
+    0
 
   // Resolve the shared connection BEFORE advertising success: a failure here
   // must surface as a real error response, not a 200 plus a ': connected'
@@ -148,13 +175,26 @@ export function obsStreamGET(req: Request, res: Response): void {
   const poll = (): void => {
     if (closed) return
     try {
-      const rows = listEvents(db, { ...scope, afterSeq: cursor, order: 'asc', limit: 500 })
+      // The head is read BEFORE the tail. SQLite has one writer at a time and a
+      // writer holds its lock from the insert that allocates a `seq` to its
+      // commit, so every row at or below this head is already visible below.
+      const head = listEvents(db, { order: 'desc', limit: 1 })[0]?.seq ?? 0
+      const rows = listEvents(db, {
+        ...filter,
+        afterSeq: cursor,
+        order: 'asc',
+        limit: STREAM_BATCH,
+      })
       for (const r of rows) {
         if (r.seq > cursor) cursor = r.seq
         const safe = JSON.stringify({ ...r, data: redactJsonString(r.data) })
         res.write(`id: ${r.seq}\n`)
         res.write(`data: ${safe}\n\n`)
       }
+      // A short read was complete, so nothing else in scope sits at or below the
+      // head: move past it. Otherwise a scope that rarely matches (`kinds` within
+      // a team, a quiet agent) rescans every row since its last match each poll.
+      if (rows.length < STREAM_BATCH && head > cursor) cursor = head
     } catch {
       /* transient read error — keep the stream alive; retry next tick */
     }
@@ -182,10 +222,6 @@ export function obsStreamGET(req: Request, res: Response): void {
 export function obsEventsGET(req: Request, res: Response): void {
   try {
     const db = getDb()
-    const kinds = strParam(req.query['kinds'])
-      ?.split(',')
-      .map((k) => k.trim())
-      .filter(Boolean) as OrchestrationEventKind[] | undefined
     const sinceRaw = strParam(req.query['since'])
     const afterSeqRaw = strParam(req.query['afterSeq'])
     const rows = listEvents(db, {
@@ -193,7 +229,7 @@ export function obsEventsGET(req: Request, res: Response): void {
       taskId: strParam(req.query['taskId']),
       agentId: strParam(req.query['agentId']),
       traceId: strParam(req.query['traceId']),
-      kinds: kinds && kinds.length ? kinds : undefined,
+      kinds: kindsParam(req.query['kinds']),
       since: sinceRaw ? Number(sinceRaw) : undefined,
       afterSeq: afterSeqRaw ? Number(afterSeqRaw) : undefined,
       limit: parseLimit(req.query['limit']),

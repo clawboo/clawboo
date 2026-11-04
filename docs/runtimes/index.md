@@ -79,13 +79,13 @@ Steering means getting a message to an agent while it is still working on a task
 
 Unless the task is finished, your comment goes into the agent's mailbox, which every run reads when it starts. If a run is working on the task right now, Clawboo also passes the comment into that run:
 
-| Runtime        | What happens to a comment on a running task                                                                                                                         | The line beside **Send** in the **Tasks** card |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| Clawboo Native | Read at the start of its next turn. A run that was about to finish takes one more turn to read it.                                                                  | "… gets this now, before its next step."       |
-| OpenClaw       | Joins the running turn at its next step, without stopping a tool that is running.                                                                                   | "… gets this now, before its next step."       |
-| Claude Code    | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."       |
-| Codex          | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."       |
-| Hermes         | Joins the running turn after the tool call in progress. Without Hermes's `acp` extra, Clawboo stops the run and resumes the same session with your comment instead. | "… gets this now, before its next step."       |
+| Runtime        | What happens to a comment on a running task                                                                                                                         | The line beside **Send** in the **Tasks** card                                                              |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Clawboo Native | Read at the start of its next turn. A run that was about to finish takes one more turn to read it.                                                                  | "… gets this now, before its next step."                                                                    |
+| OpenClaw       | Joins the running turn at its next step, without stopping a tool that is running.                                                                                   | "… gets this now, before its next step."                                                                    |
+| Claude Code    | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."                                                                    |
+| Codex          | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."                                                                    |
+| Hermes         | Joins the running turn after the tool call in progress. Without Hermes's `acp` extra, Clawboo stops the run and resumes the same session with your comment instead. | "… gets this now, before its next step." Without the `acp` extra: "… pauses to read this, then carries on." |
 
 If the comment can't get into the run (the run ended a moment earlier, or the runtime refused it), nothing is lost: the agent reads it from its mailbox at its next run, and the note under the comment says so. When it does land, the mailbox copy is marked as delivered, so the agent doesn't read it twice. A comment on a task that is not running behaves by the task's status: a task that waits on you, or waits in **To do**, starts again for it, and a finished task does not get it at all. Each case is in [Steer a running task](/using/board#steer-a-running-task).
 
@@ -105,7 +105,7 @@ Small team notices, such as "a task you delegated just finished", use the same c
 
 ## Connect a runtime
 
-Open **Settings** (Cmd/Ctrl + ,) and choose **Runtimes** under **Workspace**. Each runtime has a row with its status (**Not installed**, **Needs key**, **Needs login** or **Connected**) and one button: **Install**, **Connect**, **Sign in** (Codex) or **Manage** once it is connected. OpenClaw's row offers **Set up**, or **Reconnect** when its Gateway is offline.
+Open **Settings** (Cmd/Ctrl + ,) and choose **Runtimes** under **Workspace**. Each runtime has a row with its status (**Not installed**, **Needs key**, **Needs login** or **Connected**) and one button: **Install**, **Connect**, **Sign in** (Codex) or **Manage** once it is connected. OpenClaw's row offers **Set up**, or **Reconnect** when its Gateway is offline. A connected runtime with an update to make offers **Update** instead of **Manage**: Codex reads **Update needed** when its CLI is too old for your plan's models ([Codex](/runtimes/codex#models)), and Hermes reads **Update available** when it was installed without its live mode ([Hermes](/runtimes/hermes)).
 
 ![The Runtimes panel in Settings, listing OpenClaw, Codex, Claude Code, Hermes and Clawboo Native with their status and buttons](/images/runtimes-panel.png)
 

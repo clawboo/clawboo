@@ -122,7 +122,7 @@ The room opens as its own chat. Boo Zero leads it and hands work only to the mem
 2. Read **Latest report** and **Progress** to see where it is.
 3. In the **Comment or steer this task…** box, type a correction, for example "Keep it under 500 words and leave out prices". Click **Send**.
 
-The line beside **Send** says when the agent sees your comment. On most runtimes it reads "… gets this now, before its next step"; a Hermes agent pauses to read it, then carries on. You should see a note under your comment such as "Sent to Content Writer Boo’s run".
+The line beside **Send** says when the agent sees your comment. On most runtimes it reads "… gets this now, before its next step"; a Hermes agent installed without its live mode pauses to read it, then carries on. You should see a note under your comment such as "Sent to Content Writer Boo’s run".
 
 For a task that failed or was stopped, sending a comment starts its agent on it again, and the agent reads your comment as the run begins. To see every task the team has, click **Board** in the sidebar. Its columns are **Needs you**, **Backlog**, **To do**, **In progress**, **Done** and **Cancelled**. See [Board](/using/board).
 
