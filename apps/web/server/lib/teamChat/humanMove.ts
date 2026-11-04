@@ -18,6 +18,7 @@ import { createLogger } from '@clawboo/logger'
 
 import { stopTaskRuns } from '../runStops'
 import { getTaskOrchestrator, hasTaskOrchestrator } from './teamOrchestrator'
+import { dropTeamFolderBase } from './teamWorkCheck'
 
 const log = createLogger('human-move')
 
@@ -57,6 +58,12 @@ export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
     log.error({ err, taskId }, 'stopping a run for a person’s move failed')
   }
   if (!teamId) return
+  // A person ended the task: its work is not checked again, so the team chat's
+  // work check forgets where it began (see teamWorkCheck).
+  if (to === 'done' || to === 'cancelled')
+    void dropTeamFolderBase(teamId, taskId).catch((err: unknown) =>
+      log.error({ err, taskId, teamId }, 'could not drop the task’s starting point'),
+    )
   if (hasTaskOrchestrator(teamId, taskId, db)) {
     void getTaskOrchestrator(teamId, taskId, { mcpBaseUrl: null, db })
       .personMovedTask(taskId, to, { cancelledDependents: move.cancelledDependents ?? [] })

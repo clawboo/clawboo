@@ -113,7 +113,7 @@ Clawboo limits how deep hand-offs can nest and how many one turn can send out, a
 
 ## Good to know
 
-- **Team chat work is not checked automatically.** Review the results, or add a reviewer agent to the team and ask Boo Zero to have it check the work. See [How work is checked](/concepts/verification).
+- **Team chat work is checked only when you set a work check.** That is a command such as `npm test` in the team's settings (see [Work check](/using/teams#work-check)). Without one, review the results yourself, or add a reviewer agent to the team and ask Boo Zero to have it check the work. See [How work is checked](/concepts/verification).
 - **A team costs more tokens than one agent.** Boo Zero, each teammate and the final summary are separate model runs. See [Budgets and spend](/using/budgets-and-spend).
 
 ## Next steps

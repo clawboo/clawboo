@@ -140,11 +140,11 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 ## Checks on finished work
 
-### Most work is never checked
+### Much work is never checked
 
 **What you see:** tasks reach **Done** without a check result.
 
-**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files. Team chat, Routines created in the app and OpenClaw work are never checked. When a check does run, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
+**What it affects:** Clawboo checks work only for a task-runner run that worked in its own git worktree and changed files, and, from the next release, for team chat work that changed the team's folder on a team with a [work check](/using/teams#work-check). Other team chat work, agent Routines created in the app and OpenClaw work are never checked. When a task-runner check runs, it uses the verify command in the worktree's `init.sh`. That starts as a placeholder, and a placeholder counts as a failure. On 0.5.0 nothing tells the agent to set it, so the first check fails unless the agent does so on its own. From the next release, the run's instructions and the worktree's `TASK.md` tell it to, and a team can set its own verify command, its [work check](/using/teams#work-check), which every check runs in place of the one in `init.sh`.
 
 **What to do:** review results yourself. For runs that are checked, set the team's [work check](/using/teams#work-check) from the next release on, or name the test command in the task, for example: "Before you finish, set `VERIFY_CMD` in `init.sh` to `npm test`." See [How work is checked](/concepts/verification).
 

@@ -71,6 +71,16 @@ export interface VerifyTaskInput {
   riskFlag?: boolean
   /** Told what the reviewer's run cost, so the caller can charge it. */
   onReviewerSpend?: (spend: ReviewerSpend) => void
+  /** The commit holding the work, for a checkout that is not a task worktree
+   *  (a team folder, whose history clawboo commits itself). Absent, the worktree's
+   *  work is committed here first. */
+  reviewSha?: string
+  /** False: record the gate's run only on the task, not in VERIFICATION.md. */
+  evidence?: boolean
+  /** Asked before the verdict is written: false when the check no longer speaks
+   *  for the task (a person moved it, or it is being run again), so nothing is
+   *  recorded and the verdict is only returned. */
+  shouldRecord?: () => boolean
 }
 
 function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): StructuredError {
@@ -148,6 +158,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     scaffoldCommit: input.worktree.baseCommit,
     repoPath: input.repoPath,
     timeoutMs: input.verifyTimeoutMs,
+    ...(input.evidence === false ? { evidence: false } : {}),
   })
 
   let critic: CriticVerdict = CRITIC_NOT_RUN
@@ -156,7 +167,8 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       input.riskFlag ??
       isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` })
     try {
-      const { head } = await commitWorktreeWork(input.repoPath, input.worktree)
+      const head =
+        input.reviewSha ?? (await commitWorktreeWork(input.repoPath, input.worktree)).head
       critic = await runCritic({
         repoPath: input.repoPath,
         reviewSha: head,
@@ -189,20 +201,20 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
   const attemptNumber = priorAttempts.length + 1
   let status: VerificationResult['status'] = attemptStatus
   let structuredError: StructuredError | null = null
-  // An open item stays until a later attempt checks it again and passes. A green
-  // gate checks the gate's own item; only a review that completed checks the
-  // reviewer's, because a skipped, empty or errored review still lets the attempt
-  // pass without looking at anything. A fail or another pass with debt keeps them
-  // all (on a red gate the critic does not even run). `attempts` keeps every
-  // attempt's own record either way.
+  // An open item stays until a later attempt checks it again and that check
+  // passes. A green gate checks the gate's own item, even when the reviewer then
+  // fails the attempt. Only a pass whose review completed checks the reviewer's,
+  // because a skipped, empty or errored review still lets the attempt pass
+  // without looking at anything, and a review that fails has not shown the
+  // earlier items fixed. A red gate keeps them all (the critic does not even
+  // run). `attempts` keeps every attempt's own record either way.
   const priorNotes = prior?.debtNotes ?? []
   const reviewCompleted = critic.ran && critic.outcome === 'reviewed'
-  const debtNotes: DebtNote[] =
-    attemptStatus !== 'pass'
-      ? [...priorNotes]
-      : reviewCompleted
-        ? []
-        : priorNotes.filter((n) => n.criterion !== GATE_DEBT_CRITERION)
+  const debtNotes: DebtNote[] = !det.passed
+    ? [...priorNotes]
+    : attemptStatus === 'pass' && reviewCompleted
+      ? []
+      : priorNotes.filter((n) => n.criterion !== GATE_DEBT_CRITERION)
 
   if (attemptStatus === 'fail') {
     structuredError = structuredErrorFor(det, critic)
@@ -238,6 +250,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     debtNotes,
     updatedAt: Date.now(),
   }
+  if (input.shouldRecord && !input.shouldRecord()) return result
   setTaskVerification(db, taskId, result)
   appendAudit(db, {
     eventType: 'verification',

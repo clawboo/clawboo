@@ -58,6 +58,9 @@ export const ENGINE_FEATURES = [
   'stream.events.resume',
   // The in-place update (POST /api/system/self-update) can succeed here.
   'system.selfUpdate',
+  // Drain and hold (/api/system/hold): stop starting new agent runs, then wait
+  // for the ones in flight before a stop or an update.
+  'system.hold',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 
