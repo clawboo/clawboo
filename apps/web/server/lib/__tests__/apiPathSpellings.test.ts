@@ -91,6 +91,17 @@ function previewSpellings(prefix: string): string[] {
   ]
 }
 
+/**
+ * The status a refused spelling gets. A full-URL target is refused before any
+ * route runs: by the origin guard with 400 at the root, and by the base-path
+ * strip with 404 under a prefix, which answers first. Every path target reaches
+ * the guards and gets `refusal`.
+ */
+function expectedStatus(target: string, basePath: string, refusal: number): number {
+  if (target.startsWith(SELF)) return basePath === '' ? 400 : 404
+  return refusal
+}
+
 for (const basePath of ['', '/clawboo']) {
   describe(`guard stack, base path ${JSON.stringify(basePath)}: no spelling reaches an /api/ route without the cookie`, () => {
     let server: http.Server
@@ -116,7 +127,7 @@ for (const basePath of ['', '/clawboo']) {
       it(`refuses ${JSON.stringify(target)} without the cookie`, async () => {
         const res = await rawRequest(port, target)
         expect(res.body).not.toContain('"reached":"')
-        expect([400, 401, 404]).toContain(res.status)
+        expect(res.status).toBe(expectedStatus(target, basePath, 401))
       })
     }
 
@@ -139,7 +150,7 @@ for (const basePath of ['', '/clawboo']) {
           Origin: 'http://evil.example',
         })
         expect(res.body).not.toContain('"reached":"')
-        expect([400, 403, 404]).toContain(res.status)
+        expect(res.status).toBe(expectedStatus(target, basePath, 403))
       })
     }
   })

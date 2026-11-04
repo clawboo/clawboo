@@ -100,7 +100,7 @@ The guard stops web pages in your own browser from using Clawboo. Your browser c
 - **Origin**, when the request has one, must exactly match an allowed origin. Those are `localhost`, `127.0.0.1` and `[::1]` at Clawboo's port (over `http` or `https`), the bind address at that port, and the entries in `CLAWBOO_ALLOWED_ORIGINS`.
 - **Sec-Fetch-Site**, when present, must be `same-origin`, `same-site` or `none`.
 
-A rejected request gets `403` with `{"error":"Cross-origin request blocked."}`, and a rejected WebSocket upgrade gets `403 Forbidden`. The dashboard page and its static files are not checked, because they hold no data. A request whose target is a full URL instead of a path gets `400` with `{"error":"Bad request target."}` on every path. Browsers, reverse proxies and Clawboo's own clients always send a path.
+A rejected request gets `403` with `{"error":"Cross-origin request blocked."}`, and a rejected WebSocket upgrade gets `403 Forbidden`. The dashboard page and its static files are not checked, because they hold no data. A request whose target is a full URL instead of a path gets `400` with `{"error":"Bad request target."}` on every path, or `404` when Clawboo is served under a path prefix (`CLAWBOO_BASE_PATH`), whose check answers first. Browsers, reverse proxies and Clawboo's own clients always send a path.
 
 The two variables take comma-separated lists and only add entries; the loopback entries always stay. When you reach Clawboo by any other name or address, set both: `CLAWBOO_ALLOWED_HOSTS` for the name (`dash.example.com`) and `CLAWBOO_ALLOWED_ORIGINS` for the full origin (`https://dash.example.com`). Without them the dashboard page loads, but every API call fails with the 403 above.
 

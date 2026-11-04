@@ -87,6 +87,8 @@ export function createBasePathMiddleware(basePath: string): RequestHandler {
 
     // Everything else is outside the mount. 404 rather than fall through, so the
     // SPA exists at exactly one place and a stray path cannot reach the catch-all.
+    // That includes a target that is not a path (a full URL), which the origin
+    // guard refuses with 400 when there is no prefix.
     res.status(404).json({ error: `Not found. This Clawboo is served under ${prefix}` })
   }
 }
