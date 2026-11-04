@@ -4,6 +4,8 @@
 // The chip IS the action (no popover, no second click):
 //   - Global npm install (applyable): one click installs clawboo@latest, restarts
 //     the server into it, and reloads the page. The chip reads "Click to update".
+//     When agent runs are still going once it is installed, the server waits for
+//     them before it restarts; the chip says so and offers "Restart now".
 //   - npx / dev (can't self-update in place): one click copies the exact command
 //     (`npx clawboo@latest`) instead, since the running process can't hot-swap.
 // A small × dismisses it (keyed to the latest version, so a newer release brings
@@ -23,7 +25,11 @@ import { useUpdateCheck } from './useUpdateCheck'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
-type Phase = 'idle' | 'applying' | 'restarting' | 'manual' | 'error'
+type Phase = 'idle' | 'applying' | 'waiting' | 'restarting' | 'manual' | 'error'
+
+/** How long to watch for the new version after losing the stream mid-wait: the
+ *  server's 10-minute wait for agent runs, plus the usual 90 s for a restart. */
+const WAITING_RELOAD_TIMEOUT_MS = 10 * 60_000 + 90_000
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -36,8 +42,12 @@ function sleep(ms: number): Promise<void> {
  * server that is still on its way out; any answer at all would not. Gives up after
  * ~90s and surfaces a manual note.
  */
-async function pollThenReload(fromVersion: string, onTimeout: () => void): Promise<void> {
-  const deadline = Date.now() + 90_000
+async function pollThenReload(
+  fromVersion: string,
+  onTimeout: () => void,
+  timeoutMs = 90_000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     await sleep(1000)
     // Null while the server is restarting (no answer, or not one yet).
@@ -74,6 +84,10 @@ export function UpdateChip() {
 
   const startUpdate = useCallback(() => {
     const fromVersion = info?.current ?? ''
+    const onPollTimeout = (): void => {
+      setStatusText('Update installed. Restart Clawboo to finish.')
+      setPhase('manual')
+    }
     setPhase('applying')
     setStatusText('')
     consumeApiSSE(
@@ -84,17 +98,33 @@ export function UpdateChip() {
           // The stream drops when the server exits to restart — expected, not a
           // failure. Ignore errors once we're past 'installed'.
           if (phaseRef.current === 'restarting') return
+          // Lost while the server waits for agent runs: the update is installed
+          // and the restart still comes, within the server's wait of up to 10
+          // minutes, so keep watching for the new version. The chip stays in
+          // the waiting state: Restart now still works without this stream.
+          if (phaseRef.current === 'waiting') {
+            void pollThenReload(fromVersion, onPollTimeout, WAITING_RELOAD_TIMEOUT_MS)
+            return
+          }
           setStatusText(e.message ?? 'Update failed.')
           setPhase('error')
         },
         onEvent: (e: SSEEvent) => {
           switch (e.type) {
+            case 'progress':
+              // Installed, and waiting for agent runs to finish before it restarts.
+              if (e.step === 'waiting') {
+                // Set now, not at the next render: an error that arrives first
+                // must already see the wait.
+                phaseRef.current = 'waiting'
+                setStatusText(e.message ?? 'Waiting for agent runs to finish.')
+                setPhase('waiting')
+              }
+              break
             case 'restarting':
+              phaseRef.current = 'restarting'
               setPhase('restarting')
-              void pollThenReload(fromVersion, () => {
-                setStatusText('Update installed. Restart Clawboo to finish.')
-                setPhase('manual')
-              })
+              void pollThenReload(fromVersion, onPollTimeout)
               break
             case 'unsupported':
             case 'installed-elsewhere':
@@ -113,6 +143,27 @@ export function UpdateChip() {
     )
   }, [info])
 
+  // Restart without waiting for the agent runs still going: the update waiting
+  // on the first stream restarts, and that stream reports it as usual.
+  const restartNow = useCallback(() => {
+    consumeApiSSE(
+      '/api/system/self-update',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true }),
+      },
+      {
+        onError: (e: SSEEvent) => {
+          setStatusText(
+            `Restart now failed${e.message ? ` (${e.message})` : ''}. ` +
+              'The update still restarts once the agent runs finish.',
+          )
+        },
+      },
+    )
+  }, [])
+
   // One click = the whole action. Global install → update in place; otherwise
   // copy the command (the running npx/dev process can't hot-swap itself).
   const handlePrimary = useCallback(() => {
@@ -123,7 +174,7 @@ export function UpdateChip() {
 
   if (!shouldShow || !info) return null
 
-  const busy = phase === 'applying' || phase === 'restarting'
+  const busy = phase === 'applying' || phase === 'waiting' || phase === 'restarting'
 
   return (
     <motion.div
@@ -144,7 +195,38 @@ export function UpdateChip() {
         overflow: 'hidden',
       }}
     >
-      {busy ? (
+      {phase === 'waiting' ? (
+        <div
+          className="flex items-center gap-2 px-2.5 py-1.5 text-[12px]"
+          style={{ color: 'var(--foreground)' }}
+        >
+          <span style={{ color: 'var(--mint)', display: 'flex' }}>
+            <Spinner size={14} />
+          </span>
+          <span data-testid="update-chip-waiting" style={{ maxWidth: 220 }}>
+            {statusText}
+          </span>
+          <button
+            type="button"
+            data-testid="update-chip-restart-now"
+            onClick={restartNow}
+            title="Restart now. Agent runs still going are stopped."
+            className="transition-colors hover:bg-foreground/[0.06]"
+            style={{
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              background: 'transparent',
+              color: muted(0.75),
+              cursor: 'pointer',
+              fontSize: 11.5,
+              padding: '2px 6px',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Restart now
+          </button>
+        </div>
+      ) : busy ? (
         <div
           className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px]"
           style={{ color: 'var(--foreground)' }}

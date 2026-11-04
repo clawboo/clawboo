@@ -121,25 +121,35 @@ export function launcherAccessToken(env: NodeJS.ProcessEnv = process.env): strin
   return readAccessTokenFile({ env })
 }
 
-interface JsonReply {
+export interface JsonReply {
   status: number
   ok: boolean
   body: unknown
 }
 
-type Method = 'GET' | 'POST'
+export type Method = 'GET' | 'POST' | 'DELETE'
 
-/** One request to a JSON route. Null when the request fails or the answer is not JSON. */
+/**
+ * One request to a JSON route. Null when the request fails (no answer, or a
+ * timeout); an answer that is not JSON comes back with a null `body`, so a
+ * caller can still tell a 404 or a page from no answer at all.
+ */
 async function getJson(
   url: string,
   timeoutMs: number,
   headers: Record<string, string>,
   method: Method = 'GET',
+  body?: unknown,
 ): Promise<JsonReply | null> {
   try {
-    const res = await fetch(url, { method, signal: AbortSignal.timeout(timeoutMs), headers })
+    const res = await fetch(url, {
+      method,
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: body === undefined ? headers : { ...headers, 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
     const ct = res.headers.get('content-type') ?? ''
-    if (!ct.includes('application/json')) return null
+    if (!ct.includes('application/json')) return { status: res.status, ok: res.ok, body: null }
     return { status: res.status, ok: res.ok, body: await res.json() }
   } catch {
     return null
@@ -161,15 +171,16 @@ async function getDashboardJson(
   timeoutMs: number,
   headers: Record<string, string> = {},
   method: Method = 'GET',
+  body?: unknown,
 ): Promise<JsonReply | null> {
   const url = `http://${urlHost(host)}:${port}${route}`
-  const first = await getJson(url, timeoutMs, headers, method)
+  const first = await getJson(url, timeoutMs, headers, method, body)
   if (first === null || first.status !== 401 || !isAccessGateError(first.body)) return first
   if (!mayReceiveToken(host, port)) return first
   const token = launcherAccessToken()
   if (token === null) return first
   const cookie = { ...headers, Cookie: `${ACCESS_COOKIE}=${token}` }
-  const second = await getJson(url, timeoutMs, cookie, method)
+  const second = await getJson(url, timeoutMs, cookie, method, body)
   return second ?? first
 }
 
@@ -743,6 +754,291 @@ export async function startDashboard(opts: StartOptions = {}): Promise<StartOutc
   }
 
   return { status: 'timeout', mode, monorepoRoot, logPath: serverLog?.path ?? null }
+}
+
+// ─── Waiting for agent runs before a stop ─────────────────────────────────────
+
+/** How long `clawboo stop` and `clawboo restart` wait for agent runs by default. */
+export const DEFAULT_STOP_WAIT_SECONDS = 600
+/** The hold the launcher places lives this long unless renewed. */
+const STOP_HOLD_TTL_SECONDS = 60
+/** Renewed well inside its life, so a slow poll never lets it lapse. */
+const STOP_HOLD_RENEW_MS = 20_000
+const DRAIN_POLL_MS = 1_000
+const DRAIN_REQUEST_TIMEOUT_MS = 3_000
+/** Polls in a row that may fail before the wait gives the server up as lost. */
+const DRAIN_MAX_FAILED_POLLS = 3
+/** Tries at the first hold before the command gives up without stopping. */
+const DRAIN_FIRST_HOLD_ATTEMPTS = 3
+
+/**
+ * `--wait <seconds>`: a whole number of seconds, 0 or more, small enough that
+ * the wait stays finite. Null for anything else.
+ */
+export function waitSecondsFrom(value: string): number | null {
+  if (!/^\d+$/.test(value.trim())) return null
+  const seconds = Number(value.trim())
+  return Number.isSafeInteger(seconds) && Number.isSafeInteger(seconds * 1000) ? seconds : null
+}
+
+/** What the server says about its hold and its agent runs. */
+interface HoldState {
+  running: number
+  /** Whether the server still lists this owner's hold. */
+  mine: boolean
+}
+
+function readHoldState(reply: JsonReply | null, owner: string): HoldState | null {
+  if (reply === null || !reply.ok || !isRecord(reply.body)) return null
+  const runs = reply.body['runs']
+  const work = reply.body['backgroundWork']
+  const holds = reply.body['holds']
+  if (typeof reply.body['held'] !== 'boolean' || (work !== 'present' && work !== 'none')) {
+    return null
+  }
+  if (!isRecord(runs) || typeof runs['running'] !== 'number' || !Array.isArray(holds)) return null
+  return {
+    running: work === 'none' ? 0 : Math.max(1, runs['running']),
+    mine: holds.some((h) => isRecord(h) && h['owner'] === owner),
+  }
+}
+
+/**
+ * The answer to the first hold request: held; `unsupported`, from a server
+ * that predates the hold (a 404 or 405, or a page that is not the hold's
+ * answer); or `failed`, no usable answer (no answer, a refusal, a server
+ * error), which is worth asking again.
+ */
+function readFirstHold(
+  reply: JsonReply | null,
+  owner: string,
+): HoldState | 'unsupported' | 'failed' {
+  if (reply === null) return 'failed'
+  if (reply.status === 404 || reply.status === 405) return 'unsupported'
+  const state = readHoldState(reply, owner)
+  if (state) return state
+  return reply.ok ? 'unsupported' : 'failed'
+}
+
+/** Test seams for `drainDashboard` and `releaseDashboardHold`. */
+export interface DrainDeps {
+  /** One JSON request to the dashboard on the port being stopped. */
+  request?: (method: Method, route: string, body?: unknown) => Promise<JsonReply | null>
+  /** Resolves after `ms`, or early when `signal` aborts. */
+  sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  now?: () => number
+}
+
+export interface DrainOptions {
+  /** The hold's owner id, which also releases it. */
+  owner: string
+  /** What the hold is for, as the server shows it (`stop`, `restart`). */
+  reason: string
+  /** Stop waiting after this long, with runs still going. */
+  waitMs: number
+  /** Stop waiting at once (Ctrl+C). */
+  signal?: AbortSignal
+  /** Called before each wait with the runs still going and the time left. */
+  onWaiting?: (running: number, leftMs: number) => void
+}
+
+export type DrainOutcome =
+  /** No agent run is going: stopping now kills none. */
+  | { status: 'idle' }
+  /** The wait reached its bound with runs still going. */
+  | { status: 'timed-out'; running: number }
+  /** The wait was cut short; the hold is still placed until released or lapsed. */
+  | { status: 'cancelled'; running: number }
+  /** The server cannot be held: it predates the hold. */
+  | { status: 'unsupported' }
+  /** The server gave no usable answer to the hold, so whether runs are going is unknown. */
+  | { status: 'unreachable' }
+  /** The server stopped answering mid-wait, several polls in a row. */
+  | { status: 'lost'; running: number }
+
+function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted) return resolve()
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
+}
+
+function dashboardRequest(port: number): NonNullable<DrainDeps['request']> {
+  return (method, route, body) =>
+    getDashboardJson(
+      dashboardHost(),
+      port,
+      route,
+      DRAIN_REQUEST_TIMEOUT_MS,
+      { Accept: 'application/json' },
+      method,
+      body,
+    )
+}
+
+/**
+ * Hold the dashboard on `port`, so it starts no new agent run, and wait until
+ * the runs already going have finished, up to `waitMs`. The hold is renewed
+ * while waiting, and placed again at once when a poll finds it gone (the server
+ * restarted, or this command was suspended past its life). It is NOT released
+ * here: the stop that follows ends it, and a caller that does not stop calls
+ * `releaseDashboardHold`. A server with no hold route answers `unsupported`, and
+ * the caller stops it as before; one that gives no usable answer to a few tries
+ * answers `unreachable`, and the caller stops nothing.
+ */
+export async function drainDashboard(
+  port: number,
+  opts: DrainOptions,
+  deps: DrainDeps = {},
+): Promise<DrainOutcome> {
+  const request = deps.request ?? dashboardRequest(port)
+  const sleep = deps.sleep ?? abortableSleep
+  const now = deps.now ?? Date.now
+  const place = (): Promise<JsonReply | null> =>
+    request('POST', '/api/system/hold', {
+      owner: opts.owner,
+      ttlSeconds: STOP_HOLD_TTL_SECONDS,
+      reason: opts.reason,
+    })
+
+  let first = readFirstHold(await place(), opts.owner)
+  for (let attempt = 1; first === 'failed' && attempt < DRAIN_FIRST_HOLD_ATTEMPTS; attempt++) {
+    if (opts.signal?.aborted) break
+    await sleep(DRAIN_POLL_MS, opts.signal)
+    if (opts.signal?.aborted) break
+    first = readFirstHold(await place(), opts.owner)
+  }
+  if (opts.signal?.aborted) {
+    return { status: 'cancelled', running: typeof first === 'object' ? first.running : 0 }
+  }
+  if (first === 'unsupported') return { status: 'unsupported' }
+  if (first === 'failed') return { status: 'unreachable' }
+
+  let state = first
+  const started = now()
+  let renewedAt = started
+  let failedPolls = 0
+  for (;;) {
+    // Ctrl+C wins over an answer that came back idle: a cancel stops nothing.
+    if (opts.signal?.aborted) return { status: 'cancelled', running: state.running }
+    if (state.running === 0) return { status: 'idle' }
+    const left = opts.waitMs - (now() - started)
+    if (left <= 0) return { status: 'timed-out', running: state.running }
+    opts.onWaiting?.(state.running, left)
+    await sleep(Math.min(DRAIN_POLL_MS, left), opts.signal)
+    if (opts.signal?.aborted) return { status: 'cancelled', running: state.running }
+    let placed = now() - renewedAt >= STOP_HOLD_RENEW_MS
+    let next = readHoldState(
+      await (placed ? place() : request('GET', '/api/system/hold')),
+      opts.owner,
+    )
+    if (next !== null && !next.mine && !placed) {
+      // The hold is gone, so new runs may start: place it again now, not at the
+      // next renewal.
+      next = readHoldState(await place(), opts.owner)
+      placed = true
+    }
+    // One slow or refused poll is not the server gone: keep waiting on the last answer.
+    if (next === null) {
+      failedPolls += 1
+      if (failedPolls >= DRAIN_MAX_FAILED_POLLS) return { status: 'lost', running: state.running }
+      continue
+    }
+    failedPolls = 0
+    if (placed) renewedAt = now()
+    state = next
+  }
+}
+
+/**
+ * Release the hold `owner` placed, so the dashboard starts new runs again. Tries
+ * twice. True once nothing holds work back for this owner: released, or already
+ * gone (a 404). False when the server answered neither try; the hold then lapses
+ * within its time to live.
+ */
+export async function releaseDashboardHold(
+  port: number,
+  owner: string,
+  deps: Pick<DrainDeps, 'request'> = {},
+): Promise<boolean> {
+  const request = deps.request ?? dashboardRequest(port)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await request('DELETE', `/api/system/hold/${encodeURIComponent(owner)}`)
+    if (reply !== null && (reply.ok || reply.status === 404)) return true
+  }
+  return false
+}
+
+export interface StopAfterRunsOptions {
+  /** Names the hold (`clawboo-stop-<pid>`) and says what it is for. */
+  command: 'stop' | 'restart'
+  /** Stop now: no hold, no wait. */
+  force?: boolean
+  waitMs: number
+  signal?: AbortSignal
+  onWaiting?: DrainOptions['onWaiting']
+  /** Called once the wait is over (or skipped), just before the stop. */
+  onStopping?: (drain: DrainOutcome | null) => void
+}
+
+export interface StopAfterRunsResult {
+  /** How the wait ended; null with `force`. */
+  drain: DrainOutcome | null
+  /**
+   * How the stop ended; null when nothing was stopped: the wait was cancelled,
+   * or the server could not be held (`unreachable`).
+   */
+  stop: StopOutcome | null
+  /**
+   * Whether the hold this command placed was released, when it had to release
+   * one (the server is still up); null when it had none to release.
+   */
+  released: boolean | null
+}
+
+/**
+ * `clawboo stop` and `clawboo restart`: hold the server, wait for its agent runs
+ * to finish (up to `waitMs`), then stop it. A cancelled wait releases the hold
+ * and stops nothing, and so does a server that would not be held: stopping it
+ * could interrupt runs nobody could see. A stop that leaves the server up for
+ * any reason releases the hold too, so it starts new work again.
+ */
+export async function stopAfterAgentRuns(
+  port: number,
+  opts: StopAfterRunsOptions,
+  deps: { drain?: DrainDeps; stop?: StopDeps } = {},
+): Promise<StopAfterRunsResult> {
+  const owner = `clawboo-${opts.command}-${process.pid}`
+  let drain: DrainOutcome | null = null
+  if (!opts.force) {
+    drain = await drainDashboard(
+      port,
+      {
+        owner,
+        reason: opts.command,
+        waitMs: opts.waitMs,
+        signal: opts.signal,
+        onWaiting: opts.onWaiting,
+      },
+      deps.drain,
+    )
+    if (drain.status === 'cancelled' || drain.status === 'unreachable') {
+      const released = await releaseDashboardHold(port, owner, deps.drain)
+      return { drain, stop: null, released }
+    }
+  }
+  opts.onStopping?.(drain)
+  const stop = await stopDashboard(port, deps.stop)
+  const held = drain !== null && drain.status !== 'unsupported'
+  const released =
+    held && stop.status !== 'stopped' ? await releaseDashboardHold(port, owner, deps.drain) : null
+  return { drain, stop, released }
 }
 
 /** Test seams — every side effect `stopDashboard` performs is injectable. */
