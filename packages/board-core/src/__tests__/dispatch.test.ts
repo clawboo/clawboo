@@ -5,6 +5,7 @@ import {
   accountFailureOf,
   delegationTargetOf,
   encodeHumanAssignment,
+  isFinishedRun,
   isHumanAssignment,
   ledgerAllowsAutoFire,
   trailingFailedRuns,
@@ -73,6 +74,23 @@ describe('trailingFailedRuns', () => {
     expect(trailingFailedRuns(runs('succeeded'))).toBe(0)
     expect(trailingFailedRuns(runs('failed', 'succeeded', 'failed', 'timed_out'))).toBe(2)
     expect(trailingFailedRuns(runs('failed', 'cancelled', 'failed'))).toBe(1)
+  })
+
+  it('skips a run that never finished, as the attempt reader does (K17)', () => {
+    // A leaked `running` row behind a newer run is not an outcome anyone saw.
+    expect(trailingFailedRuns(runs('failed', 'running', 'failed'))).toBe(2)
+    expect(trailingFailedRuns(runs('succeeded', 'running', 'failed'))).toBe(1)
+    expect(ledgerAllowsAutoFire(runs('failed', 'running', 'failed'))).toBe(true)
+  })
+
+  it('agrees with isFinishedRun on what counts as an outcome', () => {
+    expect(['running', 'queued', 'pending'].map(isFinishedRun)).toEqual([false, false, false])
+    expect(['succeeded', 'failed', 'timed_out', 'cancelled'].map(isFinishedRun)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ])
   })
 
   it('reaches MAX_AUTO_FIRES exactly when the policy parks the task', () => {

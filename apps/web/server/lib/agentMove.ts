@@ -170,10 +170,17 @@ export function moveAgentToTeam(
           .run()
       }
 
-      // Its leader resume pointers for the old team and its rooms.
+      // Its resume pointers for the old team: the leader's, its rooms', and its
+      // tasks' (a task session lives with the old team's folder).
       const pointer = nativeTeamSessionSettingKey(agentId, fromTeamId)
       tx.delete(settings)
-        .where(or(eq(settings.key, pointer), like(settings.key, `${pointer}:room:%`)))
+        .where(
+          or(
+            eq(settings.key, pointer),
+            like(settings.key, `${pointer}:room:%`),
+            like(settings.key, `${pointer}:task:%`),
+          ),
+        )
         .run()
     }
 

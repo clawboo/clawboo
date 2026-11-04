@@ -168,7 +168,7 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   title: string                 // required, 1 to 500 chars
   description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
   teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
@@ -250,7 +250,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/retry
 
 ## `POST /api/board/:taskId/assign`
 
-Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started.
+Gives a task that nobody is working on to one member of its team, and starts it. Use it for a card no agent will pick up (created without one, or by an agent's own `create_task`), or to hand a failed task to someone else. The task is bound to the agent as a person's assignment (see `POST /api/board`), moved back to `todo` if it was `blocked`, `backlog` or stranded `in_progress` (no assignee and no run going), noted on its trail (`Assigned to <name>.`) and started. When the agent is not the one it was bound to, every agent's saved session on the task is cleared, so the new agent starts fresh and so does an earlier one if the task comes back to it. Assigning it to the same agent again keeps that agent's session, like a retry.
 
 A task with `runnerInputs` starts through the task runner, on the new agent's runtime, with the saved repository and isolation kind; the saved model is kept only when the runtime is the same. An agent on a runtime the runner cannot run, such as OpenClaw, and a task with no `runnerInputs`, start in team chat. See `retry` above.
 
@@ -423,7 +423,7 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ```ts
 {
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
-  priority?: number             // integer
+  priority?: number             // integer: 2 urgent, 1 high, 0 normal, -1 low; held to that range
   title?: string                // 1 to 500 chars
   description?: string          // up to 20000 chars
   humanOverride?: boolean        // move to done despite a failed check (audited); only with status 'done'
@@ -475,10 +475,10 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 ### Example
 
 ```bash
-# Bump priority + retitle
+# Make it urgent + retitle
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
   -H 'Content-Type: application/json' \
-  -d '{"priority":5,"title":"Updated title"}'
+  -d '{"priority":2,"title":"Updated title"}'
 
 # Ship despite a non-promotable verdict (audited)
 curl -X PATCH http://localhost:18790/api/board/<task-id> \

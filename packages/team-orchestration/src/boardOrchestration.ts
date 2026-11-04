@@ -157,6 +157,16 @@ const ACCOUNT_FAILURE: Record<'Auth' | 'Billing', { note: string; report: string
   },
 }
 
+/** Why the engine closed a run `cancelled` when a person finished or cancelled
+ *  its task while it ran. Read back by the ticket block's "last attempt". */
+export const RUN_CLOSED_FINISHED_BY_PERSON =
+  'The task was finished by a person before this run ended.'
+
+/** Why the engine closed a run `cancelled` whose result came back after its task
+ *  had been released. The run itself finished; its result is kept as a comment. */
+export const RUN_CLOSED_RESULT_AFTER_RELEASE =
+  'result arrived after the task was released/reassigned'
+
 /** A status as a person reads it on the board, for the notes the engine writes. */
 const STATUS_WORD: Record<string, string> = {
   backlog: 'Backlog',
@@ -1543,7 +1553,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'The task was finished by a person before this run ended.',
+          error: RUN_CLOSED_FINISHED_BY_PERSON,
         })
       }
       if (trimmed)
@@ -1603,7 +1613,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'result arrived after the task was released/reassigned',
+          error: RUN_CLOSED_RESULT_AFTER_RELEASE,
         })
       }
       // The work itself must survive the refusal: the child DID produce a result,
@@ -1738,7 +1748,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'The task was finished by a person before this run ended.',
+          error: RUN_CLOSED_FINISHED_BY_PERSON,
         })
       }
       taskReflectTo.delete(taskId)

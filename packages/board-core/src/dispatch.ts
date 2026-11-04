@@ -60,16 +60,28 @@ export function accountFailureOf(run: LedgerRun | undefined): AccountFailure | n
  */
 export const MAX_AUTO_FIRES = 3
 
+/** The statuses of a run that has not finished: no outcome yet. */
+const UNFINISHED_RUN_STATUSES: ReadonlySet<string> = new Set(['running', 'queued', 'pending'])
+
+/** Has this run ended? A run still going (or one that leaked as `running`
+ *  behind a newer run) has no outcome to count. Shared with the attempt
+ *  reader (`classifyAttempts` in @clawboo/db), so the two never disagree. */
+export function isFinishedRun(status: string): boolean {
+  return !UNFINISHED_RUN_STATUSES.has(status)
+}
+
 /**
  * How many runs at the END of the ledger ended without success and without a
  * user Stop (`failed`, `timed_out`, an orphan reaped as failed). A success or a
  * Stop in between resets the count, so a task that failed twice long ago is not
- * penalised forever.
+ * penalised forever. A run that never finished is skipped rather than counted:
+ * it is no outcome, and counting it parked a task one run early.
  */
 export function trailingFailedRuns(execs: readonly LedgerRun[]): number {
   let trailing = 0
   for (let i = execs.length - 1; i >= 0; i--) {
     const s = execs[i]!.status
+    if (!isFinishedRun(s)) continue
     if (s === 'succeeded' || s === 'cancelled') break
     trailing += 1
   }

@@ -317,6 +317,34 @@ describe('executor runner (real board + real git worktree)', () => {
     )
   })
 
+  it('records an attempt a watchdog stopped as unknown in the handoff too', async () => {
+    // A watchdog stop is not the process dying, but what the run was doing when
+    // it was stopped is just as unknown to whoever picks the work up.
+    const db = getDb()
+    const taskId = newCodeTask()
+    const prior = createExecutionProcess(db, { taskId, executorType: 'codex' })
+    completeExecutionProcess(db, prior.id, {
+      status: 'timed_out',
+      error: 'No response from the delegate for 8 minutes.',
+    })
+
+    await runTaskOnRuntime({
+      db,
+      makeAdapter: () => new FakeRunnerAdapter('codex', FULL_CAPS, 'carried on'),
+      taskId,
+      assigneeAgentId: 'codex-1',
+      repoPath: repo,
+      kind: 'code',
+      keepForResume: true,
+    })
+
+    const ws = getWorkspaceForTask(db, taskId)
+    const raw = await readFile(path.join(String(ws!.worktreePath), 'AGENT_HANDOFF.json'), 'utf8')
+    const broken = (JSON.parse(raw) as { brokenOrUnverified: string[] }).brokenOrUnverified
+    expect(broken.join('\n')).toMatch(/UNKNOWN/)
+    expect(broken.join('\n')).toMatch(/No response from the delegate for 8 minutes/)
+  })
+
   it('splits the mailbox into addressed and ambient on the EXECUTOR path too', async () => {
     // The same mailbox must not render two different ways depending on which path
     // woke the agent. This path had no test at all for the digest, so the split

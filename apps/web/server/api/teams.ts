@@ -12,6 +12,7 @@ import {
   nativeTeamSessionKeysForTeamLike,
   nativeTeamSessionRoomKeysForTeamLike,
   nativeTeamSessionSettingKey,
+  taskSessionKeysForTeamLike,
 } from '../lib/teamChat/nativeTeamSession'
 import { resolveTeamSessionKeys } from './teamChatStream'
 import { chatClearedAt, chatClearedSettingKey } from '../lib/teamChat/chatCleared'
@@ -288,6 +289,10 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
       .run()
     db.delete(settings)
       .where(like(settings.key, nativeTeamSessionRoomKeysForTeamLike(teamId)))
+      .run()
+    // And every member's per-task pointer on this team's tasks.
+    db.delete(settings)
+      .where(like(settings.key, taskSessionKeysForTeamLike(teamId)))
       .run()
 
     // Delete the team (boo_zero_team_briefs and rooms FK-cascade).

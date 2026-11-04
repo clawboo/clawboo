@@ -8,8 +8,11 @@ import { randomUUID } from 'node:crypto'
 
 import {
   canTransition,
+  clampTaskPriority,
   isTerminal,
   ledgerAllowsAutoFire,
+  MAX_TASK_PRIORITY,
+  MIN_TASK_PRIORITY,
   type RunCostSource,
   type TaskStatus,
 } from '@clawboo/board-core'
@@ -25,6 +28,7 @@ import {
 import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
+import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import {
   executionProcesses,
@@ -50,6 +54,7 @@ export interface CreateTaskInput {
   title: string
   description?: string | null
   status?: TaskStatus // default 'todo' (ready to claim); 'backlog' for triage
+  /** Clamped to the four named levels (`clampTaskPriority`); default 0, normal. */
   priority?: number
   teamId?: string | null
   assigneeRuntime?: string | null
@@ -76,7 +81,10 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     title: input.title,
     description: input.description ?? null,
     status: input.status ?? 'todo',
-    priority: input.priority ?? 0,
+    // Every create path builds its row here, so this is the one clamp: no
+    // writer, an agent's create_task included, can jump the queue with a
+    // large number.
+    priority: clampTaskPriority(input.priority ?? 0),
     teamId: input.teamId ?? null,
     assigneeAgentId: null,
     assigneeRuntime: input.assigneeRuntime ?? null,
@@ -738,6 +746,7 @@ export function updateStatus(
  *  must go through `updateStatus` so the state machine is enforced. Cost is not a
  *  field here: the run ledger records it (`recordExecutionUsage`). */
 export interface TaskFields {
+  /** Clamped to the four named levels, as at create. */
   priority?: number
   title?: string
   description?: string | null
@@ -752,7 +761,7 @@ export function updateTaskFields(db: ClawbooDb, taskId: string, fields: TaskFiel
   } = {
     updatedAt: Date.now(),
   }
-  if (fields.priority !== undefined) patch.priority = fields.priority
+  if (fields.priority !== undefined) patch.priority = clampTaskPriority(fields.priority)
   if (fields.title !== undefined) patch.title = fields.title
   if (fields.description !== undefined) patch.description = fields.description
   if (fields.assigneeRuntime !== undefined) patch.assigneeRuntime = fields.assigneeRuntime
@@ -928,7 +937,22 @@ export function cancelDependents(db: ClawbooDb, taskId: string): DbTask[] {
   return cancelled
 }
 
-/** Tasks ready to work: `todo`, not dropped, with every dependency `done`. */
+/** The tasks `taskId` waits on (its direct dependencies), oldest first. */
+export function getDependencies(db: ClawbooDb, taskId: string): DbTask[] {
+  return db
+    .select({ task: tasks })
+    .from(taskDeps)
+    .innerJoin(tasks, eq(tasks.id, taskDeps.dependsOnTaskId))
+    .where(eq(taskDeps.taskId, taskId))
+    .orderBy(tasks.createdAt, tasks.id)
+    .all()
+    .map((r) => r.task as DbTask)
+}
+
+/** Tasks ready to work: `todo`, not dropped, with every dependency `done`.
+ *  Highest priority first, the most recently updated first within a level. A
+ *  priority stored before writes were clamped is read as the nearest level
+ *  here too, so an old large value cannot jump the queue either. */
 export function getReadyTasks(
   db: ClawbooDb,
   filter: { teamId?: string; roomId?: RoomFilter } & Scope = {},
@@ -946,7 +970,10 @@ export function getReadyTasks(
     .select()
     .from(tasks)
     .where(and(...conds))
-    .orderBy(desc(tasks.priority), desc(tasks.updatedAt))
+    .orderBy(
+      desc(sql`max(${MIN_TASK_PRIORITY}, min(${MAX_TASK_PRIORITY}, ${tasks.priority}))`),
+      desc(tasks.updatedAt),
+    )
     .all() as DbTask[]
 }
 
@@ -1012,12 +1039,14 @@ export function addComment(
   return row
 }
 
+/** A task's comments, oldest first. Two written in the same millisecond keep
+ *  the order they were written in. */
 export function getComments(db: ClawbooDb, taskId: string): DbTaskComment[] {
   return db
     .select()
     .from(taskComments)
     .where(eq(taskComments.taskId, taskId))
-    .orderBy(taskComments.createdAt)
+    .orderBy(taskComments.createdAt, sql`rowid`)
     .all() as DbTaskComment[]
 }
 
@@ -1387,7 +1416,7 @@ export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }
         .set({
           status: 'failed',
           completedAt: now,
-          error: 'orphaned: process not alive on restart',
+          error: ORPHANED_RUN_ERROR,
           recoveryTombstone: 1,
         })
         .where(eq(executionProcesses.id, ex.id))
@@ -1492,7 +1521,7 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
         .set({
           status: 'timed_out',
           completedAt: now,
-          error: 'stale: no heartbeat within the watchdog window',
+          error: STALE_RUN_ERROR,
         })
         .where(and(eq(executionProcesses.taskId, t.id), eq(executionProcesses.status, 'running')))
         .run()

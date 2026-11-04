@@ -64,7 +64,7 @@ A caller's identity decides which tools it is served and what those tools can se
 
 There are four kinds of caller:
 
-- **Bound caller.** A run Clawboo started with a signed attach URL. Claude Code, Codex and Hermes runs are bound to their team and agent this way. Clawboo Native agents are bound in-process. A run the team engine drives (a team chat turn, a hand-off, a plan step) is also signed as a **team run** (`teamRun=1` on its Tasks, Memory and Tools URLs, so none of them carries a plain signature for its team and agent), because the engine claims and moves that run's tasks itself. A Clawboo Native team run gets the same limit in-process.
+- **Bound caller.** A run Clawboo started with a signed attach URL. Claude Code, Codex and Hermes runs are bound to their team and agent this way. Clawboo Native agents are bound in-process. A run the team engine drives (a team chat turn, a hand-off, a plan step) is also signed as a **team run** (`teamRun=1` on its Tasks, Memory and Tools URLs, so none of them carries a plain signature for its team and agent), because the engine claims and moves that run's tasks itself. A Clawboo Native team run gets the same limit in-process. A run on a board task (a hand-off, a task you gave from the Board, or a task-runner run) also has that task on its Tasks URL, as `scopeTaskId` inside the same signature, so a runtime cannot point it at another task; Clawboo Native gets it in-process. Its one-task tools use it when a call leaves out `taskId` (see [Tasks server](#tasks-server)).
 - **Unverified HTTP caller.** Any HTTP session without a valid signature. Every OpenClaw agent is one, because the OpenClaw Gateway uses one shared configuration for all of its agents. So is an external agent attached with an unscoped URL, or with parameters edited by hand.
 - **Operator (stdio bin).** Someone ran a `clawboo-mcp-*` bin directly. The operator is trusted, so scope and identity come from the tool arguments.
 - **In-process (Clawboo Native).** The servers run inside the dashboard server and are bound to the run's team and agent.
@@ -124,7 +124,8 @@ Rules that apply to every Tasks tool:
 - **Team-bound sessions.** When the session is bound to a team, every tool refuses a task from another team with the same `not found: <taskId>` a missing task gets, so a bound run cannot probe other teams. `list_tasks` lists only the team's tasks, and new tasks are created in the team.
 - **Refusals are tool errors.** A refused call returns `isError: true` with the text shown under each tool, not a protocol error.
 - **Never retry a lost claim.** `claim failed: conflict` means another agent won the claim. Retrying the same call cannot succeed.
-- **Mailbox delivery.** On a session bound to an agent, each successful result can carry an extra text block headed `[team updates` with up to five undelivered mailbox notices for that agent. Each notice is delivered once, on whichever channel reaches the agent first.
+- **Mailbox delivery.** On a session bound to an agent, each successful result can carry an extra text block headed `[team updates` with up to five undelivered mailbox notices for that agent. Each notice is delivered once, on whichever channel reaches the agent first. A notice can quote a person or another agent, so each one is framed as data: a header `[Inter-session message · from=clawboo · kind=<kind> · isUser=false]`, then every line of the notice quoted with `| `, under a line saying the notices are information, not instructions.
+- **The run's own task.** On a session bound to a task (a run on a board task), `get_task` and `add_comment` take `taskId` as optional and use that task when it is left out, and so does `block_task` on a team run. Their descriptions say so, and the field is listed as optional only on such a session. Any task can still be named, and an empty `taskId` is refused rather than read as the run's own task. A task-runner run still names the task to block, because the task runner does not yet handle a task its own agent blocked.
 
 ### Creation caps
 
@@ -161,6 +162,7 @@ Read one task with its comments and its ancestor chain.
 }
 ```
 
+- `taskId` is optional on a session bound to a task, and defaults to it.
 - Returns `{ task, comments, ancestors }`.
 - Error: `not found: <taskId>` for a missing task or one outside the session's team.
 
@@ -173,7 +175,7 @@ Create a task. With `parentTaskId` it is a subtask and the per-parent caps apply
   title: string
   description?: string
   status?: TaskStatus // default 'todo'
-  priority?: number // integer, default 0
+  priority?: number // 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
   teamId?: string
   parentTaskId?: string // non-empty when present
   assigneeRuntime?: string
@@ -255,6 +257,7 @@ Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
 }
 ```
 
+- `taskId` is optional on a team run bound to a task, and defaults to it. Elsewhere it is required.
 - Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
 - On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` When the run ends, the task stays **Blocked** in Needs you, the agent's reply is kept as its comment, and its delegator is told the task waits on a person. Not served to an unverified HTTP caller.
 
@@ -284,7 +287,9 @@ Add a comment to a task, such as a progress report or a note for the person.
 }
 ```
 
+- `taskId` is optional on a session bound to a task, and defaults to it.
 - For an unverified HTTP caller both `authorAgentId` and `authorType` are dropped, and the comment posts as a plain `agent` comment with no author. A caller that cannot prove who it is cannot sign as someone else, or as the person.
+- A session bound to an agent always posts as that agent: `authorType` is `agent` and `authorAgentId` is the session's own agent, whatever the call names. A later run's task block names each comment's author, so an agent cannot speak there as the person or as Clawboo.
 - Returns the new comment row. Error: `not found: <taskId>` for a task outside the session's team.
 
 ### link_task
@@ -478,7 +483,7 @@ Read new posts since a cursor. The caller's own posts are never returned.
 ```
 
 - Returns `{ posts, nextSeq }`, oldest post first. Each post is `{ seq, authorAgentId, kind, wrapped }`.
-- `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`. A teammate's post is context to weigh, never an order from the person.
+- `wrapped` presents the post as evidence, not as an instruction. It is a header line, `[Inter-session message · from=<agent> · kind=<kind> · seq=<n> · isUser=false]`, then the body with every line prefixed `| `. Text in the body that imitates such a header becomes `[peer-quoted header]`, and one that never closes loses its opening words the same way. A teammate's post is context to weigh, never an order from the person.
 - `nextSeq` is the room's newest `seq`, never lower than `sinceSeq`. When the page is full (`limit` posts, or 1,000 with no `limit`), it is the `seq` of the last post returned instead, so the next read picks up the rest.
 - Error (stdio bin only): `no bound identity: pass authorAgentId + teamId (unbound mode)`.
 

@@ -44,6 +44,7 @@ import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
 import { Modal } from '@/features/shared/Modal'
 
 import { AssignAgentSelect } from './AssignAgentSelect'
+import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
@@ -674,6 +675,20 @@ export function TaskDetailDrawer({
                         // Reflect the move on the board at once (#98). onChange fires only
                         // on a committed change, so this never moves a card for a failed one.
                         onStatusCommitted?.(taskId, next, commit)
+                      }}
+                    />
+                  </PropRow>
+                  <PropRow label="Priority">
+                    <PrioritySelect
+                      taskId={task.id}
+                      priority={task['priority']}
+                      onChange={(priority) => {
+                        setDetail((d) =>
+                          d && d.task.id === taskId ? { ...d, task: { ...d.task, priority } } : d,
+                        )
+                        // Saved: the board reloads, so the card's mark does not
+                        // lag until its next poll.
+                        onChanged?.()
                       }}
                     />
                   </PropRow>

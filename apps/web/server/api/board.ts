@@ -70,6 +70,7 @@ import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
 import { engineRefusal } from '../lib/teamChat/roomRoster'
+import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -411,6 +412,19 @@ export function boardAssignPOST(req: Request, res: Response): void {
         teamId: task.teamId,
         data: { to: 'todo', reason: 'assigned' },
       })
+    }
+    // Given to someone else, the task starts fresh: no agent resumes a
+    // conversation about it from before, the new one or one it comes back to.
+    // Assigned again to the same agent, it is a retry, and keeps its session.
+    if (delegationTargetOf(task.sourceDelegationId) !== agentId) {
+      try {
+        clearTaskSessionPointers(db, taskId)
+      } catch (err) {
+        // The new binding is saved, so failing now would leave the task assigned
+        // and never started. A pointer left behind is the earlier agent's: the
+        // new one starts fresh regardless.
+        log.error({ err, taskId }, 'clearing the task resume pointers failed')
+      }
     }
     addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))

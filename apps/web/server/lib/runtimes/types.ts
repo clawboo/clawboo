@@ -54,6 +54,10 @@ export interface RuntimeRunContext {
     runtime?: string | null
     taskId?: string | null
     sessionKey?: string | null
+    /** The board task the run works on: its Tasks tools use it when a call
+     *  leaves taskId out (signed onto the Tasks URL; in-process for Native).
+     *  Not `taskId`, which is a memory provenance stamp. */
+    boundTaskId?: string | null
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>
