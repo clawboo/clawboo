@@ -11,6 +11,7 @@ keywords:
     'OLLAMA_BASE_URL',
     'OTEL_EXPORTER_OTLP_ENDPOINT',
     'HOSTNAME',
+    'CLAWBOO_MAX_CONCURRENT_RUNS',
   ]
 ---
 
@@ -46,6 +47,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup         |
 | `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                       |
 | **Runs and verification**              |                                   |                                                              |
+| `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn    |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                         |
 | `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                 |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                       |
@@ -325,6 +327,14 @@ OpenClaw does not read this variable, so when Clawboo sets up OpenClaw on Ollama
 The Composio API address for brokered apps. The Composio key itself is saved in the vault from **Connectors**; Clawboo does not read it from the environment.
 
 ## Runs and verification
+
+### CLAWBOO_MAX_CONCURRENT_RUNS
+
+- Type: whole number, 1 or more
+- Default: `8`
+- Example: `CLAWBOO_MAX_CONCURRENT_RUNS=4`
+
+How many agent runs Clawboo executes at once, across every team and chat on the server: board tasks, team chat turns and the tasks they delegate, one-to-one chat with Clawboo Native, Claude Code, Codex and Hermes agents, peer exchanges and Routine runs. A run that starts while every slot is taken waits, and waiting runs start in the order they arrived, with one exception. A run that has to wait for the same agent's previous run to finish anyway waits without holding a slot, even when one is free, and a later run of another agent can start before it. That way one busy agent cannot take the whole cap. Waiting is never a failure: a waiting task does not move to **Blocked**, the idle watchdogs do not count the wait, and Stop takes a waiting run out of the queue. Routines that fall due together start as slots free up. The verification reviewer runs inside the slot of the run it checks. One-to-one chat with an OpenClaw agent goes through the Gateway, not the server, so the cap does not count it. Any value that is not a whole number of at least 1 means the default, and the server logs it.
 
 ### CLAWBOO_RUN_SILENT_TIMEOUT_MS
 
