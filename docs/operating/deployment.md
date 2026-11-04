@@ -194,11 +194,12 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 }
 ```
 
-| Key                       | What it pins                                                 | Same as                             |
-| ------------------------- | ------------------------------------------------------------ | ----------------------------------- |
-| `disableSelfUpdate`       | No update chip, no update from the dashboard, no npm check   | `CLAWBOO_DISABLE_SELF_UPDATE`       |
-| `disableBrowserAutostart` | Playwright and Chrome DevTools do not start on a new install | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
-| `catalogIndexUrl`         | Where the Marketplace catalog comes from, such as a mirror   | `CLAWBOO_CATALOG_INDEX_URL`         |
+| Key                                                 | What it pins                                                                                                                 | Same as                                                                     |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `disableSelfUpdate`                                 | No update chip, no update from the dashboard, no npm check                                                                   | `CLAWBOO_DISABLE_SELF_UPDATE`                                               |
+| `disableBrowserAutostart`                           | Playwright and Chrome DevTools do not start on a new install                                                                 | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`                                         |
+| `catalogIndexUrl`                                   | Where the Marketplace catalog comes from, such as a mirror                                                                   | `CLAWBOO_CATALOG_INDEX_URL`                                                 |
+| `proxyIdentity` and the other `proxyIdentity*` keys | Checking a sign-in proxy's signed identity tokens, and its keys; see [Run Clawboo behind a sign-in proxy](/guides/sso-proxy) | `CLAWBOO_PROXY_IDENTITY` and the other `CLAWBOO_PROXY_IDENTITY_*` variables |
 
 - Every key also has an environment variable, and the variable wins over the file.
 - Clawboo reads the file once at startup, so run `clawboo restart` after a change. It never writes the file.
@@ -213,6 +214,7 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 - **A proxy on the same machine:** leave `HOST` unset, pin `CLAWBOO_API_PORT`, keep the access token on (setting `STUDIO_ACCESS_TOKEN` gives you one you know for signing in), and set `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`. Deny `/api/mcp/` at the proxy.
 - **Another machine, a network or a container:** set `HOST=0.0.0.0` with the token on and the two allowlists. With the token turned off, the server refuses to start.
 - **A hostname shared with other apps:** serve Clawboo under a path prefix with `CLAWBOO_BASE_PATH`.
+- **A sign-in proxy for a team:** have Clawboo check the proxy's signed identity tokens, so approvals, chat and task moves record who did them. See [Run Clawboo behind a sign-in proxy](/guides/sso-proxy).
 
 [Reach Clawboo from another machine](/guides/self-host-securely) has the steps and the nginx, Caddy and Cloudflare Tunnel configs. On Clawboo 0.5.0 and older the `/api/mcp/` rule is required: see the advisory in the [Security model](/operating/security).
 

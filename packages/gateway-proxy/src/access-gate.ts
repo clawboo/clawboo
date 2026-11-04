@@ -236,6 +236,32 @@ export function isForwardedRequest(req: IncomingMessage): boolean {
   return FORWARDING_HEADERS.some((name) => req.headers[name] !== undefined)
 }
 
+/**
+ * True when this is one of the server's own spawned runtimes calling its
+ * control plane: an `/api/mcp/*` path, dialed on the loopback port directly
+ * (never forwarded by a proxy), carrying the attach token `authorizeRuntime`
+ * vouches for. The access gate admits these without the cookie, and the server's
+ * proxy identity lane without a person's token, by this one test.
+ */
+export function isRuntimeControlRequest(
+  req: IncomingMessage,
+  authorizeRuntime: ((req: IncomingMessage) => boolean) | undefined,
+): boolean {
+  const host = req.headers.host || 'localhost'
+  let pathname: string
+  try {
+    pathname = new URL(req.url ?? '/', `http://${host}`).pathname
+  } catch {
+    return false
+  }
+  return (
+    pathname.toLowerCase().startsWith('/api/mcp/') &&
+    isLoopbackPeer(req) &&
+    !isForwardedRequest(req) &&
+    authorizeRuntime?.(req) === true
+  )
+}
+
 // ─── createAccessGate ───────────────────────────────────────────────────────
 
 /** At most this many unused launch codes are held; minting another drops the oldest. */
@@ -421,14 +447,7 @@ export function createAccessGate(options: AccessGateOptions = {}): AccessGate {
       // that route mints signed agent identities. The address and the forwarding
       // headers now only ever take access away: a runtime dials loopback directly,
       // so a token arriving any other way is refused.
-      if (
-        url.pathname.toLowerCase().startsWith('/api/mcp/') &&
-        isLoopbackPeer(req) &&
-        !isForwardedRequest(req) &&
-        authorizeRuntime?.(req) === true
-      ) {
-        return false
-      }
+      if (isRuntimeControlRequest(req, authorizeRuntime)) return false
       if (!isAuthorized(req)) {
         res.statusCode = 401
         res.setHeader('Content-Type', 'application/json')

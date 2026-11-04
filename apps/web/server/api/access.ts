@@ -2,6 +2,7 @@
  * apps/web/server/api/access.ts
  *
  * POST /api/access/launch-code: a one-time code that signs a browser in.
+ * GET /api/access/identity: who the sign-in proxy says sent this request.
  *
  * `clawboo open` calls it with the access token as its cookie, then opens
  * `/?access_code=<code>`; the dashboard's "Open on another device" calls it for a
@@ -13,6 +14,9 @@
 import type { Request, Response } from 'express'
 
 import type { AccessGate } from '@clawboo/gateway-proxy'
+
+import { personOf } from '../lib/auth'
+import { proxyIdentityMode } from '../lib/proxyIdentity/config'
 
 /** The gate ../index.ts publishes on `app.locals`. */
 function gateOf(req: Request): Pick<AccessGate, 'enabled' | 'mintLaunchCode'> | null {
@@ -36,4 +40,14 @@ export function accessLaunchCodePOST(req: Request, res: Response): void {
     // Relative, so a browser on a machine whose clock differs can count down.
     expiresInMs: minted.expiresInMs,
   })
+}
+
+/**
+ * The proxy identity lane's mode (`off`, `on` or `required`) and the person this
+ * request's verified token names, or null. An administrator checks a new proxy
+ * with it; the dashboard can say who is signed in.
+ */
+export function accessIdentityGET(req: Request, res: Response): void {
+  res.set('Cache-Control', 'no-store')
+  res.json({ proxyIdentity: proxyIdentityMode(), person: personOf(req) })
 }

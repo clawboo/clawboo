@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
 import { describe, expect, it, vi } from 'vitest'
 
-import { attachIdentity, getUserId } from '../auth'
+import { attachIdentity, getUserId, personOf } from '../auth'
 
 describe('attachIdentity (the no-op identity middleware seam)', () => {
   it('populates req.tenantId / req.userId (both null today) and calls next() once with no error', () => {
@@ -38,5 +38,13 @@ describe('attachIdentity (the no-op identity middleware seam)', () => {
 
   it('getUserId returns null — the single implicit user', () => {
     expect(getUserId({} as Request)).toBeNull()
+  })
+
+  it('getUserId and personOf return the person a verified proxy token named', () => {
+    const person = { id: 'u-1', name: 'Ada', role: 'admin' }
+    const req = { person } as Request
+    expect(getUserId(req)).toBe('u-1')
+    expect(personOf(req)).toEqual(person)
+    expect(personOf({} as Request)).toBeNull()
   })
 })

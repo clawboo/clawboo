@@ -91,6 +91,7 @@ const PINNED_FEATURES = [
   'stream.agentChat.resume',
   'stream.events.resume',
   'system.selfUpdate',
+  'auth.proxyIdentity',
 ]
 
 /** Every route the API router serves, as `METHOD /path`, in registration order. */
@@ -98,6 +99,7 @@ const PINNED_ROUTES = [
   'GET /api/settings',
   'POST /api/settings',
   'POST /api/access/launch-code',
+  'GET /api/access/identity',
   'GET /api/approvals',
   'POST /api/approvals',
   'GET /api/chat-history',
@@ -320,6 +322,7 @@ const CHAT_MESSAGE_FIELDS = [
   'confirmed',
   'fingerprint',
   'origin',
+  'person',
 ]
 const CHAT_DELTA_FIELDS = ['sessionKey', 'runId', 'text']
 const CURSOR_FIELDS = ['cursor']

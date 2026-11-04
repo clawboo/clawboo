@@ -15,6 +15,8 @@ keywords:
     'vault',
     'reverse proxy',
     'security advisory',
+    'sign-in proxy',
+    'SSO',
   ]
 ---
 
@@ -79,6 +81,7 @@ All three rules ignore letter case, because 0.5.0 also routes variants such as `
 | Anyone who can reach a reverse proxy in front of Clawboo | Yes                   | The access token, unless you turn it off                                                                     |
 | Another user account on the same computer                | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you |
 | Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))       |
+| One person behind your sign-in proxy passing as another  | No, off by default    | The [proxy identity lane](#signed-identity-from-a-sign-in-proxy), when an administrator turns it on          |
 
 Releases after 0.5.0 give every install an access token: without one, anything that reaches Clawboo from `127.0.0.1` looked like you, and could call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs. The token is in a file only your user account can read, so it closes the API to other user accounts and to anyone behind a reverse proxy. It does not stop a program running as you: an agent can read `~/.clawboo/access-token` as easily as it can read the database.
 
@@ -148,7 +151,7 @@ A one-time link carries `?access_code=` instead of the token. The code works onc
 | An `/api/` request without a valid cookie  | `401` ``{"error":"Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.","gate":"clawboo-access"}`` |
 | `POST /api/access/launch-code` with cookie | `200` `{"gated":true,"code":"…","expiresAt":…,"expiresInMs":120000}`, or `{"gated":false}` on a server with no token                                                                  |
 
-**One secret, full access.** Everyone who has the token can do everything you can, and so can anyone who has a live one-time link. There are no accounts, roles or per-person revocation. To rotate the token, change the variable, or delete `~/.clawboo/access-token`, and restart the server; every browser then signs in again.
+**One secret, full access.** Everyone who has the token can do everything you can, and so can anyone who has a live one-time link. There are no accounts, roles or per-person revocation. Behind a sign-in proxy, the [proxy identity lane](#signed-identity-from-a-sign-in-proxy) can record who each person is, but it does not limit what anyone can do. To rotate the token, change the variable, or delete `~/.clawboo/access-token`, and restart the server; every browser then signs in again.
 
 **Agents do not receive it.** Clawboo removes `STUDIO_ACCESS_TOKEN` from the environment of the coding runtimes, Clawboo Native shell commands and connectors it starts, and the per-install token is never in any environment. The exception is an OpenClaw Gateway that you start from the dashboard: it inherits the server's whole environment, so it gets a `STUDIO_ACCESS_TOKEN` you set, but not the per-install token. A program running as you can still read the token file. Clawboo's own agents reach the MCP servers another way:
 
@@ -176,6 +179,17 @@ A one-time link carries `?access_code=` instead of the token. The code works onc
 - The request log masks `attachToken`, `scopeSig` and `provSig` in every URL it records.
 
 </Accordion>
+
+## Signed identity from a sign-in proxy
+
+Off by default. With a sign-in proxy in front of Clawboo, such as Cloudflare Access or oauth2-proxy, an administrator can turn on the proxy identity lane (`CLAWBOO_PROXY_IDENTITY` or the `proxyIdentity` operator file key). Clawboo then checks the signed token the proxy sends with each request and records the person it names on approvals, chat messages and task moves. [Run Clawboo behind a sign-in proxy](/guides/sso-proxy) has the setup.
+
+- **Public keys only.** Clawboo verifies the token with the proxy's public key or its JWKS URL, and accepts only asymmetric signatures. It refuses to start with a private key or a shared HMAC key, and refuses unsigned (`alg: none`) tokens and HMAC tokens "signed" with the public key. A shared secret would not work here: agents run as your user account and could read it, then sign a token as anyone.
+- **Bound and short-lived by default.** A request-bound token names the request's method and path, lives at most `proxyIdentityMaxLifetime` seconds (60 by default), and works once. Proxies that send their own sign-in token on every request need `session` binding, where a copied token works on any path until it expires.
+- **Never downgraded.** A token that does not verify gets `401`, in every mode. It never passes as an unnamed request.
+- **Beside the access token.** While the access token is on, a request needs the cookie too. In `required` mode, a request without a good token is refused, so an agent that reads the access token file can no longer use the API as a person. A spawned runtime's own MCP calls still work by their attach token.
+
+What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced; the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user can write would let an agent swap the key, which the server warns about at startup. The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
 
 ## Keys and secrets on disk
 
@@ -286,13 +300,14 @@ The rules in short; [Reach Clawboo from another machine](/guides/self-host-secur
 
 ## Limits of this model
 
-- **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access.
+- **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access. A sign-in proxy's identity tokens add names to what people do, not permissions.
 - **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
 - **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API.
 
 ## Related
 
 - [Reach Clawboo from another machine](/guides/self-host-securely): SSH tunnels, reverse proxies and network binds, step by step
+- [Run Clawboo behind a sign-in proxy](/guides/sso-proxy): signed identity tokens, and who approved what
 - [What agents can do](/concepts/permissions): sandboxes, worktrees and approvals for each runtime
 - [Providers and runtimes](/using/providers-and-runtimes): connecting keys, and what Disconnect removes
 - [Data and state](/operating/data-and-state): every file Clawboo writes, backups and resets

@@ -16,6 +16,7 @@ import {
 } from '@clawboo/control-client'
 import { embeddingsDisabled } from '@clawboo/db'
 
+import { proxyIdentityMode } from './proxyIdentity/config'
 import { NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
 import { getCurrentVersion, selfUpdateRefusal } from './updateCheck'
 
@@ -81,6 +82,7 @@ export const FEATURE_ROUTES = {
   'stream.agentChat.resume': ['GET /api/agents/:agentId/chat/stream'],
   'stream.events.resume': ['GET /api/obs/stream'],
   'system.selfUpdate': ['POST /api/system/self-update'],
+  'auth.proxyIdentity': ['GET /api/access/identity'],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -119,6 +121,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // Matches self-version's `applyable`: a global npm install this user can
     // write, with in-app updates not turned off by an administrator.
     'system.selfUpdate': selfUpdateRefusal() === null,
+    // The administrator's switch, on or required. Either way a verified token
+    // names the person; whether one is required is the lane's own business.
+    'auth.proxyIdentity': proxyIdentityMode() !== 'off',
   }
   return {
     version,

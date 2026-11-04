@@ -25,9 +25,9 @@
 // own, and clawboo must never keep a second copy of it — two allowlists that
 // disagree produce approvals the Gateway then ignores.
 
-import { approvalEvent, toolCallApprovals } from '@clawboo/db'
+import { approvalEvent, personJson, toolCallApprovals, type PersonRecord } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
-import { and, eq, lt, ne } from 'drizzle-orm'
+import { and, eq, isNull, lt, ne } from 'drizzle-orm'
 
 import { getDb } from '../db'
 import { emitEvent } from '../obs/emit'
@@ -287,6 +287,7 @@ export async function resolveExecApproval(
   source: ExecApprovalSource,
   id: string,
   decision: 'allow-once' | 'allow-always' | 'deny',
+  opts: { resolvedBy?: PersonRecord | null } = {},
 ): Promise<{ ok: boolean; alreadyResolved?: boolean }> {
   try {
     await source.operatorCall('exec.approval.resolve', { id, decision })
@@ -298,6 +299,18 @@ export async function resolveExecApproval(
     log.warn({ err, id }, 'could not resolve exec approval')
     return { ok: false }
   }
-  settleExecApproval(getDb(), id, execDecisionStatus(decision))
+  const db = getDb()
+  // Named only now, once the Gateway took THIS answer: before the call, another
+  // answer could still win and the row would name the wrong person. When the
+  // Gateway's broadcast settled the row first, its event went out unnamed; the
+  // row still says who answered. Missing in that race, never wrong.
+  const resolvedBy = personJson(opts.resolvedBy)
+  if (resolvedBy) {
+    db.update(toolCallApprovals)
+      .set({ resolvedBy })
+      .where(and(eq(toolCallApprovals.id, id), isNull(toolCallApprovals.resolvedBy)))
+      .run()
+  }
+  settleExecApproval(db, id, execDecisionStatus(decision))
   return { ok: true }
 }

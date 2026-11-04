@@ -58,6 +58,10 @@ export const ENGINE_FEATURES = [
   'stream.events.resume',
   // The in-place update (POST /api/system/self-update) can succeed here.
   'system.selfUpdate',
+  // A sign-in proxy's signed identity tokens are verified, and the person each
+  // names is recorded on approvals, chat messages and task edits. Who a request
+  // is signed in as: GET /api/access/identity.
+  'auth.proxyIdentity',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

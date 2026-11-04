@@ -11,6 +11,7 @@ import {
   listChatMessagesSince,
   type ClawbooDb,
 } from '@clawboo/db'
+import type { PersonRef } from '@clawboo/protocol'
 import type { Request, Response } from 'express'
 
 import {
@@ -19,6 +20,7 @@ import {
   isServerChatAgent,
   stopAgentChat,
 } from '../lib/agentChat/driveAgentChat'
+import { personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
@@ -30,7 +32,13 @@ const STREAM_KEEPALIVE_MS = 20_000
 /** Persist the user's message under the agent's 1:1 session so the SSE tail replays
  *  it AND it's durable. Idempotent on entryId (the optimistic client bubble + this
  *  replay share the id → the client dedups). */
-function persistUserEntry(db: ClawbooDb, sessionKey: string, text: string, entryId: string): void {
+function persistUserEntry(
+  db: ClawbooDb,
+  sessionKey: string,
+  text: string,
+  entryId: string,
+  person: PersonRef | null,
+): void {
   const now = Date.now()
   try {
     db.insert(chatMessages)
@@ -51,6 +59,8 @@ function persistUserEntry(db: ClawbooDb, sessionKey: string, text: string, entry
           sequenceKey: now,
           confirmed: true,
           fingerprint: entryId,
+          // Who sent it, when a sign-in proxy vouched for them.
+          ...(person ? { person } : {}),
         }),
       })
       .onConflictDoNothing()
@@ -88,7 +98,7 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'agent does not chat through the server' })
       return
     }
-    persistUserEntry(db, agentChatSessionKey(db, agentId), displayText, entryId)
+    persistUserEntry(db, agentChatSessionKey(db, agentId), displayText, entryId, personOf(req))
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Detached (the 202 returns now): the reply streams via the SSE + is persisted
     // server-side. Not aborted on client disconnect (a slow reply survives).

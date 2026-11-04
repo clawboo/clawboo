@@ -307,6 +307,13 @@ export type TranscriptEntrySource =
  */
 export type TranscriptEntryOrigin = { kind: 'routine'; routineId: string; routineName: string }
 
+/**
+ * A person a sign-in proxy vouched for with a signed token Clawboo verified:
+ * the token's subject, and the name and role it carried. Recorded on what that
+ * person did. Absent means nothing vouched for who did it.
+ */
+export type PersonRef = { id: string; name: string | null; role: string | null }
+
 export type TranscriptEntry = {
   entryId: string
   role: TranscriptEntryRole
@@ -327,6 +334,8 @@ export type TranscriptEntry = {
   fingerprint: string
   /** Set when something posted this entry on the person's behalf (a routine). */
   origin?: TranscriptEntryOrigin
+  /** Who sent a user-role entry, when a sign-in proxy vouched for them. */
+  person?: PersonRef
 }
 
 export const AGENT_FILE_NAMES = [

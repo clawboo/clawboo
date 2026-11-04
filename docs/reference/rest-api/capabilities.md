@@ -299,6 +299,7 @@ An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding)
     createdAt: number // epoch ms
     expiresAt: number // epoch ms
     resolvedAt: number | null // epoch ms
+    resolvedBy: string | null // JSON { id, name, role } of who answered, through a verified sign-in proxy
   }
 }
 ```

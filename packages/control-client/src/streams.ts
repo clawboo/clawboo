@@ -29,6 +29,10 @@ export const chatMessageFrameSchema = z.object({
   fingerprint: z.string(),
   /** Set when a routine posted the turn on the person's behalf. */
   origin: z.object({ kind: z.string(), routineId: z.string(), routineName: z.string() }).optional(),
+  /** Who sent a user turn, when a sign-in proxy vouched for them. */
+  person: z
+    .object({ id: z.string(), name: z.string().nullable(), role: z.string().nullable() })
+    .optional(),
 })
 export type ChatMessageFrame = z.infer<typeof chatMessageFrameSchema>
 

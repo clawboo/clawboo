@@ -27,6 +27,9 @@ export default defineConfig({
     'cors',
     'drizzle-orm',
     '@noble/ed25519',
+    // Verifies the sign-in proxy's identity tokens (lib/proxyIdentity). Pure JS
+    // on Web Crypto, no dependencies of its own.
+    'jose',
     '@anthropic-ai/sdk',
     'openai',
     'croner',

@@ -24,6 +24,7 @@ aggregated in this file, which ships in the package (`dist/THIRD_PARTY_NOTICES.m
 | `croner`                    | MIT        |
 | `express`, `cors`           | MIT        |
 | `@noble/ed25519`            | MIT        |
+| `jose`                      | MIT        |
 | `better-sqlite3`            | MIT        |
 | `drizzle-orm`               | Apache-2.0 |
 | `zod`                       | MIT        |

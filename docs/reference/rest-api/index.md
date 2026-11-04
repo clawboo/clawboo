@@ -1,7 +1,7 @@
 ---
 title: 'REST API overview'
 sidebarTitle: 'Overview'
-description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 210 routes.'
+description: 'Call the Clawboo server API: base URL, authentication, the same-origin guard, rate limits, errors, streaming, and an index of all 211 routes.'
 keywords: ['api', 'rest', 'http', 'curl', 'access token', 'rate limit', 'cors', 'sse', 'websocket']
 ---
 
@@ -72,6 +72,8 @@ curl -b "clawboo_access=$(cat ~/.clawboo/access-token)" http://127.0.0.1:18790/a
 With your own token, use `-b "clawboo_access=$STUDIO_ACCESS_TOKEN"`. Send the cookie to `127.0.0.1`, the address Clawboo listens on: `localhost` can resolve to `::1`, where another program could be listening on the same port. On a computer other people use, the token also shows in the process list while `curl` runs.
 
 **One-time sign-in codes.** `POST /api/access/launch-code`, behind the cookie like every other route, answers `{ "gated": true, "code": "…", "expiresAt": <epoch ms>, "expiresInMs": 120000 }`, or `{ "gated": false }` on a server with no token. Loading any page address with `?access_code=<code>` in a browser sets the cookie once, within two minutes, when the request carries `Sec-Fetch-Mode: navigate` and `Sec-Fetch-Dest: document`. A request with no fetch metadata at all (browsers send none to a plain-HTTP network address) gets a `200` sign-in page whose button sends `POST ?access_code=<code>`, which sets the cookie with a `303`. Only that form's POST spends a code: form-encoded, with fetch metadata (if any) of a same-origin page navigation and an `Origin` (if any) of the dashboard itself. A fetch or a frame, and a used, expired or unknown code, get a redirect without the cookie; a code that was not spent stays live. A code is never accepted on an `/api/` path. The route is on the sensitive rate limit.
+
+**Who is signed in.** `GET /api/access/identity` answers `{ "proxyIdentity": "off" | "on" | "required", "person": { "id", "name", "role" } | null }`: the [proxy identity lane](/guides/sso-proxy)'s mode, and the person the request's verified identity token names. With the lane `required`, every `/api/` request also needs a good token from your sign-in proxy, and one that does not verify gets `401` with `"gate": "clawboo-proxy-identity"` and a `reason`, in any mode.
 
 Keep the token out of API URLs: any request whose URL carries `access_token` gets that `302` answer (or a `401` when the token is wrong) instead of the route's response.
 
@@ -183,7 +185,7 @@ A script or app that talks to more than one Clawboo server should not guess what
 
 ## Route index
 
-The router registers 210 routes: 96 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
+The router registers 211 routes: 97 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                            |
 | ---------------------------------------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -203,7 +205,7 @@ The router registers 210 routes: 96 `GET`, 81 `POST`, 15 `DELETE`, 9 `PATCH`, 9 
 | [Agent settings](/reference/rest-api/agent-settings) | 10     | `/api/personality`, `/api/exec-settings*`, `/api/exec-allowlist*`, `/api/skills`                                                                          |
 | [Chat history](/reference/rest-api/chat-history)     | 4      | `/api/chat-history*`                                                                                                                                      |
 | [Settings and health](/reference/rest-api/settings)  | 6      | `/api/settings`, `/api/health*`, `/api/graph-layout`                                                                                                      |
-| [Authentication](#authentication)                    | 1      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**                                                       |
+| [Authentication](#authentication)                    | 2      | `/api/access/launch-code`: one-time sign-in codes for `clawboo open` and **Open on another device**; `/api/access/identity`: who is signed in             |
 | [System](/reference/rest-api/system)                 | 14     | `/api/system/*`: OpenClaw install, setup and Gateway control, models, device pairing, Clawboo's own version, capabilities and update, pinned settings     |
 | [Catalog](/reference/rest-api/catalog)               | 3      | `/api/catalog/*`: the marketplace's agent and team templates                                                                                              |
 

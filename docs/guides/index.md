@@ -22,12 +22,13 @@ Every recipe assumes Clawboo is installed and onboarding is done. If not, start 
 
 ## If you write code
 
-| Recipe                                                                   | What you get                                                                                  | Who it is for                                     |
-| ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| [Hand a task from one runtime to another](/guides/cross-runtime-handoff) | A coding task started on one runtime in its own git worktree, paused, and finished on another | Developers who drive Clawboo through its REST API |
-| [Attach an outside agent](/operating/mcp-servers)                        | Your own Claude Code, Codex or other MCP client connected to your team's board and memory     | Developers with their own agent setup             |
-| [Reach Clawboo from another machine](/guides/self-host-securely)         | The dashboard on another computer, through an SSH tunnel or a proxy with an access token      | People who run Clawboo for others                 |
-| [Back up and move Clawboo](/operating/data-and-state)                    | Where Clawboo keeps its data, and how to back it up and restore it                            | Anyone moving to a new computer                   |
+| Recipe                                                                   | What you get                                                                                         | Who it is for                                     |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
+| [Hand a task from one runtime to another](/guides/cross-runtime-handoff) | A coding task started on one runtime in its own git worktree, paused, and finished on another        | Developers who drive Clawboo through its REST API |
+| [Attach an outside agent](/operating/mcp-servers)                        | Your own Claude Code, Codex or other MCP client connected to your team's board and memory            | Developers with their own agent setup             |
+| [Reach Clawboo from another machine](/guides/self-host-securely)         | The dashboard on another computer, through an SSH tunnel or a proxy with an access token             | People who run Clawboo for others                 |
+| [Run Clawboo behind a sign-in proxy](/guides/sso-proxy)                  | Signed identity tokens from Cloudflare Access, oauth2-proxy or your own proxy, and who approved what | People who run Clawboo for a team                 |
+| [Back up and move Clawboo](/operating/data-and-state)                    | Where Clawboo keeps its data, and how to back it up and restore it                                   | Anyone moving to a new computer                   |
 
 ## Related
 

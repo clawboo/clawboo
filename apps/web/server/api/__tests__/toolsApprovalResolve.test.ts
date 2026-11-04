@@ -246,3 +246,94 @@ describe('POST /api/tools/approvals/:id/resolve', () => {
     expect(calls).toEqual([])
   })
 })
+
+// Who answered: the person a sign-in proxy vouched for (req.person, set only by
+// the proxy identity lane from a token it verified), never a guess.
+describe('who answered', () => {
+  type Person = { id: string; name: string | null; role: string | null }
+  const ADA: Person = { id: 'user-42', name: 'Ada', role: 'admin' }
+  const asPerson = (id: string, decision: string, person: Person | null): Request =>
+    ({ params: { id }, query: {}, body: { decision }, person }) as unknown as Request
+  const resolvedByOf = (id: string): string | null | undefined =>
+    db
+      .select({ resolvedBy: toolCallApprovals.resolvedBy })
+      .from(toolCallApprovals)
+      .where(eq(toolCallApprovals.id, id))
+      .get()?.resolvedBy
+
+  it('records the person on a tool card and in its approval_resolved event', async () => {
+    seed('ap-who', 'tool')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(asPerson('ap-who', 'deny', ADA), res)
+    expect((await done).body).toMatchObject({ approval: { resolvedBy: JSON.stringify(ADA) } })
+
+    expect(JSON.parse(resolvedByOf('ap-who') ?? 'null')).toEqual(ADA)
+    expect(approvalEventsFromApi()).toEqual([
+      {
+        kind: 'approval_resolved',
+        data: {
+          approvalId: 'ap-who',
+          decision: 'deny',
+          kind: 'tool',
+          toolName: 'mcp__memory__save',
+          resolvedBy: ADA,
+        },
+      },
+    ])
+  })
+
+  it('records no one when nothing vouched for the request, and ignores a body that claims someone', async () => {
+    seed('ap-anon', 'tool')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(
+      {
+        params: { id: 'ap-anon' },
+        query: {},
+        body: { decision: 'allow_once', resolvedBy: ADA, person: ADA },
+      } as unknown as Request,
+      res,
+    )
+    await done
+    expect(resolvedByOf('ap-anon')).toBeNull()
+    expect(approvalEventsFromApi()[0]?.data).not.toHaveProperty('resolvedBy')
+  })
+
+  it('a second answer cannot rename who answered first', async () => {
+    seed('ap-twice', 'tool')
+    const first = mockRes()
+    toolsApprovalResolvePOST(asPerson('ap-twice', 'allow_once', ADA), first.res)
+    await first.done
+    const second = mockRes()
+    toolsApprovalResolvePOST(
+      asPerson('ap-twice', 'deny', { id: 'user-7', name: 'Bob', role: null }),
+      second.res,
+    )
+    await second.done
+    expect(JSON.parse(resolvedByOf('ap-twice') ?? 'null')).toEqual(ADA)
+  })
+
+  it('records the person on an exec card once the Gateway takes the answer', async () => {
+    seed('ap-exec-who', 'exec')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(asPerson('ap-exec-who', 'allow_once', ADA), res)
+    await done
+    expect(JSON.parse(resolvedByOf('ap-exec-who') ?? 'null')).toEqual(ADA)
+    expect(approvalEventsFromApi()[0]?.data).toMatchObject({ resolvedBy: ADA })
+  })
+
+  it('names no one on an exec card the Gateway refused or another answer had settled', async () => {
+    failWith = 'gateway is down'
+    seed('ap-exec-refused', 'exec')
+    const refused = mockRes()
+    toolsApprovalResolvePOST(asPerson('ap-exec-refused', 'deny', ADA), refused.res)
+    await refused.done
+    expect(resolvedByOf('ap-exec-refused')).toBeNull()
+
+    failWith = 'APPROVAL_ALREADY_RESOLVED'
+    seed('ap-exec-raced', 'exec')
+    const raced = mockRes()
+    toolsApprovalResolvePOST(asPerson('ap-exec-raced', 'deny', ADA), raced.res)
+    expect((await raced.done).body).toMatchObject({ alreadyResolved: true })
+    expect(resolvedByOf('ap-exec-raced')).toBeNull()
+  })
+})

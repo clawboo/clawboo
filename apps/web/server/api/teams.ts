@@ -3,6 +3,7 @@ import { rm } from 'node:fs/promises'
 import type { Request, Response } from 'express'
 import { chatMessages, setSetting, teams, agents, settings } from '@clawboo/db'
 import { eq, inArray, like, sql } from 'drizzle-orm'
+import { personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { getRegistry } from '../lib/agentSource/registry'
@@ -459,6 +460,7 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
       stimulus: message,
       targetAgentId,
       userEntryId,
+      person: personOf(req),
     })
     res.status(202).json({ ok: true })
   } catch (err) {

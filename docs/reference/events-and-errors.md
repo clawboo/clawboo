@@ -143,14 +143,20 @@ That is 13 fields plus `data`. Before a row is stored, secrets in `data` are scr
 
 ## Board events
 
-Board events carry the task in `taskId` and its team in `teamId`.
+Board events carry the task in `taskId` and its team in `teamId`. Those written by the board routes the dashboard calls also carry `person`, `{ id: string; name: string | null; role: string | null }`, when the request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified. Without one there is no `person` field.
 
 ### task_created
 
 A task was created.
 
 ```ts
-{ title?: string | null; status?: string; parentTaskId?: string | null; priority?: string | null }
+{
+  title?: string | null
+  status?: string
+  parentTaskId?: string | null
+  priority?: string | null
+  person?: { id: string; name: string | null; role: string | null }
+}
 ```
 
 ### task_claimed
@@ -158,7 +164,7 @@ A task was created.
 An agent was given a task, by a claim or an assignment.
 
 ```ts
-{ assigneeAgentId?: string | null; assigneeRuntime?: string | null }
+{ assigneeAgentId?: string | null; assigneeRuntime?: string | null; person?: Person }
 ```
 
 ### status_changed
@@ -166,12 +172,12 @@ An agent was given a task, by a claim or an assignment.
 A task moved to another status. `to` is always present.
 
 ```ts
-{ from?: string | null; to: string }
+{ from?: string | null; to: string; by?: 'person'; person?: Person }
 ```
 
-Some writers add fields the typed shape does not declare:
+`Person` is the `person` shape above. Some writers add fields the typed shape does not declare:
 
-- `by: 'person'` marks a move a person made on the board.
+- `by: 'person'` marks a move a person made on the board, and `person` names them when a sign-in proxy vouched for them.
 - `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
 
 ### comment_added
@@ -179,7 +185,7 @@ Some writers add fields the typed shape does not declare:
 A comment or system note landed on a task.
 
 ```ts
-{ authorType?: string; body?: string }
+{ authorType?: string; body?: string; person?: Person }
 ```
 
 ### dep_linked
@@ -187,9 +193,7 @@ A comment or system note landed on a task.
 A task was made to wait for another. The task that waits is `taskId`.
 
 ```ts
-{
-  dependsOnTaskId: string
-}
+{ dependsOnTaskId: string; person?: Person }
 ```
 
 ## Run events
@@ -333,8 +337,11 @@ A second answer to the same card changes nothing and writes nothing.
   decision: string // 'allow_once' | 'allow_always' | 'deny' | 'expired'; 'resolved' when the Gateway reported an answer without naming it
   kind: string
   toolName: string
+  resolvedBy?: { id: string; name: string | null; role: string | null }
 }
 ```
+
+`resolvedBy` names the person who answered, when their request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified. It is absent otherwise, and on an OpenClaw command's event when the Gateway's own report settled the card before Clawboo heard back; the approval row still records who answered then.
 
 A connector call, Native command or hand-off card (`kind: 'tool'`) stays pending past its `expiresAt` only when nothing was left waiting on it, for example because Clawboo stopped while the card was open. The dashboard stops showing it at `expiresAt`. A late answer to it is refused and expires it at once; otherwise the reaper expires it 24 to 25 hours after it was created, with the default `CLAWBOO_APPROVAL_TTL_MS`. An OpenClaw command's copy (`kind: 'exec'`) can stay pending for up to 30 seconds past its `expiresAt`, until the next sweep. An answer to it in that time goes to the Gateway, which decides whether it still counts.
 

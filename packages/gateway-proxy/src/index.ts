@@ -4,6 +4,7 @@ export {
   createAccessGate,
   findUnsupportedTokenChar,
   isForwardedRequest,
+  isRuntimeControlRequest,
 } from './access-gate'
 
 export type { OriginGuard, OriginGuardOptions } from './origin-guard'
