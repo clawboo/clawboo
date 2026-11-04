@@ -16,7 +16,7 @@ import { Button } from '@/features/shared/Button'
 import { Modal } from '@/features/shared/Modal'
 import { Spinner } from '@/features/shared/Spinner'
 
-import { deviceLink, isLoopbackHostname } from './deviceLink'
+import { deviceLink, isLoopbackHostname, isWildcardHostname } from './deviceLink'
 
 const REACH_ANOTHER_MACHINE_DOCS = 'https://docs.claw.boo/guides/self-host-securely'
 
@@ -121,7 +121,11 @@ function DialogBody({
     }
   }, [mint])
 
-  const thisComputerOnly = isLoopbackHostname(safeHostname(origin))
+  const hostname = safeHostname(origin)
+  // Clawboo bound to every interface, opened at the any-address: the server is
+  // on the network, but this address is not.
+  const anyAddress = isWildcardHostname(hostname)
+  const thisComputerOnly = anyAddress || isLoopbackHostname(hostname)
   const url = link.kind === 'ready' ? deviceLink(origin, readInjectedBase(), link.code) : null
 
   const copy = async (): Promise<void> => {
@@ -171,8 +175,9 @@ function DialogBody({
 
           {thisComputerOnly ? (
             <p className="mt-3 rounded-lg border border-border bg-background px-3 py-2 text-[13px] text-foreground/80">
-              This address works only on this computer, because Clawboo is listening on this
-              computer alone. A phone or another computer cannot reach it. To change that, see{' '}
+              {anyAddress
+                ? "This address works only on this computer. Clawboo is listening on your network too, so for a phone or another computer, open the dashboard at this computer's network address and make the link there. See "
+                : 'This address works only on this computer, because Clawboo is listening on this computer alone. A phone or another computer cannot reach it. To change that, see '}
               <a
                 href={REACH_ANOTHER_MACHINE_DOCS}
                 target="_blank"

@@ -158,6 +158,20 @@ test.describe('pasting a sign-in link on the locked screen', () => {
     await late.context.close()
   })
 
+  test('an address typed or shared with the mark says nothing about a link', async ({
+    browser,
+  }) => {
+    // Only the gate's redirect after a posted link brings a page here with
+    // `signin=pasted`; arriving at it directly is not a refused link.
+    const context = await browser.newContext({ storageState: SIGNED_OUT, ...PHONE })
+    const page = await context.newPage()
+    await page.goto(`${API_BASE}/?signin=pasted`)
+    await expect(page.getByTestId('access-locked')).toBeVisible()
+    await expect(page).toHaveURL(`${API_BASE}/`)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    await context.close()
+  })
+
   test('a link for another address, or text that is not a link, is refused before anything is sent', async ({
     browser,
     request,

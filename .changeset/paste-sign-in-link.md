@@ -8,4 +8,4 @@ Sign in from the locked screen by pasting a one-time sign-in link.
 
 **Only a link for this dashboard is accepted.** It must name the address the dashboard is open at, with the same `CLAWBOO_BASE_PATH`. A link for another address or another dashboard, a link that carries the access token, and text that is not a sign-in link are refused with a plain message, and nothing is sent. The box never opens the address you paste. A link that was already used or has expired comes back to the locked screen, which says so.
 
-**Open on another device says how.** On an address a phone can reach, the dialog now says that an app on a phone's home screen signs in by pasting the link, next to its **Copy link** button.
+**Open on another device says how.** On an address a phone can reach, the dialog now says that an app on a phone's home screen signs in by pasting the link, next to its **Copy link** button. Opened at `0.0.0.0` or `[::]`, the address a network bind listens on, it no longer shows a QR code a phone cannot use, and says to open the dashboard at the computer's network address instead.

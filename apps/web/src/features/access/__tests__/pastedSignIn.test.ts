@@ -6,7 +6,13 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { hasPastedMark, readPastedSignIn, signInAction, withoutPastedMark } from '../pastedSignIn'
+import {
+  arrivedByRedirect,
+  hasPastedMark,
+  readPastedSignIn,
+  signInAction,
+  withoutPastedMark,
+} from '../pastedSignIn'
 
 const CODE = 'Wm9vbXpvb216b29tem9vbXpvb216b29t'
 const HERE = { origin: 'https://dash.example.com', base: '' }
@@ -151,5 +157,30 @@ describe('the pasted mark', () => {
     expect(withoutPastedMark('https://dash.example.com/clawboo/?signin=pasted')).toBe('/clawboo/')
     expect(withoutPastedMark('https://dash.example.com/?a=1&signin=pasted#x')).toBe('/?a=1#x')
     expect(withoutPastedMark('https://dash.example.com/?a=1')).toBeNull()
+  })
+})
+
+describe('arrivedByRedirect', () => {
+  const timing = (entries: unknown[]) => ({ getEntriesByType: () => entries }) as never
+
+  it('is true when a redirect brought this page load here', () => {
+    expect(arrivedByRedirect(timing([{ redirectCount: 1 }]))).toBe(true)
+  })
+
+  it('is false for a page loaded directly', () => {
+    expect(arrivedByRedirect(timing([{ redirectCount: 0 }]))).toBe(false)
+  })
+
+  it('is false when the browser does not say', () => {
+    expect(arrivedByRedirect(timing([]))).toBe(false)
+    expect(arrivedByRedirect({} as never)).toBe(false)
+    expect(arrivedByRedirect(undefined)).toBe(false)
+    expect(
+      arrivedByRedirect({
+        getEntriesByType: () => {
+          throw new Error('unsupported')
+        },
+      } as never),
+    ).toBe(false)
   })
 })

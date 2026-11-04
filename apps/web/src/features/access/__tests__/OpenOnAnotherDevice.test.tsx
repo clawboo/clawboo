@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { axe } from '@/__vitest__/axe'
 import { server } from '@/__vitest__/mswServer'
 
-import { deviceLink, isLoopbackHostname } from '../deviceLink'
+import { deviceLink, isLoopbackHostname, isWildcardHostname } from '../deviceLink'
 import { OpenOnAnotherDeviceButton } from '../OpenOnAnotherDevice'
 import { OpenOnAnotherDeviceDialog } from '../OpenOnAnotherDeviceDialog'
 
@@ -76,6 +76,17 @@ describe('isLoopbackHostname', () => {
     }
     for (const host of ['192.168.1.5', 'dash.example.com', '10.0.0.2']) {
       expect(isLoopbackHostname(host), host).toBe(false)
+    }
+  })
+})
+
+describe('isWildcardHostname', () => {
+  it('knows the any-address names a server binds to, which reach only this computer', () => {
+    for (const host of ['0.0.0.0', '[::]', '::']) {
+      expect(isWildcardHostname(host), host).toBe(true)
+    }
+    for (const host of ['localhost', '127.0.0.1', '192.168.1.5', 'dash.example.com', '0.0.0.1']) {
+      expect(isWildcardHostname(host), host).toBe(false)
     }
   })
 })
@@ -193,6 +204,25 @@ describe('OpenOnAnotherDeviceDialog on this computer only', () => {
     // No phone can reach this address, so no word about one pasting it.
     expect(screen.queryByText(/paste this link/i)).not.toBeInTheDocument()
   })
+})
+
+describe('OpenOnAnotherDeviceDialog at the any-address of a network bind', () => {
+  // A browser can open a server bound to HOST=0.0.0.0 at http://0.0.0.0:<port>,
+  // but that address means this computer, so a phone cannot use a link to it.
+  for (const origin of ['http://0.0.0.0:18790', 'http://[::]:18790']) {
+    it(`shows no QR code and no word about a phone at ${origin}, and names the way`, async () => {
+      mintsCodes('code_one')
+      render(<OpenOnAnotherDeviceDialog open onClose={() => {}} origin={origin} />)
+      expect(await screen.findByTestId('device-link')).toHaveTextContent(
+        `${origin}/?access_code=code_one`,
+      )
+      expect(screen.queryByTestId('device-qr')).not.toBeInTheDocument()
+      expect(screen.queryByText(/paste this link/i)).not.toBeInTheDocument()
+      expect(screen.getByText(/only on this computer/i)).toHaveTextContent(
+        /this computer's network address/i,
+      )
+    })
+  }
 })
 
 describe('OpenOnAnotherDeviceDialog on a server with no access token', () => {

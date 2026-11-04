@@ -13,6 +13,7 @@ import { readInjectedBase } from '@/app/injectedBase'
 import { Button } from '@/features/shared/Button'
 
 import {
+  arrivedByRedirect,
   hasPastedMark,
   readPastedSignIn,
   submitSignIn,
@@ -46,9 +47,12 @@ export function AccessLock({
   checkTimeoutMs?: number
 }) {
   const [state, setState] = useState<AccessState>('checking')
-  // A pasted link was just posted (see pastedSignIn.ts). Read once, before any
+  // A pasted link was just posted (see pastedSignIn.ts): the mark is on the
+  // address and the gate's redirect brought the page here. Read once, before any
   // effect takes the mark off the address; Strict Mode runs effects twice.
-  const [fromPastedLink] = useState(() => hasPastedMark(window.location.search))
+  const [fromPastedLink] = useState(
+    () => hasPastedMark(window.location.search) && arrivedByRedirect(),
+  )
   // True when the first read found the lock, as opposed to a later read.
   const [lockedAtStart, setLockedAtStart] = useState(false)
 

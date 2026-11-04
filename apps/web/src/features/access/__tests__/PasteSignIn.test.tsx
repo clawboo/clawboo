@@ -56,12 +56,22 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  // jsdom has no Navigation Timing; a test that needs it defines it.
+  delete (window.performance as { getEntriesByType?: unknown }).getEntriesByType
   server.events.removeListener('request:start', onRequest)
   delete (globalThis as { __CLAWBOO_BASE__?: unknown }).__CLAWBOO_BASE__
   window.history.replaceState(null, '', '/')
   window.localStorage.clear()
   window.sessionStorage.clear()
 })
+
+/** This page load, as Navigation Timing reports it: `redirects` redirects brought it here. */
+function arriveAfter(redirects: number) {
+  Object.defineProperty(window.performance, 'getEntriesByType', {
+    configurable: true,
+    value: (type: string) => (type === 'navigation' ? [{ redirectCount: redirects }] : []),
+  })
+}
 
 function locked() {
   server.use(http.get('/api/settings', () => HttpResponse.json(GATE_401, { status: 401 })))
@@ -197,6 +207,7 @@ describe('the page after a pasted link was posted', () => {
   it('says the link did not sign in when the server refused it, and clears the mark', async () => {
     // A used or expired code: the gate redirects back without the cookie.
     window.history.replaceState(null, '', '/?signin=pasted')
+    arriveAfter(1)
     await renderLocked()
     expect(screen.getByRole('alert')).toHaveTextContent(
       'That link did not sign you in. It had already been used, or its two minutes were up.',
@@ -206,6 +217,7 @@ describe('the page after a pasted link was posted', () => {
 
   it('keeps that message under Strict Mode, which runs effects twice', async () => {
     window.history.replaceState(null, '', '/?signin=pasted')
+    arriveAfter(1)
     locked()
     render(
       <StrictMode>
@@ -218,8 +230,25 @@ describe('the page after a pasted link was posted', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/did not sign you in/)
   })
 
+  it('says nothing when no redirect brought the page here, as on a typed or shared address', async () => {
+    // Only the gate's answer to the posted form arrives by a redirect, so an
+    // address someone typed or sent with the mark in it says nothing.
+    window.history.replaceState(null, '', '/?signin=pasted')
+    arriveAfter(0)
+    await renderLocked()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(window.location.search).toBe('')
+  })
+
+  it('says nothing where the browser cannot tell how the page arrived', async () => {
+    window.history.replaceState(null, '', '/?signin=pasted')
+    await renderLocked()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
   it('loads the dashboard at a clean address when the link signed in', async () => {
     window.history.replaceState(null, '', '/?signin=pasted')
+    arriveAfter(1)
     server.use(
       http.get('/api/settings', () => HttpResponse.json({ gatewayUrl: '', hasToken: false })),
     )

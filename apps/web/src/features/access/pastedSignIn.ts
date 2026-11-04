@@ -94,6 +94,24 @@ export function submitSignIn(code: string, base: string, doc: Document = documen
   form.submit()
 }
 
+/**
+ * True when a redirect brought this page load here, as the gate's 303 after the
+ * posted form does. An address typed or shared with the mark in it arrives with
+ * none, so the mark alone does not say a pasted link was refused. Navigation
+ * Timing counts same-origin redirects, which the gate's is; a browser that does
+ * not say counts as no redirect.
+ */
+export function arrivedByRedirect(
+  timing: Partial<Pick<Performance, 'getEntriesByType'>> | undefined = globalThis.performance,
+): boolean {
+  try {
+    const [load] = timing?.getEntriesByType?.('navigation') ?? []
+    return ((load as PerformanceNavigationTiming | undefined)?.redirectCount ?? 0) > 0
+  } catch {
+    return false
+  }
+}
+
 /** Did a pasted link just come back from the server without signing in? */
 export function hasPastedMark(search: string): boolean {
   return new URLSearchParams(search).get(MARK) === MARK_VALUE
