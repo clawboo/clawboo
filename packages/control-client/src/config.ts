@@ -14,6 +14,21 @@ export type HeaderProvider = () => Record<string, string>
 
 let headerProvider: HeaderProvider = () => ({})
 
+/** Sees each control-plane response before its caller does. */
+export type ResponseObserver = (res: Response) => void
+
+let responseObserver: ResponseObserver | null = null
+
+/**
+ * Watch every `apiFetch` response, or stop with null. The dashboard uses it to
+ * notice the access gate's refusal on any read, not only its first one. The
+ * observer must not consume the body: clone the response to read it. A throw
+ * from it is swallowed, so it can never break a request.
+ */
+export function setResponseObserver(fn: ResponseObserver | null): void {
+  responseObserver = fn
+}
+
 /**
  * Point the control client at a server. Web leaves this unset (same-origin);
  * desktop/mobile/npm pass an absolute origin (e.g. `https://app.example.com`).
@@ -46,10 +61,11 @@ export function getRequestHeaders(): Record<string, string> {
   return headerProvider()
 }
 
-/** Reset base + header provider to their same-origin, no-header defaults (tests). */
+/** Reset base, header provider and observer to their same-origin defaults (tests). */
 export function resetControlClient(): void {
   apiBase = ''
   headerProvider = () => ({})
+  responseObserver = null
 }
 
 /** Resolve an `/api/...` path against the configured base. */
@@ -63,8 +79,18 @@ export function apiUrl(path: string): string {
  * empty base + empty provider this is byte-identical to `fetch(path, init)`.
  */
 export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return fetch(apiUrl(path), {
-    ...init,
-    headers: { ...headerProvider(), ...(init.headers ?? {}) },
+  // Promise.resolve: a stubbed fetch may hand back a Response, not a promise.
+  return Promise.resolve(
+    fetch(apiUrl(path), {
+      ...init,
+      headers: { ...headerProvider(), ...(init.headers ?? {}) },
+    }),
+  ).then((res) => {
+    try {
+      responseObserver?.(res)
+    } catch {
+      // An observer bug must never fail the request it watched.
+    }
+    return res
   })
 }

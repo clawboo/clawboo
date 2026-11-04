@@ -36,7 +36,8 @@ Limits on running work count only the time the computer is awake. When a laptop 
 | Failures in a row of the same agent on the same task before re-delegation is refused | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:106`   |
 | Silence before a delegated task is failed and the leader told (team chat)            | 8 minutes        | No        | `packages/team-orchestration/src/boardOrchestration.ts:64`    |
 | The same, while inside one tool call or waiting to start                             | 24 minutes       | No        | `packages/team-orchestration/src/boardOrchestration.ts:91,98` |
-| How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:65`         |
+| Time a delegated task waits for a free run slot                                      | Not counted      | No        | `packages/team-orchestration/src/boardOrchestration.ts:2101`  |
+| How often that watchdog checks                                                       | 30 seconds       | No        | `apps/web/server/lib/teamChat/teamOrchestrator.ts:67`         |
 | Window for batching task updates to the leader                                       | 3 seconds        | No        | `packages/team-orchestration/src/boardOrchestration.ts:54`    |
 | Times a task update is sent again when its run never finished                        | 3                | No        | `packages/team-orchestration/src/boardOrchestration.ts:123`   |
 
@@ -46,8 +47,9 @@ The board's own REST API (`POST /api/board`) is not subject to the Tasks MCP cap
 
 | Limit                                                                                                               | Value                                          | Change it                                                | Source                                               |
 | ------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| Agent runs executing at once across the server; the rest wait their turn, never failed                              | 8                                              | `CLAWBOO_MAX_CONCURRENT_RUNS`                            | `apps/web/server/lib/runSlots.ts:29`                 |
 | Silence before a run is stopped (team chat, task runner, one-to-one chat)                                           | 30 minutes, then 5 seconds for it to wind down | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`                          | `packages/executor/src/idleTimeout.ts:22,26`         |
-| Wait for the same agent's previous run to finish                                                                    | 10 minutes                                     | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`                          | `apps/web/server/lib/executorRunner.ts:142`          |
+| Wait for the same agent's previous run to finish                                                                    | 10 minutes                                     | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`                          | `apps/web/server/lib/executorRunner.ts:177`          |
 | Model turns per Clawboo Native run (one model call plus its tool calls each)                                        | 16                                             | Per agent config, not in the dashboard                   | `packages/adapters/native/src/agentConfig.ts:97`     |
 | Context rotation: start a fresh session at this share of the context window (task runner)                           | 85%                                            | No                                                       | `packages/executor/src/session-rotation.ts:147`      |
 | Rotations per task (task runner)                                                                                    | 3                                              | Per run (`maxRotations` on `POST /api/runtimes/:id/run`) | `packages/executor/src/session-rotation.ts:148`      |
@@ -89,22 +91,25 @@ Checks run only for task-runner work in a git worktree with changes; [How work i
 | Worktree cleanup at startup                                                                              | Older than 72 hours, or beyond the newest 25                  | No                                        | `packages/worktrees/src/lifecycle.ts:60-61`           |
 | Time limit for each git command                                                                          | 60 seconds                                                    | No                                        | `packages/worktrees/src/git.ts:18`                    |
 | Routines: how far ahead the scheduler sleeps at most                                                     | 60 seconds                                                    | No                                        | `apps/web/server/lib/routines/ticker.ts:32`           |
-| Routines: wait for an OpenClaw agent's run                                                               | 10 minutes                                                    | `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`     | `apps/web/server/lib/routines/openclawDispatch.ts:46` |
+| Routines: wait for an OpenClaw agent's run                                                               | 10 minutes                                                    | `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`     | `apps/web/server/lib/routines/openclawDispatch.ts:47` |
 
 Cleanup commits a worktree's changes before removing it and keeps its branch.
 
 ## What reaches an agent
 
-| Limit                                                  | Value                                                  | Change it                                        | Source                                              |
-| ------------------------------------------------------ | ------------------------------------------------------ | ------------------------------------------------ | --------------------------------------------------- |
-| Teammates' new peer-room posts added to a turn         | 4,000 characters, at most 800 per post                 | No                                               | `apps/web/server/lib/teamChat/peerCatchup.ts:25,27` |
-| Inbox notices added to a turn                          | 4,000 characters, at most 400 per notice               | No                                               | `packages/db/src/inbox.ts:102,98`                   |
-| Undelivered inbox notices kept                         | 30 days                                                | No                                               | `packages/db/src/inbox.ts:176`                      |
-| One tool result in an agent's context                  | 16 KiB; the rest is cut and kept for the agent to read | No                                               | `packages/mcp/src/ceiling.ts:35`                    |
-| Stored copy of a large tool result                     | Up to 8 MiB                                            | No                                               | `packages/db/src/tools/resultStore.ts:45`           |
-| How long stored tool results are kept                  | 7 days                                                 | `CLAWBOO_TOOL_RESULT_TTL_MS`                     | `apps/web/server/lib/approvalReaper.ts:29`          |
-| Memory facts added at the start of a run (task runner) | Top 5, within 1,500 characters                         | Per run (`disableMemoryAutoInject` turns it off) | `apps/web/server/lib/defaults.ts:53,56`             |
-| Related facts added alongside them                     | Up to 2, at similarity 0.8 or more                     | No                                               | `apps/web/server/lib/memoryInjection.ts:81-82`      |
+| Limit                                                  | Value                                                                                  | Change it                                        | Source                                              |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------ | --------------------------------------------------- |
+| Teammates' new peer-room posts added to a turn         | 4,000 characters, at most 800 per post                                                 | No                                               | `apps/web/server/lib/teamChat/peerCatchup.ts:25,27` |
+| Inbox notices added to a turn                          | 4,000 characters, at most 400 per notice                                               | No                                               | `packages/db/src/inbox.ts:102,98`                   |
+| Undelivered inbox notices kept                         | 30 days                                                                                | No                                               | `packages/db/src/inbox.ts:176`                      |
+| One tool result in an agent's context                  | 16 KiB; the rest is cut and kept for the agent to read                                 | No                                               | `packages/mcp/src/ceiling.ts:35`                    |
+| Stored copy of a large tool result                     | Up to 8 MiB                                                                            | No                                               | `packages/db/src/tools/resultStore.ts:45`           |
+| How long stored tool results are kept                  | 7 days                                                                                 | `CLAWBOO_TOOL_RESULT_TTL_MS`                     | `apps/web/server/lib/approvalReaper.ts:29`          |
+| Memory facts added at the start of a run (task runner) | Top 5, within 1,500 characters                                                         | Per run (`disableMemoryAutoInject` turns it off) | `apps/web/server/lib/defaults.ts:53,56`             |
+| Related facts added alongside them                     | Up to 2, at similarity 0.8 or more                                                     | No                                               | `apps/web/server/lib/memoryInjection.ts:81-82`      |
+| Comments in a task run's task block                    | The newest 8, at most 4,000 characters each and 12,000 in all; `get_task` has the rest | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:23-27` |
+| Finished tasks' results in a task block                | Up to 6, at most 2,000 characters each and 6,000 in all                                | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:29-33` |
+| Parent tasks in a task block                           | Up to 6, nearest first; titles up to 200 characters                                    | No                                               | `apps/web/server/lib/teamChat/ticketBlock.ts:35-37` |
 
 [What an agent sees](/concepts/agent-context) explains what goes into each turn.
 
@@ -133,7 +138,7 @@ Cleanup commits a worktree's changes before removing it and keeps its branch.
 | Age at which a forgotten pending approval is expired      | 24 hours                                | `CLAWBOO_APPROVAL_TTL_MS`             | `apps/web/server/lib/approvalReaper.ts:26`                  |
 | How often that cleanup runs                               | Every hour, and once at startup         | `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS` | `apps/web/server/lib/approvalReaper.ts:30`                  |
 | Budget warning threshold                                  | 80% of the limit                        | No                                    | `packages/governance/src/budget/math.ts:9`                  |
-| Time a task-runner run gets to end once a hard cap trips  | 5 seconds; more work stops it sooner    | No                                    | `apps/web/server/lib/executorRunner.ts:154`                 |
+| Time a task-runner run gets to end once a hard cap trips  | 5 seconds; more work stops it sooner    | No                                    | `apps/web/server/lib/executorRunner.ts:157`                 |
 
 A budget set to hard cap pauses work at 100% of its limit; the default mode only warns. Which runs a cap can stop, and how quickly, depends on the runtime; [Budgets and spend](/using/budgets-and-spend) explains.
 

@@ -35,7 +35,8 @@ The whole dashboard changes at once, with no reload. The part you chose looks ra
 ## Good to know
 
 - Clawboo starts in **Light** until you choose.
-- Your choice is saved in this browser, for this address. Another browser, a private window, cleared site data, or the dashboard at another address or port starts in **Light** until you choose there.
+- Your choice is saved in this browser, for this address. Another browser, a private window, cleared site data, or the dashboard at another address, port or path prefix starts in **Light** until you choose there.
+- One exception after an upgrade: a theme an earlier release saved for this address goes to the first dashboard under a path prefix that opens here, and that dashboard starts in the saved theme rather than **Light**.
 - The welcome screen and the onboarding steps keep their bright sky whatever you choose.
 
 ## If you can't see the switch

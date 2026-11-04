@@ -165,6 +165,16 @@ const ACCOUNT_FAILURE: Record<'Auth' | 'Billing', { note: string; report: string
   },
 }
 
+/** Why the engine closed a run `cancelled` when a person finished or cancelled
+ *  its task while it ran. Read back by the ticket block's "last attempt". */
+export const RUN_CLOSED_FINISHED_BY_PERSON =
+  'The task was finished by a person before this run ended.'
+
+/** Why the engine closed a run `cancelled` whose result came back after its task
+ *  had been released. The run itself finished; its result is kept as a comment. */
+export const RUN_CLOSED_RESULT_AFTER_RELEASE =
+  'result arrived after the task was released/reassigned'
+
 /** A status as a person reads it on the board, for the notes the engine writes. */
 const STATUS_WORD: Record<string, string> = {
   backlog: 'Backlog',
@@ -478,6 +488,15 @@ export interface BoardOrchestratorDeps {
    * current turn ends. Omitted ⇒ only a session running a task counts as occupied.
    */
   isSessionOccupied?: (sessionKey: string) => boolean
+  /**
+   * Is the host holding this session's delivery in its run queue: accepted, but
+   * waiting for one of the process's run slots before it starts? The host settles
+   * such a delivery as delivered when it queues it, so the engine never waits on a
+   * slot (a lead's run waiting on its delegate's start while holding a slot would
+   * deadlock the cap). Queued is waiting, not silence, so the idle watchdog keeps
+   * the session's clock current instead of failing it. Omitted ⇒ nothing queues.
+   */
+  isRunQueued?: (sessionKey: string) => boolean
   /** A board mutation the orchestrator made (projection-store feed). Optional. */
   onBoardChange?: (change: BoardChange) => void
   /** Append a visible narration entry to a session's transcript. Optional.
@@ -1721,7 +1740,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'The task was finished by a person before this run ended.',
+          error: RUN_CLOSED_FINISHED_BY_PERSON,
         })
       }
       if (trimmed)
@@ -1781,7 +1800,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'result arrived after the task was released/reassigned',
+          error: RUN_CLOSED_RESULT_AFTER_RELEASE,
         })
       }
       // The work itself must survive the refusal: the child DID produce a result,
@@ -1916,7 +1935,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         taskToExec.delete(taskId)
         await deps.board.completeExecution(execId, {
           status: 'cancelled',
-          error: 'The task was finished by a person before this run ended.',
+          error: RUN_CLOSED_FINISHED_BY_PERSON,
         })
       }
       taskReflectTo.delete(taskId)
@@ -2078,6 +2097,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     replayReportUps()
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
+      // Queued for a run slot: the run has not started, so its idle window starts
+      // when it does.
+      if (deps.isRunQueued?.(sk)) {
+        lastActivityAt.set(sk, tnow)
+        continue
+      }
       // A session inside a tool call (build/test/install) is legitimately silent,
       // so it gets the longer allowance instead of being failed at 8 minutes. So
       // does a delivery still waiting to start behind another run on the agent.

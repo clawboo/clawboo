@@ -76,9 +76,9 @@ flowchart TB
 
 The Express server serves the built SPA and every `/api/*` route from the same origin, so the browser needs no backend address. It binds `127.0.0.1` unless `HOST` says otherwise, and listens on the first free port from 18790 to 18809 (or exactly `CLAWBOO_API_PORT`). The SPA builds its requests with `apiFetch()` and `apiUrl()` from `@clawboo/control-client`, so the app also works under a path prefix (`CLAWBOO_BASE_PATH`).
 
-An optional access token, `STUDIO_ACCESS_TOKEN`, gates `/api/*` and the Gateway WebSocket. A non-loopback bind without a token refuses to start unless `CLAWBOO_ALLOW_INSECURE=1` is set. [Security](/operating/security) has the full model; the entry point is `apps/web/server/index.ts`.
+An access token gates `/api/*` and the Gateway WebSocket: `STUDIO_ACCESS_TOKEN` when set, otherwise the per-install token in `<CLAWBOO_HOME>/access-token` (`packages/config/src/accessToken.ts`). A blank `STUDIO_ACCESS_TOKEN` turns the gate off, and a non-loopback bind with the gate off refuses to start unless `CLAWBOO_ALLOW_INSECURE=1` is set. [Security](/operating/security) has the full model; the entry point is `apps/web/server/index.ts`.
 
-Prompts go only to the providers and apps you connect, and Clawboo itself sends no telemetry. The server makes three calls of its own. It fetches the marketplace catalog index from GitHub (`catalogIndex.ts`, overridable with `CLAWBOO_CATALOG_INDEX_URL`) and checks npm for a newer `clawboo` (`updateCheck.ts`), each cached for 6 hours. When a model picker opens, it also reads OpenRouter's public model list without a key (`openrouterModels.ts`, cached for 30 minutes).
+Prompts go only to the providers and apps you connect, and Clawboo itself sends no telemetry. The server makes three calls of its own. It fetches the marketplace catalog index from GitHub at its own release tag, or from `main` in a development build or when the release's tag has no index (`catalogIndex.ts`, overridable with `CLAWBOO_CATALOG_INDEX_URL`), and checks npm for a newer `clawboo` (`updateCheck.ts`, off with `CLAWBOO_DISABLE_SELF_UPDATE`), each cached for 6 hours. When a model picker opens, it also reads OpenRouter's public model list without a key (`openrouterModels.ts`, cached for 30 minutes).
 
 ### SQLite holds the state
 

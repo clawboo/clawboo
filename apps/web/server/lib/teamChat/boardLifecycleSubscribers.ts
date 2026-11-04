@@ -35,6 +35,7 @@ import { createLogger } from '@clawboo/logger'
 import { getDb } from '../db'
 import { recipientFor } from './inboxNotices'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
+import { clearTaskSessionPointers } from './taskSessionPointers'
 import {
   getTaskOrchestrator,
   hasTaskOrchestrator,
@@ -158,6 +159,19 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
         (ev.kind === 'status_changed' && ev.actor === 'person' && ev.status === 'todo'))
     ) {
       schedulePump(ev.teamId, ev.taskId, opts.mcpBaseUrl)
+    }
+
+    // 2c. A finished or cancelled task forgets every agent's session on it, so
+    // nothing resumes a conversation about work that is over. Here rather than in
+    // each writer, because every path that finishes a task (the engine, a person,
+    // the Tasks tools, the task runner) publishes this one event. A server that
+    // stopped before it ran leaves the pointer to the boot sweep.
+    if (ev.kind === 'status_changed' && (ev.status === 'done' || ev.status === 'cancelled')) {
+      try {
+        clearTaskSessionPointers(getDb(), ev.taskId)
+      } catch (err) {
+        log.error({ err, taskId: ev.taskId }, 'clearing a finished task’s resume pointers failed')
+      }
     }
 
     // 3 + 4. Terminal notification for a delegated task. The mailbox row is

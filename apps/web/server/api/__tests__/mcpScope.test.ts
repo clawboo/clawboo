@@ -161,7 +161,12 @@ describe('parseBoundProvenance', () => {
 })
 
 /** A Tasks URL as serverDeliver (a team run) or the task runner writes it. */
-const signedTasksUrl = (scope: { teamId: string; agentId: string; delegate?: boolean }): string =>
+const signedTasksUrl = (scope: {
+  teamId: string
+  agentId: string
+  delegate?: boolean
+  boundTaskId?: string
+}): string =>
   mcpHttpUrl('http://127.0.0.1:1', 'tasks', {
     ...scope,
     attachSecret: getMcpAttachSecret(getDb()),
@@ -219,5 +224,39 @@ describe('parseTasksBinding', () => {
   it('is unbound with no scope at all (an OpenClaw agent, an external attach)', () => {
     expect(parseTasksBinding(req('/api/mcp/tasks'))).toBeUndefined()
     expect(parseTasksBinding(undefined)).toBeUndefined()
+  })
+})
+
+// The run's own task rides the Tasks URL inside its signature, so the Tasks
+// tools can default to it; a runtime editing its config can neither move that
+// default to another task nor add one.
+describe('parseTasksBinding: the run’s own task', () => {
+  const onTask = { teamId: 'team-A', agentId: 'coder', delegate: true, boundTaskId: 'task-1' }
+
+  it('reads the task a team run is bound to', () => {
+    expect(parseTasksBinding(req(signedTasksUrl(onTask)))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      teamRun: true,
+      taskId: 'task-1',
+    })
+  })
+
+  it('refuses the URL when the task was moved, stripped or added', () => {
+    const url = signedTasksUrl(onTask)
+    expect(
+      parseTasksBinding(req(url.replace('scopeTaskId=task-1', 'scopeTaskId=task-2'))),
+    ).toBeUndefined()
+    expect(parseTasksBinding(req(url.replace(/&?scopeTaskId=task-1/, '')))).toBeUndefined()
+    const plain = signedTasksUrl({ teamId: 'team-A', agentId: 'coder', delegate: true })
+    expect(parseTasksBinding(req(`${plain}&scopeTaskId=task-1`))).toBeUndefined()
+  })
+
+  it('leaves the Memory and Tools binding alone: only the Tasks URL carries a task', () => {
+    const memory = mcpHttpUrl('http://127.0.0.1:1', 'memory', {
+      ...onTask,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+    expect(memory).not.toContain('scopeTaskId')
+    expect(parseBoundScope(req(memory))).toEqual({ teamId: 'team-A', agentId: 'coder' })
   })
 })

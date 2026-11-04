@@ -11,6 +11,9 @@ keywords:
     'OLLAMA_BASE_URL',
     'OTEL_EXPORTER_OTLP_ENDPOINT',
     'HOSTNAME',
+    'CLAWBOO_OPERATOR_SETTINGS',
+    'CLAWBOO_DISABLE_SELF_UPDATE',
+    'CLAWBOO_MAX_CONCURRENT_RUNS',
   ]
 ---
 
@@ -22,7 +25,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | -------------------------------------- | --------------------------------- | ------------------------------------------------------------ |
 | **Access and network**                 |                                   |                                                              |
 | `HOST`                                 | `127.0.0.1`                       | Address the dashboard listens on                             |
-| `STUDIO_ACCESS_TOKEN`                  | unset                             | Turns on the access gate for `/api/*`                        |
+| `STUDIO_ACCESS_TOKEN`                  | per-install token file            | The access token for `/api/*`; blank turns the gate off      |
 | `CLAWBOO_ALLOW_INSECURE`               | unset                             | Allows a wide bind with no token                             |
 | `CLAWBOO_ALLOWED_ORIGINS`              | loopback only                     | Extra browser origins allowed to call the API                |
 | `CLAWBOO_ALLOWED_HOSTS`                | loopback and the bind host        | Extra `Host` header values the server accepts                |
@@ -37,7 +40,11 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes            |
 | `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                    |
 | `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                      |
-| `CLAWBOO_CATALOG_INDEX_URL`            | GitHub raw URL                    | Where the marketplace catalog comes from                     |
+| `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                     |
+| **Pinned by an administrator**         |                                   |                                                              |
+| `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                   |
+| `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off         |
+| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install             |
 | **Provider keys**                      |                                   |                                                              |
 | `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes              |
 | `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings           |
@@ -46,6 +53,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup         |
 | `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                       |
 | **Runs and verification**              |                                   |                                                              |
+| `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn    |
 | `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                         |
 | `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                 |
 | `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                       |
@@ -95,27 +103,28 @@ The network address the dashboard listens on.
 - Default: `127.0.0.1`, so only this machine can connect
 - Example: `HOST=0.0.0.0`
 
-Any address other than loopback (`localhost`, `127.x.x.x`, `::1`) exposes the dashboard to your network. The server then refuses to start, exiting with code 1, unless `STUDIO_ACCESS_TOKEN` holds a valid token or `CLAWBOO_ALLOW_INSECURE=1` is set. Prefer `0.0.0.0` to a single LAN address: Clawboo's own agents reach its MCP servers at `127.0.0.1`, which a single-address bind does not answer. A wide bind without `CLAWBOO_ALLOWED_ORIGINS` also logs a warning that browsers on other machines will be blocked.
+Any address other than loopback (`localhost`, `127.x.x.x`, `::1`) exposes the dashboard to your network. The server then refuses to start, exiting with code 1, when the access gate is off (`STUDIO_ACCESS_TOKEN` set blank), unless `CLAWBOO_ALLOW_INSECURE=1` is set. A default install has its per-install token, so it starts. Prefer `0.0.0.0` to a single LAN address: Clawboo's own agents reach its MCP servers at `127.0.0.1`, which a single-address bind does not answer. A wide bind without `CLAWBOO_ALLOWED_ORIGINS` also logs a warning that browsers on other machines will be blocked.
 
 `HOSTNAME` is ignored. Docker, systemd and many CI runners set it automatically, so widening the bind always takes an explicit `HOST`. [Self-host securely](/guides/self-host-securely) walks through reaching Clawboo from another machine.
 
 ### STUDIO_ACCESS_TOKEN
 
-A shared secret that turns on the access gate.
+The access token, in place of the per-install one.
 
 - Type: string of letters, digits, `.`, `_`, `~` and `-`
-- Default: unset, so the gate is off
+- Default: unset, so the server uses the per-install token in `~/.clawboo/access-token` (under `CLAWBOO_HOME`), and makes it on the first start
+- Blank (`STUDIO_ACCESS_TOKEN=`): no token, so the access gate is off and every `/api/*` route is open to anything that can reach the server. `pnpm dev` sets it blank unless your shell sets it.
 - Example: `STUDIO_ACCESS_TOKEN=$(openssl rand -hex 32)`, saved somewhere you can reuse it
 
-With a token set, every `/api/*` request and the Gateway WebSocket need the `clawboo_access` cookie. Open `http://<host>:<port>/?access_token=<token>` once to get it: the right token sets an HttpOnly cookie (scoped to your `CLAWBOO_BASE_PATH`, `SameSite=Lax`, and `Secure` when the request arrives with `X-Forwarded-Proto: https`) and redirects to the same address without the token. A wrong token answers 401 `Invalid Clawboo access token.` and a missing cookie answers 401 `Clawboo access token required. Open /?access_token=<token> once to set a cookie.` The page shell and its static files load without the cookie.
+Every `/api/*` request and the Gateway WebSocket need the `clawboo_access` cookie, with this token or the per-install one. `clawboo` opens the browser with a one-time sign-in link that sets it, and `clawboo open` does the same for a running server. With a token you know, you can also open `http://<host>:<port>/?access_token=<token>` once: the right token sets an HttpOnly cookie (scoped to your `CLAWBOO_BASE_PATH`, `SameSite=Lax`, and `Secure` when the request arrives with `X-Forwarded-Proto: https`) and redirects to the same address without the token. A wrong token answers 401 `Invalid Clawboo access token.` and a missing cookie answers 401 ``Clawboo access token required. Run `clawboo open` on the computer running Clawboo, or open /?access_token=<token> once to set a cookie.`` The page shell and its static files load without the cookie. [Security](/operating/security#the-access-token) covers one-time links and the token file.
 
-Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI reaches a gated server with the `STUDIO_ACCESS_TOKEN` from its own shell; see [Token-gated installs](/reference/cli#token-gated-installs).
+Clawboo's own runtimes reach its MCP servers with a per-install attach token instead of the cookie, and only on direct connections from `127.0.0.1`. The variable is read only from the environment; a `studioAccessToken` key in `settings.json` does nothing. It is removed from the environment of every runtime Clawboo starts. The `clawboo` CLI uses the same token as the server: this variable from its own shell, or the token file when it is unset; see [Token-gated installs](/reference/cli#token-gated-installs).
 
 <Warning>
 Use only letters, digits, `.`, `_`, `~` and `-`. With any other character, such as the `+`, `/` or `=` in a base64 token, the server logs `SECURITY: refusing to start` with the character and the allowed set, and exits with code 1, on every bind. `CLAWBOO_ALLOW_INSECURE=1` does not skip this. On 0.5.0 and older, such a token turns the gate off with only a warning, which behind a reverse proxy on the same machine leaves every `/api/*` route open.
 </Warning>
 
-With no token set, the first request that reaches the server through a reverse proxy logs a one-time `SECURITY:` warning, because such a proxy delivers every request from `127.0.0.1`. [Security](/operating/security) explains what the gate does and does not protect.
+With the gate off, the first request that reaches the server through a reverse proxy logs a one-time `SECURITY:` warning, because such a proxy delivers every request from `127.0.0.1`. [Security](/operating/security) explains what the gate does and does not protect.
 
 ### CLAWBOO_ALLOW_INSECURE
 
@@ -163,6 +172,7 @@ How it behaves:
 - The unprefixed `/api` stays available for the CLI and Clawboo's own runtimes, with the same checks.
 - `/` and the bare prefix redirect to `<prefix>/`. Any other unprefixed path answers 404 `Not found. This Clawboo is served under <prefix>/`.
 - The access cookie is scoped to the prefix, so other apps on the same hostname never receive it. The CLI adds the prefix to the URLs it prints.
+- What the dashboard keeps in the browser (theme, layout, board view, onboarding and tour progress, the browser alert choice) is stored under keys that start with the prefix, such as `/clawboo:clawboo.theme`, so two instances under different prefixes on one hostname keep their own. A key saved before the prefix existed moves to the first instance that reads it; two instances whose pages load at the same moment can each keep a copy. At the root, keys keep their old names.
 
 ### CLAWBOO_SECRETS_MASTER_KEY
 
@@ -252,11 +262,67 @@ Not used in development mode, where Vite serves the dashboard. If the files cann
 
 Where the marketplace catalog index comes from.
 
-- Type: URL
-- Default: `https://raw.githubusercontent.com/clawboo/clawboo/refs/heads/main/catalog/dist/v1/index.json`
+- Type: `http` or `https` URL, with no user name, password or credential parameter in it
+- Default: the index at the running release's tag, `https://raw.githubusercontent.com/clawboo/clawboo/refs/tags/clawboo%40<version>/catalog/dist/v1/index.json`. A development build (version `0.0.0-dev`) reads the `main` branch's index instead.
 - Example: `CLAWBOO_CATALOG_INDEX_URL=https://mirror.example.com/catalog/v1/index.json`
 
-A `catalog/dist/v1/` folder above the server, as in a source checkout, takes precedence. Pack files are fetched relative to the index, and each is checked against the index's digest before use. The index is cached for 6 hours. When it cannot be reached, the marketplace still shows the built-in pack.
+A `catalog/dist/v1/` folder above the server, as in a source checkout, takes precedence. Pack files are fetched relative to the index, and each is checked against the index's digest before use. The index is cached for 6 hours. When it cannot be reached, the marketplace still shows the built-in pack. When the release's tag has no index (GitHub answers 404), Clawboo reads the `main` branch's index for that refresh. An override is used as it is, with no fallback.
+
+The operator settings file key `catalogIndexUrl` sets the same thing; this variable wins over the file. A value Clawboo cannot use stops the server at startup (see [CLAWBOO_OPERATOR_SETTINGS](#clawboo_operator_settings)).
+
+## Pinned by an administrator
+
+An administrator who deploys Clawboo for a team can pin these settings for everyone, in one file or with these variables. **Settings** > **System** > **Deployment** shows a pinned setting as "Set by your administrator", and it cannot be changed there. [Run the Clawboo server](/operating/deployment#pin-settings-for-everyone) walks through the file.
+
+Which value wins, highest first: what Clawboo itself refuses (an in-app update of an install this user cannot write stays off whatever is pinned), then the key's variable, then the operator file, then a value saved in **Settings** > **System** > **Deployment** (one value for the whole install, not one per person), then the default.
+
+Every flag variable here takes `1` or `true` to turn the setting on and `0` or `false` to pin it off, in any letter case. Empty or unset pins nothing. Any other value stops the server at startup, exiting with code 1 and logging `CONFIG: refusing to start.` with the variable and the reason.
+
+### CLAWBOO_OPERATOR_SETTINGS
+
+Where the operator settings file is.
+
+- Type: path; a leading `~` is expanded and a relative path is resolved
+- Default: unset, so Clawboo looks for `<CLAWBOO_HOME>/operator.json` and runs without one when it is not there
+- Example: `CLAWBOO_OPERATOR_SETTINGS=/etc/clawboo/operator.json`
+
+The file is a JSON object of the keys below. Clawboo reads it once at startup and never writes it. It stops the server at startup, logging `CONFIG: refusing to start.` and the reason, when:
+
+- this variable names a file that does not exist, or a folder;
+- the file is not valid JSON, is not an object, or is larger than 64 KB;
+- any user on the machine can write it (on macOS and Linux);
+- it has a key Clawboo does not know, or a key whose value has the wrong type;
+- a key's name looks like a credential (containing `token`, `secret`, `password`, `apiKey`, `credential`, `privateKey` or `auth`), or a URL carries a user name, a password or a credential parameter. Keep keys in the vault or in the environment.
+
+| Key                       | Type    | Variable                            |
+| ------------------------- | ------- | ----------------------------------- |
+| `disableSelfUpdate`       | boolean | `CLAWBOO_DISABLE_SELF_UPDATE`       |
+| `disableBrowserAutostart` | boolean | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
+| `catalogIndexUrl`         | URL     | `CLAWBOO_CATALOG_INDEX_URL`         |
+
+Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
+
+### CLAWBOO_DISABLE_SELF_UPDATE
+
+Turns off updating Clawboo from the dashboard.
+
+- Type: flag
+- Default: unset, so a global install the server's user can write is offered the update
+- Example: `CLAWBOO_DISABLE_SELF_UPDATE=1`
+
+With it on, the dashboard shows no update chip, `GET /api/system/self-version` answers as it does with `?local=1` (no call to npm's registry, `latest` is `null`), and `POST /api/system/self-update` refuses with "In-app updates are turned off for this install by its administrator." Use it on an install that something else manages, such as a container image, a distro package or a service manager. Operator file key: `disableSelfUpdate`.
+
+Without it, the update is still refused on an install whose package folder, the folder holding it, or the folder npm links the `clawboo` command into (the prefix's `bin`) the server's user cannot write, such as a root-owned `/usr/local`. The chip there copies the update command instead.
+
+### CLAWBOO_DISABLE_BROWSER_AUTOSTART
+
+Stops Clawboo starting the browser connectors on an install that has never had one.
+
+- Type: flag
+- Default: unset, so Playwright and Chrome DevTools start when Clawboo starts, if neither has been connected or disconnected yet
+- Example: `CLAWBOO_DISABLE_BROWSER_AUTOSTART=1`
+
+Each browser keeps a process running, and on a machine with no browser installed it cannot browse anyway. With this on, they start only when someone connects them from **Connectors**. Browsers someone already connected still come back after a restart. Anyone using the dashboard can turn the same thing off for the whole install in **Settings** > **System** > **Deployment**, unless this variable or the file pins it. Operator file key: `disableBrowserAutostart`.
 
 ## Provider keys
 
@@ -323,6 +389,14 @@ OpenClaw does not read this variable, so when Clawboo sets up OpenClaw on Ollama
 The Composio API address for brokered apps. The Composio key itself is saved in the vault from **Connectors**; Clawboo does not read it from the environment.
 
 ## Runs and verification
+
+### CLAWBOO_MAX_CONCURRENT_RUNS
+
+- Type: whole number, 1 or more
+- Default: `8`
+- Example: `CLAWBOO_MAX_CONCURRENT_RUNS=4`
+
+How many agent runs Clawboo executes at once, across every team and chat on the server: board tasks, team chat turns and the tasks they delegate, one-to-one chat with Clawboo Native, Claude Code, Codex and Hermes agents, peer exchanges and Routine runs. A run that starts while every slot is taken waits, and waiting runs start in the order they arrived, with one exception. A run that has to wait for the same agent's previous run to finish anyway waits without holding a slot, even when one is free, and a later run of another agent can start before it. That way one busy agent cannot take the whole cap. Waiting is never a failure: a waiting task does not move to **Blocked**, the idle watchdogs do not count the wait, and Stop takes a waiting run out of the queue. Routines that fall due together start as slots free up. The verification reviewer runs inside the slot of the run it checks. One-to-one chat with an OpenClaw agent goes through the Gateway, not the server, so the cap does not count it. Any value that is not a whole number of at least 1 means the default, and the server logs it.
 
 ### CLAWBOO_RUN_SILENT_TIMEOUT_MS
 
@@ -570,18 +644,19 @@ Clawboo does not read `GATEWAY_AUTH_TOKEN` as its own setting. When `settings.js
 
 Clawboo sets these on processes it starts. Do not set them yourself.
 
-| Variable                                                | Set on                                     | Value                                                                                                                                                                                                                                  |
-| ------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAWBOO_VERSION`                                       | The server the CLI starts                  | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk. |
-| `CLAWBOO_LAUNCH_DIR`                                    | The server the CLI starts                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                             |
-| `CLAWBOO_MCP_BIN_DIR`                                   | The server the CLI starts (normal install) | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                 |
-| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`            | A restarted server                         | The port to keep; the new server waits up to 15 seconds for it to free.                                                                                                                                                                |
-| `NODE_ENV`                                              | The server the CLI starts                  | `production`                                                                                                                                                                                                                           |
-| `CODEX_HOME`, `HERMES_HOME`                             | Each Codex or Hermes run                   | That agent's own home folder under `~/.clawboo/runtimes/`                                                                                                                                                                              |
-| The runtime's provider key, such as `ANTHROPIC_API_KEY` | Each runtime run                           | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
-| `NO_PROXY`, `no_proxy`                                  | Each runtime run, when a proxy is set      | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
-| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`            | The `openclaw doctor --fix` repair run     | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
-| `CLAWBOO_DB_PATH`                                       | Stdio attach snippets                      | The dashboard's database file                                                                                                                                                                                                          |
+| Variable                                                                          | Set on                                     | Value                                                                                                                                                                                                                                  |
+| --------------------------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAWBOO_VERSION`                                                                 | The server the CLI starts                  | The CLI's version, which the server reports as its own. Without it the server reads its version from its package, or `0.0.0-dev` in a source checkout. The in-app update leaves it out, so the new server reads its version from disk. |
+| `CLAWBOO_LAUNCH_DIR`                                                              | The server the CLI starts                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" in connector setup. Ignored unless it is an absolute path to an existing folder.                                                                             |
+| `CLAWBOO_MCP_BIN_DIR`                                                             | The server the CLI starts (normal install) | The bundled `bin` folder, so stdio attach snippets point at the right files. Without it, snippets show a `<path-to>/dist/bin/<server>.js` placeholder.                                                                                 |
+| `CLAWBOO_API_PORT` with `CLAWBOO_AWAIT_PORT`                                      | A restarted server                         | The port to keep; the new server waits up to 15 seconds for it to free. The new server also gets the old one's node options, such as `--max-old-space-size`, except the inspector's.                                                   |
+| `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS`, `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS` | The Chrome DevTools connector              | `1`, which turns off its usage statistics and its daily check for a newer version. If the server's own environment sets either variable, that value is passed on instead.                                                              |
+| `NODE_ENV`                                                                        | The server the CLI starts                  | `production`                                                                                                                                                                                                                           |
+| `CODEX_HOME`, `HERMES_HOME`                                                       | Each Codex or Hermes run                   | That agent's own home folder under `~/.clawboo/runtimes/`                                                                                                                                                                              |
+| The runtime's provider key, such as `ANTHROPIC_API_KEY`                           | Each runtime run                           | The key found in the environment, the vault or OpenClaw's `.env`                                                                                                                                                                       |
+| `NO_PROXY`, `no_proxy`                                                            | Each runtime run, when a proxy is set      | Your list plus `127.0.0.1,localhost,::1`                                                                                                                                                                                               |
+| `OPENCLAW_SERVICE_REPAIR_POLICY`, `NO_COLOR`                                      | The `openclaw doctor --fix` repair run     | `external` (leave any system Gateway service alone) and `1`                                                                                                                                                                            |
+| `CLAWBOO_DB_PATH`                                                                 | Stdio attach snippets                      | The dashboard's database file                                                                                                                                                                                                          |
 
 ## Testing and development
 
@@ -611,9 +686,20 @@ Runtimes Clawboo starts (Claude Code, Codex, Hermes) and the verification comman
 
 The removal works by name. Any other secret in the server's environment, including provider keys such as `OPENAI_API_KEY`, reaches every agent those runtimes run. Start Clawboo from a shell that holds only what agents may see. [What agents can do](/concepts/permissions) covers what else they can reach.
 
+## What connectors and approved commands inherit
+
+Local connectors and the shell commands you approve for a Clawboo Native agent start from an empty environment instead. They get back only:
+
+- What a process needs to start: `PATH`, `HOME`, `SHELL`, `USER`, `LOGNAME`, `TERM`, `TMPDIR`, `TZ`, `LANG`, `LC_ALL` and `LC_CTYPE`, and on Windows `SystemRoot`, `APPDATA`, `LOCALAPPDATA`, `USERPROFILE`, `TEMP` and the other system folders.
+- Proxy settings: `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY`, in either case.
+- npm's prefix, cache and update check: `npm_config_prefix`, `npm_config_cache` and `npm_config_update_notifier`, in lower or upper case (`NPM_CONFIG_PREFIX` and so on). No other npm setting arrives, so npm credentials such as `npm_config__authToken` stay out.
+- For a connector, the keys you entered for that connector.
+
+A connector also gets `npm_config_update_notifier=false` when neither spelling is set, so its `npx` start does not ask the registry for a newer npm. An approved command runs npm as you configured it.
+
 <Accordion title="Source of truth">
 
-Server start: `apps/web/server/index.ts`, `lib/resolveHost.ts`, `lib/portUtils.ts`. Access: `packages/gateway-proxy/src/access-gate.ts`, `origin-guard.ts`. Paths and the base path: `packages/config/src/index.ts`, `basePath.ts`. Keys: `apps/web/server/lib/secretsVault.ts`, `lib/runtimes/descriptor.ts`. Runtime environments: `lib/runtimes/childEnv.ts`. Each timer's variable is read next to its default; [Limits and defaults](/reference/limits-and-defaults) gives the file and line.
+Server start: `apps/web/server/index.ts`, `lib/resolveHost.ts`, `lib/portUtils.ts`. Pinned settings: `lib/operatorSettings.ts`. Access: `packages/gateway-proxy/src/access-gate.ts`, `origin-guard.ts`. Paths and the base path: `packages/config/src/index.ts`, `basePath.ts`. Keys: `apps/web/server/lib/secretsVault.ts`, `lib/runtimes/descriptor.ts`. Runtime environments: `lib/runtimes/childEnv.ts`; connectors and approved commands: `packages/mcp/src/connector/env.ts`. Each timer's variable is read next to its default; [Limits and defaults](/reference/limits-and-defaults) gives the file and line.
 
 </Accordion>
 

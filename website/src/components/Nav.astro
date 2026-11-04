@@ -34,7 +34,7 @@ import { nav, links, site } from '../lib/site'
     <div class="ml-auto hidden items-center gap-2.5 md:flex">
       <ThemeToggle />
       <GitHubStars variant="pill" />
-      <Button href="#how" variant="primary" size="md" iconRight="arrow-right">Get started</Button>
+      <Button href={links.github} target="_blank" rel="noopener noreferrer" variant="primary" size="md" iconRight="arrow-right">Get started</Button>
     </div>
 
     <!-- Mobile cluster -->
@@ -77,7 +77,7 @@ import { nav, links, site } from '../lib/site'
     </div>
     <div class="mt-4 flex flex-col gap-2.5">
       <GitHubStars variant="pill" class="w-full justify-center" />
-      <Button href="#how" variant="primary" size="lg" iconRight="arrow-right" class="w-full" data-sheet-link>Get started</Button>
+      <Button href={links.github} target="_blank" rel="noopener noreferrer" variant="primary" size="lg" iconRight="arrow-right" class="w-full" data-sheet-link>Get started</Button>
     </div>
     <p class="font-data mt-4 text-center text-[11px] text-secondary">{site.tagline}</p>
   </div>

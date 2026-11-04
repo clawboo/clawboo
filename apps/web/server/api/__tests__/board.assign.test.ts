@@ -18,7 +18,9 @@ import {
   createRoom,
   createTask,
   getComments,
+  getSetting,
   getTask,
+  setSetting,
   setTaskRunnerInputs,
   teams,
   updateStatus,
@@ -49,7 +51,9 @@ vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
   },
 }))
 
-const { getDb, resetDb } = await import('../../lib/db')
+const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+const { encodeTaskSessionPointer, taskSessionSettingKey } =
+  await import('../../lib/teamChat/nativeTeamSession')
 const {
   boardAssignPOST,
   boardCommentPOST,
@@ -89,12 +93,17 @@ const DASHBOARD_HEADERS = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': '
 describe('board: handing a task to one agent', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-board-assign-'))
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    // `getDb()` follows CLAWBOO_HOME before $HOME: sandbox both.
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     dispatched.length = 0
     reruns.length = 0
     const db = getDb()
@@ -141,6 +150,8 @@ describe('board: handing a task to one agent', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
@@ -396,6 +407,38 @@ describe('board: handing a task to one agent', () => {
       expect(isHumanAssignment(stored.sourceDelegationId)).toBe(true)
       expect(getComments(getDb(), t.id).map((c) => c.body)).toEqual(['Assigned to Writer.'])
       expect(dispatched).toEqual([{ teamId: TEAM, taskId: t.id }])
+    })
+
+    it('a task given to someone else starts fresh; given to the same agent again, it keeps its session', () => {
+      const db = getDb()
+      const pointer = encodeTaskSessionPointer({
+        sessionId: 's',
+        runtime: 'codex',
+        ticketHash: 'h',
+        seenAt: 1,
+      })
+      const t = createTask(db, {
+        title: 'stuck',
+        teamId: TEAM,
+        sourceDelegationId: 'r:deleg:agent:reviewer:reflectTo:lead',
+      })
+      claimTask(db, t.id, 'reviewer')
+      updateStatus(db, t.id, 'blocked')
+      setSetting(db, taskSessionSettingKey('reviewer', TEAM, t.id), pointer)
+
+      // The same agent again: a retry.
+      boardAssignPOST(
+        req({ params: { taskId: t.id }, body: { agentId: 'reviewer' } }),
+        mockRes().res,
+      )
+      expect(getSetting(db, taskSessionSettingKey('reviewer', TEAM, t.id))).toBe(pointer)
+
+      // Someone else: nobody resumes the old conversation, the reviewer included
+      // if the task comes back to it later.
+      claimTask(db, t.id, 'reviewer')
+      updateStatus(db, t.id, 'blocked')
+      boardAssignPOST(req({ params: { taskId: t.id }, body: { agentId: 'writer' } }), mockRes().res)
+      expect(getSetting(db, taskSessionSettingKey('reviewer', TEAM, t.id))).toBeNull()
     })
 
     it('re-routes a failed task to someone else and puts it back to To do', () => {

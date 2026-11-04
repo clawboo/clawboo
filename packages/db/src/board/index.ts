@@ -15,6 +15,8 @@ export {
   TASK_STATUSES,
   canTransition,
   delegatorOf,
+  formatInterSessionMessage,
+  formatPeerPost,
   isLocked,
   isTaskStatus,
   isTerminal,
@@ -23,6 +25,8 @@ export {
 } from '@clawboo/board-core'
 export type {
   AttentionReason,
+  InterSessionAttribution,
+  PeerPostLike,
   RunCostSource,
   TaskAttention,
   TaskRunCost,

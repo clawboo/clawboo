@@ -53,13 +53,14 @@ The rules match relative paths only, so a bare specifier such as `react-dom/serv
 
 ### Other SPA lint rules
 
-The same config holds three more rules for `apps/web/src`. Each one fails lint:
+The same config holds four more rules for `apps/web/src`. Each one fails lint:
 
 | Rule                                                                  | Use instead                                                                      | Why                                                                                                                   |
 | --------------------------------------------------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
 | No capture-phase `keydown` or `keyup` listeners                       | Register the overlay with `useDismissableLayer()`, or listen in the bubble phase | A capture listener runs before the dismiss stack and every React `onKeyDown`, so two overlays act on one Escape.      |
 | No root-absolute `/api/...` URL in `fetch()` or `new EventSource()`   | `apiFetch()` and `apiUrl()` from `@clawboo/control-client`                       | Clawboo can be served under a path prefix (`CLAWBOO_BASE_PATH`); a hardcoded root path skips the prefix and 404s.     |
 | No root-absolute static asset path in a JSX `src`, `href` or `poster` | A relative path such as `logo.svg`                                               | A relative path resolves against the `<base href>` the server injects, which is right at the root and under a prefix. |
+| No direct `localStorage` or `sessionStorage` outside tests            | `scopedLocalStorage` and `scopedSessionStorage` from `@/lib/clientStorage`       | Browser storage belongs to the origin; the helper puts the base path in front of each key, so instances never share.  |
 
 The repo's own `scripts/` folder is linted too: `pnpm lint` ends with `pnpm lint:repo` (`eslint scripts/ --max-warnings 0`).
 

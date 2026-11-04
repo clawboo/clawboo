@@ -7,7 +7,7 @@ keywords: ['misc', 'catalog', 'marketplace', 'packs', 'templates', 'CLAWBOO_CATA
 
 The agent and team templates the **Marketplace** browses, served as an index plus one document set per entry. Use this page when you build a catalog view of your own or check what a template deploys. These routes read files, not the database, and they never return an empty catalog.
 
-Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` to each `curl`. All three routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
+Examples use the default port `18790`. Add the access cookie to each `curl`, as shown under [Authentication](/reference/rest-api/index#authentication). All three routes are on the general rate limit described in the [REST API overview](/reference/rest-api/index).
 
 ## Routes
 
@@ -22,7 +22,7 @@ Examples use the default port `18790` and no access token. With `STUDIO_ACCESS_T
 The server merges a built-in pack with the packs it can fetch:
 
 1. **The built-in pack** (15 agents, 5 teams) is compiled into the server and always included, so first-run onboarding works offline.
-2. **The other packs** come from the first source that exists: a local `catalog/dist/v1/` folder (a repo checkout), then the URL in `CLAWBOO_CATALOG_INDEX_URL`, then `catalog/dist/v1/index.json` on the `main` branch of the `clawboo/clawboo` repository on GitHub.
+2. **The other packs** come from the first source that exists: a local `catalog/dist/v1/` folder (a repo checkout), then the URL in `CLAWBOO_CATALOG_INDEX_URL` (or `catalogIndexUrl` in the operator settings file), then `catalog/dist/v1/index.json` at this release's tag (`clawboo@<version>`) in the `clawboo/clawboo` repository on GitHub. A development build, or a release whose tag answers 404, reads the `main` branch's instead.
 
 Each pack's bytes are checked against the `sha256` digest the index lists before they are parsed, and a pack that fails the check is skipped. A pack this build cannot read is dropped, and an index newer than this build understands (`schemaVersion` above 1) is ignored. Fetched packs are cached on disk under `<clawboo home>/catalog/` and checked again each time they are read.
 

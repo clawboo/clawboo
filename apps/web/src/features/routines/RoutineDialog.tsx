@@ -26,6 +26,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { isOnceSpec } from '@clawboo/scheduler'
+
 import { Button, IconButton } from '@/features/shared/Button'
 import { Chip } from '@/features/shared/Chip'
 import { Modal } from '@/features/shared/Modal'
@@ -43,6 +45,7 @@ import {
   updateSchedule,
   type RoutineRun,
   type ScheduleActionResult,
+  type SchedulerTimeZone,
   type ScheduleRecord,
 } from '@/lib/schedulesClient'
 import { confirm } from '@/stores/confirm'
@@ -53,6 +56,7 @@ import { useViewStore } from '@/stores/view'
 
 import {
   agentsForTeam,
+  browserTimeZone,
   buildRoutineCreateSpec,
   buildRoutinePatch,
   cronError,
@@ -71,15 +75,19 @@ import {
   runNowBlocker,
   runPill,
   runtimeDisplayName,
+  sameTimeZone,
   sortedTeams,
   statusPill,
   targetSummary,
+  timeZoneChoices,
+  timeZoneLabel,
   toggleBlocker,
   untilLabel,
   type RoutineDirectoryAgent,
   type RoutineDirectoryTeam,
   type RoutineFormValues,
 } from './routineHelpers'
+import { useSchedulerTimeZone } from './useSchedulerTimeZone'
 
 /** The teams and agents a routine can be pointed at. */
 export interface RoutineDirectory {
@@ -96,6 +104,121 @@ const INPUT_CLASS =
   'outline-none transition placeholder:text-foreground/35 ' +
   'focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50'
 const HINT = 'mt-1.5 text-[11.5px] leading-relaxed text-foreground/50'
+
+// ─── The scheduler time zone ─────────────────────────────────────────────────
+
+/** Select value for "follow the server's own zone" (no zone is named this). */
+const SERVER_ZONE = 'server'
+
+/**
+ * The zone a routine's time is read in, said where the time is chosen, with a
+ * way to change it. One zone for every routine on this install, so the hint
+ * says so; changing it moves each routine's next run onto the new zone's clock.
+ */
+function RoutineTimeZone({
+  zone,
+  onSave,
+  disabled,
+}: {
+  zone: SchedulerTimeZone
+  onSave: (timeZone: string | null) => Promise<ScheduleActionResult>
+  disabled: boolean
+}) {
+  const [editing, setEditing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const selectId = useId()
+  const mine = browserTimeZone()
+  const options: SelectOption[] = useMemo(
+    () => [
+      { value: SERVER_ZONE, label: `The server's zone (${zone.hostTimeZone})` },
+      ...timeZoneChoices([zone.timeZone, zone.hostTimeZone, mine]).map((z) => ({
+        value: z,
+        label: sameTimeZone(z, mine) ? `${z} (yours)` : z,
+      })),
+    ],
+    [zone.timeZone, zone.hostTimeZone, mine],
+  )
+
+  const choose = async (value: string): Promise<void> => {
+    const next = value === SERVER_ZONE ? null : value
+    if (next === (zone.configured ? zone.timeZone : null)) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    const result = await onSave(next)
+    setSaving(false)
+    if (result.ok) {
+      setEditing(false)
+      return
+    }
+    useToastStore.getState().addToast({
+      message: result.error ?? 'The time zone could not be saved.',
+      type: 'error',
+    })
+  }
+
+  const whose = sameTimeZone(zone.timeZone, mine)
+    ? ' (your time zone)'
+    : zone.configured
+      ? ''
+      : " (the server's time zone)"
+
+  return (
+    <div className="mt-2" data-testid="routine-time-zone">
+      {editing ? (
+        <>
+          <label htmlFor={selectId} className="sr-only">
+            Time zone for routines
+          </label>
+          <Select
+            id={selectId}
+            data-testid="routine-time-zone-select"
+            aria-label="Time zone for routines"
+            value={zone.configured ? zone.timeZone : SERVER_ZONE}
+            onChange={(v) => void choose(v)}
+            options={options}
+            searchable
+            searchPlaceholder="Search time zones"
+            disabled={disabled || saving}
+            style={{ width: '100%' }}
+          />
+          <p className={HINT}>
+            Applies to every routine. Each one&apos;s next run moves to the new zone.
+          </p>
+        </>
+      ) : (
+        <p className={HINT}>
+          <span title={zone.timeZone}>
+            Times are in {timeZoneLabel(zone.timeZone)}
+            {whose}.
+          </span>{' '}
+          <button
+            type="button"
+            data-testid="routine-time-zone-change"
+            className="font-medium text-foreground/70 underline underline-offset-2 hover:text-foreground disabled:opacity-50"
+            onClick={() => setEditing(true)}
+            disabled={disabled}
+          >
+            Change
+          </button>
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The zone a routine's schedule is read in, said beside it when it is not the
+ *  person's own, so "Daily · 9am" is not read as their 9am. */
+function RoutineZoneNote() {
+  const { zone } = useSchedulerTimeZone()
+  if (!zone || sameTimeZone(zone.timeZone, browserTimeZone())) return null
+  return (
+    <span data-testid="routine-schedule-zone" title={zone.timeZone}>
+      , {timeZoneLabel(zone.timeZone)} time
+    </span>
+  )
+}
 
 // ─── The form ────────────────────────────────────────────────────────────────
 
@@ -202,10 +325,17 @@ function RoutineForm({
     !!chosenTeam &&
     agentsForTeam(directory.agents, chosenTeam.id).length === 0
 
+  // The zone the server reads cron in. The preview waits for it: worked out in
+  // any other zone, its time could differ from the one the server arms.
+  const { zone: schedulerZone, save: saveSchedulerZone } = useSchedulerTimeZone()
+  const timeZone = schedulerZone?.timeZone
+  const otherZone = timeZone != null && !sameTimeZone(timeZone, browserTimeZone())
+
   const checkSchedule = isNew || values.cron.trim() !== initial.cron.trim()
   const problem = routineFormProblem(values, { checkSchedule })
-  const scheduleProblem = checkSchedule ? cronError(values.cron) : null
-  const next = scheduleProblem ? null : nextRunPreview(values.cron)
+  const scheduleProblem = checkSchedule ? cronError(values.cron, timeZone) : null
+  const next =
+    scheduleProblem || !schedulerZone ? null : nextRunPreview(values.cron, Date.now(), timeZone)
   const lead = directory.booZeroName ?? "the team's lead"
 
   return (
@@ -361,8 +491,12 @@ function RoutineForm({
             </p>
           ) : next != null ? (
             <p className={HINT} data-testid="routine-next-preview">
-              Next run: {formatWhen(next)}
+              Next run: {formatWhen(next, timeZone)}
+              {otherZone ? ` (${formatWhen(next)} your time)` : null}
             </p>
+          ) : null}
+          {schedulerZone ? (
+            <RoutineTimeZone zone={schedulerZone} onSave={saveSchedulerZone} disabled={busy} />
           ) : null}
         </div>
       </div>
@@ -627,6 +761,7 @@ function RoutineDetails({
 
         <DetailRow label="Schedule">
           <span>{humanCron(record.cronSpec)}</span>
+          {routine && !isOnceSpec(record.cronSpec) ? <RoutineZoneNote /> : null}
           <span className="text-foreground/50">
             {record.nextRunAt != null
               ? ` · next ${untilLabel(record.nextRunAt)} (${formatWhen(record.nextRunAt)})`

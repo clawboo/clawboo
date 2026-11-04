@@ -33,6 +33,7 @@ import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import { withRunSlot } from '../runSlots'
 import { adapterFactoryFor, type RuntimeAdapterFactory } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -70,6 +71,10 @@ export function nativeChatSessionSettingKey(agentId: string): string {
  *  `driveAgentChat`), so at most one run per agent is in flight. */
 const abortMap = new Map<string, { adapter: RuntimeAdapter; run: RunHandle }>()
 
+/** agentId → its turns waiting for a run slot (see runSlots), so a Stop takes them
+ *  out of the queue too. */
+const queuedTurns = new Map<string, Set<AbortController>>()
+
 /** Vault → spawned-run env (mirrors serverDeliver.buildApiKeyEnv). */
 function buildApiKeyEnv(runtime: string): Record<string, string> {
   const env: Record<string, string> = {}
@@ -104,8 +109,10 @@ export function agentChatSessionKey(db: ClawbooDb, agentId: string): string {
   return directChatSessionKey(agentId, agentRuntime(db, agentId))
 }
 
-/** Abort the in-flight conversational turn for an agent (the Stop button). */
+/** Abort the in-flight conversational turn for an agent (the Stop button), and
+ *  cancel any of its turns still waiting for a run slot. */
 export async function stopAgentChat(agentId: string): Promise<void> {
+  for (const queued of queuedTurns.get(agentId) ?? []) queued.abort()
   const entry = abortMap.get(agentId)
   if (!entry) return
   abortMap.delete(agentId)
@@ -132,8 +139,9 @@ export interface DriveAgentChatParams {
  * channel), commits the reply, and records the run's spend (agent scope; a paused
  * CAP budget refuses the turn, or aborts one already going). Turns for one agent
  * run one at a time: a persistent-home runtime on its home mutex (shared with team
- * runs and routines for the same agent), any other on a per-agent chat lock.
- * Best-effort: never throws.
+ * runs and routines for the same agent), any other on a per-agent chat lock. Each
+ * turn first takes one of the process's run slots, waiting for one when every slot
+ * is taken. Best-effort: never throws.
  */
 export async function driveAgentChat(params: DriveAgentChatParams): Promise<void> {
   const { db, agentId, message, mcpBaseUrl } = params
@@ -424,13 +432,29 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // for the same (runtime, agent) can't overlap its session state; any other
   // runtime takes a per-agent chat lock, which keeps the resume pointer honest.
   const lockKey = homeDir ?? `direct-chat:${agentId}`
-  await homeDispatchMutex
-    .run(lockKey, runJob, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
+  // A run slot first (see runSlots), then the agent's lock. A Stop while the turn
+  // waits for its slot takes it out of the queue, and it never starts.
+  const queue = new AbortController()
+  const waiting = queuedTurns.get(agentId) ?? new Set<AbortController>()
+  waiting.add(queue)
+  queuedTurns.set(agentId, waiting)
+  const leaveQueue = (): void => {
+    waiting.delete(queue)
+    if (waiting.size === 0 && queuedTurns.get(agentId) === waiting) queuedTurns.delete(agentId)
+  }
+  await withRunSlot(
+    () => {
+      leaveQueue()
+      return homeDispatchMutex.run(lockKey, runJob, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
+    },
+    { key: lockKey, signal: queue.signal },
+  )
     .catch((err: unknown) => {
       // An ACQUIRE timeout means `runJob` never ran at all: no 'running' status, no
       // delta, no persisted row. Swallowing it would be a silent non-response with
       // nothing on screen to explain it. Every other rejection stays swallowed:
-      // `runJob` owns its own reporting and has already surfaced the reason.
+      // `runJob` owns its own reporting and has already surfaced the reason, and a
+      // turn stopped while it waited for a slot is as silent as any user Stop.
       if (err instanceof MutexAcquireTimeoutError) {
         persist(
           'This agent was busy with another run and did not pick the message up in time. Send it again.',
@@ -439,4 +463,5 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         publishAgentStatus(sessionKey, { agentId, status: 'idle' })
       }
     })
+    .finally(leaveQueue)
 }

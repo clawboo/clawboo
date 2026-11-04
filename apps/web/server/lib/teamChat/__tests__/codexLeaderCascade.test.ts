@@ -47,7 +47,6 @@ import {
   buildTeamSessionKey,
   createBoardOrchestrator,
   createNudgeQueue,
-  REFLECT_WINDOW_MS,
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
@@ -57,6 +56,7 @@ import { nativeTeamSessionSettingKey } from '../nativeTeamSession'
 import { createServerBoardClient } from '../serverBoardClient'
 import { HUMAN_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
+import { settle } from './settleCascade'
 
 const TEAM = 'T'
 const LEAD = 'codex-lead'
@@ -121,27 +121,6 @@ class ScriptedCodex implements RuntimeAdapter {
 
 const done = (summary: string): RuntimeEvent =>
   ({ kind: 'done', reason: 'success', summary }) as RuntimeEvent
-
-/** Advance fake time in small steps (interleaving REAL macrotasks — fs I/O in the
- *  drains isn't timer-gated) until `until()` holds or the fake-time budget runs out.
- *  The cascade mixes timer-gated stages (the 3s reflect batch) with real-I/O stages
- *  (mkdir, sqlite), so under full-suite load on a slow CI runner the drains' I/O lags
- *  the fake-time advance. A single setImmediate per step and a tight budget let the
- *  cascade stall after the worker completes but before the leader's synthesis turn is
- *  delivered (leadStarts=1 not 2). Fix: a generous budget PLUS several real macrotask
- *  turns per step so the I/O keeps pace; the loop still exits the instant `until()`
- *  flips, so the fast (local) path is unchanged. */
-async function settle(until: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
-  const step = 250
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
-  }
-  for (let t = 0; t < budgetMs && !until(); t += step) {
-    await vi.advanceTimersByTimeAsync(step)
-    await flush() // real macrotask flushes (I/O completions)
-  }
-  await flush() // let any last real I/O settle before the caller asserts
-}
 
 describe('Codex-led cascade (delegate MCP tool → board → report-up → synthesis)', () => {
   let home: string
@@ -278,7 +257,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     // the 3s reflect batch → the leader's synthesis turn persisting to chat. The
     // delegation-turn ack persists too now (streamed prose never vanishes), so wait
     // for BOTH leader turns — settling on the first would race the synthesis.
-    await settle(() => persisted.length >= 2)
+    await settle(() => persisted.length >= 2, "the leader's synthesis turn")
 
     // 1. The delegation became a DURABLE board task, ran on the worker, and is DONE.
     const tasks = listTasks(db, { teamId: TEAM })
@@ -398,7 +377,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     })
 
     await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser', HUMAN_TURN)
-    await settle(() => persisted.length >= 3)
+    await settle(() => persisted.length >= 3, "the lead's second synthesis")
 
     // 1. Only the lead's turns reach the chat: the ack and its two syntheses.
     expect(persisted.map((p) => p.text)).toEqual(['handed off', 'SYNTHESIS 1', 'SYNTHESIS 2'])
@@ -440,11 +419,21 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     // re-reads the same pointer and loops through identical failures.
     setSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM), 'stale-sid')
 
+    // As the real Codex adapter ends a failed run: a fatal error, then `done`.
+    // The drain stops at the error, so the clear has to happen there.
     const adapters = new Map<string, ScriptedCodex>([
       [
         LEAD,
         new ScriptedCodex([
-          [{ kind: 'done', reason: 'error', summary: 'session not found' } as RuntimeEvent],
+          [
+            {
+              kind: 'error',
+              code: null,
+              message: 'session not found',
+              fatal: true,
+            } as RuntimeEvent,
+            { kind: 'done', reason: 'error', summary: 'session not found' } as RuntimeEvent,
+          ],
         ]),
       ],
     ])
@@ -475,7 +464,10 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     })
 
     await deliver(skFor(LEAD), LEAD, 'follow-up message', HUMAN_TURN)
-    await settle(() => !getSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM)))
+    await settle(
+      () => !getSetting(db, nativeTeamSessionSettingKey(LEAD, TEAM)),
+      'the stale pointer clear',
+    )
 
     // The failed resumed turn CLEARED the pointer — the next turn starts fresh
     // instead of resuming the dead handle again.

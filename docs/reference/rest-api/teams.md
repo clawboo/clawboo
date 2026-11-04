@@ -31,7 +31,7 @@ Two different things on this page are called rooms. A team's **chat rooms** (`/a
 
 </Note>
 
-Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work. The `curl` examples assume the access gate is off; with `STUDIO_ACCESS_TOKEN` set, add `-b 'clawboo_access=<token>'` (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules and team-verify-command routes name it `:teamId`. Both are the team id.
+Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work, except `PUT /api/team-verify-command/:teamId`, which is also on the sensitive tier (60 a minute). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules and team-verify-command routes name it `:teamId`. Both are the team id.
 
 ## Routes
 

@@ -221,9 +221,9 @@ The latest npm release is 0.5.0. Run `clawboo --version` to see which one you ha
 
 **What you see:** the Marketplace shows only 5 teams and 15 agents.
 
-**What it affects:** Clawboo's server downloads the full catalog from the Clawboo repository on GitHub, and refreshes it at most every 6 hours. Offline, or until the download lands, you see only the built-in pack.
+**What it affects:** Clawboo's server downloads the full catalog published with its version from the Clawboo repository on GitHub, and refreshes it at most every 6 hours. Offline, or until the download lands, you see only the built-in pack.
 
-**What to do:** check that the computer running Clawboo can reach GitHub, then wait for the next refresh. See [Marketplace](/using/marketplace).
+**What to do:** check that the computer running Clawboo can reach GitHub, then wait for the next refresh. On a machine that cannot reach GitHub, serve the catalog files from a mirror and point `CLAWBOO_CATALOG_INDEX_URL` at it. See [Marketplace](/using/marketplace).
 
 **Status:** open, by design.
 
@@ -283,6 +283,7 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | A remembered **Always** on a connector tool skips the prompt even under access set to ask every time (`approvalPolicy: always`)                                                                       | Security    |
 | An `allow_always` answer to a risky hand-off, sent through the API, stops that leader's risky hand-offs from asking again, with no end date                                                           | Security    |
 | `/api/mcp/config` signs any team id, and replacing the attach secret means editing the database by hand                                                                                               | Security    |
+| A saved key with no recognized prefix (Groq, Mistral, xAI) is stored in clear in tool-call records, events, memory, run summaries and the verify gate's output                                        | Security    |
 | Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama      |
 | Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama      |
 | Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers   |
@@ -293,7 +294,12 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Approving this device during OpenClaw setup can stick on "Approved. Reconnecting…" with only **Cancel**                                                                                               | OpenClaw    |
 | The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw    |
 | A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates     |
+| After an update from the chip, the server runs without the node options it was started with, such as `--max-old-space-size`                                                                           | Updates     |
+| The update chip offers **Click to update** on an install the server's user cannot write, such as a container image, and nothing turns it off                                                          | Updates     |
+| Every install reads the Marketplace catalog from the `main` branch, including content written for newer versions                                                                                      | Marketplace |
+| Playwright and Chrome DevTools start through `npx` on every new install with no way to turn that off, each beside a resident `npm exec`, and Chrome DevTools sends usage statistics                   | Connectors  |
 | The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server      |
+| Two instances under different path prefixes on one hostname share browser storage: a new one skips its welcome screen, and theme, layout and board choices carry over                                 | Server      |
 | With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart   |
 | With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display     |
 | The in-app Hermes install picks Python 3.14 over an installed 3.12, and fails                                                                                                                         | Hermes      |
@@ -316,9 +322,13 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Connecting a connector, even from an agent's request for it, gives no agent access unless you draw it on the graph                                                                                    | Connectors  |
 | The default browser access can only read pages, because Playwright marks navigate and click as destructive                                                                                            | Connectors  |
 | "Do not ask again for this for 30 days" on a connector call never stops the next prompt                                                                                                               | Connectors  |
+| After a container restart, or on a system without `ps`, starting Clawboo can stop an unrelated process that now has the process id a connector had before                                             | Connectors  |
 | Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools       |
 | Archived teams cannot be restored from the dashboard, and an agent cannot move to another team                                                                                                        | Teams       |
 | Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero    |
+| Claude Code reads **Not installed** with only the Claude Agent SDK installed, though runs use the SDK's own binary, and **Install** downloads a second copy of that binary                            | Runtimes    |
+| Routines run in the server process's time zone, which in a container is UTC unless `TZ` is set, so a 9:00 routine runs at 9:00 UTC                                                                    | Routines    |
+| Connectors and approved shell commands lose npm's prefix, cache and update-check settings, so an approved `npm install -g` can fail with `EACCES`                                                     | Connectors  |
 
 ## Related
 

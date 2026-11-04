@@ -64,13 +64,13 @@ A few tokens look the same in both themes:
 
 Two pieces apply the `.dark` class, and they must agree:
 
-1. **`ThemeProvider`** (`apps/web/src/features/theme/ThemeProvider.tsx`) is a React context with the preference `theme: 'system' | 'light' | 'dark'` and the result `resolvedTheme: 'light' | 'dark'`. It reads `localStorage['clawboo.theme']` and defaults to `'light'` when nothing is stored, so onboarding happens in light mode. It follows `prefers-color-scheme` only while the preference is System, and adds or removes `.dark` on `document.documentElement` whenever `resolvedTheme` changes. `useTheme()` returns `{ theme, resolvedTheme, setTheme }` and throws outside the provider. The provider wraps the app in `apps/web/src/app/providers.tsx`.
-2. **An inline script in `apps/web/index.html`** runs before React mounts, so the page never flashes the wrong theme. It repeats the provider's logic: read `clawboo.theme`, default to `'light'`, resolve System through `matchMedia`, set `.dark`.
+1. **`ThemeProvider`** (`apps/web/src/features/theme/ThemeProvider.tsx`) is a React context with the preference `theme: 'system' | 'light' | 'dark'` and the result `resolvedTheme: 'light' | 'dark'`. It reads `clawboo.theme` through the scoped storage helper (`apps/web/src/lib/clientStorage.ts`, which puts the base path in front of the key under `CLAWBOO_BASE_PATH`) and defaults to `'light'` when nothing is stored, so onboarding happens in light mode. It follows `prefers-color-scheme` only while the preference is System, and adds or removes `.dark` on `document.documentElement` whenever `resolvedTheme` changes. `useTheme()` returns `{ theme, resolvedTheme, setTheme }` and throws outside the provider. The provider wraps the app in `apps/web/src/app/providers.tsx`.
+2. **An inline script in `apps/web/index.html`** runs before React mounts, so the page never flashes the wrong theme. It repeats the provider's logic: read `clawboo.theme` (spelled with the base path from `window.__CLAWBOO_BASE__` in front, as the helper spells it, falling back to the unprefixed key), default to `'light'`, resolve System through `matchMedia`, set `.dark`.
 
 The switch the user clicks is `ThemeToggle` (`apps/web/src/features/theme/ThemeToggle.tsx`): a segmented System, Light and Dark radio group with icons only (Monitor, Sun, Moon). Each segment calls `setTheme` directly, and the System segment's tooltip shows the mode it resolves to, such as "System (dark)".
 
 <Info>
-The inline script and `ThemeProvider`'s resolver are deliberate copies, because the script must run before any bundle loads. Keep the storage key, the light default and the System branch identical in both. A hard refresh that flashes the wrong theme means they have drifted.
+The inline script and `ThemeProvider`'s resolver are deliberate copies, because the script must run before any bundle loads. Keep the storage key, the light default and the System branch identical in both; `themePrePaint.test.ts` fails when the script's key stops matching the helper's. A hard refresh that flashes the wrong theme means they have drifted.
 </Info>
 
 Components that draw their own themed surfaces read `resolvedTheme` and pick a matching theme object; the code editor, for example, exports `clawbooEditorThemeDark` and `clawbooEditorThemeLight`.
@@ -151,6 +151,8 @@ The custom steps fill the gaps in Tailwind's default scale (`text-xs` 12, `text-
 | `--text-section` | 22 / 28            | `text-section` | Section headers                 |
 | `--text-page`    | 28 / 34            | `text-page`    | Page titles                     |
 | `--text-hero`    | 40 / 46            | `text-hero`    | The welcome hero, big headlines |
+
+The board, `PanelHeader`, `SECTION_LABEL` and the browser alerts (`features/alerts`) keep to this scale and to the two text tokens, `text-foreground` and `text-muted-foreground`. `apps/web/src/app/__tests__/boardTypeScale.test.ts` holds them there: no arbitrary `text-[Npx]` size, no numeric inline `fontSize`, and no `text-foreground/N` opacity.
 
 Titles of 18px and up use `--font-display` (Inter, bold) with negative letter spacing; body text and small headings use `--font-body`; code, tool-call lines, timestamps and metric columns use Geist Mono. The `.font-data` class bundles mono with `tabular-nums`, so numeric columns (cost, tokens, ports, durations) line up and do not jitter as values change.
 

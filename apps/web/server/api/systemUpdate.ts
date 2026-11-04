@@ -6,10 +6,11 @@
  *   - POST /api/system/self-update   → SSE: npm install -g clawboo@latest, then
  *                                       restart into the new version.
  *
- * The POST only proceeds for a `global` install (the running dist/server.js is
- * replaced in place). npx / dev installs get an `unsupported` event and the
- * copy-command fallback — the chip hides its "Update now" button in those cases
- * anyway, so this is defense-in-depth.
+ * The POST only proceeds for a `global` install this user can write (the
+ * running dist/server.js is replaced in place), and never where an
+ * administrator turned updates off. Everything else gets an `unsupported`
+ * event naming the reason, and the copy-command fallback. The chip hides its
+ * "Update now" button in those cases anyway, so this is defense-in-depth.
  */
 import { spawn } from 'node:child_process'
 import type { Request, Response } from 'express'
@@ -20,8 +21,8 @@ import { isWindows, resolveShimName } from '../lib/platform'
 import {
   buildUpdateCommand,
   computeSelfVersion,
-  detectInstallMethod,
   readVersionFromDisk,
+  selfUpdateRefusal,
 } from '../lib/updateCheck'
 import { restartIntoLatest } from '../lib/selfRestart'
 
@@ -77,16 +78,14 @@ export async function selfUpdatePOST(req: Request, res: Response): Promise<void>
   res.setHeader('Connection', 'keep-alive')
   res.flushHeaders()
 
-  const method = detectInstallMethod()
-  if (method !== 'global') {
+  const refusal = selfUpdateRefusal()
+  if (refusal) {
     sendEvent(res, {
       type: 'unsupported',
-      method,
-      command: buildUpdateCommand(method),
-      message:
-        method === 'npx'
-          ? 'This is an npx run (ephemeral). Install globally to enable in-app updates: npm install -g clawboo@latest'
-          : 'In-app update is only available for a global install.',
+      method: refusal.method,
+      reason: refusal.reason,
+      command: buildUpdateCommand(refusal.method),
+      message: refusal.message,
     })
     res.end()
     return

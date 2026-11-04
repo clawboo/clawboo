@@ -248,7 +248,7 @@ Turns an existing capability on or off by its `id`. The route looks the row up f
 
 ### Action: `approve`
 
-Answers a pending tool-call approval: the same `tool_call_approvals` rows the approval cards on the board and in chat answer. Answering a row that is already resolved changes nothing and returns the row as it is.
+Answers a pending tool-call approval: the same `tool_call_approvals` rows the approval cards on the board and in chat answer. Answering a row someone already answered changes nothing and returns the row as it is. A `tool` row whose `expiresAt` has passed takes no answer: the response is `409 { "error": "approval expired", "approval": { ... } }`, and a row still `pending` is marked `expired`.
 
 An `allow_always` on an approval tied to a connector grant also saves a standing rule that allows that tool, with any arguments, for 30 days, unless the prompt marked the call as one that cannot be remembered (`neverRemember`). A call to a destructive tool is always marked that way.
 
@@ -286,7 +286,7 @@ An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding)
     agentId: string | null
     argsSummary: string | null   // scrubbed JSON
     reason: string | null
-    status: 'pending' | 'allow_once' | 'allow_always' | 'deny' | 'expired'
+    status: 'allow_once' | 'allow_always' | 'deny'
     taskId: string | null
     tenantId: string | null
     grantId: string | null // the connector grant the call ran under

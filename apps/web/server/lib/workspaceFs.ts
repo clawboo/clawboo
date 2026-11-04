@@ -16,10 +16,12 @@
 //      and after following any symlinked ancestors (realpath) the result must
 //      still be inside the resolved root. A link planted inside the workspace
 //      passes the lexical check and then points anywhere on disk; this layer
-//      is what stops it.
+//      is what stops it. Because the agent can change the tree between that
+//      check and the open, every file is opened through `openConfinedFile`,
+//      which re-checks the open from the handle's side.
 
 import { constants as fsConstants, existsSync } from 'node:fs'
-import { lstat, open, readdir, realpath } from 'node:fs/promises'
+import { lstat, open, readdir, readlink, realpath, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 
@@ -140,6 +142,95 @@ export async function resolveWorkspaceRelPath(
   return { abs: real, realRoot }
 }
 
+/** An open, confined regular file. The caller owns `handle` and closes it. */
+export interface ConfinedFile {
+  handle: FileHandle
+  /** Size of the file the handle holds, read from the handle itself. */
+  size: number
+}
+
+/**
+ * Open a file that `resolveWorkspaceRelPath` confined, for reading, or throw
+ * `WorkspacePathError`.
+ *
+ * The resolve proved the path safe at the moment it ran. The agent writes this
+ * tree concurrently, so between that proof and the open it can swap the file,
+ * or any folder above it, for a link to anywhere on disk. The open is therefore
+ * checked from the handle's side:
+ *   1. `O_NOFOLLOW` refuses a link as the last component, where the flag exists
+ *      (it does not on Windows), and `O_NONBLOCK` keeps a named pipe swapped in
+ *      from blocking the open until something writes to it.
+ *   2. The handle must hold a regular file with one name: a hard link is the
+ *      same file as its target, so no later check can tell it apart.
+ *   3. On Linux, the kernel's own name for the open file
+ *      (`/proc/self/fd/<fd>`) must be `abs`. It describes the handle, not a
+ *      fresh lookup, so no swap during the checks can change it.
+ *   4. Everywhere, AFTER the open, `abs` must still resolve to itself, with no
+ *      link anywhere on the way, and name the very file the handle holds (same
+ *      device and inode, still one name). This catches a folder or file swapped
+ *      for a link, and one swapped and swapped back. Off Linux it is a second
+ *      lookup by path, so an agent that keeps swapping a folder above the file
+ *      can still race it.
+ */
+export async function openConfinedFile(realRoot: string, abs: string): Promise<ConfinedFile> {
+  const sinkPrefix = rootPrefixOf(realRoot)
+  if (!abs.startsWith(sinkPrefix)) {
+    throw new WorkspacePathError('The path escapes the workspace.')
+  }
+  let handle: FileHandle
+  try {
+    handle = await open(
+      abs,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    )
+  } catch (err) {
+    // ELOOP on Linux and macOS, EMLINK on FreeBSD: the last component is a link.
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ELOOP' || code === 'EMLINK') {
+      throw new WorkspacePathError('Symbolic links are not served.')
+    }
+    throw err
+  }
+  try {
+    const held = await handle.stat()
+    if (!held.isFile()) throw new WorkspacePathError('Not a file.')
+    // A hard link is the same file under a second name, so the device and inode
+    // check below cannot tell one that leads outside the tree. A checkout never
+    // makes them; refuse every file with more than one name.
+    if (held.nlink > 1) throw new WorkspacePathError('Hard-linked files are not served.')
+    if (process.platform === 'linux') {
+      const opened = await kernelPathOf(handle)
+      if (opened !== null && opened !== abs) {
+        throw new WorkspacePathError('The file changed while it was being opened.')
+      }
+    }
+    const real = await realpath(abs)
+    if (real !== abs) {
+      throw new WorkspacePathError('The file changed while it was being opened.')
+    }
+    const named = await lstat(abs)
+    if (named.isSymbolicLink() || named.dev !== held.dev || named.ino !== held.ino) {
+      throw new WorkspacePathError('The file changed while it was being opened.')
+    }
+    // Read again here: a second name made after the first check would let the
+    // name check above match a file that lives outside the tree.
+    if (named.nlink > 1) throw new WorkspacePathError('Hard-linked files are not served.')
+    return { handle, size: held.size }
+  } catch (err) {
+    await handle.close()
+    throw err
+  }
+}
+
+/** Where the kernel says an open file is (Linux), or null when it cannot say. */
+async function kernelPathOf(handle: FileHandle): Promise<string | null> {
+  try {
+    return await readlink(`/proc/self/fd/${handle.fd}`)
+  } catch {
+    return null
+  }
+}
+
 export interface WorkspaceDirEntry {
   name: string
   kind: 'file' | 'dir'
@@ -233,35 +324,35 @@ export async function readFileAt(
   const st = await lstat(abs)
   if (!st.isFile()) throw new WorkspacePathError('Not a file.')
 
-  // O_NOFOLLOW, because `open` is the ONE sink here that follows a symlink.
-  // Every check above is an `lstat`, which does not, so the leaf was proven a
-  // regular file at check time and could still be swapped for a symlink before
-  // this line runs. The agent owns this worktree and writes it concurrently, so
-  // that window is real rather than theoretical. Undefined on Windows, where
-  // the flag does not exist; `?? 0` degrades to the previous behaviour there.
-  const handle = await open(abs, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+  // The checks above are all `lstat`s, which do not follow links, so the leaf
+  // was proven a regular file at check time and could still be swapped for a
+  // link before the open. The agent owns this worktree and writes it
+  // concurrently, so that window is real; `openConfinedFile` closes it.
+  const { handle, size } = await openConfinedFile(realRoot, abs)
   try {
     // The agent is writing this worktree concurrently, so the file can shrink
-    // between lstat and read. Every buffer is sliced to the bytes ACTUALLY
-    // read: a short read left the tail of a zero-filled Buffer in place, and
-    // those NUL bytes made a shrinking text file report as binary.
-    const sniffLen = Math.min(BINARY_SNIFF_BYTES, st.size)
+    // between the open and the read. Every buffer is sliced to the bytes
+    // ACTUALLY read: a short read left the tail of a zero-filled Buffer in
+    // place, and those NUL bytes made a shrinking text file report as binary.
+    const sniffLen = Math.min(BINARY_SNIFF_BYTES, size)
     const sniff = Buffer.alloc(sniffLen)
     let sniffRead = 0
     if (sniffLen > 0) ({ bytesRead: sniffRead } = await handle.read(sniff, 0, sniffLen, 0))
-    if (sniff.subarray(0, sniffRead).includes(0)) return { binary: true, size: st.size }
+    if (sniff.subarray(0, sniffRead).includes(0)) return { binary: true, size }
 
-    const readLen = Math.min(maxBytes, st.size)
-    const buf = Buffer.alloc(readLen)
-    let bytesRead = 0
-    if (readLen > 0) ({ bytesRead } = await handle.read(buf, 0, readLen, 0))
+    // One byte past what is shown, so `truncated` says whether more was there
+    // when it was read, not when it was opened: a file that shrank in between
+    // and was read whole is not cut.
+    const shownLen = Math.min(maxBytes, size)
+    const buf = Buffer.alloc(shownLen + 1)
+    const { bytesRead } = await handle.read(buf, 0, shownLen + 1, 0)
     return {
       binary: false,
-      size: st.size,
+      size,
       // Decoded through a StringDecoder so a cut landing mid-codepoint holds
       // the partial sequence back instead of emitting a replacement char.
-      content: decodeUtf8(buf.subarray(0, bytesRead)),
-      truncated: st.size > maxBytes,
+      content: decodeUtf8(buf.subarray(0, Math.min(bytesRead, shownLen))),
+      truncated: bytesRead > shownLen,
     }
   } finally {
     await handle.close()

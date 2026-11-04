@@ -53,6 +53,9 @@ export interface TaskAttention {
   cause?: AccountFailure
   /** The runtime whose sign-in to fix. Present only with `cause`. */
   runtime?: string
+  /** For `blocked`: a person moved the card there and no run has started
+   *  since, so it waits on their own decision rather than an agent's. */
+  byPerson?: boolean
 }
 
 /** Longest failure reason a card shows; the full text stays on the task. */
@@ -85,6 +88,27 @@ export interface AttentionInput {
   verificationBlocked?: boolean
   /** The agent working on it, for an in-progress task. */
   assigneeAgentId?: string | null
+  /** When a person last moved the card (`personMovedAt`). */
+  personMovedAt?: number | null
+}
+
+/** When the latest run started: its start, else its claim, else its creation. */
+function latestRunStart(execs: readonly LedgerRun[]): number | null {
+  let latest: number | null = null
+  for (const e of execs) {
+    const at = e.startedAt ?? e.claimedAt ?? e.createdAt ?? null
+    if (typeof at === 'number' && (latest === null || at > latest)) latest = at
+  }
+  return latest
+}
+
+/** The same test the repository uses to refuse an agent's status write after a
+ *  person's move: the move came after the latest run started, or nothing ran. */
+function movedByPerson(input: AttentionInput): boolean {
+  const moved = input.personMovedAt
+  if (typeof moved !== 'number') return false
+  const lastRun = latestRunStart(input.execs)
+  return lastRun === null || moved > lastRun
 }
 
 /** Why a task needs a person, or null when the board will move it on its own. */
@@ -97,7 +121,7 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
     if (last === 'timed_out')
       return { reason: 'timed_out', failedRuns, ...failureDetail(input.execs) }
     if (last === 'failed') return { reason: 'failed', failedRuns, ...failureDetail(input.execs) }
-    return { reason: 'blocked', failedRuns }
+    return { reason: 'blocked', failedRuns, ...(movedByPerson(input) ? { byPerson: true } : {}) }
   }
 
   if (input.status === 'todo') {

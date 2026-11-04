@@ -3,7 +3,7 @@
 // quick way to the last; Display hides the cost and the time on every card; C
 // opens New task; and a spinner shows only when a background read runs long.
 
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { delay, http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
+import { useViewStore } from '@/stores/view'
 
 import { server } from '../../../__vitest__/mswServer'
 import { BoardPanel } from '../BoardPanel'
@@ -103,6 +104,33 @@ describe('Filter', () => {
     expect(shownTitles()).toEqual(['Coder work', 'Loose idea', 'Writer work'])
     expect(screen.getByTestId('board-filter')).toHaveAccessibleName('Filter')
     expect(screen.queryByRole('menu', { name: 'Filter the board' })).toBeNull()
+  })
+
+  it('drops the filter when a browser alert opens Needs you, so what it is about shows', async () => {
+    serve([
+      ...TASKS(),
+      {
+        id: 'd',
+        title: 'Stuck work',
+        status: 'blocked',
+        createdAt: earlier(),
+        attention: { reason: 'failed', failedRuns: 1 },
+      },
+    ])
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByText('Stuck work')
+
+    // Running now hides the failed task, Needs you included.
+    const chip = screen.getByTestId('board-agents-working')
+    await user.click(chip)
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    // The card fades out of Needs you before it leaves the page.
+    await waitFor(() => expect(screen.queryByText('Stuck work')).toBeNull())
+
+    act(() => useViewStore.getState().openBoardNeedsYou(null))
+    expect(await screen.findByText('Stuck work')).toBeInTheDocument()
+    expect(chip).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('shows only the running work from the agents-working chip, and all of it again', async () => {

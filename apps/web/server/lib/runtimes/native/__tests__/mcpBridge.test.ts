@@ -13,6 +13,7 @@ import {
   DeterministicEmbeddingProvider,
   SqliteMemoryStore,
   createDb,
+  createTask,
   listTasks,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -100,6 +101,24 @@ describe('native MCP bridge (in-process)', () => {
       'unblock_task',
     ])
       expect(names).not.toContain(withheld)
+    await bridge!.close()
+  })
+
+  it('on a task run, get_task reads the run’s own task when taskId is left out', async () => {
+    // The in-process analog of the signed `scopeTaskId` on an HTTP runtime's
+    // Tasks URL, with the default read-only access every Native agent has.
+    const task = createTask(db, { title: 'Native own task', teamId: 'team-bridge' })
+    const bridge = await connectMcpBridge({
+      db,
+      agentId: 'native-team-agent',
+      enable: { tasks: 'read', memory: false, tools: false },
+      memoryScope: { teamId: 'team-bridge', agentId: 'native-team-agent' },
+      teamRun: true,
+      boundTaskId: task.id,
+    })
+    const out = await bridge!.callTool('get_task', {})
+    expect(out.isError).toBe(false)
+    expect(out.output).toContain('Native own task')
     await bridge!.close()
   })
 

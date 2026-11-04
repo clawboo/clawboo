@@ -16,13 +16,15 @@
 // older build. All of that degrades to "use the main session", which is what a
 // chat with no stored key does anyway, so a broken store is never worse than none.
 
+import { scopedLocalStorage } from '@/lib/clientStorage'
+
 const KEY = 'clawboo:chat:session:v1'
 
 /** The session this agent's chat was last moved onto, or null for its main one. */
 export function recallSession(agentId: string): string | null {
   if (!agentId) return null
   try {
-    const raw = globalThis.localStorage?.getItem(KEY)
+    const raw = scopedLocalStorage.getItem(KEY)
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null

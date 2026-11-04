@@ -71,6 +71,7 @@ import { fetchAgentModelMap } from '@/lib/agentModelMap'
 import type { AgentState } from '@/stores/fleet'
 import type { SystemInfo } from '@/stores/system'
 import { recallSession } from '@/features/chat/currentSession'
+import { scopedLocalStorage } from '@/lib/clientStorage'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +84,7 @@ const ONBOARDED_KEY = 'clawboo.onboarded'
 
 function markOnboarded(): void {
   if (typeof window !== 'undefined') {
-    localStorage.setItem(ONBOARDED_KEY, '1')
+    scopedLocalStorage.setItem(ONBOARDED_KEY, '1')
   }
 }
 
@@ -595,7 +596,8 @@ export function GatewayBootstrap() {
     // and skip the wizard. Otherwise clear the stale flag and show the
     // wizard so the user can re-install + reconfigure.
     void (async () => {
-      const onboarded = typeof window !== 'undefined' && localStorage.getItem(ONBOARDED_KEY) === '1'
+      const onboarded =
+        typeof window !== 'undefined' && scopedLocalStorage.getItem(ONBOARDED_KEY) === '1'
       const wizardActive = isWizardActive()
 
       // On-disk system state is the source of truth, so fetch it FIRST. A
@@ -671,7 +673,7 @@ export function GatewayBootstrap() {
         }
         case 'wizard-fresh':
           // Definitively not configured — clear the stale flag + arm a fresh run.
-          if (typeof window !== 'undefined') localStorage.removeItem(ONBOARDED_KEY)
+          if (typeof window !== 'undefined') scopedLocalStorage.removeItem(ONBOARDED_KEY)
           markWizardActive()
           setShowWizard(true)
           return

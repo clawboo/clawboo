@@ -32,6 +32,7 @@ import {
 import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
+import { AlertsOptIn } from '@/features/alerts/AlertsOptIn'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
@@ -125,6 +126,7 @@ import {
 } from './calendar/calendarModel'
 import { useCalendarClock } from './calendar/useCalendarClock'
 import { useRoutineRuns } from './calendar/useRoutineRuns'
+import { scopedLocalStorage, scopedSessionStorage } from '@/lib/clientStorage'
 
 /** The since line's actions: quiet links in the header's subtitle. */
 /** The views, as the view switch lists them, with their keys: the Kanban board
@@ -248,7 +250,7 @@ const DEFAULT_PREFS: BoardViewPrefs = {
 
 function readPrefs(): BoardViewPrefs {
   try {
-    const raw = window.localStorage.getItem(PREFS_KEY)
+    const raw = scopedLocalStorage.getItem(PREFS_KEY)
     if (!raw) return DEFAULT_PREFS
     const p = JSON.parse(raw) as Partial<BoardViewPrefs>
     return {
@@ -273,7 +275,7 @@ const EARLIER_KEY = 'clawboo.board.earlierOpen'
 
 function readEarlierChoice(): boolean | null {
   try {
-    const v = window.sessionStorage.getItem(EARLIER_KEY)
+    const v = scopedSessionStorage.getItem(EARLIER_KEY)
     return v === 'true' ? true : v === 'false' ? false : null
   } catch {
     return null
@@ -282,7 +284,7 @@ function readEarlierChoice(): boolean | null {
 
 function writeEarlierChoice(open: boolean): void {
   try {
-    window.sessionStorage.setItem(EARLIER_KEY, String(open))
+    scopedSessionStorage.setItem(EARLIER_KEY, String(open))
   } catch {
     // Blocked storage: the choice holds until the board closes.
   }
@@ -290,7 +292,7 @@ function writeEarlierChoice(open: boolean): void {
 
 function writePrefs(prefs: BoardViewPrefs): void {
   try {
-    window.localStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
+    scopedLocalStorage.setItem(PREFS_KEY, JSON.stringify(prefs))
   } catch {
     // Private mode or blocked storage: the view still works, it just forgets.
   }
@@ -1759,6 +1761,21 @@ export function BoardPanel() {
     requestView({ day: Date.now(), align: 'nearest', smooth: true, needsYou: true })
   }, [requestView])
 
+  // A browser alert about an approval, or about several things at once: show
+  // Needs you, on the alert's team when the board is narrowed to another one,
+  // and with no filter, which would otherwise hide what the alert is about.
+  const needsYouFocus = useViewStore((s) => s.boardNeedsYouFocus)
+  useEffect(() => {
+    if (!needsYouFocus) return
+    const { teamId } = needsYouFocus
+    if (teamId === 'all') setTeamFilter('all')
+    else if (teamId) setTeamFilter((f) => (f !== 'all' && f !== teamId ? teamId : f))
+    setBoardFilter(NO_FILTER)
+    setOpenTaskId(null)
+    revealNeedsYou()
+    useViewStore.getState().clearBoardNeedsYouFocus()
+  }, [needsYouFocus, revealNeedsYou])
+
   // ── Since you last looked ──
   // Show steps through what changed, oldest first. Changes in Needs you are only
   // counted (it keeps its own list), so once only they are left, Show goes there.
@@ -1962,6 +1979,8 @@ export function BoardPanel() {
               </button>
             </span>
           ) : null}
+          {/* Offered once there is work on the board that could need the person. */}
+          {loaded && tasks.length > 0 ? <AlertsOptIn /> : null}
           <div className="ml-auto flex items-center gap-2">
             <GitHubStarButton />
             <Button

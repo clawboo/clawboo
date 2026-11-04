@@ -58,7 +58,7 @@ import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { createReportUpOutbox } from './reportUpOutbox'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
-import { createServerDeliver, type RunEntry } from './serverDeliver'
+import { createServerDeliver, type QueuedRun, type RunEntry } from './serverDeliver'
 import { roomIdForTask, roomLeadId, roomMembers } from './roomRoster'
 
 const log = createLogger('team-orchestrator')
@@ -202,6 +202,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
   }
 
   const abortMap = new Map<string, RunEntry>()
+  /** Deliveries waiting for a run slot (see runSlots), cancelled by Stop and teardown. */
+  const queuedRuns = new Map<string, QueuedRun>()
   /** `(agent, alert text)` → last surfaced-at, so one problem is one chat line. */
   const alertsSeen = new Map<string, number>()
   const nudge = createNudgeQueue({
@@ -231,6 +233,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     mcpBaseUrl,
     nudge,
     abortMap,
+    queuedRuns,
     onEvent: (sk, ev, run) => {
       // ENGINE ACTIVITY IS ACTIVITY. The idle clock used to advance only on a
       // USER message, so a long autonomous cascade — the exact "kick it off and
@@ -319,6 +322,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // never bound behind someone else's reply, which would otherwise complete it
     // with that reply and let the task's own output surface in the chat.
     isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
+    isRunQueued: (sk) => queuedRuns.has(sk),
     agentIdForSession: (sk) => agentIdFromSessionKey(sk),
     deliver: trackedDeliver,
     stopGen: () => serverStopGen,
@@ -389,6 +393,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     abortSession: (sk) => {
       const e = abortMap.get(sk)
       if (e) void e.adapter.abort(e.run).catch(() => undefined)
+      else queuedRuns.get(sk)?.cancel()
     },
     // Risky-delegation approval gate (parity with the retired browser binding): a
     // destructive/secret-touching delegation is surfaced on the leader's approval
@@ -421,6 +426,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
   // Idle watchdog: fail a delegate gone silent past the engine's
   // DELEGATION_IDLE_TIMEOUT_MS so the leader is never left standing.
   const sweep = setInterval(() => {
+    // Runs waiting for a slot are work in hand: the team is not idle while they wait.
+    if (queuedRuns.size > 0) touch()
     // A rejected sweep used to be a bare `void` — an unhandled rejection with no
     // trace. The watchdog is the only thing that fails a silent delegate, so its
     // failing silently is precisely the case an operator needs to see.
@@ -558,6 +565,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // failure).
       serverStopGen++
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
+      // Runs waiting for a slot never start; each tells the engine it ended aborted,
+      // which releases its task to `todo` like any stopped run.
+      for (const [, q] of queuedRuns) q.cancel()
       // Queued (not-yet-started) deliveries must die with the Stop too: a
       // markIdle after the aborts would otherwise FLUSH them into brand-new
       // post-Stop runs. Dropping them loses nothing durable: alerts live in the
@@ -619,7 +629,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // would ever learn the cascade stopped. Say so in the transcript FIRST —
       // the board rows stay `in_progress` and the engine's `resume()` re-attaches
       // them when the team is next opened.
-      const stranded = [...abortMap.keys()]
+      const stranded = [...abortMap.keys(), ...queuedRuns.keys()]
         .map((sk) => agentIdFromSessionKey(sk))
         .filter((id): id is string => id !== null)
       if (stranded.length > 0) {
@@ -646,6 +656,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       }
       for (const [, e] of abortMap) void e.adapter.abort(e.run).catch(() => undefined)
       abortMap.clear()
+      for (const [, q] of queuedRuns) q.cancel()
       engine.reset()
       // NOT `nudge.drain()`. The queue's drain fires each queued `send` closure,
       // and in THIS host a send is `serverDeliver`'s closure — it builds an

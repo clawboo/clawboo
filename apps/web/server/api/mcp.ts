@@ -150,18 +150,21 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
   return params ? signedScope(params, params.get('teamRun') === '1') : undefined
 }
 
-/** Read the Tasks attach URL's binding: the scope `parseBoundScope` reads, and
- *  whether the run is one the team engine drives (`teamRun=1`, which the same
- *  signature covers, so a runtime can neither strip it nor add it). Undefined
- *  when the URL carries no valid signed scope. Exported for unit testing. */
+/** Read the Tasks attach URL's binding: the scope `parseBoundScope` reads,
+ *  whether the run is one the team engine drives (`teamRun=1`), and the board
+ *  task the run works on (`scopeTaskId`), the default for its one-task tools.
+ *  The same signature covers both claims, so a runtime can neither strip, add
+ *  nor move them. Undefined when the URL carries no valid signed scope.
+ *  Exported for unit testing. */
 export function parseTasksBinding(
   req?: IncomingMessage,
-): { scope: MemoryScope; teamRun: boolean } | undefined {
+): { scope: MemoryScope; teamRun: boolean; taskId?: string } | undefined {
   const params = attachParams(req)
   if (!params) return undefined
   const teamRun = params.get('teamRun') === '1'
-  const scope = signedScope(params, teamRun)
-  return scope ? { scope, teamRun } : undefined
+  const taskId = params.get('scopeTaskId')
+  const scope = signedScope(params, teamRun, taskId)
+  return scope ? { scope, teamRun, ...(taskId ? { taskId } : {}) } : undefined
 }
 
 function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
@@ -173,13 +176,18 @@ function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
   }
 }
 
-/** The scope the params claim, when their signature covers exactly that claim. */
-function signedScope(params: URLSearchParams, teamRun: boolean): MemoryScope | undefined {
+/** The scope the params claim, when their signature covers exactly that claim.
+ *  `boundTaskId` is the Tasks URL's own task; no other URL carries one. */
+function signedScope(
+  params: URLSearchParams,
+  teamRun: boolean,
+  boundTaskId: string | null = null,
+): MemoryScope | undefined {
   const teamId = params.get('scopeTeamId')
   const agentId = params.get('scopeAgentId')
   const tenantId = params.get('scopeTenantId')
   if (!teamId && !agentId && !tenantId) return undefined
-  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false, teamRun }))
+  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false, teamRun, boundTaskId }))
     return undefined
   return {
     ...(teamId ? { teamId } : {}),
@@ -289,7 +297,14 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     tasks: createStreamableHttpHandlers((req) => {
       const binding = parseTasksBinding(req)
       return createTasksServer(getDb(), {
-        boundScope: binding?.scope,
+        ...(binding
+          ? {
+              boundScope: {
+                ...binding.scope,
+                ...(binding.taskId ? { taskId: binding.taskId } : {}),
+              },
+            }
+          : {}),
         unverifiedCaller: binding === undefined,
         ...(binding?.teamRun ? { teamRun: true } : {}),
       })

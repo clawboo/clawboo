@@ -95,9 +95,28 @@ const PROXY_PASSTHROUGH = [
   'no_proxy',
 ]
 
+/**
+ * npm's own settings that carry no credential: where global installs go, where
+ * the cache lives, and whether npm checks the registry for a newer npm. Without
+ * the first two, a server whose user cannot write npm's built-in prefix fails an
+ * approved `npm install -g` with EACCES.
+ *
+ * Exact names in both spellings, never a `npm_config_` prefix match: npm reads
+ * its credentials from the same family (`npm_config__authToken`,
+ * `npm_config__auth`, `npm_config_//<registry>/:_authToken`).
+ */
+const NPM_PASSTHROUGH = [
+  'npm_config_prefix',
+  'NPM_CONFIG_PREFIX',
+  'npm_config_cache',
+  'NPM_CONFIG_CACHE',
+  'npm_config_update_notifier',
+  'NPM_CONFIG_UPDATE_NOTIFIER',
+]
+
 /** Every name that may pass through, in one frozen set for the test to assert against. */
 export const CONNECTOR_ENV_ALLOWLIST: ReadonlySet<string> = Object.freeze(
-  new Set([...POSIX_PASSTHROUGH, ...WINDOWS_PASSTHROUGH, ...PROXY_PASSTHROUGH]),
+  new Set([...POSIX_PASSTHROUGH, ...WINDOWS_PASSTHROUGH, ...PROXY_PASSTHROUGH, ...NPM_PASSTHROUGH]),
 ) as ReadonlySet<string>
 
 export interface ConnectorEnvOptions {
@@ -111,6 +130,15 @@ export interface ConnectorEnvOptions {
    * which is what makes the declaration meaningful rather than decorative.
    */
   declared?: Record<string, string>
+  /**
+   * npm's update check. `'off'` (the default, for a connector launch) sets
+   * `npm_config_update_notifier=false` unless the operator's environment already
+   * sets it in either spelling: a connector starts through `npx`, and npm would
+   * otherwise ask the registry for its own newest version on a schedule of its
+   * own. `'inherit'` passes the operator's setting through and adds nothing,
+   * for a command a person approved to run as they configured it.
+   */
+  npmUpdateCheck?: 'off' | 'inherit'
 }
 
 /**
@@ -126,6 +154,14 @@ export function connectorChildEnv(opts: ConnectorEnvOptions = {}): Record<string
   for (const name of CONNECTOR_ENV_ALLOWLIST) {
     const value = source[name]
     if (typeof value === 'string' && value.length > 0) env[name] = value
+  }
+
+  if (
+    (opts.npmUpdateCheck ?? 'off') === 'off' &&
+    !('npm_config_update_notifier' in env) &&
+    !('NPM_CONFIG_UPDATE_NOTIFIER' in env)
+  ) {
+    env['npm_config_update_notifier'] = 'false'
   }
 
   // Declared credentials last. An empty value is dropped rather than passed as

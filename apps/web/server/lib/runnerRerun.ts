@@ -20,6 +20,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 
 import { runTaskOnRuntime, type RunTaskResult } from './executorRunner'
+import { emitEvent } from './obs'
 import { adapterFactoryFor } from './runtimes'
 import { getDescriptor } from './runtimes/descriptor'
 import { runtimeKeyEnv } from './runtimes/runKeyEnv'
@@ -30,9 +31,10 @@ export { runnerRerunFor, type RunnerRerun } from './runnerRoute'
 const log = createLogger('runner-rerun')
 
 /**
- * Reruns started from here that have not settled, by task. A run can wait up to
- * the home mutex's timeout behind another run on the same agent before it claims
- * the task, so a second Retry, or an Assign to someone else, would otherwise
+ * Reruns started from here that have not settled, by task. A run can wait for a
+ * free run slot (see runSlots), then up to the home mutex's timeout behind another
+ * run on the same agent, before it claims the task, so a second Retry, or an
+ * Assign to someone else, would otherwise
  * queue a second run that claims the task later. Starting a rerun stops the one
  * still waiting; a claimed run cannot be replaced, because the board refuses a
  * Retry or an Assign while the task is in progress.
@@ -69,7 +71,16 @@ function refusalWords(reason: Extract<RunTaskResult, { ok: false }>['reason']): 
 function parkUnstarted(db: ClawbooDb, taskId: string, runtime: string, why: string): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
-    if (!updateStatus(db, taskId, 'blocked').ok) return
+    const moved = updateStatus(db, taskId, 'blocked')
+    if (!moved.ok) return
+    // The event log is what live views follow; the status write reaches only
+    // the in-process bus.
+    emitEvent(db, {
+      kind: 'status_changed',
+      taskId,
+      teamId: moved.task?.teamId ?? null,
+      data: { to: 'blocked', reason: 'rerun_not_started' },
+    })
     addComment(
       db,
       taskId,

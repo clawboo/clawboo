@@ -8,7 +8,8 @@
  * Alongside the default action it carries three subcommands — `backup`, `stop`,
  * and `restart` — which exist because the server runs DETACHED: copying a live
  * database, clearing an instance you can no longer Ctrl-C, and rolling a running
- * instance onto a newer build are all awkward without them.
+ * instance onto a newer build are all awkward without them. A fourth, `open`,
+ * signs a browser in to a running server that is locked with its access token.
  *
  * This file is presentation + Commander wiring only. The find/start/stop
  * primitives live in `lifecycle.ts` so they can be unit-tested (importing this
@@ -19,11 +20,10 @@ import { Command } from 'commander'
 import chalk from 'chalk'
 import * as p from '@clack/prompts'
 import ora, { type Ora } from 'ora'
-import { exec } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 
-import { resolveBasePathOrRoot, resolveClawbooDir } from '@clawboo/config'
+import { resolveAccessTokenPath, resolveClawbooDir } from '@clawboo/config'
 
 import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
@@ -31,15 +31,21 @@ import { nodeVersionError } from './node-version'
 import { tailServerLog } from './server-log'
 import { shouldOfferRestart } from './versionCheck'
 import {
+  dashboardHost,
+  dashboardUrl,
   discoverDashboard,
   fetchServerVersion,
   launcherAccessToken,
+  mintLaunchCode,
+  openReport,
+  openUrlInBrowser,
   probeDashboard,
   probePort,
   readRuntimePort,
   removeRuntimePortFile,
   startDashboard,
   stopDashboard,
+  uiPath,
   type StopOutcome,
 } from './lifecycle'
 
@@ -58,18 +64,6 @@ const TAGLINE = '   Deploy, orchestrate, and observe your AI agent fleet'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function openBrowser(url: string): Promise<void> {
-  return new Promise((resolve) => {
-    const cmd =
-      process.platform === 'darwin'
-        ? `open "${url}"`
-        : process.platform === 'win32'
-          ? `start "" "${url}"`
-          : `xdg-open "${url}"`
-    exec(cmd, () => resolve())
-  })
-}
-
 /** Shared terminal error path for every command's action handler. */
 function fail(err: unknown): never {
   console.error(chalk.red('\nError:'), err instanceof Error ? err.message : String(err))
@@ -77,15 +71,6 @@ function fail(err: unknown): never {
 }
 
 // ─── Server start / stop reporting ────────────────────────────────────────────
-
-// The URL prefix the server is mounted under, for the links we PRINT. Display
-// only: a malformed value falls back to the root here and the server refuses to
-// start with a precise message, so the CLI never dies on a bad setting. The
-// trailing slash matters under a mount, since the shell's assets are relative.
-const uiPath = (): string => {
-  const base = resolveBasePathOrRoot(process.env)
-  return base ? `${base}/` : ''
-}
 
 /**
  * Start a dashboard and narrate it. Returns the port, or null when the user is
@@ -161,9 +146,9 @@ function describeStopFailure(outcome: StopOutcome): string {
 }
 
 /**
- * A Clawboo dashboard is running but its access gate is turned on, and this
- * launcher holds no token it accepts, so every `/api/*` call from here 401s. Say
- * so instead of behaving as if nothing were running, which would fork a second
+ * A Clawboo dashboard is running behind its access token, and this launcher
+ * holds no token it accepts, so every `/api/*` call from here 401s. Say so
+ * instead of behaving as if nothing were running, which would fork a second
  * server onto the same database, fail its readiness poll, and leave the first
  * one orphaned.
  */
@@ -171,32 +156,84 @@ function printGatedNotice(port: number): void {
   p.log.warn(
     chalk.yellow(`A Clawboo server is running on port ${port}, but it requires an access token.`),
   )
+  const fromEnv = process.env['STUDIO_ACCESS_TOKEN']
   p.log.info(
     chalk.gray(
-      launcherAccessToken() === null
-        ? "Set STUDIO_ACCESS_TOKEN to the server's token in this shell and run the command again."
-        : "The STUDIO_ACCESS_TOKEN in this shell is not the server's token.",
+      fromEnv !== undefined && fromEnv.trim()
+        ? "The STUDIO_ACCESS_TOKEN in this shell is not the server's token."
+        : launcherAccessToken() !== null
+          ? `The server was not started with the token in ${resolveAccessTokenPath()}. ` +
+            "Set STUDIO_ACCESS_TOKEN to the server's token in this shell and run the command again."
+          : "Set STUDIO_ACCESS_TOKEN to the server's token in this shell and run the command again.",
     ),
   )
   p.log.info(
     chalk.gray('Open ') +
-      chalk.cyan.underline(`http://localhost:${port}${uiPath()}?access_token=<token>`) +
-      chalk.gray(' once to set it in your browser, or unset the variable and restart the server.'),
+      chalk.cyan.underline(`${dashboardUrl(port)}${uiPath() ? '' : '/'}?access_token=<token>`) +
+      chalk.gray(' once to set it in your browser.'),
   )
 }
 
 /**
- * The launcher reaches a token-gated server with its own STUDIO_ACCESS_TOKEN,
- * but the browser it opens needs the access cookie too, and the token is never
- * put in a URL or command line from here. Say how to set it.
+ * A server older than launch codes, reached with this shell's
+ * STUDIO_ACCESS_TOKEN: the browser opened without a code still needs the
+ * cookie, and the token is never put in a URL or command line from here. Say
+ * how to set it.
  */
 function printBrowserTokenHint(port: number): void {
-  if (launcherAccessToken() === null) return
+  const fromEnv = process.env['STUDIO_ACCESS_TOKEN']
+  if (fromEnv === undefined || !fromEnv.trim()) return
   p.log.info(
     chalk.gray('STUDIO_ACCESS_TOKEN is set. If the dashboard does not load, open ') +
-      chalk.cyan.underline(`http://localhost:${port}${uiPath()}?access_token=<token>`) +
+      chalk.cyan.underline(`${dashboardUrl(port)}${uiPath() ? '' : '/'}?access_token=<token>`) +
       chalk.gray(' once in this browser.'),
   )
+}
+
+/** There was no browser to open: a server with no desktop, or no `xdg-open`. */
+function printNoBrowserHint(): void {
+  p.log.info(
+    chalk.gray('For a one-time sign-in link to open in a browser yourself, run ') +
+      chalk.white('clawboo open --print') +
+      chalk.gray('.'),
+  )
+}
+
+/**
+ * Open the dashboard on `port` in this computer's browser. A locked server is
+ * opened with a one-time launch code, so the browser gets the access cookie
+ * without the token ever being in a URL. Only the plain address is printed:
+ * nothing secret goes to the terminal. False when no browser could be opened.
+ */
+async function openDashboard(port: number): Promise<boolean> {
+  const plain = dashboardUrl(port)
+  const minted = await mintLaunchCode(port)
+  const spinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
+  const opened = await openUrlInBrowser(minted?.gated ? dashboardUrl(port, minted.code) : plain)
+  switch (openReport(minted, opened)) {
+    case 'no-browser':
+      spinner.warn(chalk.yellow('Could not open a browser on this computer.'))
+      printNoBrowserHint()
+      break
+    case 'sign-in-unknown':
+      // The server gave no sign-in link (a timeout, a 429, or a server older
+      // than launch codes), so the browser may show the locked screen.
+      spinner.warn(
+        chalk.yellow('Clawboo opened at ') +
+          chalk.cyan.underline(plain) +
+          chalk.yellow(', but without a sign-in link.'),
+      )
+      p.log.info(
+        chalk.gray('If it says the dashboard is locked, run ') +
+          chalk.white('clawboo open') +
+          chalk.gray(' to sign this browser in.'),
+      )
+      printBrowserTokenHint(port)
+      break
+    default:
+      spinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(plain))
+  }
+  return opened
 }
 
 /**
@@ -314,7 +351,7 @@ async function reconcileServerVersion(port: number, opts: LaunchOptions): Promis
   // would be a silent death. If something else grabbed it, start without a pin
   // from us and let the server resolve its own port (an auto-scan — or the
   // user's own CLAWBOO_API_PORT, if they have one exported).
-  const free = !(await probePort('localhost', port, 500))
+  const free = !(await probePort(dashboardHost(), port, 500))
   const restarted = await startAndReport({ port: free ? port : undefined, verb: 'Restarting' })
   if (restarted === null) printStoppedNotReplaced(port)
   return restarted
@@ -368,14 +405,11 @@ async function run(opts: LaunchOptions): Promise<void> {
     if (dashboardPort === null) process.exit(1)
   }
 
-  const dashboardUrl = `http://localhost:${dashboardPort}${uiPath()}`
+  const plainUrl = dashboardUrl(dashboardPort)
 
   // ── 4. Open browser ────────────────────────────────────────────────────────
 
-  printBrowserTokenHint(dashboardPort)
-  const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
-  await openBrowser(dashboardUrl)
-  browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(dashboardUrl))
+  await openDashboard(dashboardPort)
 
   // ── 5. Success ─────────────────────────────────────────────────────────────
 
@@ -394,7 +428,7 @@ async function run(opts: LaunchOptions): Promise<void> {
       chalk.gray('  •  Track token usage by team and agent') +
       '\n\n' +
       chalk.gray('  Clawboo:   ') +
-      chalk.cyan.underline(dashboardUrl) +
+      chalk.cyan.underline(plainUrl) +
       '\n' +
       chalk.gray('  Docs:      ') +
       chalk.cyan.underline('https://docs.claw.boo') +
@@ -434,7 +468,7 @@ async function runStop(): Promise<void> {
     // A token-gated server there is alive too, so only a port with no Clawboo
     // answer at all counts as dead.
     const recorded = readRuntimePort()
-    if (recorded !== null && (await probeDashboard('localhost', recorded, 1_500)) === 'none') {
+    if (recorded !== null && (await probeDashboard(dashboardHost(), recorded, 1_500)) === 'none') {
       removeRuntimePortFile()
     }
     p.log.info(chalk.gray('No Clawboo server is running.'))
@@ -493,7 +527,7 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
     // Pin only if the port really freed — a `pnpm dev` supervisor can respawn
     // the server on the same port between our stop and our start. Unpinned, the
     // successor resolves its own port the way any boot does.
-    if (!(await probePort('localhost', port, 500))) pinned = port
+    if (!(await probePort(dashboardHost(), port, 500))) pinned = port
   }
 
   const started = await startAndReport({ port: pinned, verb: 'Restarting' })
@@ -504,13 +538,8 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
     process.exit(1)
   }
 
-  const url = `http://localhost:${started}${uiPath()}`
-  if (opts.open) {
-    printBrowserTokenHint(started)
-    const browserSpinner = ora({ text: 'Opening Clawboo...', color: 'cyan' }).start()
-    await openBrowser(url)
-    browserSpinner.succeed(chalk.green('Clawboo opened at ') + chalk.cyan.underline(url))
-  }
+  const url = dashboardUrl(started)
+  if (opts.open) await openDashboard(started)
 
   console.log()
   p.outro(
@@ -519,6 +548,56 @@ async function runRestart(opts: { open: boolean }): Promise<void> {
       '\n\n' +
       chalk.gray('  Clawboo:   ') +
       chalk.cyan.underline(url),
+  )
+}
+
+// ─── `clawboo open` ───────────────────────────────────────────────────────────
+
+/**
+ * Sign a browser in to the running server. Each run mints a fresh one-time
+ * launch code, so it is also the way back in for a browser that lost its
+ * cookie: the dashboard's locked screen names this command.
+ *
+ * `--print` writes the link to stdout instead, alone on its line so it can be
+ * piped, for a browser `open` cannot reach: a server with no desktop, reached
+ * through an SSH tunnel, or another browser on this computer.
+ */
+async function runOpen(opts: { print: boolean }): Promise<void> {
+  const { port, gatedPort } = await discoverDashboard()
+  if (port === null && gatedPort !== null) {
+    printGatedNotice(gatedPort)
+    process.exit(1)
+  }
+  if (port === null) {
+    p.log.warn(chalk.yellow('No Clawboo server is running.'))
+    p.log.info(chalk.gray('Start one with ') + chalk.white('clawboo') + chalk.gray('.'))
+    process.exit(1)
+  }
+
+  if (!opts.print) {
+    if (!(await openDashboard(port))) process.exit(1)
+    return
+  }
+
+  const minted = await mintLaunchCode(port)
+  if (minted?.gated) {
+    console.log(dashboardUrl(port, minted.code))
+    console.error(
+      chalk.gray(
+        'This link signs in one browser, once, within two minutes. On another computer, ' +
+          "use this computer's address in place of 127.0.0.1.",
+      ),
+    )
+    return
+  }
+  console.log(dashboardUrl(port))
+  console.error(
+    chalk.gray(
+      minted === null
+        ? 'This server could not make a one-time link, so this is its plain address. ' +
+            'It may be older than this launcher; run clawboo restart to update it.'
+        : 'This server has no access token, so its address needs no sign-in.',
+    ),
   )
 }
 
@@ -652,6 +731,17 @@ program
   .option('--no-open', "Don't open the browser after restarting.")
   .action((opts: { open: boolean }) => {
     runRestart(opts).catch(fail)
+  })
+
+program
+  .command('open')
+  .description(
+    'Open the running dashboard in your browser with a one-time sign-in link, ' +
+      'for a browser that is not signed in.',
+  )
+  .option('--print', 'Print the one-time link instead of opening a browser.')
+  .action((opts: { print?: boolean }) => {
+    runOpen({ print: opts.print === true }).catch(fail)
   })
 
 program

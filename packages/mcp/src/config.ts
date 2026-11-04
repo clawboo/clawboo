@@ -3,7 +3,12 @@
 // own config. This generates the exact snippet per runtime + transport, so a
 // user (or the live smoke) can copy-paste a working attachment. Pure — no SDK.
 
-import { signAttachAccess, signAttachProvenance, signAttachScope } from './attachAuth'
+import {
+  signAttachAccess,
+  signAttachProvenance,
+  signAttachScope,
+  type SignableScope,
+} from './attachAuth'
 
 export type McpRuntime = 'claude-code' | 'codex' | 'openclaw'
 export type McpServerName = 'tasks' | 'memory' | 'tools' | 'teamchat'
@@ -57,6 +62,15 @@ export interface AttachScope {
   runtime?: string | null
   taskId?: string | null
   sessionKey?: string | null
+  /**
+   * The board task this run works on. Rides the Tasks URL only, as `scopeTaskId`
+   * inside its `scopeSig`, and becomes the task the Tasks tools use when a call
+   * leaves out `taskId`. Kept apart from `taskId` above on purpose: that one is
+   * a memory provenance stamp, and the learning overlay counts distinct (agent,
+   * task) reporters as corroborators, so setting it changes how memories get
+   * promoted. Binding a run to its task changes nothing in memory.
+   */
+  boundTaskId?: string | null
 }
 
 export interface AttachConfigInput {
@@ -100,6 +114,16 @@ export function mcpHttpUrl(
   // team-and-agent scope: one that did would verify on the Tasks mount as a run
   // the engine does not drive, and win back every write.
   const teamRun = scope.delegate === true
+  // What each URL's signature covers, built field by field rather than spread
+  // from `scope`: a field only one URL carries (the bound task) must never
+  // reach another URL's signature, or that URL would stop verifying.
+  const sign = (claim: Omit<SignableScope, 'teamId' | 'agentId' | 'tenantId'>): string =>
+    signAttachScope(scope.attachSecret!, {
+      teamId: scope.teamId,
+      agentId: scope.agentId,
+      tenantId: scope.tenantId,
+      ...claim,
+    })
   if (server === 'memory') {
     // Memory: the run's VISIBILITY scope + provenance-only stamps (see
     // AttachScope — prov* never widen visibility).
@@ -118,8 +142,7 @@ export function mcpHttpUrl(
     // `delegate` param, so it signs delegate:false even for an orchestrated run —
     // otherwise the verifier, reconstructing scope from the params, could never
     // match, and a legitimate attach would be silently unbound.
-    if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
+    if (scope.attachSecret && claimsScope) p.set('scopeSig', sign({ delegate: false, teamRun }))
   } else if (server === 'tasks') {
     // Tasks: the run's TEAM, so a bare `list_tasks` returns this team's board.
     // An agent is never told its own teamId, so an unbound bare call would hand
@@ -129,11 +152,21 @@ export function mcpHttpUrl(
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (teamRun) p.set('teamRun', '1')
+    // The run's own task: the default for a Tasks tool call that names none.
+    if (scope.boundTaskId) p.set('scopeTaskId', scope.boundTaskId)
     // Tasks never grants delegation, so its signature pins delegate:false — a
     // signed tasks URL replayed onto teamchat with delegate=1 must not verify.
     // `teamRun` is inside the signature: stripping it would win back the writes.
+    // So is the bound task: moving it would aim the defaults at another task.
     if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
+      p.set(
+        'scopeSig',
+        sign({
+          delegate: false,
+          teamRun,
+          ...(scope.boundTaskId ? { boundTaskId: scope.boundTaskId } : {}),
+        }),
+      )
   } else if (server === 'teamchat') {
     // TeamChat: the run's room + AUTHOR IDENTITY (anti-spoof). The URL is
     // clawboo-written config, so the runtime can't post as a peer it isn't.
@@ -142,8 +175,7 @@ export function mcpHttpUrl(
     // Orchestrated runs only — exposes the `team_delegate` signal tool (see
     // AttachScope.delegate for why scope alone must not).
     if (scope.delegate) p.set('delegate', '1')
-    if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, scope))
+    if (scope.attachSecret && claimsScope) p.set('scopeSig', sign({ delegate: scope.delegate }))
   } else {
     // Tools: the run's AGENT, because a connector tool is governed per agent.
     //
@@ -158,8 +190,7 @@ export function mcpHttpUrl(
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (teamRun) p.set('teamRun', '1')
-    if (scope.attachSecret && claimsScope)
-      p.set('scopeSig', signAttachScope(scope.attachSecret, { ...scope, delegate: false, teamRun }))
+    if (scope.attachSecret && claimsScope) p.set('scopeSig', sign({ delegate: false, teamRun }))
   }
   // On every server's URL, scoped or not: the access gate refuses a cookieless
   // /api/mcp/* request without it (see `signAttachAccess`).

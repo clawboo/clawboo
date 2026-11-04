@@ -17,7 +17,7 @@ import {
 import { embeddingsDisabled } from '@clawboo/db'
 
 import { NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
-import { detectInstallMethod, getCurrentVersion } from './updateCheck'
+import { getCurrentVersion, selfUpdateRefusal } from './updateCheck'
 
 /**
  * The routes each route-backed flag stands for, as `METHOD /path` exactly as the
@@ -116,9 +116,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'stream.teamChat.resume': true,
     'stream.agentChat.resume': true,
     'stream.events.resume': true,
-    // Matches self-version's `applyable`: only a global npm install can replace
-    // itself in place.
-    'system.selfUpdate': detectInstallMethod() === 'global',
+    // Matches self-version's `applyable`: a global npm install this user can
+    // write, with in-app updates not turned off by an administrator.
+    'system.selfUpdate': selfUpdateRefusal() === null,
   }
   return {
     version,

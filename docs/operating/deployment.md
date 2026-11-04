@@ -29,7 +29,7 @@ Clawboo runs as one server process. On one port it serves the dashboard, its API
 | How               | Command                                        | Use it for                                                                       |
 | ----------------- | ---------------------------------------------- | -------------------------------------------------------------------------------- |
 | The launcher      | `clawboo`                                      | Your own computer: it starts the server in the background and opens your browser |
-| A direct start    | `node "$(npm root -g)/clawboo/dist/server.js"` | A service manager, a container, or any install with an access token              |
+| A direct start    | `node "$(npm root -g)/clawboo/dist/server.js"` | A service manager, a container, or any install with your own access token        |
 | A source checkout | `pnpm dev`                                     | Working on Clawboo itself ([Monorepo and build](/internals/monorepo-and-build))  |
 
 ## Start with the launcher
@@ -42,13 +42,13 @@ The launcher does three things:
 
 1. It looks for a Clawboo server that is already running ([how it finds the port](/reference/cli)) and opens your browser at it. If that server runs an older version than the launcher, it offers to restart it: `-y` restarts without asking, and `--no-version-check` skips the check.
 2. If none is running, it starts the server in the background. The server's working directory is your Clawboo folder (`~/.clawboo`), and its output goes to `~/.clawboo/server.log`.
-3. It waits up to 45 seconds for the server to answer, then opens `http://localhost:<port>/` (plus your `CLAWBOO_BASE_PATH`, when one is set).
+3. It waits up to 45 seconds for the server to answer, then opens `http://127.0.0.1:<port>/` (plus your `CLAWBOO_BASE_PATH`, when one is set) with a one-time sign-in code, so the browser gets the access cookie. It prints only the plain address.
 
 The server keeps running after the launcher exits. `clawboo stop` stops it, and `clawboo restart` replaces it on the same port; see the [CLI reference](/reference/cli).
 
 <Note>
 
-With `STUDIO_ACCESS_TOKEN` set on the server, the launcher uses the `STUDIO_ACCESS_TOKEN` from the shell you run it in. A server the launcher starts inherits that token, so the launcher sees it answer, and `clawboo stop` and `clawboo restart` work. From a shell without the server's token, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, and `clawboo stop` also prints a command that stops it by port. The browser still needs the access cookie: open `http://localhost:<port>/?access_token=<token>` once. See [Token-gated installs](/reference/cli#token-gated-installs).
+The launcher uses the same access token as the server: the `STUDIO_ACCESS_TOKEN` from the shell you run it in, or the per-install token in `~/.clawboo/access-token` when it is unset. A server the launcher starts inherits the shell's environment, so both pick the same one, and `clawboo stop`, `clawboo restart` and `clawboo open` work. With a server started with a `STUDIO_ACCESS_TOKEN` the shell does not have, `clawboo`, `clawboo stop` and `clawboo restart` report that a server is running and requires an access token, and `clawboo stop` also prints a command that stops it by port. See [Token-gated installs](/reference/cli#token-gated-installs).
 
 </Note>
 
@@ -65,6 +65,7 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 - **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `~/.clawboo/workspaces`.
 - **The dashboard files** come from the `ui` folder next to `server.js`. `CLAWBOO_UI_DIR` points somewhere else. If Clawboo cannot read `index.html` there, page loads answer `503` with "The Clawboo dashboard could not be read from disk. Check CLAWBOO_UI_DIR."
 - **MCP attach snippets.** To make the stdio snippets from `GET /api/mcp/config` name the bundled MCP programs, also set `CLAWBOO_MCP_BIN_DIR="$(npm root -g)/clawboo/dist/bin"`, as the launcher does.
+- **Signing in.** Without `STUDIO_ACCESS_TOKEN`, the server locks itself with the per-install token in `~/.clawboo/access-token` of the user account it runs as. Run `clawboo open` as that user to open a signed-in browser, or `clawboo open --print` for a one-time link to open elsewhere.
 
 ### Run it as a service
 
@@ -106,7 +107,7 @@ CLAWBOO_ALLOWED_ORIGINS=https://dash.example.com
 
 Generate the token with `openssl rand -hex 24` and save it in your password manager before you start the server. Use only letters, digits, `.`, `_`, `~` and `-`: with any other character the server refuses to start.
 
-The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network, not your own account.
+The file mode keeps other user accounts out of the file. Programs running as you, agents included, can still read it: the token guards the network and other accounts, not your own account. Leave `STUDIO_ACCESS_TOKEN` out and the server uses its per-install token file instead, with the same limits.
 
 Then turn the service on, and let it run while you are logged out:
 
@@ -147,7 +148,7 @@ Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME`
 
 <Tab title="In the dashboard">
 
-When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, restarts the server on the same port and reloads the page. For an `npx` run or a source checkout, the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
+When a newer version is on npm, an **Update available** chip appears at the bottom left. On a global npm install it reads **Click to update**: one click installs `clawboo@latest` with npm, restarts the server on the same port and reloads the page. The restarted server keeps the node options the old one started with, such as `--max-old-space-size`. For an `npx` run, a source checkout, or a global install whose folders the server's user cannot write (such as a root-owned `/usr/local`), the chip reads **Copy command** and copies the command to run instead. If npm fails, the chip shows npm's reason; a permissions error suggests `sudo npm install -g clawboo@latest`.
 
 </Tab>
 
@@ -160,7 +161,7 @@ clawboo restart
 
 Or run `clawboo`: it notices that the running server is older and offers to restart it.
 
-With `STUDIO_ACCESS_TOKEN` set, run `clawboo restart` from a shell that has the server's token. Without it, `clawboo restart` cannot restart the server and the old version keeps running. Stop it with the command `clawboo restart` prints, or through the service manager that runs it, then start it again [directly](#start-the-server-directly) or through that service manager.
+With your own `STUDIO_ACCESS_TOKEN` on the server, run `clawboo restart` from a shell that has that token. Without it, `clawboo restart` cannot restart the server and the old version keeps running. Stop it with the command `clawboo restart` prints, or through the service manager that runs it, then start it again [directly](#start-the-server-directly) or through that service manager.
 
 </Tab>
 
@@ -171,18 +172,46 @@ npm install -g clawboo@latest
 systemctl --user restart clawboo
 ```
 
-Skip the in-app update here. It replaces the server process itself, outside the service manager's control.
+Skip the in-app update here. It replaces the server process itself, outside the service manager's control. Set `CLAWBOO_DISABLE_SELF_UPDATE=1` in the service's environment to remove the chip.
 
 </Tab>
 
 </Tabs>
 
-To find updates, the server asks `registry.npmjs.org` for the latest version and keeps a successful answer for 6 hours.
+To find updates, the server asks `registry.npmjs.org` for the latest version and keeps a successful answer for 6 hours. With `CLAWBOO_DISABLE_SELF_UPDATE=1` it never asks, and the dashboard offers no update.
+
+## Pin settings for everyone
+
+Admins who deploy Clawboo for a team can pin settings in one file. A pinned setting applies to everyone who uses the install, and **Settings** > **System** > **Deployment** shows it as "Set by your administrator" with no way to change it.
+
+Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere with `CLAWBOO_OPERATOR_SETTINGS` pointing at it:
+
+```json
+{
+  "disableSelfUpdate": true,
+  "disableBrowserAutostart": true,
+  "catalogIndexUrl": "https://mirror.example.com/catalog/v1/index.json"
+}
+```
+
+| Key                       | What it pins                                                 | Same as                             |
+| ------------------------- | ------------------------------------------------------------ | ----------------------------------- |
+| `disableSelfUpdate`       | No update chip, no update from the dashboard, no npm check   | `CLAWBOO_DISABLE_SELF_UPDATE`       |
+| `disableBrowserAutostart` | Playwright and Chrome DevTools do not start on a new install | `CLAWBOO_DISABLE_BROWSER_AUTOSTART` |
+| `catalogIndexUrl`         | Where the Marketplace catalog comes from, such as a mirror   | `CLAWBOO_CATALOG_INDEX_URL`         |
+
+- Every key also has an environment variable, and the variable wins over the file.
+- Clawboo reads the file once at startup, so run `clawboo restart` after a change. It never writes the file.
+- A file it cannot trust stops the server at startup with `CONFIG: refusing to start.` and the reason: invalid JSON, an unknown key, a value of the wrong type, a file any user can write, or a `CLAWBOO_OPERATOR_SETTINGS` that names a missing file. Starting anyway would drop the pins you rely on.
+- The file holds no secrets: a key whose name looks like a credential, or a URL with a password or token in it, is refused. Keep keys in the vault or the environment.
+- Agents run as the same user as the server. On a shared machine, keep the file where that user can read it but not change it, such as a root-owned `/etc/clawboo/operator.json`.
+
+[Environment variables](/reference/environment-variables#pinned-by-an-administrator) has each key's details.
 
 ## Behind a reverse proxy or on another machine
 
-- **A proxy on the same machine:** leave `HOST` unset, pin `CLAWBOO_API_PORT`, and set `STUDIO_ACCESS_TOKEN` (unless the proxy authenticates every request), `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`. Deny `/api/mcp/` at the proxy.
-- **Another machine, a network or a container:** set `HOST=0.0.0.0` with the token and the two allowlists. Without a working token, the server refuses to start.
+- **A proxy on the same machine:** leave `HOST` unset, pin `CLAWBOO_API_PORT`, keep the access token on (setting `STUDIO_ACCESS_TOKEN` gives you one you know for signing in), and set `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`. Deny `/api/mcp/` at the proxy.
+- **Another machine, a network or a container:** set `HOST=0.0.0.0` with the token on and the two allowlists. With the token turned off, the server refuses to start.
 - **A hostname shared with other apps:** serve Clawboo under a path prefix with `CLAWBOO_BASE_PATH`.
 
 [Reach Clawboo from another machine](/guides/self-host-securely) has the steps and the nginx, Caddy and Cloudflare Tunnel configs. On Clawboo 0.5.0 and older the `/api/mcp/` rule is required: see the advisory in the [Security model](/operating/security).
@@ -215,7 +244,7 @@ The launcher waited 45 seconds without an answer. It prints the last lines of `~
 
 <Accordion title="A Clawboo server is running on port N, but it requires an access token.">
 
-The shell you ran the command in does not have the server's token. Set `STUDIO_ACCESS_TOKEN` to that token and run the command again. To open the dashboard, open the address the message prints, with your token in place of `<token>`. Without the token, stop the server with Ctrl+C in its terminal, with your service manager, or with the command `clawboo stop` prints.
+The server was started with a `STUDIO_ACCESS_TOKEN` that the shell you ran the command in does not have. Set `STUDIO_ACCESS_TOKEN` to that token and run the command again. To open the dashboard, open the address the message prints, with your token in place of `<token>`. Without the token, stop the server with Ctrl+C in its terminal, with your service manager, or with the command `clawboo stop` prints.
 
 </Accordion>
 
@@ -239,7 +268,7 @@ The launcher cannot find `server.js` next to itself. Reinstall with `npm install
 
 <Accordion title="SECURITY: refusing to start">
 
-`HOST` is set to a network address and the server has no access token. See [Reach Clawboo from another machine](/guides/self-host-securely), or unset `HOST` to listen on `127.0.0.1` only. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, the token has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops the server on any address: replace it with one from `openssl rand -hex 24`.
+`HOST` is set to a network address and the access token is turned off (`STUDIO_ACCESS_TOKEN=` set blank). See [Reach Clawboo from another machine](/guides/self-host-securely), or unset `HOST` to listen on `127.0.0.1` only. If the message names `~/.clawboo/access-token`, the token file is not one Clawboo can trust: delete it, and the next start makes a new one. If the message names an unsupported character in `STUDIO_ACCESS_TOKEN`, the token has a character other than letters, digits, `.`, `_`, `~` and `-`, which stops the server on any address: replace it with one from `openssl rand -hex 24`.
 
 </Accordion>
 

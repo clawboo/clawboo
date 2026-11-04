@@ -27,6 +27,7 @@ import { isOnceSpec, nextOccurrence } from '@clawboo/scheduler'
 
 import { getDb } from '../db'
 import { emitEvent } from '../obs'
+import { routineTimeZone } from './timeZone'
 import { dispatchRoutine, type RoutineDispatchOutcome } from './wakeBridge'
 
 const MAX_ARM_DELAY_MS = 60_000
@@ -112,7 +113,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     // its only time is then still ahead, but any failure stops it.
     if (outcome.ok || (outcome.transient && !isOnceSpec(claimed.cronSpec))) {
       try {
-        nextAt = nextOccurrence(claimed.cronSpec, completedAt)
+        nextAt = nextOccurrence(claimed.cronSpec, completedAt, routineTimeZone(db))
       } catch {
         nextAt = null
       }
@@ -231,12 +232,13 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
   return {
     bootResume(): void {
       try {
+        const zone = routineTimeZone(db)
         const healed = reconcileScheduledRuns(db, now(), (spec, fromMs) => {
           // A once@ orphaned mid-dispatch is NEVER re-armed: its outcome is
           // unknown, and re-firing risks double-materializing a one-shot.
           if (isOnceSpec(spec)) return null
           try {
-            return nextOccurrence(spec, fromMs)
+            return nextOccurrence(spec, fromMs, zone)
           } catch {
             return null
           }

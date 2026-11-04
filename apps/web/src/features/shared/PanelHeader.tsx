@@ -48,18 +48,18 @@ export function PanelHeader({
           </span>
         ) : null}
         <div className="min-w-0">
+          {/* On the type scale: `text-section` (22) for a page, `text-lg` (18)
+              for a panel. */}
           <h1
-            className="truncate font-display font-bold text-foreground"
-            style={{
-              fontSize: size === 'lg' ? 22 : 17,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.15,
-            }}
+            className={[
+              'truncate font-display font-bold leading-[1.15] tracking-[-0.02em] text-foreground',
+              size === 'lg' ? 'text-section' : 'text-lg',
+            ].join(' ')}
           >
             {title}
           </h1>
           {subtitle ? (
-            <p className="mt-0.5 truncate text-[13px] text-muted-foreground">{subtitle}</p>
+            <p className="mt-0.5 truncate text-compact text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
       </div>

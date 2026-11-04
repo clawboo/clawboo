@@ -54,7 +54,7 @@ Each task also remembers which chat it came from: General or one of the team's r
 
 ## Tasks that wait on other tasks
 
-A task can depend on other tasks. It becomes ready only when every task it depends on is Done, and ready tasks start in order of priority. A plan of hand-offs works this way: each step waits for the one before it. Clawboo refuses a dependency that would make a loop, because a loop could never finish.
+A task can depend on other tasks. It becomes ready only when every task it depends on is Done, and ready tasks start in order of priority: Urgent, High, Normal (where every task starts) and Low, the most recently updated first within each. A plan of hand-offs works this way: each step waits for the one before it. Clawboo refuses a dependency that would make a loop, because a loop could never finish.
 
 When a handed-off task fails, or you cancel a task, the tasks still waiting on it in To do or Backlog are cancelled too. That way they do not sit there forever. Whoever handed out the work is told which steps were dropped.
 

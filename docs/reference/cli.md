@@ -1,13 +1,14 @@
 ---
 title: 'CLI reference'
 sidebarTitle: 'CLI'
-description: 'Every clawboo command and flag: start the dashboard, stop or restart its background server, back up the database, and run the MCP stdio bins.'
+description: 'Every clawboo command and flag: start the dashboard, sign a browser in, stop or restart its background server, back up the database, and run the MCP stdio bins.'
 keywords:
   [
     'clawboo command',
     'npx clawboo',
     'clawboo stop',
     'clawboo restart',
+    'clawboo open',
     'clawboo backup',
     'server.log',
     'port discovery',
@@ -22,6 +23,7 @@ The `clawboo` command starts the dashboard and manages the server behind it. Use
 | `clawboo`               | Find or start the dashboard server, then open it in your browser    |
 | `clawboo stop`          | Stop the running dashboard server                                   |
 | `clawboo restart`       | Stop the server and start a fresh one on the same port              |
+| `clawboo open`          | Open the running dashboard in your browser, signed in               |
 | `clawboo backup [dest]` | Write a one-file copy of the database, safe while the server runs   |
 | `clawboo --version`     | Print the CLI version (`-V` for short)                              |
 | `clawboo --help`        | Print usage (`-h` for short)                                        |
@@ -40,7 +42,7 @@ Run with no subcommand, `clawboo` gets you to a working dashboard:
 5. If none is running, it starts one in the background and waits up to about 45 seconds for it to answer.
 6. It opens the dashboard in your browser, prints "Clawboo opened at" with the URL, and lists next steps.
 
-The URL is `http://localhost:<port>`, or `http://localhost:<port><prefix>/` when you set `CLAWBOO_BASE_PATH`. The browser opens with `open` on macOS, `start` on Windows and `xdg-open` elsewhere.
+The URL is `http://127.0.0.1:<port>`, or `http://127.0.0.1:<port><prefix>/` when you set `CLAWBOO_BASE_PATH`: the address the server listens on. The CLI uses it rather than `localhost`, which can resolve to `::1`, where another program could be listening on the same port. When `HOST` names another loopback address, `::1` or another `127.x`, the CLI uses that one, since it is all such a server listens on. For `HOST=localhost`, which leaves the address to the system, set `HOST=127.0.0.1` or `HOST=::1` instead. A browser signed in at one of these addresses is not signed in at the other. The browser opens with `open` on macOS, `start` on Windows and `xdg-open` elsewhere. On a server with an access token, which is every install unless you turn it off, the browser opens a one-time sign-in link instead: the same URL with `?access_code=<code>` added, which signs the browser in once, within two minutes (see [Signing in a browser](#signing-in-a-browser)). Only the plain URL is printed. When no browser opens, as on a server with no desktop, it prints "Could not open a browser on this computer." and suggests `clawboo open --print`. When the server gives no sign-in link (it did not answer in time, or it is older than one-time links), the browser opens the plain address, and the CLI says it opened without a sign-in link and to run `clawboo open` if the dashboard says it is locked.
 
 | Flag                 | Effect                                                |
 | -------------------- | ----------------------------------------------------- |
@@ -49,7 +51,7 @@ The URL is `http://localhost:<port>`, or `http://localhost:<port><prefix>/` when
 | `--no-version-check` | Attach to a running server without comparing versions |
 | `-y`, `--yes`        | Restart an older running server without asking        |
 
-`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo restart` takes `--no-open`, `clawboo backup` takes `-f, --force`, and `clawboo stop` takes no flags. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
+`--no-version-check` and `-y` apply to `clawboo` itself. `clawboo restart` takes `--no-open`, `clawboo open` takes `--print`, `clawboo backup` takes `-f, --force`, and `clawboo stop` takes no flags. A mistyped subcommand, such as `clawboo stopp`, prints `error: unknown command 'stopp'` with the help text and exits 1 instead of starting anything.
 
 ### Version check
 
@@ -115,7 +117,7 @@ clawboo restart
 clawboo restart --no-open
 ```
 
-Stops the server as `clawboo stop` does, then starts a new one on the same port, so a browser tab that is already open reconnects. Use it after `npm install -g clawboo@latest` (the running server keeps its old code until it restarts) or after you change an environment variable the server reads at startup.
+Stops the server as `clawboo stop` does, then starts a new one on the same port, so a browser tab that is already open reconnects. It opens the browser the way `clawboo` does, with a one-time sign-in link on a server with an access token. Use it after `npm install -g clawboo@latest` (the running server keeps its old code until it restarts) or after you change an environment variable the server reads at startup.
 
 | Flag        | Effect                                   |
 | ----------- | ---------------------------------------- |
@@ -128,14 +130,33 @@ Stops the server as `clawboo stop` does, then starts a new one on the same port,
 
 In a source checkout run with `pnpm dev`, the dev script supervises the server and may start it again on its own. Restart through the dev script there.
 
+## clawboo open
+
+```bash
+clawboo open
+clawboo open --print
+```
+
+Opens the running dashboard in your browser, signed in. Each run makes a fresh one-time sign-in link, so this is also the way back in for a browser that shows "This dashboard is locked to your computer". It finds the server through [port discovery](#port-discovery) and never starts one: with nothing running it prints "No Clawboo server is running." and exits 1.
+
+| Flag      | Effect                                               |
+| --------- | ---------------------------------------------------- |
+| `--print` | Print the one-time link instead of opening a browser |
+
+With `--print`, the link is the only thing written to standard output, so you can pipe it, and a note goes to standard error. Use it on a computer with no browser, or for another browser on this computer. The link names `127.0.0.1`; through an SSH tunnel that forwards the same port it opens as printed, and from another computer on the network, use this computer's address in its place. On a server with no access token, it prints the plain address and says no sign-in is needed. On a server older than one-time links, it prints the plain address and suggests `clawboo restart`.
+
+## Signing in a browser
+
+Every `/api/*` request needs the access cookie when the server has an access token. A server started with `STUDIO_ACCESS_TOKEN` unset locks itself with the per-install token in `~/.clawboo/access-token`, so that is every install unless you set `STUDIO_ACCESS_TOKEN` yourself or set it blank to turn the gate off. The CLI asks the server for a one-time sign-in code (`POST /api/access/launch-code`) and opens `?access_code=<code>`, which the server trades for the cookie once, within two minutes. The access token itself never goes into a URL or the command line of the program that opens your browser. [Security](/operating/security#the-access-token) has the details.
+
 ## Token-gated installs
 
-When the server runs with `STUDIO_ACCESS_TOKEN` set, every `/api/*` request needs the access cookie. The CLI reads `STUDIO_ACCESS_TOKEN` from the shell you run it in. It asks each port without the token first. Only a port that answers with the access gate's own refusal, which names Clawboo, is asked again with the token as the cookie, so another service in the port range never receives it.
+The CLI uses the same token as the server: `STUDIO_ACCESS_TOKEN` from the shell you run it in when it is set, no token when it is set blank, and otherwise the token in `~/.clawboo/access-token` (it follows `CLAWBOO_HOME`), which it only reads. A server that `clawboo` starts gets the shell's environment, so both pick the same token. The CLI asks each port without the token first. A port is asked again with the token as the cookie only when it answers with the access gate's own refusal, which names Clawboo, and it is the port the server recorded in `api-port.txt`, at the address above. So another service in the port range, or another user's program imitating the gate, never receives it. That includes a `STUDIO_ACCESS_TOKEN` set in the shell: `CLAWBOO_API_PORT` alone never qualifies a port, since it stays set while the server is down. For a server whose `api-port.txt` this shell cannot see (one in a container, or with another `CLAWBOO_HOME`), point `CLAWBOO_HOME` at that server's folder, or manage it with its own service manager. A server that cannot write `api-port.txt` logs a warning that the CLI cannot sign in to it.
 
-- **The shell has the server's token.** `clawboo`, `clawboo stop` and `clawboo restart` work as they do on an install without a token. A server that `clawboo` starts gets the shell's environment, token included, so the CLI sees it answer and opens it. Your browser still needs the cookie, and the CLI never puts the token in a URL or a command line. So before it opens the browser, `clawboo` prints "STUDIO_ACCESS_TOKEN is set. If the dashboard does not load, open `http://localhost:<port>/?access_token=<token>` once in this browser."
-- **The shell has no token, or a different one.** The CLI can still tell that a Clawboo server is answering, because the access gate's refusal names Clawboo. `clawboo` prints "A Clawboo server is running on port N, but it requires an access token.", a line saying to set the server's token in this shell (or that the shell's token is not the server's), and the address to open once, `http://localhost:<port>/?access_token=<token>`. Then it exits 1 without starting a second server. `clawboo stop` and `clawboo restart` print the same notice and a manual stop command, then exit 1. They never signal a process they could not identify.
+- **The CLI has the server's token.** `clawboo`, `clawboo open`, `clawboo stop` and `clawboo restart` work as they do on an install without a token, and the browser opens signed in. A server older than one-time links cannot give a sign-in code; with `STUDIO_ACCESS_TOKEN` set, `clawboo` then prints "STUDIO_ACCESS_TOKEN is set. If the dashboard does not load, open `http://127.0.0.1:<port>/?access_token=<token>` once in this browser."
+- **The CLI has no token, or a different one.** This happens with a server started with a `STUDIO_ACCESS_TOKEN` that this shell does not have. The CLI can still tell that a Clawboo server is answering, because the access gate's refusal names Clawboo. `clawboo` prints "A Clawboo server is running on port N, but it requires an access token.", a line saying to set the server's token in this shell (or that this shell's token is not the server's), and the address to open once, `http://127.0.0.1:<port>/?access_token=<token>`. Then it exits 1 without starting a second server. `clawboo open` prints the same notice and exits 1. `clawboo stop` and `clawboo restart` print it with a manual stop command, then exit 1. They never signal a process they could not identify.
 
-To stop or restart a gated server from the CLI, set the server's token in the shell first:
+To stop or restart a server started with your own token, set that token in the shell first:
 
 <Tabs>
   <Tab title="macOS and Linux">
@@ -186,24 +207,25 @@ Every command exits 0 on success and 1 on failure. Any command also exits 1 on N
 | `clawboo`               | The browser opened on a found, restarted or newly started dashboard | Only a token-gated dashboard was found and the shell does not have its token; no server to start; the start timed out; an older server was stopped for a restart and not replaced |
 | `clawboo stop`          | The server stopped, or nothing was running                          | The dashboard is token-gated and the shell does not have its token; the process could not be stopped or identified                                                                |
 | `clawboo restart`       | A server is running again (or was started from nothing)             | The dashboard is token-gated and the shell does not have its token; the stop failed; the new server did not answer                                                                |
+| `clawboo open`          | The browser opened signed in, or `--print` printed a link           | No server is running; the dashboard is token-gated and the CLI does not have its token; no browser could be opened                                                                |
 | `clawboo backup [dest]` | The copy was written                                                | No database exists; the destination exists and `--force` was not given                                                                                                            |
 
 ## Environment variables
 
 These are the variables the CLI itself reads or sets. Everything else in your shell passes through to the server unchanged; the server reads many more, listed in [Environment variables](/reference/environment-variables).
 
-| Variable              | Read or set          | Effect                                                                                                                                                                                      |
-| --------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CLAWBOO_API_PORT`    | read, and set        | Read: check only this port. Set on the new server when a restart pins the old port.                                                                                                         |
-| `CLAWBOO_AWAIT_PORT`  | set                  | Set with the pin, so the new server waits up to 15 seconds for the port to free.                                                                                                            |
-| `CLAWBOO_HOME`        | read                 | Where `api-port.txt`, `server.log` and (for `backup`) `clawboo.db` live. Default `~/.clawboo`. Also the server's working directory.                                                         |
-| `CLAWBOO_BASE_PATH`   | read                 | Added to every URL the CLI prints or opens. An invalid value is ignored here; the server itself refuses to start on it.                                                                     |
-| `STUDIO_ACCESS_TOKEN` | read                 | Sent as the access cookie, only to a port that answered with the access gate's refusal, so the CLI can use a token-gated server. A server the CLI starts gets it like every other variable. |
-| `CLAWBOO_SERVER_PATH` | read                 | Repository root to use for a source-checkout start.                                                                                                                                         |
-| `CLAWBOO_LAUNCH_DIR`  | set                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" when you set up a connector that needs a folder.                                                                  |
-| `CLAWBOO_VERSION`     | set                  | The CLI's version, which the server reports as its own.                                                                                                                                     |
-| `CLAWBOO_MCP_BIN_DIR` | set (normal install) | Where the MCP stdio bins are, so the server can print stdio attach snippets.                                                                                                                |
-| `NODE_ENV`            | set                  | `production` on the server it starts.                                                                                                                                                       |
+| Variable              | Read or set          | Effect                                                                                                                                                                                                                            |
+| --------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLAWBOO_API_PORT`    | read, and set        | Read: check only this port. Set on the new server when a restart pins the old port.                                                                                                                                               |
+| `CLAWBOO_AWAIT_PORT`  | set                  | Set with the pin, so the new server waits up to 15 seconds for the port to free.                                                                                                                                                  |
+| `CLAWBOO_HOME`        | read                 | Where `api-port.txt`, `access-token`, `server.log` and (for `backup`) `clawboo.db` live. Default `~/.clawboo`. Also the server's working directory.                                                                               |
+| `CLAWBOO_BASE_PATH`   | read                 | Added to every URL the CLI prints or opens. An invalid value is ignored here; the server itself refuses to start on it.                                                                                                           |
+| `STUDIO_ACCESS_TOKEN` | read                 | The token sent as the access cookie, only to the recorded port and only after the access gate's refusal. Unset: the CLI reads `access-token` instead. Blank: no token. A server the CLI starts gets it like every other variable. |
+| `CLAWBOO_SERVER_PATH` | read                 | Repository root to use for a source-checkout start.                                                                                                                                                                               |
+| `CLAWBOO_LAUNCH_DIR`  | set                  | The folder you ran `clawboo` from, offered as "Where you started clawboo" when you set up a connector that needs a folder.                                                                                                        |
+| `CLAWBOO_VERSION`     | set                  | The CLI's version, which the server reports as its own.                                                                                                                                                                           |
+| `CLAWBOO_MCP_BIN_DIR` | set (normal install) | Where the MCP stdio bins are, so the server can print stdio attach snippets.                                                                                                                                                      |
+| `NODE_ENV`            | set                  | `production` on the server it starts.                                                                                                                                                                                             |
 
 ## MCP stdio bins
 

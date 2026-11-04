@@ -26,6 +26,8 @@
 // island reads as a different system talking. The LABELS carry the meaning; the
 // syntax just has to be unambiguous.
 
+import { defangSectionMarkers } from '@clawboo/board-core'
+
 /** One rendered item. The caller owns the wrapper — for a peer post that is
  *  `formatPeerPost`, whose `isUser=false` token is safety-critical and must not be
  *  reconstructed here. This module only frames what it is handed. */
@@ -57,14 +59,18 @@ const ADDRESSED_END = '[End addressed to you]'
  * AUTHORSHIP, not the section labels, and mailbox rows do not go through it at
  * all. The guarantee belongs where the markers are defined.
  *
- * Matches the SHAPE rather than the four exact literals, so a near-miss that
- * would still read as authentic to a model is caught too.
+ * Matches the SHAPE rather than the exact literals, so a near-miss that would
+ * still read as authentic to a model is caught too. `your task` covers the task
+ * block a task run's context carries just before this envelope
+ * (`[Your task on the board]` … `[End your task]`), which a note must not close
+ * and reopen either. The matcher lives in @clawboo/board-core
+ * (`defangSectionMarkers`), shared with the other surfaces that frame text
+ * clawboo did not write.
  */
-const SECTION_MARKER_RE = /^[ \t]*\[(?:end\s+)?(?:ambient|addressed to you)\b[^\]]*\][ \t]*$/gim
+const SECTION_LABELS = ['ambient', 'addressed to you', 'your task'] as const
 
 /** Neutralise any section marker a body tries to smuggle in. */
-const defangMarkers = (text: string): string =>
-  text.replace(SECTION_MARKER_RE, '(quoted section marker)')
+const defangMarkers = (text: string): string => defangSectionMarkers(text, SECTION_LABELS)
 
 /**
  * Build the envelope, or null when there is nothing to say.
