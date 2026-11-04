@@ -11,6 +11,17 @@ export const API_BASE = `http://127.0.0.1:${API_PORT}`
 const SETTINGS_URL = `${API_BASE}/api/settings`
 
 /**
+ * The access cookie for the e2e server (see playwright.config.ts), for a plain
+ * `fetch` from the runner. `page` and `request` carry it already.
+ */
+export const ACCESS_COOKIE_HEADER: Record<string, string> = process.env.CLAWBOO_E2E_ACCESS_TOKEN
+  ? { Cookie: `clawboo_access=${process.env.CLAWBOO_E2E_ACCESS_TOKEN}` }
+  : {}
+
+/** Browser or request-context storage with no cookies: a signed-out browser. */
+export const SIGNED_OUT = { cookies: [], origins: [] }
+
+/**
  * Guard rail — throws when the test runner OR the running server isn't
  * clearly in a sandboxed environment.
  *
@@ -98,7 +109,7 @@ export const test = base.extend<object, { gateway: MockGateway }>({
       // token untouched (the correct restore semantics, no accidental wipe).
       let originalSettings: { gatewayUrl?: string } | null = null
       try {
-        const resp = await fetch(SETTINGS_URL)
+        const resp = await fetch(SETTINGS_URL, { headers: ACCESS_COOKIE_HEADER })
         if (resp.ok) originalSettings = (await resp.json()) as typeof originalSettings
       } catch {
         /* server may not be ready yet — will restore defaults */
@@ -113,14 +124,14 @@ export const test = base.extend<object, { gateway: MockGateway }>({
         if (originalSettings?.gatewayUrl) {
           await fetch(SETTINGS_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...ACCESS_COOKIE_HEADER },
             body: JSON.stringify({ gatewayUrl: originalSettings.gatewayUrl }),
           })
         } else {
           // Original had no URL — restore the default URL (token left as-is).
           await fetch(SETTINGS_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...ACCESS_COOKIE_HEADER },
             body: JSON.stringify({ gatewayUrl: 'ws://localhost:18789' }),
           })
         }

@@ -26,6 +26,7 @@
 import { act, render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useAlertSignal } from '@/features/alerts/alertSignal'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
 import { useRunActivityStore } from '@/stores/runActivity'
 
@@ -85,6 +86,18 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks())
 
 describe('RunStatusBridge', () => {
+  it('notes the newest event the browser alerts care about, from the same tail', () => {
+    useAlertSignal.setState({ seq: 0 })
+    streamEvents = [
+      ev('execution_started', 'a1'),
+      ev('execution_completed', 'a1'),
+      ev('tool_call', 'a1'),
+    ]
+    render(<RunStatusBridge />)
+    // The run end, not the later tool call: only what can change Needs you counts.
+    expect(useAlertSignal.getState().seq).toBe(2)
+  })
+
   it('lights an agent up from the window when the fleet is already loaded', () => {
     useFleetStore.setState({ agents: [agent('a1')] })
     streamEvents = [ev('execution_started', 'a1')]

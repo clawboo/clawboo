@@ -241,6 +241,17 @@ describe('createHermesAcpDriver', () => {
     }
   }
 
+  /** The driver's answer to request `id`, once it has written one. */
+  async function answerTo(id: string, ms = 5_000): Promise<Record<string, unknown>> {
+    const end = Date.now() + ms
+    for (;;) {
+      const answer = (await received()).find((m) => m['id'] === id && !('method' in m))
+      if (answer) return answer
+      if (Date.now() > end) throw new Error(`timed out waiting for the answer to ${id}`)
+      await new Promise((r) => setTimeout(r, 10))
+    }
+  }
+
   async function received(): Promise<Array<Record<string, unknown>>> {
     const raw = await readFile(logPath, 'utf8')
     return raw
@@ -338,8 +349,10 @@ describe('createHermesAcpDriver', () => {
     const { driver, seen } = driverFor('fs-request')
     await driver.start()
     await until(() => seen.some((e) => e.type === 'result'))
-    const answer = (await received()).find((m) => m['id'] === 'fs-1')
-    expect(answer?.['error']).toMatchObject({ code: -32601 })
+    // The fake ends the turn without waiting for this answer, so it can land
+    // in the log after the result does.
+    const answer = await answerTo('fs-1')
+    expect(answer['error']).toMatchObject({ code: -32601 })
   })
 
   it('steers a running turn with /steer, keeping the acknowledgement out of the output', async () => {

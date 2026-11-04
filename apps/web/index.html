@@ -56,14 +56,22 @@
     />
 
     <!-- Theme init — runs synchronously before React mounts to prevent FOUC.
-         Reads localStorage('clawboo.theme'); fresh installs (no stored value)
+         Reads the stored 'clawboo.theme'; fresh installs (no stored value)
          default to LIGHT so onboarding happens in light mode. Once the user
          picks a preference (light/dark/system) it's respected.
-         Mirror of the resolver inside features/theme/ThemeProvider.tsx. -->
+         Mirror of the resolver inside features/theme/ThemeProvider.tsx. Under a
+         base path the key carries the prefix the server injected above, spelled
+         as src/lib/clientStorage.ts spells it (themePrePaint.test.ts holds the
+         two together), with the unprefixed key from before as the fallback. -->
     <script>
       ;(function () {
         try {
-          var stored = window.localStorage.getItem('clawboo.theme')
+          var base =
+            typeof window.__CLAWBOO_BASE__ === 'string' ? window.__CLAWBOO_BASE__.trim() : ''
+          while (base.charAt(base.length - 1) === '/') base = base.slice(0, -1)
+          if (base && base.charAt(0) !== '/') base = '/' + base
+          var stored = window.localStorage.getItem(base ? base + ':clawboo.theme' : 'clawboo.theme')
+          if (stored === null && base) stored = window.localStorage.getItem('clawboo.theme')
           var pref =
             stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'light'
           var resolved =

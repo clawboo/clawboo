@@ -146,6 +146,11 @@ describe('origin guard — Host allowlist (DNS-rebinding defense)', () => {
     expect(cap.statusCode).toBe(403)
   })
 
+  it('REJECTS an IPv4-mapped loopback Host', () => {
+    expect(guard.isAllowedHost(`[::ffff:127.0.0.1]:${PORT}`)).toBe(false)
+    expect(guard.isAllowedHost(`[::ffff:127.0.0.2]:${PORT}`)).toBe(false)
+  })
+
   it('REJECTS an absent Host', () => {
     expect(guard.isAllowedHost(undefined)).toBe(false)
     expect(guard.isAllowedHost('')).toBe(false)

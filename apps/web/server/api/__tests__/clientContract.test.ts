@@ -97,6 +97,7 @@ const PINNED_FEATURES = [
 const PINNED_ROUTES = [
   'GET /api/settings',
   'POST /api/settings',
+  'POST /api/access/launch-code',
   'GET /api/approvals',
   'POST /api/approvals',
   'GET /api/chat-history',
@@ -281,6 +282,8 @@ const PINNED_ROUTES = [
   'POST /api/governance/budgets/:scope/:scopeId/resume',
   'GET /api/schedules',
   'GET /api/schedules/occurrences',
+  'GET /api/schedules/time-zone',
+  'PUT /api/schedules/time-zone',
   'POST /api/schedules',
   'POST /api/schedules/:id/run',
   'GET /api/schedules/:id/runs',

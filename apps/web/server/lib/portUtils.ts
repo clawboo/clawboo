@@ -147,17 +147,19 @@ function readPortEnv(name: string): number | null {
 }
 
 /**
- * Write the runtime port file. Best-effort; errors are logged via the
- * caller-provided callback but never thrown — a missing file just means
- * downstream tools fall back to env vars / defaults.
+ * Write the runtime port file. Never throws; false when the write did not land,
+ * so the caller can say so. The `clawboo` command sends the access token only
+ * to the port this file names, so without it the command cannot sign in.
  */
-export function writeApiPortFile(port: number): void {
+export function writeApiPortFile(port: number): boolean {
   const file = getApiPortFilePath()
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     fs.writeFileSync(file, String(port), 'utf8')
+    return true
   } catch {
-    // Non-fatal — the env var is still valid for in-process consumers.
+    // Non-fatal: the env var is still valid for in-process consumers.
+    return false
   }
 }
 

@@ -18,53 +18,28 @@
  * The `onboarded` flag wins over this marker for genuinely-returning users
  * (completed before): the bootstrap only resumes when active && !onboarded.
  */
+import { scopedLocalStorage } from './clientStorage'
+
 const WIZARD_ACTIVE_KEY = 'clawboo.wizard.active'
 
-// localStorage exists but THROWS on access in storage-disabled contexts (Safari
-// private mode, some embedded webviews). The `typeof window` guard isn't enough, so
-// every access is wrapped: the persistence feature degrades to a no-op rather than
-// crashing the onboarding wizard.
-function safeLocalSet(key: string, value: string): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(key, value)
-  } catch {
-    /* storage unavailable — degrade to non-persistent */
-  }
-}
-
-function safeLocalRemove(key: string): void {
-  if (typeof window === 'undefined') return
-  try {
-    localStorage.removeItem(key)
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-function safeLocalGet(key: string): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
+// Stored through `clientStorage`: the marker belongs to this instance's base path,
+// and storage that throws on access (Safari private mode, some embedded webviews)
+// degrades to a no-op rather than crashing the onboarding wizard.
 
 /** Mark that a wizard run is in progress (idempotent). */
 export function markWizardActive(): void {
-  safeLocalSet(WIZARD_ACTIVE_KEY, '1')
+  scopedLocalStorage.setItem(WIZARD_ACTIVE_KEY, '1')
 }
 
 /** Clear the in-progress marker — call on completion or when skipping to the
  * returning-user fast path. */
 export function clearWizardActive(): void {
-  safeLocalRemove(WIZARD_ACTIVE_KEY)
+  scopedLocalStorage.removeItem(WIZARD_ACTIVE_KEY)
 }
 
 /** True when a wizard run started but hasn't been completed/cleared. */
 export function isWizardActive(): boolean {
-  return safeLocalGet(WIZARD_ACTIVE_KEY) === '1'
+  return scopedLocalStorage.getItem(WIZARD_ACTIVE_KEY) === '1'
 }
 
 /**

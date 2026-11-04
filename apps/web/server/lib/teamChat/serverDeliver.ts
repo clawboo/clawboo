@@ -66,6 +66,7 @@ import { getRegistry } from '../agentSource/registry'
 import { budgetPreflight, budgetRefusalText, type BudgetPreflightResult } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import { runSlots, type RunSlot } from '../runSlots'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
 import { openclawAgentModel } from '../openclawAgentModel'
@@ -120,6 +121,18 @@ export interface RunEntry {
   serverAbortReason?: string | null
 }
 
+/** A delivery waiting in the process's run queue (see runSlots), keyed by sessionKey
+ *  in the host's queued map from the moment it queues until its run starts. */
+export interface QueuedRun {
+  /** Take it out of the queue (Stop, teardown). It never starts. */
+  cancel(): void
+}
+
+/** How often a queued delivery re-marks its session busy, well inside the nudge
+ *  queue's 10-minute wedge timer, which would otherwise force-idle the session and
+ *  let the next delivery start a second run on it. */
+const QUEUED_KEEPALIVE_MS = 60_000
+
 export interface ServerDeliverDeps {
   db: ClawbooDb
   teamId: string
@@ -133,6 +146,11 @@ export interface ServerDeliverDeps {
   /** sessionKey → live run, so `stop()` / the wedge can abort it. Populated here
    *  (in the send closure) and evicted in `drainRun` on the run's terminal. */
   abortMap: Map<string, RunEntry>
+  /** sessionKey → a delivery waiting for a run slot, so `stop()` can cancel it and the
+   *  engine's watchdog can tell waiting from silence. Populated here when every slot
+   *  is taken; evicted when the run starts or the delivery ends. Omitted in tests
+   *  that do not look at it. */
+  queuedRuns?: Map<string, QueuedRun>
   /** The engine's event sink: the orchestrator's `onEvent`. `run` is the stamp
    *  fixed when this run was delivered. */
   onEvent: (sessionKey: string, event: RuntimeEvent, run: RunStamp) => Promise<void>
@@ -245,6 +263,7 @@ function missionRootId(db: ClawbooDb, taskId: string): string {
 /** Build the engine's `deliver(targetSessionKey, targetAgentId, message)`. */
 export function createServerDeliver(deps: ServerDeliverDeps) {
   const { db, teamId, mcpBaseUrl, nudge, abortMap, onEvent, onSessionClosed, taskForSession } = deps
+  const queuedRuns = deps.queuedRuns ?? new Map<string, QueuedRun>()
   const execForSession = deps.execForSession
   const chatRoomId = deps.chatRoomId ?? null
   const stopGen = deps.stopGen
@@ -396,6 +415,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       /** The agent's configured model, used to price an estimate when the run's cost
        *  events name none. */
       model: string | null
+      /** Give the run's slot back (see runSlots). Called once the run is over, before
+       *  the session's next delivery flushes and before the engine reacts to the
+       *  terminal, so whatever that starts can take the slot. */
+      releaseRunSlot: () => void
     },
   ): Promise<void> {
     let sawTerminal = false
@@ -646,6 +669,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // one CLEARING delta — empty text tells the client to drop its StreamingCard
           // (nothing will ever replace it, so leaving it lingers-then-vanishes).
           if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+          obs.releaseRunSlot()
           // Evict THIS run's abort entry BEFORE markIdle — this run is terminal, so
           // its handle is dead weight, and markIdle synchronously flushes the
           // session's next QUEUED delivery: for a mutex-less runtime (ephemeral
@@ -715,6 +739,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // Ordered last: a partial committed just above replaces the StreamingCard on
       // its own, so only a turn that truly committed nothing needs clearing.
       if (publishedDelta && !persistedTurn) publishDelta?.(sessionKey, null, '')
+      obs.releaseRunSlot()
       evictOwnEntry()
       if (ownsSlot()) nudge.markIdle(sessionKey)
       publishStatus?.(agentId, 'idle')
@@ -862,13 +887,6 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       targetSessionKey,
       () =>
         new Promise<void>((started, failStart) => {
-          const settleRefused = (why: 'stopped' | 'released'): void => {
-            if (why === 'released') nudge.markIdle(targetSessionKey)
-            started()
-          }
-          // Rendered HERE: this runs when the queue releases the delivery, so the
-          // context reflects state at start time rather than at enqueue time.
-          const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
           // Resolve the agent's registry row up front — the runtime tags obs, and (for
           // a connected substrate) the row's gateway id keys the cross-subsystem mutex.
           // NEVER read the task's `assigneeRuntime` (the engine hardcodes 'openclaw'
@@ -1053,6 +1071,85 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // AND Boo-Zero-in-N-teams (the one OpenClaw agent that spans teams).
           const connectedKey = homeKind === 'connected' && row ? connectedAgentKey(row) : null
 
+          // The process-wide run cap (see runSlots), keyed on the agent lock this run
+          // takes. A delegated task's delivery that finds every slot taken is settled
+          // as delivered at once: the engine awaits it, often from inside a lead's
+          // drain that holds a slot, and waiting there for a slot only that lead can
+          // free would stall both. From then on, what happens to it reaches the
+          // engine the way a run's own ending would. Any other delivery (a person's
+          // or a routine's message, a task update) waits for its slot unsettled:
+          // nothing holding a slot awaits it, and its caller keeps its own handling
+          // of a failure to start.
+          const slotKey = capturedHomeDir ?? connectedKey ?? null
+          let settledEarly = false
+          let queuedEntry: QueuedRun | null = null
+          let keepBusy: ReturnType<typeof setInterval> | null = null
+          let runSlot: RunSlot | null = null
+          let runStarted = false
+          /** Out of the run queue: the run started, or the delivery ended without one. */
+          const leaveQueue = (): void => {
+            if (keepBusy) clearInterval(keepBusy)
+            keepBusy = null
+            if (queuedEntry && queuedRuns.get(targetSessionKey) === queuedEntry)
+              queuedRuns.delete(targetSessionKey)
+            queuedEntry = null
+          }
+          /**
+           * A delivery settled early ended without a run. A released task needs
+           * nothing from the engine, which already let go of it. A Stop releases the
+           * task cleanly and a failure to start fails it, but only while the session
+           * still holds that task: a Stop can free the session for a newer task while
+           * this delivery waited for its agent's lock, and an ending meant for this
+           * one would then fail the newer task.
+           */
+          const endQueued = async (outcome: 'stopped' | 'released' | Error): Promise<void> => {
+            const ownsSession = stopGen() === deliveredGen
+            if (outcome === 'released') {
+              if (ownsSession) nudge.markIdle(targetSessionKey)
+              return
+            }
+            if (outcome !== 'stopped') {
+              // A refusal has already put its reason in the chat.
+              if (chatVisible && !(outcome instanceof DeliveryRefusedError)) {
+                const provider = loadAgentConfig(db, targetAgentId)?.primaryProvider
+                deps.persistMeta?.(
+                  targetSessionKey,
+                  runFailureText(outcome.message, resolvedRuntime, provider),
+                )
+              }
+              if (ownsSession) nudge.markIdle(targetSessionKey)
+            }
+            if (runTaskId === null || taskForSession(targetSessionKey) !== runTaskId) return
+            const base = { runId: '', sessionId: null, ts: Date.now(), seq: 0 }
+            const ending: RuntimeEvent =
+              outcome === 'stopped'
+                ? { ...base, kind: 'done', reason: 'aborted', summary: '' }
+                : { ...base, kind: 'error', code: null, message: outcome.message, fatal: true }
+            try {
+              await onEvent(targetSessionKey, ending, stamp)
+            } catch (err) {
+              log.error(
+                { err, sessionKey: targetSessionKey },
+                'engine rejected the end of a queued run',
+              )
+            }
+          }
+          const settleStarted = (): void => {
+            if (!settledEarly) started()
+          }
+          const settleFailed = (err: Error): void => {
+            if (!settledEarly) failStart(err)
+            else if (!runStarted) void endQueued(err)
+          }
+          const settleRefused = (why: 'stopped' | 'released'): void => {
+            if (settledEarly) {
+              void endQueued(why)
+              return
+            }
+            if (why === 'released') nudge.markIdle(targetSessionKey)
+            started()
+          }
+
           // Set once the agent's lock is held: from then on runJob settles the
           // delivery itself.
           let jobRan = false
@@ -1090,7 +1187,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 budgetNoticeShown.add(targetAgentId)
                 deps.persistMeta?.(targetSessionKey, text)
               }
-              failStart(new DeliveryRefusedError(text))
+              settleFailed(new DeliveryRefusedError(text))
               return
             }
             if (capturedWorkdir) {
@@ -1098,7 +1195,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 await ensureTeamWorkdir(capturedWorkdir)
               } catch (e) {
                 // Never fall back to the server's working directory.
-                failStart(
+                settleFailed(
                   new Error(
                     `could not create the team's working folder ${capturedWorkdir}: ${e instanceof Error ? e.message : String(e)}`,
                   ),
@@ -1106,6 +1203,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 return
               }
             }
+            // Rendered HERE, with the run's slot and its agent's lock held and every
+            // gate passed, so the context is the state at start time: anything that
+            // arrived while the delivery waited (in the nudge queue, for a run slot
+            // or for the lock) rides this turn.
+            const { teamContext, digestIds, roomId, throughSeq } = renderWaiting()
             let run: RunHandle
             try {
               run = await adapter.start(
@@ -1135,7 +1237,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               }
               // Immediate-send failure → the engine fails the task now rather than
               // waiting out the 8-minute watchdog (the nudge un-busies the session).
-              failStart(e instanceof Error ? e : new Error(String(e)))
+              settleFailed(e instanceof Error ? e : new Error(String(e)))
               return
             }
             // Gate 3, with no await before abortMap.set: a run refused after it
@@ -1143,7 +1245,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // a refused delivery consumes no inbox rows or cursor.
             const after = refusal()
             if (after) {
-              started()
+              // A delivery settled early has to tell the engine itself that a Stop
+              // ended it.
+              if (!settledEarly) started()
+              else if (after === 'stopped') void endQueued('stopped')
               await discardRun(adapter, run)
               // A Stop during the discard reset the queue, so the slot is no
               // longer this delivery's to free.
@@ -1153,6 +1258,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               return
             }
             abortMap.set(targetSessionKey, { adapter, run })
+            runStarted = true
+            leaveQueue()
             budgetNoticeShown.delete(targetAgentId)
             // The run STARTED with the catch-up in its context, so the cursor may
             // advance — and only now. Advancing at render time would let a failed
@@ -1186,7 +1293,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // `deliver` resolves HERE — after start, BEFORE the drain — so the
             // engine's `await deps.deliver` doesn't serialize the cascade. The home /
             // connected mutex (when held) stays held for the WHOLE drain below.
-            started()
+            settleStarted()
             // A task run can be steered while it works: a person commenting on
             // the task reaches it through the per-task registry (see runSteers).
             const steerHandle =
@@ -1202,6 +1309,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 stamp,
                 execId: runExecId,
                 model: configuredModel,
+                releaseRunSlot: () => runSlot?.release(),
               })
             } finally {
               steerHandle?.release()
@@ -1235,23 +1343,63 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           const stopBeat = beatTaskId
             ? startTaskHeartbeat(db, beatTaskId, { assigneeAgentId: targetAgentId })
             : (): void => undefined
-          void job()
-            .catch((e: unknown) => {
-              // A lock wait that timed out never reached runJob's gates. After a
-              // Stop or a release that is a refused start too, not a failure of
-              // whatever task holds the session now.
-              if (!jobRan) {
-                const why = refusal()
-                if (why) {
-                  settleRefused(why)
-                  return
+          const runWithSlot = (slot: RunSlot): void => {
+            runSlot = slot
+            void job()
+              .catch((e: unknown) => {
+                // A lock wait that timed out never reached runJob's gates. After a
+                // Stop or a release that is a refused start too, not a failure of
+                // whatever task holds the session now.
+                if (!jobRan) {
+                  const why = refusal()
+                  if (why) {
+                    settleRefused(why)
+                    return
+                  }
                 }
-              }
-              // runJob settles `started`/`failStart` itself; this catch only guards an
-              // unexpected throw before/around that so it isn't an unhandled rejection.
-              failStart(e instanceof Error ? e : new Error(String(e)))
+                // runJob settles the delivery itself; this catch only guards an
+                // unexpected throw before/around that so it isn't an unhandled rejection.
+                settleFailed(e instanceof Error ? e : new Error(String(e)))
+              })
+              .finally(() => {
+                slot.release()
+                leaveQueue()
+                stopBeat()
+              })
+          }
+          // The slot comes BEFORE the agent's lock (see runSlots), so a delivery
+          // waiting for one holds nothing a running agent needs.
+          const slot = runSlots().tryAcquire(slotKey)
+          if (slot) {
+            runWithSlot(slot)
+            return
+          }
+          if (runTaskId !== null) {
+            settledEarly = true
+            started()
+          }
+          const cancel = new AbortController()
+          queuedEntry = { cancel: () => cancel.abort() }
+          queuedRuns.set(targetSessionKey, queuedEntry)
+          keepBusy = setInterval(() => {
+            if (stopGen() === deliveredGen) nudge.markBusy(targetSessionKey)
+          }, QUEUED_KEEPALIVE_MS)
+          keepBusy.unref?.()
+          runSlots()
+            .acquire({ key: slotKey, signal: cancel.signal })
+            .then(
+              (granted) => runWithSlot(granted),
+              () => {
+                // Taken out of the queue by a Stop, a teardown or the engine letting
+                // go of the task: it never starts.
+                leaveQueue()
+                stopBeat()
+                settleRefused(refusal() ?? 'released')
+              },
+            )
+            .catch((err: unknown) => {
+              log.error({ err, sessionKey: targetSessionKey }, 'queued delivery failed to settle')
             })
-            .finally(() => stopBeat())
         }),
     )
   }

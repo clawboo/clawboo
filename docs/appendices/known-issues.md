@@ -283,6 +283,7 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | A remembered **Always** on a connector tool skips the prompt even under access set to ask every time (`approvalPolicy: always`)                                                                       | Security    |
 | An `allow_always` answer to a risky hand-off, sent through the API, stops that leader's risky hand-offs from asking again, with no end date                                                           | Security    |
 | `/api/mcp/config` signs any team id, and replacing the attach secret means editing the database by hand                                                                                               | Security    |
+| A saved key with no recognized prefix (Groq, Mistral, xAI) is stored in clear in tool-call records, events, memory, run summaries and the verify gate's output                                        | Security    |
 | Picking **Ollama** during setup records nothing: a new team runs on Anthropic, and its first message says Clawboo Native has no provider key                                                          | Ollama      |
 | Setup accepts an Ollama with no model pulled, then every run fails with "model not found"                                                                                                             | Ollama      |
 | Agents run on Anthropic when an `ANTHROPIC_API_KEY` is in your shell or in `~/.openclaw/.env`, even after you picked another default provider                                                         | Providers   |
@@ -294,6 +295,7 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | The Gateway will not start after an OpenClaw upgrade until you run `openclaw doctor --fix`                                                                                                            | OpenClaw    |
 | A second update from the dashboard's update chip fails with "exit code 7"                                                                                                                             | Updates     |
 | The API answers "Too many requests" after a run of page loads                                                                                                                                         | Server      |
+| Two instances under different path prefixes on one hostname share browser storage: a new one skips its welcome screen, and theme, layout and board choices carry over                                 | Server      |
 | With "reduce motion" turned on, the Radial layout of the Org chart (called Atlas in 0.5.0) piles each team's Boos on top of each other                                                                | Org chart   |
 | With the sidebar hidden, a Boo elsewhere on the page can draw only its eyes and paws                                                                                                                  | Display     |
 | The in-app Hermes install picks Python 3.14 over an installed 3.12, and fails                                                                                                                         | Hermes      |
@@ -320,6 +322,9 @@ These problems affect the 0.5.0 release. They are fixed on main and ship with th
 | Agents are offered a `web_search` tool that only repeats the query (once `TAVILY_API_KEY` is set) and a `delete_path` tool that deletes nothing                                                       | Tools       |
 | Archived teams cannot be restored from the dashboard, and an agent cannot move to another team                                                                                                        | Teams       |
 | Boo Zero's **Global Brief** is saved but never sent to Boo Zero                                                                                                                                       | Boo Zero    |
+| Claude Code reads **Not installed** with only the Claude Agent SDK installed, though runs use the SDK's own binary, and **Install** downloads a second copy of that binary                            | Runtimes    |
+| Routines run in the server process's time zone, which in a container is UTC unless `TZ` is set, so a 9:00 routine runs at 9:00 UTC                                                                    | Routines    |
+| Connectors and approved shell commands lose npm's prefix, cache and update-check settings, so an approved `npm install -g` can fail with `EACCES`                                                     | Connectors  |
 
 ## Related
 
