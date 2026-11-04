@@ -358,7 +358,7 @@ Checks the signed identity token a sign-in proxy in front of Clawboo sends with 
 
 With `on`, a request that carries a token must have a good one, and a request without one works as before, with no name recorded. With `required`, every `/api/` request and the Gateway WebSocket must carry a good token, except a spawned runtime's own MCP calls. A token that does not verify gets `401` in both. The access token is still needed beside it while it is on. Operator file key: `proxyIdentity`.
 
-Turning it on needs a key (`CLAWBOO_PROXY_IDENTITY_JWKS_URL` or `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`, not both), `CLAWBOO_PROXY_IDENTITY_ISSUER` and `CLAWBOO_PROXY_IDENTITY_AUDIENCE`. Without them, or with a value Clawboo cannot trust, the server logs `CONFIG: refusing to start.` and exits with code 1. Agents run as the same user as the server, so set these where that user cannot change them: in your service manager, or a root-owned operator file. The server logs a `SECURITY:` warning when they come from a file that user can change.
+Turning it on needs a key (`CLAWBOO_PROXY_IDENTITY_JWKS_URL` or `CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY`, not both), `CLAWBOO_PROXY_IDENTITY_ISSUER` and `CLAWBOO_PROXY_IDENTITY_AUDIENCE`. Without them, or with a value Clawboo cannot trust, the server logs `CONFIG: refusing to start.` and exits with code 1. Agents run as the same user as the server, so set these where that user cannot change them: in your service manager, or a root-owned operator file. The server logs a `SECURITY:` warning when they come from a file that user owns, can write, or can replace through a folder above it.
 
 ### CLAWBOO_PROXY_IDENTITY_HEADER
 

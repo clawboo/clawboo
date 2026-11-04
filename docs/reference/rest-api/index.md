@@ -57,7 +57,7 @@ Clawboo has no user accounts. The only credential is the access token, which the
 
 - **`STUDIO_ACCESS_TOKEN` set:** that token.
 - **Unset (the default):** the per-install token in `~/.clawboo/access-token` (under `CLAWBOO_HOME`), made on the first start and readable only by your user account.
-- **Set blank (`STUDIO_ACCESS_TOKEN=`):** no token, so every route answers without credentials. This relies on the loopback bind; the [same-origin guard](#same-origin-guard) still refuses cross-origin browser requests.
+- **Set blank (`STUDIO_ACCESS_TOKEN=`):** no token, so every route answers without credentials, unless the [proxy identity lane](/guides/sso-proxy) is `required`: then every `/api/` request still needs a verified identity token from your sign-in proxy. This relies on the loopback bind; the [same-origin guard](#same-origin-guard) still refuses cross-origin browser requests.
 
 With a token, every `/api/*` request and the WebSocket need a `clawboo_access` cookie whose value is the token.
 

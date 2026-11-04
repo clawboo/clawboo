@@ -189,7 +189,7 @@ Off by default. With a sign-in proxy in front of Clawboo, such as Cloudflare Acc
 - **Never downgraded.** A token that does not verify gets `401`, in every mode. It never passes as an unnamed request.
 - **Beside the access token.** While the access token is on, a request needs the cookie too. In `required` mode, a request without a good token is refused, so an agent that reads the access token file can no longer use the API as a person. A spawned runtime's own MCP calls still work by their attach token.
 
-What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced; the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user can write would let an agent swap the key, which the server warns about at startup. The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
+What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced; the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup. The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
 
 ## Keys and secrets on disk
 

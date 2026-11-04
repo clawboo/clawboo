@@ -63,9 +63,9 @@ Start with `on` to check that names come through, then switch to `required`.
 
 With `request` binding every token must carry:
 
-- `htm`, the request's method, and `htu`, its path. Only the path is compared, never the query, and exactly as written: the same letter case and percent-encoding, and no `.` or `..` segments. `htu` can also be a full `https` or `http` URL, of which only the path counts. It is the path as Clawboo receives it, after any rewriting your proxy does, so it includes the [path prefix](/guides/self-host-securely#serve-clawboo-under-a-path-prefix) when you use one.
+- `htm`, the request's method, and `htu`, its path. Only the path is compared, never the query, and exactly as written: the same letter case, percent-encoding and `.` or `..` segments as the request's. `htu` can also be a full `https` or `http` URL, of which only the path counts; a URL whose path has `.` or `..` segments matches no request. It is the path as Clawboo receives it, after any rewriting your proxy does, so it includes the [path prefix](/guides/self-host-securely#serve-clawboo-under-a-path-prefix) when you use one.
 - `iat` and `exp`, with `exp` no more than `proxyIdentityMaxLifetime` seconds after `iat` (60 by default, 300 at most).
-- `jti`, a unique id. Clawboo accepts each one once.
+- `jti`, a unique id. Clawboo accepts each one once. It remembers them in the server's memory, so a restart forgets them, and two Clawboo servers behind one proxy each accept a token once (see [What it does not protect](#what-it-does-not-protect)).
 
 With `session` binding a token needs only `sub` and `exp`. If it carries `htm` or `htu`, those are still checked.
 
@@ -88,7 +88,7 @@ Set exactly one of `proxyIdentityJwksUrl` and `proxyIdentityPublicKey`, and both
 
 Clawboo reads these once at startup. When the lane is on but cannot be trusted, the server logs `CONFIG: refusing to start.` with the reason and exits with code 1. That happens when there is no key, both keys, no issuer or no audience; when the key is a private key, a shared (HMAC) key, an RSA key shorter than 2048 bits, or not a key; when the JWKS URL is plain `http` to another computer; or when the header is one Clawboo or a browser already uses, such as `cookie` or `host`.
 
-**Keep these settings out of agents' reach.** Agents run as the same user as Clawboo, so an agent that can change these settings can put in its own key and sign in as anyone after the next restart. Set the variables in your service manager, or keep the operator file somewhere that user can read but not change, such as a root-owned `/etc/clawboo/operator.json`. When the settings come from a file Clawboo's user can change, or replace through its folder, the server logs a `SECURITY:` warning at startup.
+**Keep these settings out of agents' reach.** Agents run as the same user as Clawboo, so an agent that can change these settings can put in its own key and sign in as anyone after the next restart. Set the variables in your service manager, or keep the operator file somewhere that user can read but not change, such as a root-owned `/etc/clawboo/operator.json`: the file and every folder above it owned by another user, and none of them writable by Clawboo's user, except a sticky folder such as `/tmp`, which lets a user rename only what it owns. When the settings come from a file Clawboo's user owns, can write, or can replace through a folder above it, the server logs a `SECURITY:` warning at startup.
 
 ## Set it up
 
@@ -212,7 +212,7 @@ With `proxyIdentity` set to `required`, you can turn the access token off with `
 - **It is not access control.** Anyone who gets through your proxy can do everything the dashboard can. Roles are recorded, not enforced.
 - **The records live in Clawboo's database.** Agents and other programs running as Clawboo's user can change the database and its files directly. The records say who did what through the dashboard; they are not a tamper-proof audit log.
 - **In `on` mode, the access token still works.** Agents can read the access token file, so anything running as Clawboo's user can still act through the API, with no name recorded. Use `required` to refuse such requests.
-- **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds. Clawboo never logs tokens, but your proxy's logs might.
+- **A token someone copies works for its lifetime.** With `session` binding that can be hours, on any path. With `request` binding it is once, for one request, within seconds, per Clawboo server: the list of used tokens is kept in memory, so a token used just before a restart works once more after it until it expires, and so does one sent to a second server behind the same proxy. Clawboo never logs tokens, but your proxy's logs might.
 - **An agent that can use your signed-in browser can act as you.** If an agent drives a browser profile that is signed in to your proxy, its requests carry your token.
 - **The proxy must be the only way in from outside.** A request that reaches Clawboo without passing the proxy carries no token, which `required` refuses and `on` lets through unnamed.
 - **Some actions carry no name.** OpenClaw agents' 1:1 chat and everything else sent over the Gateway WebSocket (the connection is checked when it opens, but the messages on it are not), edits to a task's title, description or priority, and work started by routines.
@@ -252,7 +252,7 @@ A refused WebSocket upgrade gets `401 Unauthorized`. The server logs `Proxy iden
 
 - Allowed algorithms: `EdDSA` (Ed25519), `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384` and `PS512`. The algorithm is checked before any key is looked up, so an unsigned token or one "signed" with the public key as an HMAC secret never reaches a key.
 - Tokens are verified with the `jose` library. A key set from a URL is cached for 10 minutes. A token with a key id the cache does not have makes it fetch again, at most once every 30 seconds, and a fetch that takes over 5 seconds fails.
-- Clawboo remembers the `jti` of each request-bound token until it expires, up to 100,000 at a time. When that many are live, new tokens are refused rather than an old one forgotten.
+- Clawboo remembers the `jti` of each request-bound token until it expires, up to 100,000 at a time, in the server's memory only. When that many are live, new tokens are refused rather than an old one forgotten.
 - The lane runs after the access gate and before any route. It reads a request's path three ways: as sent, with `.` and `..` segments resolved, and as the router matches it. It guards the request when any of them is under `/api/`, in any letter case, so neither `/API/...`, a dot segment nor an absolute-form target such as `GET http://host/api/... HTTP/1.1` steps around it. A runtime's attach token stands in for an identity token only when all three are under `/api/mcp/`. Binding uses the path as sent.
 - Names and roles are stripped of control characters and cut to 200 characters. A `sub` longer than 256 characters, with a control character in it or with spaces around it, is refused.
 

@@ -307,6 +307,25 @@ describe('request targets that are not a plain path', () => {
     })
   })
 
+  it('checks an identity token a runtime call carries, rather than skipping it', async () => {
+    await start({ mode: 'required' })
+    const forged = await assertion('POST', '/api/mcp/tasks', other.privateKey)
+    expect(
+      await get(
+        '/api/mcp/tasks',
+        { 'x-test-attach': 'minted', 'clawboo-identity': forged },
+        'POST',
+      ),
+    ).toMatchObject({ status: 401, body: { reason: 'signature' } })
+    const good = await assertion('POST', '/api/mcp/tasks')
+    expect(
+      await get('/api/mcp/tasks', { 'x-test-attach': 'minted', 'clawboo-identity': good }, 'POST'),
+    ).toEqual({
+      status: 200,
+      body: { runtime: true, person: { id: 'user-42', name: 'Ada', role: 'admin' } },
+    })
+  })
+
   it('refuses a runtime credential on a path that only resolves to /api/mcp/', async () => {
     await start({ mode: 'required' })
     // Resolved, this is /api/mcp/tasks; the router sends it to /api/files/*splat.
@@ -373,6 +392,9 @@ describe('the Gateway connection', () => {
     })
   })
 
+  // The server's own path check drops an absolute-form upgrade before the lane
+  // is asked (apps/web/server/index.ts). This pins how the lane reads one for
+  // any caller that does pass it.
   it('reads an absolute-form upgrade target by its path', async () => {
     await start({ mode: 'required' })
     const target = `http://127.0.0.1:${port}/api/gateway/ws`

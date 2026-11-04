@@ -117,6 +117,16 @@ describe('team chat ingest from a routine', () => {
     })
   })
 
+  it('a typed message records the person a sign-in proxy vouched for, and no one otherwise', async () => {
+    const person = { id: 'user-42', name: 'Ada', role: 'admin' }
+    await getTeamOrchestrator('T').enqueueUserMessage({ stimulus: 'first', person })
+    await getTeamOrchestrator('T').enqueueUserMessage({ stimulus: 'second', person: null })
+    const [first, second] = transcript()
+    expect(first).toMatchObject({ text: 'first', person })
+    expect(second).toMatchObject({ text: 'second' })
+    expect(second).not.toHaveProperty('person')
+  })
+
   it('a typed message keeps the human origin and carries no routine', async () => {
     const result = await getTeamOrchestrator('T').enqueueUserMessage({ stimulus: 'hello' })
     expect(result).toEqual({ ok: true, targetAgentId: 'lead' })

@@ -72,6 +72,16 @@ const CLAIM_PATH = /^[A-Za-z0-9_:$-]+(\.[A-Za-z0-9_:$-]+){0,4}$/
 const PRIVATE_MEMBERS = ['d', 'p', 'q', 'dp', 'dq', 'qi', 'oth', 'k'] as const
 
 const EC_CURVES = new Set(['P-256', 'P-384', 'P-521'])
+/** The algorithms each key can verify, for a JWK that names its own `alg`. */
+const KEY_ALGS: Record<string, readonly string[]> = {
+  OKP: ['EdDSA', 'Ed25519'],
+  RSA: ['RS256', 'RS384', 'RS512', 'PS256', 'PS384', 'PS512'],
+}
+const EC_ALGS: Record<string, readonly string[]> = {
+  'P-256': ['ES256'],
+  'P-384': ['ES384'],
+  'P-521': ['ES512'],
+}
 const MIN_RSA_BITS = 2048
 
 function fail(message: string): never {
@@ -116,6 +126,18 @@ function checkJwk(raw: unknown, where: string): JWK {
   }
   if (kty === 'RSA' && (detail?.modulusLength ?? 0) < MIN_RSA_BITS) {
     fail(`${where} is an RSA key shorter than ${MIN_RSA_BITS} bits.`)
+  }
+  // A key set ignores a key whose `alg` does not fit it, so a wrong one would
+  // pass startup and then refuse every token as a bad signature.
+  const alg = jwk['alg']
+  if (alg !== undefined) {
+    const fits = kty === 'EC' ? EC_ALGS[String(jwk['crv'])] : KEY_ALGS[kty]
+    if (typeof alg !== 'string' || !fits?.includes(alg)) {
+      fail(
+        `${where} names "alg" ${JSON.stringify(alg)}, which its key cannot sign with. ` +
+          `Use ${(fits ?? []).join(', ')}, or leave "alg" out.`,
+      )
+    }
   }
   const out: JWK = { kty }
   for (const member of ['crv', 'x', 'y', 'n', 'e', 'kid', 'alg', 'use'] as const) {
@@ -259,11 +281,67 @@ function writableByUs(target: string): boolean {
   }
 }
 
+/** What `replaceableBy` asks of the filesystem: `stat` is an lstat. */
+export interface PathProbe {
+  stat: (p: string) => { uid: number; mode: number }
+  writable: (p: string) => boolean
+}
+
+const STICKY = 0o1000
+
+/**
+ * Whether the user `uid` can change `file` or put another file in its place:
+ * it can write the file; it owns the file or any folder above it (an owner can
+ * always make it writable again); or it can write a folder above it, which lets
+ * it rename the folder below and make its own. A sticky folder such as `/tmp`
+ * lets a user rename only what it owns there, so it counts only then.
+ */
+export function replaceableBy(file: string, uid: number, probe: PathProbe): boolean {
+  const chain: string[] = []
+  for (let p = path.resolve(file); ; p = path.dirname(p)) {
+    chain.push(p)
+    if (path.dirname(p) === p) break
+  }
+  const stat = (p: string) => {
+    try {
+      return probe.stat(p)
+    } catch {
+      return null
+    }
+  }
+  if (probe.writable(chain[0]!)) return true
+  for (let i = 0; i < chain.length; i++) {
+    const here = stat(chain[i]!)
+    if (!here) continue
+    if (here.uid === uid) return true
+    if (i === 0 || !probe.writable(chain[i]!)) continue
+    if ((here.mode & STICKY) === 0) return true
+    if (stat(chain[i - 1]!)?.uid === uid) return true
+  }
+  return false
+}
+
+/** `replaceableBy` for this process, on the real filesystem. */
+function replaceableByUs(file: string): boolean {
+  const uid = process.getuid?.()
+  // No owners to compare on Windows: the file and its folder must not be writable.
+  if (uid === undefined) return writableByUs(file) || writableByUs(path.dirname(file))
+  const probe: PathProbe = { stat: (p) => fs.lstatSync(p), writable: writableByUs }
+  let real = file
+  try {
+    real = fs.realpathSync(file)
+  } catch {
+    // Judged by the path as named.
+  }
+  return replaceableBy(file, uid, probe) || (real !== file && replaceableBy(real, uid, probe))
+}
+
 /**
  * A warning when the lane's settings come from an operator file that this
- * server's own OS user can change, or replace through its folder. Agents run as
- * that user, so one could put its own key there and sign in as anyone after the
- * next restart. Null when nothing is read from such a file.
+ * server's own OS user can change, or replace through a folder above it (see
+ * replaceableBy). Agents run as that user, so one could put its own key there
+ * and sign in as anyone after the next restart. Null when nothing is read from
+ * such a file.
  */
 export function proxyIdentityFileWarning(): string | null {
   const keys = (Object.keys(OPERATOR_KEYS) as OperatorKey[]).filter((k) =>
@@ -271,11 +349,11 @@ export function proxyIdentityFileWarning(): string | null {
   )
   if (!keys.some((k) => effectiveSetting(k).source === 'file')) return null
   const file = operatorFileLocation().path
-  if (!writableByUs(file) && !writableByUs(path.dirname(file))) return null
+  if (!replaceableByUs(file)) return null
   return (
     `SECURITY: the proxy identity settings come from ${file}, which this server's own user ` +
-    'can change, and so can every agent it runs. Make the file and its folder read-only to ' +
-    'this user (owned by root, for example), or set the CLAWBOO_PROXY_IDENTITY variables ' +
-    'in your service manager instead.'
+    'can change or replace, and so can every agent it runs. Keep the file, and every folder ' +
+    'above it, owned by another user such as root and not writable by this one, or set the ' +
+    'CLAWBOO_PROXY_IDENTITY variables in your service manager instead.'
   )
 }

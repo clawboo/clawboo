@@ -7,7 +7,8 @@
 //   required  every /api/ request and the Gateway connection must carry a token
 //             that verifies. A spawned runtime's own control-plane calls (the
 //             attach-token lane the access gate admits) are the one exception:
-//             they never come from a person.
+//             they never come from a person, and carry no token. One that does
+//             carry a token is checked like any other request.
 //
 // NEVER DOWNGRADED. A token that is present but does not verify (forged,
 // expired, replayed, for another path) is refused with 401, in both modes. It
@@ -150,7 +151,13 @@ export function createProxyIdentityLane(
       next()
       return
     }
-    if (readings.every(under('/api/mcp/')) && opts.isRuntimeRequest(req)) {
+    // A runtime's own control-plane call carries no identity token. One that
+    // does is checked like any other: a bad token is refused on every path.
+    if (
+      readings.every(under('/api/mcp/')) &&
+      tokenFrom(req, config.header) === undefined &&
+      opts.isRuntimeRequest(req)
+    ) {
       next()
       return
     }
