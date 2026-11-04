@@ -8,15 +8,19 @@
  * (or omitted) is a successful completion. `'person_done'` and
  * `'person_cancelled'` are a person deciding the task on the board: neither is a
  * failure, and a cancelled task must not be redone. `'blocked'` is the agent
- * marking its own task blocked because it needs a person. The others are
- * failures. All of these but the person's decisions are ones the leader must act
- * on rather than keep waiting for.
+ * marking its own task blocked because it needs a person. `'check_failed'` is the
+ * team's check not passing the work (on its last attempt, or a check that could
+ * not run), and `'check_interrupted'` a check a restart cut short; both leave the
+ * task for a person too. The others are failures. All of these but the person's
+ * decisions are ones the leader must act on rather than keep waiting for.
  */
 export type TaskUpdateOutcome =
   | 'done'
   | 'person_done'
   | 'person_cancelled'
   | 'blocked'
+  | 'check_failed'
+  | 'check_interrupted'
   | 'error'
   | 'aborted'
   | 'timeout'
@@ -37,6 +41,9 @@ type FailedOutcome = Exclude<TaskUpdateOutcome, 'done' | 'person_done' | 'person
 
 const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
   blocked: 'marked it blocked: it needs a person before it can go on',
+  check_failed: "finished, but the work did not pass the team's check: it needs a person",
+  check_interrupted:
+    'finished, but its check was cut short, so the work was not checked: it needs a person',
   error: 'failed with an error',
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',

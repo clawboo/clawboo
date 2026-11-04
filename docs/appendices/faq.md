@@ -155,7 +155,7 @@ Yes. A routine sends work on a schedule to a team or to one agent, for example e
 
 ### My agent says the work is done. Did Clawboo check it?
 
-Usually not. Clawboo checks work only on a task run that worked in its own copy of a git repository (a worktree) and changed files, and only the API starts those runs. Then it runs the task's test command and, for bigger or handed-off changes, has a second agent review the change. A failed check sends the task back to the agent once, then to **Needs you**. Nothing you start in the dashboard is checked: team chat, tasks on the **Board**, one-to-one chats, routines made in the dashboard and all OpenClaw work. Review those results yourself. See [How work is checked](/concepts/verification).
+Only if the team has a [work check](/using/teams#work-check), or the task ran in its own copy of a git repository (a worktree). With a work check, team chat work and tasks you give on the **Board** are checked when they changed the team's folder: Clawboo runs the team's test command there and, for bigger or risky changes, or work handed down from another task, has a second agent review the change. A task run that worked in a worktree and changed files is checked too, and only the API starts those. A failed check sends the task back to the agent once, then to **Needs you**. Not checked: team chat work on a team with no work check, one-to-one chats, routines made in the dashboard and all OpenClaw work. Review those results yourself. See [How work is checked](/concepts/verification).
 
 ### How do I keep spending under control?
 

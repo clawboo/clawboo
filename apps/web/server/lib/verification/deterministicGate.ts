@@ -49,6 +49,9 @@ export interface DeterministicGateInput {
    *  through the worktree, whose `.git` pointer the builder can edit. */
   repoPath?: string | null
   timeoutMs?: number
+  /** Append the run to VERIFICATION.md in the checkout. Default true; false for a
+   *  team folder, whose files are the team's and not a task's record. */
+  evidence?: boolean
   /**
    * Injectable env (tests); defaults to a SCRUBBED child env (`buildChildEnv()` —
    * clawboo's own server secrets removed). The verify command is model/worktree-
@@ -245,6 +248,6 @@ export async function runDeterministicGate(
     durationMs: Date.now() - startedAt,
     timedOut: run.timedOut,
   })
-  await appendEvidence(worktreePath, det, startedAt)
+  if (input.evidence !== false) await appendEvidence(worktreePath, det, startedAt)
   return det
 }

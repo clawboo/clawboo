@@ -45,6 +45,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 ├── runtimes/                   per-agent homes for Codex and Hermes
 ├── catalog/                    a cached copy of the Marketplace catalog
 ├── workspaces/                 a folder for each team, where its agents start
+├── team-folder-history/        a git history of each team's folder, for checks
 ├── worktrees/                  git worktrees for board tasks
 └── reviews/                    checkouts for verifying finished work
 ```
@@ -68,6 +69,7 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 | `runtimes/`                          | Per-agent homes for Codex and Hermes agents, including a copy of your Codex sign-in                                                                                         | Yes, when no run is active                  | Those agents' saved sessions; they start fresh.                                                  |
 | `catalog/`                           | A cached copy of the Marketplace catalog                                                                                                                                    | Yes                                         | Nothing. Clawboo downloads it again.                                                             |
 | `workspaces/`                        | One folder per team (`workspaces/<team id>`), where its agents start when a run has no worktree, plus `_no-team` for tasks with no team. Deleting a team deletes its folder | Yes, when no run is active                  | The files agents saved there. Clawboo creates a team's folder again on its next run.             |
+| `team-folder-history/`               | A git history of each team's folder (`<team id>.git`), saved as team chat tasks start and end so their work can be checked. Deleting a team deletes it                      | Yes, when no check is running               | Running tasks lose their starting point: unchecked, or Needs you after a failed check.           |
 | `worktrees/`                         | Git worktrees for board tasks that run in a repository                                                                                                                      | No: Clawboo removes old ones itself         | Uncommitted work in those checkouts.                                                             |
 | `reviews/`                           | Read-only checkouts for verifying finished work                                                                                                                             | Yes, when no check is running               | Nothing.                                                                                         |
 

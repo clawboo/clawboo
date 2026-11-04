@@ -48,6 +48,7 @@ and talks to the server over REST and server-sent events.
 | `isRiskyDelegation`, `requestDelegationApproval` | no       | make a risky delegation wait for a person's approval                           |
 | `abortSession`                                   | no       | stop a run when a person moves its card                                        |
 | `reportUps`                                      | no       | a durable outbox for `[Task Update]` items, so they outlive a restart          |
+| `workCheck`                                      | no       | the check a task's work must pass before it is done                            |
 
 <Warning>
 
@@ -96,6 +97,20 @@ would lose to its own claim, and one that completed the task would complete it t
   engine settles only items it still holds, and lets one go only once its settlement is written, so after `reset()`
   a run cancelled at teardown leaves its items for the next engine; `reset()` does not flush them either. An item
   already sent again `MAX_REPORT_UP_REPLAYS` times is given up instead, with an `alert` narration to its recipient.
+- **Work is checked before it is done.** With `workCheck`, the engine calls `begin(taskId, agentId)` before it
+  delivers a fresh run of a task (a fix round is not one), and `prepare` when the run ends with `done: success`.
+  `prepare` returns null when there is nothing to check; otherwise the engine runs the returned check without
+  awaiting it in the run's drain. Meanwhile the session stays bound to the task: no other task is bound to it,
+  the idle watchdog skips it, and its other turns' terminals are not the task's. The check answers `pass` (the
+  task is completed as usual), `retry` with a fix note (the first execution closes as succeeded and a new one
+  delivers the note plus the task's brief; while `isSessionOccupied` reports another turn the session stays under
+  check and the fix round waits for that turn's end, and after a Stop none starts), `failed` (the host blocked the
+  task; the delegator's `[Task Update]` has the outcome `check_failed`) or `decided` (a person moved the card). A
+  check that throws, or has not answered after `WORK_CHECK_TIMEOUT_MS` of awake time, blocks the task as
+  `check_failed` too, and so does a `done` the board refuses while the task is still `in_progress` or
+  `in_review`. `markStopped` leaves a check under way alone. `checksInFlight()` counts checks under way, for a host
+  that unloads idle engines. `resume()` hands a task left `in_review` with a running engine execution and no check
+  of its own (a restart or teardown cut it short) to a person and tells its delegator (`check_interrupted`).
 - **A person's move is final.** `personMovedTask` stops the run working on the card, closes its execution as
   cancelled, and tells the delegator when the person marked it done or cancelled it. A run that ends after that
   changes nothing. `markStopped` makes a Stop durable at once, so the ready-pump never re-fires stopped work.

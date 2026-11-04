@@ -18,6 +18,7 @@ import {
   diffStat,
   findScaffoldCommit,
   hasUncommittedChanges,
+  isBareRepo,
   isGitRepo,
   isWorktreeRegistered,
   pruneWorktrees,
@@ -421,13 +422,15 @@ function ownedReviewDir(reviewRoot: string, candidate: string): string {
  * Detached HEAD = no branch, so a reviewer has nothing to push: review can never
  * mutate a teammate's branch. (Tool-level write denial is the runtime's job —
  * e.g. an OpenClaw read-only sandbox; this gives the structural guarantee.)
+ * `repoPath` may be a bare repository, such as the history clawboo keeps for a
+ * team folder outside the folder itself.
  */
 export async function provisionReviewWorktree(opts: ReviewOptions): Promise<Worktree> {
   const reviewRoot = reviewRootFor(opts.repoPath, opts.rootDir)
   const worktreePath = ownedReviewDir(reviewRoot, path.join(reviewRoot, opts.sha.slice(0, 12)))
 
   return mutex.run(worktreePath, async () => {
-    if (!(await isGitRepo(opts.repoPath))) {
+    if (!(await isGitRepo(opts.repoPath)) && !(await isBareRepo(opts.repoPath))) {
       throw new Error(`not a git repository: ${opts.repoPath}`)
     }
     await removeWorktree(opts.repoPath, worktreePath)

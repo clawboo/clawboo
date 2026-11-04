@@ -61,6 +61,16 @@ export async function isGitRepo(dir: string): Promise<boolean> {
   }
 }
 
+/** True when `dir` is a bare repository (a git directory with no work tree). */
+export async function isBareRepo(dir: string): Promise<boolean> {
+  try {
+    const out = await execGit(dir, ['rev-parse', '--is-bare-repository'])
+    return out.trim() === 'true'
+  } catch {
+    return false
+  }
+}
+
 /** Resolve a ref (default HEAD) to a full commit SHA. */
 export async function resolveBaseSha(repoPath: string, ref = 'HEAD'): Promise<string> {
   return (await execGit(repoPath, ['rev-parse', ref])).trim()
