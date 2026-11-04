@@ -190,6 +190,17 @@ describe('reserveRunBudget when the ledger fails', () => {
     expect(gate.hold.recheck()).toEqual({ blocked: true, scope: 'agent', reason: 'paused' })
   })
 
+  it('the final gate refuses a cap that paused meanwhile, for a run that got no hold', () => {
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
+    db.$client.exec('DROP TABLE budget_reservations')
+    const gate = reserveRunBudget(db, { agentId: 'a1' }, { kind: 'task', estimateCents: 10 })
+    if (gate.blocked) throw new Error('refused')
+    expect(gate.hold.id).toBeNull()
+    // A teammate's spend pauses the cap while this run gets ready.
+    recordSpend(db, 'agent', 'a1', 150)
+    expect(gate.hold.recheck()).toEqual({ blocked: true, scope: 'agent', reason: 'paused' })
+  })
+
   it('lets the run go when neither the hold nor the budgets can be read', () => {
     setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'cap' })
     db.$client.exec('DROP TABLE budget_reservations')

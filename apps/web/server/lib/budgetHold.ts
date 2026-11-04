@@ -147,8 +147,8 @@ function retryPendingReleases(db: ClawbooDb): void {
   }
 }
 
-/** The hold of a run that holds nothing: no budget applies, or the ledger could
- *  not be read. */
+/** The hold of a run that holds nothing because no budget applies, or because
+ *  the gate itself could not run. */
 export const NO_BUDGET_HOLD: RunBudgetHold = {
   id: null,
   recheck: () => ({ blocked: false }),
@@ -181,7 +181,18 @@ export function reserveRunBudget(
     first = reserveBudgets(db, input)
   } catch (err) {
     log.error({ err, kind: run.kind, ref: run.ref }, 'budget hold could not be taken')
-    return pausedOnly(db, scopes, run) ?? { blocked: false, hold: NO_BUDGET_HOLD }
+    const paused = pausedOnly(db, scopes, run)
+    if (paused) return paused
+    // No hold was written, so there is nothing to settle or release, but the final
+    // gate still refuses a cap that pauses while the run gets ready.
+    return {
+      blocked: false,
+      hold: {
+        id: null,
+        recheck: () => pausedOnly(db, scopes, run) ?? { blocked: false },
+        release: () => undefined,
+      },
+    }
   }
   if (!first.ok) return { blocked: true, scope: first.scope, reason: first.reason }
   const holdId = first.holdId

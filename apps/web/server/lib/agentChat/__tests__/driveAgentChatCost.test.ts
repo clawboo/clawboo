@@ -334,6 +334,37 @@ describe('driveAgentChat: cost records and budget holds', () => {
     }
   })
 
+  it('a turn that got no hold is still refused by a cap that paused while it got ready', async () => {
+    seedAgent('cc-x', 'claude-code')
+    const sk = directChatSessionKey('cc-x', 'claude-code')
+    setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 100, mode: 'cap' })
+    // The hold cannot be written (the reservations table is unreadable), so the
+    // turn starts without one.
+    db.$client.exec('DROP TABLE budget_reservations')
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hi' }
+      })(),
+    )
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => {
+        recordSpend(db, 'agent', 'cc-x', 150)
+        return adapter
+      },
+    })
+    expect(adapter.startCalls).toBe(0)
+    expect(chatRows(sk)).toEqual([
+      expect.objectContaining({
+        kind: 'meta',
+        text: expect.stringContaining('The agent budget is paused at its hard cap'),
+      }),
+    ])
+  })
+
   it('a failed turn frees its hold', async () => {
     seedAgent('cc-x', 'claude-code')
     setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 1000, mode: 'cap' })
