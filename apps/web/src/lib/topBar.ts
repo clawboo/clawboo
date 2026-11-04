@@ -15,9 +15,15 @@ import { NAV_VIEWS, type NavView, type ViewMode } from '@/stores/view'
 export const NAV_WITH_INLINE_STAR: ReadonlySet<NavView> = new Set(NAV_VIEWS)
 
 /** Whether the global AppTopBar (Star-pill-only strip) should render for a view. */
-export function shouldShowGlobalTopBar(viewMode: ViewMode): boolean {
+export function shouldShowGlobalTopBar(
+  viewMode: ViewMode,
+  { hasBooZero = true }: { hasBooZero?: boolean } = {},
+): boolean {
   if (viewMode.type === 'nav') return !NAV_WITH_INLINE_STAR.has(viewMode.view)
-  // agent / booZero / groupChat host the Star inline; only `welcome` falls back
-  // to the global bar.
+  // With no Boo Zero, the Boo Zero view shows the welcome screen, which has no
+  // header: the bar is what carries the sidebar toggle there, as for `welcome`.
+  if (viewMode.type === 'booZero') return !hasBooZero
+  // agent / groupChat host the Star inline; only `welcome` falls back to the
+  // global bar.
   return viewMode.type === 'welcome'
 }

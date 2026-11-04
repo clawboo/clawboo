@@ -85,6 +85,11 @@ describe('the board at phone width', () => {
     await screen.findByTestId('board-calendar')
     const [needsYou, ...statuses] = tracks()
     expect(needsYou).toBe(PHONE_LANE)
+    // The screen less the 16 px side gutter, the 8 px gap and a 32 px strip of
+    // the next lane.
+    expect(screen.getByTestId('board-calendar').style.getPropertyValue('--board-phone-lane')).toBe(
+      'calc(100vw - 56px)',
+    )
     const cancelled = statuses.pop()
     expect(cancelled).toBe('40px')
     expect(statuses.length).toBeGreaterThan(0)

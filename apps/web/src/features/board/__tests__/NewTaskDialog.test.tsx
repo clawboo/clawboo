@@ -178,6 +178,22 @@ describe('NewTaskDialog', () => {
     })
   })
 
+  it('shortens a long agent name in Send rather than push the button off the dialog', async () => {
+    // Agent names have no length limit, and at phone width the dialog is the
+    // screen less its margins. jsdom draws nothing, so this pins the classes
+    // that let the row, the button and its label give way.
+    const long = 'Research Boo with an unusually long name for a phone'
+    seed([{ ...ALPHA, agentCount: 1 }])
+    useFleetStore.setState({ agents: [{ id: 'long', name: long, teamId: 'team-1' }] as never })
+    serve({})
+    const { dialog, field } = renderDialog('team-1')
+    await userEvent.setup().type(field, 'Find three sources')
+    const send = await within(dialog).findByRole('button', { name: `Send to ${long}` })
+    expect(send).toHaveClass('min-w-0')
+    expect(within(send).getByText(`Send to ${long}`)).toHaveClass('truncate')
+    expect(send.parentElement).toHaveClass('min-w-0')
+  })
+
   it('sends nothing on Enter until the task is written', async () => {
     seed()
     const posted = serve()

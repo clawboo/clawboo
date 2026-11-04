@@ -328,7 +328,7 @@ Under a prefix, the dashboard, the API, the live streams and the Gateway WebSock
 
 ## Put the dashboard on your phone
 
-The dashboard installs as a web app: it opens from your phone's home screen in a window of its own, with no address bar. A phone's browser offers this only for an `https://` address, so set up [Option 2: Reverse proxy](#option-2-reverse-proxy) first. It works under a path prefix too. Through an SSH tunnel or a plain `http://` network bind, the dashboard opens in the phone's browser, but the browser does not offer to install it.
+The dashboard installs as a web app: it opens from your phone's home screen in a window of its own, with no address bar. A phone's browser installs it only from a secure address: `https://`, or `http://localhost` and `http://127.0.0.1` on the phone itself, as through an SSH tunnel that runs on the phone. For any other address, set up [Option 2: Reverse proxy](#option-2-reverse-proxy) first; it works under a path prefix too. Over a plain `http://` network address, such as a network bind, the dashboard opens in the phone's browser, but the browser does not offer to install it.
 
 <Steps>
 

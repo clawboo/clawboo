@@ -6,23 +6,33 @@
 // The drawer keeps its own state. Opening it must never write the docked
 // sidebar's collapsed preference, which the same browser reads when it is wide.
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { mockPhoneViewport, type PhoneViewport } from '@/__vitest__/phoneViewport'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useViewStore } from '@/stores/view'
 
 import { AppSidebar } from '../AppSidebar'
 import { closePhoneNav, usePhoneNav } from '../phoneLayout'
 import { CollapsedSidebarToggle } from '../SidebarToggle'
 
-// The columns' own contents are not under test here, only where they sit.
+// The columns' own contents are not under test here, only where they sit. Each
+// holds one button, so focus has somewhere to go inside the drawer.
 vi.mock('@/features/layout/TeamSidebar', () => ({
-  TeamSidebar: () => <div data-testid="team-rail" />,
+  TeamSidebar: () => (
+    <div data-testid="team-rail">
+      <button type="button">First in the rail</button>
+    </div>
+  ),
 }))
 vi.mock('@/features/layout/AgentListColumn', () => ({
-  AgentListColumn: () => <div data-testid="agent-column" />,
+  AgentListColumn: () => (
+    <div data-testid="agent-column">
+      <button type="button">Last in the column</button>
+    </div>
+  ),
 }))
 
 let viewport: PhoneViewport
@@ -33,6 +43,9 @@ function renderShell() {
       <header>
         <CollapsedSidebarToggle />
       </header>
+      <main>
+        <button type="button">On the page</button>
+      </main>
       <AppSidebar />
     </>,
   )
@@ -42,6 +55,7 @@ const drawerOpen = () => !screen.getByTestId('sidebar-drawer').hasAttribute('ine
 
 beforeEach(() => {
   closePhoneNav()
+  useSettingsModalStore.setState({ open: false })
   useViewStore.setState({ columnCollapsed: false, viewMode: { type: 'nav', view: 'board' } })
   localStorage.clear()
 })
@@ -84,6 +98,48 @@ describe('AppSidebar at phone width', () => {
     expect(drawerOpen()).toBe(true)
     await userEvent.click(screen.getByTestId('sidebar-drawer-scrim'))
     expect(drawerOpen()).toBe(false)
+  })
+
+  it('keeps Tab inside while it is open, and gives focus back to the toggle on close', async () => {
+    renderShell()
+    const toggle = screen.getByTestId('sidebar-toggle')
+    await userEvent.click(toggle)
+    const first = screen.getByRole('button', { name: 'First in the rail' })
+    const last = screen.getByRole('button', { name: 'Last in the column' })
+    // Moved in on the next frame, past the drawer's slide.
+    await waitFor(() => expect(first).toHaveFocus())
+
+    await userEvent.tab()
+    expect(last).toHaveFocus()
+    // Past the last control, Tab wraps to the first rather than leaving for the
+    // page under the scrim.
+    await userEvent.tab()
+    expect(first).toHaveFocus()
+    await userEvent.tab({ shift: true })
+    expect(last).toHaveFocus()
+
+    await userEvent.keyboard('{Escape}')
+    expect(drawerOpen()).toBe(false)
+    expect(toggle).toHaveFocus()
+  })
+
+  it('leaves Tab alone while it is closed', async () => {
+    // The drawer stays mounted while closed, so a trap held for its whole
+    // lifetime would pull Tab from the page into it.
+    renderShell()
+    screen.getByTestId('sidebar-toggle').focus()
+    await userEvent.tab()
+    expect(screen.getByRole('button', { name: 'On the page' })).toHaveFocus()
+  })
+
+  it('closes when Settings opens, and stays closed after Settings does', async () => {
+    renderShell()
+    await userEvent.click(screen.getByTestId('sidebar-toggle'))
+    act(() => useSettingsModalStore.getState().openSettings())
+    expect(drawerOpen()).toBe(false)
+    act(() => useSettingsModalStore.getState().close())
+    expect(drawerOpen()).toBe(false)
+    expect(usePhoneNav.getState().open).toBe(false)
   })
 
   it('closes when the person moves to another view', async () => {

@@ -14,6 +14,7 @@ import { FinishPromptDialog } from '@/features/board/FinishPromptDialog'
 import { useViewStore } from '@/stores/view'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useSettingsModalStore } from '@/stores/settingsModal'
+import { useBooZeroStore } from '@/stores/booZero'
 import { shouldShowGlobalTopBar } from '@/lib/topBar'
 
 export function App() {
@@ -31,7 +32,10 @@ export function App() {
   // duplicate there — it renders ONLY for `welcome`. The rule lives in
   // `lib/topBar.ts` (built from `NAV_VIEWS`) so a new dashboard tab can't silently
   // reintroduce the double-Star bug.
-  const showGlobalTopBar = shouldShowGlobalTopBar(viewMode)
+  // The Boo Zero view without a Boo Zero falls back to the welcome screen, and
+  // takes the bar with it.
+  const hasBooZero = useBooZeroStore((s) => s.booZeroAgentId !== null)
+  const showGlobalTopBar = shouldShowGlobalTopBar(viewMode, { hasBooZero })
 
   return (
     <Providers>

@@ -3,6 +3,8 @@ import { TeamSidebar } from '@/features/layout/TeamSidebar'
 import { AgentListColumn } from '@/features/layout/AgentListColumn'
 import { ErrorBoundary } from '@/features/shared/ErrorBoundary'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
+import { useFocusTrap } from '@/features/shared/useFocusTrap'
+import { useSettingsModalStore } from '@/stores/settingsModal'
 import {
   closePhoneNav,
   isPhoneLayout,
@@ -96,22 +98,29 @@ function Rail({
 
 // ─── Phone drawer ────────────────────────────────────────────────────────────
 
+/** Holds Tab inside the open drawer and hands focus back to whatever opened it
+ *  on close. Its own component, mounted only while the drawer is open: the trap
+ *  works for as long as it is mounted, and the drawer itself never unmounts. */
+function DrawerFocusTrap({ panelRef }: { panelRef: React.RefObject<HTMLDivElement | null> }) {
+  useFocusTrap(panelRef, null)
+  return null
+}
+
 /** The sidebar at phone width: the rail and the column laid over the content
  *  from the left edge, behind a scrim, opened from the toggle at the start of
  *  the view's header. Escape or a tap on the scrim closes it, and so does moving
- *  to another view (see AppSidebar). Kept mounted while closed, inert and out of
- *  sight, so the column keeps its search and scroll between openings. */
+ *  to another view or opening Settings (see AppSidebar). Kept mounted while
+ *  closed, inert and out of sight, so the column keeps its search and scroll
+ *  between openings. */
 function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
-  const open = usePhoneNav((s) => s.open)
+  // Settings opens over the whole app, so the drawer steps aside in the same
+  // render: its trap lets go of focus before the modal's takes it, and the modal
+  // then hands focus back to the header toggle rather than into a closed drawer.
+  const settingsOpen = useSettingsModalStore((s) => s.open)
+  const open = usePhoneNav((s) => s.open) && !settingsOpen
   const panelRef = useRef<HTMLDivElement>(null)
 
   useDismissableLayer({ active: open, level: 'dialog', onEscape: closePhoneNav })
-
-  // Focus goes into the drawer as it opens, so a keyboard or a screen reader
-  // starts there rather than behind the scrim.
-  useEffect(() => {
-    if (open) panelRef.current?.focus()
-  }, [open])
 
   return (
     <>
@@ -143,10 +152,14 @@ function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
           background: 'var(--background)',
           boxShadow: open ? 'var(--shadow-overlay)' : 'none',
           transform: open ? 'translateX(0)' : 'translateX(-100%)',
-          visibility: open ? 'visible' : 'hidden',
+          // Closed, it is off screen and `inert`, which keeps it out of the tab
+          // order and the accessibility tree, so visibility never changes. A
+          // hidden-to-visible flip would start a visibility transition on every
+          // `transition-all` control inside, leaving it hidden, and unfocusable,
+          // on the frame where the focus trap moves focus in.
           transition: open
-            ? 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1), visibility 0s'
-            : 'transform 160ms ease, visibility 0s linear 160ms',
+            ? 'transform 200ms cubic-bezier(0.32, 0.72, 0, 1)'
+            : 'transform 160ms ease',
         }}
       >
         <Rail peek={false} showToggle={!showColumn} />
@@ -154,6 +167,7 @@ function PhoneDrawer({ showColumn }: { showColumn: boolean }) {
             leave no room beside the drawer to tap it closed. */}
         {showColumn && <ColumnBody width={SIDEBAR_NATURAL_WIDTH} bordered />}
       </div>
+      {open && <DrawerFocusTrap panelRef={panelRef} />}
     </>
   )
 }
@@ -276,10 +290,16 @@ export function AppSidebar() {
   }, [collapsed])
   useEffect(() => clearPeekHide, [])
 
-  // ── Phone drawer: closed by a move to another view, and by a wide window ───
+  // ── Phone drawer: closed by a move to another view, by Settings opening ────
+  // (so it does not come back over the page when Settings closes), and by a
+  // wide window.
+  const settingsOpen = useSettingsModalStore((s) => s.open)
   useEffect(() => {
     closePhoneNav()
   }, [viewMode])
+  useEffect(() => {
+    if (settingsOpen) closePhoneNav()
+  }, [settingsOpen])
   useEffect(() => {
     if (!phone) closePhoneNav()
   }, [phone])

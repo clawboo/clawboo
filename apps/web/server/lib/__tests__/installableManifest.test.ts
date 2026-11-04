@@ -15,7 +15,7 @@
 // No service worker is shipped. Current Chrome and Safari install from the
 // manifest alone, and without one nothing can cache an /api/ answer.
 
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
@@ -51,9 +51,13 @@ interface Manifest {
   serviceworker?: unknown
 }
 
+/** Every ui dir a test made, removed once the suite is done. */
+const uiDirs: string[] = []
+
 /** A ui dir holding the real public assets, as the Vite build copies them. */
 function makeUiDir(): string {
   const uiDir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-manifest-'))
+  uiDirs.push(uiDir)
   cpSync(PUBLIC_DIR, uiDir, { recursive: true })
   writeFileSync(
     path.join(uiDir, 'index.html'),
@@ -86,6 +90,7 @@ function serve(basePath: string): Promise<string> {
 
 afterAll(() => {
   for (const server of servers) server.close()
+  for (const dir of uiDirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
 /** Width and height from a PNG's IHDR chunk. */
