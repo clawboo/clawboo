@@ -180,6 +180,19 @@ describe('the locked screen: pasting a sign-in link', () => {
     expect(submitted).toEqual([])
   })
 
+  it('never posts the access token pasted on its own, and never shows it', async () => {
+    // 32 random bytes in base64url, as the per-install token is: it fits the
+    // characters of a code but not its length.
+    const token = 'q3Ym7cX0vE9kR2tN5wL8hJ1pA6sD4fG0zU7iO3bV_-c'
+    await renderLocked()
+    paste(token)
+    expect(screen.getByRole('alert')).toHaveTextContent(/access token/i)
+    expect(screen.getByRole('alert')).toHaveTextContent(/not sent/i)
+    expect(screen.getByRole('alert').textContent).not.toContain(token)
+    expect(submitted).toEqual([])
+    expect(requests).toEqual(['/api/settings'])
+  })
+
   it('asks for a link when the field is empty', async () => {
     await renderLocked()
     paste('')

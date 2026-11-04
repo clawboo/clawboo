@@ -10,8 +10,32 @@
 // the same cookie and a 303 to the page without the code. Nothing goes to the
 // pasted address, and the code never lands in the address bar or in storage.
 
-/** The shape the access gate gives a launch code (`LAUNCH_CODE_SHAPE` there). */
-const LAUNCH_CODE_SHAPE = /^[A-Za-z0-9_-]{16,256}$/
+/**
+ * A launch code: 24 random bytes in base64url, so always 32 characters
+ * (`mintLaunchCode` in the access gate). Nothing else is ever posted. The
+ * per-install access token is 43 characters of the same alphabet, and posting
+ * it as a code would put the long-lived token in the request line, where a
+ * reverse proxy's access log records it.
+ */
+const LAUNCH_CODE = /^[A-Za-z0-9_-]{32}$/
+
+/**
+ * 32 hex digits, as `openssl rand -hex 16` makes for a token set by hand. A
+ * real code is all hex about once in 10^15, so such a value is a token.
+ */
+const HEX_TOKEN = /^[0-9a-f]{32}$/i
+
+/**
+ * The access token's characters, less `.`, so that a bare host name such as
+ * `dash.example.com` reads as a link and not as a token.
+ */
+const TOKEN_LIKE = /^[A-Za-z0-9_~-]{16,}$/
+
+/** Is this value a launch code, something that looks like the token, or neither? */
+function readCode(value: string): 'code' | 'token' | 'neither' {
+  if (LAUNCH_CODE.test(value) && !HEX_TOKEN.test(value)) return 'code'
+  return TOKEN_LIKE.test(value) ? 'token' : 'neither'
+}
 
 /** Longer than any link the dashboard or `clawboo open` makes, by a wide margin. */
 const MAX_PASTED_LENGTH = 2048
@@ -44,7 +68,9 @@ export function readPastedSignIn(pasted: string, here: DashboardAddress): Pasted
   const text = pasted.replace(/\s+/g, '')
   if (text === '') return { ok: false, reason: 'empty' }
   if (text.length > MAX_PASTED_LENGTH) return { ok: false, reason: 'not-a-link' }
-  if (LAUNCH_CODE_SHAPE.test(text)) return { ok: true, code: text }
+  const bare = readCode(text)
+  if (bare === 'code') return { ok: true, code: text }
+  if (bare === 'token') return { ok: false, reason: 'token' }
 
   let link: URL
   try {
@@ -61,7 +87,9 @@ export function readPastedSignIn(pasted: string, here: DashboardAddress): Pasted
   if (link.searchParams.has('access_token')) return { ok: false, reason: 'token' }
   const codes = link.searchParams.getAll('access_code')
   const code = codes.length === 1 ? codes[0]! : ''
-  if (!LAUNCH_CODE_SHAPE.test(code)) return { ok: false, reason: 'not-a-link' }
+  const reading = readCode(code)
+  if (reading === 'token') return { ok: false, reason: 'token' }
+  if (reading !== 'code') return { ok: false, reason: 'not-a-link' }
   // The browser keeps cookies per origin, and the code is for one server.
   if (link.origin !== here.origin) {
     return { ok: false, reason: 'elsewhere', linkOrigin: link.origin }

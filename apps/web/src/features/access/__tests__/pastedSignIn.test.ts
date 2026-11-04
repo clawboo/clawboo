@@ -15,6 +15,10 @@ import {
 } from '../pastedSignIn'
 
 const CODE = 'Wm9vbXpvb216b29tem9vbXpvb216b29t'
+// The per-install access token: 32 random bytes in base64url, 43 characters.
+const TOKEN = 'q3Ym7cX0vE9kR2tN5wL8hJ1pA6sD4fG0zU7iO3bV_-c'
+// What `openssl rand -hex 16` makes, a token someone may set themselves.
+const HEX_TOKEN = '0f3a9c1e7b2d4f6a8c0e1b3d5f7a9c2e'
 const HERE = { origin: 'https://dash.example.com', base: '' }
 const MOUNTED = { origin: 'https://dash.example.com', base: '/clawboo' }
 
@@ -100,6 +104,32 @@ describe('readPastedSignIn', () => {
     ).toEqual({ ok: false, reason: 'other-dashboard' })
   })
 
+  it('never takes the access token for a code, pasted alone or in a link', () => {
+    // Posting it as a code would put the long-lived token in the request line,
+    // where a reverse proxy's access log records it.
+    for (const text of [
+      TOKEN,
+      HEX_TOKEN,
+      `https://dash.example.com/?access_code=${TOKEN}`,
+      `https://dash.example.com/?access_code=${HEX_TOKEN}`,
+    ]) {
+      const result = readPastedSignIn(text, HERE)
+      expect(result, text).toEqual({ ok: false, reason: 'token' })
+      expect(JSON.stringify(result)).not.toContain(TOKEN)
+    }
+  })
+
+  it('takes only the 32 characters a launch code always has', () => {
+    for (const code of [CODE.slice(1), `${CODE}x`]) {
+      expect(readPastedSignIn(code, HERE).ok, code).toBe(false)
+      expect(readPastedSignIn(`https://dash.example.com/?access_code=${code}`, HERE).ok).toBe(false)
+    }
+  })
+
+  it('reads a bare host name as a link without a code, not as a token', () => {
+    expect(readPastedSignIn('dash.example.com', HERE)).toEqual({ ok: false, reason: 'not-a-link' })
+  })
+
   it('refuses a link that carries the access token, and keeps no copy of it', () => {
     const result = readPastedSignIn(
       'https://dash.example.com/?access_token=the-real-access-token',
@@ -174,7 +204,7 @@ describe('arrivedByRedirect', () => {
   it('is false when the browser does not say', () => {
     expect(arrivedByRedirect(timing([]))).toBe(false)
     expect(arrivedByRedirect({} as never)).toBe(false)
-    expect(arrivedByRedirect(undefined)).toBe(false)
+    expect(arrivedByRedirect(timing([{}]))).toBe(false)
     expect(
       arrivedByRedirect({
         getEntriesByType: () => {

@@ -90,7 +90,10 @@ describe('mintLaunchCode', () => {
     const { gate } = gateAt(5_000)
     const minted = gate.mintLaunchCode()
     expect(minted).not.toBeNull()
-    expect(minted!.code).toMatch(/^[A-Za-z0-9_-]{32,}$/)
+    // Exactly 32: the dashboard's paste box takes nothing else, so it can never
+    // mistake the 43-character access token for a code and send it on
+    // (apps/web/src/features/access/pastedSignIn.ts).
+    expect(minted!.code).toMatch(/^[A-Za-z0-9_-]{32}$/)
     expect(minted!.code).not.toContain(TOKEN)
     expect(minted!.expiresAt).toBe(5_000 + 120_000)
   })

@@ -164,7 +164,7 @@ function problemWith(read: Exclude<PastedSignIn, { ok: true }>): string {
     case 'not-a-link':
       return 'That is not a sign-in link. Paste the whole link, or the code after access_code=.'
     case 'token':
-      return 'That link holds the access token, not a one-time code. Paste a one-time sign-in link instead.'
+      return 'That looks like the access token, not a one-time code, so it was not sent. Paste a one-time sign-in link instead.'
     case 'elsewhere':
       return (
         `That link is for ${read.linkOrigin}, and this dashboard is at ${window.location.origin}. ` +
