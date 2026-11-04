@@ -58,6 +58,7 @@ interface RuntimeAdapter {
   setModel(run: RunHandle, model: string): Promise<void>
   writeContext(run: RunHandle, key: string, value: string): Promise<void>
   steer?(run: RunHandle, text: string, opts?: SteerOptions): Promise<SteerResult>
+  runSteering?(run: RunHandle): SteeringMode
   readonly sessionCodec?: SessionCodec
   dispose?(): Promise<void>
 }
@@ -170,6 +171,8 @@ Adapters subscribe when `events()` is called, not on the first `next()`, so fram
 `steer()` is optional and never throws. It resolves `{ delivered: true, mode }` when the runtime accepted the message for this run, or `{ delivered: false, reason }` with `reason` one of `no-run`, `run-ended`, `unsupported` or `rejected` (plus an optional `detail`). The server's comment path writes the agent's mailbox first, steers second, and marks the mailbox row delivered only when the steer lands, so a refusal falls back to the next run reading the mailbox.
 
 `SteerOptions.passive` marks an ambient note rather than a person's instruction: it is delivered if the run reads input again, but never keeps a finishing run going and never stops a run (an `'interrupt-resume'` adapter refuses it). Adapters with a per-run driver share their `steer()` body through `steerThroughDriver(driver, text, mode, opts)`; `steeringOf(caps)` reads an omitted claim as `'none'`.
+
+`runSteering(run)` (optional) says how one run takes a steer, for an adapter whose runs can differ from what `capabilities()` declares for new runs. Hermes has it: a run that fell back from ACP to `hermes chat` keeps stopping and resuming after ACP comes back, and the reverse. The task card's hint reads it, through `GET /api/board/:taskId`'s `runSteering`. Without it a run takes a steer the declared way.
 
 ### `sessionCodec` and `dispose`
 

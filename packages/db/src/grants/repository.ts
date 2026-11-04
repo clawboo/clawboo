@@ -13,7 +13,7 @@
 // via `idx_tool_audit_grant`.
 
 import { randomUUID } from 'node:crypto'
-import { and, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, desc, eq, gt, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import type { Grant, GrantState, StandingRule } from '@clawboo/governance'
 
 import { immediateWrite, withWriteRetry } from '../board/contention'
@@ -180,7 +180,8 @@ export function lastUsedByGrant(db: ClawbooDb, grantIds: readonly string[]): Map
   return out
 }
 
-/** Pending approvals per grant: the count the graph renders as a marching edge. */
+/** Pending approvals per grant: the count the graph renders as a marching edge.
+ *  Only cards still answerable count, the same set the approval queue lists. */
 export function pendingApprovalsByGrant(
   db: ClawbooDb,
   grantIds: readonly string[],
@@ -196,6 +197,7 @@ export function pendingApprovalsByGrant(
       and(
         inArray(toolCallApprovals.grantId, [...grantIds]),
         eq(toolCallApprovals.status, 'pending'),
+        gt(toolCallApprovals.expiresAt, Date.now()),
       ),
     )
     .groupBy(toolCallApprovals.grantId)

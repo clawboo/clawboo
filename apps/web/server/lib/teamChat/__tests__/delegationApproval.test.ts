@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   createApproval,
+  getApproval,
   listEvents,
   listPendingApprovals,
   resolveApproval,
@@ -171,6 +172,25 @@ describe('resolveDelegationApproval', () => {
       },
     ])
     for (const e of events) expect(e.data).not.toContain('payroll')
+  })
+
+  it('expires and announces a hand-off nobody answered as soon as it stops waiting', async () => {
+    const pending = resolveDelegationApproval(db, {
+      leaderAgentId: 'L',
+      targetAgentName: 'Ops',
+      task: 'deploy to production',
+    })
+    const [open] = listPendingApprovals(db)
+    db.$client
+      .prepare('UPDATE tool_call_approvals SET expires_at = ? WHERE id = ?')
+      .run(Date.now() - 1_000, open!.id)
+    expect(await pending).toBe('expired')
+
+    expect(getApproval(db, open!.id)?.status).toBe('expired')
+    const resolved = listEvents(db, { kinds: ['approval_resolved'] })
+    expect(resolved.map((e) => JSON.parse(e.data) as unknown)).toEqual([
+      { approvalId: open!.id, decision: 'expired', kind: 'tool', toolName: 'delegate:code' },
+    ])
   })
 
   it('is FAIL-CLOSED: a transport error resolves to timeout (never auto-run)', async () => {
