@@ -68,6 +68,7 @@ import {
   setRuntimeSecret,
 } from '../lib/secretsVault'
 import { onEmbeddingKeysChanged } from '../lib/memoryEmbedding'
+import { detectInstallMethod } from '../lib/updateCheck'
 
 /** Validate the :id param against the runtime set; 404s + returns null on miss. */
 function requireRuntimeId(req: Request, res: Response): NonOpenClawRuntimeId | null {
@@ -268,6 +269,16 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
     return
   }
 
+  // The server loads the SDK from the node_modules folders around itself, so a
+  // global `npm install -g` reaches it only when Clawboo itself is a global
+  // install. Anywhere else the download would be one no run can load.
+  const sdkRefusal = d.sdkBinary ? sdkInstallRefusal(d) : null
+  if (sdkRefusal) {
+    sendEvent(res, { type: 'error', code: 'SDK_NOT_LOADABLE', message: sdkRefusal })
+    res.end()
+    return
+  }
+
   sendEvent(res, { type: 'progress', step: 'installing', message: `Installing ${d.name}…` })
 
   // An install over one that is already there is an update. Stopped part way it
@@ -285,6 +296,27 @@ export function runtimesInstallPOST(req: Request, res: Response): void {
 
   if (d.packageManager === 'npm') installViaNpm(res, d, ctl)
   else installViaPip(res, d, ctl)
+}
+
+/** Why an SDK install from here could not reach this server, or null when it
+ *  can (a global install of Clawboo). */
+function sdkInstallRefusal(d: RuntimeDescriptor): string | null {
+  switch (detectInstallMethod()) {
+    case 'npx':
+      return (
+        `${d.name} needs ${String(d.pkg)} next to Clawboo, and a one-off npx run cannot load ` +
+        `one installed globally. Install both: npm install -g clawboo ${String(d.pkg)}, then ` +
+        'start Clawboo with clawboo.'
+      )
+    case 'dev':
+      return (
+        `This Clawboo runs from a source checkout, which loads ${String(d.pkg)} from its own ` +
+        'node_modules. Run pnpm install in the checkout (without --no-optional, which leaves ' +
+        'out the SDK binary), then restart the server.'
+      )
+    default:
+      return null
+  }
 }
 
 /** On a successful install: flip the flag on (live; runtime flags need no
@@ -306,7 +338,9 @@ async function finishInstall(res: Response, d: RuntimeDescriptor): Promise<void>
     sendEvent(res, {
       type: 'complete',
       success: true,
-      warning: `Installed, but '${String(d.healthBin)}' isn't on PATH or the known user-install dirs yet. Restart the server if it stays missing.`,
+      warning: d.sdkBinary
+        ? `Installed, but this Clawboo cannot load it: the SDK has to sit next to Clawboo. If Clawboo was installed with another Node or npm, install both with that one (npm install -g clawboo ${String(d.pkg)}), then run clawboo restart.`
+        : `Installed, but '${String(d.healthBin)}' isn't on PATH or the known user-install dirs yet. Restart the server if it stays missing.`,
     })
   }
   res.end()
