@@ -291,7 +291,15 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
 
 ```ts
 {
-  task: DbTask & { attention; runCost; runningSince } // shape as in GET /api/board
+  task: DbTask & {
+    attention
+    runCost
+    runningSince // shape as in GET /api/board
+    // How the run working on the task takes a comment now: the run's own way,
+    // which can differ from its runtime's (a Hermes run that fell back to
+    // `hermes chat` stops and resumes). null when no run is registered here.
+    runSteering: 'live' | 'interrupt-resume' | 'none' | null
+  }
   comments: Array<{
     id: string
     taskId: string

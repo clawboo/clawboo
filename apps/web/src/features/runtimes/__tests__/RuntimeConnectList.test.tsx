@@ -195,6 +195,93 @@ describe('RuntimeConnectList: a Codex CLI too old for the plan', () => {
   })
 })
 
+describe('RuntimeConnectList: a Hermes without its live mode', () => {
+  function renderHermes(status: RuntimeStatus, onChanged = vi.fn()) {
+    return render(
+      <RuntimeConnectList
+        runtimeIds={['hermes']}
+        statuses={[status]}
+        loaded
+        variant="panel"
+        onChanged={onChanged}
+        openclaw={OPENCLAW_OFF}
+      />,
+    )
+  }
+
+  it('reads "Update available", and its toggle reveals the notice beside the providers', async () => {
+    renderHermes({ id: 'hermes', connectionState: 'ready', codexAuth: false, acpMissing: true })
+    expect(screen.getByText('Update available')).toBeInTheDocument()
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument()
+    const toggle = screen.getByTestId('runtime-list-row-hermes-toggle')
+    expect(toggle).toHaveTextContent(/Update/i)
+    await userEvent.click(toggle)
+    expect(screen.getByTestId('runtime-hermes-update-required')).toHaveTextContent(
+      /installed without its live mode/,
+    )
+    // Hermes still runs, so its keys and sign-in stay managed here too.
+    expect(await screen.findByTestId('runtime-hermes-subscription-needs-codex')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-hermes-disconnect')).toBeInTheDocument()
+  })
+
+  it('Update Hermes runs the install stream, then re-reads the status', async () => {
+    let installs = 0
+    server.use(
+      http.post('/api/runtimes/hermes/install', () => {
+        installs += 1
+        return new HttpResponse('data: {"type":"complete","success":true}\n\n', {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }),
+    )
+    // The status re-read is held open, so the button must stay busy until it lands.
+    let releaseRefetch: () => void = () => {}
+    const onChanged = vi.fn(
+      () =>
+        new Promise<void>((r) => {
+          releaseRefetch = r
+        }),
+    )
+    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: true }, onChanged)
+    await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
+    await userEvent.click(screen.getByTestId('runtime-hermes-update'))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(installs).toBe(1)
+    expect(screen.getByTestId('runtime-hermes-update')).toHaveTextContent('Updating Hermes…')
+    releaseRefetch()
+    await waitFor(() =>
+      expect(screen.getByTestId('runtime-hermes-update')).toHaveTextContent('Update Hermes'),
+    )
+  })
+
+  it('a failed update says why and lets you try again', async () => {
+    server.use(
+      http.post(
+        '/api/runtimes/hermes/install',
+        () =>
+          new HttpResponse(
+            'data: {"type":"error","code":"EXIT_1","message":"Installation failed with exit code 1"}\n\n',
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          ),
+      ),
+    )
+    const onChanged = vi.fn()
+    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: true }, onChanged)
+    await userEvent.click(screen.getByTestId('runtime-list-row-hermes-toggle'))
+    await userEvent.click(screen.getByTestId('runtime-hermes-update'))
+    expect(await screen.findByText('Installation failed with exit code 1')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-hermes-update')).toBeEnabled()
+    expect(onChanged).not.toHaveBeenCalled()
+  })
+
+  it('a Hermes with its live mode reads Connected with Manage and no notice', () => {
+    renderHermes({ id: 'hermes', connectionState: 'ready', acpMissing: false })
+    expect(screen.getByText('Connected')).toBeInTheDocument()
+    expect(screen.getByTestId('runtime-list-row-hermes-toggle')).toHaveTextContent(/Manage/i)
+    expect(screen.queryByTestId('runtime-hermes-update-required')).not.toBeInTheDocument()
+  })
+})
+
 describe('RuntimeConnectList — connected card + Manage', () => {
   it('a connected runtime shows the top-right "Connected" status + a Manage footer (no ⓘ button)', async () => {
     renderList([{ id: 'hermes', connectionState: 'ready', codexAuth: false }])
