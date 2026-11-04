@@ -654,16 +654,46 @@ describe('observability REST', () => {
 
     it('a narrowed, team-scoped client loses nothing while it skips past other traffic', () => {
       vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+      const db = getDb()
+      const now = Date.now()
+      db.insert(teams)
+        .values({
+          id: 'team-B',
+          name: 'Other',
+          icon: 'x',
+          color: '#111',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      db.insert(agents)
+        .values({
+          id: 'boo-B',
+          name: 'Other Boo',
+          gatewayId: 'boo-B',
+          status: 'idle',
+          teamId: 'team-B',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
       const s = open({ teamId: 'team-A', kinds: APPROVAL_KINDS, afterSeq: String(head()) })
       chatter(5)
       vi.advanceTimersByTime(750) // nothing matches: the cursor moves past the chatter
       const a = ask()
+      // Another team's approval, between ours: the team filter keeps it out.
+      const other = createApproval(db, { toolName: 'files_delete', agentId: 'boo-B', args: {} })
+      resolveApproval(db, other.id, 'allow_once')
       chatter(5)
       vi.advanceTimersByTime(750)
-      resolveApproval(getDb(), a.id, 'deny')
+      resolveApproval(db, a.id, 'deny')
       vi.advanceTimersByTime(750)
       s.close()
-      expect(kindsOf(s.writes())).toEqual(['approval_requested', 'approval_resolved'])
+      const got = frames(s.writes())
+      expect(got.map((f) => f.row.kind)).toEqual(['approval_requested', 'approval_resolved'])
+      expect(got.map((f) => (JSON.parse(f.row.data) as { approvalId: string }).approvalId)).toEqual(
+        [a.id, a.id],
+      )
     })
 
     it('a full read does not skip ahead: the rest arrives on the next poll', () => {
