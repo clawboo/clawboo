@@ -18,6 +18,7 @@ import {
 } from '@clawboo/db'
 import {
   blockingFindings,
+  GATE_DEBT_CRITERION,
   nextCycleDecision,
   shouldRunCritic,
   verificationStatusFor,
@@ -40,9 +41,6 @@ import { runDeterministicGate } from './deterministicGate'
 export { runDeterministicGate } from './deterministicGate'
 export { runCritic } from './critic'
 export type { ReviewerSpend } from './critic'
-
-/** The `criterion` of the open item a red deterministic gate leaves at exhaustion. */
-const GATE_DEBT_CRITERION = 'deterministic gate'
 
 const CRITIC_NOT_RUN: CriticVerdict = {
   ran: false,

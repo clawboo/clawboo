@@ -61,6 +61,7 @@ import {
   type TaskAttention,
 } from './boardStatus'
 import { timeOnDay } from './calendar/calendarFormat'
+import { openItemsOf } from './openItems'
 import { StatusGlyph, glyphKindOf } from './StatusGlyph'
 import { useTaskActions } from './useTaskActions'
 import { formatRunCost, runCostOf } from './taskCost'
@@ -71,6 +72,7 @@ interface Verdict {
     deterministic?: {
       command?: string
       commandSource?: 'configured' | 'scaffold' | 'agent' | 'none'
+      passed?: boolean
     }
     critic?: {
       ran?: boolean
@@ -736,6 +738,7 @@ export function TaskDetailDrawer({
                     // reviewer model and runtime are shown for the bias caveat. A
                     // review that failed or came back empty says so instead.
                     const line = last?.critic ? reviewerLine(last.critic) : null
+                    const openItems = openItemsOf(verdict)
                     return (
                       <div className="flex flex-col gap-1.5 text-compact">
                         <div
@@ -771,17 +774,25 @@ export function TaskDetailDrawer({
                             {line.text}
                           </div>
                         ) : null}
-                        {/* Open items show only on a pass with debt. A pass can
-                            carry some too (ones its review did not check again,
-                            or ones an older Clawboo kept), and they stay out. */}
-                        {verdict.status === 'completed_with_debt' &&
-                          (verdict.debtNotes ?? []).length > 0 && (
+                        {/* A pass or a fail can carry open items from an earlier
+                            pass with debt; each lists them under a note saying so. */}
+                        {openItems.length > 0 && (
+                          <>
+                            {verdict.status === 'pass' || verdict.status === 'fail' ? (
+                              <div className="text-xs font-medium text-foreground">
+                                <WarnMark />
+                                {verdict.status === 'pass'
+                                  ? 'Not reviewed again'
+                                  : 'Still open from an earlier pass with debt'}
+                              </div>
+                            ) : null}
                             <ul className="board-reason list-disc pl-4 text-xs">
-                              {verdict.debtNotes!.map((d, i) => (
+                              {openItems.map((d, i) => (
                                 <li key={i}>{debtLine(d)}</li>
                               ))}
                             </ul>
-                          )}
+                          </>
+                        )}
                         {(last?.critic?.findings ?? []).map((fnd, i) => (
                           <div key={i} className="text-xs text-foreground">
                             <span className="font-medium">{fnd.severity}</span>: {fnd.title}
