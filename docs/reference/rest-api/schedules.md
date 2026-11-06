@@ -57,6 +57,9 @@ Both sources describe their schedules in one shape. It is the element type of `s
                              //   includes a paused Routine
   lastRunAt?: number
   lastError?: string
+  heldBy?: { kind: string; id: string; name: string } | null // on the list route only: what
+                             // holds the next fire back, a pause on its target or an archived team.
+                             // kind is agent, team, task_tree or archived_team
   status: 'queued' | 'claimed' | 'running' | 'idle' | 'paused' | 'error'
   manageability: 'managed' | 'external-write' | 'observe-only'
   domain: 'team-task' | 'runtime-own-life'
@@ -438,7 +441,7 @@ curl -X DELETE http://localhost:18790/api/schedules/openclaw-gateway-cron:<job-i
 
 ## `POST /api/schedules/:id/run`
 
-Runs a schedule now. The answer only says the run was queued; it does not wait for the run. A Routine moves to `queued` and Clawboo's scheduler picks it up at once; a Gateway job gets the Gateway's `cron.run { id, mode: 'force' }`. Only an `idle` Routine can be queued: a paused, errored, queued, claimed or running one answers **409**. Follow the result in the Routine's run history (`GET /api/schedules/:id/runs`), the event log, or OpenClaw's own cron history.
+Runs a schedule now. The answer only says the run was queued; it does not wait for the run. A Routine moves to `queued` and Clawboo's scheduler picks it up at once; a Gateway job gets the Gateway's `cron.run { id, mode: 'force' }`. Only an `idle` Routine can be queued: a paused, errored, queued, claimed or running one answers **409**. So does one a [pause](/using/board#pause-work) holds back, in words that say what is paused. Follow the result in the Routine's run history (`GET /api/schedules/:id/runs`), the event log, or OpenClaw's own cron history.
 
 - **Path params**: `id` (composite schedule id).
 - **Request body**: none.
@@ -509,7 +512,7 @@ A Routine's recent runs, newest first, built from the Routine's events in the ev
   runs: Array<{
     firedAt: number // epoch ms when the run was claimed
     finishedAt: number | null // when its outcome was recorded
-    status: 'running' | 'succeeded' | 'failed' | 'interrupted'
+    status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'paused'
     error: string | null // why a failed run failed
     taskId: string | null // the board task an agent routine's run created; null for a team routine
     dispatchPath: string | null // 'team-chat' | 'one-shot' | 'connected'
@@ -519,7 +522,7 @@ A Routine's recent runs, newest first, built from the Routine's events in the ev
 }
 ```
 
-A run reads `interrupted` when it never recorded an outcome: the next run began without one, or the Routine is no longer queued, claimed or running. Either way the server stopped during that run. A team routine's run `succeeded` once the lead's turn started; the team's work then continues in the chat.
+A run reads `interrupted` when it never recorded an outcome: the next run began without one, or the Routine is no longer queued, claimed or running. Either way the server stopped during that run. A team routine's run `succeeded` once the lead's turn started; the team's work then continues in the chat. A run reads `paused` when a pause stopped it: it counts as neither a run nor a failure, `error` says why, and the routine runs again on resume.
 
 **`404 Not Found`**: `:id` is not a composite schedule id, or names no Routine:
 
@@ -551,6 +554,7 @@ Only runs after now are counted, and only for Routines that will run. These are 
 - a Routine whose cron spec cannot be read;
 - a team routine whose team is gone, archived, opted out of server orchestration, or has no active member;
 - an agent routine whose agent is gone, archived, or a person;
+- a Routine a [pause](/using/board#pause-work) or an archived team holds back, since it does not fire until that ends;
 - every OpenClaw Gateway cron job (those are an OpenClaw agent's own work, not team work).
 
 For an `idle` Routine, the first run is its stored `nextRunAt`, the time the scheduler will actually use, and the cron spec gives the runs after it. A result is reused for up to a minute, and never past its first run, so boards that poll this cost little.

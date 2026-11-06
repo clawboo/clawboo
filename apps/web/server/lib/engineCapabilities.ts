@@ -106,6 +106,7 @@ export const FEATURE_ROUTES = {
     'POST /api/system/hold',
     'DELETE /api/system/hold/:owner',
   ],
+  'board.pause': ['GET /api/pauses', 'POST /api/pauses', 'DELETE /api/pauses/:kind/:id'],
   'auth.proxyIdentity': ['GET /api/access/identity'],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
@@ -158,6 +159,7 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // write, with in-app updates not turned off by an administrator.
     'system.selfUpdate': selfUpdateRefusal() === null,
     'system.hold': true,
+    'board.pause': true,
     // The administrator's switch, on or required. Either way a verified token
     // names the person; whether one is required is the lane's own business.
     'auth.proxyIdentity': proxyIdentityMode() !== 'off',

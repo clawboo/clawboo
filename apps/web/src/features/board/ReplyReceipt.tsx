@@ -27,6 +27,7 @@ export function receiptText(delivery: ReplyDelivery, name: string): string {
         return `Clawboo is holding new runs. ${name} will see this when it resumes`
       if (delivery.reason === 'waiting')
         return `${name} will see this when the task it waits on is done`
+      if (delivery.reason === 'paused') return `Saved. ${name} starts on this after the resume`
       return `${name} will see this on the next run`
     case 'not-delivered':
       return `Not sent: ${notDeliveredWhy(delivery.reason)}`

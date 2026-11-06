@@ -1013,6 +1013,25 @@ export const budgets = sqliteTable(
 export type DbBudget = typeof budgets.$inferSelect
 export type DbBudgetInsert = typeof budgets.$inferInsert
 
+// pauses: a person's durable pause of an agent, a team or a task tree (its root
+// task's id), which every run start reads. A row means paused; resuming deletes it.
+export const pauses = sqliteTable(
+  'pauses',
+  {
+    id: text('id').primaryKey(),
+    scopeKind: text('scope_kind').notNull(), // agent | team | task_tree
+    scopeId: text('scope_id').notNull(),
+    reason: text('reason'),
+    // JSON { id, name, role }, from a sign-in proxy; null for the local person.
+    pausedBy: text('paused_by'),
+    tenantId: text('tenant_id'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('uniq_pauses_scope').on(t.scopeKind, t.scopeId)],
+)
+
+export type DbPause = typeof pauses.$inferSelect
+
 // What a run that is going expects to spend, set aside on each budget it counts
 // toward until it ends (see governance/reservations.ts). One row per (hold, budget).
 export const budgetReservations = sqliteTable(

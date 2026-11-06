@@ -188,10 +188,28 @@ export function formatWhen(ms: number, timeZone?: string): string {
  * in `error` after a failed run and does not run again until it is resumed; a
  * Gateway job in `error` only failed its last run and stays enabled.
  */
-export function statusPill(rec: Pick<ScheduleRecord, 'status' | 'nextRunAt' | 'manageability'>): {
+/** Why a pause holds this routine's next fire back, or null. It runs once on resume. */
+export function routineHeldWords(rec: Pick<ScheduleRecord, 'heldBy'>): string | null {
+  const held = rec.heldBy
+  if (!held) return null
+  if (held.kind === 'agent') return `${held.name} is paused, so this runs on resume`
+  if (held.kind === 'team') return `The ${held.name} team is paused, so this runs on resume`
+  if (held.kind === 'task_tree') return `“${held.name}” is paused, so this runs on resume`
+  return `The ${held.name} team is archived, so this does not run`
+}
+
+export function statusPill(
+  rec: Pick<ScheduleRecord, 'status' | 'nextRunAt' | 'manageability'> &
+    Partial<Pick<ScheduleRecord, 'heldBy'>>,
+): {
   tone: StatusTone
   label: string
 } {
+  // Waiting on a pause is not "on" and not "queued". A fire under way or the routine's
+  // own stop says more than this does.
+  if (rec.heldBy && (rec.status === 'idle' || rec.status === 'queued')) {
+    return { tone: 'idle', label: 'on hold' }
+  }
   switch (rec.status) {
     case 'running':
       return { tone: 'working', label: 'running' }
@@ -407,7 +425,7 @@ export function buildRoutinePatch(
 
 // ─── Run history ─────────────────────────────────────────────────────────────
 
-export type RoutineRunStatus = 'running' | 'succeeded' | 'failed' | 'interrupted'
+export type RoutineRunStatus = 'running' | 'succeeded' | 'failed' | 'interrupted' | 'paused'
 
 /** A fire's pill. A team fire "succeeds" once the lead has taken the message, so
  *  it reads as posted; the team's work then continues in the chat. */
@@ -424,6 +442,8 @@ export function runPill(
       return { tone: 'error', label: 'failed' }
     case 'interrupted':
       return { tone: 'warning', label: 'interrupted' }
+    case 'paused':
+      return { tone: 'idle', label: 'paused' }
   }
 }
 

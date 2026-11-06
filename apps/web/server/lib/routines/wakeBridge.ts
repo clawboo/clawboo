@@ -25,10 +25,12 @@ import {
   routineSurvivesFailure,
   teams,
   updateStatus,
+  startRefusedBy,
   type ClawbooDb,
   type DbAgent,
   type DbScheduledRun,
   type DbTask,
+  type StartRefusal,
   type WaitingOn,
 } from '@clawboo/db'
 import { resolveRuntimeIntegration, type RuntimeAdapter } from '@clawboo/executor'
@@ -45,6 +47,7 @@ import { eq } from 'drizzle-orm'
 
 import { getRegistry } from '../agentSource'
 import { emitEvent } from '../obs'
+import { pauseRefusalText } from '../pauseBus'
 import { runTaskOnRuntime } from '../executorRunner'
 import { adapterFactoryFor } from '../runtimes'
 import { isOrchestratableRuntimeId } from '../runtimes/descriptor'
@@ -52,6 +55,7 @@ import { runtimeKeyEnv } from '../runtimes/runKeyEnv'
 import { resolveServerOrchestrated } from '../teamChat/resolveServerOrchestrated'
 import {
   getTeamOrchestrator,
+  teamMessageTarget,
   type EnqueueUserMessageInput,
   type EnqueueUserMessageResult,
 } from '../teamChat/teamOrchestrator'
@@ -68,6 +72,9 @@ export interface RoutineDispatchOutcome {
    *  so the routine keeps its schedule, up to MAX_ROUTINE_TRANSIENT_FAILURES in a
    *  row. Anything else stops it until a person resumes it. */
   transient?: boolean
+  /** A pause stopped or refused this fire, so it did not happen: not a failure, not a
+   *  success. The ticker puts the routine back to run on resume. */
+  paused?: boolean
 }
 
 /** A failed fire filed under its class, from its error text when the runner named
@@ -200,6 +207,56 @@ function setAsideFailedFireTask(
 }
 
 /**
+ * Set aside the task a fire a pause stopped had made. The routine runs again on
+ * resume and files its own task then, as it does after a failure. `cancelled` rather
+ * than `blocked`, because nothing here needs a person. Only while it is still in To
+ * do: a person's move stands.
+ */
+function setAsidePausedFireTask(db: ClawbooDb, taskId: string): void {
+  try {
+    if (getTask(db, taskId)?.status !== 'todo') return
+    const moved = updateStatus(db, taskId, 'cancelled')
+    if (!moved.ok) return
+    emitEvent(db, {
+      kind: 'status_changed',
+      taskId,
+      teamId: moved.task?.teamId ?? null,
+      data: { to: 'cancelled', reason: 'routine_fire_paused' },
+    })
+    addComment(
+      db,
+      taskId,
+      'A pause stopped this scheduled run. The routine runs again on resume, as a new task, so this one was set aside.',
+      'system',
+    )
+  } catch {
+    // Best effort: the routine runs again whether or not this card moved.
+  }
+}
+
+/**
+ * What holds this routine's next fire back, or null when it may start: a pause on
+ * its real target, or an archived team. A team routine's target is who its message
+ * would reach: an @mention in its instructions, else the lead. An agent routine's is
+ * its agent, its team, and the tree of the task it is bound to. The ledger's own read
+ * sees only the paused agents and teams a row names, so the ticker asks this too.
+ */
+export function routineStartRefusal(db: ClawbooDb, run: DbScheduledRun): StartRefusal | null {
+  const template = parseTaskTemplate(run.taskTemplate)
+  if (template && routineTargetOf(template) === 'team') {
+    if (!run.teamId) return null
+    const stimulus = template.description?.trim() || template.title
+    const agentId = teamMessageTarget(db, run.teamId, null, stimulus)
+    return startRefusedBy(db, { agentId, teamId: run.teamId })
+  }
+  return startRefusedBy(db, {
+    agentId: run.agentId || null,
+    teamId: run.teamId,
+    taskId: template?.teamTaskId ?? null,
+  })
+}
+
+/**
  * A team fire: post the routine's instructions into the team's chat for its
  * lead. The outcome is whether the lead's turn started (or queued behind one
  * already running); what the team then does lands in that chat and on the board.
@@ -223,6 +280,11 @@ async function dispatchTeamRoutine(
     return { ok: false, error: `The team "${team.name}" does not take messages from routines.` }
   }
 
+  // The ticker holds a fire whose target is paused. This meets one placed since it
+  // looked: the fire did not happen, and it runs on resume.
+  const refused = routineStartRefusal(db, run)
+  if (refused) return { ok: false, paused: true, error: pauseRefusalText(refused) }
+
   const stimulus = template.description?.trim() || template.title
   const enqueue =
     deps.enqueueTeamMessage ??
@@ -235,6 +297,7 @@ async function dispatchTeamRoutine(
   // The OpenClaw operator still down after a reconnect is a dropped connection,
   // which may pass by itself; every other refusal stops the routine as before.
   if (!result.ok) {
+    if (result.paused) return { ok: false, paused: true, error: result.error }
     return result.transient
       ? { ok: false, error: result.error, errorClass: 'ProviderError', transient: true }
       : { ok: false, error: result.error }
@@ -320,6 +383,11 @@ export async function dispatchRoutine(
 
   const integration = resolveRuntimeIntegration(probe.capabilities())
 
+  // The ticker holds a fire a pause covers, so this only meets one placed since it
+  // looked. No task is made for a run that cannot start, and the fire runs on resume.
+  const refused = routineStartRefusal(db, run)
+  if (refused) return { ok: false, paused: true, error: pauseRefusalText(refused) }
+
   const materialized = materializeTask(db, run, template, runtime)
   if (!materialized.ok) return { ok: false, error: materialized.error }
   const task = materialized.task
@@ -345,6 +413,14 @@ export async function dispatchRoutine(
     taskId: task.id,
     error: err instanceof Error ? err.message : String(err),
   })
+  // A pause stopped this fire, so it did not happen: it runs again on resume, as a
+  // new task like any fire. This one is set aside so it does not sit on the board
+  // with nothing coming for it. A task bound at registration is the board's own, and
+  // the next fire runs it again.
+  const pausedFire = (error: string): RoutineDispatchOutcome => {
+    if (!template.teamTaskId) setAsidePausedFireTask(db, task.id)
+    return { ok: false, paused: true, taskId: task.id, error }
+  }
 
   if (integration.home.kind === 'connected') {
     emitEvent(db, {
@@ -358,16 +434,15 @@ export async function dispatchRoutine(
     })
     const dispatch = deps.dispatchConnected ?? dispatchConnectedSubstrate
     try {
-      return settle(
-        await dispatch({
-          db,
-          run,
-          template,
-          agentRow,
-          taskId: task.id,
-          client: operatorClient!,
-        }),
-      )
+      const outcome = await dispatch({
+        db,
+        run,
+        template,
+        agentRow,
+        taskId: task.id,
+        client: operatorClient!,
+      })
+      return outcome.paused ? pausedFire(outcome.error ?? 'A pause stopped it.') : settle(outcome)
     } catch (err) {
       return settle(thrown(err))
     }
@@ -407,6 +482,7 @@ export async function dispatchRoutine(
     // A lost claim means another worker already owns the task — the work is
     // happening; treat the fire as satisfied (drop, never retry).
     if (result.reason === 'conflict') return { ok: true, taskId: task.id }
+    if (result.reason === 'paused') return pausedFire('A pause stopped it before it started.')
     // A cap whose room runs already going have set aside clears as they finish, so
     // that refusal may pass by itself; every other refusal fails the same way again.
     return settle({
@@ -416,6 +492,7 @@ export async function dispatchRoutine(
       transient: result.reason === 'budget_held',
     })
   }
+  if (result.stoppedByPause) return pausedFire(result.summary || 'A pause stopped it.')
   // A person moved the card while it ran, which stopped the run. Their move is
   // the task's outcome: the fire did not fail, so the routine stays armed and the
   // task stays where they put it.

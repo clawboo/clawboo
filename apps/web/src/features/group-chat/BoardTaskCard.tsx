@@ -75,6 +75,8 @@ export function toneFor(
       tone: ATTENTION_META[attention.reason].tone,
       label: attentionLabel(attention, otherAssigneeName(task, me)),
     }
+  // A pause holds it back: not queued work about to start.
+  if (task['pause']) return { tone: 'idle', label: 'Paused' }
   // Blocked by name only: the board moves it on when the work it waits on finishes.
   if (waitingWorkLabel(task)) return { tone: 'working', label: 'Waiting' }
   // A check waiting for teammates to finish in the team folder has not started.

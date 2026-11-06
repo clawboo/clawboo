@@ -5,7 +5,9 @@
 // back, a question it asked, work that did not pass its checks), and an agent
 // waiting for an approval. Reasons a person caused (they pressed Stop, left a task
 // without an agent, took a task themselves, or moved the card to Blocked
-// themselves) are not announced.
+// themselves) are not announced. A pause is one of those: a person placed it, so a task
+// it holds back has no attention at all and shows its pause on the card. Its start is
+// in the event log as `pause_placed`.
 //
 // The desktop app raises the same alerts natively (its needsYou.ts and
 // approvals.ts watchers), so the copy and the rules here match it. Everything

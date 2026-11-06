@@ -1,7 +1,9 @@
 import { memo, useMemo } from 'react'
 import { BOO_VARIANTS, BooAvatar, BooVariantAvatar, variantIdForRuntime } from '@clawboo/ui'
+import { Pause } from 'lucide-react'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useFleetStore } from '@/stores/fleet'
+import { pauseOfAgent, usePauseStore } from '@/stores/pauses'
 import { useTeamStore } from '@/stores/team'
 import { useTheme } from '@/features/theme/useTheme'
 import { DEFAULT_COLLECTION_ID } from '@/lib/teamPalettes'
@@ -43,6 +45,12 @@ export function useTeamBooColor(agentId: string, isBooZero: boolean): string | u
     // Seed with teamId so same-collection teams get distinct rotated palettes.
     return pickBooColor(collectionId, members, agentId, resolvedTheme, teamId)
   }, [isBooZero, teamId, collectionId, membersSig, agentId, resolvedTheme])
+}
+
+/** Whether a pause covers this agent. A primitive, so nothing else re-renders the avatar. */
+function useAgentPaused(agentId: string): boolean {
+  const teamId = useFleetStore((s) => s.agents.find((a) => a.id === agentId)?.teamId ?? null)
+  return usePauseStore((s) => pauseOfAgent(s.pauses, agentId, teamId) !== null)
 }
 
 /** svg height / width of the generated mascot, whose viewBox is `0 0 100 92`. */
@@ -100,23 +108,41 @@ export const AgentBooAvatar = memo(function AgentBooAvatar({
   const isBooZero = useBooZeroStore((s) => s.booZeroAgentId === agentId)
   const tint = useTeamBooColor(agentId, isBooZero)
   const variantId = useAgentBooVariant(agentId, isBooZero)
+  const paused = useAgentPaused(agentId)
 
-  if (variantId) {
-    // `tint` is undefined for a teamless agent, and a variant reads that as "keep your own locked
-    // colour", which is exactly the intent. It is passed as null so the prop's meaning is stated
-    // rather than left to an absent value.
-    return (
-      <BooVariantAvatar
-        variantId={variantId}
-        tint={tint ?? null}
-        surface={resolvedTheme}
-        size={size}
-        className={className}
-      />
-    )
-  }
-
-  return (
+  // `tint` is undefined for a teamless agent, and a variant reads that as "keep your own locked
+  // colour", which is exactly the intent. It is passed as null so the prop's meaning is stated
+  // rather than left to an absent value.
+  const avatar = variantId ? (
+    <BooVariantAvatar
+      variantId={variantId}
+      tint={tint ?? null}
+      surface={resolvedTheme}
+      size={size}
+      className={className}
+    />
+  ) : (
     <BooAvatar seed={agentId} size={size} className={className} isBooZero={isBooZero} tint={tint} />
+  )
+  if (!paused) return avatar
+
+  // Every face of an agent goes through here, so a paused agent looks paused wherever it shows.
+  // The wrapper exists only while it is paused, so nothing about a running agent's layout changes.
+  // Capped, and in the far corner on a large face, where the Org chart's runtime badge is not.
+  const face = size ?? 32
+  const mark = Math.min(18, Math.max(10, Math.round(face * 0.34)))
+  const corner = face >= 48 ? '-left-0.5 -top-0.5' : '-bottom-0.5 -right-0.5'
+  return (
+    <span className="relative inline-flex shrink-0" data-testid={`agent-paused-${agentId}`}>
+      {avatar}
+      <span
+        title="Paused"
+        className={`absolute ${corner} flex items-center justify-center rounded-full border border-border bg-popover text-muted-foreground`}
+        style={{ width: mark, height: mark }}
+      >
+        <Pause size={Math.round(mark * 0.6)} strokeWidth={2.5} aria-hidden />
+        <span className="sr-only">Paused</span>
+      </span>
+    </span>
   )
 })

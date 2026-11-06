@@ -48,7 +48,11 @@ import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
 import { Modal } from '@/features/shared/Modal'
 
+import { PausedNotice, PauseToggle } from '@/features/pause/PausedNotice'
+import type { PauseView } from '@/stores/pauses'
+
 import { AssignAgentSelect } from './AssignAgentSelect'
+import { isFinishedStatus } from './calendar/calendarModel'
 import { QuestionAnswer, type OpenQuestion } from './QuestionAnswer'
 import { useBoardPerson } from './useBoardPerson'
 import { PrioritySelect } from './PrioritySelect'
@@ -598,6 +602,7 @@ export function TaskDetailDrawer({
   )
   const outputTitle = reporterName ? `${reporterName}'s report` : 'Report'
   const attention = task ? taskAttentionOf(task) : null
+  const taskPause = (task?.['pause'] as PauseView | null | undefined) ?? null
   const person = task ? assigneePersonOf(task) : null
   const asker = task ? askerOf(task, person) : null
   const me = useBoardPerson(person !== null || asker !== null)
@@ -752,7 +757,23 @@ export function TaskDetailDrawer({
                     <span className="truncate">{teamName ?? teamId}</span>
                   </Pill>
                 ) : null}
+                {!isFinishedStatus(task.status) &&
+                (!taskPause || taskPause.kind === 'task_tree') ? (
+                  <PauseToggle
+                    target={{ kind: 'task', id: task.id }}
+                    name={task.title ?? 'this task'}
+                    ownPause={taskPause}
+                    onChanged={refreshAfterAction}
+                    className="-ml-0.5"
+                  />
+                ) : null}
               </div>
+
+              {taskPause && (
+                <div className="overflow-hidden rounded-lg border border-border [&>div]:border-t-0">
+                  <PausedNotice pause={taskPause} onChanged={refreshAfterAction} />
+                </div>
+              )}
 
               {attention && (
                 <NeedsYouBanner
@@ -1186,6 +1207,7 @@ export function TaskDetailDrawer({
                   taskId={task.id}
                   status={task.status}
                   agentName={ownerId ? (ownerName ?? ownerId) : null}
+                  paused={taskPause !== null}
                   onSent={({ commentId, delivery, body }) => {
                     if (commentId && delivery) {
                       setReceipts((m) => new Map(m).set(commentId, { delivery, body }))

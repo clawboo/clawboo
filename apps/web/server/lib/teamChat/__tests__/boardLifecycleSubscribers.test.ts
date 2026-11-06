@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -29,14 +30,15 @@ import {
   getSetting,
   setSetting,
   getComments,
+  liftPause,
   linkDep,
   listEvents,
   listWaitingTaskWakes,
+  placePause,
   reconcileStaleInProgress,
   recordTaskWake,
   tasks,
 } from '@clawboo/db'
-import { eq } from 'drizzle-orm'
 
 import { encodeTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
 import { engineHold } from '../../engineHold'
@@ -189,6 +191,30 @@ describe('board lifecycle subscribers', () => {
       expect(pumped).toEqual([])
     } finally {
       engineHold().release('lifecycle-test')
+      vi.useRealTimers()
+    }
+  })
+
+  it('wakes no team a person paused, or one that was archived', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      const t = createTask(db, { title: 'released', teamId: TEAM })
+      claimTask(db, t.id, 'a2')
+      pumped.length = 0
+      placePause(db, { kind: 'team', id: TEAM })
+      releaseTask(db, t.id)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pumped).toEqual([])
+      liftPause(db, 'team', TEAM)
+
+      const u = createTask(db, { title: 'left behind', teamId: TEAM })
+      claimTask(db, u.id, 'a2')
+      db.update(teams).set({ isArchived: 1 }).where(eq(teams.id, TEAM)).run()
+      releaseTask(db, u.id)
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(pumped).toEqual([])
+    } finally {
       vi.useRealTimers()
     }
   })

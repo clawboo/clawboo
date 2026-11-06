@@ -195,7 +195,8 @@ export function createServerBoardClient(
       // `in_progress` waiting for a run slot across the stop the hold is for.
       // Refused as a conflict, the engine leaves the task in To do, as it does
       // when another engine wins the claim, and the server's dispatch pump fires
-      // it once the hold lifts or after the next start.
+      // it once the hold lifts or after the next start. `claimTask` refuses a task a
+      // pause covers the same way, whichever path asks.
       if (engineHeld()) return { ok: false, reason: 'conflict' }
       try {
         // The run opens with the claim, in one write: the execution, its stamp on the

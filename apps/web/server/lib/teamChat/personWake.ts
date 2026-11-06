@@ -105,6 +105,8 @@ function deliveryOf(decision: WakeDecision | null, agentId: string): ReplyDelive
   switch (decision.skip) {
     case 'held':
       return { status: 'queued', agentId, reason: 'held' }
+    case 'paused':
+      return { status: 'queued', agentId, reason: 'paused' }
     case 'dependency':
       return { status: 'queued', agentId, reason: 'waiting' }
     case 'under_check':

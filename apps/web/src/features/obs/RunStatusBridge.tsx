@@ -14,6 +14,8 @@
 import { useEffect, useRef } from 'react'
 
 import { useAlertSignal } from '@/features/alerts/alertSignal'
+import { latestPauseEvent } from '@/features/pause/latestPauseEvent'
+import { usePauseStore } from '@/stores/pauses'
 import { latestAlertTrigger, latestInboxTrigger } from '@/features/alerts/alertRules'
 import { useFleetStore } from '@/stores/fleet'
 import { useRunActivityStore } from '@/stores/runActivity'
@@ -72,6 +74,14 @@ export function RunStatusBridge(): null {
     if (inboxSeq > 0) useAlertSignal.getState().noteInboxEvent(inboxSeq)
   }, [events])
 
+  // So do the pauses: read once at start, then only when one was placed or lifted.
+  const pauseSeq = useRef(-1)
+  useEffect(() => {
+    const seq = latestPauseEvent(events)
+    if (seq === pauseSeq.current) return
+    pauseSeq.current = seq
+    void usePauseStore.getState().refresh()
+  }, [events])
   // So does the person's inbox.
   useEffect(() => {
     if (boardActivity) {

@@ -6,6 +6,8 @@ import { apiFetch } from '@clawboo/control-client'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useChatStore } from '@/stores/chat'
+import { PausedNotice } from '@/features/pause/PausedNotice'
+import { pauseOfTeamChat, usePauseStore } from '@/stores/pauses'
 import { useConnectionStore } from '@/stores/connection'
 import { taskAttentionOf } from '@/features/board/boardStatus'
 import { useBoardStore } from '@/stores/board'
@@ -79,6 +81,17 @@ export function GroupChatPanel({
   embedded?: boolean
 }) {
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId) ?? null)
+  // The task cards say a task is paused from the board's own read, which a change
+  // frame does not carry: read it again when a pause is placed or lifted.
+  const pauses = usePauseStore((s) => s.pauses)
+  const firstPauseRead = useRef(true)
+  useEffect(() => {
+    if (firstPauseRead.current) {
+      firstPauseRead.current = false
+      return
+    }
+    void useBoardStore.getState().load(teamId)
+  }, [pauses, teamId])
   const room = useRoom(teamId, roomId)
   // Everything that resets on a team switch resets on a room switch too.
   const chatKey = roomId ? `${teamId}:room:${roomId}` : teamId
@@ -119,6 +132,13 @@ export function GroupChatPanel({
     () => (isBooZeroEligibleForTeam(booZeroAgent, teamId) ? booZeroAgent : null),
     [booZeroAgent, teamId],
   )
+  // Who a message that names nobody reaches, as the send below routes it.
+  const chatLeadId =
+    teamBooZeroAgent?.id ??
+    (team?.leaderAgentId && teamAgents.some((a) => a.id === team.leaderAgentId)
+      ? team.leaderAgentId
+      : (teamAgents[0]?.id ?? null))
+  const chatPause = pauseOfTeamChat(pauses, teamId, chatLeadId)
   // ── Server-orchestrated teams (the only mode) ────────────────────────────
   // Every team's chat is driven by the SERVER orchestrator: the browser is a THIN
   // CLIENT — it POSTs the message + renders the SSE transcript stream. There is no
@@ -967,6 +987,8 @@ export function GroupChatPanel({
 
       {/* Inline approval cards for team agents */}
       <InlineApprovalTray teamId={teamId} />
+
+      {chatPause && <PausedNotice pause={chatPause} />}
 
       {/* Composer */}
       <MessageComposer

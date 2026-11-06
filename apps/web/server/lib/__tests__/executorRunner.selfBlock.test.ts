@@ -12,8 +12,14 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
-import { encodeHumanAssignment, taskAttention } from '@clawboo/board-core'
 import {
+  encodeHumanAssignment,
+  parseWaitingOn,
+  PAUSED_RUN_CLASS,
+  taskAttention,
+} from '@clawboo/board-core'
+import {
+  askQuestion,
   blockTask,
   createTask,
   getComments,
@@ -44,6 +50,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
+import { stopPausedTaskRuns } from '../runStops'
 import type { RuntimeRunContext } from '../runtimes'
 import { getTaskWorkspace } from '../worktrees'
 
@@ -78,7 +85,11 @@ const REPLY = 'I need the staging API key from a person before I can go on.'
 /** A runtime that does `during` mid-run, then ends with `reason`. */
 function agentRun(
   during: () => void,
-  opts: { reason?: 'success' | 'max_turns'; caps?: Capabilities; summary?: string } = {},
+  opts: {
+    reason?: 'success' | 'max_turns' | 'aborted'
+    caps?: Capabilities
+    summary?: string
+  } = {},
 ) {
   const starts: StartOpts[] = []
   const adapter: RuntimeAdapter = {
@@ -162,6 +173,7 @@ describe('task runner: a task its own agent blocked', () => {
       sourceDelegationId: t.sourceDelegationId,
       execs: listExecutions(getDb(), taskId),
       personMovedAt: t.personMovedAt,
+      waitingOn: t.waitingOn,
     })
   }
 
@@ -190,6 +202,68 @@ describe('task runner: a task its own agent blocked', () => {
     expect(
       listEvents(getDb(), { taskId, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
     ).toContainEqual({ to: 'blocked', reason: 'agent_blocked' })
+  })
+
+  it('a pause stopping the run keeps the block: the card waits for a person, not the resume', async () => {
+    const taskId = task('Deploy to staging')
+    const { adapter } = agentRun(
+      () => {
+        block(taskId)()
+        stopPausedTaskRuns(() => true, 'Stopped: this agent is paused.')
+      },
+      { caps: NO_WORKTREE, reason: 'aborted' },
+    )
+
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'coder',
+    })
+
+    expect(result).toMatchObject({ ok: true, stoppedByPause: true, status: 'blocked' })
+    expect(getTask(getDb(), taskId)?.status).toBe('blocked')
+    expect(listExecutions(getDb(), taskId)[0]).toMatchObject({
+      status: 'cancelled',
+      errorClass: PAUSED_RUN_CLASS,
+    })
+    expect(attentionOf(taskId)).toMatchObject({ reason: 'blocked' })
+  })
+
+  it('a pause stopping the run keeps a question its agent asked, with no note over it', async () => {
+    const taskId = task('Deploy to staging')
+    const NOTE = 'Stopped: this agent is paused.'
+    let questionId = ''
+    const { adapter } = agentRun(
+      () => {
+        const asked = askQuestion(getDb(), {
+          taskId,
+          agentId: 'coder',
+          kind: 'confirm',
+          payload: { prompt: 'Deploy?' },
+        })
+        if (!asked.ok) throw new Error(`ask refused: ${asked.reason}`)
+        questionId = asked.question.id
+        stopPausedTaskRuns(() => true, NOTE)
+      },
+      { caps: NO_WORKTREE, reason: 'aborted' },
+    )
+
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'coder',
+    })
+
+    expect(result).toMatchObject({ ok: true, stoppedByPause: true, status: 'blocked' })
+    expect(parseWaitingOn(getTask(getDb(), taskId)?.waitingOn)).toMatchObject({
+      kind: 'question',
+      questionId,
+    })
+    expect(listExecutions(getDb(), taskId)[0]).toMatchObject({ errorClass: PAUSED_RUN_CLASS })
+    expect(getComments(getDb(), taskId).map((c) => c.body)).not.toContain(NOTE)
+    expect(attentionOf(taskId)).toMatchObject({ reason: 'question' })
   })
 
   it('a saved wake the run carried was heard, since the run ended well', async () => {

@@ -76,6 +76,9 @@ export const ENGINE_FEATURES = [
   // Drain and hold (/api/system/hold): stop starting new agent runs, then wait
   // for the ones in flight before a stop or an update.
   'system.hold',
+  // Pause an agent, a team or a task tree, durably, until a person resumes it
+  // (/api/pauses).
+  'board.pause',
   // A sign-in proxy's signed identity tokens are verified, and the person each
   // names is recorded on approvals, chat messages and task edits. Who a request
   // is signed in as: GET /api/access/identity.

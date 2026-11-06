@@ -57,6 +57,7 @@ import {
   routineKindOf,
   runNowBlocker,
   runtimeDisplayName,
+  routineHeldWords,
   statusPill,
   targetSummary,
   toggleBlocker,
@@ -144,7 +145,11 @@ export function RoutineRow({
           </span>
           <span className="font-data mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-foreground/50">
             <span className="text-foreground/60">{humanCron(rec.cronSpec)}</span>
-            <span>· {rec.nextRunAt ? untilLabel(rec.nextRunAt) : 'not scheduled'}</span>
+            <span>
+              ·{' '}
+              {routineHeldWords(rec) ??
+                (rec.nextRunAt ? untilLabel(rec.nextRunAt) : 'not scheduled')}
+            </span>
             {rec.lastRunAt ? <span>· ran {formatRelative(rec.lastRunAt)}</span> : null}
           </span>
           {rec.lastError ? (

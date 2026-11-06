@@ -701,6 +701,18 @@ const SCHEMA_DDL = `
     -- as the run's real spend is recorded and is deleted when the run ends.
     -- owner_pid + owner_started_at name the server process that holds it, so a
     -- boot sweep can drop the holds of a server that is gone.
+    -- A person's durable pause of an agent, a team or a task tree (see board/pauses).
+    CREATE TABLE IF NOT EXISTS pauses (
+      id         TEXT    PRIMARY KEY,
+      scope_kind TEXT    NOT NULL,
+      scope_id   TEXT    NOT NULL,
+      reason     TEXT,
+      paused_by  TEXT,
+      tenant_id  TEXT,
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_pauses_scope ON pauses (scope_kind, scope_id);
+
     CREATE TABLE IF NOT EXISTS budget_reservations (
       id                   TEXT    PRIMARY KEY,
       hold_id              TEXT    NOT NULL,

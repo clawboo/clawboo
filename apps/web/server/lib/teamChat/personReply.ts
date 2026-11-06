@@ -35,6 +35,7 @@ import {
   listExecutions,
   recordTaskWake,
   updateStatus,
+  startRefusedByTask,
   type ClawbooDb,
   type DbTask,
 } from '@clawboo/db'
@@ -54,7 +55,11 @@ export type ReplyDelivery =
   | { status: 'woke-agent'; agentId: string }
   /** Waiting for the agent's next turn: a saved wake on a team chat task, a mailbox
    *  note on a task the runner runs. */
-  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' }
+  | {
+      status: 'queued'
+      agentId: string
+      reason: 'next-run' | 'in-review' | 'waiting' | 'held' | 'paused'
+    }
   | {
       status: 'not-delivered'
       agentId: string | null
@@ -159,6 +164,17 @@ function wake(
 ): ReplyDelivery {
   // The saved wake waits: the dispatch pump runs a pass when the hold lifts.
   if (deps.held?.()) return { status: 'queued', agentId, reason: 'held' }
+  // So does a pause, in the pump's own read of it: the card stays as the person left
+  // it, and the reply starts the task on resume, whatever its ledger says. An archived
+  // team has no resume to promise: it goes out if the team comes back.
+  const refused = startRefusedByTask(db, task)
+  if (refused) {
+    return {
+      status: 'queued',
+      agentId,
+      reason: refused.kind === 'archived_team' ? 'next-run' : 'paused',
+    }
+  }
   // Its agent has not finished stopping (it asked, or handed back, and the run is still
   // ending). A move to To do now would read as being taken off the task. The run's end
   // brings the pump, and the wake goes then.

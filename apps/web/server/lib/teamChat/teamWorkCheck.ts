@@ -35,6 +35,7 @@ import {
   setTaskCheckHeld,
   startTaskHeartbeat,
   updateStatus,
+  startRefusedBy,
   type ClawbooDb,
 } from '@clawboo/db'
 import type { RuntimeAdapter } from '@clawboo/executor'
@@ -567,6 +568,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       reviewSha: head,
       evidence: false,
       ...(reviewer ? { makeReviewerAdapter: reviewer } : {}),
+      reviewPaused: () => startRefusedBy(db, { agentId, teamId, taskId }) !== null,
       reviewerModel,
       mcpBaseUrl: opts.mcpBaseUrl,
       onReviewerSpend: (spend) => chargeReview(taskId, agentId, reviewerModel, spend),

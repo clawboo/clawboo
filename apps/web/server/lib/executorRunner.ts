@@ -12,6 +12,7 @@
 // process", so a future non-subprocess participant (a human, UI-driven) slots in
 // behind the same seam.
 
+import { agedTaskPriority, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import {
   addComment,
   appendAudit,
@@ -38,6 +39,7 @@ import {
   startReviewHeartbeat,
   startTaskHeartbeat,
   updateStatus,
+  startRefusedBy,
   type ClawbooDb,
   type DbExecutionProcess,
   type RunCostSource,
@@ -251,6 +253,9 @@ export type RunTaskResult =
         // Isolation was required for a file-mutating task but could not be
         // provisioned; the run is refused rather than executed un-isolated.
         | 'workspace_unavailable'
+        // A person paused its agent, team or task tree (or its team was archived).
+        // Nothing was claimed, and the task starts again when that lifts.
+        | 'paused'
     }
   | {
       ok: true
@@ -269,6 +274,8 @@ export type RunTaskResult =
       /** A person moved the task's card and that stopped the run (see
        *  `stopTaskRuns`). Their move is the outcome, not a failure. */
       stoppedByPerson?: boolean
+      /** That stop was a pause's: the run did not fail and did not finish. */
+      stoppedByPause?: boolean
       /** The class a failed run (`doneReason: 'error'`) was filed under. */
       errorClass?: RuntimeErrorClass
     }
@@ -472,7 +479,7 @@ export async function runTaskOnRuntime(caller: RunTaskInput): Promise<RunTaskRes
   if (caller.abortSignal?.aborted) forward()
   else caller.abortSignal?.addEventListener('abort', forward, { once: true })
   const input: RunTaskInput = { ...caller, abortSignal: controller.signal }
-  const stop = registerRunStop(input.taskId, forward)
+  const stop = registerRunStop(input.taskId, forward, input.assigneeAgentId, { waiting: true })
   // The live run, once there is one, so a person's comment on the task can steer
   // it (`steerTaskRun`). Re-pointed on every rotation.
   const steerSlot: SteerSlot = { handle: null }
@@ -553,15 +560,34 @@ async function runTaskOnRuntimeInner(
   // the claim, so a queued task stays in `todo`. The slot is held until the run,
   // its completion and its review are over: the critic runs inside it and takes
   // none of its own, which would deadlock a cap of one.
+  const startingTask = getTask(input.db, input.taskId)
+  const pauseSubject = {
+    agentId: input.assigneeAgentId,
+    teamId: startingTask?.teamId ?? null,
+    taskId: input.taskId,
+  }
+  // A paused agent, team or task tree does not join the queue to wait for its
+  // resume: nothing is claimed and the caller hears why. The queue reads the pause
+  // again before it grants, for a pause placed while this run waits there.
+  if (startRefusedBy(input.db, pauseSubject)) return { ok: false, reason: 'paused' }
   const runOnce = (attempt: RunTaskInput): Promise<RunTaskResult> =>
-    withRunSlot(() => locked(attempt), { key: homeKey, signal: input.abortSignal }).catch(
-      (err: unknown): RunTaskResult => {
-        // Cancelled while queued (the caller left, or a person moved the card): the
-        // same outcome as the aborted-waiter check before the claim.
-        if (err instanceof RunQueueAbortedError) return { ok: false, reason: 'conflict' }
-        throw err
+    withRunSlot(
+      () => {
+        stop.started()
+        return locked(attempt)
       },
-    )
+      {
+        key: homeKey,
+        signal: input.abortSignal,
+        rank: { priority: startingTask ? agedTaskPriority(startingTask, Date.now()) : 0 },
+        paused: () => startRefusedBy(input.db, pauseSubject) !== null,
+      },
+    ).catch((err: unknown): RunTaskResult => {
+      // Cancelled while queued (the caller left, or a person moved the card): the
+      // same outcome as the aborted-waiter check before the claim.
+      if (err instanceof RunQueueAbortedError) return { ok: false, reason: 'conflict' }
+      throw err
+    })
 
   // The liveness beat is owned HERE — outside the mutex — so one interval spans
   // the slot and mutex waits, the run, and every fix cycle, and the `finally` guarantees
@@ -600,6 +626,11 @@ async function runTaskOnRuntimeInner(
     while (result.ok && result.needsVerifyFix && cycle < maxFix) {
       cycle++
       result = await runOnce({ ...input, fixCycle: cycle })
+    }
+    // A pause landed between two fix cycles: this run still holds the claim, with
+    // no run left to give it back. To do, to start again on resume.
+    if (!result.ok && stop.byPause && getTask(input.db, input.taskId)?.status === 'in_progress') {
+      releaseTask(input.db, input.taskId)
     }
     return result
   } catch (err) {
@@ -2119,6 +2150,8 @@ async function runTaskInner(
           ...(input.checkDeadlineMs ? { checkDeadlineMs: input.checkDeadlineMs } : {}),
           makeReviewerAdapter: input.makeAdapter,
           reviewerModel,
+          reviewPaused: () =>
+            startRefusedBy(db, { agentId: assigneeAgentId, teamId: task.teamId, taskId }) !== null,
           mcpBaseUrl: input.mcpBaseUrl,
           // The review is paid work done for this task, so it is charged to the
           // same agent, mission and team budgets and shows in Tokens Used. A
@@ -2208,12 +2241,16 @@ async function runTaskInner(
     }
   } else {
     const stopNote = doneReason === 'aborted' ? (claimState.stop?.note ?? null) : null
-    addComment(
-      db,
-      taskId,
-      stopNote ?? `Run ${doneReason}: ${failureDetail || '(no output)'}`,
-      'system',
-    )
+    // A task its agent had already blocked, or asked a question on, waits on someone
+    // whatever a pause does, and its card says what for: a pause has nothing to add.
+    if (!(claimState.stop?.byPause && getTask(db, taskId)?.status === 'blocked')) {
+      addComment(
+        db,
+        taskId,
+        stopNote ?? `Run ${doneReason}: ${failureDetail || '(no output)'}`,
+        'system',
+      )
+    }
     // A failed run is filed under its class, from the runtime's typed cause and
     // its message. An unmappable failure is an UNKNOWN class → a harness bug →
     // alert (AC5). The ledger keeps the class: an account refusal (sign-in or
@@ -2227,12 +2264,16 @@ async function runTaskInner(
     // BIND the result. `completeExecutionProcess` refuses (returns null) when
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+    // A pause stopped it: the ledger says so, and the task fires again on resume
+    // rather than reading as a person's Stop.
+    const stoppedByPause = stopNote !== null && claimState.stop?.byPause === true
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
-      error: failureDetail || doneReason,
+      error: stoppedByPause ? stopNote : failureDetail || doneReason,
       ...(errorClass ? { errorClass } : {}),
+      ...(stoppedByPause ? { errorClass: PAUSED_RUN_CLASS } : {}),
       // Aborted with a person's note: they moved the card. Any other abort is not theirs.
-      ...(stopNote !== null ? { byPerson: true } : {}),
+      ...(stopNote !== null && !stoppedByPause ? { byPerson: true } : {}),
       costUsd,
       costSource,
       inputTokens: ledgerInputTokens,
@@ -2291,8 +2332,9 @@ async function runTaskInner(
     // next dispatch falls back to the prose handoff instead of retrying into
     // the same possibly-stale session id forever (a pruned/unknown id is a
     // hard runtime failure). Losing native resume degrades gracefully — the
-    // structured handoff is the designed cross-runtime path anyway.
-    if (cwd && ctx.resume) {
+    // structured handoff is the designed cross-runtime path anyway. A pause stopping
+    // it says nothing about the session, which the run after the resume can still use.
+    if (cwd && ctx.resume && !stoppedByPause) {
       const cleared: AgentHandoffInput = {
         handoffFrom: assigneeAgentId,
         runtime: resume?.lastRuntime ?? runtimeId,
@@ -2329,5 +2371,6 @@ async function runTaskInner(
     degradations: degrNotes,
     ...(needsVerifyFix ? { needsVerifyFix: true } : {}),
     ...(doneReason === 'aborted' && claimState.stop?.note ? { stoppedByPerson: true } : {}),
+    ...(doneReason === 'aborted' && claimState.stop?.byPause ? { stoppedByPause: true } : {}),
   }
 }

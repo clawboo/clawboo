@@ -21,6 +21,7 @@ import {
   setBudgetLimit,
   setSetting,
   SqliteMemoryStore,
+  placePause,
   type ClawbooDb,
 } from '@clawboo/db'
 import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
@@ -35,7 +36,8 @@ import type {
 } from '@clawboo/executor'
 
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
-import { getDb, resetDb } from '../../db'
+import { getDb, getDbPath, resetDb } from '../../db'
+import { homeDispatchMutex } from '../../executorRunner'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { saveAgentConfig } from '../../runtimes/native/agentConfigStore'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
@@ -50,6 +52,7 @@ import {
   nativeChatSessionKey,
   nativeChatSessionSettingKey,
   stopAgentChat,
+  stopPausedAgentChats,
 } from '../driveAgentChat'
 
 const CAPS: Capabilities = {
@@ -130,13 +133,18 @@ async function untilRunning(adapter: FakeAdapter): Promise<void> {
 describe('driveAgentChat (1:1 native conversational runner)', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-agentchat-'))
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    resetDb()
     db = getDb()
+    expect(getDbPath().startsWith(home)).toBe(true)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory
@@ -144,6 +152,8 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -422,6 +432,211 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     expect(rows()).not.toContain('cut short')
     expect(deltas).toEqual(['cut short', ''])
     unsub()
+  })
+
+  describe('under a pause', () => {
+    const NOTE = 'Stopped: this agent is paused. The task starts again on resume.'
+    const metaRows = (sk: string): string[] =>
+      (
+        db.select().from(chatMessages).where(eq(chatMessages.sessionKey, sk)).all() as Array<{
+          data: string
+        }>
+      )
+        .map((r) => JSON.parse(r.data) as { kind?: string; text: string })
+        .filter((d) => d.kind === 'meta')
+        .map((d) => d.text)
+    const silent = (): FakeAdapter =>
+      new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hi' }
+        })(),
+      )
+
+    it('refuses a turn for a paused agent, with the reason in the chat', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      placePause(db, { kind: 'agent', id: 'native-x' })
+      const adapter = silent()
+      await driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.startCalls).toBe(0)
+      expect(metaRows(nativeChatSessionKey('native-x')).join(' ')).toContain('This agent is paused')
+    })
+
+    it('refuses a turn for an agent on a paused team', async () => {
+      seedAgent('native-x', 'clawboo-native', 'team-p')
+      placePause(db, { kind: 'team', id: 'team-p' })
+      const adapter = silent()
+      await driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.startCalls).toBe(0)
+      expect(metaRows(nativeChatSessionKey('native-x')).join(' ')).toContain('This team is paused')
+    })
+
+    it('keeps an agent reachable after its team is only archived', async () => {
+      seedAgent('native-x', 'clawboo-native', 'team-a')
+      db.update(teams).set({ isArchived: 1 }).where(eq(teams.id, 'team-a')).run()
+      const adapter = silent()
+      await driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      expect(adapter.startCalls).toBe(1)
+    })
+
+    it('stops a turn going and one waiting for a slot, each with the reason in the chat', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      setRunSlotsForTests(createRunSlots(1))
+      try {
+        const hold = deferred()
+        const running = new FakeAdapter((run) =>
+          (async function* () {
+            await hold.promise
+            yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+          })(),
+        )
+        running.onAbort = hold.resolve
+        const first = driveAgentChat({
+          db,
+          agentId: 'native-x',
+          message: 'one',
+          mcpBaseUrl: null,
+          makeAdapter: () => running,
+        })
+        await untilRunning(running)
+        const queued = silent()
+        const second = driveAgentChat({
+          db,
+          agentId: 'native-x',
+          message: 'two',
+          mcpBaseUrl: null,
+          makeAdapter: () => queued,
+        })
+        await tick()
+
+        placePause(db, { kind: 'agent', id: 'native-x' })
+        await stopPausedAgentChats(db, ({ agentId }) => agentId === 'native-x', NOTE)
+        await Promise.all([first, second])
+        expect(running.aborted).toBe(1)
+        expect(queued.startCalls).toBe(0)
+        expect(metaRows(nativeChatSessionKey('native-x'))).toContain(NOTE)
+      } finally {
+        setRunSlotsForTests(null)
+      }
+    })
+
+    it('stops a turn a pause landed on while it was starting', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      const hold = deferred()
+      const starting = new FakeAdapter((run) =>
+        (async function* () {
+          await hold.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+        })(),
+      )
+      starting.onAbort = hold.resolve
+      const realStart = starting.start.bind(starting)
+      starting.start = async (t, o) => {
+        placePause(db, { kind: 'agent', id: 'native-x' })
+        return realStart(t, o)
+      }
+      await driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () => starting,
+      })
+      expect(starting.aborted).toBe(1)
+      expect(metaRows(nativeChatSessionKey('native-x'))).toEqual(['Stopped: this agent is paused.'])
+    })
+
+    it('refuses a turn a pause landed on while it waited for the agent, before anything starts', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      let release!: () => void
+      const held = homeDispatchMutex.run(
+        'direct-chat:native-x',
+        () =>
+          new Promise<void>((r) => {
+            release = r
+          }),
+      )
+      const adapter = silent()
+      const going = driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () => adapter,
+      })
+      await tick()
+      placePause(db, { kind: 'agent', id: 'native-x' })
+      release()
+      await held
+      await going
+      expect(adapter.startCalls).toBe(0)
+      expect(metaRows(nativeChatSessionKey('native-x')).join(' ')).toContain('This agent is paused')
+    })
+
+    it('says a stopped turn stopped, and promises no task coming back', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      await stopPausedAgentChats(db, () => true, 'Stopped: this agent is paused.')
+      const hold = deferred()
+      const running = new FakeAdapter((run) =>
+        (async function* () {
+          await hold.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'aborted', summary: '' }
+        })(),
+      )
+      running.onAbort = hold.resolve
+      const going = driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'one',
+        mcpBaseUrl: null,
+        makeAdapter: () => running,
+      })
+      await untilRunning(running)
+      placePause(db, { kind: 'agent', id: 'native-x' })
+      await stopPausedAgentChats(db, () => true, 'Stopped: this agent is paused.')
+      await going
+      expect(metaRows(nativeChatSessionKey('native-x')).join(' ')).not.toContain('task')
+    })
+
+    it('stops nothing it does not cover', async () => {
+      seedAgent('native-x', 'clawboo-native')
+      const hold = deferred()
+      const running = new FakeAdapter((run) =>
+        (async function* () {
+          await hold.promise
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+        })(),
+      )
+      const going = driveAgentChat({
+        db,
+        agentId: 'native-x',
+        message: 'one',
+        mcpBaseUrl: null,
+        makeAdapter: () => running,
+      })
+      await untilRunning(running)
+      await stopPausedAgentChats(db, ({ agentId }) => agentId === 'someone-else', NOTE)
+      expect(running.aborted).toBe(0)
+      hold.resolve()
+      await going
+    })
   })
 
   it('a non-native agent (no injected adapter) never runs', async () => {

@@ -1,0 +1,11 @@
+---
+'clawboo': minor
+---
+
+**Pause an agent, a team or a task tree, and work now runs in a fair order.**
+
+A pause holds until you resume it, and it lasts through a restart. Use **Pause** in an agent's or a team chat's header, in a task's drawer, or from a right-click on the team rail or the Org chart. Its runs stop within seconds. A task whose run stopped goes back to To do and keeps its agent, every other task stays in its status, and nothing it covers starts: no task, no Routine and no wake. A message to a paused agent or team gets a line in the chat saying it did not start, so send it again after you resume. A reply on a paused task is kept, and the agent starts on it after the resume. A routine that falls due during a pause reads **on hold** and runs once on resume, and one a pause stops partway counts as neither a run nor a failure. **Resume** is on the banner in the chat and the task drawer, and waiting work starts again at once. A paused item carries a pause mark wherever it shows, and says who paused it. `GET` and `POST /api/pauses` and `DELETE /api/pauses/:kind/:id` are the routes, and the `board.pause` flag in `GET /api/system/capabilities` says a server has them. A 1:1 chat with an OpenClaw agent runs in the OpenClaw Gateway, so a pause does not cover it, and a team's work check already running finishes its command, though it starts no reviewer and no fix round.
+
+The order changed in both waiting lines. Ready tasks now go by: tasks that already ran and came back, then priority, then oldest first, so editing a task no longer moves it to the front. A task that keeps waiting reads one priority higher every 4 hours, up to **High**, so **Low** work gets through newer work, while a task someone marked **Urgent** still goes first. When every run slot is taken, a person's chat turn goes first, then tasks by priority, so an **Urgent** task is no longer stuck behind everything queued before it. A waiting run reads one level higher every 15 minutes, and while both kinds wait, one slot in every four goes to background work.
+
+An archived team's agents now stop working and nothing wakes them. Before, work left on its board kept starting. Bring the team back and its work starts again.

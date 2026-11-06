@@ -224,7 +224,7 @@ Claim a `todo` task for an agent. The claim is atomic: when two agents race, exa
 - A caller bound to an agent claims for itself: `assigneeAgentId` is optional, and naming another agent is refused with `claim_task claims a task for you (<agent>), not for <name>. To hand a task to another agent, use assign_task.` The operator's stdio bin names the agent, as before.
 - Succeeds only for a task that is `todo`, has no assignee and is not dropped.
 - Returns the claimed task row.
-- Errors: `claim failed: conflict` (the task exists but is not claimable, for example another agent won; do not retry), `claim failed: not_found`, and `not found: <taskId>` for a task outside the session's team.
+- Errors: `claim failed: conflict` (the task exists but is not claimable, for example another agent won; do not retry), `claim failed: paused` (a person paused the agent, the team or the task's tree, or the team is archived; do not retry), `claim failed: not_found`, and `not found: <taskId>` for a task outside the session's team.
 - Not served to an unverified HTTP caller, because `assigneeAgentId` would let it act as any agent, nor on a team run, where the engine claims each task for its agent.
 
 ### assign_task

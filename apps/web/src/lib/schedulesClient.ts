@@ -193,7 +193,7 @@ export function deleteSchedule(id: string): Promise<ScheduleActionResult> {
 export interface RoutineRun {
   firedAt: number
   finishedAt: number | null
-  status: 'running' | 'succeeded' | 'failed' | 'interrupted'
+  status: 'running' | 'succeeded' | 'failed' | 'interrupted' | 'paused'
   error: string | null
   taskId: string | null
   dispatchPath: string | null

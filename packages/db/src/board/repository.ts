@@ -15,8 +15,6 @@ import {
   isTerminal,
   ledgerAllowsAutoFire,
   LOCAL_PERSON,
-  MAX_TASK_PRIORITY,
-  MIN_TASK_PRIORITY,
   parseWaitingOn,
   personMoveAllowed,
   waitingOnJson,
@@ -39,6 +37,8 @@ import {
 } from '@clawboo/governance'
 import { and, count, desc, eq, gt, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
 
+import { readyOrder } from './readyOrder'
+
 import type { ClawbooDb } from '../db'
 import { appendEvent } from '../events/appendEvent'
 import { parsePersonJson, personJson, type PersonRecord } from '../person'
@@ -51,6 +51,7 @@ import {
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
 import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
+import { startRefusedBy, startRefusedByTask } from './pauses'
 import {
   delegationFailures,
   executionProcesses,
@@ -563,7 +564,7 @@ export function listTasks(db: ClawbooDb, filter: ListTasksFilter = {}): DbTask[]
 
 // ─── Atomic claim (the mutex) ────────────────────────────────────────────────
 
-export type ClaimReason = 'conflict' | 'not_found' | 'person_assigned'
+export type ClaimReason = 'conflict' | 'not_found' | 'paused' | 'person_assigned'
 export interface ClaimResult {
   ok: boolean
   task?: DbTask
@@ -640,6 +641,22 @@ export function claimTask(
 ): ClaimResult {
   const now = Date.now()
   const result = immediateWrite(db, (tx): ClaimResult => {
+    // Every claim passes here, so a paused agent, team or task tree (see ./pauses)
+    // starts no work whichever path asked. The task stays in To do. Read inside the
+    // write, on its one connection, so a pause placed just before it is seen.
+    // A person's task says so below: it is theirs whatever is paused.
+    const target = tx
+      .select({ teamId: tasks.teamId, person: tasks.assigneePersonId })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .get()
+    if (
+      target &&
+      !target.person &&
+      startRefusedBy(db, { agentId: assigneeAgentId, teamId: target.teamId, taskId }) !== null
+    ) {
+      return { ok: false, reason: 'paused' }
+    }
     const run = opts.run
     if (run) {
       const live = tx
@@ -727,11 +744,12 @@ export const isLedgerAutoFireable: (execs: readonly LedgerRun[]) => boolean = le
  * `:agent:` target marker AND whose execution ledger permits an auto-fire. The
  * server dispatch pump scans this to know WHICH team orchestrators to (re)build
  * and pump; a room has its own orchestrator, so the room is part of the answer
- * (`roomId` null = the team's default room). Precision matters twice over:
+ * (`roomId` null = the team's default room). Precision matters three times over:
  * without the ledger filter one permanently-parked task would rebuild its
- * orchestrator every tick forever, and without the readiness filter a
- * dep-blocked plan tail would do the same. The engine's own policy remains the
- * final arbiter of what runs.
+ * orchestrator every tick forever, without the readiness filter a dep-blocked
+ * plan tail would do the same, and without the pause check so would paused work
+ * or a task left on an archived team. The engine's own policy remains the final
+ * arbiter of what runs.
  */
 export function listRoomsWithFireableDelegations(
   db: ClawbooDb,
@@ -752,13 +770,11 @@ export function listRoomsWithFireableDelegations(
     if (!c.teamId) continue
     // Readiness (deps satisfied) comes from the same query the engine's pump
     // uses, so the two views can't drift.
-    const ready = getReadyTasks(db, { teamId: c.teamId, roomId: c.roomId }) as Array<{
-      id: string
-      sourceDelegationId?: string | null
-    }>
+    const ready = getReadyTasks(db, { teamId: c.teamId, roomId: c.roomId })
     for (const t of ready) {
       if (!/:agent:/.test(t.sourceDelegationId ?? '')) continue
       if (!isLedgerAutoFireable(listExecutions(db, t.id))) continue
+      if (startRefusedByTask(db, t) !== null) continue
       out.push({ teamId: c.teamId, roomId: c.roomId })
       break
     }
@@ -1926,13 +1942,22 @@ export function getDependencies(db: ClawbooDb, taskId: string): DbTask[] {
     .map((r) => r.task as DbTask)
 }
 
-/** Tasks ready to work: `todo`, not dropped, with every dependency `done`.
- *  Highest priority first, the most recently updated first within a level. A
- *  priority stored before writes were clamped is read as the nearest level
- *  here too, so an old large value cannot jump the queue either. */
+/**
+ * Tasks ready to work: `todo`, not dropped, with every dependency `done`, in the
+ * order they are served. The server scan and every engine read this one query, so
+ * the two stay in step.
+ *   1. Tasks that ran before and came back (released after a crash, a failure on
+ *      its way to a retry, a run a pause stopped) lead, since their work is under
+ *      way. A run a person stopped does not count: that was a decision.
+ *   2. Then priority, aged (see `agedTaskPriority`), so low-priority work gets through
+ *      newer work, though never past a person's Urgent. A priority stored before
+ *      writes were clamped is read as the nearest level, so an old large value
+ *      cannot jump the queue either.
+ *   3. Then oldest first, by creation, so an edit moves nothing.
+ */
 export function getReadyTasks(
   db: ClawbooDb,
-  filter: { teamId?: string; roomId?: RoomFilter } & Scope = {},
+  filter: { teamId?: string; roomId?: RoomFilter; now?: number } & Scope = {},
 ): DbTask[] {
   const conds = [
     eq(tasks.status, 'todo'),
@@ -1949,10 +1974,7 @@ export function getReadyTasks(
     .select()
     .from(tasks)
     .where(and(...conds))
-    .orderBy(
-      desc(sql`max(${MIN_TASK_PRIORITY}, min(${MAX_TASK_PRIORITY}, ${tasks.priority}))`),
-      desc(tasks.updatedAt),
-    )
+    .orderBy(...readyOrder(filter.now ?? Date.now()))
     .all() as DbTask[]
 }
 

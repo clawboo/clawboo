@@ -54,6 +54,8 @@ export interface CriticInput {
   reviewRootDir: string
   /** Told what the reviewer's run cost once it has run, so the caller can charge it. */
   onSpend?: (spend: ReviewerSpend) => void
+  /** True while a pause covers the task: the reviewer does not start. */
+  paused?: () => boolean
 }
 
 /** What a reviewer run cost, as its runtime reported it. */
@@ -144,6 +146,11 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
       cwd: review.worktreePath,
       model: input.reviewerModel ?? null,
       mcpBaseUrl: input.mcpBaseUrl ?? null,
+    }
+    // A reviewer is a paid run, and nothing starts under a pause. The gate before it
+    // may have run for a long time, so this is read as late as it can be.
+    if (input.paused?.()) {
+      return errored(null, 'This task is paused, so the reviewer did not run.')
     }
     const adapter = input.makeReviewerAdapter(ctx)
     const sessionKey = `review:${input.reviewSha.slice(0, 12)}`

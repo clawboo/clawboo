@@ -205,6 +205,20 @@ describe('QuestionAnswer', () => {
     })
   })
 
+  it('says an answer waits for the resume when a pause covers the task', async () => {
+    answerTaskQuestion.mockResolvedValue({
+      ok: true,
+      delivery: { status: 'queued', agentId: 'a1', reason: 'paused' },
+    })
+    render(<QuestionAnswer question={q('confirm', {})} onAnswered={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Yes' }))
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+        'Your answer is saved. The agent gets it after the resume.',
+      ),
+    )
+  })
+
   it('says why an answer did not land, and refreshes a question that closed', async () => {
     answerTaskQuestion.mockResolvedValue({ ok: false, reason: 'expired' })
     const onAnswered = vi.fn()
@@ -396,6 +410,22 @@ describe('useTaskActions: people', () => {
     const toast = useToastStore.getState().toasts.at(-1)
     expect(toast?.message).toMatch(/team was deleted/i)
     expect(toast?.type).not.toBe('success')
+  })
+
+  it('says a Reopen starts after the resume when a pause covers the task', async () => {
+    server.use(
+      http.post('/api/board/t1/reopen', () =>
+        HttpResponse.json({
+          ok: true,
+          delivery: { status: 'queued', agentId: 'a1', reason: 'paused' },
+        }),
+      ),
+    )
+    expect(await actions().reopen('t1', 'Go again')).toBe(true)
+    expect(useToastStore.getState().toasts.at(-1)).toMatchObject({
+      type: 'info',
+      message: 'Reopened. It’s back in To do, and starts after the resume.',
+    })
   })
 
   it('offers the override when a check holds a person’s Done', async () => {

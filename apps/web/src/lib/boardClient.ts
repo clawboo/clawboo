@@ -392,7 +392,11 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
 export type ReplyDelivery =
   | { status: 'steered'; agentId: string }
   | { status: 'woke-agent'; agentId: string }
-  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' }
+  | {
+      status: 'queued'
+      agentId: string
+      reason: 'next-run' | 'in-review' | 'waiting' | 'held' | 'paused'
+    }
   | {
       status: 'not-delivered'
       agentId: string | null

@@ -29,6 +29,8 @@ export interface BoardTaskView {
    *  means not known for the current status (a status frame that carried no
    *  verdict); readers fall back to the status via `taskAttentionOf`. */
   attention?: TaskAttention | null
+  /** The pause covering the task, as the board or a status frame last said. */
+  pause?: BoardChange['pause']
   /** The chat room the task belongs to; null (or absent) = the team's own group chat. */
   roomId?: string | null
   /** What it waits on (the JSON reason), as the server last said for this status. */
@@ -109,6 +111,7 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame
         : status === existing?.status
           ? existing.attention
           : undefined,
+    pause: change.pause !== undefined ? change.pause : (existing?.pause ?? null),
     // A task never changes room; a frame that did not say keeps the known one.
     roomId: change.roomId !== undefined ? change.roomId : (existing?.roomId ?? null),
     // Waiting only ever means In review, so a frame from any other status ends it.
@@ -153,6 +156,7 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             assigneeAgentId: r.assigneeAgentId ?? null,
             parentTaskId: r.parentTaskId ?? null,
             attention: taskAttentionOf(r),
+            pause: (r['pause'] as BoardChange['pause']) ?? null,
             roomId: typeof r.roomId === 'string' ? r.roomId : null,
             waitingOn: typeof r['waitingOn'] === 'string' ? r['waitingOn'] : null,
             waitingOnDetail:

@@ -26,6 +26,7 @@ import {
   delegationTargetOf,
   ledgerWillAutoFire,
   trailingFailedRuns,
+  stoppedByPause,
   type AccountFailure,
   type LedgerRun,
 } from './dispatch'
@@ -107,6 +108,8 @@ export interface AttentionInput {
   assigneeAgentId?: string | null
   /** When a person last moved the card (`personMovedAt`). */
   personMovedAt?: number | null
+  /** The task runner saved how to run it, so it can start it again with no agent bound. */
+  runnerBound?: boolean
   /** What the task waits on: the `waiting_on` column, or its parsed value. */
   waitingOn?: unknown
   /** The person it is assigned to. */
@@ -185,10 +188,15 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
     return { reason: 'needs_review', failedRuns, detail: waiting.need }
 
   if (input.status === 'todo') {
-    if (!delegationTargetOf(input.sourceDelegationId))
+    // A pause stopped it: it waits for the resume, which a person already knows
+    // about, and fires again by itself. The card shows who paused it. That takes an
+    // agent to fire it for: its binding, or what the task runner saved.
+    const pauseStopped = stoppedByPause(input.execs[input.execs.length - 1])
+    if (!delegationTargetOf(input.sourceDelegationId) && !(pauseStopped && input.runnerBound))
       return { reason: 'unassigned', failedRuns: 0 }
     // A live run owns it (a release racing a run's terminal): not stuck.
     if (last === 'running') return null
+    if (pauseStopped) return null
     if (last === 'cancelled') return { reason: 'stopped', failedRuns: 0 }
     // A task the no-progress brake is holding back fires by itself when the wait
     // ends, so it does not need a person.

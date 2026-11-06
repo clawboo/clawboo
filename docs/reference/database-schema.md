@@ -65,6 +65,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
 | [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
 | [`budget_reservations`](#budget_reservations)   | Spend, budgets and audit | What runs going hold against each budget         |
+| [`pauses`](#pauses)                             | Board                    | What a person has paused                         |
 | [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                    |
 | [`orchestration_events`](#orchestration_events) | Event log                | The event log                                    |
 | [`settings`](#settings)                         | Settings and layout      | Key and value settings                           |
@@ -458,6 +459,22 @@ The git worktree a task ran in.
 | `last_used_at`  | `INTEGER`                            |                                           |
 
 Indexes: `idx_workspaces_task` (`task_id`).
+
+### pauses
+
+A person's pause of an agent, a team or a task tree, which every run start reads (see [Pauses](/internals/board-internals#pauses)). A row means paused, and resuming deletes it. It needs no renewal and survives a restart. A row left behind by a deleted agent or team covers nothing.
+
+| Column       | Type                | Notes                                                     |
+| ------------ | ------------------- | --------------------------------------------------------- |
+| `id`         | `TEXT`, PK          |                                                           |
+| `scope_kind` | `TEXT`, not null    | `agent`, `team` or `task_tree`                            |
+| `scope_id`   | `TEXT`, not null    | The agent or team id, or the tree's root task id          |
+| `reason`     | `TEXT`              | What the person said it is for                            |
+| `paused_by`  | `TEXT`              | JSON `{ id, name, role }` from a sign-in proxy, else null |
+| `tenant_id`  | `TEXT`              |                                                           |
+| `created_at` | `INTEGER`, not null | When it was paused                                        |
+
+Indexes: `uniq_pauses_scope` (unique: `scope_kind`, `scope_id`).
 
 ### execution_processes
 
@@ -993,7 +1010,7 @@ The append-only event log that observability reads. Kinds and their data are in 
 | `seq`            | `INTEGER`, PK, autoincrement | Increases with every row and is never reused, across processes   |
 | `id`             | `TEXT`, not null             | Event UUID                                                       |
 | `ts`             | `INTEGER`, not null          | When the event happened                                          |
-| `kind`           | `TEXT`, not null             | One of the 25 event kinds                                        |
+| `kind`           | `TEXT`, not null             | One of the 32 event kinds                                        |
 | `team_id`        | `TEXT`                       |                                                                  |
 | `task_id`        | `TEXT`                       |                                                                  |
 | `agent_id`       | `TEXT`                       |                                                                  |

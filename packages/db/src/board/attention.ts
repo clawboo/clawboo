@@ -53,6 +53,7 @@ export function attentionForTasks(
         verificationBlocked: verificationBlocks(t.verification),
         assigneeAgentId: t.assigneeAgentId,
         personMovedAt: t.personMovedAt,
+        runnerBound: t.runnerInputs != null,
         waitingOn: t.waitingOn,
         assigneePersonId: t.assigneePersonId,
       }),

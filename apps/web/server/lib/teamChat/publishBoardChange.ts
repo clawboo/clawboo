@@ -16,7 +16,9 @@ import {
   type DbTask,
   type TaskAttention,
 } from '@clawboo/db'
-import type { BoardChange } from '@clawboo/team-orchestration'
+import type { BoardChange, BoardChangePause } from '@clawboo/team-orchestration'
+
+import { pauseViewOfTask } from '../pauseViews'
 
 import { hasBoardChangeSubscribers, publishBoardChange } from './boardChangeBus'
 
@@ -51,8 +53,11 @@ export function publishBoardChangeWithAttention(
     return
   }
   let attention: TaskAttention | null | undefined
+  // A task made or moved during a pause says so, as it would after a reload.
+  let pause: BoardChangePause | null | undefined
   try {
     attention = attentionForTask(db, change.id)
+    pause = row ? pauseViewOfTask(db, row) : null
   } catch {
     // Best-effort enrichment: the frame still carries the status, and the next
     // board reload corrects the badge. No verdict, rather than null: null says
@@ -70,5 +75,6 @@ export function publishBoardChangeWithAttention(
     ...roomed,
     ...fromRow,
     ...(attention === undefined ? {} : { attention }),
+    ...(pause === undefined ? {} : { pause }),
   })
 }

@@ -330,6 +330,38 @@ describe('verification gate (real board + real git worktree)', () => {
   )
 
   it(
+    'starts no reviewer while a pause covers the task, and records that the review did not run',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      let started = 0
+      const db = getDb()
+      const verdict = await verifyTask({
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        reviewPaused: () => true,
+        makeReviewerAdapter: () => {
+          const adapter = new FakeReviewerAdapter('{"findings":[]}')
+          const start = adapter.start.bind(adapter)
+          adapter.start = async (t, o) => {
+            started += 1
+            return start(t, o)
+          }
+          return adapter
+        },
+      })
+      expect(started).toBe(0)
+      expect(verdict.attempts.at(-1)?.critic).toMatchObject({ ran: true, outcome: 'errored' })
+      expect(verdict.attempts.at(-1)?.critic.findings[0]?.body).toContain('paused')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
     "a pass with no review keeps the reviewer's open items and drops the gate's",
     async () => {
       const { taskId, worktree } = await provisionForTask(repo, 'exit 0')

@@ -38,6 +38,7 @@ import {
   listUndeliveredInbox,
   listWaitingTaskWakes,
   onBoardLifecycle,
+  startRefusedBy,
   type BoardLifecycleEvent,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -76,8 +77,10 @@ function schedulePump(teamId: string, taskId: string, mcpBaseUrl: string | null)
   const t = setTimeout(() => {
     pendingPumps.delete(key)
     // A held engine (see engineHold) claims nothing it cannot start; the server's
-    // dispatch pump runs a pass when the hold lifts.
+    // dispatch pump runs a pass when the hold lifts. So does a lifted pause. Nothing
+    // wakes an archived team, or a team a person paused.
     if (engineHeld()) return
+    if (startRefusedBy(getDb(), { teamId }) !== null) return
     getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
       .pump()
       .catch((err: unknown) => log.error({ err, teamId, roomId }, 'wake-on-work pump failed'))

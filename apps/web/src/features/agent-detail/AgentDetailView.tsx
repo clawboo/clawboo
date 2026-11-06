@@ -1,3 +1,5 @@
+import { ownPauseOf, PauseToggle } from '@/features/pause/PausedNotice'
+import { usePauseStore } from '@/stores/pauses'
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { Group, Panel, useDefaultLayout } from 'react-resizable-panels'
 import { Folder, Globe, ListChecks, Network, Terminal } from 'lucide-react'
@@ -290,6 +292,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
 
   // The chat with its header: the whole view at phone width, the left panel
   // otherwise.
+  const ownPause = usePauseStore((s) => ownPauseOf(s.pauses, 'agent', agent.id))
   const chatColumn = (
     <div className="flex h-full flex-col">
       {/* Chat header: agent identity left; card toggles + GitHub Star
@@ -354,6 +357,12 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          <PauseToggle
+            target={{ kind: 'agent', id: agent.id }}
+            name={agent.name}
+            ownPause={ownPause}
+            compact
+          />
           {CARD_ORDER.map((card) => (
             <PaneToggle
               key={card}

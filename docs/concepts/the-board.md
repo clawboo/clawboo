@@ -72,7 +72,7 @@ Each task also remembers which chat it came from: General or one of the team's r
 
 ## Tasks that wait on other tasks
 
-A task can depend on other tasks. It becomes ready only when every task it depends on is Done, and ready tasks start in order of priority: Urgent, High, Normal (where every task starts) and Low, the most recently updated first within each. A plan of hand-offs works this way: each step waits for the one before it. Clawboo refuses a dependency that would make a loop, because a loop could never finish.
+A task can depend on other tasks. It becomes ready only when every task it depends on is Done, and ready tasks start in a fair order. A task that already ran and came back (a run that died or failed, or one a pause stopped) goes first, because its work is under way. Then priority: Urgent, High, Normal (where every task starts) and Low. Then oldest first, so editing a task does not move it forward. A task that keeps waiting reads one priority higher every 4 hours, up to High, so Low work gets through newer work. It never reads as Urgent, so a task someone marked Urgent still goes first. A plan of hand-offs works this way: each step waits for the one before it. Clawboo refuses a dependency that would make a loop, because a loop could never finish.
 
 When a handed-off task fails, or you cancel a task, the tasks still waiting on it in To do or Backlog are cancelled too. That way they do not sit there forever. Whoever handed out the work is told which steps were dropped.
 
@@ -147,7 +147,7 @@ With no sign-in there is one built-in reader. Behind a [sign-in proxy](/guides/s
 
 ## When work restarts by itself
 
-Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, or when its last 3 runs in a row failed or timed out. A successful run, or a Stop, resets that count.
+Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, when its last 3 runs in a row failed or timed out, or while a [pause](#pause) covers it. A successful run, or a Stop, resets that count.
 
 It also waits before starting a task that keeps coming back with nothing to show. After 2 runs in a row with no visible progress, the next automatic start waits 2 minutes, then 4, doubling up to 30. Your comment or a **Retry** starts it at once. The task stays in To do while it waits, with a note on its card saying how long.
 
@@ -158,6 +158,7 @@ It also waits before starting a task that keeps coming back with nothing to show
 | A handed-off task failed or went quiet in team chat          | Blocked, shown in Needs you as **Failed** or **Timed out** | No. Whoever handed it off is told, and you can **Retry** it.        |
 | The process running it died, or the Clawboo server restarted | To do                                                      | Yes, until 3 runs in a row have failed. Then it waits in Needs you. |
 | You pressed **Stop**                                         | To do                                                      | No. It waits in Needs you as **Stopped**.                           |
+| A [pause](#pause) stopped its run                            | To do                                                      | Yes, when you resume. It does not show in Needs you.                |
 
 Clawboo notices a dead run in two ways. A running task proves it is alive every 30 seconds; after 3 minutes with no sign of life, the run is timed out and the task returns to To do. When the server starts, runs left over from before that have shown no sign of life for 3 minutes are marked failed, and their tasks return to To do. The limits for a teammate that goes quiet in team chat are on [How work is delegated](/concepts/delegation-and-orchestration).
 
@@ -173,8 +174,19 @@ Most tasks run through team chat. An agent Routine that names no repository runs
 
 Runs that name a repository, started through the runtime run API or by an agent Routine (the repository is set through the API), get an isolated worktree for work that changes files. If the agent changed files there, the change is checked before the task can be Done. A worktree keeps file changes apart; it is not a sandbox. See [What agents can do](/concepts/permissions), [When work is checked](/concepts/verification) and [Worktrees and handoff](/concepts/worktrees-and-handoff).
 
+## Pause
+
+You can pause one agent, one team, or a task with the tasks under it (its task tree). Nothing it covers starts until you resume it, and that holds through a restart. There is no time limit, and agents cannot pause or resume anything.
+
+A pause stops its runs within seconds. A task whose run it stopped goes back to To do and keeps its agent. Every other task stays in its status. When you resume, the tasks start again by themselves. In team chat, Clawboo Native, Claude Code, Codex and Hermes continue the session they had on the task; the task runner picks up from its saved handoff, and from a session if the task had saved one. A task made while the pause lasts, under a paused task, is paused too.
+
+A routine's run that a pause stops does not count as having run: the routine runs again on resume, as a new task, and a one-time routine is not used up.
+
+A pause does not cover a 1:1 chat with an OpenClaw agent, which runs in the OpenClaw Gateway rather than on Clawboo's server. A team's work check that is already running finishes its command. It starts no reviewer under the pause, and the result says the review did not run. It starts no fix round either: the task waits in To do with what the check found. See [Pause work](/using/board#pause-work).
+
 ## What you control
 
+- **Pause work**: pause an agent, a team or a task tree, and resume it when you are ready.
 - **Give an agent a task**: use **New task** on the board. It starts at once if the agent is free, and waits in To do otherwise.
 - **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it. The agent cannot move the card back: its own status changes are refused until a new run on the task starts.
 - **Steer a task**: reply on it in the board's task drawer, the team chat's **Tasks** card or the agent's page.

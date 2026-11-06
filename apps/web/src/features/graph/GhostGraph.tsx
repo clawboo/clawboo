@@ -71,6 +71,8 @@ import { useViewStore } from '@/stores/view'
 import { useToastStore } from '@/stores/toast'
 import { mutationQueue } from '@/lib/mutationQueue'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { ownPauseOf, pauseWithConfirm, resumeWithToast } from '@/features/pause/PausedNotice'
+import { usePauseStore } from '@/stores/pauses'
 import { GraphContextMenu } from './GraphContextMenu'
 import { MoveAgentDialog } from '@/features/teams/MoveAgentDialog'
 import { connectionRefusal } from './connectionGrammar'
@@ -349,6 +351,7 @@ export function GhostGraph({
   )
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const pauses = usePauseStore((s) => s.pauses)
   const [moving, setMoving] = useState<{ agentId: string; agentName: string } | null>(null)
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
 
@@ -1998,6 +2001,14 @@ export function GhostGraph({
           y={contextMenu.y}
           agentName={contextMenu.agentName}
           onClose={() => setContextMenu(null)}
+          isPaused={ownPauseOf(pauses, 'agent', contextMenu.agentId) !== null}
+          onTogglePause={() => {
+            const { agentId, agentName } = contextMenu
+            setContextMenu(null)
+            void (ownPauseOf(pauses, 'agent', agentId)
+              ? resumeWithToast({ kind: 'agent', id: agentId })
+              : pauseWithConfirm({ kind: 'agent', id: agentId }, agentName))
+          }}
           onChat={() => {
             useFleetStore.getState().selectAgent(contextMenu.agentId)
             useViewStore.getState().openAgent(contextMenu.agentId)

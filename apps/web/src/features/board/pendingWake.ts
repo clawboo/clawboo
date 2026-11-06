@@ -31,6 +31,10 @@ export function pendingWakeText(wake: PendingWake, name: string): string {
   switch (wake.skipReason) {
     case 'held':
       return `Clawboo is holding new runs. ${name} reads ${what} when they resume`
+    case 'paused':
+      return `This is paused. ${name} reads ${what} after the resume`
+    case 'team_archived':
+      return `Its team is archived. Bring the team back to send ${what} to ${name}`
     case 'budget':
       return `Waiting: a budget cap would refuse the run. Raise it to send ${what} to ${name}`
     case 'braked':

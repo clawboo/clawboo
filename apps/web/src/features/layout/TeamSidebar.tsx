@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Archive, Plus } from 'lucide-react'
+import { Archive, Plus, Pause } from 'lucide-react'
 import { apiFetch } from '@clawboo/control-client'
 import { useTeamStore, type Team } from '@/stores/team'
 import { useFleetStore, type AgentState } from '@/stores/fleet'
@@ -10,7 +10,9 @@ import { useToastStore } from '@/stores/toast'
 import { useMarketplaceStore } from '@/stores/marketplace'
 import { confirm } from '@/stores/confirm'
 import { deleteAgentOperation } from '@/features/fleet/deleteAgentOperation'
+import { pauseWithConfirm, resumeWithToast } from '@/features/pause/PausedNotice'
 import { TeamContextMenu } from '@/features/teams/TeamContextMenu'
+import { pauseOfTeam, usePauseStore } from '@/stores/pauses'
 import { refreshTeamAgentsMd } from '@/lib/createAgent'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 import { SidebarToggle } from './SidebarToggle'
@@ -129,8 +131,10 @@ function TeamIcon({
   onClick: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
 }) {
+  const paused = usePauseStore((s) => pauseOfTeam(s.pauses, team.id) !== null)
+  const label = archived ? `${team.name} (archived)` : paused ? `${team.name} (paused)` : team.name
   return (
-    <RailTip label={archived ? `${team.name} (archived)` : team.name}>
+    <RailTip label={label}>
       <div className="relative flex items-center">
         {/* Selected indicator pill on the left edge — brand red. */}
         {selected && (
@@ -142,7 +146,7 @@ function TeamIcon({
         <button
           onClick={onClick}
           onContextMenu={onContextMenu}
-          aria-label={archived ? `${team.name} (archived)` : team.name}
+          aria-label={label}
           className={[
             'flex h-10 w-10 shrink-0 items-center justify-center border-none p-0 text-xl leading-none transition-all duration-200 cursor-pointer',
             selected ? 'rounded-[13px]' : 'rounded-[20px] hover:rounded-[14px]',
@@ -156,6 +160,15 @@ function TeamIcon({
         >
           {team.icon}
         </button>
+        {paused && (
+          <span
+            aria-hidden
+            data-testid="team-paused-mark"
+            className="pointer-events-none absolute -bottom-0.5 -right-0.5 flex size-4 items-center justify-center rounded-full border border-border bg-popover text-muted-foreground"
+          >
+            <Pause size={9} strokeWidth={2.5} />
+          </span>
+        )}
       </div>
     </RailTip>
   )
@@ -210,6 +223,7 @@ export function TeamSidebar({
     team: Team
   } | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  const pauses = usePauseStore((s) => s.pauses)
 
   // Creating a team is now a Marketplace journey: the "+" navigates to the
   // Teams tab (the one canonical, richer team showcase) instead of opening a
@@ -580,7 +594,15 @@ export function TeamSidebar({
           y={contextMenu.y}
           teamName={contextMenu.team.name}
           isArchived={contextMenu.team.isArchived}
+          isPaused={pauseOfTeam(pauses, contextMenu.team.id) !== null}
           onClose={() => setContextMenu(null)}
+          onTogglePause={() => {
+            const { team } = contextMenu
+            setContextMenu(null)
+            void (pauseOfTeam(pauses, team.id)
+              ? resumeWithToast({ kind: 'team', id: team.id })
+              : pauseWithConfirm({ kind: 'team', id: team.id }, team.name))
+          }}
           onArchive={handleArchiveTeam}
           onRefreshProtocol={handleRefreshProtocol}
           onDelete={handleDeleteTeam}

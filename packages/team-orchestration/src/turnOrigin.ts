@@ -173,6 +173,8 @@ export interface RunStamp {
   deliveryId?: string
   execId?: string
   wakeIds?: string[]
+  /** A pause stopped this run. It is no failure, and what it carried comes back. */
+  stoppedByPause?: boolean
 }
 
 /**

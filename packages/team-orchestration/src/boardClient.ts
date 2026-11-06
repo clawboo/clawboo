@@ -40,7 +40,7 @@ export interface BoardTask {
   [k: string]: unknown
 }
 
-export type ClaimReason = 'conflict' | 'not_found' | 'error'
+export type ClaimReason = 'conflict' | 'not_found' | 'error' | 'paused'
 export interface ClaimResult {
   ok: boolean
   reason?: ClaimReason

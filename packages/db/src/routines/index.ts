@@ -16,6 +16,7 @@ export {
   claimScheduledRun,
   markRunRunning,
   recordRunOutcome,
+  requeuePausedFire,
   routineSurvivesFailure,
   MAX_ROUTINE_TRANSIENT_FAILURES,
   setScheduledRunStatus,

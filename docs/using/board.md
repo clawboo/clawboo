@@ -112,6 +112,7 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 - **Priority**: two small up chevrons for an **Urgent** task, one for **High**. A **Normal** or **Low** task shows nothing here. Point at the mark to read it.
 - **Status mark**: **Verifying** while the work is checked, and **Waiting to check** while its check waits for teammates to finish in the team folder. After a check, an amber cross means it failed, an amber dashed circle means it passed with debt (open issues noted), and a green check means it passed (until the card reaches Done). A card with no mark shows its cost here.
 - **Cost**: what all of the task's runs cost, once a run has recorded a cost. A figure that starts with `~` is an estimate: the runtime reported no charge, so Clawboo priced the run itself. A cost under a cent reads `<$0.01`, and a task whose runs all ran on a model your own Ollama serves reads `free`. When a status mark takes the cost's place, point at the card to see the cost. Which runtimes report real cost is in [Budgets and spend](/using/budgets-and-spend).
+- **Paused**: a small pause mark when a pause covers the task. Point at it to read what is paused and who paused it. The face of a paused agent carries the same mark wherever it shows.
 - **Subtask**: a small arrow when another task handed this one out and the card has no mark or cost to show. Otherwise the mark's or the cost's tooltip says it is a subtask.
 - **Labels**: up to two of the task's labels, then a count of the rest. See [Labels](#labels).
 - **Time**: on Kanban, how long ago the task was added or finished, such as "4m ago", "Yesterday" or "3d ago". A calendar view shows the clock time, and the Earlier row the date. A running task shows how long its current run has gone, after a small live dot. Point at the time for the full date.
@@ -170,7 +171,7 @@ Clawboo can send a browser notification when something new needs you while its t
 
 Click an alert to bring the tab back. An alert about one task opens it in the drawer. Any other alert opens the board on **Needs you**, on the team it is about.
 
-Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, a task you took yourself, and a task with no agent are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
+Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, a task you took yourself, a task with no agent and a task held back by a [pause](#pause-work) are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
 
 ### See it all in the Inbox
 
@@ -298,6 +299,33 @@ When a reply starts a task again, Clawboo adds the note "Started again for a per
 
 A reply is saved as a wake on the task first, so a restart cannot lose it. If a run cannot take it in time, the agent reads it in its task block at the next turn, once. A task the task runner runs has no task block, so there the reply also goes into the agent's mailbox and the agent reads it when its next run starts. A steered reply and a mailbox note carry the first 1,000 characters and say when they were cut, and the task keeps all of it. On team chat work, a reply cut this way also comes whole at the next turn. How each runtime takes a reply mid-run, including older Codex versions, is in [Choose a runtime](/runtimes/index).
 
+## Pause work
+
+A pause holds back one agent, one team, or a task with the tasks under it, until you resume it. It lasts through a restart, and it has no time limit.
+
+| To pause or resume | Where                                                                                                             |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| An agent           | **Pause** in the header of the agent's page. On the **Org chart**, right-click it.                                |
+| A team             | **Pause** in the team chat's header. In the team rail, right-click the team.                                      |
+| A task tree        | **Pause** in the task drawer, beside the agent and team. It covers the task's whole tree, from the top task down. |
+
+What happens:
+
+- **Runs stop within seconds.** A task whose run stopped goes back to To do and keeps its agent. The task's comments say why. It does not show in Needs you. A routine's run that stops does not count as having run: it runs again on resume, as a new task, and its stopped card is set aside.
+- **Nothing it covers starts.** No task starts, no Routine fires and no message wakes it. A run already waiting for a free run slot stays waiting. **Retry** says the task is paused.
+- **Messages get an answer.** A message to a paused agent or team stays in the chat, with a line saying it did not start. The agent does not get it, so send it again after you resume. A reply on a paused task is saved, and the note under it says so. So is your answer to an agent's question, and a note on a task you reopen. The agent starts on them after the resume, on a task in Needs you too, and the task drawer says what it waits for.
+- **Tasks keep their place.** Each task stays in its status, and you can still assign tasks to a paused agent. They wait in To do. A task an agent asked you about still shows its question in **Needs you**, and you can answer it during the pause. A task you took yourself stays yours: it reads as neither paused nor started by a resume.
+
+**Resume** is on the banner in the agent's chat, the team's chat and the task drawer. A team's chat shows it for the team, or for its lead: messages that name nobody go to the lead, so pausing Boo Zero holds every team it leads. Waiting work starts again at once: stopped tasks go first, and a Routine that fell due during the pause runs once. Tasks you stopped with **Stop** do not start again.
+
+Things a pause does not do:
+
+- A 1:1 chat with an OpenClaw agent runs in the OpenClaw Gateway, so it still works. The chat's banner says so.
+- A team's work check that is already running finishes its command. It starts no reviewer under the pause, and the result says the review did not run. If the check fails, the task waits in To do with what it found.
+- Pausing a team does not pause its agents' work for another team, and it does not change their tasks' priority.
+
+Archiving a team stops its runs the same way, and nothing wakes its agents while it is archived. You can still chat 1:1 with them. Bring the team back and its work starts again.
+
 ## The task drawer
 
 Click any card to open its drawer on the right. It reads like a document: the task's title, with its status, agent and team under it. Press **Escape** or click outside it to close it.
@@ -345,7 +373,7 @@ A **Done** or **Cancelled** task's drawer has **Reopen**. Say what should change
 
 ### Set a task's priority
 
-A task has one of four priorities: **Urgent**, **High**, **Normal** (every task starts there) and **Low**. Only you can set **Urgent**: an agent creating a task stops at **High**. Change it with **Priority** in the drawer's **Properties**. When an agent has several tasks waiting, it starts the highest priority first, and the most recently updated first within one priority. An agent that creates a task through its Tasks tools can set its priority too, as a number from 1 (High) down to -1 (Low); any other number is held to that range, so no agent's task can jump ahead of an urgent one. The same limit applies to anything that sets a priority without going through this page, such as a routine created through the API.
+A task has one of four priorities: **Urgent**, **High**, **Normal** (every task starts there) and **Low**. Only you can set **Urgent**: an agent creating a task stops at **High**. Change it with **Priority** in the drawer's **Properties**. When an agent has several tasks waiting, it starts one that already ran and came back first, then the highest priority, then the oldest. A task that keeps waiting reads one priority higher every 4 hours, up to **High**, so a **Low** task gets through newer work in the end. Only a task you marked **Urgent** reads as Urgent, so it always goes first. Priority also counts when every [run slot](/reference/environment-variables) is taken: an **Urgent** task goes ahead of runs that queued before it. An agent that creates a task through its Tasks tools can set its priority too, as a number from 1 (High) down to -1 (Low); any other number is held to that range, so no agent's task can jump ahead of an urgent one. The same limit applies to anything that sets a priority without going through this page, such as a routine created through the API.
 
 ### Task ids
 

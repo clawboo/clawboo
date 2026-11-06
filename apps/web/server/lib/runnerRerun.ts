@@ -7,7 +7,7 @@
 // board hands it to team chat as before. Which way a task goes is decided in
 // ./runnerRoute.
 
-import { delegationTargetOf } from '@clawboo/board-core'
+import { delegationTargetOf, stoppedByPause } from '@clawboo/board-core'
 import {
   addComment,
   countRefusedWakeStart,
@@ -15,7 +15,9 @@ import {
   getTask,
   isLedgerAutoFireable,
   listExecutions,
+  readTaskRunnerInputs,
   updateStatus,
+  startRefusedByTask,
   type ClawbooDb,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
@@ -150,8 +152,14 @@ export function requestRunnerRerun(
       settle()
       log.debug({ taskId, runtime, result }, 'runner rerun')
       // A lost claim means the task is someone else's now; not_found means it
-      // is gone. Neither is a rerun stuck in To do.
-      if (!result.ok && result.reason !== 'conflict' && result.reason !== 'not_found') {
+      // is gone. Neither is a rerun stuck in To do, and nor is one a pause holds
+      // back: it starts again by itself on resume.
+      if (
+        !result.ok &&
+        result.reason !== 'conflict' &&
+        result.reason !== 'not_found' &&
+        result.reason !== 'paused'
+      ) {
         parkUnstarted(db, taskId, runtime, refusalWords(result.reason))
         // A budget refusal waits for the cap, and the wake pump asks the gate first.
         // Any other leaves no ledger row, so only this count can end its retries.
@@ -178,9 +186,15 @@ export function requestRunnerRerun(
 export function pumpRunnerReruns(db: ClawbooDb, mcpBaseUrl: string | null): void {
   for (const task of getReadyTasks(db)) {
     if (!task.runnerInputs || waiting.has(task.id)) continue
-    const agentId = delegationTargetOf(task.sourceDelegationId)
+    const execs = listExecutions(db, task.id)
+    // A run a pause stopped comes back whether or not an agent is bound to it: a run
+    // through POST /api/runtimes/:id/run names one only in what the runner saved.
+    const agentId =
+      delegationTargetOf(task.sourceDelegationId) ??
+      (stoppedByPause(execs.at(-1)) ? (readTaskRunnerInputs(task)?.assigneeAgentId ?? null) : null)
     if (!agentId) continue
-    if (!isLedgerAutoFireable(listExecutions(db, task.id))) continue
+    if (!isLedgerAutoFireable(execs)) continue
+    if (startRefusedByTask(db, task) !== null) continue
     const rerun = runnerRerunFor(db, task, agentId)
     if (!rerun) continue
     requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: agentId, rerun, mcpBaseUrl })

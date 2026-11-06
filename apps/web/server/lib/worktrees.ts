@@ -410,6 +410,8 @@ export interface CompleteWorkspaceOpts {
   mcpBaseUrl?: string | null
   /** Told what the reviewer's run cost, so the caller can charge it. */
   onReviewerSpend?: (spend: ReviewerSpend) => void
+  /** True while a pause covers the task: the reviewer does not start. */
+  reviewPaused?: () => boolean
   /**
    * The run this check belongs to, still open: the task runner closes its run only
    * after the verdict, so a crash during the check leaves a `running` row the boot
@@ -555,6 +557,7 @@ export async function actOnTaskWorkspace(
     reviewerModel: opts.reviewerModel,
     mcpBaseUrl: opts.mcpBaseUrl,
     onReviewerSpend: opts.onReviewerSpend,
+    ...(opts.reviewPaused ? { reviewPaused: opts.reviewPaused } : {}),
     shouldRecord: runStillOpen,
   })
   // A run's check has a limit, as the team chat's has: the verify command has its own,

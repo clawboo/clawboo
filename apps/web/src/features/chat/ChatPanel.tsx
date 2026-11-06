@@ -4,6 +4,8 @@ import { apiFetch } from '@clawboo/control-client'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { useFleetStore } from '@/stores/fleet'
 import { useChatStore } from '@/stores/chat'
+import { PausedNotice } from '@/features/pause/PausedNotice'
+import { pauseOfAgent, usePauseStore } from '@/stores/pauses'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
 import { useBooZeroStore } from '@/stores/booZero'
 import { useSettingsModalStore } from '@/stores/settingsModal'
@@ -60,6 +62,9 @@ export function ChatPanel({
   }, [propAgentId])
 
   const agent = agents.find((a) => a.id === resolvedAgentId) ?? null
+  const pause = usePauseStore((s) =>
+    agent ? pauseOfAgent(s.pauses, agent.id, agent.teamId) : null,
+  )
 
   const sessionKey = agent?.sessionKey ?? null
   const transcripts = useChatStore((s) => s.transcripts)
@@ -460,6 +465,16 @@ export function ChatPanel({
           meaningless there). */}
       {isBooZeroChat && activeTeams.length > 0 && (
         <TeamChips teams={activeTeams} onTag={handleChipTag} />
+      )}
+
+      {pause && (
+        <PausedNotice
+          pause={pause}
+          // A chat with an OpenClaw agent runs in its Gateway, outside this server.
+          {...(isServerChat
+            ? {}
+            : { note: 'This chat runs in the OpenClaw Gateway, so the pause does not cover it.' })}
+        />
       )}
 
       {/* Composer */}

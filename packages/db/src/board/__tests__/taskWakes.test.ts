@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import { sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -564,5 +565,45 @@ describe('a fix round', () => {
     const fix = createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
     expect(rowOf(wake.id).carriedExecId).toBeNull()
     expect(adoptTaskWakes(db, id, fix.id).map((w) => w.id)).toEqual([wake.id])
+  })
+})
+
+describe('the run that carried a wake, stopped by a pause', () => {
+  const carried = (): { wakeId: string; execId: string } => {
+    const id = newTask()
+    const { id: wakeId } = comment(id)
+    const claim = claimTask(db, id, 'a1', 'openclaw', { run: RUN })
+    expect(claim.ok).toBe(true)
+    expect(rowOf(wakeId).carriedExecId).toBe(claim.execution!.id)
+    return { wakeId, execId: claim.execution!.id }
+  }
+
+  it('gives it back to waiting, uncounted, and not held as a Stop would', () => {
+    const { wakeId, execId } = carried()
+    completeExecutionProcess(db, execId, { status: 'cancelled', errorClass: PAUSED_RUN_CLASS })
+    expect(rowOf(wakeId)).toMatchObject({
+      carriedExecId: null,
+      replays: 0,
+      heldAt: null,
+      settledAt: null,
+    })
+    expect(listWaitingTaskWakes(db).map((w) => w.id)).toEqual([wakeId])
+  })
+
+  it("reads the pause first, whatever the close says of a person's hand", () => {
+    const { wakeId, execId } = carried()
+    completeExecutionProcess(db, execId, {
+      status: 'cancelled',
+      errorClass: PAUSED_RUN_CLASS,
+      byPerson: true,
+    })
+    expect(rowOf(wakeId)).toMatchObject({ replays: 0, heldAt: null })
+  })
+
+  it('keeps a row a Stop held held: the pause lifting does not start it', () => {
+    const { wakeId, execId } = carried()
+    db.update(taskWakes).set({ heldAt: 1 }).where(eq(taskWakes.id, wakeId)).run()
+    completeExecutionProcess(db, execId, { status: 'cancelled', errorClass: PAUSED_RUN_CLASS })
+    expect(rowOf(wakeId)).toMatchObject({ heldAt: 1, carriedExecId: null })
   })
 })

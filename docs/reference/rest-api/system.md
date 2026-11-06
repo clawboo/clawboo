@@ -779,6 +779,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Always. The team chat stream, the 1:1 chat stream and the event stream each resume from `Last-Event-ID`.                                                                                                                                                  |
 | `system.selfUpdate`                                                         | `POST /api/system/self-update` can succeed here: a global npm install this user can write, with in-app updates not turned off. The same answer as `self-version`'s `applyable`.                                                                           |
 | `system.hold`                                                               | Always. The server can be held before a stop or an update (`/api/system/hold`), and the in-app update waits for agent runs before it restarts.                                                                                                            |
+| `board.pause`                                                               | Always. A person can pause an agent, a team or a task tree until they resume it (`/api/pauses`).                                                                                                                                                          |
 | `auth.proxyIdentity`                                                        | An administrator turned the [proxy identity lane](/guides/sso-proxy) `on` or `required`: a sign-in proxy's signed identity tokens are checked, and the person each names is recorded. `GET /api/access/identity` says which mode, and who the request is. |
 
 ### For client authors
@@ -869,11 +870,11 @@ Anything that stops or restarts the server can first ask it to hold: `clawboo st
 
 While the server is held:
 
-- A run that would start waits instead, in the same first-come queue that holds runs back when [`CLAWBOO_MAX_CONCURRENT_RUNS`](/reference/environment-variables) is reached. That covers board task runs, team chat turns, 1:1 chat turns with Clawboo Native, Claude Code, Codex and Hermes agents, the turns of a peer exchange and Routine runs on any runtime. A run that is waiting is not failed and does not count against any time limit.
+- A run that would start waits instead, in the same queue that holds runs back when [`CLAWBOO_MAX_CONCURRENT_RUNS`](/reference/environment-variables) is reached. That covers board task runs, team chat turns, 1:1 chat turns with Clawboo Native, Claude Code, Codex and Hermes agents, the turns of a peer exchange and Routine runs on any runtime. A run that is waiting is not failed and does not count against any time limit.
 - Clawboo's Routines scheduler fires nothing. A Routine that falls due stays due and fires once the hold lifts, or after the next start.
 - Team chat claims no board task. A task agents hand each other stays in To do instead of waiting `in_progress`, and the board's dispatch pump, which starts those tasks, skips its pass.
 
-When the last hold is released or lapses, the waiting runs start in order, the scheduler checks for due Routines and the pump runs a pass, which starts the tasks left in To do.
+When the last hold is released or lapses, the waiting runs start in the queue's order, the scheduler checks for due Routines and the pump runs a pass, which starts the tasks left in To do.
 
 The hold covers the runs this server starts. A 1:1 chat with an OpenClaw agent, and OpenClaw's own scheduled jobs and messaging channels, run inside the OpenClaw Gateway: they are neither held nor counted in `backgroundWork`, and stopping the server does not stop them.
 

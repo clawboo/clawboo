@@ -46,6 +46,7 @@ import {
   type OperatorClientLike,
 } from '../openclawDispatch'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
+import { stopPausedTaskRuns } from '../../runStops'
 import { noteHumanMove } from '../../teamChat/humanMove'
 
 // ── Local clone of the adapter package's unpublished FakeGatewayClient ──────
@@ -214,6 +215,34 @@ describe('dispatchConnectedSubstrate', () => {
     expect(getComments(db, taskId).some((c) => c.body.includes('swept the queue'))).toBe(true)
     // The event subscription was released.
     expect(client.subscriberCount()).toBe(0)
+  })
+
+  it('a pause stops the run: paused in the ledger, back in To do, and not a failed fire', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    const dispatchPromise = dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const note = 'Stopped: this agent is paused.'
+    expect(stopPausedTaskRuns(({ agentId }) => agentId === agentRow.id, note)).toEqual([taskId])
+    const outcome = await dispatchPromise
+
+    expect(outcome).toEqual({ ok: false, taskId, error: note, paused: true })
+    expect(getTask(db, taskId)?.status).toBe('todo')
+    expect(listExecutions(db, taskId)[0]).toMatchObject({
+      status: 'cancelled',
+      errorClass: 'Paused',
+      error: note,
+    })
   })
 
   it('a non-success terminal fails the exec and releases the task to todo', async () => {

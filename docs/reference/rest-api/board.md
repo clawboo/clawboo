@@ -22,6 +22,9 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | Method | Path                                      | Summary                                                       | Stream? |
 | ------ | ----------------------------------------- | ------------------------------------------------------------- | ------- |
 | GET    | `/api/board`                              | List tasks (or the ready-to-work ones)                        | No      |
+| GET    | `/api/pauses`                             | Every pause: agents, teams and task trees                     | No      |
+| POST   | `/api/pauses`                             | Pause an agent, a team or a task's tree. A person's route     | No      |
+| DELETE | `/api/pauses/:kind/:id`                   | Resume it. A person's route                                   | No      |
 | POST   | `/api/board`                              | Create a task (optionally for one agent, started at once)     | No      |
 | POST   | `/api/board/:taskId/retry`                | Run a stuck task again, straight to its agent                 | No      |
 | POST   | `/api/board/:taskId/assign`               | Give an unowned task to one team member and start it          | No      |
@@ -73,7 +76,7 @@ Moving a task to `todo` clears its assignee and its check result, so it can be c
 
 ## `GET /api/board`
 
-Lists tasks, for one team or all of them, or only the tasks that are ready to work. With `ready=true` the list holds `todo` tasks that are not dropped and whose dependencies are all `done`. Otherwise it is filtered by `teamId`, `status` and `includeDropped`. Dropped (soft-deleted) tasks are left out unless `includeDropped=true`.
+Lists tasks, for one team or all of them, or only the tasks that are ready to work. With `ready=true` the list holds `todo` tasks that are not dropped and whose dependencies are all `done`, in the order they are served: tasks that ran before first, then aged priority, then oldest first. A task a pause covers is still listed there. Each row of the full list, and `task` in `GET /api/board/:taskId`, carries `pause`: the [pause](/using/board#pause-work) covering the task, or `null`. Otherwise it is filtered by `teamId`, `status` and `includeDropped`. Dropped (soft-deleted) tasks are left out unless `includeDropped=true`.
 
 - **Query params**:
 
@@ -252,6 +255,39 @@ curl -X POST http://localhost:18790/api/board \
 
 ---
 
+## `GET /api/pauses`
+
+Every pause, oldest first. A person pauses an agent, a team or a task tree, and nothing it covers starts until they resume it; see [Pause work](/using/board#pause-work). A pause whose agent or team has been deleted is not listed.
+
+```ts
+{
+  pauses: Array<{
+    kind: 'agent' | 'team' | 'task_tree'
+    id: string // the agent or team, or the tree's root task
+    name: string // the agent's or team's name, or the root task's title
+    reason: string | null
+    pausedBy: { id: string; name: string | null; role: string | null } | null // null: the local person
+    pausedAt: number
+  }>
+}
+```
+
+## `POST /api/pauses`
+
+Pauses it, and stops the runs it covers without waiting for them: the pause holds as soon as this answers. Pausing something already paused changes nothing, and the first pause's reason and time stand. Only the dashboard's own page can call this.
+
+- **Request body**: `{ kind: 'agent' | 'team' | 'task', id: string, reason?: string }`. `task` names any task in a tree, and the tree is paused from its root. `reason` is at most 200 characters.
+
+**`201 Created`** when this paused it, **`200 OK`** when it already was: `{ ok: true, created: boolean, pause }`.
+
+**`400 Bad Request`**: a bad `kind`, `id` or `reason`. **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`. **`404 Not Found`**: `{ "ok": false, "error": "not_found" }`.
+
+## `DELETE /api/pauses/:kind/:id`
+
+Resumes it, and waiting work starts again at once. `:kind` is `agent`, `team`, `task` (any task in the tree) or `task_tree`. Only the dashboard's own page can call this.
+
+**`200 OK`**: `{ ok: true }`. **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`. **`404 Not Found`**: `{ "ok": false, "error": "not_paused" }`.
+
 ## `POST /api/board/:taskId/retry`
 
 Runs a stuck task again because a person asked: one that failed, timed out, was stopped, or was parked after failing three times in a row. A `blocked`, `backlog` or stranded `in_progress` task (no assignee and no run going) is moved back to `todo` first, which clears its assignee and check result. The route adds a `user` comment `Retry requested.` to the task and hands it straight to its bound agent. The board's automatic limit of three re-runs does not apply to a retry a person asks for. The response does not wait for the run to start.
@@ -273,7 +309,7 @@ A runner rerun that does not start (the runner refuses it, for example because a
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
-**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), or `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`). A task filed under a room that no longer exists gets `no_team`: rooms are removed only with their team, so there is no chat left to run it.
+**`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it), or `paused` (a [pause](/using/board#pause-work) covers it, or its team is archived; resuming starts it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`). A task filed under a room that no longer exists gets `no_team`: rooms are removed only with their team, so there is no chat left to run it.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
 
@@ -371,7 +407,7 @@ A person answers an agent's question. The question goes on the task's comments u
 
 An answer is judged against expiry inside its own write. A question closes unanswered when its task reaches `done` or `cancelled`, is dropped or moves on, or when a newer question replaces it, and an answer that loses that race changes nothing.
 
-**`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `dashboard_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
+**`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. Under a [pause](/using/board#pause-work), `delivery.reason` is `paused`, the task stays Blocked, and its `attention.detail` says the agent gets the answer after the resume. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `dashboard_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
 
 ## `GET /api/board/:taskId`
 
@@ -711,7 +747,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
   delivery?: // present for a `user` comment only
     | { status: 'steered'; agentId: string }
     | { status: 'woke-agent'; agentId: string }
-    | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' }
+    | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' | 'paused' }
     | {
         status: 'not-delivered'
         agentId: string | null
@@ -729,6 +765,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
 | `queued`        | `next-run`      | The agent reads it at its next turn: a `backlog` task, or an `in_progress` task whose steer did not land within 2.5 seconds. On a team chat task it is a saved wake, answered before the task can be `done` |
 | `queued`        | `in-review`     | The task is `in_review`; the agent reads the reply in its next turn, whatever the check answers                                                                                                             |
 | `queued`        | `waiting`       | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                                                                   |
+| `queued`        | `paused`        | A pause covers the task, so nothing starts. The task stays where it is, and the wake goes out on resume, on a blocked, parked or stopped task too                                                           |
 | `queued`        | `held`          | The engine is held, so nothing starts. The task stays where it is, and the wake goes out when the hold lifts                                                                                                |
 | `not-delivered` | `finished`      | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                                                                        |
 | `not-delivered` | `unassigned`    | No agent has the task, and `agentId` is `null`                                                                                                                                                              |
