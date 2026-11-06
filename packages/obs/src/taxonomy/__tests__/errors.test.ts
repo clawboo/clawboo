@@ -50,6 +50,12 @@ describe('error taxonomy', () => {
       classifyError(null, 'Context overflow: prompt too large for the model. Try /reset (or /new)'),
     ).toBe('ContextOverflow')
     // a real, recoverable condition — NOT a harness bug, and NOT an anomaly for native
+    // The typed verdict decides: a token count in the message is not a status.
+    for (const count of ['201,402', '201,401', '201,403', '201,429']) {
+      expect(classifyError('context_overflow', `Context length exceeded: ${count} tokens.`)).toBe(
+        'ContextOverflow',
+      )
+    }
     expect(isHarnessBug('ContextOverflow')).toBe(false)
     expect(isUnexpectedFor('clawboo-native', 'ContextOverflow')).toBe(false)
   })

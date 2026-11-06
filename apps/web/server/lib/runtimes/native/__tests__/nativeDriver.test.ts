@@ -13,15 +13,16 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { NativeEvent } from '@clawboo/adapter-native'
 import { chatMessages, createDb, type ClawbooDb } from '@clawboo/db'
 import type { StartOpts } from '@clawboo/executor'
+import type { TranscriptEntry } from '@clawboo/protocol'
 import { eq } from 'drizzle-orm'
 
 import type { RuntimeRunContext } from '../../types'
-import { createNativeDriver } from '../nativeDriver'
+import { createNativeDriver, persistNativeChatEntry } from '../nativeDriver'
 import type { ProviderStreamEvent } from '../providers/types'
 import type { RoutedProviderClient } from '../routeCall'
 
@@ -87,6 +88,24 @@ describe('native driver: what reaches the 1:1 chat', () => {
       message: 'do the thing',
     })
     expect(nativeRows('nat-solo')).toHaveLength(1)
+  })
+
+  it('two rows in one millisecond stay two rows for the client, in order', () => {
+    // A failed turn's reply and then its notice are written back to back. The stream
+    // sends each row's `data` as it is, and `appendTranscript` drops an id it has seen.
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+    try {
+      persistNativeChatEntry(db, 'same-ms', 'the partial reply')
+      persistNativeChatEntry(db, 'same-ms', 'the notice', { kind: 'meta', role: 'system' })
+    } finally {
+      clock.mockRestore()
+    }
+    const entries = nativeRows('same-ms').map((row) =>
+      JSON.parse((row as { data: string }).data),
+    ) as TranscriptEntry[]
+    expect(new Set(entries.map((e) => e.entryId)).size).toBe(2)
+    expect(new Set(entries.map((e) => e.fingerprint)).size).toBe(2)
+    expect(entries[1]!.sequenceKey).toBeGreaterThan(entries[0]!.sequenceKey)
   })
 
   it('stays out of the chat for a team run', async () => {

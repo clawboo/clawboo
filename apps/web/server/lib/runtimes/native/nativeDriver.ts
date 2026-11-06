@@ -34,6 +34,9 @@ export interface NativeDriverDeps {
   uuid?: () => string
 }
 
+/** The client sorts by timestamp, then this: entries in one millisecond keep their order. */
+let lastChatSequence = 0
+
 /** Persist the agent's final reply into its chat history so the conversation
  *  shows in the UI chat panel (sessionKey `agent:<id>:native`). Best-effort —
  *  narrative, never load-bearing. `opts` lets a caller persist a user-facing
@@ -50,14 +53,19 @@ export function persistNativeChatEntry(
     if (!text.trim()) return
     const now = Date.now()
     const sessionKey = opts?.sessionKey ?? nativeChatSessionKey(agentId)
+    // Unique, not built from the clock: the stream sends `data` as it is, and the
+    // client drops an entry whose id it has seen, so two rows in one millisecond (a
+    // failed turn's reply, then its notice) would lose the second.
+    const entryId = `native-${randomUUID()}`
+    lastChatSequence = Math.max(now, lastChatSequence + 1)
     db.insert(chatMessages)
       .values({
         sessionKey,
         gatewayUrl: 'native',
-        entryId: `native-${randomUUID()}`,
+        entryId,
         timestampMs: now,
         data: JSON.stringify({
-          entryId: `native-chat-${now}`,
+          entryId,
           role: opts?.role ?? 'assistant',
           kind: opts?.kind ?? 'assistant',
           text,
@@ -65,9 +73,9 @@ export function persistNativeChatEntry(
           runId: null,
           source: 'runtime-agent',
           timestampMs: now,
-          sequenceKey: now,
+          sequenceKey: lastChatSequence,
           confirmed: true,
-          fingerprint: `native:${now}`,
+          fingerprint: entryId,
         }),
       })
       .run()

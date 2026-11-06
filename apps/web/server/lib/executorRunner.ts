@@ -1100,6 +1100,9 @@ async function runTaskInner(
   // the run's summary, which can be the agent's prose about anything (a route
   // named /login, a 401 handler) and would misfile a transient failure.
   let fatalErrorText: string | null = null
+  // Why this pass ran out of room, when a context overflow did it. It rides a non-fatal
+  // error, since the run is rotated rather than failed, and it is no part of the reply.
+  let overflowText: string | null = null
   // The drain's idle guard ended the run: its class is Timeout whatever it says.
   let silentKill = false
 
@@ -1229,6 +1232,7 @@ async function runTaskInner(
     doneReason = 'error'
     fatalErrorCode = null
     fatalErrorText = null
+    overflowText = null
     // Whether the runtime reported ANY spend for this pass. Codex and Hermes only
     // emit a cost event `if (ev.usage)`, so a CLI output-format drift silently
     // yields zero recorded spend — the budget ledger would then under-count real
@@ -1407,6 +1411,7 @@ async function runTaskInner(
         if (ev.fatal && ev.message) lastFatalError = ev.message
         if (ev.fatal && ev.code) fatalErrorCode = ev.code
         if (ev.fatal && ev.message) fatalErrorText = ev.message
+        if (ev.code === 'context_overflow' && ev.message) overflowText = ev.message
         // A recognized policy denial (a broker Deny surfaced by the runtime) is
         // EXPECTED governance, not a harness bug — classify it as such and skip
         // the alert. Everything else goes through the taxonomy; an unknown class
@@ -1866,6 +1871,8 @@ async function runTaskInner(
   // dumps its env to stderr (or an SDK that echoes a key in an exception) would
   // otherwise persist the credential verbatim. compact() does not scrub.
   const safeSummary = scrubResultSummary(summary)
+  // What a failed run's records say: why it ran out of room, when it knows, then its output.
+  const failureDetail = scrubResultSummary([overflowText, summary].filter(Boolean).join(' '))
   const reported = compact(safeSummary) || '(no summary)'
   const success = doneReason === 'success'
   let status: string
@@ -2039,7 +2046,7 @@ async function runTaskInner(
     addComment(
       db,
       taskId,
-      stopNote ?? `Run ${doneReason}: ${safeSummary || '(no output)'}`,
+      stopNote ?? `Run ${doneReason}: ${failureDetail || '(no output)'}`,
       'system',
     )
     // A failed run is filed under its class, from the runtime's typed cause and
@@ -2057,7 +2064,7 @@ async function runTaskInner(
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
-      error: safeSummary || doneReason,
+      error: failureDetail || doneReason,
       ...(errorClass ? { errorClass } : {}),
       costUsd,
       costSource,

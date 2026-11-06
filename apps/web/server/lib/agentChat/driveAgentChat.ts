@@ -25,6 +25,7 @@ import {
   type RuntimeEvent,
 } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
+import { createLogger } from '@clawboo/logger'
 import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
@@ -33,13 +34,26 @@ import { reserveRunBudget, type RunBudgetGate, type RunBudgetHold } from '../bud
 import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { getMcpAttachSecret } from '../mcpAttachSecret'
-import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import {
+  CONVERSATION_TRIMMED_TEXT,
+  isPassingCause,
+  isRefusedRequest,
+  refusedSessionDroppedText,
+  RUN_ENDED_WITHOUT_RESULT,
+  runFailureText,
+  SESSION_DROPPED_TEXT,
+  SESSION_NOT_DROPPED_TEXT,
+  TURN_TOO_LARGE_TEXT,
+} from '../runFailureText'
 import { withRunSlot } from '../runSlots'
 import { adapterFactoryFor, type RuntimeAdapterFactory } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
 import { loadAgentConfig } from '../runtimes/native/agentConfigStore'
+import { boundResumedTranscript } from '../runtimes/native/conversation'
+import type { NeutralMessage } from '../runtimes/native/providers/types'
 import { persistNativeChatEntry } from '../runtimes/native/nativeDriver'
+import { loadSessionTranscript } from '../runtimes/native/sessionStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { estimateTokensFromChars } from '../runtimes/estimateCost'
 import { createRunCostTally } from '../runtimes/runCostTally'
@@ -55,6 +69,8 @@ import { buildMemoryRecall } from './memoryRecall'
 
 const NATIVE_RUNTIME = 'clawboo-native'
 
+const log = createLogger('agent-chat')
+
 // The 1:1 chat key lives with the other session-key shapes so every writer agrees
 // on what a person's chat is. Re-exported here because this module is where the
 // 1:1 chat path is read from.
@@ -67,6 +83,47 @@ export { directChatSessionKey, nativeChatSessionKey }
  *  `chatHistoryRESETCONTEXT`) + swept on agent delete (see `perAgentSettingKeys`). */
 export function nativeChatSessionSettingKey(agentId: string): string {
   return `native-chat-session:${agentId}`
+}
+
+/** A resume has to send at most this share of what was refused to be worth keeping. A
+ *  trim that barely dropped anything, with the next message on top, sends about the
+ *  same again: a long chat hovering at the bound would fail on every retry. */
+const RESUME_MUST_SHRINK_TO = 0.9
+
+const transcriptChars = (messages: NeutralMessage[]): number =>
+  messages.reduce((n, m) => n + JSON.stringify(m.content).length, 0)
+
+/**
+ * Whether resuming a Native session that overflowed sends the model less than the
+ * request it refused. The saved transcript IS that request, and a resume sends what
+ * `boundResumedTranscript` keeps of it, plus the next message. So when the bound keeps
+ * everything or nearly everything, the resume overflows again: one turn that alone
+ * overflowed, or a transcript at or under the bound on a model whose window is smaller
+ * still. When it drops a real share of it the resume may fit, and the turns it keeps are
+ * worth keeping. If what it keeps still overflows, that failed turn's transcript comes
+ * back here, smaller, and a short next message settles it: it fits, or it clears. A run
+ * of large messages can keep it trimming for as long as they keep coming. A transcript
+ * that cannot be read cannot be resumed either.
+ */
+async function nativeResumeCanShrink(
+  homeDir: string | null,
+  sessionId: string | null,
+): Promise<boolean> {
+  if (!sessionId) return false
+  try {
+    const transcript = await loadSessionTranscript(homeDir, sessionId)
+    if (transcript) {
+      const kept = boundResumedTranscript(transcript)
+      return (
+        kept.length < transcript.length &&
+        transcriptChars(kept) <= RESUME_MUST_SHRINK_TO * transcriptChars(transcript)
+      )
+    }
+    log.warn({ sessionId, homeDir }, 'native: overflowed session has no readable transcript')
+  } catch (err) {
+    log.warn({ err, sessionId }, 'native: could not read an overflowed session transcript')
+  }
+  return false
 }
 
 /** agentId → the live conversational run, so a Stop can abort it. Module-level: an
@@ -308,6 +365,10 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     let userStopped = false
     let failure: string | null = null
     let lastError: string | null = null
+    /** The run reported a context overflow (fatal or not). */
+    let overflowed = false
+    /** The typed cause of the fatal error that ended the run. */
+    let failureCode: string | null = null
     // Why the SERVER ended the run, when it did. Every runtime reports an abort as
     // a clean `done: 'aborted'`, so without this a kill reads like the user's Stop.
     let serverAbort: string | null = null
@@ -348,6 +409,8 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
           }
         }
         if (ev.kind === 'error') lastError = ev.message || lastError
+        if (ev.kind === 'error' && ev.code === 'context_overflow') overflowed = true
+        if (ev.kind === 'error' && ev.fatal) failureCode = ev.code ?? null
         const terminal = ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)
         if (!terminal) continue
         sawTerminal = true
@@ -384,6 +447,64 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     }
     if (abortMap.get(agentId)?.run === run) abortMap.delete(agentId)
 
+    // A context overflow first settles what happens to the session, since the turn's
+    // one notice says so. Any ending but success: a run that reported an overflow and
+    // then finished got past it, and its session is sound. Claude Code, Codex and Hermes
+    // report one only once their session cannot go on, so it is dropped, whether or not
+    // this turn was itself a resume. Native trims what it resumes, so it drops only when
+    // trimming cannot help. A failure writing the clear must not cost the person the
+    // truth about what comes next.
+    const canResume = !!adapter.sessionCodec && adapter.capabilities().resume
+    let savedSessionId: string | null = null
+    if (canResume) {
+      try {
+        const blob = await adapter.sessionCodec!.serialize(run)
+        const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
+        // Claude Code falls back to the session key when no native id arrived.
+        if (sid && sid !== sessionKey) savedSessionId = sid
+      } catch {
+        // A missing/unparseable id just means the next turn starts fresh.
+      }
+    }
+    const failed = !succeeded && !userStopped
+    let overflowNotice: string | null = null
+    let pointerSettled = false
+    const clearPointer = (): boolean => {
+      try {
+        setSetting(db, pointerKey, '')
+        return true
+      } catch (err) {
+        log.error({ err, agentId }, 'could not clear a session pointer')
+        return false
+      }
+    }
+    if (overflowed && !succeeded && canResume) {
+      if (runtime === NATIVE_RUNTIME && (await nativeResumeCanShrink(homeDir, savedSessionId))) {
+        overflowNotice = CONVERSATION_TRIMMED_TEXT
+      } else {
+        pointerSettled = true
+        // With nothing being carried, the pointer is already empty.
+        if (!priorSessionId) overflowNotice = TURN_TOO_LARGE_TEXT
+        else overflowNotice = clearPointer() ? SESSION_DROPPED_TEXT : SESSION_NOT_DROPPED_TEXT
+      }
+    } else if (
+      runtime === NATIVE_RUNTIME &&
+      canResume &&
+      failed &&
+      !serverAbort &&
+      !acc.trim() &&
+      isRefusedRequest(failureCode, failure) &&
+      !(await nativeResumeCanShrink(homeDir, savedSessionId))
+    ) {
+      // The provider refused the request outright, in words that may not say why (no
+      // pattern knows every provider's way of saying a prompt is too long). The saved
+      // transcript is that request, and a resume sends it again plus more, so keeping
+      // the pointer means every later message fails the same way. A first turn's pointer
+      // is simply not written, and the failure notice below stands.
+      pointerSettled = true
+      if (priorSessionId && clearPointer()) overflowNotice = refusedSessionDroppedText(failure!)
+    }
+
     // A user Stop stays discarded (the client cleared optimistically, the Gateway
     // 1:1 Stop convention). Anything else that did not commit is reported: a turn
     // that DIED mid-reply commits the partial the user watched (it survives reload,
@@ -393,7 +514,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     if (!committed && !userStopped && acc.trim()) {
       persist(acc)
       committed = true
-    } else if (!committed && !userStopped && !succeeded) {
+    } else if (!committed && !userStopped && !succeeded && !overflowNotice) {
       const provider =
         runtime === NATIVE_RUNTIME ? loadAgentConfig(db, agentId)?.primaryProvider : null
       // A stream that died without a terminal never said why, so say exactly that,
@@ -405,10 +526,10 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         true,
       )
     }
+    if (overflowNotice) persist(overflowNotice, true)
     if (publishedDelta && !committed)
       publishChatDelta(sessionKey, { sessionKey, runId: null, text: '' })
     // Turn over — back to Idle (or Error for a failed run) either way.
-    const failed = !succeeded && !userStopped
     publishAgentStatus(sessionKey, { agentId, status: failed ? 'error' : 'idle' })
 
     // Price what the cost events did not already charge (Codex and Claude Code
@@ -442,24 +563,24 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // CONTINUATION: remember THIS turn's session id so the NEXT turn resumes it (the
     // harness saved the session before emitting its terminal). Only for a runtime
     // that resumes and exposes a session codec (the fake test adapter does not).
-    if (adapter.sessionCodec && adapter.capabilities().resume) {
-      if (failed && !serverAbort && priorSessionId && runtime !== NATIVE_RUNTIME) {
+    if (canResume && !pointerSettled) {
+      if (
+        failed &&
+        !serverAbort &&
+        priorSessionId &&
+        runtime !== NATIVE_RUNTIME &&
+        !isPassingCause(failureCode)
+      ) {
         // A failed turn that tried to resume most likely holds a dead handle (codex
         // `exec resume <unknown-id>` exits 1; the Claude SDK cannot find a session
         // from another working folder). Clear it so the next turn starts fresh
         // instead of failing the same way forever. Native reloads a missing
         // transcript as an empty one, so its pointer is kept. A run the server
-        // ended (gone quiet, budget cap) had a live session, so it keeps it.
+        // ended (gone quiet, budget cap) had a live session, so it keeps it, and so
+        // does one that hit something that passes by itself (a rate limit, an overload).
         setSetting(db, pointerKey, '')
-      } else {
-        try {
-          const blob = await adapter.sessionCodec.serialize(run)
-          const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
-          // Claude Code falls back to the session key when no native id arrived.
-          if (sid && sid !== sessionKey) setSetting(db, pointerKey, sid)
-        } catch {
-          // A missing/unparseable id just means the next turn starts fresh.
-        }
+      } else if (savedSessionId) {
+        setSetting(db, pointerKey, savedSessionId)
       }
     }
   }

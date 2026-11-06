@@ -74,6 +74,22 @@ describe('runFailureText — a context-overflow label', () => {
     }
   })
 
+  it('keeps that advice to a Gateway run: a runtime Clawboo runs gets a plain sentence', () => {
+    for (const runtime of ['clawboo-native', 'claude-code', 'codex', 'hermes']) {
+      const text = runFailureText(RAW, runtime)
+      expect(text).toBe(
+        "This run outgrew the model's context window and stopped before it finished.",
+      )
+    }
+    expect(runFailureText(RAW, null)).toMatch(/context-window setting/i)
+  })
+
+  it('reads a rate limit in the same words as the rate limit it is', () => {
+    expect(runFailureText('Rate limit: too many tokens', 'codex')).toBe(
+      'The run failed: Rate limit: too many tokens',
+    )
+  })
+
   it('leaves an unrelated failure verbatim, so real errors still reach the user', () => {
     expect(runFailureText('ECONNREFUSED 127.0.0.1:18789', 'openclaw')).toBe(
       'The run failed: ECONNREFUSED 127.0.0.1:18789',

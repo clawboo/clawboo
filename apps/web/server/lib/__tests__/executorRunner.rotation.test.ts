@@ -16,6 +16,7 @@ import {
   SqliteMemoryStore,
   createTask,
   getBudget,
+  getComments,
   getSessionBySourceId,
   getSessionLineage,
   getTask,
@@ -214,6 +215,45 @@ describe('executor runner — session rotation + memory injection', () => {
     expect(fake.startCount).toBe(3) // initial + 2 rotations
     const db = getDb()
     expect(listEvents(db, { taskId, kinds: ['session_rotated'] })).toHaveLength(2)
+  })
+
+  it('when rotations run out, the board says why the context filled, not "(no output)"', async () => {
+    const taskId = newTask()
+    const reason =
+      "The conversation outgrew the model's context window (A file being read or a tool output is likely too large for the context window.)."
+    class OverflowingAdapter extends RotatingAdapter {
+      override events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+        const inner = super.events(run)
+        return (async function* () {
+          yield {
+            runId: run.sessionKey,
+            sessionId: run.sessionKey,
+            ts: 0,
+            seq: 0,
+            kind: 'error',
+            code: 'context_overflow',
+            message: reason,
+            fatal: false,
+          } as RuntimeEvent
+          yield* inner
+        })()
+      }
+    }
+    const fake = new OverflowingAdapter('claude-code', ['max_turns', 'max_turns'])
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => fake,
+      taskId,
+      assigneeAgentId: 'claude-1',
+      disableMemoryAutoInject: true,
+      kind: 'research',
+      maxRotations: 1,
+    })
+    expect(result.ok).toBe(true)
+    const db = getDb()
+    const comments = getComments(db, taskId).map((c) => c.body)
+    expect(comments.some((c) => c.startsWith('Run max_turns: ') && c.includes(reason))).toBe(true)
+    expect(listExecutions(db, taskId).some((e) => e.error?.includes(reason))).toBe(true)
   })
 
   it('does NOT rotate a clean success', async () => {

@@ -343,6 +343,18 @@ function stringifyToolContent(content: unknown): string {
   }
 }
 
+/**
+ * The CLI's endings for a conversation that no longer fits the model's context
+ * window. Its own goal handling files these three together as `context_limit`.
+ * `prompt_too_long`: the API refused the prompt and compaction could not make it fit.
+ * `blocking_limit`: the CLI's own count reached its limit with no compaction to fall
+ * back on, so it refused before calling the API. `rapid_refill_breaker`: the context
+ * refilled to the limit within 3 turns of a compaction, 3 times in a row, so the CLI
+ * gave up compacting. Claude Code 2.1.268 (Agent SDK 0.3.268).
+ */
+const isContextLimitEnding = (reason: unknown): boolean =>
+  reason === 'prompt_too_long' || reason === 'blocking_limit' || reason === 'rapid_refill_breaker'
+
 /** True when a `result` reports a turn that ended on an API error: the CLI
  *  sends those as a success carrying the error text. An `error_*` subtype also
  *  sets `is_error`, but it names its own cause in `errors`. */
@@ -399,7 +411,7 @@ export function translateClaudeMessage(
       // it is out of room, not a failure, so it is flagged for the host to
       // rotate to a fresh session. The CLI sends it as an API error, but its
       // cause is not one.
-      const contextFull = msg.terminal_reason === 'prompt_too_long'
+      const contextFull = isContextLimitEnding(msg.terminal_reason)
       const apiError = !contextFull && isApiErrorResult(msg)
       const ok = msg.subtype === 'success' && !apiError && !contextFull
       // The SDK signals a turn-ceiling stop as `result.subtype === 'error_max_turns'`.
@@ -427,7 +439,10 @@ export function translateClaudeMessage(
         {
           type: 'result',
           ok,
-          summary: ok ? (msg.result ?? '') : (errMsg ?? 'error'),
+          // A context-limit ending's text is the CLI talking to its own user ("use
+          // /clear"), and team chat commits a summary as the agent's reply. So it goes
+          // in `errorMessage` only, and the reply is what the agent really streamed.
+          summary: ok ? (msg.result ?? '') : contextFull ? '' : (errMsg ?? 'error'),
           costUsd: msg.total_cost_usd ?? null,
           ...(usage ? { usage } : {}),
           ...(msg.session_id ? { sessionId: msg.session_id } : {}),

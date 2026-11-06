@@ -74,7 +74,13 @@ import {
 } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
-import { RUN_ENDED_WITHOUT_RESULT, runFailureText } from '../runFailureText'
+import {
+  isPassingCause,
+  RUN_ENDED_WITHOUT_RESULT,
+  runFailureText,
+  teamOverflowNotClearedText,
+  teamOverflowText,
+} from '../runFailureText'
 import { runSlots, type RunSlot } from '../runSlots'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
@@ -593,8 +599,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const evictOwnEntry = (): void => {
       if (abortMap.get(sessionKey)?.run === run) abortMap.delete(sessionKey)
     }
-    /** The run reported a context overflow (fatal or not). */
+    /** The run reported a context overflow (fatal or not), and what it said. */
     let overflowed = false
+    let overflowReason = ''
+    /** False once a clear of an overflowed session has failed: its next run resumes it. */
+    let overflowCleared = true
+    /** The typed cause of the fatal error that ended the run. */
+    let failureCode: string | null = null
     /**
      * Record the session this run ended with, so the next run resumes it, or
      * clear the pointer. Called once, on the run's first terminal and BEFORE
@@ -611,22 +622,25 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         reason === 'success' ||
         (pointer.keepUnlessError && (reason === 'aborted' || reason === 'max_turns'))
       try {
-        if (overflowed) {
+        if (overflowed && reason !== 'success') {
           // The session outgrew the model's context window, so the next run must
           // not resume it, whether or not this run was itself a resume. Claude
           // Code reports an overflow as out of room (`done: max_turns`), which
           // would otherwise keep the pointer, and resuming such a session
           // overflows again (seen with Claude Code 2.1.268 against a stand-in
           // API that enforced a context limit).
+          overflowCleared = false
           setSetting(db, pointer.key, '')
+          overflowCleared = true
           return
         }
-        if (!sound && obs.resumeAttempted) {
+        if (!sound && obs.resumeAttempted && !isPassingCause(failureCode)) {
           // Stale-pointer self-heal (mirrors executorRunner's clear-on-failed-
           // resume): a run that TRIED to resume and failed most likely holds a
           // dead handle (codex `exec resume <unknown-id>` is a hard exit 1), so
           // writing it back would send every later run through the same failure.
-          // Clear it; the next run starts fresh.
+          // Clear it; the next run starts fresh. A failure that passes by itself (a
+          // rate limit, an overload) says nothing about the session, so it stays.
           setSetting(db, pointer.key, '')
           return
         }
@@ -635,8 +649,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         const blob = await adapter.sessionCodec.serialize(run)
         const sid = (JSON.parse(blob) as { sessionId?: string | null }).sessionId
         if (sid) setSetting(db, pointer.key, pointer.encode(sid))
-      } catch {
+      } catch (err) {
         // Best-effort: a missing or unparseable id means the next run starts fresh.
+        log.warn({ err, sessionKey }, 'could not settle a run resume pointer')
       }
     }
 
@@ -665,7 +680,11 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         },
       })) {
         costTally.observe(ev)
-        if (ev.kind === 'error' && ev.code === 'context_overflow') overflowed = true
+        if (ev.kind === 'error' && ev.code === 'context_overflow') {
+          overflowed = true
+          overflowReason = ev.message
+        }
+        if (ev.kind === 'error' && ev.fatal) failureCode = ev.code ?? null
         if (ev.kind === 'tool-call') openToolCalls.add(ev.toolCallId || ev.name)
         else if (ev.kind === 'tool-result') openToolCalls.delete(ev.toolCallId || ev.name)
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
@@ -723,6 +742,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // On the FIRST terminal: every runtime ends a failed run with a fatal
           // `error` before its `done`, and this loop stops at the first one.
           await settleResumePointer(ev.kind === 'done' ? ev.reason : 'error')
+          // An overflow cost this agent its session (settleResumePointer): say that,
+          // once, in place of a failure notice.
+          const outgrew = overflowed && !(ev.kind === 'done' && ev.reason === 'success')
           // A fatal-error terminal never reaches the `done` persist above — commit the
           // partial streamed text (what the user already watched) so it survives the
           // failure instead of vanishing with the stream.
@@ -734,10 +756,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             // through the same wording). Deliberately NOT `persistedTurn`: a system
             // notice is not the agent's turn, and nothing streamed, so the clearing
             // delta below is not in play either.
-            else {
+            else if (!outgrew) {
               const provider = loadAgentConfig(db, agentId)?.primaryProvider
               deps.persistMeta?.(sessionKey, runFailureText(ev.message, obs.runtime, provider))
             }
+          }
+          if (outgrew && chatVisible) {
+            const name = db.select().from(agents).where(eq(agents.id, agentId)).get()?.name
+            deps.persistMeta?.(
+              sessionKey,
+              overflowCleared
+                ? teamOverflowText(name, !!obs.resumeAttempted)
+                : teamOverflowNotClearedText(name),
+            )
           }
           // Stream-without-commit belt: a turn that streamed live tokens but persisted
           // nothing (pure silent delegation, a write-time drop, an insert error) gets
@@ -779,7 +810,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         } else if (ownsSlot())
           nudge.markBusy(sessionKey, openToolCalls.size > 0 ? TOOL_CALL_WEDGE_MS : undefined)
         try {
-          await onEvent(sessionKey, ev, obs.stamp)
+          // The engine records a failed `done`'s summary as its detail on the board.
+          // An overflow's reason rode a non-fatal error and is no part of the agent's
+          // reply, so it joins the detail here, after the chat commit above.
+          await onEvent(
+            sessionKey,
+            ev.kind === 'done' && overflowed && ev.reason !== 'success'
+              ? { ...ev, summary: [overflowReason, ev.summary].filter(Boolean).join(' ') }
+              : ev,
+            obs.stamp,
+          )
         } catch (err) {
           // A single bad event must not kill the observer — but it must not be
           // invisible either: this is the engine refusing an event, which is how

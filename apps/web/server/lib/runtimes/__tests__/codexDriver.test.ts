@@ -293,6 +293,70 @@ describe('a refused model reports the backend reason, not the stderr log', () =>
     sawResult: false,
   })
 
+  it('notes a failed turn that outgrew the context window, as `codex exec` 0.136 sends it', () => {
+    // Both captured from the CLI against a stand-in Responses API: a stream's
+    // `response.failed`, and an HTTP 400 whose body it forwards as a JSON string.
+    const forms = [
+      "Codex ran out of room in the model's context window. Start a new thread or clear earlier history before retrying.",
+      JSON.stringify({
+        error: {
+          message:
+            'Your input exceeds the context window of this model. Please adjust your input and try again.',
+          type: 'invalid_request_error',
+          param: 'input',
+          code: 'context_length_exceeded',
+        },
+      }),
+    ]
+    for (const message of forms) {
+      const state = fresh()
+      translateCodexEvent({ type: 'error', message }, state)
+      translateCodexEvent({ type: 'turn.failed', error: { message } }, state)
+      expect(state.streamErrorCode).toBe('context_overflow')
+      expect(state.streamError).toMatch(/context window/)
+    }
+  })
+
+  it('reads a rate limit as one, whatever its words', () => {
+    const limits = [
+      { status: 429, error: { code: 'rate_limit_exceeded', message: 'too many tokens' } },
+      { type: 'error', status: 429, error: { message: 'too many tokens' } },
+      { error: { code: 429, message: 'too many tokens' } },
+      { error: { message: 'too many tokens', type: 'rate_limit_error' } },
+    ]
+    for (const body of limits) {
+      const state = fresh()
+      translateCodexEvent({ type: 'turn.failed', error: { message: JSON.stringify(body) } }, state)
+      expect(state.streamErrorCode).toBe('rate_limit')
+    }
+  })
+
+  it('notes no other failed turn', () => {
+    const others = [
+      REFUSED,
+      'stream disconnected before completion',
+      // An empty balance also comes as a 429. It is not a limit that waiting clears.
+      JSON.stringify({ status: 429, error: { code: 'insufficient_quota', message: 'pay up' } }),
+      JSON.stringify({ error: { message: 'bad key', code: 'invalid_api_key' } }),
+      JSON.stringify({ error: { message: 'too many tokens', code: 'some_other_cause' } }),
+    ]
+    for (const message of others) {
+      const state = fresh()
+      translateCodexEvent({ type: 'turn.failed', error: { message } }, state)
+      expect(state.streamErrorCode ?? null).toBeNull()
+    }
+  })
+
+  it('reads only the last error: one that passed does not type a later failure', () => {
+    const state = fresh()
+    translateCodexEvent(
+      { type: 'error', message: "Codex ran out of room in the model's context window." },
+      state,
+    )
+    translateCodexEvent({ type: 'turn.failed', error: { message: 'boom' } }, state)
+    expect(state.streamErrorCode ?? null).toBeNull()
+  })
+
   it('keeps the readable message from the error / turn.failed events', () => {
     const state = fresh()
     expect(translateCodexEvent({ type: 'error', message: REFUSED }, state)).toEqual([])

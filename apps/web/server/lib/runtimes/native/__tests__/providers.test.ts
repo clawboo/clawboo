@@ -16,6 +16,7 @@ import {
   toOpenAiTools,
 } from '../providers/openai'
 import {
+  isContextOverflowMessage,
   isFallbackWorthy,
   normalizeProviderError,
   type NeutralMessage,
@@ -313,6 +314,54 @@ describe('provider error normalization', () => {
     expect(normalizeProviderError({ status: 400 } as unknown as Error).code).toBe('bad_request')
     expect(normalizeProviderError(new Error('fetch failed')).code).toBe('network')
     expect(normalizeProviderError(new Error('???')).code).toBe('unknown')
+  })
+
+  it('reads a typed rate limit from an error frame in the stream, which has no HTTP status', () => {
+    // The OpenAI SDK sets `code` and `type` from the frame's error.
+    const openai = normalizeProviderError(
+      Object.assign(new Error('too many tokens'), { code: 'rate_limit_exceeded', type: 'tokens' }),
+    )
+    expect(openai.code).toBe('rate_limit')
+    // The run's failure notice reads the message alone, so it says so too.
+    expect(openai.message).toBe('Rate limit: too many tokens')
+    // The Anthropic SDK sets `type`, keeps the body as `error`, and makes it the message.
+    const body = { type: 'error', error: { type: 'rate_limit_error', message: 'too many tokens' } }
+    const anthropic = normalizeProviderError(
+      Object.assign(new Error(JSON.stringify(body)), { type: 'rate_limit_error', error: body }),
+    )
+    expect(anthropic.code).toBe('rate_limit')
+    expect(isContextOverflowMessage(anthropic.message)).toBe(false)
+    // One that says so already is left as it is.
+    const said = normalizeProviderError(
+      Object.assign(new Error('429 Rate limit reached'), { status: 429 }),
+    )
+    expect(said.message).toBe('429 Rate limit reached')
+  })
+
+  it('reads a 429 sent as a number in the code', () => {
+    const body = { code: 429, message: 'too many tokens' }
+    const frame = normalizeProviderError(
+      Object.assign(new Error('too many tokens'), { code: 429, error: body }),
+    )
+    expect(frame.code).toBe('rate_limit')
+    expect(isContextOverflowMessage(frame.message)).toBe(false)
+    // Another number is no rate limit.
+    const refused = normalizeProviderError(
+      Object.assign(new Error('too many tokens'), { code: 400, error: { code: 400 } }),
+    )
+    expect(refused.code).toBe('unknown')
+  })
+
+  it('does not read any other typed error as a rate limit', () => {
+    const overflow = normalizeProviderError(
+      Object.assign(new Error('too many tokens in the request'), {
+        status: 400,
+        code: 'context_length_exceeded',
+        type: 'invalid_request_error',
+      }),
+    )
+    expect(overflow.code).toBe('bad_request')
+    expect(isContextOverflowMessage(overflow.message)).toBe(true)
   })
 
   it('only auth / rate_limit / overloaded / network justify fallback', () => {
