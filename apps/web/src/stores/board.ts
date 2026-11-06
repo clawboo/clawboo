@@ -17,6 +17,8 @@ import { boardClient } from '@/lib/boardClient'
 
 export interface BoardTaskView {
   id: string
+  /** The readable id, like `CLB-12`; null or absent when it has none or none is known. */
+  identifier?: string | null
   title: string
   status: string
   assigneeAgentId: string | null
@@ -49,6 +51,7 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame
   const status = change.status ?? existing?.status ?? 'todo'
   return {
     id: change.id,
+    identifier: change.identifier ?? existing?.identifier ?? null,
     title: change.title ?? existing?.title ?? '',
     status,
     assigneeAgentId: change.assigneeAgentId ?? existing?.assigneeAgentId ?? null,
@@ -94,6 +97,7 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
           r.id,
           mergeTask(tasks.get(r.id), {
             id: r.id,
+            identifier: r.identifier ?? null,
             title: r.title,
             status: r.status,
             assigneeAgentId: r.assigneeAgentId ?? null,

@@ -50,4 +50,11 @@ describe('cap-hit audit wiring', () => {
     const src = readFileSync(path.join(here, '..', 'teamOrchestrator.ts'), 'utf8')
     expect(src).toMatch(/onCapHit:\s*\(info\)\s*=>\s*auditCapHit\(/)
   })
+
+  it('records the ceiling a hand-off cap names, over the default', () => {
+    const db = createDb(':memory:')
+    auditCapHit(db, 'team-1', { kind: 'child_cap', sourceTaskId: 'task-1', max: 24 }, 8)
+    const rows = listGovernanceAudit(db, { eventType: 'cap_hit' })
+    expect(JSON.parse(rows[0]!.summary) as unknown).toEqual({ kind: 'child_cap', max: 24 })
+  })
 })

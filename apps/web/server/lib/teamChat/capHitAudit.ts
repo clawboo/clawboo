@@ -9,13 +9,11 @@
 
 import { appendAudit, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
+import type { CapHit } from '@clawboo/team-orchestration'
 
 const log = createLogger('teamchat:cap-hit')
 
-export interface CapHitInfo {
-  kind: 'fanout'
-  sourceTaskId: string | null
-}
+export type CapHitInfo = CapHit
 
 /**
  * Record a cap hit in the forensic audit log. BEST-EFFORT and never throws: the
@@ -29,7 +27,7 @@ export function auditCapHit(db: ClawbooDb, teamId: string, info: CapHitInfo, max
       eventType: 'cap_hit',
       teamId,
       taskId: info.sourceTaskId,
-      summary: { kind: info.kind, max },
+      summary: { kind: info.kind, max: info.max ?? max },
     })
   } catch (err) {
     log.debug({ teamId, kind: info.kind, err }, 'cap-hit audit write failed (ignored)')

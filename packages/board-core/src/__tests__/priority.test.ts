@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  clampAgentTaskPriority,
   clampTaskPriority,
   MAX_TASK_PRIORITY,
   MIN_TASK_PRIORITY,
@@ -35,5 +36,20 @@ describe('task priority', () => {
     expect(clampTaskPriority(1.6)).toBe(2)
     expect(clampTaskPriority(Number.NaN)).toBe(0)
     expect(clampTaskPriority(Number.POSITIVE_INFINITY)).toBe(0)
+  })
+})
+
+describe('clampAgentTaskPriority', () => {
+  it('holds an agent to High at most', () => {
+    expect(clampAgentTaskPriority(TASK_PRIORITY_VALUE.urgent)).toBe(TASK_PRIORITY_VALUE.high)
+    expect(clampAgentTaskPriority(99)).toBe(TASK_PRIORITY_VALUE.high)
+  })
+
+  it('leaves the levels below Urgent alone', () => {
+    expect(clampAgentTaskPriority(TASK_PRIORITY_VALUE.high)).toBe(TASK_PRIORITY_VALUE.high)
+    expect(clampAgentTaskPriority(TASK_PRIORITY_VALUE.normal)).toBe(TASK_PRIORITY_VALUE.normal)
+    expect(clampAgentTaskPriority(TASK_PRIORITY_VALUE.low)).toBe(TASK_PRIORITY_VALUE.low)
+    expect(clampAgentTaskPriority(-5)).toBe(TASK_PRIORITY_VALUE.low)
+    expect(clampAgentTaskPriority(Number.NaN)).toBe(TASK_PRIORITY_VALUE.normal)
   })
 })

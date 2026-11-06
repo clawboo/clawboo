@@ -338,7 +338,9 @@ describe('a delivery carrying report-ups that never starts', () => {
     for (let i = 0; i < 20 && notStarted.length === 0; i++)
       await new Promise((r) => setImmediate(r))
 
-    expect(notStarted).toEqual([{ reportForTaskId: null, stopGen: 0, reportUpIds: ['ru-1'] }])
+    expect(notStarted).toEqual([
+      { deliveryId: expect.any(String), reportForTaskId: null, stopGen: 0, reportUpIds: ['ru-1'] },
+    ])
   })
 
   it('hands them back too when setting up the queued run throws before it starts', async () => {
@@ -353,7 +355,9 @@ describe('a delivery carrying report-ups that never starts', () => {
     for (let i = 0; i < 20 && notStarted.length === 0; i++)
       await new Promise((r) => setImmediate(r))
 
-    expect(notStarted).toEqual([{ reportForTaskId: null, stopGen: 0, reportUpIds: ['ru-1'] }])
+    expect(notStarted).toEqual([
+      { deliveryId: expect.any(String), reportForTaskId: null, stopGen: 0, reportUpIds: ['ru-1'] },
+    ])
   })
 
   it("leaves a start that fails at once to the engine's own retry", async () => {

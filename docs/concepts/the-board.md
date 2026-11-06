@@ -58,6 +58,25 @@ A task can depend on other tasks. It becomes ready only when every task it depen
 
 When a handed-off task fails, or you cancel a task, the tasks still waiting on it in To do or Backlog are cancelled too. That way they do not sit there forever. Whoever handed out the work is told which steps were dropped.
 
+## Tasks have readable ids
+
+A task of a team has an id you can say out loud, like `MAR-12`: letters from the team's name and a number. The letters are unique across your Clawboo, so a second team whose name starts the same way gets the next free set, like `MA2`. You can change them in Team settings until the team's first task exists. From then on they are fixed, and renaming the team changes no ids.
+
+Agents can use the readable id wherever a tool asks for a task. A task with no team has no readable id.
+
+## A task is made once
+
+A create repeated by a retry, a reconnect or a model saying the same thing twice does not make a second task. Two checks catch it:
+
+- **The same create again.** The New task dialog sends a key per draft, an agent's tool call can name one, and the server makes one up for a call that names none. The same key returns the same task.
+- **The same words from an agent.** When an agent creates a task or hands one off, an open task with the same words under the same parent from the last 48 hours is returned instead. Blocked tasks do not count, and neither does a task in To do that will not start by itself, such as one you stopped, because a retry is how that work starts again. A hand-off only matches a task someone is on and that will run, so a card nobody holds, or one parked in Backlog, does not swallow it. One turn asking two teammates the same thing makes a task for each; a later turn saying those words again is a retry.
+
+Tasks you create yourself skip the second check: if you want two tasks with one title, you get two. The agent is told when it got an existing task, and which one.
+
+## Hand-offs do not go in circles
+
+An agent cannot hand work back to an agent that is waiting on it. If Ana hands a task to Ben, Ben cannot hand work on it back to Ana, directly or through a third agent, while Ana's task is open: each would wait on the other. Ben's result reaches Ana by itself when his task ends. The team's lead is exempt, because every agent is told to take a blocker there.
+
 ## Comments steer the work
 
 A comment you add to a task is a reply to the agent the task belongs to: the agent working on it, or the agent it is bound to while it waits. Write it in the board's task drawer, in a team chat's **Tasks** card, or in **Tasks & Routines** on the agent's page. What the reply does depends on where the task stands:
@@ -121,7 +140,9 @@ Runs that name a repository, started through the runtime run API or by an agent 
 ## Limits
 
 - One agent works a task at a time. To split work, hand out separate tasks.
-- Agents that create tasks with Clawboo's task tools are capped: at most 24 child tasks under one parent (finished ones count) and 30 new top-level tasks in 5 minutes. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
+- Agents that create tasks with Clawboo's task tools, or hand them off in team chat, are capped: at most 24 child tasks under one parent and 30 new top-level tasks in 5 minutes (for a hand-off, per team). Finished and cancelled children count, so an agent cannot clear its own way; only your cancel frees a place. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
+- One team-chat turn can start at most 8 hand-offs, counted across the whole turn, and a plan can have at most 25 steps. A plan too long, or with no room, is refused whole.
+- An agent can set a task's priority up to High. Only you can make a task Urgent.
 - Most work runs without a worktree or a check, as described in [Where the work happens](#where-the-work-happens).
 
 <Accordion title="Under the hood">

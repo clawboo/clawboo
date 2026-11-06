@@ -61,6 +61,16 @@ describe('normalizeQuery', () => {
 })
 
 describe('matchBoard', () => {
+  it('finds a task by its readable id, whole or by its letters', () => {
+    const tasks = [task('a', 'Write the docs', { identifier: 'ZQX-12' }), task('b', 'Other')]
+    const ids = (query: string): string[] => matchBoard(query, input(tasks)).map((r) => r.id)
+    expect(ids('zqx-12')).toEqual(['a'])
+    expect(ids('ZQX')).toEqual(['a'])
+    expect(ids('zqx-13')).toEqual([])
+    // One letter would match every task of the team.
+    expect(ids('z')).toEqual([])
+  })
+
   it('returns nothing for a blank query', () => {
     const tasks = [task('t1', 'Anything')]
     expect(matchBoard('', input(tasks))).toEqual([])

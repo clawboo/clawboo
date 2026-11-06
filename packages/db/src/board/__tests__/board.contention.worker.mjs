@@ -38,6 +38,22 @@ async function main() {
     return
   }
 
+  // `create` mode: race ONE plain create per thread against the SAME team, with the
+  // same barrier: no two threads may take one number, and one idempotency key may
+  // make one task.
+  if (mode === 'create') {
+    if (typeof startAtMs === 'number') {
+      const coarse = startAtMs - Date.now() - 20
+      if (coarse > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, coarse)
+      while (Date.now() < startAtMs) {
+        // final spin, as in `child` mode
+      }
+    }
+    const t = db.createTask(conn, { title: `w${id}`, teamId: taskId, ...(workerData.input ?? {}) })
+    parentPort.postMessage({ id, taskId: t.id, identifier: t.identifier })
+    return
+  }
+
   // `claim` mode: race a SINGLE atomic claimTask on ONE task against the other
   // threads — the exactly-one-winner mutex under true OS-thread concurrency (the
   // `addComment` mode below only proves WAL write-survival, not the claim mutex).

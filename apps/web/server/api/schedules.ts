@@ -9,6 +9,7 @@ import type { Request, Response } from 'express'
 
 import {
   agents,
+  clampAgentTaskPriority,
   getScheduledRun,
   getTask,
   listRoutineFires,
@@ -38,6 +39,7 @@ import {
 
 import { eq } from 'drizzle-orm'
 
+import { isDashboardRequest } from '../lib/dashboardRequest'
 import { getDb } from '../lib/db'
 import { getRoutinesTicker } from '../lib/routines/ticker'
 import {
@@ -311,6 +313,20 @@ export function schedulesTimeZonePUT(req: Request, res: Response): void {
 // POST /api/schedules — body = ScheduleCreateSpec; routed by spec.source
 // A team routine (`target: 'team'`) names a team instead of an agent; every other
 // create names the agent it runs on.
+/**
+ * A routine's task template as this caller may set it. A routine files its tasks with
+ * the template's priority, so this is another way to set one, and Urgent is a person's
+ * call: anything but the dashboard's own page stops at High. A speed bump, as on the
+ * board's own routes (see isDashboardRequest).
+ */
+function templateFor(req: Request, template: unknown): unknown {
+  if (isDashboardRequest(req) || typeof template !== 'object' || template === null) return template
+  const priority = (template as { priority?: unknown }).priority
+  return typeof priority === 'number'
+    ? { ...template, priority: clampAgentTaskPriority(priority) }
+    : template
+}
+
 export async function schedulesCreatePOST(req: Request, res: Response): Promise<void> {
   const body = (req.body ?? {}) as Partial<ScheduleCreateSpec>
   const teamRoutine = body.source === 'clawboo-routine' && body.target === 'team'
@@ -334,7 +350,10 @@ export async function schedulesCreatePOST(req: Request, res: Response): Promise<
   try {
     const schedule = await getScheduleMultiplexer().write({
       kind: 'create',
-      spec: body as ScheduleCreateSpec,
+      spec: {
+        ...(body as ScheduleCreateSpec),
+        ...('taskTemplate' in body ? { taskTemplate: templateFor(req, body.taskTemplate) } : {}),
+      },
     })
     res.status(201).json({ schedule: withName(schedule) })
   } catch (err) {
@@ -356,7 +375,12 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
       const schedule = await getScheduleMultiplexer().write({
         kind: 'update',
         id,
-        patch: body.patch,
+        patch: {
+          ...body.patch,
+          ...('taskTemplate' in body.patch
+            ? { taskTemplate: templateFor(req, body.patch.taskTemplate) }
+            : {}),
+        },
       })
       res.json({ schedule: withName(schedule) })
       return

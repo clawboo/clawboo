@@ -53,7 +53,14 @@ to anyone changing them:
   `get_task`, `add_comment` and `block_task` use when a call leaves out `taskId`. Cancelling a task
   with `update_task_status` cancels the plan steps waiting on it and leaves its delegator a mailbox note. A lost
   claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep) come back as tool
-  errors the model should not retry.
+  errors the model should not retry. Every argument naming a task takes its readable id too, resolved in one wrapper
+  (`acceptReadableIds`) and only within a bound team. `create_task` and `create_subtask` send an idempotency key, the
+  caller's (kept to the bound task, else the agent, else the team, and to the parent and title) or one derived from
+  the bound task, the parent and the title. With no bound task it derives from the team and matches only an open
+  task. They mark the create as an agent's, so the same-title check applies; a repeat returns the existing task with
+  `deduplicated: true`. `priority`
+  stops at High (`clampAgentTaskPriority`). `assign_task` refuses a hand-off back up the chain unless the target is a
+  lead, which the host names with `isLeadAgent`; the default is the team's own lead.
 - **Tools.** Every call runs through the `@clawboo/db` broker, so a connector tool is checked against the agent's
   grants. A connector tool is listed only to an agent whose grant would allow it.
 - **TeamChat.** `team_delegate` only signals: the team engine sees the tool call and creates the board task.

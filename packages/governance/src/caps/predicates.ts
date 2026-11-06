@@ -28,6 +28,10 @@ export const DEFAULT_MAX_CHILDREN = 24
 export const DEFAULT_MAX_ROOT_CREATES = 30
 export const DEFAULT_ROOT_CREATE_WINDOW_MS = 5 * 60_000
 
+/** The most steps one plan may have. A plan is one model's guess at a whole job, so
+ *  one too long is refused whole rather than started and cut. */
+export const DEFAULT_MAX_PLAN_STEPS = 25
+
 /** Reject once the existing ancestor depth has reached the max (would create depth+1). */
 export function checkDepthCap({ depth, max }: { depth: number; max: number }): CapResult {
   if (depth >= max) return { ok: false, reason: `delegation depth ${depth} >= max ${max}` }

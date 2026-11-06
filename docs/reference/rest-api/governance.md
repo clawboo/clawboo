@@ -214,12 +214,12 @@ The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-run
 
 - **Query params**:
 
-| Param       | Type                                                                                                   | Default | Notes                                                      |
-| ----------- | ------------------------------------------------------------------------------------------------------ | ------- | ---------------------------------------------------------- |
-| `agentId`   | string                                                                                                 | none    | Only this agent's rows                                     |
-| `eventType` | `'install' \| 'approval' \| 'tool_call' \| 'budget' \| 'cap_hit' \| 'verification' \| 'circuit_break'` | none    | Any other value is ignored                                 |
-| `since`     | number                                                                                                 | none    | `createdAt` lower bound (epoch ms); used only when above 0 |
-| `limit`     | number                                                                                                 | `200`   | At most 1000; used only when above 0                       |
+| Param       | Type                                                                                                              | Default | Notes                                                      |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- | ------- | ---------------------------------------------------------- |
+| `agentId`   | string                                                                                                            | none    | Only this agent's rows                                     |
+| `eventType` | `'install' \| 'approval' \| 'tool_call' \| 'budget' \| 'cap_hit' \| 'verification' \| 'circuit_break' \| 'board'` | none    | Any other value is ignored                                 |
+| `since`     | number                                                                                                            | none    | `createdAt` lower bound (epoch ms); used only when above 0 |
+| `limit`     | number                                                                                                            | `200`   | At most 1000; used only when above 0                       |
 
 - **Request body**: none.
 
@@ -232,7 +232,14 @@ The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-run
   audit: Array<{
     id: string
     eventType:
-      'install' | 'approval' | 'tool_call' | 'budget' | 'cap_hit' | 'verification' | 'circuit_break'
+      | 'install'
+      | 'approval'
+      | 'tool_call'
+      | 'budget'
+      | 'cap_hit'
+      | 'verification'
+      | 'circuit_break'
+      | 'board'
     agentId: string | null
     taskId: string | null
     teamId: string | null

@@ -245,12 +245,13 @@ The **Audit log** at the bottom of **Governance** keeps a record of what Clawboo
 
 The event types that matter for spend:
 
-| Event type      | What it records                                                                                                                           |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `budget`        | A budget passing 80% or 100% on an agent routine, an API run or an OpenClaw routine, and each run a hard cap auto-paused or finished past |
-| `cap_hit`       | A team-chat turn that tried to start more hand-offs than the fan-out cap allows                                                           |
-| `circuit_break` | A circuit breaker stopping an agent routine or API run that was going nowhere                                                             |
-| `approval`      | Decisions on risky hand-offs, and unanswered approvals that Clawboo's cleanup expired                                                     |
+| Event type      | What it records                                                                                                                                 |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `budget`        | A budget passing 80% or 100% on an agent routine, an API run or an OpenClaw routine, and each run a hard cap auto-paused or finished past       |
+| `cap_hit`       | A team-chat turn that tried to start more hand-offs than the fan-out cap allows, a plan too long, or a hand-off over the child or top-level cap |
+| `circuit_break` | A circuit breaker stopping an agent routine or API run that was going nowhere                                                                   |
+| `board`         | A person setting a team's task id letters, changing a label, or changing a task's labels                                                        |
+| `approval`      | Decisions on risky hand-offs, and unanswered approvals that Clawboo's cleanup expired                                                           |
 
 Resuming a budget writes no entry, and neither does a run a budget refused, or spend in team chat or one-to-one chat.
 

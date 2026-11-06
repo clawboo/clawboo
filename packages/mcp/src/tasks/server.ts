@@ -7,23 +7,32 @@ import {
   addComment,
   blockTask,
   cancelDependents,
+  clampAgentTaskPriority,
   claimTask,
   createCappedRootTask,
   createCappedSubtask,
   delegatorOf,
+  deriveCreateKey,
   enqueueInbox,
+  findHandOffCycle,
   getAncestors,
   getComments,
   getReadyTasks,
   getTask,
+  handOffChain,
+  isTaskIdentifier,
+  isTeamLeadAgent,
   linkDep,
   listTasks,
   releaseTask,
+  resolveTaskRef,
+  setTaskDelegator,
   TaskDependencyCycleError,
   taskStatusSchema,
   unblockTask,
   updateStatus,
   type ClawbooDb,
+  type CreatedTask,
   type CreateTaskInput,
   type DbTask,
   type GuardedCreateResult,
@@ -98,7 +107,7 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
   // repeat-policy-denied rule instead of looping against the wall forever.
   if (result.reason === 'child_cap') {
     return textResult(
-      `subtask rejected: parent ${parentTaskId} already has ${result.count} children (max ${result.max}); drop one or attach the new task elsewhere`,
+      `subtask rejected: parent ${parentTaskId} already has ${result.count} children (max ${result.max}). Finished and cancelled children still count, and only a person cancelling one frees a place. Attach the new task elsewhere, or tell the person.`,
       true,
       result.reason,
     )
@@ -119,6 +128,27 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
     )
   }
   return textResult(`parent not found: ${parentTaskId}`, true, result.reason)
+}
+
+/** The arguments that name a task, and so take a readable id as well as an id. */
+const TASK_REF_ARGS = ['taskId', 'parentTaskId', 'dependsOnTaskId'] as const
+
+/**
+ * A created task as the model reads it. A create that found its task already there
+ * says so and names it, so the model works with that one. It does not say how a
+ * second one could be made: the check exists to stop exactly that.
+ */
+function createdResult(task: CreatedTask): McpToolResult {
+  if (!task.deduplicated) return jsonResult(task)
+  const name = task.identifier ?? `"${task.title}"`
+  const status = STATUS_WORD[task.status] ?? task.status
+  return jsonResult({
+    ...task,
+    note:
+      task.deduplicatedBy === 'title'
+        ? `An open task with this title already exists under the same parent: ${name}, ${status}. No second task was made. This is that task.`
+        : `This task was already created: ${name}, ${status}. No second task was made. This is that task.`,
+  })
 }
 
 /**
@@ -248,6 +278,13 @@ export interface TasksServerOptions {
    * task the bound agent is working on.
    */
   teamRun?: boolean
+
+  /**
+   * Is this agent a lead of the team? A hand-off to a lead is an escalation, which
+   * the cycle guard lets through. Defaults to the team's own lead; the server adds
+   * Boo Zero, which leads every team.
+   */
+  isLeadAgent?: (teamId: string | null, agentId: string) => boolean
 }
 
 export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Server {
@@ -286,6 +323,57 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   /** Appended to a one-task tool's description when a task is bound. */
   const ownTaskHint = (verb: string): string =>
     boundTaskId ? ` Leave out taskId to ${verb} the task you are working on.` : ''
+
+  const isLead = opts?.isLeadAgent ?? ((teamId, agentId) => isTeamLeadAgent(db, teamId, agentId))
+
+  /**
+   * The create's idempotency key. A key the caller named is the model's own word, so
+   * it only means this create from this caller: kept to the run's task, else the agent,
+   * else the team, and to this parent and title. Agent B's `subtask-1` is not agent A's.
+   *
+   * With none, the key comes from the run's task, the parent and the title, so a run
+   * that makes a sub-task twice gets one, even once it has finished. A caller with no
+   * bound task (an OpenClaw session, a lead's chat turn) falls back to the team, which
+   * speaks for every teammate's create, so it matches only a task still open: Monday's
+   * finished digest is not what Tuesday's create is asking for.
+   */
+  const createKeyFor = (
+    args: Record<string, unknown>,
+    teamId: string | null | undefined,
+    parentTaskId: string | undefined,
+  ): CreateTaskInput['createKey'] => {
+    const title = str(args['title'])
+    const parent = parentTaskId ?? ''
+    const named = optStr(args['idempotencyKey'])
+    if (named) {
+      const owner = boundTaskId
+        ? ['task', boundTaskId]
+        : boundAgentId
+          ? ['agent', boundAgentId]
+          : ['team', teamId ?? '']
+      return { key: deriveCreateKey(['mcp', ...owner, parent, named], title).key }
+    }
+    if (boundTaskId) return deriveCreateKey(['mcp-task', boundTaskId, parent], title)
+    return { ...deriveCreateKey(['mcp-team', teamId ?? '', parent], title), openOnly: true }
+  }
+
+  /** The refusal for a hand-off that would go back to an agent waiting on this
+   *  work, or null. See `findHandOffCycle`. A lead is exempt, and handing a task to
+   *  yourself hands nothing off. */
+  const handOffRefusal = (taskId: string, targetAgentId: string): McpToolResult | null => {
+    if (targetAgentId === boundAgentId) return null
+    if (isLead(getTask(db, taskId)?.teamId ?? null, targetAgentId)) return null
+    const cycle = findHandOffCycle(handOffChain(db, taskId), targetAgentId, {
+      ownTaskId: boundTaskId ?? null,
+    })
+    if (!cycle) return null
+    const name = cycle.identifier ?? `"${cycle.title}"`
+    return textResult(
+      `Not handed off: ${targetAgentId} handed out ${name}, which is still open, so this cannot go back to them. Each would wait on the other. Finish your part and report back; for a blocker, go to the team lead.`,
+      true,
+      'hand_off_cycle',
+    )
+  }
 
   const claimFor = (args: Record<string, unknown>, assigneeAgentId: string): McpToolResult => {
     const denied = outOfTeam(str(args['taskId']))
@@ -339,7 +427,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'get_task',
-      description: `Get a task with its comments and ancestor chain.${ownTaskHint('read')}`,
+      description: `Get a task with its comments and ancestor chain. taskId here and on every tool takes the id or the readable id, like CLB-12.${ownTaskHint('read')}`,
       inputSchema: z.object({ taskId: taskIdField }),
       handler: (args) => {
         const id = taskOf(args)
@@ -354,7 +442,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     {
       name: 'create_task',
       description:
-        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply. Without one it is a root task, rate-limited per rolling window. priority: 2 urgent, 1 high, 0 normal (the default), -1 low; any other number is held to that range.',
+        'Create a board task. With parentTaskId set it is a subtask: the per-parent child-count and nesting-depth caps apply. Without one it is a root task, rate-limited per rolling window. priority: 1 high, 0 normal (the default), -1 low; only a person can make a task urgent, and any other number is held to that range. A task is made once: repeating a create, or creating an open task with the same title under the same parent within 48 hours, returns the existing task with deduplicated: true. Pass idempotencyKey to name a create, so a retry of it by you, with this title and parent, returns the same task.',
       inputSchema: z.object({
         title: z.string(),
         description: z.string().optional(),
@@ -366,24 +454,37 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         // the zod→JSON-Schema converter emits { type: 'string' } either way.
         parentTaskId: z.string().min(1).optional(),
         assigneeRuntime: z.string().optional(),
+        idempotencyKey: z.string().min(1).max(200).optional(),
       }),
       handler: (args) => {
+        // A bound session creates INTO ITS TEAM, full stop. The caller's teamId
+        // was honoured verbatim, so a bound model could create into any team by
+        // naming it: the one write the outOfTeam guard below cannot catch,
+        // because the task does not exist yet. Membership in the team is the
+        // binding's decision, not the argument's.
+        const teamId = boundTeamId ?? optStr(args['teamId'])
+        // No parent ⇒ a ROOT task, bounded by a rolling-window rate cap instead
+        // (a per-parent ceiling has no subject there).
+        const parentTaskId = optStr(args['parentTaskId'])
         const input: Omit<CreateTaskInput, 'parentTaskId'> = {
           title: str(args['title']),
           description: optStr(args['description']),
           status: optStr(args['status']) as TaskStatus | undefined,
-          priority: typeof args['priority'] === 'number' ? args['priority'] : undefined,
-          // A bound session creates INTO ITS TEAM, full stop. The caller's teamId
-          // was honoured verbatim, so a bound model could create into any team by
-          // naming it: the one write the outOfTeam guard below cannot catch,
-          // because the task does not exist yet. Membership in the team is the
-          // binding's decision, not the argument's.
-          teamId: boundTeamId ?? optStr(args['teamId']),
+          // Urgent is a person's call; see clampAgentTaskPriority.
+          priority:
+            typeof args['priority'] === 'number'
+              ? clampAgentTaskPriority(args['priority'])
+              : undefined,
+          teamId,
           assigneeRuntime: optStr(args['assigneeRuntime']),
+          agentCreated: true,
+          delegatedByAgentId: boundAgentId ?? null,
+          createKey: createKeyFor(
+            args,
+            teamId ?? (parentTaskId ? getTask(db, parentTaskId)?.teamId : null),
+            parentTaskId,
+          ),
         }
-        // No parent ⇒ a ROOT task, bounded by a rolling-window rate cap instead
-        // (a per-parent ceiling has no subject there).
-        const parentTaskId = optStr(args['parentTaskId'])
         // A subtask INHERITS its parent's team, so a parent outside the binding
         // is a cross-team write wearing a create's clothes.
         if (parentTaskId) {
@@ -393,17 +494,18 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const result = parentTaskId
           ? createCappedSubtask(db, parentTaskId, input)
           : createCappedRootTask(db, input)
-        return result.ok ? jsonResult(result.task) : createDenial(result, parentTaskId)
+        return result.ok ? createdResult(result.task) : createDenial(result, parentTaskId)
       },
     },
     {
       name: 'create_subtask',
       description:
-        'Create a subtask under a parent (inherits the parent team). Capped per parent (child count) and by nesting depth.',
+        'Create a subtask under a parent (inherits the parent team). Capped per parent (child count) and by nesting depth. A task is made once: repeating a create, or creating an open task with the same title under the same parent within 48 hours, returns the existing task with deduplicated: true.',
       inputSchema: z.object({
         parentTaskId: z.string().min(1),
         title: z.string(),
         description: z.string().optional(),
+        idempotencyKey: z.string().min(1).max(200).optional(),
       }),
       handler: (args) => {
         const parentTaskId = str(args['parentTaskId'])
@@ -415,8 +517,15 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const result = createCappedSubtask(db, parentTaskId, {
           title: str(args['title']),
           description: optStr(args['description']),
+          agentCreated: true,
+          delegatedByAgentId: boundAgentId ?? null,
+          createKey: createKeyFor(
+            args,
+            boundTeamId ?? getTask(db, parentTaskId)?.teamId,
+            parentTaskId,
+          ),
         })
-        return result.ok ? jsonResult(result.task) : createDenial(result, parentTaskId)
+        return result.ok ? createdResult(result.task) : createDenial(result, parentTaskId)
       },
     },
     {
@@ -441,9 +550,20 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     {
       name: 'assign_task',
       description:
-        'Assign a todo task to an agent (same atomic claim; conflict means already assigned).',
+        'Assign a todo task to an agent (same atomic claim; conflict means already assigned). A task cannot go back to an agent that handed out one of its open parents, except the team lead.',
       inputSchema: assignSchema,
-      handler: (args) => claimFor(args, str(args['assigneeAgentId'])),
+      handler: (args) => {
+        const taskId = str(args['taskId'])
+        const target = str(args['assigneeAgentId'])
+        const denied = outOfTeam(taskId) ?? handOffRefusal(taskId, target)
+        if (denied) return denied
+        const result = claimFor(args, target)
+        // Who handed it out, for the guard on whatever comes back down this chain.
+        if (!result.isError && boundAgentId && boundAgentId !== target) {
+          setTaskDelegator(db, taskId, boundAgentId)
+        }
+        return result
+      },
     },
     {
       name: 'release_task',
@@ -600,14 +720,36 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
   ]
 
+  /**
+   * A readable id in an argument becomes the task's id before the tool sees it, so
+   * every tool takes both and no tool can miss it. A reference that does not resolve
+   * reaches the tool as it came, which answers "not found" in the caller's own words.
+   * A bound session resolves only its own team's ids, so it cannot learn what another
+   * team's readable id points at.
+   */
+  const acceptReadableIds = (tool: ToolDef): ToolDef => ({
+    ...tool,
+    handler: (args) => {
+      const resolved: Record<string, unknown> = { ...args }
+      for (const name of TASK_REF_ARGS) {
+        const ref = args[name]
+        if (typeof ref !== 'string' || !isTaskIdentifier(ref)) continue
+        const id = resolveTaskRef(db, ref, boundTeamId ? { teamId: boundTeamId } : {})
+        if (id) resolved[name] = id
+      }
+      return tool.handler(resolved)
+    },
+  })
+
   const withheld = new Set<string>()
   if (teamRun) for (const name of TEAM_RUN_WITHHELD_TOOL_NAMES) withheld.add(name)
   if (opts?.unverifiedCaller === true)
     for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES]) withheld.add(name)
-  const active =
+  const active = (
     opts?.readOnly === true
       ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name))
       : tools.filter((t) => !withheld.has(t.name))
+  ).map(acceptReadableIds)
   // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).
   return buildServer(
     'clawboo-tasks',

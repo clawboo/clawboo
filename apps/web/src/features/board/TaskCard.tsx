@@ -31,10 +31,13 @@ import { useFleetStore } from '@/stores/fleet'
 
 import type { CardProperties } from './BoardToolbar'
 
+import { labelsOfTask } from '@/lib/teamLabels'
+
 import { boardColumnOf } from './boardStatus'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { sitsOnOtherDay } from './finishMove'
 import { StatusGlyph } from './StatusGlyph'
+import { LabelChip } from './TaskLabelsSelect'
 import { formatCostUsd, formatRunCost, runCostOf } from './taskCost'
 
 /** What every card shows besides its title and agent, from the Display popover. */
@@ -243,6 +246,9 @@ function CostLabel({
   )
 }
 
+/** How many labels a card has room for; the rest are in a tooltip and the drawer. */
+const MAX_CARD_LABELS = 2
+
 /**
  * A calendar chip's meta row, one line: who has it, a raised priority, at most
  * one status mark (else its cost), a subtask arrow when neither of those has
@@ -267,8 +273,17 @@ function ChipMeta({
   const subtask = !!task['parentTaskId']
   const shows = useContext(CardPropertiesContext)
   const costShown = shows.cost && cost.usd !== null
+  const labels = labelsOfTask(task)
   return (
     <div className="flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-1">
+      {task.identifier ? (
+        <span
+          data-testid="board-card-identifier"
+          className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground"
+        >
+          {task.identifier}
+        </span>
+      ) : null}
       {ownerId ? (
         <span title={ownerName ?? undefined} className="inline-flex shrink-0 items-center">
           <AgentBooAvatar agentId={ownerId} size={16} />
@@ -299,6 +314,20 @@ function ChipMeta({
         <IconMark label="Subtask" className="text-muted-foreground">
           <CornerDownRight size={12} strokeWidth={2} aria-hidden />
         </IconMark>
+      ) : null}
+      {labels.slice(0, MAX_CARD_LABELS).map((label) => (
+        <LabelChip key={label.id} name={label.name} />
+      ))}
+      {labels.length > MAX_CARD_LABELS ? (
+        <span
+          className="text-xs text-muted-foreground"
+          title={labels
+            .slice(MAX_CARD_LABELS)
+            .map((label) => label.name)
+            .join(', ')}
+        >
+          +{labels.length - MAX_CARD_LABELS}
+        </span>
       ) : null}
       {stamp && shows.time ? <StampLabel stamp={stamp} /> : null}
     </div>

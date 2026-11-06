@@ -71,6 +71,7 @@ export const taskAttentionFrameSchema = z.object({
  *  present; a client merges the rest into the task it already holds. */
 export const boardChangeFrameSchema = z.object({
   id: z.string(),
+  identifier: z.string().nullable().optional(),
   title: z.string().optional(),
   status: z.string().optional(),
   assigneeAgentId: z.string().nullable().optional(),

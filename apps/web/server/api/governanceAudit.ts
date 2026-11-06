@@ -20,6 +20,7 @@ const EVENT_TYPES = [
   'cap_hit',
   'verification',
   'circuit_break',
+  'board',
 ] as const
 const isEventType = (v: unknown): v is GovernanceEventType =>
   typeof v === 'string' && (EVENT_TYPES as readonly string[]).includes(v)

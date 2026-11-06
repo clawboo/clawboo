@@ -78,7 +78,7 @@ The toolbar under it holds these controls, left to right:
 | **Needs you**              | Shows when the Needs you column is out of view, with its count. Click it to bring Needs you into view                                                                                      |
 | Agents working             | Reads, for example, **2 agents working** while runs are going, with the faces of the agents at work. Click it to show only running work, and again to show everything                      |
 | Search button              | Opens **Find** (`/` or `Cmd/Ctrl+K`)                                                                                                                                                       |
-| **Filter**                 | Shows only some agents' tasks, tasks with **No agent**, or what is **Running now**. The button counts the filters that are on, and **Clear filters** turns them off                        |
+| **Filter**                 | Shows only some agents' tasks, tasks with **No agent**, what is **Running now**, or tasks with a label. The button counts the filters that are on, and **Clear filters** turns them off    |
 | **Display**                | **Routine runs** (calendar views only) shows or hides upcoming routine runs. **Cancelled column** opens or folds Cancelled. **On cards** turns each card's **Cost** and **Time** on or off |
 | View menu (names the view) | Switches between **Kanban**, **Today**, **Week** and **Month**, and lists each view's key                                                                                                  |
 
@@ -105,11 +105,13 @@ Each column title has a small status mark in the column's color, and counts the 
 
 Cards are neutral: color appears only in the status marks, and amber marks what needs you. A card shows the task's title, on up to two lines, and one row of details:
 
+- **Id**: the task's readable id, like `MAR-12`. See [Task ids](#task-ids).
 - **Agent**: the face of the agent that has the task. In **To do**, a dashed circle means no agent is bound to it.
 - **Priority**: two small up chevrons for an **Urgent** task, one for **High**. A **Normal** or **Low** task shows nothing here. Point at the mark to read it.
 - **Status mark**: **Verifying** while the work is checked. After a check, an amber cross means it failed, an amber dashed circle means it passed with debt (open issues noted), and a green check means it passed (until the card reaches Done). A card with no mark shows its cost here.
 - **Cost**: what all of the task's runs cost, once a run has recorded a cost. A figure that starts with `~` is an estimate: the runtime reported no charge, so Clawboo priced the run itself. A cost under a cent reads `<$0.01`, and a task whose runs all ran on a model your own Ollama serves reads `free`. When a status mark takes the cost's place, point at the card to see the cost. Which runtimes report real cost is in [Budgets and spend](/using/budgets-and-spend).
 - **Subtask**: a small arrow when another task handed this one out and the card has no mark or cost to show. Otherwise the mark's or the cost's tooltip says it is a subtask.
+- **Labels**: up to two of the task's labels, then a count of the rest. See [Labels](#labels).
 - **Time**: on Kanban, how long ago the task was added or finished, such as "4m ago", "Yesterday" or "3d ago". A calendar view shows the clock time, and the Earlier row the date. A running task shows how long its current run has gone, after a small live dot. Point at the time for the full date.
 
 **Display** > **On cards** turns the **Cost** and **Time** off and on for every card.
@@ -314,7 +316,21 @@ Cards in **Needs you** move with their own buttons instead of by dragging. With 
 
 ### Set a task's priority
 
-A task has one of four priorities: **Urgent**, **High**, **Normal** (every task starts there) and **Low**. Change it with **Priority** in the drawer's **Properties**. When an agent has several tasks waiting, it starts the highest priority first, and the most recently updated first within one priority. An agent that creates a task through its Tasks tools can set its priority too, as a number from 2 (Urgent) down to -1 (Low); any other number is held to that range, so no task can jump ahead of an urgent one.
+A task has one of four priorities: **Urgent**, **High**, **Normal** (every task starts there) and **Low**. Only you can set **Urgent**: an agent creating a task stops at **High**. Change it with **Priority** in the drawer's **Properties**. When an agent has several tasks waiting, it starts the highest priority first, and the most recently updated first within one priority. An agent that creates a task through its Tasks tools can set its priority too, as a number from 1 (High) down to -1 (Low); any other number is held to that range, so no agent's task can jump ahead of an urgent one. The same limit applies to anything that sets a priority without going through this page, such as a routine created through the API.
+
+### Task ids
+
+Every task of a team has a readable id, on its card, at the top of its drawer and on its card in team chat. Tell an agent "look at `MAR-12`" and it can find it. **Find** matches an id too.
+
+The letters come from the team's name. To use others, open the team's settings from its chat header and change **Task ids**. You can do that until the team's first task exists. After that the letters are fixed, and renaming the team changes nothing. Two teams cannot share letters: Clawboo offers the next free set, like `MA2`, and refuses a set another team uses.
+
+A task with no team has no readable id. Tasks from before this feature got their ids in the order they were made, the first time Clawboo started after the update.
+
+### Labels
+
+Labels are a team's own words for sorting its board. Set them with **Labels** in the drawer's **Properties**: tick the ones you want, or type a new name. To rename or remove a label for the whole team, open the team's settings and go to **Labels**. Removing one takes it off every task.
+
+**Filter** lists the labels on the tasks in view. Under **All teams**, two teams' labels with the same name are one entry. Agents do not set labels.
 
 ### Review what an agent built
 

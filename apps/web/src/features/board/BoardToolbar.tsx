@@ -209,21 +209,32 @@ export interface BoardFilter {
   agents: ReadonlySet<string>
   unowned: boolean
   running: boolean
+  /** Label names, compared without case: under All teams, two teams' "Bug" are one. */
+  labels: ReadonlySet<string>
 }
 
-export const NO_FILTER: BoardFilter = { agents: new Set(), unowned: false, running: false }
+export const NO_FILTER: BoardFilter = {
+  agents: new Set(),
+  unowned: false,
+  running: false,
+  labels: new Set(),
+}
 
 export function filterCount(f: BoardFilter): number {
-  return f.agents.size + (f.unowned ? 1 : 0) + (f.running ? 1 : 0)
+  return f.agents.size + (f.unowned ? 1 : 0) + (f.running ? 1 : 0) + f.labels.size
 }
 
-/** Filter: the agents in scope, the tasks with no agent, and the running work. */
+/** Filter: the agents in scope, the tasks with no agent, the running work, and the
+ *  labels on the board's tasks. */
 export function FilterMenuButton({
   agents,
+  labels = [],
   filter,
   onChange,
 }: {
   agents: { id: string; name: string }[]
+  /** The label names on the tasks in view. */
+  labels?: readonly string[]
   filter: BoardFilter
   onChange: (next: BoardFilter) => void
 }) {
@@ -234,6 +245,13 @@ export function FilterMenuButton({
     if (agentsNext.has(id)) agentsNext.delete(id)
     else agentsNext.add(id)
     onChange({ ...filter, agents: agentsNext })
+  }
+  const toggleLabel = (name: string) => {
+    const key = name.toLowerCase()
+    const labelsNext = new Set(filter.labels)
+    if (labelsNext.has(key)) labelsNext.delete(key)
+    else labelsNext.add(key)
+    onChange({ ...filter, labels: labelsNext })
   }
   const items: BoardMenuItem[] = [
     ...agents.map((a, i) => ({
@@ -258,6 +276,13 @@ export function FilterMenuButton({
       checked: filter.running,
       onSelect: () => onChange({ ...filter, running: !filter.running }),
     },
+    ...labels.map((name, i) => ({
+      key: `label:${name.toLowerCase()}`,
+      label: name,
+      group: i === 0 ? 'Labels' : undefined,
+      checked: filter.labels.has(name.toLowerCase()),
+      onSelect: () => toggleLabel(name),
+    })),
     ...(count > 0
       ? [
           {

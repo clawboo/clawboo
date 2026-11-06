@@ -137,6 +137,7 @@ interface TaskText {
   agent: string
   description: string
   id: string
+  identifier: string
 }
 
 /** A token's best field on a task, or null when no field holds it. */
@@ -146,6 +147,10 @@ function bestField(token: string, text: TaskText): { score: number; field: FindF
   const agent = textScore(text.agent, token, AGENT_WORD, AGENT_WORD, AGENT_CONTAINS)
   if (agent > 0) return { score: agent, field: 'agent' }
   if (token.length >= ID_MIN_TOKEN && text.id.startsWith(token)) {
+    return { score: ID_PREFIX, field: 'id' }
+  }
+  // A readable id is short, so one is read whole or by its letters, from two characters.
+  if (token.length >= 2 && text.identifier !== '' && text.identifier.startsWith(token)) {
     return { score: ID_PREFIX, field: 'id' }
   }
   if (text.description.includes(token)) return { score: DESCRIPTION_CONTAINS, field: 'description' }
@@ -227,6 +232,7 @@ export function matchBoard(query: string, input: FindInput): FindResult[] {
       agent: normalizedOf((owner && input.agentName(owner)) ?? ''),
       description: typeof task.description === 'string' ? normalizedOf(task.description) : '',
       id: task.id.toLowerCase(),
+      identifier: task.identifier?.toLowerCase() ?? '',
     }
     const match = matchTask(tokens, text)
     if (!match) continue

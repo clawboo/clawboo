@@ -176,6 +176,10 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
     setPickedAgent(null)
   }
 
+  // One key per draft, so a create whose answer was lost and is sent again returns the
+  // same task. Editing the draft makes it another create.
+  const draftKey = useMemo(() => crypto.randomUUID(), [trimmedTitle, description, agent?.id])
+
   // Enter in the one field submits the form, so this is also the Enter path.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -186,6 +190,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
       description: description.trim() || undefined,
       teamId: agent.teamId,
       assigneeAgentId: agent.id,
+      idempotencyKey: draftKey,
     })
     if (task) {
       rememberAssignee(agent.teamId, agent.id)

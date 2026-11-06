@@ -29,6 +29,7 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | POST   | `/api/board/:taskId/claim`               | Claim a `todo` task for one agent (409 if taken)              | No      |
 | PATCH  | `/api/board/:taskId`                     | Change status (checked) and edit title, description, priority | No      |
 | POST   | `/api/board/:taskId/comments`            | Add a comment (a person's reply reaches the task's agent)     | No      |
+| PUT    | `/api/board/:taskId/labels`              | Replace a task's labels (dashboard only)                      | No      |
 | POST   | `/api/board/:taskId/executions`          | Open a run in the ledger (after a claim)                      | No      |
 | PATCH  | `/api/board/executions/:execId`          | Close a run with its outcome, tokens and cost                 | No      |
 | GET    | `/api/board/:taskId/executions`          | The task's run ledger                                         | No      |
@@ -86,6 +87,8 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 {
   tasks: Array<{
     id: string
+    identifier: string | null // the readable id, like MAR-12; null for a task with no team
+    labels: Array<{ id: string; name: string }>
     title: string
     description: string | null
     status: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
@@ -158,7 +161,7 @@ curl 'http://localhost:18790/api/board?teamId=<team-id>&status=in_progress'
 
 Creates a task. `status` defaults to `todo` (ready to be claimed); pass `backlog` to park it. On success the route writes a `task_created` event to the [event log](/reference/rest-api/observability); a failed event write never fails the request.
 
-Set `parentTaskId` to make a subtask. This route applies no child-count or depth limit (the Tasks MCP server's `create_subtask` does; see [MCP tools](/reference/mcp-tools)), and it does not copy the parent's team or room. A `parentTaskId` that does not exist fails the database's foreign key and answers **500**.
+Set `parentTaskId` to make a subtask. This route applies no child-count or depth limit (the Tasks MCP server's `create_subtask` and the team engine's hand-offs do; see [MCP tools](/reference/mcp-tools)), and it does not copy the parent's team or room. A `parentTaskId` that does not exist fails the database's foreign key and answers **500**.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -169,14 +172,18 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number             // integer: 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
+                                // urgent only from the dashboard's page; anything else stops at 1
   teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
   sourceDelegationId?: string
   tenantId?: string             // non-empty if present
   assigneeAgentId?: string      // create the task FOR this agent (see below)
+  idempotencyKey?: string       // 1 to 200 chars; the same key, within a team, returns the same task
 }
 ```
+
+**With `idempotencyKey`** (the New task dialog sends one per draft), a repeat returns the task the key first made, with `deduplicated: true` beside `task`. It writes no event and starts no run. This route skips the same-title check that agents' creates go through: a person's two tasks with one title are two tasks.
 
 **With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's engine to run now (the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
 
@@ -402,10 +409,12 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 Changes a task's status, edits its `priority`, `title` or `description`, or both. At least one field is required. The status change follows the [status rules](#task-statuses) (an illegal move is **409** `illegal_transition`). A move to `done` is also refused with **409** `verification_required` when the task's stored check result is `fail`, or `completed_with_debt` with a failing last check. The only way past that is `humanOverride: true`, and a `done` with the override writes a `verification` row to the [audit log](/reference/rest-api/governance).
 
+A `priority` of Urgent is kept only from the dashboard's own page; any other caller stops at High. That check is a speed bump, not a boundary (see [Security](/operating/security)).
+
 This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task:
 
 - A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (up to 5 minutes ahead of the server clock is allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
-- A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`.
+- A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`. It frees each of their places under their parent for the [Tasks tools' child cap](/reference/mcp-tools#creation-caps).
 - A move to `backlog`, `todo`, `blocked`, `done` or `cancelled` stops the run working on the task, whether team chat, the task runner or an OpenClaw Routine fire started it, and closes its ledger row as cancelled. A move to `in_progress` or `in_review` stops nothing. A task moved back to `todo` while it was running is started again for its bound agent.
 - Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.
 - The move is stamped on the task as `personMovedAt`. Until a run starts after it, the agent's own status writes through the [tasks MCP tools](/reference/mcp-tools) (`update_task_status`, `block_task`, `unblock_task`) are refused with a tool error that names the column the person chose and tells the agent not to retry, so the run the person overruled cannot put the card back. A run that starts after the move writes as usual.
@@ -589,6 +598,27 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
   -H 'Content-Type: application/json' \
   -d '{"body":"Use the v2 schema; it landed this morning.","authorType":"user"}'
 ```
+
+---
+
+## `PUT /api/board/:taskId/labels`
+
+Replaces the task's labels with this set, all from its own team. A person's call: a request that did not come from the dashboard's own page gets **403** `person_only`. That check is a speed bump, not a boundary (see [Security](/operating/security)). The change goes on the [audit feed](/reference/rest-api/governance) as a `board` event, with the person a sign-in proxy vouched for.
+
+- **Path params**: `taskId`.
+- **Request body**: `{ labelIds: string[] }`. At most 10.
+
+### Responses
+
+**`200 OK`**: `{ labels: Array<{ id: string; name: string }> }`.
+
+**`400 Bad Request`**: the body failed validation.
+
+**`403 Forbidden`**: `{ "error": "person_only" }`.
+
+**`404 Not Found`**: `{ "error": "not_found" }`, no such task.
+
+**`409 Conflict`**: `{ "error": "label_not_in_team" }` (a label of another team, or any label on a task with no team) or `{ "error": "too_many" }`.
 
 ---
 

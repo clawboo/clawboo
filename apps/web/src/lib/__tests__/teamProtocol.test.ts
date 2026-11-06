@@ -90,6 +90,18 @@ describe('buildTeamAgentsMd', () => {
     expect(result).toContain(rules)
   })
 
+  it('tells the agent a task is made once and a hand-off cannot go back up, with no way around', () => {
+    const result = buildTeamAgentsMd({
+      agentName: 'Dev Boo',
+      teamName: 'Dev Team',
+      teammates: [{ name: 'QA Boo', role: 'Tests' }],
+      routingRules: '',
+    })
+    expect(result).toContain('The board makes a task once')
+    expect(result).toContain('cannot go back to an agent waiting on your work, except the lead')
+    expect(result).not.toMatch(/different title|reword|rename the task/i)
+  })
+
   it('includes the Delegation Protocol section with the <delegate> tag example', () => {
     const result = buildTeamAgentsMd({
       agentName: 'Lead Dev Boo',

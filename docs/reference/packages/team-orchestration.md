@@ -72,9 +72,16 @@ would lose to its own claim, and one that completed the task would complete it t
   rejects with a `DeliveryRefusedError`, and its message becomes the task's failure comment and what the delegator
   is told. Any other rejection is reported as a message the agent did not receive.
 - **Bounded trees.** Delegation depth is capped by `MAX_SPAWN_DEPTH`, the same constant the board and the task
-  runner use, and fan-out per turn by `caps.maxFanout`. A lost claim is never retried. After
+  runner use, and fan-out per turn by `caps.maxFanout`, counted across the turn's events. A plan is capped at
+  `MAX_PLAN_STEPS` and refused whole past it. A lost claim is never retried. After
   `MAX_DELEGATION_FAILURES` failures in a row of the same task by the same agent, the engine refuses to delegate it
-  to that agent again and tells the delegator to handle it another way.
+  to that agent again and tells the delegator to handle it another way. The count lives on the board
+  (`delegationFailure` on `EngineBoardClient`), so it outlives the engine.
+- **One task, no circles.** A hand-off goes through `createHandOff`, the capped create: its key from the delivery
+  (`RunStamp.deliveryId`, since an event's `runId` repeats across turns on a resumed native session), the target and
+  the words returns the same task on a replay, and an open task with the same words from another turn is returned
+  instead of a second one, with one note to the sender. A hand-off back to an agent that delegated an open task on the
+  sender's chain is refused (`findHandOffCycle` from `@clawboo/board-core`), unless the target is the lead.
 - **Account failures are not re-delegated.** A run that ends on a fatal error is filed under its class
   (`classifyError` from `@clawboo/obs`, on the error's code and message), and the class goes on the run's ledger
   row. For `Auth` or `Billing` the task's comment says the sign-in or the account was refused, the failure report

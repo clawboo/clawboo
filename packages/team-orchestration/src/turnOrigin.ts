@@ -144,6 +144,12 @@ export interface RunStamp {
   reportForTaskId: string | null
   stopGen: number
   reportUpIds?: string[]
+  /**
+   * This one delivery, unique for good. An event's `runId` cannot serve: Codex binds
+   * it to the native thread and Hermes' quiet transport to the session key, so every
+   * turn of a resumed session carries the same one.
+   */
+  deliveryId?: string
 }
 
 /**

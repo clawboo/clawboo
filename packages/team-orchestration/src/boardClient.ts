@@ -10,9 +10,9 @@
 // @clawboo/board-core carries no server/db graph, so this host-agnostic interface
 // package stays browser-safe while using the SAME union @clawboo/db enforces — a
 // host binding over the direct-DB client type-checks by identity, not by luck.
-import type { TaskStatus } from '@clawboo/board-core'
+import type { HandOffLink, TaskStatus } from '@clawboo/board-core'
 
-export type { TaskStatus }
+export type { HandOffLink, TaskStatus }
 
 export interface CreateTaskInput {
   title: string
@@ -28,6 +28,8 @@ export interface CreateTaskInput {
 export interface BoardTask {
   id: string
   status: string
+  /** The readable id, like `CLB-12`; null for a task with no team. */
+  identifier?: string | null
   title?: string
   description?: string | null
   teamId?: string | null
@@ -112,4 +114,68 @@ export interface BoardClient {
    * tell the leader the plan chain stalled.
    */
   cancelDependents(taskId: string): Promise<Array<{ id: string; title?: string }>>
+}
+
+/** A hand-off the engine wants on the board. */
+export interface HandOffInput extends CreateTaskInput {
+  /**
+   * What makes a replay of this hand-off return the same task: who sent it from
+   * which turn, and the words. Left out when the event has no turn, since nothing
+   * then says it is the same hand-off.
+   */
+  handOffKey?: { scope: readonly string[]; text: string }
+  /**
+   * The turn it comes from. The same-title check skips this turn's own tasks: a turn
+   * asking two teammates the same thing, or a plan repeating a step (test, fix, test),
+   * means each one. A later turn saying the same words is a retry.
+   */
+  turnId?: string
+}
+
+export type HandOffRefusal = 'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap'
+
+export type HandOffResult =
+  | {
+      ok: true
+      task: BoardTask
+      /** The hand-off made no task: this one was there already. `key` is a replay of
+       *  this same hand-off, `title` is an open task with the same words. */
+      deduplicated?: 'key' | 'title'
+    }
+  | {
+      ok: false
+      reason: HandOffRefusal | 'error'
+      count?: number
+      max?: number
+      windowMs?: number
+    }
+
+export interface HandOffCapacity {
+  room: number
+  max: number
+  reason: 'child_cap' | 'root_rate_cap'
+}
+
+/** What the team engine needs on top of the board: capped, repeat-safe creates, the
+ *  chain the cycle guard reads, and the failure breaker. A browser has no use for
+ *  these, so its client does not carry them. Same contract: never throws. */
+export interface EngineBoardClient extends BoardClient {
+  createHandOff(input: HandOffInput): Promise<HandOffResult>
+  /** How many more of this team's tasks fit under this parent (null: at the root).
+   *  Null when unread. */
+  handOffRoom(teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null>
+  /** A task and its ancestors, nearest first. Null when unread. */
+  handOffChain(taskId: string): Promise<HandOffLink[] | null>
+  delegationFailure(
+    teamId: string,
+    targetAgentId: string,
+    taskKey: string,
+  ): Promise<{ failures: number; notified: boolean }>
+  noteDelegationFailure(teamId: string, targetAgentId: string, taskKey: string): Promise<void>
+  markDelegationFailureNotified(
+    teamId: string,
+    targetAgentId: string,
+    taskKey: string,
+  ): Promise<void>
+  clearDelegationFailure(teamId: string, targetAgentId: string, taskKey: string): Promise<void>
 }

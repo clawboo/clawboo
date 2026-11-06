@@ -9,10 +9,12 @@ import { randomUUID } from 'node:crypto'
 import {
   canTransition,
   clampTaskPriority,
+  delegatorOf,
   isTerminal,
   ledgerAllowsAutoFire,
   MAX_TASK_PRIORITY,
   MIN_TASK_PRIORITY,
+  type HandOffLink,
   type RunCostSource,
   type TaskStatus,
 } from '@clawboo/board-core'
@@ -37,6 +39,7 @@ import {
   taskComments,
   taskDeps,
   tasks,
+  teams,
   workspaces,
   type DbExecutionProcess,
   type DbTask,
@@ -44,7 +47,17 @@ import {
   type DbWorkspace,
 } from '../schema'
 import { immediateWrite, withWriteRetry, type BoardTx } from './contention'
+import {
+  existingTaskForCreate,
+  rememberCreateKey,
+  type CreatedTask,
+  type TaskCreateKey,
+} from './createDedupe'
+import { allocateTaskIdentifier } from './identifiers'
 import { ancestorRowsSchema, type AncestorRow } from './schemas'
+
+export { SAME_TASK_WINDOW_MS } from './createDedupe'
+export type { CreatedTask, DedupedBy, TaskCreateKey } from './createDedupe'
 
 export interface Scope {
   tenantId?: string | null
@@ -69,6 +82,17 @@ export interface CreateTaskInput {
   /** The chat room the task belongs to. Null/absent = the team's default room. A
    *  subtask inherits its parent's room when none is given. */
   roomId?: string | null
+  /** Makes the create safe to repeat: the same key returns the same task. */
+  createKey?: TaskCreateKey | null
+  /** An agent is creating it, not a person: the same-title check applies. */
+  agentCreated?: boolean
+  /** The create has a target (a hand-off): only a task someone is on, and that will
+   *  run, can stand in. */
+  titleMatchNeedsOwner?: boolean
+  /** Tasks from this turn do not stand in for it. */
+  titleMatchExceptTurn?: string | null
+  /** The agent handing it out through the Tasks tools (the cycle guard reads it). */
+  delegatedByAgentId?: string | null
 }
 
 /**
@@ -106,19 +130,35 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     roomId: input.roomId ?? null,
     personMovedAt: null,
     runnerInputs: null,
+    identifier: null,
+    delegatedByAgentId: input.delegatedByAgentId ?? null,
+    personCancelledAt: null,
   }
 }
 
-export function createTask(db: ClawbooDb, input: CreateTaskInput): DbTask {
+/** Write a new task inside the caller's transaction: its row, its readable id and
+ *  its idempotency key, so all three land or none do. */
+function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
   const row = buildTaskRow(input)
-  withWriteRetry(() => db.insert(tasks).values(row).run())
-  emitBoardLifecycle({
-    kind: 'task_created',
-    taskId: row.id,
-    teamId: row.teamId ?? null,
-    status: row.status,
-    sourceDelegationId: row.sourceDelegationId ?? null,
-  })
+  row.identifier = allocateTaskIdentifier(tx, row.teamId)
+  tx.insert(tasks).values(row).run()
+  if (input.createKey) rememberCreateKey(tx, input.createKey, row.id, row.createdAt)
+  return row
+}
+
+export function createTask(db: ClawbooDb, input: CreateTaskInput): CreatedTask {
+  const row = immediateWrite(
+    db,
+    (tx): CreatedTask => existingTaskForCreate(tx, input, Date.now()) ?? insertTask(tx, input),
+  )
+  if (!row.deduplicated)
+    emitBoardLifecycle({
+      kind: 'task_created',
+      taskId: row.id,
+      teamId: row.teamId ?? null,
+      status: row.status,
+      sourceDelegationId: row.sourceDelegationId ?? null,
+    })
   return row
 }
 
@@ -130,7 +170,7 @@ export function createSubtask(
   db: ClawbooDb,
   parentTaskId: string,
   input: Omit<CreateTaskInput, 'parentTaskId'>,
-): DbTask {
+): CreatedTask {
   const parent = getTask(db, parentTaskId)
   return createTask(db, {
     ...input,
@@ -165,6 +205,9 @@ export interface RootCreateCaps {
   maxRootCreates?: number
   /** The rolling window the count is measured over. Default DEFAULT_ROOT_CREATE_WINDOW_MS. */
   windowMs?: number
+  /** Count only this team's roots, so one team's busy hour does not stop another
+   *  team's lead handing out work. Omitted: every team's. */
+  teamId?: string | null
 }
 
 /**
@@ -174,7 +217,7 @@ export interface RootCreateCaps {
  * the looser shape; new refusal types should follow this one.)
  */
 export type GuardedCreateResult =
-  | { ok: true; task: DbTask }
+  | { ok: true; task: CreatedTask }
   | {
       ok: false
       reason: CreateGuardReason
@@ -185,6 +228,46 @@ export type GuardedCreateResult =
       /** The rolling window in ms — set on `root_rate_cap` only. */
       windowMs?: number
     }
+
+/**
+ * How many slots a parent's children hold. Dropped children free theirs (soft-delete
+ * is an operator's recovery). Done and cancelled children keep theirs: the cap bounds
+ * rows on the board, so a create → complete → create loop cannot outgrow it, and an
+ * agent cannot cancel its own children and create more. Only a person's cancel frees
+ * a slot (`personCancelledAt`).
+ */
+function countChildSlots(tx: ClawbooDb | BoardTx, parentTaskId: string): number {
+  const row = tx
+    .select({ n: count() })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.parentTaskId, parentTaskId),
+        eq(tasks.dropped, 0),
+        isNull(tasks.personCancelledAt),
+      ),
+    )
+    .get() as { n: number } | undefined
+  return row?.n ?? 0
+}
+
+/** Live root tasks created since a moment. `idx_tasks_parent_dropped_created` serves
+ *  it, so this is a scan of recent roots rather than the whole table. */
+function countRecentRoots(tx: ClawbooDb | BoardTx, since: number, teamId?: string | null): number {
+  const row = tx
+    .select({ n: count() })
+    .from(tasks)
+    .where(
+      and(
+        isNull(tasks.parentTaskId),
+        eq(tasks.dropped, 0),
+        gt(tasks.createdAt, since),
+        ...(teamId ? [eq(tasks.teamId, teamId)] : []),
+      ),
+    )
+    .get() as { n: number } | undefined
+  return row?.n ?? 0
+}
 
 /**
  * Create a subtask with the per-parent child-count + nesting-depth caps ENFORCED,
@@ -218,16 +301,18 @@ export function createCappedSubtask(
     // `PRAGMA foreign_keys = ON` — an exception, not data. Refuse it as data.
     if (!parent) return { ok: false, reason: 'parent_not_found' }
 
-    // Fan-out: count LIVE siblings only (`dropped = 0`). Soft-delete is the user's
-    // ONLY recovery once a parent is at the cap, so it must actually free a slot.
-    // Terminal (`done`/`cancelled`) children DO count: the cap bounds rows on the
-    // board, so a create → complete → create loop cannot outgrow it.
-    const siblingRow = tx
-      .select({ n: count() })
-      .from(tasks)
-      .where(and(eq(tasks.parentTaskId, parentTaskId), eq(tasks.dropped, 0)))
-      .get() as { n: number } | undefined
-    const siblingCount = siblingRow?.n ?? 0
+    const resolved = {
+      ...input,
+      parentTaskId,
+      teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
+      roomId: input.roomId ?? parent.roomId ?? null,
+    }
+    // Before the caps: a repeat makes no row, so a cap has nothing to refuse, and a
+    // retry must get the task it made rather than a refusal.
+    const existing = existingTaskForCreate(tx, resolved, Date.now())
+    if (existing) return { ok: true, task: existing }
+
+    const siblingCount = countChildSlots(tx, parentTaskId)
     if (!checkFanoutCap({ siblingCount, max: maxChildren }).ok) {
       return { ok: false, reason: 'child_cap', count: siblingCount, max: maxChildren }
     }
@@ -257,20 +342,13 @@ export function createCappedSubtask(
       return { ok: false, reason: 'depth_cap', max: maxDepth }
     }
 
-    const row = buildTaskRow({
-      ...input,
-      parentTaskId,
-      teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
-      roomId: input.roomId ?? parent.roomId ?? null,
-    })
-    tx.insert(tasks).values(row).run()
-    return { ok: true, task: row }
+    return { ok: true, task: insertTask(tx, resolved) }
   })
   // Post-commit, exactly as `createTask` does. The guarded creates insert INSIDE
   // their own transaction rather than delegating to `createTask`, so they have to
   // emit for themselves — without this a task created through the Tasks MCP is
   // invisible to every lifecycle subscriber (the ready-pump wake among them).
-  if (result.ok)
+  if (result.ok && !result.task.deduplicated)
     emitBoardLifecycle({
       kind: 'task_created',
       taskId: result.task.id,
@@ -307,24 +385,20 @@ export function createCappedRootTask(
   const since = Date.now() - windowMs
 
   const result = immediateWrite(db, (tx): GuardedCreateResult => {
-    // `idx_tasks_parent` covers the NULL-parent group (SQLite indexes NULLs), so
-    // this is a scan of recent roots rather than the whole table.
-    const row = tx
-      .select({ n: count() })
-      .from(tasks)
-      .where(and(isNull(tasks.parentTaskId), eq(tasks.dropped, 0), gt(tasks.createdAt, since)))
-      .get() as { n: number } | undefined
-    const recent = row?.n ?? 0
+    const resolved = { ...input, parentTaskId: null }
+    // Before the cap, as in `createCappedSubtask`.
+    const existing = existingTaskForCreate(tx, resolved, Date.now())
+    if (existing) return { ok: true, task: existing }
+
+    const recent = countRecentRoots(tx, since, caps.teamId)
     if (!checkFanoutCap({ siblingCount: recent, max: maxRootCreates }).ok) {
       return { ok: false, reason: 'root_rate_cap', count: recent, max: maxRootCreates, windowMs }
     }
 
-    const created = buildTaskRow({ ...input, parentTaskId: null })
-    tx.insert(tasks).values(created).run()
-    return { ok: true, task: created }
+    return { ok: true, task: insertTask(tx, resolved) }
   })
   // Post-commit — see the note in `createCappedSubtask`.
-  if (result.ok)
+  if (result.ok && !result.task.deduplicated)
     emitBoardLifecycle({
       kind: 'task_created',
       taskId: result.task.id,
@@ -333,6 +407,87 @@ export function createCappedRootTask(
       sourceDelegationId: result.task.sourceDelegationId ?? null,
     })
   return result
+}
+
+export interface HandOffCapacity {
+  /** How many more tasks fit right now. */
+  room: number
+  max: number
+  reason: 'child_cap' | 'root_rate_cap'
+}
+
+/**
+ * How many tasks the capped creates would let in under this parent (null: at the
+ * root), so a plan can be refused whole instead of stopping partway. Only an
+ * estimate under a concurrent writer: each create still checks for itself. Null for
+ * a parent that does not exist.
+ */
+export function handOffCapacity(
+  db: ClawbooDb,
+  parentTaskId: string | null,
+  teamId?: string | null,
+): HandOffCapacity | null {
+  if (parentTaskId === null) {
+    const recent = countRecentRoots(db, Date.now() - DEFAULT_ROOT_CREATE_WINDOW_MS, teamId)
+    return {
+      room: Math.max(0, DEFAULT_MAX_ROOT_CREATES - recent),
+      max: DEFAULT_MAX_ROOT_CREATES,
+      reason: 'root_rate_cap',
+    }
+  }
+  if (!getTask(db, parentTaskId)) return null
+  return {
+    room: Math.max(0, DEFAULT_MAX_CHILDREN - countChildSlots(db, parentTaskId)),
+    max: DEFAULT_MAX_CHILDREN,
+    reason: 'child_cap',
+  }
+}
+
+/** The most levels `handOffChain` walks. Well past the depth caps; it bounds the
+ *  walk over a corrupt `parent_task_id` cycle. */
+const MAX_CHAIN_LINKS = 32
+
+/**
+ * A task and its ancestors, nearest first, each with the agent that handed it out:
+ * what the hand-off cycle guard reads. The engine records its delegator in
+ * `source_delegation_id`, and the Tasks tools in `delegated_by_agent_id`.
+ */
+export function handOffChain(db: ClawbooDb, taskId: string): HandOffLink[] {
+  const chain: HandOffLink[] = []
+  let cursor: string | null = taskId
+  while (cursor !== null && chain.length < MAX_CHAIN_LINKS) {
+    const row: DbTask | undefined = db.select().from(tasks).where(eq(tasks.id, cursor)).get() as
+      DbTask | undefined
+    if (!row) break
+    chain.push({
+      id: row.id,
+      status: row.status,
+      delegatedBy: row.delegatedByAgentId ?? delegatorOf(row.sourceDelegationId),
+      title: row.title,
+      identifier: row.identifier,
+    })
+    cursor = row.parentTaskId
+  }
+  return chain
+}
+
+/** Record who handed a task out through the Tasks tools. */
+export function setTaskDelegator(db: ClawbooDb, taskId: string, agentId: string): void {
+  withWriteRetry(() =>
+    db.update(tasks).set({ delegatedByAgentId: agentId }).where(eq(tasks.id, taskId)).run(),
+  )
+}
+
+/** Is this agent the team's own lead? A host that knows more leads (Boo Zero leads
+ *  every team) adds them. */
+export function isTeamLeadAgent(db: ClawbooDb, teamId: string | null, agentId: string): boolean {
+  if (!teamId) return false
+  const team = db
+    .select({ leaderAgentId: teams.leaderAgentId })
+    .from(teams)
+    .where(eq(teams.id, teamId))
+    .get()
+  return team?.leaderAgentId === agentId
 }
 
 export function getTask(db: ClawbooDb, taskId: string): DbTask | null {
@@ -689,6 +844,10 @@ export interface UpdateStatusOptions {
    *  overruled, and its status write would put the card back where the person
    *  took it from. A run started after the move writes as usual. */
   unlessPersonMoved?: boolean
+  /** A cancel that follows from a person's cancel of the step this one waits on. It
+   *  frees the task's slot under its parent as their own cancel does, without being
+   *  a move of this card (see `personCancelledAt`). */
+  byPersonCascade?: boolean
 }
 
 /** When the task's latest run started (its newest execution's start, claim or
@@ -779,6 +938,11 @@ export function updateStatus(
         updatedAt: now,
         ...(finishing ? { completedAt } : {}),
         ...(opts.actor === 'person' ? { personMovedAt: now } : {}),
+        // A person's cancel frees the task's slot under its parent. An agent's frees
+        // nothing, and cancelled is terminal, so a slot never comes back.
+        ...(to === 'cancelled' && (opts.actor === 'person' || opts.byPersonCascade)
+          ? { personCancelledAt: now }
+          : {}),
         // A task moved back to `todo` is released for re-claim — clear the assignee
         // so the atomic claim (`assignee IS NULL`) can re-acquire it (matches
         // releaseTask / orphan reconciliation, which also unassign on release).
@@ -991,11 +1155,15 @@ export function getDependents(db: ClawbooDb, taskId: string): DbTask[] {
  * Returns the cancelled rows so the caller can report the stall to the leader.
  * Tasks already `in_progress`/`done`/`cancelled` are left untouched.
  */
-export function cancelDependents(db: ClawbooDb, taskId: string): DbTask[] {
+export function cancelDependents(
+  db: ClawbooDb,
+  taskId: string,
+  opts: { byPerson?: boolean } = {},
+): DbTask[] {
   const cancelled: DbTask[] = []
   for (const dep of getDependents(db, taskId)) {
     if (dep.status !== 'todo' && dep.status !== 'backlog') continue
-    const r = updateStatus(db, dep.id, 'cancelled')
+    const r = updateStatus(db, dep.id, 'cancelled', opts.byPerson ? { byPersonCascade: true } : {})
     if (r.ok && r.task) cancelled.push(r.task)
   }
   return cancelled

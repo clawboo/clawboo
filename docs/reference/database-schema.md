@@ -32,6 +32,10 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`rooms`](#rooms)                               | Chat                     | A team's chat rooms                              |
 | [`room_members`](#room_members)                 | Chat                     | Room membership                                  |
 | [`tasks`](#tasks)                               | Board                    | Task cards                                       |
+| [`task_create_keys`](#task_create_keys)         | Board                    | What makes a create safe to repeat               |
+| [`delegation_failures`](#delegation_failures)   | Board                    | The team engine's failure breaker                |
+| [`labels`](#labels)                             | Board                    | A team's labels                                  |
+| [`task_labels`](#task_labels)                   | Board                    | Which task carries which label                   |
 | [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                       |
 | [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                      |
 | [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                   |
@@ -81,6 +85,9 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | `rooms.team_id`                                     | `teams.id`      | The rooms are deleted with it      |
 | `room_members.room_id`                              | `rooms.id`      | Memberships are deleted with it    |
 | `room_members.agent_id`                             | `agents.id`     | Memberships are deleted with it    |
+| `labels.team_id`                                    | `teams.id`      | The labels are deleted with it     |
+| `task_labels.label_id`                              | `labels.id`     | Removed from tasks with it         |
+| `task_labels.task_id`, `task_create_keys.task_id`   | `tasks.id`      | Deleted with it                    |
 | `tasks.parent_task_id`                              | `tasks.id`      | Refused while rows point at it     |
 | `task_deps.task_id`, `task_deps.depends_on_task_id` | `tasks.id`      | Refused while rows point at it     |
 | `task_comments.task_id`                             | `tasks.id`      | Refused while rows point at it     |
@@ -97,21 +104,23 @@ In the column tables below, `FK` marks these columns and `cascade` marks the one
 
 One row per team.
 
-| Column                | Type                             | Notes                                             |
-| --------------------- | -------------------------------- | ------------------------------------------------- |
-| `id`                  | `TEXT`, PK                       |                                                   |
-| `name`                | `TEXT`, not null                 | Display name                                      |
-| `icon`                | `TEXT`, not null                 | An emoji                                          |
-| `color`               | `TEXT`, not null                 | Hex color                                         |
-| `color_collection_id` | `TEXT`                           | The Boo color collection the team's avatars use   |
-| `template_id`         | `TEXT`                           | The marketplace team it was deployed from, if any |
-| `leader_agent_id`     | `TEXT`                           | The team's Leader, when one is set                |
-| `is_archived`         | `INTEGER`, not null, default `0` | `1` once the team is archived                     |
-| `tenant_id`           | `TEXT`                           | Unused                                            |
-| `created_at`          | `INTEGER`, not null              |                                                   |
-| `updated_at`          | `INTEGER`, not null              |                                                   |
+| Column                | Type                             | Notes                                                                                                                                                          |
+| --------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                  | `TEXT`, PK                       |                                                                                                                                                                |
+| `name`                | `TEXT`, not null                 | Display name                                                                                                                                                   |
+| `icon`                | `TEXT`, not null                 | An emoji                                                                                                                                                       |
+| `color`               | `TEXT`, not null                 | Hex color                                                                                                                                                      |
+| `color_collection_id` | `TEXT`                           | The Boo color collection the team's avatars use                                                                                                                |
+| `template_id`         | `TEXT`                           | The marketplace team it was deployed from, if any                                                                                                              |
+| `leader_agent_id`     | `TEXT`                           | The team's Leader, when one is set                                                                                                                             |
+| `is_archived`         | `INTEGER`, not null, default `0` | `1` once the team is archived                                                                                                                                  |
+| `tenant_id`           | `TEXT`                           | Unused                                                                                                                                                         |
+| `task_prefix`         | `TEXT`                           | The letters on the team's task ids (`MAR` in `MAR-12`), unique across the workspace. Null until a person sets it or the team's first task takes it, then fixed |
+| `next_task_number`    | `INTEGER`, not null, default `1` | The number the team's next task takes                                                                                                                          |
+| `created_at`          | `INTEGER`, not null              |                                                                                                                                                                |
+| `updated_at`          | `INTEGER`, not null              |                                                                                                                                                                |
 
-Indexes: `idx_teams_name` (`name`).
+Indexes: `idx_teams_name` (`name`), `idx_teams_task_prefix` (`task_prefix`, unique).
 
 ### agents
 
@@ -245,36 +254,90 @@ The board is where team work is coordinated. Statuses and legal moves are descri
 
 The task cards.
 
-| Column                 | Type                                  | Notes                                                                                                                                                                                       |
-| ---------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                   | `TEXT`, PK                            |                                                                                                                                                                                             |
-| `title`                | `TEXT`, not null                      |                                                                                                                                                                                             |
-| `description`          | `TEXT`                                |                                                                                                                                                                                             |
-| `status`               | `TEXT`, not null, default `'backlog'` | `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` or `cancelled`. Clawboo creates tasks in `todo` unless the creator picks a status, so the column default rarely applies    |
-| `priority`             | `INTEGER`, not null, default `0`      | Higher runs first among ready tasks. Four levels: `2` Urgent, `1` High, `0` Normal, `-1` Low. Every write is held to that range, and an older value outside it is read as the nearest level |
-| `team_id`              | `TEXT`                                | Plain reference to `teams.id`                                                                                                                                                               |
-| `assignee_agent_id`    | `TEXT`                                | Plain reference to `agents.id`                                                                                                                                                              |
-| `assignee_runtime`     | `TEXT`                                | The runtime that claimed it                                                                                                                                                                 |
-| `parent_task_id`       | `TEXT`, FK `tasks.id`                 | The parent task, for a subtask                                                                                                                                                              |
-| `source_delegation_id` | `TEXT`                                | Set by the team engine: which delegation created the task and whom it reports back to                                                                                                       |
-| `worktree_ref`         | `TEXT`                                | The git worktree the work happened in                                                                                                                                                       |
-| `branch_ref`           | `TEXT`                                | Its git branch                                                                                                                                                                              |
-| `cost_usd`             | `REAL`, not null, default `0`         | The sum of the task's recorded run costs                                                                                                                                                    |
-| `parent_session_id`    | `TEXT`                                | Unused                                                                                                                                                                                      |
-| `dropped`              | `INTEGER`, not null, default `0`      | `1` once soft-deleted                                                                                                                                                                       |
-| `tenant_id`            | `TEXT`                                | Unused                                                                                                                                                                                      |
-| `verification`         | `TEXT`                                | JSON verification verdict; null until a check runs. While it holds a failing verdict, a move to `done` is refused (`verification_required`) unless a person overrides it                    |
-| `scheduled_by`         | `TEXT`, not null, default `'manual'`  | Who fires the task: `manual`, `clawboo` (the Routines engine) or `openclaw`                                                                                                                 |
-| `created_at`           | `INTEGER`, not null                   |                                                                                                                                                                                             |
-| `updated_at`           | `INTEGER`, not null                   |                                                                                                                                                                                             |
-| `completed_at`         | `INTEGER`                             | Set when the task first reaches `done` or `cancelled`                                                                                                                                       |
-| `room_id`              | `TEXT`                                | Plain reference to `rooms.id`: the room the task was delegated in; null means General. A subtask takes its parent's room                                                                    |
-| `person_moved_at`      | `INTEGER`                             | When a person last moved the card on the board or in the task drawer. While no run has started since, an agent's own status write through the tasks MCP tools is refused                    |
-| `runner_inputs`        | `TEXT`                                | JSON: what the task runner was given for the task's latest run (runtime, agent, repository, kind, model). Null for a task the runner never ran. **Retry** and **Assign** read it            |
+| Column                  | Type                                  | Notes                                                                                                                                                                                              |
+| ----------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                    | `TEXT`, PK                            |                                                                                                                                                                                                    |
+| `title`                 | `TEXT`, not null                      |                                                                                                                                                                                                    |
+| `description`           | `TEXT`                                |                                                                                                                                                                                                    |
+| `status`                | `TEXT`, not null, default `'backlog'` | `backlog`, `todo`, `in_progress`, `in_review`, `blocked`, `done` or `cancelled`. Clawboo creates tasks in `todo` unless the creator picks a status, so the column default rarely applies           |
+| `priority`              | `INTEGER`, not null, default `0`      | Higher runs first among ready tasks. Four levels: `2` Urgent, `1` High, `0` Normal, `-1` Low. Every write is held to that range, and an older value outside it is read as the nearest level        |
+| `team_id`               | `TEXT`                                | Plain reference to `teams.id`                                                                                                                                                                      |
+| `assignee_agent_id`     | `TEXT`                                | Plain reference to `agents.id`                                                                                                                                                                     |
+| `assignee_runtime`      | `TEXT`                                | The runtime that claimed it                                                                                                                                                                        |
+| `parent_task_id`        | `TEXT`, FK `tasks.id`                 | The parent task, for a subtask                                                                                                                                                                     |
+| `source_delegation_id`  | `TEXT`                                | Set by the team engine: which delegation created the task and whom it reports back to                                                                                                              |
+| `worktree_ref`          | `TEXT`                                | The git worktree the work happened in                                                                                                                                                              |
+| `branch_ref`            | `TEXT`                                | Its git branch                                                                                                                                                                                     |
+| `cost_usd`              | `REAL`, not null, default `0`         | The sum of the task's recorded run costs                                                                                                                                                           |
+| `parent_session_id`     | `TEXT`                                | Unused                                                                                                                                                                                             |
+| `dropped`               | `INTEGER`, not null, default `0`      | `1` once soft-deleted                                                                                                                                                                              |
+| `tenant_id`             | `TEXT`                                | Unused                                                                                                                                                                                             |
+| `verification`          | `TEXT`                                | JSON verification verdict; null until a check runs. While it holds a failing verdict, a move to `done` is refused (`verification_required`) unless a person overrides it                           |
+| `scheduled_by`          | `TEXT`, not null, default `'manual'`  | Who fires the task: `manual`, `clawboo` (the Routines engine) or `openclaw`                                                                                                                        |
+| `created_at`            | `INTEGER`, not null                   |                                                                                                                                                                                                    |
+| `updated_at`            | `INTEGER`, not null                   |                                                                                                                                                                                                    |
+| `completed_at`          | `INTEGER`                             | Set when the task first reaches `done` or `cancelled`                                                                                                                                              |
+| `room_id`               | `TEXT`                                | Plain reference to `rooms.id`: the room the task was delegated in; null means General. A subtask takes its parent's room                                                                           |
+| `person_moved_at`       | `INTEGER`                             | When a person last moved the card on the board or in the task drawer. While no run has started since, an agent's own status write through the tasks MCP tools is refused                           |
+| `runner_inputs`         | `TEXT`                                | JSON: what the task runner was given for the task's latest run (runtime, agent, repository, kind, model). Null for a task the runner never ran. **Retry** and **Assign** read it                   |
+| `identifier`            | `TEXT`                                | The readable id, like `MAR-12`, unique across the workspace. Taken in the create's own write transaction. Null for a task with no team, or whose team is gone. Existing tasks are numbered at boot |
+| `delegated_by_agent_id` | `TEXT`                                | The agent that handed the task out through the Tasks tools. The team engine records its delegator in `source_delegation_id`. The hand-off cycle guard reads both                                   |
+| `person_cancelled_at`   | `INTEGER`                             | When a person cancelled it, or cancelled the step it waited on. Only this frees its place under its parent                                                                                         |
 
-Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`).
+Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
 
 The `(parent_task_id, dropped, created_at)` index serves the Tasks MCP creation caps, which count live children per parent and new root tasks per 5 minutes.
+
+### task_create_keys
+
+What makes a create safe to repeat: one row per idempotency key, pointing at the task it made or found.
+
+| Column       | Type                                     | Notes                                                                                                                                                                                     |
+| ------------ | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `key`        | `TEXT`, PK                               | Says who made it (`rest:`, `mcp`, `mcp-task`, `mcp-team`) and ends in a hash of the title where a title is part of it. A hand-off's is its team, delivery, target and a hash of its words |
+| `task_id`    | `TEXT`, not null, FK `tasks.id`, cascade |                                                                                                                                                                                           |
+| `derived`    | `INTEGER`, not null, default `0`         | `1`: the server made it up, for a hand-off or an unnamed Tasks create. It lapses after 48 hours and never matches a blocked task                                                          |
+| `created_at` | `INTEGER`, not null                      |                                                                                                                                                                                           |
+
+### delegation_failures
+
+The team engine's loop breaker: how many times in a row one agent failed one task. A count runs out 24 hours after its last failure.
+
+| Column            | Type                             | Notes                                  |
+| ----------------- | -------------------------------- | -------------------------------------- |
+| `team_id`         | `TEXT`, not null, PK             | Plain reference to `teams.id`          |
+| `target_agent_id` | `TEXT`, not null, PK             |                                        |
+| `task_key`        | `TEXT`, not null, PK             | The start of the ask, in lower case    |
+| `failures`        | `INTEGER`, not null, default `0` |                                        |
+| `notified_at`     | `INTEGER`                        | When the delegator was told it is over |
+| `updated_at`      | `INTEGER`, not null              | The last failure                       |
+
+### labels
+
+A team's labels.
+
+| Column       | Type                                     | Notes                |
+| ------------ | ---------------------------------------- | -------------------- |
+| `id`         | `TEXT`, PK                               |                      |
+| `team_id`    | `TEXT`, not null, FK `teams.id`, cascade |                      |
+| `name`       | `TEXT`, not null                         |                      |
+| `name_key`   | `TEXT`, not null                         | The name as compared |
+| `created_at` | `INTEGER`, not null                      |                      |
+| `updated_at` | `INTEGER`, not null                      |                      |
+
+Indexes: `idx_labels_team_name` (`team_id`, `name_key`, unique).
+
+### task_labels
+
+Which task carries which label.
+
+| Column       | Type                                          | Notes |
+| ------------ | --------------------------------------------- | ----- |
+| `task_id`    | `TEXT`, not null, PK, FK `tasks.id`, cascade  |       |
+| `label_id`   | `TEXT`, not null, PK, FK `labels.id`, cascade |       |
+| `created_at` | `INTEGER`, not null                           |       |
+
+Indexes: `idx_task_labels_label` (`label_id`).
 
 ### task_deps
 

@@ -246,7 +246,9 @@ export const BoardTaskCard = memo(function BoardTaskCard({
               </span>
             </span>
             <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              <span className="font-semibold">Task</span>
+              <span className="font-semibold" data-testid="board-task-id">
+                {task.identifier ?? 'Task'}
+              </span>
               <span aria-hidden className="text-foreground/25">
                 ·
               </span>

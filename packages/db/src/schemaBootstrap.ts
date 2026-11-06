@@ -55,10 +55,13 @@ const SCHEMA_DDL = `
       leader_agent_id TEXT,
       is_archived    INTEGER NOT NULL DEFAULT 0,
       tenant_id      TEXT,
+      task_prefix    TEXT,
+      next_task_number INTEGER NOT NULL DEFAULT 1,
       created_at     INTEGER NOT NULL,
       updated_at     INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_teams_name ON teams (name);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_teams_task_prefix ON teams (task_prefix);
 
     CREATE TABLE IF NOT EXISTS agents (
       id             TEXT    PRIMARY KEY,
@@ -242,13 +245,52 @@ const SCHEMA_DDL = `
       completed_at         INTEGER,
       room_id              TEXT,
       person_moved_at      INTEGER,
-      runner_inputs        TEXT
+      runner_inputs        TEXT,
+      identifier           TEXT,
+      delegated_by_agent_id TEXT,
+      person_cancelled_at  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_team_room   ON tasks (team_id, room_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_identifier ON tasks (identifier);
+
+    CREATE TABLE IF NOT EXISTS task_create_keys (
+      key        TEXT    PRIMARY KEY,
+      task_id    TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      derived    INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS delegation_failures (
+      team_id         TEXT    NOT NULL,
+      target_agent_id TEXT    NOT NULL,
+      task_key        TEXT    NOT NULL,
+      failures        INTEGER NOT NULL DEFAULT 0,
+      notified_at     INTEGER,
+      updated_at      INTEGER NOT NULL,
+      PRIMARY KEY (team_id, target_agent_id, task_key)
+    );
+
+    CREATE TABLE IF NOT EXISTS labels (
+      id         TEXT    PRIMARY KEY,
+      team_id    TEXT    NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+      name       TEXT    NOT NULL,
+      name_key   TEXT    NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_labels_team_name ON labels (team_id, name_key);
+
+    CREATE TABLE IF NOT EXISTS task_labels (
+      task_id    TEXT    NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      label_id   TEXT    NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (task_id, label_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_labels_label ON task_labels (label_id);
 
     CREATE TABLE IF NOT EXISTS task_deps (
       task_id            TEXT NOT NULL REFERENCES tasks(id),

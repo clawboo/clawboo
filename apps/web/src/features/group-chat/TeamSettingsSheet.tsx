@@ -21,6 +21,8 @@ import { TeamIconPicker } from '@/features/teams/TeamIconPicker'
 import { TeamBriefForm } from './TeamBriefForm'
 import { TeamRulesEditor } from './TeamRulesEditor'
 import { TeamVerifyCommandEditor } from './TeamVerifyCommandEditor'
+import { TeamTaskPrefixEditor } from './TeamTaskPrefixEditor'
+import { TeamLabelsEditor } from './TeamLabelsEditor'
 
 interface TeamSettingsSheetProps {
   team: Team
@@ -167,6 +169,20 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             Work check
           </h3>
           <TeamVerifyCommandEditor teamId={team.id} />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Task ids
+          </h3>
+          <TeamTaskPrefixEditor teamId={team.id} />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Labels
+          </h3>
+          <TeamLabelsEditor teamId={team.id} />
         </section>
       </div>
     </Modal>

@@ -11,10 +11,12 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  SAME_TASK_WINDOW_MS,
   getComments,
   getTask,
   listEvents,
   listExecutions,
+  updateStatus,
   type ClawbooDb,
   type DbOrchestrationEvent,
 } from '@clawboo/db'
@@ -239,5 +241,45 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
     expect((await team.getReadyTasks(TEAM)).map((t) => t.id)).toEqual([inTeam!.id])
     // An unscoped client still sees every room.
     expect((await createServerBoardClient(db).listTasks(TEAM)).length).toBe(2)
+  })
+
+  describe('a hand-off key', () => {
+    const handOff = (client: ReturnType<typeof createServerBoardClient>) =>
+      client.createHandOff({
+        title: 'Run the tests',
+        teamId: 'T',
+        sourceDelegationId: 'd1:deleg:agent:a:reflectTo:lead',
+        handOffKey: { scope: ['T', 'deleg', 'd1', 'a'], text: 'Run the tests' },
+        turnId: 'd1',
+      })
+
+    it('returns its task on a replay, but lapses like any key the server made up', async () => {
+      const client = createServerBoardClient(db)
+      const first = await handOff(client)
+      if (!first.ok) throw new Error(first.reason)
+      const replay = await handOff(client)
+      expect(replay.ok && replay.deduplicated).toBe('key')
+      updateStatus(db, first.task.id, 'in_progress')
+      expect(updateStatus(db, first.task.id, 'done').ok).toBe(true)
+      // Still a replay while it is fresh, finished or not.
+      const closed = await handOff(client)
+      expect(closed.ok && closed.task.id).toBe(first.task.id)
+
+      db.$client
+        .prepare('UPDATE task_create_keys SET created_at = ?')
+        .run(Date.now() - SAME_TASK_WINDOW_MS - 1)
+      const later = await handOff(client)
+      expect(later.ok && later.task.id).not.toBe(first.task.id)
+      expect(later.ok && later.deduplicated).toBeUndefined()
+    })
+
+    it('does not match a blocked task', async () => {
+      const client = createServerBoardClient(db)
+      const first = await handOff(client)
+      if (!first.ok) throw new Error(first.reason)
+      expect(updateStatus(db, first.task.id, 'blocked').ok).toBe(true)
+      const retry = await handOff(client)
+      expect(retry.ok && retry.task.id).not.toBe(first.task.id)
+    })
   })
 })

@@ -53,10 +53,19 @@ export const teams = sqliteTable(
     leaderAgentId: text('leader_agent_id'),
     isArchived: integer('is_archived').notNull().default(0),
     tenantId: text('tenant_id'), // dormant multi-tenant seam (single implicit tenant)
+    // The letters on the team's readable task ids (`CLB` in `CLB-12`), unique across
+    // the workspace. NULL until a person sets it or the team's first task takes it;
+    // fixed from that first task on, whatever the team is renamed to.
+    taskPrefix: text('task_prefix'),
+    // The number the team's next task takes.
+    nextTaskNumber: integer('next_task_number').notNull().default(1),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },
-  (t) => [index('idx_teams_name').on(t.name)],
+  (t) => [
+    index('idx_teams_name').on(t.name),
+    uniqueIndex('idx_teams_task_prefix').on(t.taskPrefix),
+  ],
 )
 
 export type DbTeam = typeof teams.$inferSelect
@@ -365,6 +374,17 @@ export const tasks = sqliteTable(
     // `TaskRunnerInputs`, see board/runnerInputs.ts), so a person's Retry or
     // Assign runs it the same way again. NULL for a task the runner never ran.
     runnerInputs: text('runner_inputs'),
+    // The readable id, like `CLB-12` (see board/identifiers.ts), unique across the
+    // workspace. NULL for a task with no team, or whose team is gone.
+    identifier: text('identifier'),
+    // The agent that handed the task out through the Tasks tools. The team engine
+    // records its delegator in `source_delegation_id` instead. The cycle guard
+    // reads both (see `handOffChain`).
+    delegatedByAgentId: text('delegated_by_agent_id'),
+    // When a person cancelled it, itself or as a step waiting on one they cancelled.
+    // Only this frees the task's slot under its parent: an agent that could free
+    // slots by cancelling its own children could create without limit.
+    personCancelledAt: integer('person_cancelled_at'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
@@ -379,11 +399,86 @@ export const tasks = sqliteTable(
     // writes on a board with a long history. `idx_tasks_parent` is kept: dropping it
     // from this DDL would not drop it from databases that already have it.
     index('idx_tasks_parent_dropped_created').on(t.parentTaskId, t.dropped, t.createdAt),
+    uniqueIndex('idx_tasks_identifier').on(t.identifier),
   ],
 )
 
 export type DbTask = typeof tasks.$inferSelect
 export type DbTaskInsert = typeof tasks.$inferInsert
+
+// task_create_keys: what makes a create safe to repeat. One row per idempotency
+// key: the same key again returns this task instead of making another. A separate
+// table so that a task the same-title check returned can answer to the key of the
+// create it stood in for as well as its own. `derived` marks a key the server made
+// up from the run and the title: it holds for 48 hours and not over a blocked task,
+// where a caller's own key holds for good.
+export const taskCreateKeys = sqliteTable('task_create_keys', {
+  key: text('key').primaryKey(),
+  taskId: text('task_id')
+    .notNull()
+    .references(() => tasks.id, { onDelete: 'cascade' }),
+  derived: integer('derived').notNull().default(0),
+  createdAt: integer('created_at').notNull(),
+})
+
+export type DbTaskCreateKey = typeof taskCreateKeys.$inferSelect
+
+// delegation_failures: the team engine's loop breaker: how many times in a row
+// one agent failed one task. In the database so a restart or an unloaded engine
+// does not hand a failing loop three more tries. `task_key` is the start of the
+// ask, as the engine compares it. A soft ref to the team, as on `tasks`.
+export const delegationFailures = sqliteTable(
+  'delegation_failures',
+  {
+    teamId: text('team_id').notNull(),
+    targetAgentId: text('target_agent_id').notNull(),
+    taskKey: text('task_key').notNull(),
+    failures: integer('failures').notNull().default(0),
+    notifiedAt: integer('notified_at'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.teamId, t.targetAgentId, t.taskKey] })],
+)
+
+export type DbDelegationFailure = typeof delegationFailures.$inferSelect
+
+// labels + task_labels: a team's own words for sorting its board. `name_key` is
+// the name as compared (see board/labels.ts), so `Bug` and `bug` are one label.
+export const labels = sqliteTable(
+  'labels',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id')
+      .notNull()
+      .references(() => teams.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    nameKey: text('name_key').notNull(),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('idx_labels_team_name').on(t.teamId, t.nameKey)],
+)
+
+export type DbLabel = typeof labels.$inferSelect
+
+export const taskLabels = sqliteTable(
+  'task_labels',
+  {
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    labelId: text('label_id')
+      .notNull()
+      .references(() => labels.id, { onDelete: 'cascade' }),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.taskId, t.labelId] }),
+    index('idx_task_labels_label').on(t.labelId),
+  ],
+)
+
+export type DbTaskLabel = typeof taskLabels.$inferSelect
 
 // task_deps — the blocks / blocked-by dependency graph (Beads-style). Composite
 // PK prevents duplicate edges.

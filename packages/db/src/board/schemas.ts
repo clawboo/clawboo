@@ -25,8 +25,15 @@ export const createTaskBody = z.object({
   // Create the task FOR one agent on `teamId` (the board's New task dialog). The
   // server binds it to that agent and starts it; see POST /api/board.
   assigneeAgentId: z.string().min(1).optional(),
+  // Makes the create safe to repeat: the same key returns the same task. The New task
+  // dialog sends one per draft.
+  idempotencyKey: z.string().min(1).max(200).optional(),
 })
 export type CreateTaskBody = z.infer<typeof createTaskBody>
+
+export const taskLabelsBody = z.object({
+  labelIds: z.array(z.string().min(1)).max(100),
+})
 
 export const updateTaskBody = z
   .object({
