@@ -1,4 +1,5 @@
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { useInboxCount } from '@/features/inbox/useInboxCount'
 import { useInSettingsModal } from '@/features/settings/settingsModalContext'
 import { useViewStore } from '@/stores/view'
 import { openPhoneNav, usePhoneLayout, usePhoneNav } from './phoneLayout'
@@ -22,22 +23,33 @@ export function SidebarToggle({
 }) {
   const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar'
   const Icon = collapsed ? PanelLeftOpen : PanelLeftClose
+  // The Inbox badge sits in the sidebar, so while the sidebar is away (collapsed, or
+  // a closed drawer on a phone) this says there is something to see.
+  const inbox = useInboxCount()
+  const showInbox = collapsed && inbox > 0
   return (
     <button
       type="button"
       data-testid="sidebar-toggle"
-      aria-label={label}
+      aria-label={showInbox ? `${label}, ${inbox} in your inbox` : label}
       aria-expanded={!collapsed}
       title={`${label} (⌘\\)`}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       className={[
-        'flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground/80',
+        'relative flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg border-none bg-transparent p-0 text-foreground/45 transition-colors duration-150 hover:bg-foreground/[0.06] hover:text-foreground/80',
         className,
       ].join(' ')}
     >
       <Icon size={17} strokeWidth={1.9} aria-hidden />
+      {showInbox ? (
+        <span
+          data-testid="sidebar-toggle-inbox-dot"
+          aria-hidden
+          className="absolute right-1 top-1 size-1.5 rounded-full bg-primary-solid"
+        />
+      ) : null}
     </button>
   )
 }

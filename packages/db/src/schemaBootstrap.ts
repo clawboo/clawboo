@@ -251,6 +251,7 @@ const SCHEMA_DDL = `
       person_cancelled_at  INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);
     CREATE INDEX IF NOT EXISTS idx_tasks_team_room   ON tasks (team_id, room_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
@@ -314,6 +315,70 @@ const SCHEMA_DDL = `
       created_at      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id);
+
+    -- ── A person's inbox: see src/board/readState.ts ──────────
+    -- Each task's newest change that a person could want to know about. One row
+    -- per task: a change deletes the old row and inserts a new one, so AUTOINCREMENT
+    -- hands it a seq no earlier change had, on any connection, in any process. A
+    -- seq is therefore a position in the whole board's history, and two changes in
+    -- one millisecond stay two changes. Written only by the triggers below, so no
+    -- write path can forget. A task last changed before this table existed has no
+    -- row, and is never unread.
+    CREATE TABLE IF NOT EXISTS task_activity (
+      seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id TEXT    NOT NULL,
+      -- created | status | edited | comment
+      kind    TEXT    NOT NULL,
+      at      INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_activity_task ON task_activity (task_id);
+    CREATE TRIGGER IF NOT EXISTS task_activity_created AFTER INSERT ON tasks BEGIN
+      DELETE FROM task_activity WHERE task_id = new.id;
+      INSERT INTO task_activity (task_id, kind, at) VALUES (new.id, 'created', new.created_at);
+    END;
+    -- Named columns and a WHEN, because updated_at also moves on every heartbeat,
+    -- cost landing and workspace ref, and none of those is news.
+    CREATE TRIGGER IF NOT EXISTS task_activity_changed
+    AFTER UPDATE OF status, title, description, priority, assignee_agent_id ON tasks
+    WHEN old.status IS NOT new.status
+      OR old.title IS NOT new.title
+      OR old.description IS NOT new.description
+      OR old.priority IS NOT new.priority
+      OR old.assignee_agent_id IS NOT new.assignee_agent_id
+    BEGIN
+      DELETE FROM task_activity WHERE task_id = new.id;
+      INSERT INTO task_activity (task_id, kind, at) VALUES (
+        new.id,
+        CASE WHEN old.status IS NOT new.status THEN 'status' ELSE 'edited' END,
+        new.updated_at
+      );
+    END;
+    -- The app's own notes narrate a change that already counted, or echo a person's
+    -- own move (a stopped run), so only people and agents make a comment news.
+    CREATE TRIGGER IF NOT EXISTS task_activity_comment AFTER INSERT ON task_comments
+    WHEN new.author_type <> 'system'
+    BEGIN
+      DELETE FROM task_activity WHERE task_id = new.task_id;
+      INSERT INTO task_activity (task_id, kind, at) VALUES (new.task_id, 'comment', new.created_at);
+    END;
+
+    -- How far each reader has read. A reader is 'local' (the built-in reader on an
+    -- install with no sign-in) or 'person:<id>' (a person a sign-in proxy vouched
+    -- for). Everything at or below baseline_seq is read: where the reader started,
+    -- raised by "mark all read".
+    CREATE TABLE IF NOT EXISTS task_readers (
+      reader_id    TEXT    PRIMARY KEY,
+      baseline_seq INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL
+    );
+    -- The newest change a reader has read on one task, past their baseline.
+    CREATE TABLE IF NOT EXISTS task_reads (
+      reader_id TEXT    NOT NULL,
+      task_id   TEXT    NOT NULL,
+      read_seq  INTEGER NOT NULL,
+      read_at   INTEGER NOT NULL,
+      PRIMARY KEY (reader_id, task_id)
+    );
 
     CREATE TABLE IF NOT EXISTS workspaces (
       id            TEXT    PRIMARY KEY,

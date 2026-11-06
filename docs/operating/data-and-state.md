@@ -253,7 +253,7 @@ When a new version first starts, it adds any columns the database is missing, so
 
 <Accordion title="Under the hood">
 
-- The database holds 35 tables and runs in SQLite's WAL mode, which is why the `-wal` and `-shm` files sit beside it. `clawboo backup` uses SQLite's online backup, so its copy needs no working files. See the [database schema](/reference/database-schema).
+- The database holds 40 tables and runs in SQLite's WAL mode, which is why the `-wal` and `-shm` files sit beside it. `clawboo backup` uses SQLite's online backup, so its copy needs no working files. See the [database schema](/reference/database-schema).
 - `clawboo stop` sends the server a stop signal. On macOS and Linux the server stops its agent processes, folds the working files into `clawboo.db` and closes it, so after a clean stop `clawboo.db` alone holds every saved change. On Windows the process is ended at once with none of those steps, so copy the `-wal` and `-shm` files with the database.
 - The `POST /api/system/configure-openclaw` route, which no dashboard screen calls, replaces `openclaw.json` and `.env` outright and mints a new Gateway token. The dashboard's OpenClaw setup uses the route that fills in only what is missing.
 

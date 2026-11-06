@@ -2,6 +2,13 @@
 // they come back to can say what changed while they were away. Kept in this
 // browser's storage as a convenience: a missing or unreadable record only means
 // nothing is marked.
+//
+// What was READ lives on the server (@clawboo/db's board/readState.ts, shown by the
+// Inbox), so it follows the person between browsers. This stays here because it
+// answers a different question: what MOVED, by column, since this browser last
+// looked. A mark from before the server kept read state stays until it is looked
+// at; a read row clears one (`read` below), so a task read in another browser stops
+// being news in this one.
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 
@@ -64,6 +71,9 @@ export interface SeenTask {
   column: string
   /** Its team, so a change seen under one filter counts under that team's view too. */
   teamId?: string | null
+  /** The server says the person has read its newest change, from any browser. Left
+   *  out when the server has no word on it: its last change predates that record. */
+  read?: boolean
 }
 
 export interface SeenBoard {
@@ -147,7 +157,13 @@ export function useSeenBoard(team: string): SeenBoard {
       for (const task of read) latest.current.set(task.id, task)
       const at = Date.now()
       const watching = watchingNow()
-      put(t, noteRead(prev, read, at, watching))
+      put(
+        t,
+        acknowledge(
+          noteRead(prev, read, at, watching),
+          read.filter((task) => task.read === true).map((task) => task.id),
+        ),
+      )
       // What moved while the person watched it move is not news under any other
       // filter either, once they get there.
       if (prev && watchedThrough(prev, at, watching)) {

@@ -24,6 +24,7 @@ export const NAV_VIEWS = [
   'system',
   'obs',
   'board',
+  'inbox',
   'runtimes',
   'providers',
   'memory',

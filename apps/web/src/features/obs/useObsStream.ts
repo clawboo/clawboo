@@ -32,6 +32,9 @@ export interface ObsStreamState {
   events: ObsLogEvent[]
   /** The SSE connection is currently open (the tail is live). */
   live: boolean
+  /** Where the board's record of task changes stands and when this person last
+   *  marked something read, for a stream opened with `activity`; null until it says. */
+  boardActivity: { seq: number; read: number } | null
   /** The initial backfill is in flight. */
   loading: boolean
   error: string | null
@@ -66,15 +69,17 @@ function parseRow(row: Record<string, unknown>): ObsLogEvent {
 
 export function useObsStream(
   scope: ObsScope,
-  opts?: { limit?: number; enabled?: boolean },
+  opts?: { limit?: number; enabled?: boolean; activity?: boolean },
 ): ObsStreamState {
   const [events, setEvents] = useState<ObsLogEvent[]>([])
   const [live, setLive] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [boardActivity, setBoardActivity] = useState<ObsStreamState['boardActivity']>(null)
 
   const enabled = opts?.enabled ?? true
   const limit = opts?.limit ?? DEFAULT_BACKFILL
+  const activity = opts?.activity ?? false
   // Stable subscription key — re-subscribe only when the scope actually changes.
   const scopeKey = `${scope.taskId ?? ''}|${scope.agentId ?? ''}|${scope.teamId ?? ''}`
   const scopeRef = useRef(scope)
@@ -110,7 +115,24 @@ export function useObsStream(
       if (typeof EventSource === 'undefined') return
       const sp = new URLSearchParams(base)
       sp.set('since', String(maxSeq))
+      if (activity) sp.set('activity', '1')
       es = new EventSource(apiUrl(`/api/obs/stream?${sp.toString()}`))
+      if (activity) {
+        es.addEventListener('activity', (e) => {
+          if (cancelled) return
+          try {
+            const { seq, read } = JSON.parse((e as MessageEvent<string>).data) as {
+              seq?: unknown
+              read?: unknown
+            }
+            if (typeof seq === 'number' && typeof read === 'number') {
+              setBoardActivity({ seq, read })
+            }
+          } catch {
+            /* ignore a malformed frame */
+          }
+        })
+      }
       es.onopen = () => {
         if (!cancelled) setLive(true)
       }
@@ -187,7 +209,7 @@ export function useObsStream(
       if (reopen !== null) clearTimeout(reopen)
       es?.close()
     }
-  }, [scopeKey, enabled, limit])
+  }, [scopeKey, enabled, limit, activity])
 
-  return { events, live, loading, error }
+  return { events, live, boardActivity, loading, error }
 }

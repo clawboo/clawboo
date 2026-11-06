@@ -105,6 +105,13 @@ export const orchestrationEventFrameSchema = z.object({
 })
 export type OrchestrationEventFrame = z.infer<typeof orchestrationEventFrameSchema>
 
+/** Where the board's record of changes stands (`seq`) and when this person last
+ *  marked something read (`read`): the `activity` event on the event stream, sent
+ *  only to a client that asks with `?activity=1`, once on connecting and again when
+ *  either moves. It says only that a read of the inbox is worth taking. */
+export const boardActivityFrameSchema = z.object({ seq: z.number(), read: z.number() })
+export type BoardActivityFrame = z.infer<typeof boardActivityFrameSchema>
+
 /** One resumable stream: its route and the schema of each event it sends. The
  *  `message` event is the stored one, carrying the `id:` a client resumes from. */
 export interface ResumableStream {
@@ -138,6 +145,6 @@ export const RESUMABLE_STREAMS = {
   events: {
     method: 'GET',
     path: '/api/obs/stream',
-    events: { message: orchestrationEventFrameSchema },
+    events: { message: orchestrationEventFrameSchema, activity: boardActivityFrameSchema },
   },
 } as const satisfies Record<string, ResumableStream>

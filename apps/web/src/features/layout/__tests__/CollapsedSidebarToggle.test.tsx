@@ -6,7 +6,9 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
 import { InSettingsModalContext } from '@/features/settings/settingsModalContext'
+import { useApprovalsStore } from '@/stores/approvals'
 import { useViewStore } from '@/stores/view'
 
 import { CollapsedSidebarToggle } from '../SidebarToggle'
@@ -47,5 +49,29 @@ describe('CollapsedSidebarToggle', () => {
     await userEvent.click(toggle)
     expect(useViewStore.getState().columnCollapsed).toBe(false)
     expect(useSidebarPeek.getState().peek).toBe(false)
+  })
+})
+
+describe('the inbox on the toggle', () => {
+  beforeEach(() => {
+    useViewStore.setState({ columnCollapsed: true })
+    resetInboxStore()
+    useApprovalsStore.setState({ pendingApprovals: new Map() })
+  })
+
+  it('shows a dot while the sidebar hides the badge, and says why', () => {
+    render(<CollapsedSidebarToggle />)
+    expect(screen.queryByTestId('sidebar-toggle-inbox-dot')).not.toBeInTheDocument()
+    cleanup()
+
+    useInboxStore.getState().apply({
+      unread: [{ id: 'a', seq: 2 }],
+      needsYou: [],
+      approvals: [],
+      through: 2,
+    })
+    render(<CollapsedSidebarToggle />)
+    expect(screen.getByTestId('sidebar-toggle-inbox-dot')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /1 in your inbox/ })).toBeInTheDocument()
   })
 })

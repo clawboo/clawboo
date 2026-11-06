@@ -25,6 +25,9 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | POST   | `/api/board`                             | Create a task (optionally for one agent, started at once)     | No      |
 | POST   | `/api/board/:taskId/retry`               | Run a stuck task again, straight to its agent                 | No      |
 | POST   | `/api/board/:taskId/assign`              | Give an unowned task to one team member and start it          | No      |
+| GET    | `/api/board/inbox`                       | What is unread and what needs the person, for the badge       | No      |
+| POST   | `/api/board/inbox/read`                  | Mark everything read, or one team's tasks                     | No      |
+| POST   | `/api/board/:taskId/read`                | Mark one task read, through the change the page showed        | No      |
 | GET    | `/api/board/:taskId`                     | One task with its comments and parent chain                   | No      |
 | POST   | `/api/board/:taskId/claim`               | Claim a `todo` task for one agent (409 if taken)              | No      |
 | PATCH  | `/api/board/:taskId`                     | Change status (checked) and edit title, description, priority | No      |
@@ -346,6 +349,64 @@ curl http://localhost:18790/api/board/<task-id>
 ```
 
 ---
+
+## `GET /api/board/inbox`
+
+The small read behind the Inbox badge: what is unread for this reader, and what needs a person, across every team. The reader is the person a [sign-in proxy](/guides/sso-proxy) vouched for, or else one built-in reader. A person new to the proxy starts caught up.
+
+Don't poll it. Open the [event stream](/reference/rest-api/observability) with `?activity=1`, and read this when an `activity` event says something moved.
+
+**`200 OK`**:
+
+```ts
+{
+  // Newest change first, at most 100. `seq` is the task's newest change, a position
+  // in the board's history. The app's own notes and heartbeats do not make a task
+  // unread, and this reader's own write marks the task read.
+  unread: Array<{ id: string; seq: number }>
+  // Task ids with a needs-you reason, the same ones the board's column lists, at
+  // most 100.
+  needsYou: string[]
+  // Ids of pending approvals that have not expired.
+  approvals: string[]
+  // The newest change this read knew of: what "mark all read" should cover.
+  through: number
+}
+```
+
+Rows on `GET /api/board` and `GET /api/board/:taskId` carry the same state as `unread: boolean` and `activity: { seq, kind, at } | null`. `kind` is `created`, `status`, `edited` or `comment`. `activity` is null for a task last changed before the board kept this record.
+
+## `POST /api/board/:taskId/read`
+
+Mark a task read as of the change the page showed, which is what makes a change that landed since stay unread. A person's write: it needs the dashboard's own page or a person a sign-in proxy vouched for. This is a speed bump rather than a boundary, as on comments: any program running as the same user can send the same headers.
+
+**Request body**:
+
+| Field     | Type    | Notes                                                                                                            |
+| --------- | ------- | ---------------------------------------------------------------------------------------------------------------- |
+| `through` | integer | The `activity.seq` the page rendered. Clamped to the task's newest change, and a mark never moves a reader back. |
+
+**Responses**:
+
+| Status | Body                                 | When                                |
+| ------ | ------------------------------------ | ----------------------------------- |
+| `200`  | `{ ok: true, unread: boolean }`      | `unread` is whether it still is     |
+| `400`  | `{ error: 'invalid body', details }` | `through` is not a whole number ≥ 0 |
+| `403`  | `{ error: 'person_only' }`           | The caller is not a person          |
+| `404`  | `{ error: 'task not found' }`        |                                     |
+
+## `POST /api/board/inbox/read`
+
+Mark everything read as of `through`, or one team's tasks. A change after `through` stays unread. The same rule on who may call it as `POST /api/board/:taskId/read`.
+
+**Request body**:
+
+| Field     | Type    | Notes                                                      |
+| --------- | ------- | ---------------------------------------------------------- |
+| `through` | integer | The newest change the page knew of. Clamped to the newest. |
+| `teamId`  | string  | Optional. Leave it out for every team.                     |
+
+**Responses**: `200 { ok: true }`, `400` for a bad body, `403 { error: 'person_only' }`.
 
 ## `POST /api/board/:taskId/claim`
 

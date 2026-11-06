@@ -8,9 +8,10 @@ import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import type { ReactElement } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { axe } from '@/__vitest__/axe'
+import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
@@ -1547,5 +1548,54 @@ describe('TaskDetailDrawer: replying', () => {
     expect(
       screen.getByText('This task is finished. You can send your reply as a follow-up task.'),
     ).toBeInTheDocument()
+  })
+})
+
+describe('TaskDetailDrawer: opening a task reads it', () => {
+  const reads: Array<{ through: number }> = []
+
+  function serve(task: Record<string, unknown>) {
+    reads.length = 0
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Wire it', status: 'todo', ...task },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.post('/api/board/t1/read', async ({ request }) => {
+        reads.push((await request.json()) as { through: number })
+        return HttpResponse.json({ ok: true, unread: false })
+      }),
+    )
+  }
+
+  beforeEach(() => resetInboxStore())
+
+  it('marks an unread task read, through the change this read shows', async () => {
+    serve({ unread: true, activity: { seq: 12, kind: 'comment', at: 1 } })
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await waitFor(() => expect(reads).toEqual([{ through: 12 }]))
+    expect(useInboxStore.getState().marks).toEqual({ t1: 12 })
+  })
+
+  it('writes nothing for a task with nothing new', async () => {
+    serve({ unread: false, activity: { seq: 12, kind: 'comment', at: 1 } })
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findAllByText('Wire it')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reads).toEqual([])
+  })
+
+  it('writes nothing for a task the server has no record of changing', async () => {
+    serve({})
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findAllByText('Wire it')
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reads).toEqual([])
   })
 })

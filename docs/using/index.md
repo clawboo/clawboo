@@ -118,6 +118,7 @@ Other pages, such as Settings, the Org chart, Memory, the Marketplace and Routin
 | **Home**        | The team's home page, which holds only a placeholder          |              |
 | **Org chart**   | Every team and agent in one chart, led by Boo Zero            | `Cmd/Ctrl+1` |
 | **Board**       | Every task, by status and by day, with a **Needs you** column | `Cmd/Ctrl+2` |
+| **Inbox**       | What needs you and what changed since you last opened it      |              |
 | **Connectors**  | Apps and tools you connect for your agents                    | `Cmd/Ctrl+3` |
 | **Memory**      | What your agents have saved, as a graph or a list             | `Cmd/Ctrl+4` |
 | **Marketplace** | Ready-made teams, agents and skills                           |              |

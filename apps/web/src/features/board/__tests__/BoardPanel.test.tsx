@@ -7,6 +7,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resetInboxStore } from '@/features/inbox/inboxStore'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -1220,5 +1221,161 @@ describe('BoardPanel', () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+})
+
+describe('BoardPanel and the read state on the server', () => {
+  it('a task read in another browser stops being news here', async () => {
+    window.localStorage.setItem(
+      'clawboo.board.seen.all',
+      JSON.stringify({
+        v: 1,
+        at: Date.now() - 3_600_000,
+        watching: false,
+        columns: { t1: 'todo', t2: 'todo' },
+        pending: null,
+      }),
+    )
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            {
+              id: 't1',
+              title: 'Read elsewhere',
+              status: 'done',
+              unread: false,
+              activity: { seq: 4, kind: 'status', at: 1 },
+            },
+            {
+              id: 't2',
+              title: 'Still news',
+              status: 'done',
+              unread: true,
+              activity: { seq: 5, kind: 'status', at: 1 },
+            },
+          ],
+        }),
+      ),
+    )
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    await waitFor(() => expect(screen.getByTestId('board-since')).toHaveTextContent('1 done'))
+  })
+
+  it('a mark this browser stored before the server kept read state stays', async () => {
+    window.localStorage.setItem(
+      'clawboo.board.seen.all',
+      JSON.stringify({
+        v: 1,
+        at: Date.now() - 3_600_000,
+        watching: false,
+        columns: { t1: 'todo' },
+        pending: null,
+      }),
+    )
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [{ id: 't1', title: 'Old news', status: 'done', unread: false, activity: null }],
+        }),
+      ),
+    )
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    await waitFor(() => expect(screen.getByTestId('board-since')).toHaveTextContent('1 done'))
+  })
+
+  it('Mark seen says so when the server refuses, and the board stays seen here', async () => {
+    resetInboxStore()
+    window.localStorage.setItem(
+      'clawboo.board.seen.all',
+      JSON.stringify({
+        v: 1,
+        at: Date.now() - 3_600_000,
+        watching: false,
+        columns: { t1: 'todo' },
+        pending: null,
+      }),
+    )
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            {
+              id: 't1',
+              title: 'News',
+              status: 'done',
+              unread: true,
+              activity: { seq: 9, kind: 'status', at: 1 },
+            },
+          ],
+        }),
+      ),
+      http.post('/api/board/inbox/read', () =>
+        HttpResponse.json({ error: 'person_only' }, { status: 403 }),
+      ),
+    )
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    const since = await screen.findByTestId('board-since')
+    await userEvent.click(within(since).getByRole('button', { name: 'Mark seen' }))
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.map((t) => t.message)).toContain(
+        'Couldn’t mark these read in your Inbox.',
+      ),
+    )
+    expect(screen.queryByTestId('board-since')).not.toBeInTheDocument()
+  })
+
+  it('Mark seen tells the server too, through what the board showed', async () => {
+    resetInboxStore()
+    const marked: unknown[] = []
+    window.localStorage.setItem(
+      'clawboo.board.seen.all',
+      JSON.stringify({
+        v: 1,
+        at: Date.now() - 3_600_000,
+        watching: false,
+        columns: { t1: 'todo' },
+        pending: null,
+      }),
+    )
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            {
+              id: 't1',
+              title: 'News',
+              status: 'done',
+              unread: true,
+              activity: { seq: 9, kind: 'status', at: 1 },
+            },
+          ],
+        }),
+      ),
+      http.post('/api/board/inbox/read', async ({ request }) => {
+        marked.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    const since = await screen.findByTestId('board-since')
+    await userEvent.click(within(since).getByRole('button', { name: 'Mark seen' }))
+    await waitFor(() => expect(marked).toEqual([{ through: 9 }]))
   })
 })

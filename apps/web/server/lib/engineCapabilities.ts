@@ -46,6 +46,11 @@ export const FEATURE_ROUTES = {
     'DELETE /api/teams/:id/labels/:labelId',
     'PUT /api/board/:taskId/labels',
   ],
+  'board.inbox': [
+    'GET /api/board/inbox',
+    'POST /api/board/inbox/read',
+    'POST /api/board/:taskId/read',
+  ],
   'workspace.view': [
     'GET /api/agents/:agentId/workspaces',
     'GET /api/board/:taskId/workspace/tree',
@@ -118,6 +123,7 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.steering': true,
     'board.readableIds': true,
     'board.labels': true,
+    'board.inbox': true,
     'workspace.view': true,
     'workspace.preview': true,
     'agent.nativeShell': true,

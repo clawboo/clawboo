@@ -116,3 +116,39 @@ describe('useSeenBoard across team filters', () => {
     expect(hook.result.current.summary).toBeNull()
   })
 })
+
+describe('a task read on the server', () => {
+  it('drops the mark when the server says the person read it, from any browser', () => {
+    store('all', { x: 'todo', y: 'todo' })
+    const { result } = mount('all')
+    act(() =>
+      result.current.noteBoardRead('all', [
+        { id: 'x', column: 'done', teamId: 'team-a', read: true },
+        { id: 'y', column: 'done', teamId: 'team-a', read: false },
+      ]),
+    )
+    expect(result.current.pending).toEqual({ y: 'done' })
+    expect(stored('all').pending?.items).toEqual({ y: 'done' })
+  })
+
+  it('leaves a mark the server has no word on: the browser’s record stands', () => {
+    store('all', { x: 'todo' })
+    const { result } = mount('all')
+    act(() => result.current.noteBoardRead('all', [{ id: 'x', column: 'done', teamId: 'team-a' }]))
+    expect(result.current.pending).toEqual({ x: 'done' })
+  })
+
+  it('still reads a record stored before the server kept read state', () => {
+    const rec = {
+      v: 1,
+      at: T0 - HOUR,
+      watching: false,
+      columns: { x: 'done' },
+      pending: { since: T0 - 2 * HOUR, items: { x: 'done' } },
+    }
+    window.localStorage.setItem('clawboo.board.seen.all', JSON.stringify(rec))
+    const { result } = mount('all')
+    act(() => result.current.noteBoardRead('all', [{ id: 'x', column: 'done', teamId: 'team-a' }]))
+    expect(result.current.pending).toEqual({ x: 'done' })
+  })
+})

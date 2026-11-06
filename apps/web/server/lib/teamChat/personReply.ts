@@ -55,6 +55,9 @@ export interface ReplyDeps {
   /** How long to wait for a steer to land before saying it is queued. */
   steerWaitMs?: number
   now?: () => number
+  /** Runs a write the reply causes as part of the person's own write, so it does
+   *  not come back to them as news. */
+  asOwnWrite?: <T>(write: () => T) => T
 }
 
 /** Replies this close together start one run. */
@@ -119,7 +122,8 @@ function wake(
     return { status: 'woke-agent', agentId }
   }
   if (task.status !== 'todo') {
-    const moved = updateStatus(db, task.id, 'todo')
+    const move = (): ReturnType<typeof updateStatus> => updateStatus(db, task.id, 'todo')
+    const moved = deps.asOwnWrite ? deps.asOwnWrite(move) : move()
     if (!moved.ok) return { status: 'queued', agentId, reason: 'next-run' }
     emitEvent(db, {
       kind: 'status_changed',

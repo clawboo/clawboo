@@ -33,8 +33,13 @@ import { useRunActivityStore } from '@/stores/runActivity'
 import type { ObsLogEvent } from '../useObsStream'
 
 let streamEvents: ObsLogEvent[] = []
+let streamActivity: { seq: number; read: number } | null = null
+const streamOpts: unknown[] = []
 vi.mock('../useObsStream', () => ({
-  useObsStream: () => ({ events: streamEvents, error: null, connected: true }),
+  useObsStream: (_scope: unknown, opts: unknown) => {
+    streamOpts.push(opts)
+    return { events: streamEvents, boardActivity: streamActivity, error: null, connected: true }
+  },
 }))
 
 // Imported after the mock so the component picks it up.
@@ -202,5 +207,43 @@ describe('RunStatusBridge', () => {
     expect(statusOf('a1')).toBe('running')
     // Evidence-only: a chat run with no execution events is never reset.
     expect(statusOf('chatty')).toBe('running')
+  })
+})
+
+describe('RunStatusBridge: the person’s inbox', () => {
+  beforeEach(() => {
+    streamEvents = []
+    streamActivity = null
+    streamOpts.length = 0
+    useFleetStore.setState({ agents: [] })
+    useAlertSignal.setState({ seq: 0, inbox: 0, inboxEvent: 0, boardActivity: 0, boardReads: 0 })
+  })
+
+  it('asks the one tail for board activity rather than opening a second', () => {
+    render(<RunStatusBridge />)
+    expect(streamOpts[0]).toMatchObject({ activity: true })
+  })
+
+  it('wakes the inbox when the board’s record moves', () => {
+    const { rerender } = render(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(0)
+    streamActivity = { seq: 12, read: 0 }
+    rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState()).toMatchObject({ boardActivity: 12, inbox: 1 })
+    // The same position again is not a change.
+    streamActivity = { seq: 12, read: 0 }
+    rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(1)
+    // A read in another browser is.
+    streamActivity = { seq: 12, read: 500 }
+    rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(2)
+  })
+
+  it('wakes the inbox when an approval is answered, which the alerts do not read', () => {
+    streamEvents = [ev('approval_resolved', 'a1')]
+    render(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(1)
+    expect(useAlertSignal.getState().seq).toBe(0)
   })
 })

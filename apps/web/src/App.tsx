@@ -3,6 +3,7 @@ import { ToastContainer } from '@/features/ui/ToastContainer'
 import { GatewayBootstrap } from '@/features/connection/GatewayBootstrap'
 import { RunStatusBridge } from '@/features/obs/RunStatusBridge'
 import { NeedsYouAlerts } from '@/features/alerts/NeedsYouAlerts'
+import { InboxBridge } from '@/features/inbox/InboxBridge'
 import { AppSidebar } from '@/features/layout/AppSidebar'
 import { ContentArea } from '@/features/layout/ContentArea'
 import { FirstRunNudge } from '@/features/fleet/FirstRunNudge'
@@ -46,6 +47,8 @@ export function App() {
       {/* Browser notifications for what needs the person, while the tab is in
           the background. Opt-in, and quiet inside the desktop app. */}
       <NeedsYouAlerts />
+      {/* The person's inbox and its badge, woken by the same event tail. */}
+      <InboxBridge />
       {/* `--clawboo-titlebar-inset` (unset = 0) lets an embedder reserve a strip
           for its own title bar, such as an inset macOS one, so it never sits on
           the sidebar. The fallback lives here rather than on :root, so a value

@@ -309,6 +309,7 @@ A Server-Sent Events tail of the event log, optionally scoped to a team, task or
 | `kinds`    | string | Comma-separated list of event kinds; empty/blank values dropped. Only events of these kinds are sent. |
 | `afterSeq` | number | Resume after this `seq`, the same cursor as on `GET /api/obs/events`.                                 |
 | `since`    | number | The same as `afterSeq`. Here it is a `seq`, not the time it means on `GET /api/obs/events`.           |
+| `activity` | string | `1` also sends `activity` events, below. Off otherwise, so the stream is unchanged for other clients. |
 
 The cursor is the first of `Last-Event-ID`, `afterSeq` and `since` that holds a number of `0` or more. A missing, malformed or negative value is skipped, and with none left the cursor is `0`. A browser's `EventSource` reconnects to the same URL with the last `id` it received as `Last-Event-ID`, so that header wins over the query.
 
@@ -335,11 +336,14 @@ then emits a `: connected` comment frame and flushes any rows already past the c
 
 ### Event catalog
 
-| Frame         | When                                         | Shape                                                                              |
-| ------------- | -------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `: connected` | Immediately on open                          | SSE comment (ignored by `EventSource`)                                             |
-| event data    | Per new log row in scope (poll every 750 ms) | `id: <seq>` line + `data: <json>` line (the full event row, `data` field redacted) |
-| `: keepalive` | Every 20 s while open                        | SSE comment (keeps the connection warm)                                            |
+| Frame         | When                                          | Shape                                                                              |
+| ------------- | --------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `: connected` | Immediately on open                           | SSE comment (ignored by `EventSource`)                                             |
+| event data    | Per new log row in scope (poll every 750 ms)  | `id: <seq>` line + `data: <json>` line (the full event row, `data` field redacted) |
+| `: keepalive` | Every 20 s while open                         | SSE comment (keeps the connection warm)                                            |
+| `activity`    | With `?activity=1`: on open, then on a change | `event: activity` + `data: {"seq":N,"read":T}`, with no `id:` line                 |
+
+An `activity` event says the [Inbox](/reference/rest-api/board) is worth reading again. `seq` is the board's newest task change, recorded by database triggers, so it also moves for writes that leave no event row, such as an agent's comment through its task tool. `read` goes up each time this person marks something read, so a read in one browser wakes the others. It never moves the resume cursor.
 
 The `data:` payload is one stored event row, identical in shape to a `GET /api/obs/events` row, with its inner JSON `data` field masked (`••••`). The `id:` value is the row's `seq`; the browser sends it back as `Last-Event-ID` on auto-reconnect, so the tail resumes without gaps.
 

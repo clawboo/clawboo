@@ -6,6 +6,7 @@ import {
   Brain,
   Ghost,
   Home,
+  Inbox,
   KanbanSquare,
   MoreHorizontal,
   Network,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { GroupAvatar } from '@/components/GroupAvatar'
+import { useInboxCount } from '@/features/inbox/useInboxCount'
 import { SidebarToggle } from '@/features/layout/SidebarToggle'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { SearchInput } from '@/features/shared/SearchInput'
@@ -246,6 +248,7 @@ const NAV: NavItem[] = [
   // `'graph'` is the Org chart: every team, with Boo Zero at the top.
   { id: 'graph', icon: Network },
   { id: 'board', icon: KanbanSquare },
+  { id: 'inbox', icon: Inbox },
   // Its own destination rather than a Marketplace tab: connecting a tool the
   // agents will use is not the same errand as shopping for a team template.
   { id: 'connectors', icon: Plug },
@@ -291,7 +294,7 @@ function NavButton({
       ) : null}
       {badge ? (
         <span className="ml-auto flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-primary-solid px-1 text-[10px] font-bold text-primary-foreground">
-          {badge}
+          {badge > 99 ? '99+' : badge}
         </span>
       ) : null}
     </button>
@@ -574,6 +577,7 @@ export function AgentListColumn() {
   const connectionStatus = useConnectionStore((s) => s.status)
 
   const viewMode = useViewStore((s) => s.viewMode)
+  const inboxCount = useInboxCount()
   const settingsOpen = useSettingsModalStore((s) => s.open)
 
   const [query, setQuery] = useState('')
@@ -969,6 +973,7 @@ export function AgentListColumn() {
             key={item.id}
             item={item}
             active={viewMode.type === 'nav' && viewMode.view === item.id}
+            {...(item.id === 'inbox' ? { badge: inboxCount } : {})}
             onClick={() => useViewStore.getState().navigateTo(item.id)}
           />
         ))}
