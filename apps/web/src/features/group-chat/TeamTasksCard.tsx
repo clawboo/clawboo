@@ -20,7 +20,14 @@ import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { InlineApprovalCard } from '@/features/approvals/InlineApprovalCard'
 import { ToolApprovalCard } from '@/features/approvals/ToolApprovalCard'
 import { usePendingApprovals } from '@/features/approvals/usePendingApprovals'
-import { attentionLabel, taskAttentionOf } from '@/features/board/boardStatus'
+import {
+  assigneePersonOf,
+  attentionLabel,
+  otherAssigneeName,
+  taskAttentionOf,
+  waitingWorkLabel,
+} from '@/features/board/boardStatus'
+import { useBoardPerson } from '@/features/board/useBoardPerson'
 import { ReplyReceipt } from '@/features/board/ReplyReceipt'
 import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
 import { formatRunCost, runCostOf } from '@/features/board/taskCost'
@@ -66,14 +73,20 @@ function firstLine(text: string): string {
 
 /** The muted line under a task's title: why it waits on you, what it reported,
  *  or simply where it stands. */
-function subtitleOf(task: BoardTaskView, assigneeName: string | null): string {
+function subtitleOf(
+  task: BoardTaskView,
+  assigneeName: string | null,
+  me: { id: string } | null,
+): string {
   const attention = taskAttentionOf(task)
   if (attention) {
-    const label = attentionLabel(attention)
+    const label = attentionLabel(attention, otherAssigneeName(task, me))
     return attention.detail ? `${label}: ${attention.detail}` : label
   }
+  const waiting = waitingWorkLabel(task)
+  if (waiting) return waiting
   if (task.summary) return firstLine(task.summary)
-  const { label } = toneFor(task)
+  const { label } = toneFor(task, me)
   return assigneeName ? `${label} · ${assigneeName}` : label
 }
 
@@ -81,6 +94,7 @@ function subtitleOf(task: BoardTaskView, assigneeName: string | null): string {
 
 function TaskRow({ task, onOpen }: { task: BoardTaskView; onOpen: () => void }) {
   const assigneeName = useAgentName(task.assigneeAgentId)
+  const me = useBoardPerson(task.assigneePersonId != null)
   return (
     <button
       type="button"
@@ -98,7 +112,7 @@ function TaskRow({ task, onOpen }: { task: BoardTaskView; onOpen: () => void }) 
               {task.identifier} ·{' '}
             </span>
           ) : null}
-          {subtitleOf(task, assigneeName)}
+          {subtitleOf(task, assigneeName, me)}
         </span>
       </span>
       {task.assigneeAgentId && <AgentBooAvatar agentId={task.assigneeAgentId} size={20} />}
@@ -323,7 +337,7 @@ function composerHint(
   hasAgent: boolean,
 ): string {
   if (task.status === 'done' || task.status === 'cancelled')
-    return 'This task is finished. You can send your comment as a follow-up task.'
+    return 'This task is finished. Reopen it, or send your comment as a follow-up task.'
   if (!hasAgent) return 'No agent is on this task yet. Your comment is saved on it.'
   const who = name ?? 'The agent'
   if (task.status === 'in_progress') {
@@ -417,7 +431,10 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
     setReloadKey((n) => n + 1)
   }
 
-  const { tone, label } = toneFor(task)
+  const person = assigneePersonOf(task)
+  const me = useBoardPerson(person !== null)
+  const personName = person ? (otherAssigneeName(task, me) ?? 'You') : null
+  const { tone, label } = toneFor(task, me)
   const delivery = midRunDelivery(
     assigneeRuntime,
     asSteering(row?.runSteering),
@@ -443,7 +460,7 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
           <StatusPill tone={tone} label={label} />
           <span className="flex items-center gap-1.5">
             {task.assigneeAgentId && <AgentBooAvatar agentId={task.assigneeAgentId} size={18} />}
-            <span className="text-foreground/80">{assigneeName ?? 'Unassigned'}</span>
+            <span className="text-foreground/80">{assigneeName ?? personName ?? 'Unassigned'}</span>
           </span>
           {runtime && <span>{resolveRuntimeMark(runtime).label}</span>}
           {cost?.usd != null && (

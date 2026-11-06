@@ -57,6 +57,10 @@ export function pendingWakeText(wake: PendingWake, name: string): string {
       return `Waiting on the provider's billing. Fix it, then retry`
     case 'blocked':
       return `Waiting on you: Retry starts ${name} on it`
+    case 'person_assigned':
+      return `This task is with a person. ${name} reads ${what} when it is given back`
+    case 'question':
+      return `${name} reads ${what} when its question is answered`
     case 'backlog':
       return `In Backlog. Move it to To do to send ${what} to ${name}`
     case 'no_agent':

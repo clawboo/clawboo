@@ -10,9 +10,9 @@
 // @clawboo/board-core carries no server/db graph, so this host-agnostic interface
 // package stays browser-safe while using the SAME union @clawboo/db enforces — a
 // host binding over the direct-DB client type-checks by identity, not by luck.
-import type { HandOffLink, TaskStatus, TaskWakeReason } from '@clawboo/board-core'
+import type { HandOffLink, TaskStatus, TaskWakeReason, WaitingOn } from '@clawboo/board-core'
 
-export type { HandOffLink, TaskStatus }
+export type { HandOffLink, TaskStatus, WaitingOn }
 
 export interface CreateTaskInput {
   title: string
@@ -114,7 +114,12 @@ export interface BoardClient {
     assigneeRuntime?: string,
     run?: ClaimRun,
   ): Promise<ClaimResult>
-  updateStatus(taskId: string, status: string): Promise<boolean>
+  /** `waitingOn` says what a task moved to Blocked or In review now waits for. A
+   *  host that cannot store it (the browser's REST client) leaves it out. */
+  updateStatus(taskId: string, status: string, opts?: { waitingOn?: WaitingOn }): Promise<boolean>
+  /** Say what a task waits for without moving it (a check whose move to Blocked
+   *  keeps failing). Best-effort; a host may not have it. */
+  setWaitingOn?(taskId: string, waitingOn: WaitingOn | null): Promise<void>
   addComment(
     taskId: string,
     body: string,

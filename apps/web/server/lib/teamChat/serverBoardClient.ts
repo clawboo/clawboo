@@ -33,6 +33,7 @@ import {
   linkDep,
   listDirectDependentIds,
   listTasks,
+  setTaskWaitingOn,
   markDelegationFailureNotified,
   noteDelegationFailure,
   readDelegationFailure,
@@ -41,7 +42,7 @@ import {
   type ClawbooDb,
   type TaskStatus,
 } from '@clawboo/db'
-import type { TaskWakeReason } from '@clawboo/board-core'
+import { delegationTargetOf, type TaskWakeReason } from '@clawboo/board-core'
 import type {
   BoardTask,
   ClaimResult,
@@ -200,6 +201,9 @@ export function createServerBoardClient(
         // The run opens with the claim, in one write: the execution, its stamp on the
         // task and the saved wakes it takes.
         const result = claimTask(db, taskId, assigneeAgentId, assigneeRuntime, run ? { run } : {})
+        // A person's task is someone else's, as far as the engine goes: it leaves
+        // it alone and moves on, as it does when another engine wins the claim.
+        if (result.reason === 'person_assigned') return { ok: false, reason: 'conflict' }
         if (!result.ok || !result.task) return result as ClaimResult
         const t = result.task
         emitEvent(db, {
@@ -239,13 +243,18 @@ export function createServerBoardClient(
       }
     },
 
-    async updateStatus(taskId, status): Promise<boolean> {
+    async updateStatus(taskId, status, opts): Promise<boolean> {
       try {
         // Route through the repo's state-machine-enforced `updateStatus`: a
         // `→todo` clears the assignee + verification (re-claimable), and an
         // illegal/verification-gated transition returns `{ ok: false }` → false,
         // which the engine must NOT retry.
-        const result = updateStatus(db, taskId, status as TaskStatus)
+        const result = updateStatus(
+          db,
+          taskId,
+          status as TaskStatus,
+          opts?.waitingOn ? { waitingOn: opts.waitingOn } : {},
+        )
         if (result.ok && result.task) {
           const t = result.task
           emitEvent(db, {
@@ -260,6 +269,19 @@ export function createServerBoardClient(
       } catch {
         return false
       }
+    },
+
+    async setWaitingOn(taskId, waitingOn): Promise<void> {
+      setTaskWaitingOn(db, taskId, waitingOn)
+      // It now needs a person without having moved: what browser alerts follow.
+      const t = getTask(db, taskId)
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: t?.teamId ?? null,
+        agentId: t?.assigneeAgentId ?? null,
+        data: { to: t?.status ?? null, reason: 'waiting_on' },
+      })
     },
 
     async addComment(taskId, body, authorType = 'system', authorAgentId): Promise<void> {
@@ -340,7 +362,9 @@ export function createServerBoardClient(
           kind: 'execution_completed',
           taskId: exec.taskId,
           teamId: task?.teamId ?? null,
-          agentId: task?.assigneeAgentId ?? null,
+          // A hand-back takes the agent off the task before its run ends. The binding
+          // still names it, or its open-run count would never come down.
+          agentId: task?.assigneeAgentId ?? delegationTargetOf(task?.sourceDelegationId) ?? null,
           runtime: exec.executorType,
           data: {
             execId,

@@ -1,8 +1,8 @@
 // Who a request reads and writes the board as, for a person's inbox.
 //
-// One seam. On an install with no sign-in there is one built-in reader. Behind a
-// sign-in proxy each verified person is their own reader. A built-in local person,
-// when there is one, changes `readerOf` and nothing else.
+// One seam. On an install with no sign-in there is one built-in reader, whose id is
+// the built-in person's (`local`, see LOCAL_PERSON), so their read state needs no move.
+// Behind a sign-in proxy each verified person is their own reader.
 
 import type { Request } from 'express'
 

@@ -64,7 +64,11 @@ describe('Tasks MCP on a team run', () => {
   it('lets the agent block its own task', async () => {
     const taskId = claimedBy('coder')
     const client = await connectInMemory(createTasksServer(db, TEAM_RUN))
-    const res = await callText(client, 'block_task', { taskId })
+    const res = await callText(client, 'block_task', {
+      taskId,
+      waitingOn: 'person',
+      need: 'A person must decide',
+    })
     expect(res.isError).toBe(false)
     expect(getTask(db, taskId)?.status).toBe('blocked')
   })

@@ -52,6 +52,7 @@ import { EMPTY_DIRECTORY, loadRoutineDirectory } from '@/features/routines/routi
 import { TaskDetailDrawer, type DrawerPosition } from './TaskDetailDrawer'
 import { NeedsYouItems, NeedsYouLane, useNeedsYou } from './NeedsYouColumn'
 import { NewTaskDialog } from './NewTaskDialog'
+import { useBoardPerson } from './useBoardPerson'
 import { CardPropertiesContext, TaskCard, taskOwnerOf } from './TaskCard'
 import { StatusGlyph, glyphKindOf } from './StatusGlyph'
 import {
@@ -73,6 +74,7 @@ import {
   STATUS_LABEL,
   boardColumnOf,
   canTransition,
+  isMyTask,
   statusLabel,
   statusOptions,
 } from './boardStatus'
@@ -221,7 +223,7 @@ function dropCommitsAtOnce(
 
 /** A task with no agent bound waits in Needs you once it is in To do. */
 function unboundTodo(task: BoardTask, to: string): boolean {
-  if (to !== 'todo') return false
+  if (to !== 'todo' || task['assigneePersonId']) return false
   const sdid = typeof task['sourceDelegationId'] === 'string' ? task['sourceDelegationId'] : null
   return delegationTargetOf(sdid) == null
 }
@@ -326,8 +328,9 @@ function isRunning(task: BoardTask): boolean {
 }
 
 /** Whether the board's filter lets a task through. */
-function matchesFilter(task: BoardTask, filter: BoardFilter): boolean {
+function matchesFilter(task: BoardTask, filter: BoardFilter, me: { id: string }): boolean {
   if (filter.running && !isRunning(task)) return false
+  if (filter.mine && !isMyTask(task, me)) return false
   if (
     filter.labels.size > 0 &&
     !labelsOfTask(task).some((label) => filter.labels.has(label.name.toLowerCase()))
@@ -384,6 +387,7 @@ export function BoardPanel() {
   // What the board is narrowed to (Filter, and the agents-working chip). It lasts
   // for this visit and starts over with each team.
   const [boardFilter, setBoardFilter] = useState<BoardFilter>(NO_FILTER)
+  const me = useBoardPerson(boardFilter.mine)
   const [refreshing, setRefreshing] = useState(false)
   // The board polls every 5s; a spinner shows only when a read runs long.
   const slowRefresh = useDelayedFlag(refreshing, 300)
@@ -915,8 +919,8 @@ export function BoardPanel() {
     () =>
       filterCount(boardFilter) === 0
         ? effectiveTasks
-        : effectiveTasks.filter((t) => matchesFilter(t, boardFilter)),
-    [effectiveTasks, boardFilter],
+        : effectiveTasks.filter((t) => matchesFilter(t, boardFilter, me)),
+    [effectiveTasks, boardFilter, me],
   )
   // A team has its own agents, so the filter starts over with each team.
   useEffect(() => setBoardFilter(NO_FILTER), [teamFilter])

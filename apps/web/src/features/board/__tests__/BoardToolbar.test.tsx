@@ -78,6 +78,59 @@ beforeEach(() => {
 })
 afterEach(() => cleanup())
 
+describe('the Mine filter on the board', () => {
+  it('narrows every column to the tasks assigned to you, by the id the server says is you', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'p1', name: 'Priya', role: null } }),
+      ),
+    )
+    serve([
+      {
+        id: 'mine',
+        title: 'My parked task',
+        status: 'backlog',
+        assigneePersonId: 'p1',
+        createdAt: earlier(),
+      },
+      {
+        id: 'shared',
+        title: 'For whoever is here',
+        status: 'backlog',
+        assigneePersonId: 'local',
+        createdAt: earlier(),
+      },
+      {
+        id: 'theirs',
+        title: 'Someone else’s',
+        status: 'backlog',
+        assigneePersonId: 'p2',
+        createdAt: earlier(),
+      },
+      {
+        id: 'agents',
+        title: 'An agent’s',
+        status: 'in_progress',
+        assigneeAgentId: 'coder',
+        createdAt: earlier(),
+      },
+    ])
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    await screen.findByText('My parked task')
+    expect(screen.getByText('An agent’s')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Filter' }))
+    await userEvent.click(await screen.findByRole('menuitemcheckbox', { name: /Mine/ }))
+    await waitFor(() => expect(screen.queryByText('An agent’s')).toBeNull())
+    expect(screen.queryByText('Someone else’s')).toBeNull()
+    expect(screen.getByText('My parked task')).toBeInTheDocument()
+    expect(screen.getByText('For whoever is here')).toBeInTheDocument()
+  })
+})
+
 describe('Filter', () => {
   it('narrows the board to the agents picked, counts itself, and clears', async () => {
     serve()

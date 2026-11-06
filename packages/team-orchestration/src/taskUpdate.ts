@@ -24,15 +24,20 @@ import { formatInterSessionMessage, oneLine } from '@clawboo/board-core'
  * the board did not mark the task done. `'not_started'` is a hand-off the board
  * refused, so no run failed but the work is still undone. `'already_open'` is not a
  * failure at all: a hand-off found its work already on the board, and that task's
- * own result comes later. The others are failures. All of these but
- * the person's decisions are ones the leader must act on rather than keep waiting
- * for.
+ * own result comes later. `'asked'` is the agent asking a person a question: it
+ * waits for the answer and starts again by itself, so nobody should redo it or hand
+ * it out. `'waiting'` is the agent waiting on another task or its sub-tasks: the
+ * board moves it on when that work ends, so the same holds. The others are failures.
+ * All of these but the person's decisions and those two waits are ones the leader
+ * must act on rather than keep waiting for.
  */
 export type TaskUpdateOutcome =
   | 'done'
   | 'person_done'
   | 'person_cancelled'
   | 'blocked'
+  | 'asked'
+  | 'waiting'
   | 'check_failed'
   | 'check_interrupted'
   | 'done_refused'
@@ -56,7 +61,7 @@ export interface TaskUpdateItem {
 
 type FailedOutcome = Exclude<
   TaskUpdateOutcome,
-  'done' | 'person_done' | 'person_cancelled' | 'already_open'
+  'done' | 'person_done' | 'person_cancelled' | 'already_open' | 'asked' | 'waiting'
 >
 
 const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
@@ -169,6 +174,8 @@ export function buildTaskUpdateMessage(
 ): string {
   if (items.length === 0) return ''
   const failures = items.filter((i) => isTaskFailure(i.outcome))
+  const asking = items.filter((i) => i.outcome === 'asked').length
+  const waiting = items.filter((i) => i.outcome === 'waiting').length
   // A hand-off that found its work on the board finished nothing, so it is not counted
   // as a task that did. A batch with none of these reads as it always has.
   const found = items.filter((i) => i.outcome === 'already_open').length
@@ -230,6 +237,16 @@ export function buildTaskUpdateMessage(
       `A person cancelled ${cancelledByPerson === items.length ? (items.length === 1 ? 'it' : 'all of them') : `${cancelledByPerson} of these`} on the board. Do NOT redo cancelled work or hand it to anyone again.`,
     )
   }
+  if (asking > 0) {
+    headerLines.push(
+      `${asking === items.length ? (items.length === 1 ? 'This one is' : 'These are') : `${asking} of these are`} waiting for a person's answer. Do NOT redo or reassign them: each starts again by itself once answered, and reports here then.`,
+    )
+  }
+  if (waiting > 0) {
+    headerLines.push(
+      `${waiting === items.length ? (items.length === 1 ? 'This one is' : 'These are') : `${waiting} of these are`} waiting on other work. Do NOT redo or reassign them: each goes back to the queue once that work is done, and comes to a person if it is cancelled.`,
+    )
+  }
   if (failures.length > 0) {
     headerLines.push(
       `⚠ ${failures.length} of these did NOT complete (the ⚠ entries below). Decide what to do next — retry, reassign to another teammate, or tell the user it failed and why. Do NOT keep silently waiting on them.`,
@@ -244,11 +261,15 @@ export function buildTaskUpdateMessage(
       ? `⚠ ${by} — DID NOT COMPLETE (${failLabel})`
       : item.outcome === 'already_open'
         ? 'Already on the board'
-        : item.outcome === 'person_cancelled'
-          ? `✕ Cancelled by a person (it was ${by}'s)`
-          : item.outcome === 'person_done'
-            ? `✓ Marked done by a person (it was ${by}'s)`
-            : `✓ ${by}`
+        : item.outcome === 'asked'
+          ? `… ${by} asked a person a question and waits for the answer`
+          : item.outcome === 'waiting'
+            ? `… ${by} is waiting on other work`
+            : item.outcome === 'person_cancelled'
+              ? `✕ Cancelled by a person (it was ${by}'s)`
+              : item.outcome === 'person_done'
+                ? `✓ Marked done by a person (it was ${by}'s)`
+                : `✓ ${by}`
     if (item.title) header += ` — "${clipTitle(item.title)}"`
     sections.push(header)
     const result = item.summary || (failed ? '(no output was produced before it stopped)' : '')

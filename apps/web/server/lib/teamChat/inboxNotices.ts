@@ -3,7 +3,7 @@
 // (executorRunner → subscribers → teamOrchestrator → serverDeliver →
 // executorRunner). Imports only @clawboo/db and @clawboo/board-core.
 
-import { isHumanAssignment } from '@clawboo/board-core'
+import { isHumanAssignment, parseWaitingOn, waitsOnOtherWork } from '@clawboo/board-core'
 import { enqueueInbox, getTask, teams, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq } from 'drizzle-orm'
@@ -88,12 +88,19 @@ export function notifyBlockedByAgent(
     const why = reply
       ? `Its whole reply is on the task. It said: ${reply.slice(0, NOTICE_REPLY_MAX_CHARS)}`
       : 'It did not say why.'
+    const task = getTask(db, taskId)
+    const title = task?.title ?? taskId
+    // Waiting on other work, the board moves it on: telling a delegator it needs a
+    // person would have them redo it while it queues itself again.
+    const state = waitsOnOtherWork(parseWaitingOn(task?.waitingOn))
+      ? 'is waiting on other work. Do not redo or reassign it: it goes back to the queue once that work is done, and comes to a person if it is cancelled.'
+      : 'is blocked: its agent needs a person before it can go on.'
     enqueueInbox(db, {
       agentId: recipient,
       teamId,
       kind: 'task_update',
       taskId,
-      body: `“${getTask(db, taskId)?.title ?? taskId}” is blocked: its agent needs a person before it can go on. ${why}`,
+      body: `“${title}” ${state} ${why}`,
     })
   } catch (err) {
     log.error({ err, taskId }, 'agent-blocked notice failed')

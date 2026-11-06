@@ -907,3 +907,116 @@ describe('Needs you when the provider refused the account', () => {
     expect(screen.getAllByTestId('needs-you-task')).toHaveLength(4)
   })
 })
+
+describe('NeedsYouColumn: a question and a person’s task', () => {
+  const asked: BoardTask = {
+    id: 'q-task',
+    title: 'Write the post',
+    status: 'blocked',
+    teamId: 'team1',
+    assigneeAgentId: 'a1',
+    attention: { reason: 'question', failedRuns: 0, questionId: 'q1' },
+    openQuestion: {
+      id: 'q1',
+      kind: 'question',
+      payload: JSON.stringify({ prompt: 'Which audience?', options: ['Developers', 'Everyone'] }),
+    },
+  } as BoardTask
+
+  it('shows the question and answers it from the card', async () => {
+    const answers: unknown[] = []
+    server.use(
+      http.post('/api/board/questions/q1/answer', async ({ request }) => {
+        answers.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const { onTasksChanged } = renderColumn([asked])
+    const card = await screen.findByTestId('needs-you-task')
+    expect(card).toHaveAttribute('data-attention', 'question')
+    expect(within(card).getByText('Waiting for your answer')).toBeInTheDocument()
+    expect(within(card).getByText('Which audience?')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: 'Developers' }))
+    await waitFor(() => expect(answers).toEqual([{ answer: { choice: 'Developers' } }]))
+    await waitFor(() => expect(onTasksChanged).toHaveBeenCalled())
+  })
+
+  it('a person’s task leads with Mark done and is never unassigned', async () => {
+    let moved: unknown = null
+    server.use(
+      http.patch('/api/board/mine', async ({ request }) => {
+        moved = await request.json()
+        return HttpResponse.json({ ok: true, task: { id: 'mine', status: 'done' } })
+      }),
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'local', name: 'You', role: null } }),
+      ),
+    )
+    const task = {
+      id: 'mine',
+      title: 'Call the supplier',
+      status: 'todo',
+      teamId: 'team1',
+      assigneePersonId: 'local',
+      attention: { reason: 'assigned', failedRuns: 0, personId: 'local' },
+    } as BoardTask
+    const { onTasksChanged } = renderColumn([task])
+    const card = await screen.findByTestId('needs-you-task')
+    expect(within(card).getByText('Assigned to you')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: /Mark done/ }))
+    await waitFor(() => expect(moved).toMatchObject({ status: 'done' }))
+    await waitFor(() => expect(onTasksChanged).toHaveBeenCalled())
+  })
+
+  it('a hand-back says what the person must do and can go back to its agent', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'local', name: 'You', role: null } }),
+      ),
+    )
+    const task = {
+      id: 'back',
+      title: 'Deploy',
+      status: 'blocked',
+      teamId: 'team1',
+      assigneePersonId: 'local',
+      sourceDelegationId: 'r:deleg:agent:a1:reflectTo:lead',
+      attention: {
+        reason: 'assigned',
+        failedRuns: 0,
+        personId: 'local',
+        handedBack: true,
+        detail: 'Press publish',
+      },
+    } as BoardTask
+    renderColumn([task])
+    const card = await screen.findByTestId('needs-you-task')
+    expect(within(card).getByText('Press publish')).toBeInTheDocument()
+    // It says who it came from, and the last row does not say it is that agent's.
+    expect(within(card).getByTitle('Handed back by Coder')).toHaveTextContent('from Coder')
+    await userEvent.click(within(card).getByRole('button', { name: /More for/ }))
+    expect(await screen.findByRole('menuitem', { name: /Give back to Coder/ })).toBeInTheDocument()
+  })
+
+  it('an unassigned card offers you as well as the team', async () => {
+    const task = {
+      id: 'free',
+      title: 'Nobody has this',
+      status: 'todo',
+      teamId: 'team1',
+      attention: { reason: 'unassigned', failedRuns: 0 },
+    } as BoardTask
+    const assigned: string[] = []
+    server.use(
+      http.post('/api/board/free/assign-person', () => {
+        assigned.push('me')
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    renderColumn([task])
+    const card = await screen.findByTestId('needs-you-task')
+    await userEvent.click(within(card).getByRole('button', { name: 'Assign' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'You' }))
+    await waitFor(() => expect(assigned).toEqual(['me']))
+  })
+})

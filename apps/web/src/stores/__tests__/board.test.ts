@@ -111,3 +111,64 @@ describe('useBoardStore.applyChange (projection merge)', () => {
     useBoardStore.getState().reset('t2')
   })
 })
+
+describe('useBoardStore: person tasks, waits and Reopen', () => {
+  beforeEach(() => useBoardStore.getState().reset('t1'))
+  const task = () => useBoardStore.getState().tasksByTeam.get('t1')!.get('task-1')!
+
+  it('a person taking the task takes the agent off, as the server did', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('t1', { id: 'task-1', status: 'blocked', assigneeAgentId: 'a2', updatedAt: 100 })
+    s.applyChange('t1', {
+      id: 'task-1',
+      status: 'blocked',
+      assigneePersonId: 'local',
+      assigneePerson: '{"id":"local","name":"You","role":null}',
+      updatedAt: 200,
+    })
+    expect(task().assigneeAgentId).toBeNull()
+    expect(task().assigneePersonId).toBe('local')
+    // A frame that does not say keeps who has it.
+    s.applyChange('t1', { id: 'task-1', summary: 'note', updatedAt: 300 })
+    expect(task().assigneePersonId).toBe('local')
+  })
+
+  it('a person giving it back clears them', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('t1', { id: 'task-1', status: 'todo', assigneePersonId: 'local', updatedAt: 100 })
+    s.applyChange('t1', { id: 'task-1', status: 'todo', assigneePersonId: null, updatedAt: 200 })
+    expect(task().assigneePersonId).toBeNull()
+  })
+
+  it('carries what a task waits on, and drops it when the card moves without saying', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('t1', {
+      id: 'task-1',
+      status: 'blocked',
+      waitingOn: '{"kind":"subtasks"}',
+      waitingOnDetail: { openSubtasks: 2 },
+      updatedAt: 100,
+    })
+    expect(task().waitingOn).toBe('{"kind":"subtasks"}')
+    expect(task().waitingOnDetail).toEqual({ openSubtasks: 2 })
+    s.applyChange('t1', { id: 'task-1', status: 'blocked', updatedAt: 150 })
+    expect(task().waitingOn).toBe('{"kind":"subtasks"}')
+    s.applyChange('t1', { id: 'task-1', status: 'todo', updatedAt: 200 })
+    expect(task().waitingOn).toBeUndefined()
+    expect(task().waitingOnDetail).toBeUndefined()
+  })
+
+  it('a reopened task forgets the report of the run that finished it', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('t1', { id: 'task-1', status: 'done', summary: 'all done', updatedAt: 100 })
+    s.applyChange('t1', { id: 'task-1', status: 'todo', updatedAt: 200 })
+    expect(task().summary).toBeNull()
+  })
+
+  it('a task that failed and runs again keeps nothing sticky from Done, and a live summary still lands', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('t1', { id: 'task-1', status: 'cancelled', summary: 'dropped', updatedAt: 100 })
+    s.applyChange('t1', { id: 'task-1', status: 'todo', summary: 'fresh', updatedAt: 200 })
+    expect(task().summary).toBe('fresh')
+  })
+})

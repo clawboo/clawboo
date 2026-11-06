@@ -75,14 +75,14 @@ The header holds the **Board** title, the team filter, and **New task** (press `
 
 The toolbar under it holds these controls, left to right:
 
-| Control                    | What it does                                                                                                                                                                               |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Needs you**              | Shows when the Needs you column is out of view, with its count. Click it to bring Needs you into view                                                                                      |
-| Agents working             | Reads, for example, **2 agents working** while runs are going, with the faces of the agents at work. Click it to show only running work, and again to show everything                      |
-| Search button              | Opens **Find** (`/` or `Cmd/Ctrl+K`)                                                                                                                                                       |
-| **Filter**                 | Shows only some agents' tasks, tasks with **No agent**, what is **Running now**, or tasks with a label. The button counts the filters that are on, and **Clear filters** turns them off    |
-| **Display**                | **Routine runs** (calendar views only) shows or hides upcoming routine runs. **Cancelled column** opens or folds Cancelled. **On cards** turns each card's **Cost** and **Time** on or off |
-| View menu (names the view) | Switches between **Kanban**, **Today**, **Week** and **Month**, and lists each view's key                                                                                                  |
+| Control                    | What it does                                                                                                                                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Needs you**              | Shows when the Needs you column is out of view, with its count. Click it to bring Needs you into view                                                                                                          |
+| Agents working             | Reads, for example, **2 agents working** while runs are going, with the faces of the agents at work. Click it to show only running work, and again to show everything                                          |
+| Search button              | Opens **Find** (`/` or `Cmd/Ctrl+K`)                                                                                                                                                                           |
+| **Filter**                 | Shows only your tasks (**Mine**), some agents' tasks, tasks with **No agent**, what is **Running now**, or tasks with a label. The button counts the filters that are on, and **Clear filters** turns them off |
+| **Display**                | **Routine runs** (calendar views only) shows or hides upcoming routine runs. **Cancelled column** opens or folds Cancelled. **On cards** turns each card's **Cost** and **Time** on or off                     |
+| View menu (names the view) | Switches between **Kanban**, **Today**, **Week** and **Month**, and lists each view's key                                                                                                                      |
 
 The filter applies to every column, Needs you included, and starts over when you change the team filter. **Find** still searches every task. When the filter hides every task, the board says "No tasks match these filters" with **Clear filters**.
 
@@ -99,7 +99,7 @@ On a calendar view, the left of the toolbar holds **Today**, the previous and ne
 | **Done**        | Finished tasks                                                                                                                       |
 | **Cancelled**   | Tasks that will not run again. The column starts folded into a narrow rail; click the rail to open it                                |
 
-There is no Blocked column and no In review column. A blocked task always needs a person, so it sits in **Needs you**. A task under review stays in **In progress** with a **Verifying** mark. A task with a status the board does not recognize appears in an extra **Other** column.
+There is no Blocked column and no In review column. A blocked task needs a person, so it sits in **Needs you**, unless it waits on another task or on its own sub-tasks: then it sits in **In progress**, saying what it waits on. A task under review stays in **In progress** with a **Verifying** mark. A task with a status the board does not recognize appears in an extra **Other** column.
 
 Each column title has a small status mark in the column's color, and counts the tasks the column holds in the range on screen (every task on Kanban). An empty column shows no count, and an empty Kanban lane says so, for example "Nothing running".
 
@@ -125,17 +125,19 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 - **Approvals**: an agent wants to run a command, use a risky tool, or make a risky handoff. Answer them on their card. See [Approvals](/using/approvals).
 - **Tasks that will not move by themselves**. Each card says why in amber, with the reason the run recorded when there is one, and shows the agent.
 
-| Badge               | What happened                                                                 |
-| ------------------- | ----------------------------------------------------------------------------- |
-| **Failed**          | The last run ended in an error                                                |
-| **Sign-in failed**  | The runtime's key or login was refused, missing or expired                    |
-| **Billing problem** | The provider refused the account: no credit, a hold or a pending verification |
-| **Timed out**       | The agent stopped responding and its run was ended                            |
-| **Stopped**         | You pressed **Stop** on its run. It never restarts by itself                  |
-| **Needs review**    | Verification could not pass it                                                |
-| **Blocked**         | An agent marked it blocked                                                    |
-| **Unassigned**      | No agent is bound to it, so nobody will pick it up                            |
-| **Not started**     | It is in In progress with no agent, so no run is going                        |
+| Badge                       | What happened                                                                 |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| **Failed**                  | The last run ended in an error                                                |
+| **Sign-in failed**          | The runtime's key or login was refused, missing or expired                    |
+| **Billing problem**         | The provider refused the account: no credit, a hold or a pending verification |
+| **Timed out**               | The agent stopped responding and its run was ended                            |
+| **Stopped**                 | You pressed **Stop** on its run. It never restarts by itself                  |
+| **Needs review**            | Verification could not pass it                                                |
+| **Blocked**                 | An agent marked it blocked. The card says what it needs                       |
+| **Waiting for your answer** | An agent asked you a question and stopped. The card has the answer controls   |
+| **Assigned to you**         | The task is yours, or an agent handed it back to you and says what it needs   |
+| **Unassigned**              | No agent is bound to it, so nobody will pick it up                            |
+| **Not started**             | It is in In progress with no agent, so no run is going                        |
 
 When several runs in a row failed, the badge counts them, for example **Failed 2×**. Each card has one button for the next step, and a **More** menu (the three dots) with the rest.
 
@@ -146,8 +148,11 @@ When several runs in a row failed, the badge counts them, for example **Failed 2
 | **Assign**      | **Unassigned**, or one of those four with no agent bound to it                             | Lists the members of the task's team. The one you pick starts the task at once, and the task becomes yours (see [Give an agent a task](#give-an-agent-a-task)) |
 | **Review**      | **Needs review**                                                                           | Opens the task's drawer, where the check's result is                                                                                                           |
 | **Open**        | **Blocked**, or a task neither **Retry** nor **Assign** can move                           | Opens the task's drawer                                                                                                                                        |
+| **Mark done**   | **Assigned to you**                                                                        | Moves your task to **Done**, from wherever it is, and asks first if a check did not pass. Steps that wait on it can then start                                 |
 
-The **More** menu holds what the card's button does not: **Retry**, the team's agents under **Assign to** (or **Give to someone else** when the task is bound to an agent), and always **Dismiss**. **Dismiss** asks first, then moves the task to **Cancelled**, along with any later plan steps that were waiting on it.
+The **More** menu holds what the card's button does not: **Retry** (**Give back to** the agent, on a task an agent handed back), **Take it yourself**, the team's agents under **Assign to** (or **Give to someone else** when the task is bound to an agent), and always **Dismiss**. **Dismiss** asks first, then moves the task to **Cancelled**, along with any later plan steps that were waiting on it.
+
+A **Waiting for your answer** card has the question and its controls right on it, and so does the task drawer: a button for each option, a box for free text, **Yes** and **No** for a confirmation, and for suggested tasks a list you can edit, then **Accept** or **Turn down**. Your answer goes on the task's comments in your name, with the agent's question just above it under the agent's name, and starts the agent again. Like a reply, it is saved as a wake first, so a restart cannot lose it, and while Clawboo is holding new runs it waits for the hold to lift. An accepted list is for the agent to create. A question closes without an answer when the task finishes or moves on, or when the agent asks a newer one. An answer that comes too late says so and changes nothing.
 
 A **Sign-in failed** or **Billing problem** task leads with **Fix sign-in** instead of **Retry**, because a retry fails the same way until the account is fixed. **Retry** stays in the **More** menu, and it asks first, quoting the error. Clawboo never retries such a task by itself, and when it failed in team chat, the lead is told not to hand it out again.
 
@@ -157,15 +162,15 @@ A **Sign-in failed** or **Billing problem** task leads with **Fix sign-in** inst
 
 Clawboo can send a browser notification when something new needs you while its tab is in the background or its window is not in front. Once the board has a task on it, the header offers **Get an alert when something needs you, even with this tab in the background**. Click **Turn on**, then allow notifications when your browser asks. **Not now** puts the offer away. Clawboo asks your browser only when you click **Turn on**, never by itself.
 
-| Alert                       | When                                                                                                      |
-| --------------------------- | --------------------------------------------------------------------------------------------------------- |
-| **A task needs you**        | A run failed or stopped responding, an agent marked the task blocked, or the work did not pass its checks |
-| **Ada needs your approval** | An agent waits for you to allow or deny a command, a tool or a handoff, named by its agent                |
-| **3 things need you**       | Several arrived at once. One alert names the first two, approvals first, and counts the rest              |
+| Alert                       | When                                                                                                                                                           |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A task needs you**        | A run failed or stopped responding, an agent marked the task blocked, asked you a question or handed the task back to you, or the work did not pass its checks |
+| **Ada needs your approval** | An agent waits for you to allow or deny a command, a tool or a handoff, named by its agent                                                                     |
+| **3 things need you**       | Several arrived at once. One alert names the first two, approvals first, and counts the rest                                                                   |
 
 Click an alert to bring the tab back. An alert about one task opens it in the drawer. Any other alert opens the board on **Needs you**, on the team it is about.
 
-Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, and a task with no agent are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
+Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, a task you took yourself, and a task with no agent are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
 
 ### See it all in the Inbox
 
@@ -191,7 +196,7 @@ A task that runs again in team chat, by itself or through **Retry**, a reply or 
 
 Deleting a chat room stops its work the same way. Its unfinished tasks move to **General**: the ones that were queued for an agent wait in **Needs you** as **Stopped**, and **Retry** runs them there.
 
-An agent working on a task in team chat can mark that task blocked when it cannot go on without you. The task then waits in **Needs you** as **Blocked**, with the agent's reply as its comment, and whoever handed out the task is told. Steps of a plan that wait on it stay queued, so a **Retry** carries the plan on.
+An agent working on a task in team chat can mark that task blocked, saying what it waits on. Waiting on you, the task waits in **Needs you** as **Blocked**, saying what it needs, with the agent's reply as its comment, and whoever handed out the task is told. Steps of a plan that wait on it stay queued, so a **Retry** carries the plan on. Waiting on another task or on its own sub-tasks, it stays out of **Needs you** and goes back to **To do** when that work is done, which starts its agent. If the task it waits on or one of those sub-tasks is cancelled, it comes to **Needs you** to say so. If you move the work it waits on to the **Backlog**, nothing tells you the task is still waiting, apart from its card.
 
 When a task fails, the later plan steps that were waiting on it are cancelled. When an agent handed the task out, that agent is told, so nothing waits forever. A task whose work failed the team's check, or whose fix round could not start, keeps its later steps queued instead, so a **Retry** carries the plan on.
 
@@ -214,6 +219,8 @@ Write one sentence under **What should get done?**, for example "Draft the launc
 <Step title="Check the agent">
 
 Beside **For**, Clawboo suggests an agent, with a note that says why: **Fits the task**, **Last used** or **Team lead**. To give the task to someone else, pick another agent from the list. Picking an agent also picks its team.
+
+To keep the task for yourself, pick **You**. It waits in **Needs you** as **Assigned to you**, and nothing starts it.
 
 </Step>
 
@@ -282,12 +289,12 @@ You should see your reply under **Comments** as **You**, with a note under it th
 | A plan step still waiting for an earlier task                                                                   | Waits with the task                                                                                                                                                | "Ada will see this when the task it waits on is done"                                                                                               |
 | Being checked (**Verifying** or **Waiting to check**)                                                           | Waits for the check's answer. Ada reads it in the fix round, or answers it before the task is Done                                                                 | "Ada will see this after the check"                                                                                                                 |
 | In **Backlog**                                                                                                  | Waits for the agent to read when the task starts                                                                                                                   | "Ada will see this on the next run"                                                                                                                 |
-| **Done** or **Cancelled**                                                                                       | Is not sent, because the task cannot run again. The note offers **Send as a follow-up task**                                                                       | "Not sent: the task is finished"                                                                                                                    |
+| **Done** or **Cancelled**                                                                                       | Is not sent, because the task is not running. The note offers **Reopen the task** and **Send as a follow-up task**                                                 | "Not sent: the task is finished"                                                                                                                    |
 | With no agent                                                                                                   | Is saved on the task only                                                                                                                                          | "Not sent: no agent has this task"                                                                                                                  |
 
 When a reply starts a task again, Clawboo adds the note "Started again for a person’s reply." to its comments. Replies you send while a run is already on its way for an earlier one start no second run, and replies within a second of each other go into a running task together. While Clawboo is holding new runs, a reply that would start the task waits for the hold to lift, and the note says so. The note under a reply is not saved with it: it shows until you close the task. Until a reply reaches the agent, a line above the box says what it is waiting for.
 
-**Send as a follow-up task** gives the same agent a new task, named after the finished one (for example "Follow up: Draft the launch post"). Your reply becomes its brief, the finished task is its **Parent**, and it goes to the agent like a task you add with **New task**. The note then reads "Sent as a follow-up task for Ada".
+**Reopen the task** puts it back in **To do** and starts its agent with your reply. See [Reopen a finished task](#reopen-a-finished-task). **Send as a follow-up task** gives the same agent a new task, named after the finished one (for example "Follow up: Draft the launch post"). Your reply becomes its brief, the finished task is its **Parent**, and it goes to the agent like a task you add with **New task**. The note then reads "Sent as a follow-up task for Ada".
 
 A reply is saved as a wake on the task first, so a restart cannot lose it. If a run cannot take it in time, the agent reads it in its task block at the next turn, once. A task the task runner runs has no task block, so there the reply also goes into the agent's mailbox and the agent reads it when its next run starts. A steered reply and a mailbox note carry the first 1,000 characters and say when they were cut, and the task keeps all of it. On team chat work, a reply cut this way also comes whole at the next turn. How each runtime takes a reply mid-run, including older Codex versions, is in [Choose a runtime](/runtimes/index).
 
@@ -331,6 +338,10 @@ Use **Status** in the drawer's **Properties**, or drag the card to another colum
 - If the task's stored check result cannot pass, moving it to **Done** asks you to confirm with **Complete anyway**. The override is recorded in the audit log.
 
 Cards in **Needs you** move with their own buttons instead of by dragging. With a mouse, drag a card from anywhere on it. To drag with the keyboard, focus a card's handle and press **Space**, choose a column with the arrow keys, then press **Space** to drop it or **Escape** to cancel. On a touch screen, drag a card by its handle.
+
+### Reopen a finished task
+
+A **Done** or **Cancelled** task's drawer has **Reopen**. Say what should change, if you like, and it goes back to **To do**, without its finish date. Its agent starts again, in a fresh session, with your words. In team chat it also has the task's comments in front of it. A run on the task runner gets your words from its mailbox and no comments. Reopening a task assigned to you gives it back to you, and a task with no agent waits in **Needs you** for you to assign one. Plan steps cancelled along with it stay cancelled. A step whose earlier step stays cancelled cannot be reopened, because nothing would ever start it: **Reopen** says so, and you reopen the earlier step first. Agents have no tool for it, and the route takes only a request from the board's own page, which on a local install is a [speed bump](/operating/security#what-counts-as-a-person).
 
 ### Set a task's priority
 
@@ -510,8 +521,9 @@ The board shows "Couldn’t load the board." when its first read fails. Click **
 <Accordion title="Under the hood">
 
 - The board reads `GET /api/board`, every five seconds while the tab is visible. The drawer reads `GET /api/board/:taskId`, `GET /api/board/:taskId/executions` and `GET /api/board/:taskId/workspace/detail`. The preview is served from `GET /api/board/:taskId/preview/`.
-- **New task** is `POST /api/board` with an `assigneeAgentId`. It reads each agent's role from `GET /api/teams/member-roles`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
-- On a team chat run the team engine claims and moves the task itself, so the agent gets no claim or status tools there except `block_task` on its own task. An OpenClaw agent gets none at all, since its tools cannot tell one agent from another. Cancelling a task with `update_task_status` cancels the plan steps waiting on it, as **Dismiss** does.
+- **Reopen** is `POST /api/board/:taskId/reopen`, assigning a task to yourself is `POST /api/board/:taskId/assign-person`, and answering a question is `POST /api/board/questions/:questionId/answer`. Each answers only a request the board's own page sent. That check is a speed bump on a local install, because an agent running as you can send the same headers. Behind a sign-in proxy in `required` mode, every request also needs a verified person. See [Security](/operating/security).
+- **New task** is `POST /api/board` with an `assigneeAgentId`, or `assignToMe` for "You". It reads each agent's role from `GET /api/teams/member-roles`. **Retry**, **Assign** and replies are `POST /api/board/:taskId/retry`, `/assign` and `/comments`; the reply's answer carries a `delivery` field that says where it went. A status change is `PATCH /api/board/:taskId`, and a confirmed **Complete anyway** sends `humanOverride`, which is written to the audit log.
+- On a team chat run the team engine claims and moves the task itself, so the agent gets no claim or status tools there except `block_task`, `ask_person` and `hand_back_task` on its own task. An OpenClaw agent gets none at all, since its tools cannot tell one agent from another. Cancelling a task with `update_task_status` cancels the plan steps waiting on it, as **Dismiss** does.
 - **Retry**, **Assign**, and a reply that would start the task again, refuse a task still filed under a deleted chat room (`room_archived`) instead of saying it started; restarting Clawboo moves it to General. A task whose team was deleted is refused the same way (`no_team`), and nothing can run it.
 - A status change you make records its time on the task (`personMovedAt`). Until a run starts after that time, the agent's `update_task_status`, `block_task` and `unblock_task` tools are refused. See the [tasks tools](/reference/mcp-tools#tasks-server).
 - The view and the **Display** choices are stored in this browser's local storage under `clawboo.board.calendar`, and the agent you last gave a task to, per team, under `clawboo.board.new-task-agents`. Under a path prefix (`CLAWBOO_BASE_PATH`), each key starts with the prefix, such as `/clawboo:clawboo.board.calendar`.

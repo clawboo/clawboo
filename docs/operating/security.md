@@ -75,14 +75,15 @@ All three rules ignore letter case, because 0.5.0 also routes variants such as `
 
 ## What is protected by default, and what is not
 
-| Who could reach Clawboo                                  | Protected by default? | What protects it                                                                                             |
-| -------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                          |
-| A web page open in your browser                          | Yes                   | The same-origin guard                                                                                        |
-| Anyone who can reach a reverse proxy in front of Clawboo | Yes                   | The access token, unless you turn it off                                                                     |
-| Another user account on the same computer                | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you |
-| Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))       |
-| One person behind your sign-in proxy passing as another  | No, off by default    | The [proxy identity lane](#signed-identity-from-a-sign-in-proxy), when an administrator turns it on          |
+| Who could reach Clawboo                                  | Protected by default? | What protects it                                                                                                                             |
+| -------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Another computer on your network                         | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                                          |
+| A web page open in your browser                          | Yes                   | The same-origin guard                                                                                                                        |
+| Anyone who can reach a reverse proxy in front of Clawboo | Yes                   | The access token, unless you turn it off                                                                                                     |
+| Another user account on the same computer                | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you                                 |
+| Agents, connectors and other programs running as you     | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                                       |
+| One person behind your sign-in proxy passing as another  | No, off by default    | The [proxy identity lane](#signed-identity-from-a-sign-in-proxy), when an administrator turns it on                                          |
+| An agent answering its own question or reopening a task  | A speed bump locally  | The board's person-only routes refuse any request the dashboard's page did not send. See [What counts as a person](#what-counts-as-a-person) |
 
 Releases after 0.5.0 give every install an access token: without one, anything that reaches Clawboo from `127.0.0.1` looked like you, and could call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs. The token is in a file only your user account can read, so it closes the API to other user accounts and to anyone behind a reverse proxy. It does not stop a program running as you: an agent can read `~/.clawboo/access-token` as easily as it can read the database.
 
@@ -195,6 +196,19 @@ Off by default. With a sign-in proxy in front of Clawboo, such as Cloudflare Acc
 
 What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced; the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup (on Windows, whenever the settings come from the file, since it cannot check who can change it there). The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
 
+## What counts as a person
+
+Some board writes are a person's alone: answering a question an agent asked, reopening a finished task, and assigning a task to yourself. Each sits under `/api/`, never under `/api/mcp/`, so a runtime's attach token does not reach it, and no Tasks tool does any of them. Each refuses a request the dashboard's own page did not send, by its browser fetch metadata, and records who did it: the person a sign-in proxy vouched for, else the install's built-in person, "You".
+
+| Your install                          | What stops an agent acting as a person                                                                                                                                           |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local, or behind a proxy in `on` mode | A speed bump. An agent running as your user can read the access token file and send the same fetch metadata. It stops an agent passing for you by setting one field, and no more |
+| Behind a proxy in `required` mode     | The request also needs a token the proxy signed, so reading the access token file is not enough                                                                                  |
+
+A browser sends fetch metadata only to localhost or an HTTPS address. A dashboard opened over plain http on a network address sends none, so these writes are refused there, and the board says to open it on localhost or over HTTPS.
+
+Isolating agents from your user account is what would turn the local case into a boundary. Until then, treat "a person answered" as the board's record of what happened, not as proof.
+
 ## Keys and secrets on disk
 
 Clawboo encrypts the keys it stores for itself, but some copies are plain text. Paths below use the defaults; `CLAWBOO_HOME` moves `~/.clawboo` and `OPENCLAW_STATE_DIR` moves `~/.openclaw`.
@@ -305,6 +319,7 @@ The rules in short; [Reach Clawboo from another machine](/guides/self-host-secur
 ## Limits of this model
 
 - **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access. A sign-in proxy's identity tokens add names to what people do, not permissions.
+- **A person's writes on a local install are a speed bump.** See [What counts as a person](#what-counts-as-a-person).
 - **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
 - **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API.
 

@@ -52,7 +52,7 @@ export function StatusSelect({
     if (!saving) setValue(status)
   }, [status, saving])
 
-  const options = manualStatusOptions(value)
+  const options = manualStatusOptions(value, { personAssigned: !!task?.['assigneePersonId'] })
 
   // Off-list status (nothing legal to offer) → read-only display, matching the
   // board's catch-all "Other" handling rather than a broken, empty dropdown.

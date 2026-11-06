@@ -143,7 +143,12 @@ describe('Tasks MCP: cancelling a task', () => {
     const client = await connectInMemory(
       createTasksServer(db, { boundScope: { teamId: 'A', agentId: 'reviewer' } }),
     )
-    const res = await callText(client, 'update_task_status', { taskId: first, status: 'blocked' })
+    const res = await callText(client, 'update_task_status', {
+      taskId: first,
+      status: 'blocked',
+      waitingOn: 'person',
+      need: 'A person must decide',
+    })
     expect(res.isError).toBe(false)
     expect(getTask(db, second)?.status).toBe('todo')
     expect(listUndeliveredInbox(db, 'lead', { teamId: 'A' })).toHaveLength(0)

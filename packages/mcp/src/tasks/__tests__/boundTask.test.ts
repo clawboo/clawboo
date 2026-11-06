@@ -100,7 +100,10 @@ describe('Tasks tools with the run bound to its task', () => {
     expect((await callText(client, 'add_comment', { body: 'half done' })).isError).toBe(false)
     expect(getComments(db, mine).map((c) => c.body)).toEqual(['half done'])
 
-    expect((await callText(client, 'block_task', {})).isError).toBe(false)
+    expect(
+      (await callText(client, 'block_task', { waitingOn: 'person', need: 'A person must decide' }))
+        .isError,
+    ).toBe(false)
     expect(getTask(db, mine)?.status).toBe('blocked')
   })
 
@@ -142,11 +145,12 @@ describe('Tasks tools with the run bound to its task', () => {
     const block = (await client.listTools()).tools.find((t) => t.name === 'block_task')!
     expect((block.inputSchema as { required?: string[] }).required ?? []).not.toContain('taskId')
     expect(block.description).toContain('Leave out taskId')
-    expect((await callText(client, 'block_task', {})).isError).toBe(false)
+    const why = { waitingOn: 'person', need: 'Choose the database' }
+    expect((await callText(client, 'block_task', why)).isError).toBe(false)
     expect(getTask(db, mine)?.status).toBe('blocked')
     // It can still name another task, as this caller always could.
     expect(getTask(db, other)?.status).toBe('todo')
-    expect((await callText(client, 'block_task', { taskId: other })).isError).toBe(false)
+    expect((await callText(client, 'block_task', { taskId: other, ...why })).isError).toBe(false)
     expect(getTask(db, other)?.status).toBe('blocked')
     expect((await callText(client, 'block_task', { taskId: '' })).isError).toBe(true)
   })

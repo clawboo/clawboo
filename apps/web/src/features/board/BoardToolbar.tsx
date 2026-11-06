@@ -204,11 +204,12 @@ export function ViewMenuButton<T extends string>({
 }
 
 /** What the board is narrowed to: some agents, the tasks nobody has, the work
- *  running now. Empty sets and false mean "everything". */
+ *  running now, the tasks assigned to you. Empty sets and false mean "everything". */
 export interface BoardFilter {
   agents: ReadonlySet<string>
   unowned: boolean
   running: boolean
+  mine: boolean
   /** Label names, compared without case: under All teams, two teams' "Bug" are one. */
   labels: ReadonlySet<string>
 }
@@ -218,10 +219,13 @@ export const NO_FILTER: BoardFilter = {
   unowned: false,
   running: false,
   labels: new Set(),
+  mine: false,
 }
 
 export function filterCount(f: BoardFilter): number {
-  return f.agents.size + (f.unowned ? 1 : 0) + (f.running ? 1 : 0) + f.labels.size
+  return (
+    f.agents.size + (f.unowned ? 1 : 0) + (f.running ? 1 : 0) + (f.mine ? 1 : 0) + f.labels.size
+  )
 }
 
 /** Filter: the agents in scope, the tasks with no agent, the running work, and the
@@ -254,6 +258,13 @@ export function FilterMenuButton({
     onChange({ ...filter, labels: labelsNext })
   }
   const items: BoardMenuItem[] = [
+    {
+      key: 'mine',
+      label: 'Mine',
+      group: 'People',
+      checked: filter.mine,
+      onSelect: () => onChange({ ...filter, mine: !filter.mine }),
+    },
     ...agents.map((a, i) => ({
       key: a.id,
       label: a.name,

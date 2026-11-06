@@ -17,7 +17,12 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Plus } from 'lucide-react'
 
-import { createTaskForAgent, fetchMemberRoles, type BoardTask } from '@/lib/boardClient'
+import {
+  createTaskForAgent,
+  createTaskForMe,
+  fetchMemberRoles,
+  type BoardTask,
+} from '@/lib/boardClient'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
@@ -27,6 +32,7 @@ import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
+import { DASHBOARD_ONLY } from './boardStatus'
 import { recentAssignees, rememberAssignee } from './newTaskMemory'
 import { suggestAgent, type AgentCandidate, type SuggestionReason } from './suggestAgent'
 
@@ -37,6 +43,9 @@ const INPUT_CLASS =
   'w-full rounded-lg border border-border bg-surface px-3 text-foreground ' +
   'outline-none transition placeholder:text-muted-foreground ' +
   'focus:border-primary focus:ring-4 focus:ring-primary/15 disabled:opacity-50'
+
+/** The agent picker's value for "You". */
+const ME = 'person:me'
 
 /** Why the agent was suggested, beside the agent picker. */
 const REASON_LABEL: Record<SuggestionReason, string | null> = {
@@ -97,6 +106,8 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   const [moreOpen, setMoreOpen] = useState(false)
   /** The agent the person picked; until then the suggestion stands. */
   const [pickedAgent, setPickedAgent] = useState<string | null>(null)
+  /** The person picked "You": their own task, on the team shown beside the picker. */
+  const [forMe, setForMe] = useState(false)
   /** The team the person picked under More options. */
   const [pickedTeam, setPickedTeam] = useState<string | null>(null)
   const [roles, setRoles] = useState<Record<string, string>>({})
@@ -169,7 +180,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   })
 
   const trimmedTitle = title.trim()
-  const canSubmit = !!agent && trimmedTitle.length > 0 && !submitting
+  const canSubmit = (forMe ? !!team : !!agent) && trimmedTitle.length > 0 && !submitting
 
   function handleTeamChange(next: string) {
     setPickedTeam(next)
@@ -183,8 +194,32 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
   // Enter in the one field submits the form, so this is also the Enter path.
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!canSubmit || !agent) return
+    if (!canSubmit) return
     setSubmitting(true)
+    if (forMe) {
+      // Yours: it waits for you, and no agent starts it.
+      const mine = await createTaskForMe({
+        title: trimmedTitle,
+        description: description.trim() || undefined,
+        teamId: team,
+      })
+      if (mine.ok) {
+        addToast({ type: 'success', message: 'Task added for you' })
+        onCreated(mine.task)
+        onClose()
+      } else {
+        addToast({
+          type: 'error',
+          message:
+            mine.reason === 'dashboard_only'
+              ? DASHBOARD_ONLY
+              : 'Couldn’t create the task. Please try again.',
+        })
+        setSubmitting(false)
+      }
+      return
+    }
+    if (!agent) return
     const task = await createTaskForAgent({
       title: trimmedTitle,
       description: description.trim() || undefined,
@@ -209,9 +244,15 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
       id={agentFieldId}
       aria-label="Agent"
       size={moreOpen ? 'md' : 'sm'}
-      value={agent?.id ?? ''}
-      onChange={setPickedAgent}
-      disabled={submitting || agentOptions.length === 0}
+      value={forMe ? ME : (agent?.id ?? '')}
+      onChange={(v) => {
+        setForMe(v === ME)
+        if (v !== ME) setPickedAgent(v)
+        // The team stands from here: with all teams in scope it followed the agent the
+        // title suggested, and a person's task follows no agent.
+        else if (team) setPickedTeam(team)
+      }}
+      disabled={submitting}
       menuWidth={moreOpen ? undefined : 240}
       style={moreOpen ? { width: '100%' } : undefined}
     >
@@ -220,6 +261,7 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
           {moreOpen && !team ? 'Pick a team first' : 'No agents yet'}
         </option>
       ) : null}
+      <option value={ME}>You</option>
       {agentOptions.map((c) => (
         <option key={c.id} value={c.id}>
           {c.name}
@@ -312,10 +354,29 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
               </div>
             </div>
           ) : (
-            <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>For</span>
               {agentSelect}
-              {reason ? <span data-testid="new-task-suggestion">{reason}</span> : null}
+              {forMe && activeTeams.length > 1 ? (
+                <>
+                  <span>on</span>
+                  <Select
+                    aria-label="Team"
+                    size="sm"
+                    value={team}
+                    onChange={handleTeamChange}
+                    disabled={submitting}
+                    menuWidth={200}
+                  >
+                    {activeTeams.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.icon} {t.name}
+                      </option>
+                    ))}
+                  </Select>
+                </>
+              ) : null}
+              {reason && !forMe ? <span data-testid="new-task-suggestion">{reason}</span> : null}
             </div>
           )}
 
@@ -339,9 +400,11 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
         </div>
 
         <p className={FIELD_HINT}>
-          {agent
-            ? `${agent.name} starts right away and is the only agent on it. The result shows on the task card, on the board and in the team chat.`
-            : 'The result shows on the task card, on the board and in the team chat.'}
+          {forMe
+            ? 'This one is yours. It waits in Needs you until you mark it done, and no agent starts it.'
+            : agent
+              ? `${agent.name} starts right away and is the only agent on it. The result shows on the task card, on the board and in the team chat.`
+              : 'The result shows on the task card, on the board and in the team chat.'}
         </p>
 
         {/* Wraps on a phone, where "Send to <agent>" leaves no room beside More
@@ -371,7 +434,9 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
               className="min-w-0 shrink!"
             >
               {!submitting && <Plus size={14} strokeWidth={2} className="shrink-0" />}
-              <span className="truncate">{agent ? `Send to ${agent.name}` : 'Create task'}</span>
+              <span className="truncate">
+                {forMe ? 'Add for you' : agent ? `Send to ${agent.name}` : 'Create task'}
+              </span>
             </Button>
           </div>
         </div>

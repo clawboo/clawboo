@@ -17,11 +17,14 @@
 // every @clawboo/* package the SPA consumes; `turbo dev` covers first start).
 
 import {
+  LOCAL_PERSON_ID,
   TASK_STATUSES,
   canTransition as canTransitionStrict,
   isTaskStatus,
   isTerminal,
   legalTargets,
+  parseWaitingOn,
+  waitsOnOtherWork,
   type AccountFailure,
   type AttentionReason,
   type TaskAttention,
@@ -95,8 +98,15 @@ const RUN_STATUSES = new Set<string>(['in_progress', 'in_review'])
  * being verified. Choosing either by hand starts no run and no check, so the
  * card would look worked on while nothing works on it.
  */
-export function manualStatusOptions(from: string): TaskStatus[] {
-  return statusOptions(from).filter((s) => !RUN_STATUSES.has(s) || s === from)
+export function manualStatusOptions(
+  from: string,
+  ctx: { personAssigned?: boolean } = {},
+): TaskStatus[] {
+  const options = statusOptions(from).filter((s) => !RUN_STATUSES.has(s) || s === from)
+  // A person's own task: nothing else will move it to Done, so they can from anywhere.
+  if (ctx.personAssigned && isTaskStatus(from) && !isTerminal(from) && !options.includes('done'))
+    return TASK_STATUSES.filter((s) => s === 'done' || options.includes(s))
+  return options
 }
 
 // ─── Needs you ──────────────────────────────────────────────────────────────
@@ -113,6 +123,8 @@ const ATTENTION_REASONS = new Set<string>([
   'blocked',
   'unassigned',
   'unstarted',
+  'question',
+  'assigned',
 ])
 
 /** How each reason reads on a card: a short badge and one line of guidance. */
@@ -155,6 +167,16 @@ export const ATTENTION_META: Record<
     tone: 'warning',
     hint: 'It is marked In progress, but no agent has it and nothing is running. Retry it or give it to an agent.',
   },
+  question: {
+    label: 'Waiting for your answer',
+    tone: 'warning',
+    hint: 'An agent asked you something and stopped. Your answer starts it again.',
+  },
+  assigned: {
+    label: 'Assigned to you',
+    tone: 'warning',
+    hint: 'This one is yours. Mark it done when it is finished, or give it to an agent.',
+  },
 }
 
 /** A run the provider refused for the account: the badge in place of "Failed",
@@ -175,8 +197,10 @@ export const ACCOUNT_FAILURE_META: Record<AccountFailure, { label: string; hint:
 export const FIX_SIGN_IN = 'Fix sign-in'
 
 /** The badge for a needs-you task: "Failed", or "Failed 3×" once it has failed
- *  more than once in a row. An account failure names its cause instead. */
-export function attentionLabel(attention: TaskAttention): string {
+ *  more than once in a row. An account failure names its cause instead. `assignee`
+ *  is who has a person's task, when that is not you. */
+export function attentionLabel(attention: TaskAttention, assignee?: string | null): string {
+  if (attention.reason === 'assigned' && assignee) return `Assigned to ${assignee}`
   const base = attention.cause
     ? ACCOUNT_FAILURE_META[attention.cause].label
     : ATTENTION_META[attention.reason].label
@@ -189,21 +213,36 @@ export function attentionLabel(attention: TaskAttention): string {
  * A task's needs-you state as the board should render it. Reads the server's
  * `attention` field; a `blocked` task always needs a person, so one that arrives
  * without the field (an older server, a live frame that raced the ledger) is
- * still routed as blocked rather than left looking like queued work.
+ * still routed as blocked rather than left looking like queued work. One waiting on
+ * another task or on its own sub-tasks is the exception: the board moves it on.
  */
 export function taskAttentionOf(task: {
   status: string
   attention?: unknown
+  waitingOn?: unknown
 }): TaskAttention | null {
   const a = task.attention
   if (a && typeof a === 'object') {
-    const { reason, failedRuns, detail, cause, runtime, byPerson } = a as {
+    const {
+      reason,
+      failedRuns,
+      detail,
+      cause,
+      runtime,
+      byPerson,
+      questionId,
+      personId,
+      handedBack,
+    } = a as {
       reason?: unknown
       failedRuns?: unknown
       detail?: unknown
       cause?: unknown
       runtime?: unknown
       byPerson?: unknown
+      questionId?: unknown
+      personId?: unknown
+      handedBack?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
       const known = cause === 'sign_in' || cause === 'billing' ? cause : null
@@ -215,11 +254,119 @@ export function taskAttentionOf(task: {
           ? { cause: known, ...(typeof runtime === 'string' && runtime ? { runtime } : {}) }
           : {}),
         ...(byPerson === true ? { byPerson: true } : {}),
+        ...(typeof questionId === 'string' ? { questionId } : {}),
+        ...(typeof personId === 'string' ? { personId } : {}),
+        ...(handedBack === true ? { handedBack: true } : {}),
       }
     }
   }
-  if (task.status === 'blocked') return { reason: 'blocked', failedRuns: 0 }
+  // An explicit null is the server's verdict that it does not need a person, which a
+  // task waiting on other work gets. A chat card's frame carries no `waitingOn`.
+  if (a === null) return null
+  if (task.status === 'blocked' && !waitsOnOtherWork(parseWaitingOn(task.waitingOn)))
+    return { reason: 'blocked', failedRuns: 0 }
   return null
+}
+
+// ─── People ─────────────────────────────────────────────────────────────────
+
+/** Why a person-only write was refused with `dashboard_only`. A browser sends the
+ *  fetch metadata the check reads only on localhost or over HTTPS, so this is what a
+ *  plain http network address gets, and trying again would not change it. */
+export const DASHBOARD_ONLY =
+  'Clawboo could not tell this came from the board itself. Open the board on localhost or over HTTPS to do this.'
+
+/** Why a person's words did not reach an agent (a `not-delivered` reply). */
+export function notDeliveredWhy(reason: string): string {
+  switch (reason) {
+    case 'finished':
+      return 'the task is finished'
+    case 'unassigned':
+      return 'no agent has this task'
+    case 'room_archived':
+      return 'this task’s chat room was archived. Restart Clawboo to move it to General.'
+    case 'no_team':
+      return 'this task’s team was deleted'
+    default:
+      return 'something went wrong'
+  }
+}
+
+/** The question a board row says is open (`openQuestion`), or null. */
+export function openQuestionOf(task: {
+  status?: unknown
+  openQuestion?: unknown
+}): { id: string; kind: string; payload: unknown } | null {
+  const q = task.openQuestion as { id?: unknown; kind?: unknown; payload?: unknown } | null
+  if (!q || typeof q.id !== 'string' || typeof q.kind !== 'string') return null
+  return { id: q.id, kind: q.kind, payload: q.payload }
+}
+
+/** The person a task is assigned to, as the row stores it, or null. */
+export function assigneePersonOf(task: {
+  status?: unknown
+  assigneePersonId?: unknown
+  assigneePerson?: unknown
+}): { id: string; name: string | null } | null {
+  if (typeof task.assigneePersonId !== 'string' || !task.assigneePersonId) return null
+  let name: string | null = null
+  try {
+    const doc: unknown =
+      typeof task.assigneePerson === 'string'
+        ? JSON.parse(task.assigneePerson)
+        : task.assigneePerson
+    const raw = (doc as { name?: unknown } | null)?.name
+    if (typeof raw === 'string' && raw) name = raw
+  } catch {
+    // The id still says whose it is.
+  }
+  return { id: task.assigneePersonId, name }
+}
+
+/** Is this task the viewer's? Their own id, or the install's built-in person, which
+ *  stands for whoever is at the dashboard. */
+export function isMyTask(
+  task: { status?: unknown; assigneePersonId?: unknown },
+  me: { id: string } | null | undefined,
+): boolean {
+  const id = task.assigneePersonId
+  if (typeof id !== 'string' || !id) return false
+  return id === LOCAL_PERSON_ID || id === me?.id
+}
+
+/** Who has a person's task, for a badge: null when it is the viewer's, whose badge
+ *  already says "you". */
+export function otherAssigneeName(
+  task: { status?: unknown; assigneePersonId?: unknown; assigneePerson?: unknown },
+  me: { id: string } | null | undefined,
+): string | null {
+  if (isMyTask(task, me)) return null
+  const person = assigneePersonOf(task)
+  return person ? (person.name ?? 'a person') : null
+}
+
+/**
+ * What a card says for a task waiting on other work, or null when it is not. The
+ * server attaches `waitingOnDetail` to a row: the title of the task it waits on, or
+ * how many of its sub-tasks are open.
+ */
+export function waitingWorkLabel(task: {
+  status: string
+  waitingOn?: unknown
+  waitingOnDetail?: unknown
+}): string | null {
+  if (task.status !== 'blocked') return null
+  const w = parseWaitingOn(task.waitingOn)
+  if (!w || !waitsOnOtherWork(w)) return null
+  const detail = (task.waitingOnDetail ?? {}) as { taskTitle?: unknown; openSubtasks?: unknown }
+  if (w.kind === 'task') {
+    return typeof detail.taskTitle === 'string' && detail.taskTitle
+      ? `Waiting on “${detail.taskTitle}”`
+      : 'Waiting on another task'
+  }
+  const n = typeof detail.openSubtasks === 'number' ? detail.openSubtasks : 0
+  if (n <= 0) return 'Waiting on its sub-tasks'
+  return `Waiting on ${n} sub-${n === 1 ? 'task' : 'tasks'}`
 }
 
 // ─── Board columns ──────────────────────────────────────────────────────────
@@ -231,7 +378,8 @@ export const NEEDS_YOU_COLUMN = 'needs_you'
  * The status columns, after Needs you. `in_review` has no column of its own: it
  * is the automated verification step, so those cards sit in In progress under a
  * "Verifying" badge, and a verdict that needs a person sends the task to Needs
- * you. `blocked` has none either: every blocked task needs a person.
+ * you. `blocked` has none either: a blocked task needs a person, unless it waits on
+ * other work, and then it sits in In progress, saying what it waits on.
  */
 export const BOARD_STATUS_COLUMNS: readonly TaskStatus[] = [
   'backlog',
@@ -243,8 +391,12 @@ export const BOARD_STATUS_COLUMNS: readonly TaskStatus[] = [
 
 /** Which column a task sits in: Needs you, one of the status columns, or its raw
  *  status when that is off-list (the board parks those in "Other"). */
-export function boardColumnOf(task: { status: string; attention?: unknown }): string {
+export function boardColumnOf(task: {
+  status: string
+  attention?: unknown
+  waitingOn?: unknown
+}): string {
   if (taskAttentionOf(task)) return NEEDS_YOU_COLUMN
-  if (task.status === 'in_review') return 'in_progress'
+  if (task.status === 'in_review' || task.status === 'blocked') return 'in_progress'
   return task.status
 }

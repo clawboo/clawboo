@@ -19,7 +19,7 @@ import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
 
-import { getDb, resetDb } from '../../db'
+import { getDb, getDbPath, resetDb } from '../../db'
 import { writeRuntimeAgentFile } from '../../agentSource/runtimeAgentFileStore'
 import { saveAgentConfig, writeNativeAgentFile } from '../../runtimes/native/agentConfigStore'
 import { buildServerTeamContext } from '../contextPreamble'
@@ -60,12 +60,16 @@ const FOLLOW_UP_BLOCK = '[Following up on your task'
 describe('buildServerTeamContext coordination blocks', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-ctx-home-'))
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     db = getDb()
     const now = Date.now()
     db.insert(teams)
@@ -132,6 +136,8 @@ describe('buildServerTeamContext coordination blocks', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -267,7 +273,9 @@ describe('buildServerTeamContext coordination blocks', () => {
   it('native WORKER turn: worker guardrail, NO [About the User], NO leader block', () => {
     const ctx = buildServerTeamContext(db, 'T', 'nwork', WORKER) ?? ''
     expect(ctx).toContain(WORKER_BLOCK)
-    expect(ctx).toContain('You CANNOT reach the user')
+    // The run has `ask_person` attached, so it is told to ask rather than that it cannot.
+    expect(ctx).toContain('call `ask_person`')
+    expect(ctx).not.toContain('You CANNOT reach the user')
     expect(ctx).not.toContain(ABOUT_USER) // the user intro is leader-only
     expect(ctx).not.toContain(LEADER_BLOCK)
     // the roster is still present (the worker still sees teammate names)
@@ -278,11 +286,41 @@ describe('buildServerTeamContext coordination blocks', () => {
     const ctx = buildServerTeamContext(db, 'T', 'nwork', USER_ASSIGNED) ?? ''
     expect(ctx).toContain('the user assigned to you directly from the team board')
     expect(ctx).toContain('posted on that task')
-    // Still a worker: it cannot ask the user anything mid-task, and it is not the lead.
-    expect(ctx).toContain('make a reasonable assumption and note it')
+    // Still a worker, and not the lead. Assuming comes first; asking is for what only
+    // the person can settle.
+    expect(ctx).toContain('make the assumption and note it')
+    expect(ctx).toContain('call `ask_person`')
     expect(ctx).not.toContain('delegated to you by your team lead')
     expect(ctx).not.toContain(ABOUT_USER)
     expect(ctx).not.toContain(LEADER_BLOCK)
+  })
+
+  it('where the tool is not attached, a worker is still told it cannot ask', () => {
+    // OpenClaw's Tasks URL carries no identity, so nothing could wake it.
+    const openclaw = buildServerTeamContext(db, 'T', 'ocagent', WORKER) ?? ''
+    expect(openclaw).toContain('You CANNOT reach the user')
+    expect(openclaw).not.toContain('ask_person')
+
+    // A Native agent with no Tasks tools.
+    saveAgentConfig(db, {
+      ...DEFAULT_AGENT_CONFIG,
+      id: 'nwork',
+      tools: { memory: true, tools: true, tasks: false, teamchat: false },
+    })
+    const noTasks = buildServerTeamContext(db, 'T', 'nwork', USER_ASSIGNED) ?? ''
+    expect(noTasks).toContain('make a reasonable assumption and note it')
+    expect(noTasks).not.toContain('ask_person')
+  })
+
+  it('a routine’s run may not ask: its person may be away', () => {
+    const ctx =
+      buildServerTeamContext(db, 'T', 'nwork', {
+        ...WORKER,
+        scheduledRoutine: 'Morning briefing',
+      }) ?? ''
+    expect(ctx).not.toContain('ask_person')
+    expect(ctx).toContain('You CANNOT reach the user')
+    expect(ctx).toContain('do not wait on them')
   })
 
   it('OpenClaw LEADER turn: delegate-protocol block + [About the User], no worker guardrail', () => {

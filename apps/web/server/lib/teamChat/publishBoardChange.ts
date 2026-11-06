@@ -8,14 +8,28 @@
 // whether it needs a person, so the attention read is skipped for everything
 // else; the room is one primary-key read.
 
-import { attentionForTask, getTask, type ClawbooDb, type TaskAttention } from '@clawboo/db'
+import {
+  attentionForTask,
+  getTask,
+  waitingOnDetailOf,
+  type ClawbooDb,
+  type DbTask,
+  type TaskAttention,
+} from '@clawboo/db'
 import type { BoardChange } from '@clawboo/team-orchestration'
 
 import { hasBoardChangeSubscribers, publishBoardChange } from './boardChangeBus'
 
 /** A board change as the chat stream sends it: the engine's change plus the
- *  task's chat room (null = the team's default room). */
-export type RoomedBoardChange = BoardChange & { roomId?: string | null }
+ *  task's chat room (null = the team's default room) and, on a move, what it now waits
+ *  on and the person it is assigned to, which only the row knows. */
+export type RoomedBoardChange = BoardChange & {
+  roomId?: string | null
+  waitingOn?: string | null
+  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number } | null
+  assigneePersonId?: string | null
+  assigneePerson?: string | null
+}
 
 export function publishBoardChangeWithAttention(
   db: ClawbooDb,
@@ -24,8 +38,10 @@ export function publishBoardChangeWithAttention(
 ): void {
   if (!hasBoardChangeSubscribers(teamId)) return
   let roomId: string | null | undefined
+  let row: DbTask | null = null
   try {
-    roomId = getTask(db, change.id)?.roomId ?? null
+    row = getTask(db, change.id)
+    roomId = row?.roomId ?? null
   } catch {
     // Best-effort: without it the client keeps the room it already knew.
   }
@@ -34,12 +50,25 @@ export function publishBoardChangeWithAttention(
     publishBoardChange(teamId, roomed)
     return
   }
-  let attention: TaskAttention | null = null
+  let attention: TaskAttention | null | undefined
   try {
     attention = attentionForTask(db, change.id)
   } catch {
     // Best-effort enrichment: the frame still carries the status, and the next
-    // board reload corrects the badge.
+    // board reload corrects the badge. No verdict, rather than null: null says
+    // the task does not need a person.
   }
-  publishBoardChange(teamId, { ...roomed, attention })
+  const fromRow: Partial<RoomedBoardChange> = row
+    ? {
+        waitingOn: row.waitingOn,
+        waitingOnDetail: waitingOnDetailOf(db, row) ?? null,
+        assigneePersonId: row.assigneePersonId,
+        assigneePerson: row.assigneePerson,
+      }
+    : {}
+  publishBoardChange(teamId, {
+    ...roomed,
+    ...fromRow,
+    ...(attention === undefined ? {} : { attention }),
+  })
 }

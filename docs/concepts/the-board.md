@@ -34,17 +34,35 @@ flowchart LR
 
 ## Statuses and columns
 
-| Status      | What it means                                                                                | Where the card shows                    |
-| ----------- | -------------------------------------------------------------------------------------------- | --------------------------------------- |
-| Backlog     | Parked. Not ready to work yet.                                                               | Backlog                                 |
-| To do       | Ready, and waiting for its agent to start.                                                   | To do                                   |
-| In progress | An agent is working on it.                                                                   | In progress                             |
-| In review   | The finished work is being checked.                                                          | In progress, with a **Verifying** badge |
-| Blocked     | Stuck: a run failed or went quiet, a check could not pass it, or an agent marked it blocked. | Needs you                               |
-| Done        | Finished.                                                                                    | Done                                    |
-| Cancelled   | Dropped.                                                                                     | Cancelled                               |
+| Status      | What it means                                                                                   | Where the card shows                      |
+| ----------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Backlog     | Parked. Not ready to work yet.                                                                  | Backlog                                   |
+| To do       | Ready, and waiting for its agent to start.                                                      | To do                                     |
+| In progress | An agent is working on it.                                                                      | In progress                               |
+| In review   | The finished work is being checked.                                                             | In progress, with a **Verifying** badge   |
+| Blocked     | Waiting: a run failed or went quiet, a check could not pass it, or an agent says what it needs. | Needs you, unless it waits on other tasks |
+| Done        | Finished.                                                                                       | Done                                      |
+| Cancelled   | Dropped.                                                                                        | Cancelled                                 |
 
-Done and Cancelled are final: a card in either cannot move again. The board does not let you move a card into In progress or In review by hand, because each means an agent or a check is working on it. A task that reaches In progress some other way, with no agent and no run behind it, shows in Needs you as **Not started**.
+Done and Cancelled stay put until you say otherwise: **Reopen** in the task's drawer brings a finished task back. Agents have no tool for it and the team engine never does it, and the route takes only a request from the board's own page, which on a local install is a [speed bump](/operating/security#what-counts-as-a-person). The board does not let you move a card into In progress or In review by hand, because each means an agent or a check is working on it. A task that reaches In progress some other way, with no agent and no run behind it, shows in Needs you as **Not started**.
+
+## What a task waits on
+
+A task that waits says what for. Agents must give the reason when they block a task, and Clawboo's own parks give theirs: a failed run, a check that could not pass, a stop from a budget or the breaker, a restart. Needs you reads it:
+
+| The task waits on                   | Where it shows                                              | What ends the wait                                                                     |
+| ----------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| You: something only a person can do | Needs you as **Blocked**, saying what is needed             | Your reply or **Retry**                                                                |
+| Your answer to a question           | Needs you as **Waiting for your answer**, with its controls | Your answer, saved as a wake on the task, so a restart cannot lose it                  |
+| Another task                        | In progress, saying **Waiting on** and the task's title     | That task finishing. If it is cancelled instead, the task comes to Needs you to say so |
+| Its own sub-tasks                   | In progress, saying **Waiting on 3 sub-tasks**              | The last one finishing. If one was cancelled, the task comes to Needs you to say so    |
+| A check, a failure, a stop          | Needs you, as before                                        | **Retry** or **Assign**                                                                |
+
+## Tasks for a person
+
+A task has one assignee, an agent or a person, never both. A task assigned to a person never starts on its own and no agent can claim it. It shows in Needs you as **Assigned to you**, until you mark it done or give it to an agent. An agent can also hand its own task back to the person who asked for it, saying what they must do: the card says whose turn it is, and your reply or **Give back to its agent** returns it. The **Mine** filter narrows the board to the tasks assigned to you.
+
+On a local install there is one built-in person, "You". Behind a [sign-in proxy](/guides/sso-proxy), you are the person the proxy's token names, and a task that an agent handed back with no one on record who asked goes to whoever opens it. There is no member list: you can assign a task to yourself, or to the person who asked for it.
 
 ## One agent per task
 
@@ -85,7 +103,7 @@ A comment you add to a task is a reply to the agent the task belongs to: the age
 - **Waiting on you, or in To do.** The reply starts the agent on the task again, as **Retry** does, so answering a blocked task needs no second click. Replies that come while a run is already on its way for an earlier one start no second run. A plan step that still waits on an earlier task keeps the reply until it can start.
 - **Being checked.** The reply waits for the check's answer. If the check sends the work back, the fix round reads it. If the check passes, the agent answers it before the task counts as Done.
 - **In Backlog.** You parked the task, so nothing starts. The agent reads the reply when the task next runs.
-- **Done or Cancelled.** A finished task cannot run again, so the reply is saved but not sent. You can send it instead as a follow-up task for the same agent.
+- **Done or Cancelled.** A finished task does not run again, so the reply is saved but not sent. You can **Reopen** the task, which starts its agent with your reply, or send the reply as a follow-up task for the same agent.
 
 Clawboo saves a reply as a wake on the task before it does anything else, so a restart cannot lose it, and the agent reads it once. Under each reply, a note says where it went. While a wake waits, the task drawer says what it is waiting for. A steered reply passes on the first 1,000 characters and says when it was cut; a run that reads it in its task block gets up to 4,000. See [Steer a running task](/using/board#steer-a-running-task) for each case, and [Choose a runtime](/runtimes/index) for how each runtime takes a reply mid-run.
 
@@ -105,15 +123,17 @@ A task has one live run at a time. A wake that arrives while a run is waiting fo
 
 **Needs you** is the board's first column. It holds everything that will not move without a person: pending approvals, and tasks that are stuck for one of these reasons.
 
-| Label        | What happened                                                |
-| ------------ | ------------------------------------------------------------ |
-| Failed       | The run ended with an error.                                 |
-| Timed out    | The agent stopped responding and the run was ended.          |
-| Stopped      | You stopped the run. It will not restart on its own.         |
-| Needs review | A check could not pass the work.                             |
-| Blocked      | An agent marked it blocked.                                  |
-| Unassigned   | No agent is bound to it, so no one will pick it up.          |
-| Not started  | It is in progress, but no agent and no run is working on it. |
+| Label                   | What happened                                                |
+| ----------------------- | ------------------------------------------------------------ |
+| Failed                  | The run ended with an error.                                 |
+| Timed out               | The agent stopped responding and the run was ended.          |
+| Stopped                 | You stopped the run. It will not restart on its own.         |
+| Needs review            | A check could not pass the work.                             |
+| Blocked                 | An agent marked it blocked, and says what it needs.          |
+| Waiting for your answer | An agent asked you a question and stopped.                   |
+| Assigned to you         | The task is yours, or an agent handed it back to you.        |
+| Unassigned              | No agent is bound to it, so no one will pick it up.          |
+| Not started             | It is in progress, but no agent and no run is working on it. |
 
 Each card leads with the one action that gets it going: **Retry** runs it again, **Assign** hands a task with no agent to one, and **Review** or **Open** opens the task. Its **More** menu holds the rest, including **Dismiss**, which moves the task to Cancelled for good. Failed and Timed out show a count, such as **Failed 3×**, when it has happened more than once in a row.
 
@@ -159,6 +179,8 @@ Runs that name a repository, started through the runtime run API or by an agent 
 - **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it. The agent cannot move the card back: its own status changes are refused until a new run on the task starts.
 - **Steer a task**: reply on it in the board's task drawer, the team chat's **Tasks** card or the agent's page.
 - **Unstick a task**: use **Retry**, assign an agent, or **Dismiss** from Needs you.
+- **Answer a question**: use the controls on its card in Needs you, or in the task drawer.
+- **Bring back a finished task**: use **Reopen** in its drawer.
 
 [Track work on the board](/using/board) has the steps for each.
 

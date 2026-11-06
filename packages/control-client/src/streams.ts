@@ -81,6 +81,15 @@ export const boardChangeFrameSchema = z.object({
   summary: z.string().optional(),
   attention: taskAttentionFrameSchema.nullable().optional(),
   roomId: z.string().nullable().optional(),
+  // On a move: what the task now waits on (a JSON reason), what its card should name
+  // for a wait on other work, and the person it is assigned to.
+  waitingOn: z.string().nullable().optional(),
+  waitingOnDetail: z
+    .object({ taskTitle: z.string().optional(), openSubtasks: z.number().optional() })
+    .nullable()
+    .optional(),
+  assigneePersonId: z.string().nullable().optional(),
+  assigneePerson: z.string().nullable().optional(),
   /** When the task's check began waiting for the team folder; null when it stopped. */
   checkHeldSince: z.number().nullable().optional(),
 })

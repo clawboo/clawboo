@@ -5,6 +5,8 @@
 
 import {
   addComment,
+  answerForAgent,
+  askQuestion,
   blockTask,
   cancelDependents,
   clampAgentTaskPriority,
@@ -19,11 +21,15 @@ import {
   getComments,
   getReadyTasks,
   getTask,
+  handBackTask,
   handOffChain,
   isTaskIdentifier,
   isTeamLeadAgent,
   linkDep,
   listTasks,
+  LOCAL_PERSON,
+  openSubtasksOf,
+  parseQuestionPayload,
   releaseTask,
   resolveTaskRef,
   setTaskDelegator,
@@ -31,13 +37,19 @@ import {
   taskStatusSchema,
   unblockTask,
   updateStatus,
+  waitReaches,
   type ClawbooDb,
   type CreatedTask,
   type CreateTaskInput,
   type DbTask,
+  type DbTaskQuestion,
   type GuardedCreateResult,
+  type QuestionAnswer,
+  type QuestionKind,
+  type QuestionPayload,
   type TaskStatus,
   type UpdateStatusResult,
+  type WaitingOn,
 } from '@clawboo/db'
 import { z } from 'zod'
 
@@ -46,6 +58,7 @@ import {
   buildServer,
   jsonResult,
   textResult,
+  zodObjectToJsonSchema,
   type McpToolResult,
   type Server,
   type ToolDef,
@@ -82,10 +95,43 @@ function statusWriteResult(r: UpdateStatusResult, verb: string): McpToolResult {
       true,
     )
   }
+  if (r.reason === 'person_assigned')
+    return textResult(
+      'This task is assigned to a person, so its status is theirs to set. Leave it as it is and do not retry this call. To raise something about it, use add_comment.',
+      true,
+    )
+  if (r.reason === 'awaiting_answer')
+    return textResult(
+      'This task is waiting for a person to answer a question, and the answer starts it again. Leave it as it is and do not retry this call. To raise something about it, use add_comment.',
+      true,
+    )
   return textResult(`${verb} failed: ${r.reason}`, true)
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+/** Statuses a task only enters waiting for something, so an agent must say what. */
+const WAITING_STATUSES = new Set(['blocked', 'in_review'])
+
+/** The fields an agent says what its task waits for with. Flat, so every client's
+ *  schema reader sees each one. */
+const WAITING_FIELDS = {
+  waitingOn: z.enum(['person', 'task', 'subtasks']).optional(),
+  need: z.string().max(1_000).optional(),
+  waitingOnTaskId: z.string().min(1).optional(),
+}
+
+/** The advertised schema with the waiting reason required. It stays optional in the
+ *  zod schema so a call without it gets the refusal below, which says what to send,
+ *  rather than a bare validation error. */
+function requireWaitingOn(schema: z.ZodObject<z.ZodRawShape>): Record<string, unknown> {
+  const json = zodObjectToJsonSchema(schema)
+  return { ...json, required: [...(json.required ?? []), 'waitingOn'] }
+}
+
+/** How a task's agent says what to wait for, as the refusal tells it. */
+const WAITING_HOW =
+  "Say what the task waits for: waitingOn 'person' with need (what the person must do), 'task' with waitingOnTaskId (a task that must finish first), or 'subtasks' (its own open sub-tasks)."
 const optStr = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
 
 /**
@@ -131,7 +177,7 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
 }
 
 /** The arguments that name a task, and so take a readable id as well as an id. */
-const TASK_REF_ARGS = ['taskId', 'parentTaskId', 'dependsOnTaskId'] as const
+const TASK_REF_ARGS = ['taskId', 'parentTaskId', 'dependsOnTaskId', 'waitingOnTaskId'] as const
 
 /**
  * A created task as the model reads it. A create that found its task already there
@@ -192,9 +238,45 @@ function noteCancelForDelegator(
   }
 }
 
+/** Why an ask was refused, in words the model can act on. */
+/** Why a routine's task never waits on a person, in words the model can act on. */
+const ROUTINE_NO_WAIT =
+  'This task comes from a scheduled routine, and its person may be away. Do not wait on them: make a reasonable assumption, say it in your reply, and finish.'
+
+const ASK_REFUSAL: Record<string, string> = {
+  not_found: 'This task no longer exists.',
+  not_yours: 'You are not working on this task, so you cannot ask about it.',
+  finished: 'This task is finished: there is no one to ask about it.',
+  routine: ROUTINE_NO_WAIT,
+  illegal_transition: 'This task cannot wait for an answer from where it is now.',
+}
+
+/** What an agent does after its question went in. */
+const ASK_STOP =
+  'The task now waits for the answer, so stop here: end your turn with one short line saying what you asked. When the person answers, the task starts again with their answer in it.'
+
+/** A repeated `idempotencyKey`: the question is still open or was answered. One that
+ *  closed unanswered freed its key, so that ask is a new question. */
+function repeatedAskText(q: DbTaskQuestion): string {
+  if (q.status === 'pending') return `You already asked this. ${ASK_STOP}`
+  const prompt = parseQuestionPayload(q.payload)?.prompt ?? 'your question'
+  let answer: QuestionAnswer | null = null
+  try {
+    answer = JSON.parse(q.answer ?? 'null') as QuestionAnswer | null
+  } catch {
+    // Unreadable: the thread still has it.
+  }
+  return answer
+    ? `You already asked this, and a person answered. Carry on with their answer.\n${answerForAgent(prompt, answer)}`
+    : 'You already asked this, and a person answered. Their answer is in the comments on this task: carry on with it.'
+}
+
 /** The board's read surface: the half that is safe to attach to an agent that
  *  must not mutate the board at all (a Clawboo Native team run). */
 const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
+/** Served to a read-only team run as well: asking a person moves only the run's own
+ *  task, and it is the only way such a run can wait for someone. */
+const ASK_TOOL_NAMES = new Set(['ask_person'])
 /** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
 const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
 /** Tools that move a card: who may call them depends on who is calling. */
@@ -203,6 +285,8 @@ const STATUS_TOOL_NAMES = new Set([
   'update_task_status',
   'block_task',
   'unblock_task',
+  'ask_person',
+  'hand_back_task',
 ])
 /**
  * Not served on a team run. The team engine claims each task for its agent and
@@ -374,6 +458,72 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       'hand_off_cycle',
     )
   }
+  // The task `ask_person` and `hand_back_task` act on: the run's own, where its end
+  // is handled as an agent's block. Without one they are not served, because no run
+  // would be woken by the answer.
+  const ownTask = teamRun && boundTaskId && boundAgentId ? boundTaskId : undefined
+
+  /**
+   * What a task waits for, from an agent's arguments, or the refusal that tells the
+   * model what to send. It refuses what could not end as things stand: a task on this
+   * team that is finished, is this one, is in the Backlog (nothing starts it), or needs
+   * this one to finish first; and sub-tasks when none is open, one is in the Backlog,
+   * or they need this one to finish first. A check at the moment of the wait: what
+   * people do to that work afterwards is theirs to do.
+   */
+  const waitingFrom = (
+    taskId: string,
+    args: Record<string, unknown>,
+  ): { waitingOn: WaitingOn } | { refusal: McpToolResult } => {
+    const kind = optStr(args['waitingOn'])
+    const refuse = (why: string) => ({ refusal: textResult(why, true) })
+    const EACH_OTHER =
+      'Those tasks would wait on each other, so neither would ever start. Wait on something else.'
+    const NOT_STARTED = (what: string) =>
+      `${what} in the backlog, and nothing starts work from there, so this would never end. Move it to todo first, or wait on something else.`
+    if (!kind) return refuse(`This task would wait without a reason. ${WAITING_HOW}`)
+    if (kind === 'person') {
+      const need = str(args['need']).trim()
+      if (!need)
+        return refuse(`waitingOn 'person' needs need: what the person must do. ${WAITING_HOW}`)
+      return { waitingOn: { kind: 'person', need, by: 'agent' } }
+    }
+    if (kind === 'subtasks') {
+      const open = openSubtasksOf(db, taskId)
+      if (open.length === 0)
+        return refuse(
+          'This task has no open sub-tasks to wait on. Create them first, or wait on something else.',
+        )
+      if (open.some((s) => s.status === 'backlog'))
+        return refuse(NOT_STARTED('One of its sub-tasks is'))
+      if (
+        waitReaches(
+          db,
+          open.map((s) => s.id),
+          taskId,
+        )
+      )
+        return refuse(EACH_OTHER)
+      return { waitingOn: { kind: 'subtasks' } }
+    }
+    const target = optStr(args['waitingOnTaskId']) ?? ''
+    if (!target) return refuse(`waitingOn 'task' needs waitingOnTaskId. ${WAITING_HOW}`)
+    const denied = outOfTeam(target)
+    if (denied) return { refusal: denied }
+    if (target === taskId) return refuse('A task cannot wait on itself.')
+    const t = getTask(db, target)
+    if (!t || t.dropped) return refuse(`not found: ${target}`)
+    if (t.status === 'done' || t.status === 'cancelled')
+      return refuse(`That task is already ${STATUS_WORD[t.status]}: there is nothing to wait for.`)
+    if (t.status === 'backlog') return refuse(NOT_STARTED('That task is'))
+    if (waitReaches(db, [target], taskId)) return refuse(EACH_OTHER)
+    return { waitingOn: { kind: 'task', taskId: target } }
+  }
+
+  const blockSchema = z.object({
+    taskId: taskIdField,
+    ...WAITING_FIELDS,
+  })
 
   const claimFor = (args: Record<string, unknown>, assigneeAgentId: string): McpToolResult => {
     const denied = outOfTeam(str(args['taskId']))
@@ -384,6 +534,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       assigneeAgentId,
       optStr(args['assigneeRuntime']),
     )
+    if (result.reason === 'person_assigned')
+      return textResult(
+        'claim failed: this task is assigned to a person, so no agent takes it. Do not retry.',
+        true,
+      )
     if (!result.ok) return textResult(`claim failed: ${result.reason}`, true) // conflict → DO NOT retry
     return jsonResult(result.task)
   }
@@ -455,8 +610,22 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         parentTaskId: z.string().min(1).optional(),
         assigneeRuntime: z.string().optional(),
         idempotencyKey: z.string().min(1).max(200).optional(),
+        ...WAITING_FIELDS,
       }),
       handler: (args) => {
+        // A task born waiting says what for, as a status move must.
+        let waitingOn: WaitingOn | undefined
+        if (WAITING_STATUSES.has(str(args['status']))) {
+          const kind = optStr(args['waitingOn'])
+          if (kind !== 'person')
+            return textResult(
+              `A task created ${STATUS_WORD[str(args['status'])]} must say what it waits for: waitingOn 'person' with need (what the person must do).`,
+              true,
+            )
+          const w = waitingFrom('', args)
+          if ('refusal' in w) return w.refusal
+          waitingOn = w.waitingOn
+        }
         // A bound session creates INTO ITS TEAM, full stop. The caller's teamId
         // was honoured verbatim, so a bound model could create into any team by
         // naming it: the one write the outOfTeam guard below cannot catch,
@@ -477,6 +646,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
               : undefined,
           teamId,
           assigneeRuntime: optStr(args['assigneeRuntime']),
+          ...(waitingOn ? { waitingOn } : {}),
           agentCreated: true,
           delegatedByAgentId: boundAgentId ?? null,
           createKey: createKeyFor(
@@ -579,14 +749,30 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     {
       name: 'update_task_status',
       description:
-        'Transition a task status (state-machine enforced; illegal transitions error). Cancelling a task also cancels the plan steps still waiting on it.',
-      inputSchema: z.object({ taskId: z.string(), status: STATUS }),
+        "Transition a task status (state-machine enforced; illegal transitions error). Cancelling a task also cancels the plan steps still waiting on it. Moving it to blocked or in_review needs waitingOn: 'person' with need, 'task' with waitingOnTaskId, or 'subtasks'.",
+      inputSchema: z.object({ taskId: z.string(), status: STATUS, ...WAITING_FIELDS }),
       handler: (args) => {
         const taskId = str(args['taskId'])
         const denied = outOfTeam(taskId)
         if (denied) return denied
         const status = str(args['status']) as TaskStatus
-        const r = updateStatus(db, taskId, status, { unlessPersonMoved: true })
+        let waitingOn: WaitingOn | undefined
+        if (WAITING_STATUSES.has(status)) {
+          const w = waitingFrom(taskId, args)
+          if ('refusal' in w) return w.refusal
+          // In review means someone is reviewing it. Nothing ends a wait on other work
+          // from there: the board moves a task on only from Blocked.
+          if (status === 'in_review' && w.waitingOn.kind !== 'person')
+            return textResult(
+              "A task waiting on another task or on its sub-tasks goes to blocked, not in_review, so the board can move it on when that work finishes. Use status 'blocked', or waitingOn 'person' with need for in_review.",
+              true,
+            )
+          waitingOn = w.waitingOn
+        }
+        const r = updateStatus(db, taskId, status, {
+          unlessPersonMoved: true,
+          ...(waitingOn ? { waitingOn } : {}),
+        })
         if (!r.ok || !r.task || status !== 'cancelled') return statusWriteResult(r, 'status change')
         // A cancelled step can never be done, so the steps waiting on it would
         // sit in To do forever, looking queued. The same cascade as a person's
@@ -616,9 +802,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       // The team engine and the task runner both end a run whose agent blocked its
       // own task as that agent's call, with its reply kept and the delegator told.
       description: teamRun
-        ? `Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.${boundTaskId ? ' Leave out taskId to block it.' : ''}`
-        : `Mark a task blocked.${boundTaskId ? ' Leave out taskId to block the task you are working on, when you cannot go on without a person, and say why in your reply.' : ''}`,
-      inputSchema: z.object({ taskId: taskIdField }),
+        ? `Mark the task you are working on blocked, when it cannot go on until something else happens. ${WAITING_HOW}${ownTask ? ' To ask a person a question, use ask_person instead.' : ''}${boundTaskId ? ' Leave out taskId to block it.' : ''}`
+        : `Mark a task blocked. ${WAITING_HOW}${boundTaskId ? ' Leave out taskId to block the task you are working on, and say why in your reply.' : ''}`,
+      inputSchema: blockSchema,
+      jsonSchema: requireWaitingOn(blockSchema),
       handler: (args) => {
         const taskId = taskOf(args)
         const denied = outOfTeam(taskId)
@@ -628,10 +815,109 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
             'On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.',
             true,
           )
-        const r = blockTask(db, taskId, { unlessPersonMoved: true })
+        const w = waitingFrom(taskId, args)
+        if ('refusal' in w) return w.refusal
+        const r = blockTask(db, taskId, { unlessPersonMoved: true, waitingOn: w.waitingOn })
         return statusWriteResult(r, 'block')
       },
     },
+    ...(ownTask
+      ? [
+          {
+            name: 'ask_person',
+            description:
+              "Ask a person something you cannot decide or find out yourself, about the task you are working on, then stop. kind 'question' with options (and allowOther for free text), or none for free text; 'confirm' for a yes or no; 'suggest_tasks' with tasks, a breakdown they accept or edit. The task waits for the answer, and you are started again with it. Do not ask what you can reasonably assume.",
+            inputSchema: z.object({
+              taskId: z.string().min(1).optional(),
+              kind: z.enum(['question', 'confirm', 'suggest_tasks']),
+              question: z.string().min(1).max(2_000),
+              options: z.array(z.string().min(1).max(200)).max(8).optional(),
+              allowOther: z.boolean().optional(),
+              tasks: z.array(z.string().min(1).max(200)).max(12).optional(),
+              idempotencyKey: z.string().min(1).max(200).optional(),
+            }),
+            handler: (args: Record<string, unknown>): McpToolResult => {
+              const named = optStr(args['taskId'])
+              if (named && named !== ownTask)
+                return textResult(
+                  'ask_person asks only about the task you are working on. To raise something about another task, use add_comment on it.',
+                  true,
+                )
+              const kind = str(args['kind']) as QuestionKind
+              const options = Array.isArray(args['options']) ? (args['options'] as string[]) : []
+              const tasks = Array.isArray(args['tasks']) ? (args['tasks'] as string[]) : []
+              if (kind === 'suggest_tasks' && tasks.length === 0)
+                return textResult("kind 'suggest_tasks' needs tasks: the titles you propose.", true)
+              const payload: QuestionPayload = {
+                prompt: str(args['question']),
+                ...(kind === 'question' && options.length > 0 ? { options } : {}),
+                ...(kind === 'question' && args['allowOther'] === true ? { allowOther: true } : {}),
+                ...(kind === 'suggest_tasks' ? { tasks: tasks.map((title) => ({ title })) } : {}),
+              }
+              const r = askQuestion(db, {
+                taskId: ownTask,
+                agentId: boundAgentId ?? '',
+                kind,
+                payload,
+                idempotencyKey: optStr(args['idempotencyKey']) ?? null,
+              })
+              if (r.ok && r.existing) return textResult(repeatedAskText(r.question))
+              if (r.ok) return textResult(`Asked. ${ASK_STOP}`)
+              if (r.reason === 'person_moved')
+                return statusWriteResult({ ok: false, reason: 'person_moved', task: r.task }, 'ask')
+              return textResult(ASK_REFUSAL[r.reason] ?? `ask failed: ${r.reason}`, true)
+            },
+          },
+          {
+            name: 'hand_back_task',
+            description:
+              'Hand the task you are working on back to the person who asked for it, when the next step is theirs to take (a login only they have, a decision, a physical action). need says exactly what they must do. Then stop.',
+            inputSchema: z.object({
+              taskId: z.string().min(1).optional(),
+              need: z.string().max(1_000).optional(),
+            }),
+            // Advertised as required; a call without it gets the refusal below.
+            jsonSchema: zodObjectToJsonSchema(
+              z.object({ taskId: z.string().min(1).optional(), need: z.string() }),
+            ),
+            handler: (args: Record<string, unknown>): McpToolResult => {
+              const named = optStr(args['taskId'])
+              if (named && named !== ownTask)
+                return textResult(
+                  'hand_back_task hands back only the task you are working on.',
+                  true,
+                )
+              const need = str(args['need']).trim()
+              if (!need)
+                return textResult('hand_back_task needs need: what the person must do.', true)
+              const r = handBackTask(db, ownTask, { agentId: boundAgentId ?? '', need })
+              if (r.ok) {
+                // The built-in person's name is "You", which reads as the agent itself.
+                const who =
+                  r.person.id === LOCAL_PERSON.id
+                    ? 'the person who asked'
+                    : (r.person.name ?? 'the person who asked')
+                return textResult(
+                  `Handed back to ${who}. Stop here: end your turn with one short line saying what they need to do.`,
+                )
+              }
+              if (r.reason === 'person_moved')
+                return statusWriteResult(
+                  { ok: false, reason: 'person_moved', task: r.task },
+                  'hand back',
+                )
+              return textResult(
+                r.reason === 'not_yours'
+                  ? 'You are not working on this task, so it is not yours to hand back.'
+                  : r.reason === 'routine'
+                    ? ROUTINE_NO_WAIT
+                    : `hand back failed: ${r.reason}`,
+                true,
+              )
+            },
+          },
+        ]
+      : []),
     {
       name: 'unblock_task',
       description: 'Unblock a task (back to todo).',
@@ -750,7 +1036,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES]) withheld.add(name)
   const active = (
     opts?.readOnly === true
-      ? tools.filter((t) => READ_ONLY_TOOL_NAMES.has(t.name))
+      ? tools.filter(
+          (t) =>
+            READ_ONLY_TOOL_NAMES.has(t.name) ||
+            (ASK_TOOL_NAMES.has(t.name) && !withheld.has(t.name)),
+        )
       : tools.filter((t) => !withheld.has(t.name))
   ).map(acceptReadableIds)
   // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).

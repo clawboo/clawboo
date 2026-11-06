@@ -66,7 +66,10 @@ describe('readable ids on the tools', () => {
     expect(link.isError).toBe(false)
     expect(link.text).toContain(other.id)
 
-    expect((await callText(c, 'block_task', { taskId: 'ALP-1' })).isError).toBe(false)
+    expect(
+      (await callText(c, 'block_task', { taskId: 'ALP-1', waitingOn: 'person', need: 'A key' }))
+        .isError,
+    ).toBe(false)
     expect(getTask(db, t.id)?.status).toBe('blocked')
   })
 

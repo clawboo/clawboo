@@ -180,7 +180,7 @@ describe('Tasks over HTTP', () => {
         jsonrpc: '2.0',
         id: 2,
         method: 'tools/call',
-        params: { name: 'block_task', arguments: {} },
+        params: { name: 'block_task', arguments: { waitingOn: 'person', need: 'A key' } },
       }),
     })
     await call.text()

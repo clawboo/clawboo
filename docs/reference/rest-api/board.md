@@ -19,36 +19,40 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 
 ## Routes
 
-| Method | Path                                     | Summary                                                       | Stream? |
-| ------ | ---------------------------------------- | ------------------------------------------------------------- | ------- |
-| GET    | `/api/board`                             | List tasks (or the ready-to-work ones)                        | No      |
-| POST   | `/api/board`                             | Create a task (optionally for one agent, started at once)     | No      |
-| POST   | `/api/board/:taskId/retry`               | Run a stuck task again, straight to its agent                 | No      |
-| POST   | `/api/board/:taskId/assign`              | Give an unowned task to one team member and start it          | No      |
-| GET    | `/api/board/inbox`                       | What is unread and what needs the person, for the badge       | No      |
-| POST   | `/api/board/inbox/read`                  | Mark everything read, or one team's tasks                     | No      |
-| POST   | `/api/board/:taskId/read`                | Mark one task read, through the change the page showed        | No      |
-| GET    | `/api/board/:taskId`                     | One task with its comments and parent chain                   | No      |
-| POST   | `/api/board/:taskId/claim`               | Claim a `todo` task for one agent (409 if taken)              | No      |
-| PATCH  | `/api/board/:taskId`                     | Change status (checked) and edit title, description, priority | No      |
-| POST   | `/api/board/:taskId/comments`            | Add a comment (a person's reply reaches the task's agent)     | No      |
-| PUT    | `/api/board/:taskId/labels`              | Replace a task's labels (dashboard only)                      | No      |
-| POST   | `/api/board/:taskId/executions`          | Open a run in the ledger (after a claim)                      | No      |
-| PATCH  | `/api/board/executions/:execId`          | Close a run with its outcome, tokens and cost                 | No      |
-| GET    | `/api/board/:taskId/executions`          | The task's run ledger                                         | No      |
-| POST   | `/api/board/:taskId/deps`                | Make one task wait for another                                | No      |
-| POST   | `/api/board/:taskId/cancel-dependents`   | Cancel the waiting tasks behind a failed one                  | No      |
-| POST   | `/api/board/:taskId/workspace`           | Create the task's worktree, branch and task files             | No      |
-| GET    | `/api/board/:taskId/workspace`           | Read the workspace and the state to resume from               | No      |
-| PATCH  | `/api/board/:taskId/workspace`           | `pause` or `complete` the worktree                            | No      |
-| POST   | `/api/board/:taskId/workspace/handoff`   | Write `AGENT_HANDOFF.json` for the next runtime or person     | No      |
-| GET    | `/api/board/:taskId/workspace/detail`    | Task file contents and the diff (the task drawer view)        | No      |
-| GET    | `/api/board/:taskId/workspace/tree`      | One directory level of the worktree                           | No      |
-| GET    | `/api/board/:taskId/workspace/file`      | One file, size-capped                                         | No      |
-| GET    | `/api/board/:taskId/workspace/file-diff` | One file's diff against the starting commit                   | No      |
-| GET    | `/api/board/:taskId/workspace/status`    | `git status` for the worktree                                 | No      |
-| GET    | `/api/board/:taskId/preview`             | Serve the worktree's `index.html` (redirects to `preview/`)   | No      |
-| GET    | `/api/board/:taskId/preview/<path>`      | Serve one file from the worktree, for the preview frame       | No      |
+| Method | Path                                      | Summary                                                       | Stream? |
+| ------ | ----------------------------------------- | ------------------------------------------------------------- | ------- |
+| GET    | `/api/board`                              | List tasks (or the ready-to-work ones)                        | No      |
+| POST   | `/api/board`                              | Create a task (optionally for one agent, started at once)     | No      |
+| POST   | `/api/board/:taskId/retry`                | Run a stuck task again, straight to its agent                 | No      |
+| POST   | `/api/board/:taskId/assign`               | Give an unowned task to one team member and start it          | No      |
+| POST   | `/api/board/:taskId/reopen`               | A person reopens a finished task                              | No      |
+| POST   | `/api/board/:taskId/assign-person`        | Give a task to a person, or take a person off                 | No      |
+| GET    | `/api/board/:taskId/questions`            | The questions agents asked on a task                          | No      |
+| POST   | `/api/board/questions/:questionId/answer` | A person answers a question                                   | No      |
+| GET    | `/api/board/inbox`                        | What is unread and what needs the person, for the badge       | No      |
+| POST   | `/api/board/inbox/read`                   | Mark everything read, or one team's tasks                     | No      |
+| POST   | `/api/board/:taskId/read`                 | Mark one task read, through the change the page showed        | No      |
+| GET    | `/api/board/:taskId`                      | One task with its comments and parent chain                   | No      |
+| POST   | `/api/board/:taskId/claim`                | Claim a `todo` task for one agent (409 if taken)              | No      |
+| PATCH  | `/api/board/:taskId`                      | Change status (checked) and edit title, description, priority | No      |
+| POST   | `/api/board/:taskId/comments`             | Add a comment (a person's reply reaches the task's agent)     | No      |
+| PUT    | `/api/board/:taskId/labels`               | Replace a task's labels (dashboard only)                      | No      |
+| POST   | `/api/board/:taskId/executions`           | Open a run in the ledger (after a claim)                      | No      |
+| PATCH  | `/api/board/executions/:execId`           | Close a run with its outcome, tokens and cost                 | No      |
+| GET    | `/api/board/:taskId/executions`           | The task's run ledger                                         | No      |
+| POST   | `/api/board/:taskId/deps`                 | Make one task wait for another                                | No      |
+| POST   | `/api/board/:taskId/cancel-dependents`    | Cancel the waiting tasks behind a failed one                  | No      |
+| POST   | `/api/board/:taskId/workspace`            | Create the task's worktree, branch and task files             | No      |
+| GET    | `/api/board/:taskId/workspace`            | Read the workspace and the state to resume from               | No      |
+| PATCH  | `/api/board/:taskId/workspace`            | `pause` or `complete` the worktree                            | No      |
+| POST   | `/api/board/:taskId/workspace/handoff`    | Write `AGENT_HANDOFF.json` for the next runtime or person     | No      |
+| GET    | `/api/board/:taskId/workspace/detail`     | Task file contents and the diff (the task drawer view)        | No      |
+| GET    | `/api/board/:taskId/workspace/tree`       | One directory level of the worktree                           | No      |
+| GET    | `/api/board/:taskId/workspace/file`       | One file, size-capped                                         | No      |
+| GET    | `/api/board/:taskId/workspace/file-diff`  | One file's diff against the starting commit                   | No      |
+| GET    | `/api/board/:taskId/workspace/status`     | `git status` for the worktree                                 | No      |
+| GET    | `/api/board/:taskId/preview`              | Serve the worktree's `index.html` (redirects to `preview/`)   | No      |
+| GET    | `/api/board/:taskId/preview/<path>`       | Serve one file from the worktree, for the preview frame       | No      |
 
 ## Task statuses
 
@@ -116,14 +120,33 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     personMovedAt: number | null // when a person last moved the card (see PATCH below)
     runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
     checkHeldSince: number | null // when its team-chat check began waiting for the team folder; null otherwise
+    waitingOn: string | null // JSON: what it waits for, a kind and what it points at (see below)
+    assigneePersonId: string | null // the person it is assigned to; never with assigneeAgentId
+    assigneePerson: string | null // JSON { id, name, role } of that person
+    requestedBy: string | null // JSON { id, name, role } of the person who asked for it
+    // The question it has open, when it waits on one. Not returned by the `ready=true` variant.
+    openQuestion: null | { id: string; kind: string; payload: string; status: 'pending' /* ... */ }
+    // For a task waiting on other work: the title of the task, or how many sub-tasks are open.
+    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number }
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
       reason:
-        'failed' | 'timed_out' | 'stopped' | 'needs_review' | 'blocked' | 'unassigned' | 'unstarted'
+        | 'failed'
+        | 'timed_out'
+        | 'stopped'
+        | 'needs_review'
+        | 'blocked'
+        | 'unassigned'
+        | 'unstarted'
+        | 'question'
+        | 'assigned'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
-      detail?: string // the last run's error, trimmed, for failed / timed_out
+      detail?: string // the last run's error, trimmed, for failed / timed_out; what a person must do
       byPerson?: true // for blocked: a person moved it there and no run has started since
+      questionId?: string // for question: the question waiting for its answer
+      personId?: string // for assigned: the person whose turn it is
+      handedBack?: true // for assigned: an agent handed it back
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -139,7 +162,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 }
 ```
 
-`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger and its check result. A `blocked` task always has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `blocked`). A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
+`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `needs_review` when it waits on a check, else `blocked`), unless it waits on another task or on its own sub-tasks: then it has none. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
 
 `runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource` `'reported'` or `'local'`; a row with a null source counts as an estimate. `local: true` appears only when every counted row is `'local'`, a run on a model the user's own Ollama served, and the board then shows the cost as `free`. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
@@ -183,9 +206,12 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   sourceDelegationId?: string
   tenantId?: string             // non-empty if present
   assigneeAgentId?: string      // create the task FOR this agent (see below)
+  assignToMe?: boolean          // create the task for the sender, from the dashboard's page only
   idempotencyKey?: string       // 1 to 200 chars; the same key, within a team, returns the same task
 }
 ```
+
+`assignToMe` makes the task the sender's own: nothing starts it. It cannot go with `assigneeAgentId` (`400 one_assignee`), and a request the dashboard's page did not send gets `403 dashboard_only`. A task created from the dashboard's page, or by a person a sign-in proxy vouched for, records them in `requestedBy`, which is where an agent's hand-back goes.
 
 **With `idempotencyKey`** (the New task dialog sends one per draft), a repeat returns the task the key first made, with `deduplicated: true` beside `task`. It writes no event and starts no run. This route skips the same-title check that agents' creates go through: a person's two tasks with one title are two tasks.
 
@@ -289,6 +315,63 @@ curl -X POST http://localhost:18790/api/board/<task-id>/assign \
 ```
 
 ---
+
+## `POST /api/board/:taskId/reopen`
+
+A person reopens a `done` or `cancelled` task: it goes back to `todo`, with `completedAt` and `personCancelledAt` cleared, and a note on its comments. A saved wake starts it, so a restart cannot lose the start or the words. With `comment`, its agent starts with those words. Without one, a task bound to an agent starts as a retry starts it. A task assigned to a person goes back to them and starts nothing, and a task with no agent waits in Needs you. A finished task's saved sessions are already cleared, so the run starts fresh. Plan steps cancelled along with it stay cancelled.
+
+**A person's route.** It answers `403 { "ok": false, "error": "dashboard_only" }` to a request the dashboard's own page did not send, judged by its `Sec-Fetch-Site` and `Sec-Fetch-Mode`. A browser sends those only to localhost or an HTTPS address, so a dashboard opened over plain http on a network address gets the refusal too. A speed bump on a local install: see [What counts as a person](/operating/security#what-counts-as-a-person). The moves are not in the status table, so `PATCH /api/board/:taskId` cannot make them.
+
+- **Request body** (optional):
+
+```ts
+{
+  comment?: string // up to 20000 chars
+  onThread?: boolean // the comment is a reply already saved on the task: pass it on, do not save it again
+}
+```
+
+**`200 OK`**: `{ ok: true, task: DbTask, delivery?: ReplyDelivery }`. `delivery` says where a `comment` went, as on a person's comment, and is also present when a task with no comment could not start. A reopened task whose words reached no one still answers `200`: read `delivery`.
+
+**`404 Not Found`**: no such task. **`409 Conflict`**: `{ "ok": false, "error": "not_finished" }`, or `"blocker_cancelled"` for a task that depends on one that was cancelled or dropped: nothing would ever start it, so reopen that one first.
+
+## `POST /api/board/:taskId/assign-person`
+
+Gives a task nobody is working on to a person. It takes any agent off it, including the agent binding, so nothing starts it and a comment reaches no agent. Whoever delegated it is still told when it finishes. Every agent's saved session on it is cleared. A `blocked` or stranded `in_progress` task goes to `todo`. Any open question closes.
+
+**A person's route**, like `reopen`. There is no member list, and a request body never makes a person: `personId` may name only the sender or the person who asked for the task.
+
+```ts
+{
+  personId?: string | null // absent: the sender. null: take the person off
+}
+```
+
+**`200 OK`**: `{ ok: true, task: DbTask, attention }`. **`400 Bad Request`**: `{ "ok": false, "error": "unknown_person" }`. **`404 Not Found`**: no such task. **`409 Conflict`**: `{ "ok": false, "error": "not_assignable" }`: the task is being worked on, finished, cancelled or dropped.
+
+## `GET /api/board/:taskId/questions`
+
+The questions agents asked on a task, oldest first: `{ questions: DbTaskQuestion[] }`. See [`task_questions`](/reference/database-schema#task_questions).
+
+## `POST /api/board/questions/:questionId/answer`
+
+A person answers an agent's question. The question goes on the task's comments under the agent that asked it, the answer goes there in the person's name, and the task starts again for its agent, as a person's reply starts it. No Tasks tool can do this.
+
+**A person's route**, like `reopen`. It records the verified person, or the install's built-in one, as `answeredBy`. Behind a sign-in proxy in `required` mode, every request here also needs a verified person.
+
+```ts
+{
+  answer:
+    | { choice: string } // one of a question's options
+    | { text: string } // free text, where the question takes it
+    | { confirmed: boolean; note?: string } // a confirmation
+    | { accepted: boolean; tasks?: Array<{ title: string; description?: string }>; note?: string } // suggested tasks
+}
+```
+
+An answer is judged against expiry inside its own write. A question closes unanswered when its task reaches `done` or `cancelled`, is dropped or moves on, or when a newer question replaces it, and an answer that loses that race changes nothing.
+
+**`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `dashboard_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
 
 ## `GET /api/board/:taskId`
 
@@ -456,7 +539,7 @@ A **409** means another worker holds the task: do not retry it. A task left `in_
 { "ok": false, "error": "not_found" }
 ```
 
-**`409 Conflict`**: the task was not in a claimable state (already claimed, dropped, or not `todo`):
+**`409 Conflict`**: the task was not in a claimable state (already claimed, dropped, or not `todo`), or it is assigned to a person (`person_assigned`):
 
 ```json
 { "ok": false, "error": "conflict" }

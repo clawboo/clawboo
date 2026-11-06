@@ -41,7 +41,7 @@ describe('Tasks MCP: a status write after a person moved the card', () => {
     const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
     for (const [name, args] of [
       ['update_task_status', { taskId, status: 'in_progress' }],
-      ['block_task', { taskId }],
+      ['block_task', { taskId, waitingOn: 'person', need: 'A person must decide' }],
     ] as const) {
       const res = await callText(client, name, args)
       expect(res.isError, name).toBe(true)
@@ -56,7 +56,11 @@ describe('Tasks MCP: a status write after a person moved the card', () => {
     claimTask(db, taskId, 'coder')
     createExecutionProcess(db, { taskId, executorType: 'claude-code' })
     const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
-    const res = await callText(client, 'block_task', { taskId })
+    const res = await callText(client, 'block_task', {
+      taskId,
+      waitingOn: 'person',
+      need: 'A person must decide',
+    })
     expect(res.isError).toBe(false)
     expect(getTask(db, taskId)?.status).toBe('blocked')
   })

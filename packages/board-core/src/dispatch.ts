@@ -249,6 +249,11 @@ export function ledgerWillAutoFire(execs: readonly LedgerRun[]): boolean {
   return autoFireRefusal(execs, Number.POSITIVE_INFINITY) === null
 }
 
+/** What the delegation failure breaker counts one agent's failures on one task under. */
+export function delegationFailureKey(targetAgentId: string, task: string): string {
+  return `${targetAgentId}:${task.slice(0, 80).toLowerCase().trim()}`
+}
+
 /**
  * The agent a task is bound to, decoded from its `sourceDelegationId`, or null
  * when the task names none (a legacy manual card, an agent's own `create_task`).

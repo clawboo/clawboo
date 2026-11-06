@@ -11,7 +11,7 @@ import { useToastStore } from '@/stores/toast'
 /** What sending a reply does, for a task in `status`. */
 export function replyHint(status: string, agentName: string | null): string {
   if (status === 'done' || status === 'cancelled')
-    return 'This task is finished. You can send your reply as a follow-up task.'
+    return 'This task is finished. Reopen it, or send your reply as a follow-up task.'
   if (!agentName) return 'No agent has this task. Your reply is saved on it.'
   if (status === 'in_progress') return `${agentName} gets this in the current run.`
   if (status === 'blocked' || status === 'todo') return `Sending starts ${agentName} on this again.`

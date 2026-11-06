@@ -55,6 +55,25 @@ export function legalTargets(from: TaskStatus): TaskStatus[] {
   return [...(LEGAL[from] ?? [])]
 }
 
+/**
+ * Moves only a person may make, outside the shared table on purpose: the table is
+ * read by every writer and listed by the board's status menu, and neither an agent
+ * nor the engine may make these. `updateStatus` allows them only for
+ * `actor: 'person'`.
+ *  • `reopen`: Done or Cancelled back to To do, on the Reopen route alone.
+ *  • `personAssigned`: the task is a person's own work, so they finish it from
+ *    wherever it is. No run moved it to In progress first.
+ */
+export function personMoveAllowed(
+  from: TaskStatus,
+  to: TaskStatus,
+  ctx: { reopen?: boolean; personAssigned?: boolean },
+): boolean {
+  if (ctx.reopen === true) return isTerminal(from) && to === 'todo'
+  if (ctx.personAssigned === true) return to === 'done' && !isTerminal(from)
+  return false
+}
+
 /** Locked = actively owned; assignee must not be reassigned while locked. */
 export function isLocked(status: TaskStatus): boolean {
   return status === 'in_progress' || status === 'in_review'

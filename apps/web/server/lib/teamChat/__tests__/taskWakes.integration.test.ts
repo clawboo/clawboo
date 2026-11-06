@@ -15,24 +15,31 @@ import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
   addComment,
   agents,
+  answerQuestion,
+  askQuestion,
   claimTask,
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  executionProcesses,
   getComments,
   getTask,
+  handBackTask,
   linkDep,
   listEvents,
   listExecutions,
   listRoomsWithFireableDelegations,
+  listTaskQuestions,
   listTasks,
   listUnsettledTaskWakes,
   listWaitingTaskWakes,
+  LOCAL_PERSON,
   LOCAL_READER,
   markTaskRead,
   reconcileOrphans,
   reconcileStaleInProgress,
   recordTaskWake,
+  reopenTask,
   taskReadStates,
   tasks,
   taskWakes,
@@ -67,14 +74,10 @@ import { getDb, getDbPath, resetDb } from '../../db'
 import { stopAsOwnWrite } from '../../boardReader'
 import { createReportUpOutbox } from '../reportUpOutbox'
 import { deliverPersonReply, type ReplyDeps } from '../personReply'
+import { savePersonWake, startPersonWake } from '../personWake'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
-import {
-  createTaskWakeOutbox,
-  pumpTaskWakes,
-  wakeForAnsweredQuestion,
-  type TaskWakePumpDeps,
-} from '../taskWakes'
+import { createTaskWakeOutbox, pumpTaskWakes, type TaskWakePumpDeps } from '../taskWakes'
 import { engineRefusal } from '../roomRoster'
 import { resetTeamOrchestrators } from '../teamOrchestrator'
 import { createRunSlots, setRunSlotsForTests } from '../../runSlots'
@@ -1306,23 +1309,218 @@ describe('saved wakes, end to end', () => {
     })
   })
 
-  describe('a question answered', () => {
-    it('is only a hook for now: a wake that says why', async () => {
+  describe('what a person did on the board', () => {
+    /** A task its agent asked about, as `ask_person` leaves it. */
+    const asking = (prompt = 'Deploy?'): { task: DbTask; questionId: string } => {
       const task = newTask()
-      updateStatus(db, task.id, 'blocked')
-      const saved = wakeForAnsweredQuestion(db, task)
-      expect(saved?.merged).toBe(false)
+      claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      const exec = listExecutions(db, task.id).at(-1)!
+      const asked = askQuestion(db, {
+        taskId: task.id,
+        agentId: WORKER,
+        kind: 'confirm',
+        payload: { prompt },
+      })
+      if (!asked.ok) throw new Error(`ask refused: ${asked.reason}`)
+      completeExecutionProcess(db, exec.id, { status: 'succeeded' })
+      return { task: getTask(db, task.id)!, questionId: asked.question.id }
+    }
+    /** What the answer route commits: the answer, its comments and its wake. */
+    const answer = (questionId: string, words = 'No.'): string => {
+      const result = answerQuestion(db, questionId, { confirmed: false }, { person: LOCAL_PERSON })
+      if (!result.ok) throw new Error(`answer refused: ${result.reason}`)
+      const written = addComment(db, result.task.id, words, 'user', null, { kind: 'person' })
+      const saved = savePersonWake(db, result.task, 'question_answered', {
+        id: written.id,
+        body: words,
+      })
+      if (!saved.saved) throw new Error('no wake saved')
+      return saved.agentId
+    }
+
+    it('an answer wakes through a saved wake, and a restart loses nothing', async () => {
+      const { task, questionId } = asking()
+      // The server dies right after the answer's write: nothing started anything.
+      answer(questionId)
       const [row] = listWaitingTaskWakes(db)
       expect(row?.reason).toBe('question_answered')
-      script([done('thanks')])
+      expect(wakeCommentIds(row!)).toHaveLength(1)
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+
+      // A restart: all that is left is the database, and the pump's first pass.
+      vi.clearAllTimers()
+      proc = bootProcess(db, adapters)
+      script([done('did it another way')])
       pumpTaskWakes(db, pumpDeps())
-      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
-      expect(started()[0]!.context).toContain('Why this run: a person answered your question')
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the restart')
+
+      expect(started().at(-1)!.context).toContain('Why this run: a person answered your question')
+      expect(started().at(-1)!.context).toMatch(/from=person[^\n]*\n\| No\./)
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+      expect(listExecutions(db, task.id).at(-1)?.runReason).toBe('question_answered')
+      expect(
+        getComments(db, task.id).some((c) => c.body === 'Started again with a person’s answer.'),
+      ).toBe(true)
     })
 
-    it('needs an agent to wake', () => {
-      const task = newTask({ sourceDelegationId: null })
-      expect(wakeForAnsweredQuestion(db, task)).toBeNull()
+    it('an answer while the asking run is still ending waits for it, then goes', async () => {
+      const task = newTask()
+      claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      const exec = listExecutions(db, task.id).at(-1)!
+      const asked = askQuestion(db, {
+        taskId: task.id,
+        agentId: WORKER,
+        kind: 'confirm',
+        payload: { prompt: 'Deploy?' },
+      })
+      if (!asked.ok) throw new Error('ask refused')
+      const agentId = answer(asked.question.id)
+
+      expect(startPersonWake(db, task.id, agentId, pumpDeps())).toMatchObject({
+        status: 'queued',
+        reason: 'next-run',
+      })
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(started()).toEqual([])
+
+      completeExecutionProcess(db, exec.id, { status: 'succeeded' })
+      script([done('carried on')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after it ended')
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+    })
+
+    it('a reply to a hand-back while its run is still ending waits for it, then goes', async () => {
+      const task = newTask()
+      claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      const exec = listExecutions(db, task.id).at(-1)!
+      expect(handBackTask(db, task.id, { agentId: WORKER, need: 'Log in' }).ok).toBe(true)
+
+      expect(await reply(task.id, 'Logged in, carry on')).toMatchObject({
+        status: 'queued',
+        reason: 'next-run',
+      })
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(started()).toEqual([])
+
+      completeExecutionProcess(db, exec.id, { status: 'succeeded' })
+      script([done('carried on')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after it ended')
+      expect(started().at(-1)!.context).toContain('Logged in, carry on')
+    })
+
+    it('a Reopen with a note reaches the agent through the wake', async () => {
+      const task = newTask()
+      updateStatus(db, task.id, 'cancelled', { actor: 'person' })
+      expect(reopenTask(db, task.id).ok).toBe(true)
+      const note = personComment(task.id, 'Use the new logo this time')
+      const saved = savePersonWake(db, getTask(db, task.id)!, 'reopened', {
+        id: note.id,
+        body: 'Use the new logo this time',
+      })
+      if (!saved.saved) throw new Error('no wake saved')
+      expect(wakeCommentIds(listWaitingTaskWakes(db)[0]!)).toEqual([note.id])
+
+      script([done('used it')])
+      expect(startPersonWake(db, task.id, saved.agentId, pumpDeps()).status).toBe('woke-agent')
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+
+      expect(started().at(-1)!.context).toContain('Why this run: a person reopened this task')
+      expect(started().at(-1)!.context).toContain('Use the new logo this time')
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+    })
+
+    it('a Reopen starts past a ledger that ended in a Stop, and only once', async () => {
+      const task = newTask()
+      const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      completeExecutionProcess(db, c.execution!.id, { status: 'cancelled', byPerson: true })
+      updateStatus(db, task.id, 'cancelled', { actor: 'person' })
+      expect(reopenTask(db, task.id).ok).toBe(true)
+      const saved = savePersonWake(db, getTask(db, task.id)!, 'reopened', null)
+      if (!saved.saved) throw new Error('no wake saved')
+      script([done('again')])
+      expect(startPersonWake(db, task.id, saved.agentId, pumpDeps()).status).toBe('woke-agent')
+      // The pass the wake's own event brings finds nothing more to do.
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+    })
+
+    it('the pump never fires a person’s task, whatever wake waits on it', async () => {
+      const task = newTask()
+      claimTask(db, task.id, WORKER)
+      expect(handBackTask(db, task.id, { agentId: WORKER, need: 'Log in' }).ok).toBe(true)
+      // Someone's comment from before the hand-back is still waiting for a turn.
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'person_comment',
+        commentIds: ['earlier'],
+      })
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['person_assigned'])
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(getTask(db, task.id)?.assigneePersonId).not.toBeNull()
+      expect(started()).toEqual([])
+      expect(listWaitingTaskWakes(db)).toHaveLength(1)
+    })
+
+    it('the pump never ends a wait on a question, and the answer carries what waited', async () => {
+      const { task, questionId } = asking()
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'person_comment',
+        commentIds: ['earlier'],
+      })
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['question'])
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(listTaskQuestions(db, task.id).map((q) => q.status)).toEqual(['pending'])
+      expect(started()).toEqual([])
+
+      answer(questionId)
+      const rows = listWaitingTaskWakes(db)
+      expect(rows).toHaveLength(1)
+      expect(wakeCommentIds(rows[0]!)).toHaveLength(2)
+      script([done('heard it all')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+    })
+
+    it('a brake does not lose an answer: it waits, then goes out', async () => {
+      const { task, questionId } = asking()
+      answer(questionId)
+      // Two runs carrying it died with nothing to show, so the brake is on.
+      updateStatus(db, task.id, 'todo')
+      for (let i = 0; i < 2; i++) {
+        const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+        expect(c.ok).toBe(true)
+        db.update(tasks).set({ updatedAt: 1 }).where(eq(tasks.id, task.id)).run()
+        expect(reconcileStaleInProgress(db, 1_000).reconciled).toBe(1)
+      }
+      expect(listWaitingTaskWakes(db)[0]!.replays).toBe(2)
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().includes('braked'), 'the brake holding it back')
+      expect(started()).toEqual([])
+      expect(wakeCommentIds(listWaitingTaskWakes(db)[0]!)).toHaveLength(1)
+
+      // The brake's wait runs out: it reads the time the last run ended.
+      db.update(executionProcesses)
+        .set({ completedAt: Date.now() - 31 * 60_000 })
+        .where(eq(executionProcesses.taskId, task.id))
+        .run()
+      script([done('finally')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the brake')
+      expect(started()[0]!.context).toMatch(/from=person[^\n]*\n\| No\./)
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
     })
   })
 

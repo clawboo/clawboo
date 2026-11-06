@@ -21,7 +21,7 @@ import { useToastStore } from '@/stores/toast'
 
 import { delegationTargetOf } from '@clawboo/board-core'
 
-import { canTransition, statusLabel } from './boardStatus'
+import { canTransition, isTerminalStatus, statusLabel } from './boardStatus'
 import { localeWeekStart } from './calendar/calendarModel'
 import {
   createdAtOf,
@@ -113,7 +113,10 @@ export function useStatusMutation(): (input: StatusMutationInput) => Promise<Sta
 
       // Illegal transition → reject client-side; the drawer editor never offers one,
       // and a drag onto an illegal column shouldn't burn a doomed PATCH.
-      if (!canTransition(from, to)) {
+      // (A person's own task is theirs to finish from anywhere: a person-only move the
+      // server allows outside the shared table.)
+      const personFinish = to === 'done' && !!task?.['assigneePersonId'] && !isTerminalStatus(from)
+      if (!canTransition(from, to) && !personFinish) {
         addToast({
           type: 'error',
           message: `Can’t move ${statusLabel(from)} → ${statusLabel(to)}.`,

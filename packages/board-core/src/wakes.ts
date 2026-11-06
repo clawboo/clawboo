@@ -12,8 +12,10 @@ export type TaskWakeReason =
   | 'person_comment'
   /** A task it was waiting on moved to done, on any path. */
   | 'dependency_done'
-  /** A person answered its question. The reason exists now; questions come later. */
+  /** A person answered its question. */
   | 'question_answered'
+  /** A person reopened a finished task. */
+  | 'reopened'
 
 /** Why a run on a task started, written to its `execution_processes.run_reason`
  *  and read back by the ticket block's "Why this run" line. */
@@ -43,7 +45,7 @@ export function commentMayWake(comment: { kind?: string | null; authorType?: str
 /** Is a person behind this wake? Their first start skips the no-progress brake and
  *  the automatic pump's other refusals, and restarts a Blocked task. */
 export function wakeFromPerson(reason: string): boolean {
-  return reason === 'person_comment' || reason === 'question_answered'
+  return reason === 'person_comment' || reason === 'question_answered' || reason === 'reopened'
 }
 
 /** The reason a merged row keeps: the one a person is behind. */
@@ -83,6 +85,10 @@ export type WakeSkipReason =
   | 'billing'
   /** Blocked, and this wake is not one a person is behind. */
   | 'blocked'
+  /** A person holds it: ends when they give it back to its agent. */
+  | 'person_assigned'
+  /** It waits on a person's answer: ends when they answer, or move it on. */
+  | 'question'
   /** A person parked it in Backlog. */
   | 'backlog'
   /** No agent is bound to it: a person assigns one. */
@@ -108,6 +114,8 @@ export const WAKE_SKIP_REASONS: readonly WakeSkipReason[] = [
   'sign_in',
   'billing',
   'blocked',
+  'person_assigned',
+  'question',
   'backlog',
   'no_agent',
   'room_archived',
@@ -141,6 +149,11 @@ export interface WakeDecisionInput {
   refusal: 'room_archived' | 'no_team' | null
   /** A hard budget cap would refuse a run now. */
   budgetRefused: boolean
+  /** A person holds the task. No wake starts it: it is their turn. */
+  personAssigned?: boolean
+  /** It waits on a question still open, so a comment from before the agent asked
+   *  does not end that wait. A person's reply does, through its own path. */
+  waitingOnQuestion?: boolean
   now: number
 }
 
@@ -170,6 +183,8 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
   if (input.held) return wait('held')
   if (input.refusal) return wait(input.refusal)
   if (!input.hasAgent) return wait('no_agent')
+  if (input.personAssigned) return wait('person_assigned')
+  if (input.waitingOnQuestion) return wait('question')
   if (status === 'backlog') return wait('backlog')
   if (status === 'in_review') return wait('under_check')
   if (status === 'in_progress') {

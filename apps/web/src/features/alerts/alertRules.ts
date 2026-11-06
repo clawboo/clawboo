@@ -1,10 +1,11 @@
 // Browser alerts for what needs a person, raised while the tab is in the background.
 //
 // Two things are announced: a task an agent's work left waiting on a person (a
-// run that failed or stopped responding, a task an agent marked blocked, work
-// that did not pass its checks), and an agent waiting for an approval. Reasons
-// a person caused (they pressed Stop, left a task without an agent, or moved
-// the card to Blocked themselves) are not announced.
+// run that failed or stopped responding, a task an agent marked blocked or handed
+// back, a question it asked, work that did not pass its checks), and an agent
+// waiting for an approval. Reasons a person caused (they pressed Stop, left a task
+// without an agent, took a task themselves, or moved the card to Blocked
+// themselves) are not announced.
 //
 // The desktop app raises the same alerts natively (its needsYou.ts and
 // approvals.ts watchers), so the copy and the rules here match it. Everything
@@ -13,7 +14,14 @@
 
 import { taskAttentionOf } from '@/features/board/boardStatus'
 
-export const ANNOUNCED_REASONS = ['failed', 'timed_out', 'blocked', 'needs_review'] as const
+export const ANNOUNCED_REASONS = [
+  'failed',
+  'timed_out',
+  'blocked',
+  'needs_review',
+  'question',
+  'assigned',
+] as const
 export type AnnouncedReason = (typeof ANNOUNCED_REASONS)[number]
 
 const isAnnounced = (r: unknown): r is AnnouncedReason =>
@@ -119,6 +127,8 @@ export function collectAlertItems(
     if (!attention || !isAnnounced(attention.reason)) continue
     // The person moved it to Blocked themselves, and no run has started since.
     if (attention.byPerson) continue
+    // They took it themselves. An agent handing it back is news.
+    if (attention.reason === 'assigned' && !attention.handedBack) continue
     items.push({
       // Keyed by the reason and the failed-run count too: a task that fails,
       // is retried and fails again is news again, even when no read saw it
@@ -250,6 +260,8 @@ const WHAT_HAPPENED: Record<AnnouncedReason, string> = {
   timed_out: 'stopped responding',
   blocked: 'is blocked',
   needs_review: 'did not pass its checks',
+  question: 'has a question for you',
+  assigned: 'was handed back to you',
 }
 
 /** What an agent waiting on an approval wants to do, in plain words. */

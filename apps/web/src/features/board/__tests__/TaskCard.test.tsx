@@ -764,6 +764,36 @@ describe('DraggableCard: keys, clicks and the grip', () => {
   })
 })
 
+describe('TaskCard: people and waits', () => {
+  it('marks a person’s task with who has it', () => {
+    const card = renderChip(makeTask({ assigneePersonId: 'local', assigneeAgentId: null }))
+    expect(within(card).getByText('Assigned to you')).toBeInTheDocument()
+  })
+
+  it('names someone else', () => {
+    const card = renderChip(
+      makeTask({
+        assigneePersonId: 'p1',
+        assigneePerson: '{"id":"p1","name":"Priya","role":null}',
+      }),
+    )
+    expect(within(card).getByText('Assigned to Priya')).toBeInTheDocument()
+  })
+
+  it('says what a task waits on in place of a status mark', () => {
+    const card = renderChip(
+      makeTask({
+        status: 'blocked',
+        waitingOn: '{"kind":"task","taskId":"t2"}',
+        waitingOnDetail: { taskTitle: 'Agree the copy' },
+      }),
+    )
+    expect(within(card).getByTestId('board-card-waiting')).toHaveTextContent(
+      'Waiting on “Agree the copy”',
+    )
+  })
+})
+
 describe('TaskCard: readable id and labels', () => {
   const base = { id: 't1', title: 'Work', status: 'todo', createdAt: 1, updatedAt: 1 }
 

@@ -8,7 +8,12 @@
 //     it, the user stopped its last run, or it failed MAX_AUTO_FIRES times in a
 //     row and was parked;
 //   · it is `in_progress` with no agent on it and no run going: moved there by
-//     hand, which starts nothing, so it would sit there looking worked on.
+//     hand, which starts nothing, so it would sit there looking worked on;
+//   · it waits on a person (`waiting_on`), which includes a question an agent
+//     asked, or it is assigned to a person.
+//
+// A task waiting on another task or on its own sub-tasks is not on this list: the
+// board moves it on when that work finishes.
 //
 // Everything else (queued work the pump will fire, a run in flight, a finished
 // or cancelled task, a deliberately parked backlog item) returns null.
@@ -24,6 +29,7 @@ import {
   type AccountFailure,
   type LedgerRun,
 } from './dispatch'
+import { parseWaitingOn, waitsOnOtherWork } from './waitingOn'
 
 export type AttentionReason =
   /** The last run ended in an error (a crash, a runtime error, an infra kill). */
@@ -40,6 +46,10 @@ export type AttentionReason =
   | 'unassigned'
   /** In progress with no agent and no run: nothing is working on it. */
   | 'unstarted'
+  /** An agent asked a person a question and waits for the answer. */
+  | 'question'
+  /** It is assigned to a person: their turn. */
+  | 'assigned'
 
 export interface TaskAttention {
   reason: AttentionReason
@@ -56,6 +66,13 @@ export interface TaskAttention {
   /** For `blocked`: a person moved the card there and no run has started
    *  since, so it waits on their own decision rather than an agent's. */
   byPerson?: boolean
+  /** For `question`: the question waiting for its answer. */
+  questionId?: string
+  /** For `assigned`: the person whose turn it is. */
+  personId?: string
+  /** For `assigned`: an agent handed the task back, as opposed to a person taking
+   *  it themselves. Only the first is news to anyone. */
+  handedBack?: boolean
 }
 
 /** Longest failure reason a card shows; the full text stays on the task. */
@@ -90,6 +107,10 @@ export interface AttentionInput {
   assigneeAgentId?: string | null
   /** When a person last moved the card (`personMovedAt`). */
   personMovedAt?: number | null
+  /** What the task waits on: the `waiting_on` column, or its parsed value. */
+  waitingOn?: unknown
+  /** The person it is assigned to. */
+  assigneePersonId?: string | null
 }
 
 /** When the latest run started: its start, else its claim, else its creation. */
@@ -115,14 +136,53 @@ function movedByPerson(input: AttentionInput): boolean {
 export function taskAttention(input: AttentionInput): TaskAttention | null {
   const failedRuns = trailingFailedRuns(input.execs)
   const last = input.execs.length > 0 ? input.execs[input.execs.length - 1]!.status : null
+  const waiting = parseWaitingOn(input.waitingOn)
+  const open = input.status !== 'done' && input.status !== 'cancelled'
+
+  // Whose turn it is comes before what the ledger says: a question is waiting
+  // whatever the last run did, and a person's task is theirs whatever came before.
+  if (open && waiting?.kind === 'question')
+    return { reason: 'question', failedRuns, questionId: waiting.questionId }
+  if (open && input.status !== 'backlog' && input.assigneePersonId) {
+    const need = waiting?.kind === 'person' ? waiting : null
+    return {
+      reason: 'assigned',
+      failedRuns: 0,
+      personId: input.assigneePersonId,
+      ...(need ? { detail: need.need } : {}),
+      ...(need?.by === 'agent' ? { handedBack: true } : {}),
+    }
+  }
+  // A check that could not be parked: In progress or In review to the board, but
+  // nothing is coming for it until a person looks or the move lands.
+  if (open && waiting?.kind === 'verification' && waiting.state === 'park_pending')
+    return { reason: 'needs_review', failedRuns }
 
   if (input.status === 'blocked') {
+    if (waitsOnOtherWork(waiting)) return null
     if (input.verificationBlocked) return { reason: 'needs_review', failedRuns }
+    // The agent said what a person must do, and its run failed afterwards. What they
+    // must do is still the next step.
+    if (waiting?.kind === 'person' && waiting.by === 'agent')
+      return { reason: 'blocked', failedRuns, detail: waiting.need }
     if (last === 'timed_out')
       return { reason: 'timed_out', failedRuns, ...failureDetail(input.execs) }
     if (last === 'failed') return { reason: 'failed', failedRuns, ...failureDetail(input.execs) }
-    return { reason: 'blocked', failedRuns, ...(movedByPerson(input) ? { byPerson: true } : {}) }
+    if (waiting?.kind === 'verification') return { reason: 'needs_review', failedRuns }
+    // A person's own move has no need to read back to them.
+    const need =
+      waiting?.kind === 'person' && waiting.by !== 'person' ? { detail: waiting.need } : {}
+    return {
+      reason: 'blocked',
+      failedRuns,
+      ...need,
+      ...(movedByPerson(input) ? { byPerson: true } : {}),
+    }
   }
+
+  // An agent moved its task In review and says a person must act.
+  if (input.status === 'in_review' && waiting?.kind === 'person')
+    return { reason: 'needs_review', failedRuns, detail: waiting.need }
 
   if (input.status === 'todo') {
     if (!delegationTargetOf(input.sourceDelegationId))

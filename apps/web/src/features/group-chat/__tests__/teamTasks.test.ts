@@ -81,3 +81,20 @@ describe('team tasks by chat room', () => {
     expect(inRoom({ roomId: 'room-design' }, null)).toBe(false)
   })
 })
+
+describe('a task waiting on other work', () => {
+  it('sits with the work in progress, as it does on the board', () => {
+    expect(
+      taskSectionOf({
+        status: 'blocked',
+        attention: null,
+        waitingOn: '{"kind":"subtasks"}',
+        updatedAt: 1,
+      }),
+    ).toBe('in_progress')
+  })
+
+  it('a blocked task with no verdict and no such reason still needs a person', () => {
+    expect(taskSectionOf({ status: 'blocked', updatedAt: 1 })).toBe('needs_you')
+  })
+})

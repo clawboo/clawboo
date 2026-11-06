@@ -34,18 +34,20 @@ is why the connector client lives here too.
 
 ## The four servers
 
-| Server                        | Built by                              | Tools                                                                                                                                                                                  |
-| ----------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tasks (`clawboo-tasks`)       | `createTasksServer(db, opts)`         | `list_tasks`, `get_task`, `create_task`, `create_subtask`, `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `unblock_task`, `add_comment`, `link_task` |
-| Memory (`clawboo-memory`)     | `createMemoryServer(db, embed, opts)` | `memory_save`, `memory_search`, `memory_browse`, `memory_feedback`                                                                                                                     |
-| Tools (`clawboo-tools`)       | `createToolsServer(db, opts)`         | the built-ins (`echo`, `note`), plus the tools of each connected connector and the app toolkits an agent has been granted                                                              |
-| TeamChat (`clawboo-teamchat`) | `createTeamChatServer(db, opts)`      | `team_chat_post`, `team_chat_subscribe`, and `team_delegate` when the binding grants delegation                                                                                        |
+| Server                        | Built by                              | Tools                                                                                                                                                                                                                  |
+| ----------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tasks (`clawboo-tasks`)       | `createTasksServer(db, opts)`         | `list_tasks`, `get_task`, `create_task`, `create_subtask`, `claim_task`, `assign_task`, `release_task`, `update_task_status`, `block_task`, `ask_person`, `hand_back_task`, `unblock_task`, `add_comment`, `link_task` |
+| Memory (`clawboo-memory`)     | `createMemoryServer(db, embed, opts)` | `memory_save`, `memory_search`, `memory_browse`, `memory_feedback`                                                                                                                                                     |
+| Tools (`clawboo-tools`)       | `createToolsServer(db, opts)`         | the built-ins (`echo`, `note`), plus the tools of each connected connector and the app toolkits an agent has been granted                                                                                              |
+| TeamChat (`clawboo-teamchat`) | `createTeamChatServer(db, opts)`      | `team_chat_post`, `team_chat_subscribe`, and `team_delegate` when the binding grants delegation                                                                                                                        |
 
 Each server is a thin layer over `@clawboo/db`: the handlers call its repository functions. A few behaviors matter
 to anyone changing them:
 
-- **Tasks.** `readOnly` serves only `list_tasks` and `get_task`; Clawboo Native uses it for an agent whose Tasks
-  access is set to read. `teamRun` is set for a run the team engine drives (signed `teamRun=1` on its Tasks, Memory and Tools URLs; Clawboo Native sets it in-process):
+- **Tasks.** `readOnly` serves only `list_tasks` and `get_task`, plus `ask_person` on a team run bound to a task;
+  Clawboo Native uses it for an agent whose Tasks access is set to read. `ask_person` and `hand_back_task` act only
+  on the bound task of a team run, and are not served without one. `block_task`, and `update_task_status` and
+  `create_task` into `blocked` or `in_review`, need a `waitingOn` reason. `teamRun` is set for a run the team engine drives (signed `teamRun=1` on its Tasks, Memory and Tools URLs; Clawboo Native sets it in-process):
   it leaves out `claim_task`, `assign_task`, `release_task`, `update_task_status` and `unblock_task`, and lets
   `block_task` block only the bound agent's own task. A bound agent's `claim_task` claims for that agent. A bound
   team scope forces `list_tasks` to that team and makes `get_task` refuse another team's task. A bound task

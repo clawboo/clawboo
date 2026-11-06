@@ -831,6 +831,24 @@ describe('dispatchConnectedSubstrate', () => {
     expect(outcome).toMatchObject({ ok: true, taskId })
   })
 
+  it('a task a person took is satisfied too: the routine is not disarmed', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const { assignTaskToPerson, LOCAL_PERSON } = await import('@clawboo/db')
+    expect(assignTaskToPerson(db, taskId, LOCAL_PERSON).ok).toBe(true)
+
+    const outcome = await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: new FakeOperatorClient() as unknown as OperatorClientLike,
+    })
+    expect(outcome).toMatchObject({ ok: true, taskId })
+  })
+
   it('a ledger row closed out from under the drain is NOT re-reported as succeeded', async () => {
     // The obs stream and the ledger must never disagree. A terminal ledger row is
     // immutable, so if something else closed this exec (a stale sweep, an abort)

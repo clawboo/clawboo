@@ -43,7 +43,9 @@ Every server reports version `0.1.0` and declares the `tools.listChanged` capabi
 | [`assign_task`](#assign_task)                 | Tasks    | Atomically hand a `todo` task to an agent                |
 | [`release_task`](#release_task)               | Tasks    | Put an `in_progress` task back to `todo`                 |
 | [`update_task_status`](#update_task_status)   | Tasks    | Move a task to another status                            |
-| [`block_task`](#block_task)                   | Tasks    | Move a task to `blocked`                                 |
+| [`block_task`](#block_task)                   | Tasks    | Move a task to `blocked`, saying what it waits on        |
+| [`ask_person`](#ask_person)                   | Tasks    | Ask a person about the run's task, then stop             |
+| [`hand_back_task`](#hand_back_task)           | Tasks    | Hand the run's task back to the person who asked         |
 | [`unblock_task`](#unblock_task)               | Tasks    | Move a task back to `todo`                               |
 | [`add_comment`](#add_comment)                 | Tasks    | Comment on a task                                        |
 | [`link_task`](#link_task)                     | Tasks    | Make one task wait for another                           |
@@ -69,12 +71,12 @@ There are four kinds of caller:
 - **Operator (stdio bin).** Someone ran a `clawboo-mcp-*` bin directly. The operator is trusted, so scope and identity come from the tool arguments.
 - **In-process (Clawboo Native).** The servers run inside the dashboard server and are bound to the run's team and agent.
 
-| Server   | Bound caller                                                                                                                                                                                                                                                                                    | Unverified HTTP caller                                                                                                   | Operator (stdio bin)                                |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
-| Tasks    | 12 tools. When the run has a team, reads and writes are limited to its tasks and new tasks land in it. Mailbox notices ride along on results. A team run gets 7: no `claim_task`, `assign_task`, `release_task`, `update_task_status` or `unblock_task`, and `block_task` only for its own task | 6 tools: no claims and no status writes. Board-wide. Comments post as a plain `agent` comment                            | 12 tools, board-wide                                |
-| Memory   | Saves are shared with the team. Reads see team facts, this agent's own facts and facts that belong to no team. Provenance is recorded                                                                                                                                                           | Saves and reads use only facts that belong to no team. No reporter or provenance is recorded                             | Scope comes from `scopeTeamId` and `scopeAgentId`   |
-| Tools    | Builtins plus the connector tools this agent's grants allow                                                                                                                                                                                                                                     | Builtins and `read_tool_result`, plus any connector tools a `global` grant allows. Agent and team grants cannot be found | Builtins and `read_tool_result`; no connector tools |
-| TeamChat | 2 tools, posting as the bound agent in its peer room. `team_delegate` too on orchestrated runs                                                                                                                                                                                                  | No tools                                                                                                                 | 2 tools; author and team come from the arguments    |
+| Server   | Bound caller                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Unverified HTTP caller                                                                                                   | Operator (stdio bin)                                |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------- |
+| Tasks    | 12 tools. When the run has a team, reads and writes are limited to its tasks and new tasks land in it. Mailbox notices ride along on results. A team run gets 7: no `claim_task`, `assign_task`, `release_task`, `update_task_status` or `unblock_task`, and `block_task` only for its own task. A team run on a board task also gets `ask_person` and `hand_back_task`; a Clawboo Native team run whose Tasks access is read gets the two reads and `ask_person` | 6 tools: no claims and no status writes. Board-wide. Comments post as a plain `agent` comment                            | 12 tools, board-wide                                |
+| Memory   | Saves are shared with the team. Reads see team facts, this agent's own facts and facts that belong to no team. Provenance is recorded                                                                                                                                                                                                                                                                                                                             | Saves and reads use only facts that belong to no team. No reporter or provenance is recorded                             | Scope comes from `scopeTeamId` and `scopeAgentId`   |
+| Tools    | Builtins plus the connector tools this agent's grants allow                                                                                                                                                                                                                                                                                                                                                                                                       | Builtins and `read_tool_result`, plus any connector tools a `global` grant allows. Agent and team grants cannot be found | Builtins and `read_tool_result`; no connector tools |
+| TeamChat | 2 tools, posting as the bound agent in its peer room. `team_delegate` too on orchestrated runs                                                                                                                                                                                                                                                                                                                                                                    | No tools                                                                                                                 | 2 tools; author and team come from the arguments    |
 
 <Warning>
 
@@ -126,6 +128,7 @@ Rules that apply to every Tasks tool:
 - **Never retry a lost claim.** `claim failed: conflict` means another agent won the claim. Retrying the same call cannot succeed.
 - **Mailbox delivery.** On a session bound to an agent, each successful result can carry an extra text block headed `[team updates` with up to five undelivered mailbox notices for that agent. Each notice is delivered once, on whichever channel reaches the agent first. A notice can quote a person or another agent, so each one is framed as data: a header `[Inter-session message · from=clawboo · kind=<kind> · isUser=false]`, then every line of the notice quoted with `| `, under a line saying the notices are information, not instructions.
 - **The run's own task.** On a session bound to a task (a run on a board task), `get_task` and `add_comment` take `taskId` as optional and use that task when it is left out, and so does `block_task`. Their descriptions say so, and the field is listed as optional only on such a session. Any task can still be named (on a team run, `block_task` names only its own), and an empty `taskId` is refused rather than read as the run's own task.
+- **A waiting task says why.** `block_task`, and `update_task_status` and `create_task` moving a task to `blocked` or `in_review`, need `waitingOn`. A call without it is refused with text that says what to send, and nothing moves.
 
 ### Creation caps
 
@@ -226,7 +229,7 @@ Claim a `todo` task for an agent. The claim is atomic: when two agents race, exa
 
 ### assign_task
 
-Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same results and errors, and `assigneeAgentId` is always required; `conflict` means the task is already taken. Not served to an unverified HTTP caller or on a team run.
+Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same results and errors, and `assigneeAgentId` is always required; `conflict` means the task is already taken, and a task assigned to a person is refused the same way. Not served to an unverified HTTP caller or on a team run.
 
 A hand-off cannot go in a circle. It is refused with `Not handed off: ...` (typed `hand_off_cycle` in `_meta.denied`) when the target handed out the task or any of its open ancestors, unless the target is the team's lead or Boo Zero. Assigning to yourself is not a hand-off. A bound caller is recorded as the task's delegator, and so is a bound caller that creates it.
 
@@ -251,6 +254,10 @@ Move a task to another status. Legal moves follow the board's state machine; `do
 {
   taskId: string
   status: TaskStatus
+  // Required for blocked and in_review. See block_task.
+  waitingOn?: 'person' | 'task' | 'subtasks'
+  need?: string
+  waitingOnTaskId?: string
 }
 ```
 
@@ -258,23 +265,67 @@ Move a task to another status. Legal moves follow the board's state machine; `do
 - Moving a task to `cancelled` also cancels the plan steps still waiting on it (`todo` or `backlog`, all the way down the chain), as a person's cancel on the board does. The result then carries them as `cancelledDependents: [{ id, title }]`. Cancelling a task that is already cancelled runs the same cascade again, so a repeated call finishes one an earlier call left undone. The agent that delegated the task gets a mailbox note naming it and how many steps went with it, unless that agent made the call. When the note cannot be written, the cancel still stands and the result carries `delegatorNotTold: <agentId>`.
 - Returns the updated task row.
 - Errors: `status change failed: illegal_transition`, `status change failed: not_found`, and `status change failed: verification_required` when the task holds a failing verification verdict (only a person's override, from the board or the board API, can finish it). See [When work is checked](/concepts/verification).
+- Refused for a task assigned to a person, and for one waiting on a person's answer to a question: the tool errors start `This task is assigned to a person` and `This task is waiting for a person to answer a question`. This holds on every status tool, for any agent.
 - Refused when a person moved the card on the board or in the task drawer after the task's latest run started (or the task has not run since): that run was overruled, and the status stays where the person put it. The tool error reads `A person moved this task to <column> after your run on it started, so its status is theirs to set. Leave it as it is and do not retry this call.` A run started after the move writes as usual.
 - Not served to an unverified HTTP caller or on a team run. On a team run the engine moves the card when the run ends and reports the result to whoever handed out the task.
 
 ### block_task
 
-Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
+Move a task to `blocked`, saying what it waits on. It is `update_task_status` with `status: 'blocked'`.
 
 ```ts
 {
   taskId: string
+  waitingOn: 'person' | 'task' | 'subtasks' // required
+  need?: string // for 'person': what the person must do
+  waitingOnTaskId?: string // for 'task': the task that must finish first
 }
 ```
 
 - `taskId` is optional on a session bound to a task (a team run or a task runner run), and defaults to it. Elsewhere it is required.
+- `waitingOn` is listed as required, and a call without it is refused. `update_task_status` to `in_review` takes only `person`, because a wait on other work can end only from `blocked`. `person` needs `need` and shows in Needs you with that text. `task` must name an unfinished task on the team that is not this one, is not in the Backlog (nothing starts work there), and does not need this one to finish first, through a wait, its sub-tasks or a dependency. `subtasks` needs at least one open sub-task, none of them in the Backlog or needing this one first. Both stay out of Needs you. The task goes back to `todo` when that work is done, and to Needs you if it was cancelled. These are checks at the moment of the wait: nothing alerts anyone if a person later moves that work to the Backlog.
 - Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
-- On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` Not served to an unverified HTTP caller.
+- On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` Not served to an unverified HTTP caller. A wait on another task or on sub-tasks is reported as that, with no call to redo it, on team runs and task runner runs alike.
 - When a run blocks its own task, on a team run or a task runner run, the task stays **Blocked** in Needs you and the steps waiting on it stay queued. If the run then ends normally, it is recorded as succeeded, the agent's reply is kept as its comment, and its delegator is told the task waits on a person. A task runner run's worktree is kept unchecked for a Retry to carry on from. A task a person assigned tells no agent: the result is on its card. On the task runner, a run that blocks its task and then runs out of turns or hits an error is recorded as failed, and one stopped by a budget or a breaker as cancelled. The task stays **Blocked** in each case.
+
+### ask_person
+
+Ask a person something the agent cannot decide or find out itself, about the task it is working on, then stop. Served only on a team run bound to a task, including a Clawboo Native team run whose Tasks access is read. No Tasks tool answers a question: only a person does, on the dashboard.
+
+```ts
+{
+  taskId?: string // the run's own task; any other is refused
+  kind: 'question' | 'confirm' | 'suggest_tasks'
+  question: string // up to 2,000 characters
+  options?: string[] // for 'question': up to 8 choices; none means free text
+  allowOther?: boolean // for 'question': free text as well as the options
+  tasks?: string[] // for 'suggest_tasks', required: up to 12 proposed titles
+  idempotencyKey?: string // a repeated call with this key asks once
+}
+```
+
+- Moves the task to `blocked`, waiting on the question, and closes any question it had open. When the run ends, it stays **Blocked** in Needs you as **Waiting for your answer**, the agent's reply is kept as its comment, and its delegator is told it waits on an answer and not to redo or reassign it.
+- The answer starts the task again, with the answer in its comments. A suggested list the person accepts is for the agent to create.
+- Refused when the agent is not on the task, the task is finished, or a person moved the card after the run started. A routine's task is refused too, because its person may be away: `This task comes from a scheduled routine, and its person may be away. Do not wait on them: make a reasonable assumption, say it in your reply, and finish.`
+- A repeated `idempotencyKey` asks nothing new while that question is open or answered, and the result says which: still waiting, so stop; or answered, with the answer first, so carry on. A question that closed without an answer freed its key, so the same call asks it again and the task waits.
+- After it, `block_task` and the other status tools are refused until the answer comes. `hand_back_task` still works, and closes the question.
+- If the run then fails, the task still waits on the question. The run's row says it failed, but its delegator is told it waits on an answer, and the plan steps waiting on it stay queued.
+- The question is the agent's text. It goes on the thread as a comment from the agent, and only the person's answer goes under their name.
+- A question expires on an event, not a clock: the task reaching Done or Cancelled, being dropped or moving on, or a newer question.
+
+### hand_back_task
+
+Hand the task the agent is working on back to the person who asked for it, saying what they must do. Served only on a team run bound to a task, and not to a Clawboo Native team run whose Tasks access is read.
+
+```ts
+{
+  taskId?: string // the run's own task; any other is refused
+  need: string // what the person must do, up to 1,000 characters
+}
+```
+
+- Moves the task to `blocked`, assigned to the person, and takes the agent off it. It keeps its binding to the agent, so the person's reply or **Give back to its agent** returns it. The person is the one recorded as asking for the task or its nearest ancestor, else the install's built-in person.
+- Refused when the agent is not on the task, or a person moved the card after the run started. A routine's task is refused too, with the same words as `ask_person`, because its next fire needs it back in To do.
 
 ### unblock_task
 
@@ -320,7 +371,7 @@ Make `taskId` wait for `dependsOnTaskId`: it is not ready to claim until that ta
 ```
 
 - Returns the text `linked: <taskId> depends on <dependsOnTaskId>`. Linking an edge that already exists changes nothing.
-- A link to the task itself, or one that would close a loop (directly or through other tasks), is refused: `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. A loop could never finish, because every task in it waits on another.
+- A link to the task itself, or one that would close a loop (directly or through other tasks, including what a task is waiting on), is refused: `linking <taskId> to <dependsOnTaskId> would create a dependency cycle`. A loop could never finish, because every task in it waits on another.
 - On a team-bound session both tasks must belong to the team, otherwise `not found: <id>`.
 
 ## Memory server

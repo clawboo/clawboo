@@ -21,6 +21,7 @@ import {
   CircleDashed,
   CornerDownRight,
   GripVertical,
+  UserRound,
   X,
 } from 'lucide-react'
 
@@ -33,12 +34,13 @@ import type { CardProperties } from './BoardToolbar'
 
 import { labelsOfTask } from '@/lib/teamLabels'
 
-import { boardColumnOf } from './boardStatus'
+import { assigneePersonOf, boardColumnOf, isMyTask, waitingWorkLabel } from './boardStatus'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { sitsOnOtherDay } from './finishMove'
 import { StatusGlyph } from './StatusGlyph'
 import { LabelChip } from './TaskLabelsSelect'
 import { formatCostUsd, formatRunCost, runCostOf } from './taskCost'
+import { useBoardPerson } from './useBoardPerson'
 
 /** What every card shows besides its title and agent, from the Display popover. */
 export const CardPropertiesContext = createContext<CardProperties>({ cost: true, time: true })
@@ -277,6 +279,9 @@ function ChipMeta({
   const subtask = !!task['parentTaskId']
   const shows = useContext(CardPropertiesContext)
   const costShown = shows.cost && cost.usd !== null
+  const person = assigneePersonOf(task)
+  const me = useBoardPerson(person !== null)
+  const personName = isMyTask(task, me) ? 'you' : (person?.name ?? 'a person')
   const labels = labelsOfTask(task)
   return (
     <div className="flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-1">
@@ -288,7 +293,12 @@ function ChipMeta({
           {task.identifier}
         </span>
       ) : null}
-      {ownerId ? (
+      {person ? (
+        <span title={`Assigned to ${personName}`} className="inline-flex shrink-0 items-center">
+          <UserRound size={14} strokeWidth={2} aria-hidden className="text-muted-foreground" />
+          <span className="sr-only">{`Assigned to ${personName}`}</span>
+        </span>
+      ) : ownerId ? (
         <span title={ownerName ?? undefined} className="inline-flex shrink-0 items-center">
           <AgentBooAvatar agentId={ownerId} size={16} />
           <span className="sr-only">{`Assigned to ${ownerName ?? 'an agent'}`}</span>
@@ -452,11 +462,22 @@ export function TaskCard({
   const cost = runCostOf(task)
   const verdict = verdictStatus(task)
   const stamped = stamp != null
-  const mark = chipStatusMark(
-    task.status,
-    verdict,
-    Boolean(task['parentTaskId']),
-    task['checkHeldSince'] != null,
+  const waiting = waitingWorkLabel(task)
+  const mark = waiting ? (
+    <span
+      data-testid="board-card-waiting"
+      title={waiting}
+      className="min-w-0 truncate text-xs text-muted-foreground"
+    >
+      {waiting}
+    </span>
+  ) : (
+    chipStatusMark(
+      task.status,
+      verdict,
+      Boolean(task['parentTaskId']),
+      task['checkHeldSince'] != null,
+    )
   )
   // A card shows one mark; when that mark takes the cost's place, the cost moves
   // into the card's tooltip.
