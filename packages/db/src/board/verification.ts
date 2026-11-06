@@ -28,6 +28,17 @@ export function setTaskVerification(
   )
 }
 
+/** Mark a task's check as waiting since `since`, or as no longer waiting (null). */
+export function setTaskCheckHeld(db: ClawbooDb, taskId: string, since: number | null): void {
+  withWriteRetry(() =>
+    db
+      .update(tasks)
+      .set({ checkHeldSince: since, updatedAt: Date.now() })
+      .where(eq(tasks.id, taskId))
+      .run(),
+  )
+}
+
 /** Read the typed verification verdict (zod-validated; null when absent/invalid). */
 export function getTaskVerification(db: ClawbooDb, taskId: string): VerificationResult | null {
   const row = getTask(db, taskId)

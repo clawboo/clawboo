@@ -53,7 +53,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | OpenClaw agents                                     | `runtime.openclaw`                                                          | Supported                      | Planned     | Planned       |
 | Team chat and chat rooms                            | `chat.rooms`                                                                | Supported                      | Planned     | Planned       |
 | 1:1 chats                                           | `chat.direct`                                                               | Supported                      | Planned     | Planned       |
-| Board, with checks on finished work                 | `board.verification`                                                        | Supported                      | Planned     | Planned       |
+| Board, with checks on finished work                 | `board.verification`, `board.checkHold`                                     | Supported                      | Planned     | Planned       |
 | A person's inbox, with read state on the server     | `board.inbox`                                                               | Supported                      | Planned     | Planned       |
 | Comments that reach a running task                  | `board.steering`                                                            | Supported                      | Planned     | Planned       |
 | Readable task ids                                   | `board.readableIds`                                                         |

@@ -57,6 +57,7 @@ import { loadSessionTranscript } from '../runtimes/native/sessionStore'
 import { buildPersonaBlock } from '../runtimes/personaBlock'
 import { estimateTokensFromChars } from '../runtimes/estimateCost'
 import { createRunCostTally } from '../runtimes/runCostTally'
+import { startFolderRun } from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { recordRunTokens } from '../runTokenLog'
@@ -603,10 +604,14 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // However the turn ends (refused, failed, stopped, gone quiet, or its own code
   // throwing), its hold goes before the agent's lock does.
   const runHeld = async (): Promise<void> => {
+    // The team folder is shared with the team chat, so this turn reports that it is
+    // working there, and a team-chat work check waits for it (see teamFolderActivity).
+    const folderRun = workdir ? startFolderRun(workdir, agentId) : null
     try {
       await runJob()
     } finally {
       hold?.release()
+      folderRun?.release()
     }
   }
   await withRunSlot(

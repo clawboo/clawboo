@@ -118,6 +118,21 @@ describe('a clamped chip', () => {
     expect(card).toHaveAttribute('title', `${TITLE}\nCost: ~$0.02 est.`)
   })
 
+  it('says a check that is waiting is waiting, not verifying', () => {
+    const { card } = renderChip(
+      makeTask({ status: 'in_review', checkHeldSince: 1_700_000_000_000 }),
+    )
+    expect(within(card).getByText('Waiting to check')).toBeInTheDocument()
+    expect(within(card).queryByText('Verifying')).toBeNull()
+    expect(within(card).getByText('Waiting to check')).not.toHaveClass('board-shimmer')
+  })
+
+  it('reads a check that is running as verifying', () => {
+    const { card } = renderChip(makeTask({ status: 'in_review', checkHeldSince: null }))
+    expect(within(card).getByText('Verifying')).toBeInTheDocument()
+    expect(within(card).queryByText('Waiting to check')).toBeNull()
+  })
+
   it('leaves a cost on the face out of the tooltip', () => {
     const { card } = renderChip(
       makeTask({ status: 'done', runCost: { usd: 0.42, estimated: false } }),

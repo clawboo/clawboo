@@ -22,6 +22,7 @@ import {
   nextCycleDecision,
   shouldRunCritic,
   verificationStatusFor,
+  type CheckHold,
   type CriticVerdict,
   type DebtNote,
   type DeterministicResult,
@@ -81,6 +82,9 @@ export interface VerifyTaskInput {
    *  for the task (a person moved it, or it is being run again), so nothing is
    *  recorded and the verdict is only returned. */
   shouldRecord?: () => boolean
+  /** How the check shared a team folder with other runs, read when the attempt is
+   *  written. Null when nothing else was going. */
+  hold?: () => CheckHold | null
 }
 
 function structuredErrorFor(det: DeterministicResult, critic: CriticVerdict): StructuredError {
@@ -236,6 +240,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     }
   }
 
+  const hold = input.hold?.() ?? null
   const attempt: VerificationAttempt = {
     attempt: attemptNumber,
     at: Date.now(),
@@ -243,6 +248,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     critic,
     status,
     structuredError,
+    ...(hold ? { hold } : {}),
   }
   const result: VerificationResult = {
     status,

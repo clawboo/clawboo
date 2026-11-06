@@ -286,6 +286,7 @@ The task cards.
 | `identifier`            | `TEXT`                                | The readable id, like `MAR-12`, unique across the workspace. Taken in the create's own write transaction. Null for a task with no team, or whose team is gone. Existing tasks are numbered at boot |
 | `delegated_by_agent_id` | `TEXT`                                | The agent that handed the task out through the Tasks tools. The team engine records its delegator in `source_delegation_id`. The hand-off cycle guard reads both                                   |
 | `person_cancelled_at`   | `INTEGER`                             | When a person cancelled it, or cancelled the step it waited on. Only this frees its place under its parent                                                                                         |
+| `check_held_since`      | `INTEGER`                             | When the task's team-chat check began waiting for the team folder, or `NULL`. Read only while the task is `in_review`; any move out of review clears it                                            |
 
 Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
 

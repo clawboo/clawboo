@@ -115,6 +115,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     completedAt: number | null
     personMovedAt: number | null // when a person last moved the card (see PATCH below)
     runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
+    checkHeldSince: number | null // when its team-chat check began waiting for the team folder; null otherwise
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {

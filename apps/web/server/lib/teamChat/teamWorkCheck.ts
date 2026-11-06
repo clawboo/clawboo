@@ -10,6 +10,11 @@
 // compares the two. The folder is shared by every teammate, so a check sees the
 // whole folder, including what a teammate working at the same time changed.
 //
+// A check waits its turn: while another run of the team is working in the folder,
+// or another check of the team is running, it holds (see `holdCheck` and
+// ../runtimes/teamFolderActivity), so a teammate's half-written change cannot fail
+// it. What a teammate changed during the task's own run is still in what it measures.
+//
 // Checked only when the team has a verify command (its Work check). Without one
 // a change is left unchecked rather than failed: much team-chat work writes
 // documents, not code, and a gate with no command can only fail.
@@ -27,22 +32,35 @@ import {
   getTaskVerification,
   listExecutions,
   recordSpend,
+  setTaskCheckHeld,
   startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
 } from '@clawboo/db'
 import type { RuntimeAdapter } from '@clawboo/executor'
-import { usdToFractionalCents } from '@clawboo/governance'
+import { usdToFractionalCents, type CheckHold } from '@clawboo/governance'
 import { createLogger } from '@clawboo/logger'
-import type { WorkCheck, WorkCheckResult } from '@clawboo/team-orchestration'
+import {
+  WORK_CHECK_HOLD_LIMIT_MS,
+  type BoardChange,
+  type PreparedWorkCheck,
+  type WorkCheck,
+  type WorkCheckResult,
+} from '@clawboo/team-orchestration'
 import { assertSafeTaskId, execGit, KeyedMutex, type DiffStat } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { isLocalModel } from '../costUtils'
+import { emitEvent } from '../obs'
 import { adapterFactoryFor, type RuntimeRunContext } from '../runtimes'
 import { isOrchestratableRuntimeId } from '../runtimes/descriptor'
 import { estimateRunCostUsd, estimateTokensFromChars } from '../runtimes/estimateCost'
 import { sanitizeAgentId } from '../runtimes/identityHome'
+import {
+  enterFolderCheckLine,
+  folderRunners,
+  type FolderCheckTurn,
+} from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, teamWorkdirFor, teamWorkdirPath } from '../runtimes/teamWorkdir'
 import { recordRunTokens } from '../runTokenLog'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from '../verification'
@@ -105,12 +123,41 @@ async function ensureHistory(gitDir: string): Promise<void> {
   await writeFile(path.join(gitDir, 'info', 'exclude'), `${HISTORY_EXCLUDES.join('\n')}\n`)
 }
 
+/** How many times a snapshot tries `git add` before it gives up. */
+const STAGE_TRIES = 3
+
+/** Stage the folder. A teammate can delete a file while git reads the folder, which
+ *  fails the whole add; the next pass no longer sees that file. */
+async function stageFolder(gitDir: string, folder: string): Promise<void> {
+  for (let tries = 1; ; tries++) {
+    try {
+      await historyGit(gitDir, folder, ['add', '-A'])
+      return
+    } catch (err) {
+      if (tries >= STAGE_TRIES) throw err
+    }
+  }
+}
+
 /** Commit the folder as it is now, less what git leaves out: the dependency
  *  folders above, and whatever a `.gitignore` in the folder ignores. Returns the
  *  commit. Ignored files stay out on purpose: forcing them in would also take
- *  `.env` files and the like into the history and the reviewer's checkout. */
-async function snapshot(gitDir: string, folder: string, message: string): Promise<string> {
-  await historyGit(gitDir, folder, ['add', '-A'])
+ *  `.env` files and the like into the history and the reviewer's checkout.
+ *
+ *  `orOlder` is for a task's starting point: if the folder cannot be staged, it
+ *  commits what the last snapshot staged. An older start can only add to what the
+ *  task is measured on, while no start at all would leave its work unchecked. An
+ *  end point never does this: it could hide the very change it is measuring. */
+async function snapshot(
+  gitDir: string,
+  folder: string,
+  message: string,
+  opts: { orOlder?: boolean } = {},
+): Promise<string> {
+  await stageFolder(gitDir, folder).catch((err: unknown) => {
+    if (!opts.orOlder) throw err
+    log.warn({ err, folder }, 'could not stage the team folder; starting from its last snapshot')
+  })
   await historyGit(gitDir, folder, [
     '-c',
     'user.name=clawboo',
@@ -148,12 +195,22 @@ async function diffBetween(
   return { filesChanged, insertions, deletions, dirty: filesChanged > 0 }
 }
 
+/** How one check has waited for the team folder. `since` is null until it has. */
+interface CheckWait {
+  turn: FolderCheckTurn | null
+  since: number | null
+  waitedMs: number
+  limitReached: boolean
+}
+
 export interface TeamWorkCheckOpts {
   db: ClawbooDb
   teamId: string
   mcpBaseUrl: string | null
   /** The reviewer for an agent's runtime (tests). Defaults to that runtime's adapter. */
   makeReviewerAdapter?: (runtime: string) => ((ctx: RuntimeRunContext) => RuntimeAdapter) | null
+  /** Tell open chats a check began or stopped waiting, so their cards say so. */
+  onBoardChange?: (change: BoardChange) => void
 }
 
 /** The engine's `workCheck` for one team (see WorkCheck in @clawboo/team-orchestration). */
@@ -208,6 +265,100 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     }
   }
 
+  /** The folder's commit now and what changed since the task's start, or null when
+   *  the task has no starting point. */
+  const measure = (
+    folder: string,
+    taskId: string,
+  ): Promise<{ b: string; h: string; d: DiffStat } | null> =>
+    historyMutex.run(gitDir, async () => {
+      const b = await baseOf(folder, taskId)
+      if (!b) return null
+      const h = await snapshot(gitDir, folder, `clawboo: task ${taskId}`)
+      return { b, h, d: await diffBetween(gitDir, folder, b, h) }
+    })
+
+  /** What the team folder is busy with, in words. */
+  const folderBusyWith = (folder: string): string => {
+    const names = folderRunners(folder).map((id) => {
+      const row = db.select().from(agents).where(eq(agents.id, id)).get() as
+        { name?: string | null } | undefined
+      return row?.name || id
+    })
+    if (names.length === 0) return "another task's check is running in the team folder"
+    const who =
+      names.length === 1 ? names[0]! : `${names.slice(0, -1).join(', ')} and ${names.at(-1)!}`
+    return `${who} ${names.length === 1 ? 'is' : 'are'} still working in the team folder`
+  }
+
+  /** The wait is over: the card stops saying so, and a wait that ran out says that.
+   *  Reads the mark rather than `wait`, so a mark some other write left behind can
+   *  never read as waiting during a real check. */
+  const endWait = (taskId: string, folder: string, wait: CheckWait): void => {
+    if (getTask(db, taskId)?.checkHeldSince != null) {
+      setTaskCheckHeld(db, taskId, null)
+      opts.onBoardChange?.({
+        id: taskId,
+        status: 'in_review',
+        checkHeldSince: null,
+        updatedAt: Date.now(),
+      })
+    }
+    if (wait.limitReached)
+      note(
+        taskId,
+        `Stopped waiting after ${Math.round(WORK_CHECK_HOLD_LIMIT_MS / 60_000)} minutes: ${folderBusyWith(folder)}. The check runs now, so it may include unfinished work that is not this task's.`,
+      )
+  }
+
+  /**
+   * Wait for the check's turn on the team folder (see PreparedWorkCheck.hold). A
+   * clear folder changes nothing. Otherwise the card goes In review now, as for a
+   * running check: the board's stale sweep leaves it, and a restart hands it to a
+   * person. It takes no run slot and no budget.
+   */
+  async function holdCheck(
+    taskId: string,
+    folder: string,
+    wait: CheckWait,
+    signal: AbortSignal,
+  ): Promise<() => void> {
+    const turn = enterFolderCheckLine(folder)
+    wait.turn = turn
+    if (turn.clear) return turn.leave
+    try {
+      // A task that cannot enter review was moved by a person: nothing to wait for.
+      if (!updateStatus(db, taskId, 'in_review').ok) return turn.leave
+      const since = Date.now()
+      wait.since = since
+      setTaskCheckHeld(db, taskId, since)
+      // On the event log too: this move does not go through the board client.
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId,
+        data: { to: 'in_review', reason: 'check_waiting' },
+      })
+      opts.onBoardChange?.({
+        id: taskId,
+        status: 'in_review',
+        checkHeldSince: since,
+        updatedAt: since,
+      })
+      note(
+        taskId,
+        `Waiting to check this work: ${folderBusyWith(folder)}. The check runs once the folder is clear, or after ${Math.round(WORK_CHECK_HOLD_LIMIT_MS / 60_000)} minutes at most.`,
+      )
+      await turn.wait(signal)
+      wait.waitedMs = Date.now() - since
+      wait.limitReached = signal.aborted
+      return turn.leave
+    } catch (err) {
+      turn.leave()
+      throw err
+    }
+  }
+
   /**
    * After an attempt failed the check, a later attempt that cannot be checked
    * cannot pass either (and the board would refuse `done` over the failed
@@ -216,7 +367,8 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
   const unableToCheck =
     (taskId: string, reason: string): (() => Promise<WorkCheckResult>) =>
     async () => {
-      if (getTask(db, taskId)?.status !== 'in_progress') return { verdict: 'decided' }
+      const status = getTask(db, taskId)?.status
+      if (status !== 'in_progress' && status !== 'in_review') return { verdict: 'decided' }
       note(taskId, reason)
       updateStatus(db, taskId, 'blocked')
       return { verdict: 'failed', reason }
@@ -238,7 +390,9 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
           // failed check is measured from where the task first began, so a Retry
           // that changes nothing is still checked.
           if (await baseOf(target.folder, taskId)) return
-          const sha = await snapshot(gitDir, target.folder, `clawboo: before task ${taskId}`)
+          const sha = await snapshot(gitDir, target.folder, `clawboo: before task ${taskId}`, {
+            orOlder: true,
+          })
           await historyGit(gitDir, target.folder, ['update-ref', baseRef(taskId), sha])
         })
       } catch (err) {
@@ -264,46 +418,65 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
               "An earlier attempt failed the team's check, and the team no longer has a check this attempt can run, so the task waits for a person.",
             )
           : null
-      let measured: { b: string; h: string; d: DiffStat } | null
+      const noStart =
+        "An earlier attempt failed the team's check, and the record of where this task began is gone, so the task waits for a person."
+      let measured: { b: string; h: string; d: DiffStat } | null = null
+      let measureFailed = false
       try {
-        measured = await historyMutex.run(gitDir, async () => {
-          const b = await baseOf(target.folder, taskId)
-          if (!b) return null
-          const h = await snapshot(gitDir, target.folder, `clawboo: task ${taskId}`)
-          return { b, h, d: await diffBetween(gitDir, target.folder, b, h) }
-        })
+        measured = await measure(target.folder, taskId)
       } catch (err) {
-        log.error({ err, teamId, taskId }, 'could not measure what the task changed')
-        const why = err instanceof Error ? err.message : String(err)
-        if (tried)
-          return unableToCheck(
-            taskId,
-            `An earlier attempt failed the team's check, and this one could not be measured, so the task waits for a person: ${why}`,
-          )
-        note(
-          taskId,
-          `Clawboo could not see what this run changed, so its work is not checked: ${why}`,
-        )
-        return null
+        log.warn({ err, teamId, taskId }, 'could not measure what the task changed')
+        measureFailed = true
       }
-      if (!measured)
-        return tried
-          ? unableToCheck(
-              taskId,
-              "An earlier attempt failed the team's check, and the record of where this task began is gone, so the task waits for a person.",
-            )
-          : null
-      const { b: base, h: head, d: diff } = measured
-      // After a failed attempt the check runs even on an unchanged folder: the
-      // work it failed may still be there, and an undo has to pass it too.
-      if (!diff.dirty && !tried) {
-        await dropBase(target.folder, taskId)
-        return null
+      if (!measureFailed) {
+        if (!measured) return tried ? unableToCheck(taskId, noStart) : null
+        // After a failed attempt the check runs even on an unchanged folder: the
+        // work it failed may still be there, and an undo has to pass it too.
+        if (!measured.d.dirty && !tried) {
+          await dropBase(target.folder, taskId)
+          return null
+        }
       }
       // The run this check is for: the task's latest execution now, as the run
       // that just ended. A newer one means the task is being run again.
       const runId = latestRun(taskId)
-      return () => check(taskId, agentId, target, base, head, diff, runId)
+      const wait: CheckWait = { turn: null, since: null, waitedMs: 0, limitReached: false }
+      const prepared: PreparedWorkCheck = async () => {
+        if (measured)
+          return check(taskId, agentId, target, measured.b, measured.h, measured.d, runId, wait)
+        // A folder a teammate is changing can fail a measure, which must not leave the
+        // work unchecked: the wait came first, and this is one more try. Only now
+        // does it give up, the way a measure that fails on a quiet folder does.
+        if (wait.since !== null && getTask(db, taskId)?.status !== 'in_review')
+          return { verdict: 'decided' }
+        let found: { b: string; h: string; d: DiffStat } | null
+        try {
+          found = await measure(target.folder, taskId)
+        } catch (err) {
+          log.error({ err, teamId, taskId }, 'could not measure what the task changed')
+          const why = err instanceof Error ? err.message : String(err)
+          endWait(taskId, target.folder, wait)
+          if (tried)
+            return unableToCheck(
+              taskId,
+              `An earlier attempt failed the team's check, and this one could not be measured, so the task waits for a person: ${why}`,
+            )()
+          note(
+            taskId,
+            `Clawboo could not see what this run changed, so its work is not checked: ${why}`,
+          )
+          return { verdict: 'unchecked' }
+        }
+        if (!found || (!found.d.dirty && !tried)) {
+          endWait(taskId, target.folder, wait)
+          if (!found && tried) return unableToCheck(taskId, noStart)()
+          if (found) await dropBase(target.folder, taskId)
+          return { verdict: 'unchecked' }
+        }
+        return check(taskId, agentId, target, found.b, found.h, found.d, runId, wait)
+      }
+      prepared.hold = (signal) => holdCheck(taskId, target.folder, wait, signal)
+      return prepared
     },
   }
 
@@ -316,19 +489,50 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     agentId: string,
     target: { folder: string; command: string; runtime: string; model: string | null },
     base: string,
-    head: string,
-    diff: DiffStat,
+    measuredHead: string,
+    measuredDiff: DiffStat,
     runId: string | null,
+    wait: CheckWait,
   ): Promise<WorkCheckResult> {
-    // In review while it is checked, as on the task runner: the board shows the
-    // check running, and the stale sweep (which watches `in_progress`) leaves it.
-    // A task that cannot enter review was moved by a person meanwhile.
-    if (!updateStatus(db, taskId, 'in_review').ok) return { verdict: 'decided' }
     // This check still speaks for the task: still in review, and not run again
     // since (a person's Retry, or the engine giving up on this check, ends it).
     // Asked before the verdict is written and before every card move.
     const stillMine = (): boolean =>
       getTask(db, taskId)?.status === 'in_review' && latestRun(taskId) === runId
+    // Superseded: a person moved the card (to Done, Cancelled or Blocked), or the
+    // task is being run again. That stands, nothing here moves the card, and no
+    // verdict was written. Only Done and Cancelled end the task's history; a
+    // Blocked task can be retried and is then measured from its start.
+    const superseded = async (): Promise<WorkCheckResult> => {
+      const now = getTask(db, taskId)?.status
+      if (now === 'done' || now === 'cancelled') await dropBase(target.folder, taskId)
+      return { verdict: 'decided' }
+    }
+    // A wait left the card in review, so anything else is a person's move. Asked
+    // before the move below, which would otherwise pull the card back.
+    if (latestRun(taskId) !== runId || (wait.since !== null && !stillMine())) return superseded()
+    // In review while it is checked, as on the task runner: the board shows the
+    // check running, and the stale sweep (which watches `in_progress`) leaves it.
+    // A task that cannot enter review was moved by a person meanwhile.
+    if (!updateStatus(db, taskId, 'in_review').ok) return { verdict: 'decided' }
+    endWait(taskId, target.folder, wait)
+    // After a wait, what is checked and reviewed is the folder as it is now. The
+    // snapshot from the run's end stands in if this one cannot be taken.
+    let head = measuredHead
+    let diff = measuredDiff
+    if (wait.since !== null) {
+      try {
+        const now = await measure(target.folder, taskId)
+        if (now) {
+          head = now.h
+          diff = now.d
+        }
+      } catch (err) {
+        log.warn({ err, teamId, taskId }, 'could not measure the folder again after the wait')
+      }
+    }
+    /** Something else was in the folder during this check (see CheckHold). */
+    const hadCompany = (): boolean => wait.limitReached || (wait.turn?.sawRun() ?? false)
     const reviewerModel = process.env['CLAWBOO_REVIEWER_MODEL'] || target.model
     const reviewer = reviewerFor(target.runtime)
     const verdict = await verifyTask({
@@ -352,18 +556,14 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       mcpBaseUrl: opts.mcpBaseUrl,
       onReviewerSpend: (spend) => chargeReview(taskId, agentId, reviewerModel, spend),
       shouldRecord: stillMine,
+      hold: (): CheckHold | null => {
+        const runBeside = wait.turn?.sawRun() ?? false
+        if (wait.since === null && !runBeside) return null
+        return { waitedMs: wait.waitedMs, limitReached: wait.limitReached, runBeside }
+      },
     })
 
-    // Superseded while it ran: a person moved the card (to Done, Cancelled or
-    // Blocked), or the task is being run again. That stands, nothing here moves
-    // the card, and no verdict was written. Only Done and Cancelled end the
-    // task's history; a Blocked task can be retried and is then measured from
-    // its start.
-    if (!stillMine()) {
-      const now = getTask(db, taskId)?.status
-      if (now === 'done' || now === 'cancelled') await dropBase(target.folder, taskId)
-      return { verdict: 'decided' }
-    }
+    if (!stillMine()) return superseded()
     const last = verdict.attempts[verdict.attempts.length - 1]
     const err = last?.structuredError
     if (verdict.status === 'pass') {
@@ -388,7 +588,12 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     const fixNote = err
       ? `What: ${err.what}\nWhy: ${err.why}\nHow to fix: ${err.howToFix}`
       : 'The check failed.'
-    return { verdict: 'retry', fixNote }
+    return {
+      verdict: 'retry',
+      fixNote: hadCompany()
+        ? `${fixNote}\n\nSomething else was working in the team folder during this check, so this failure may come from its unfinished work rather than yours.`
+        : fixNote,
+    }
   }
 
   /** The reviewer's run is paid work for this task: charged like the task runner's. */

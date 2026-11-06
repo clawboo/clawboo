@@ -109,6 +109,21 @@ export type StructuredError = z.infer<typeof structuredErrorSchema>
 export const verificationStatusSchema = z.enum(['pass', 'fail', 'completed_with_debt'])
 export type VerificationStatus = z.infer<typeof verificationStatusSchema>
 
+/**
+ * How a check on a shared team folder shared it with other runs. Absent when
+ * nothing else was going, and on every task-runner attempt, which has its own
+ * checkout.
+ */
+export const checkHoldSchema = z.object({
+  /** How long the check waited for other runs and checks to leave the folder. */
+  waitedMs: z.number().int().nonnegative(),
+  /** It stopped waiting at the limit, with the folder still in use. */
+  limitReached: z.boolean(),
+  /** Another run was going in the folder at some point while the check ran. */
+  runBeside: z.boolean(),
+})
+export type CheckHold = z.infer<typeof checkHoldSchema>
+
 /** One verify-fix attempt. The attempts array IS the loop history. */
 export const verificationAttemptSchema = z.object({
   attempt: z.number().int().positive(),
@@ -117,6 +132,7 @@ export const verificationAttemptSchema = z.object({
   critic: criticVerdictSchema,
   status: verificationStatusSchema,
   structuredError: structuredErrorSchema.nullable().default(null),
+  hold: checkHoldSchema.optional(),
 })
 export type VerificationAttempt = z.infer<typeof verificationAttemptSchema>
 

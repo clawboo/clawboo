@@ -2,6 +2,47 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 import { useBoardStore } from '../board'
 
+describe('useBoardStore.applyChange (a check waiting for the team folder)', () => {
+  const get = () => useBoardStore.getState().tasksByTeam.get('held')?.get('task-1')
+
+  it('marks the card while the check waits, and clears it when the check starts', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('held', { id: 'task-1', status: 'in_progress', updatedAt: 100 })
+    expect(get()?.checkHeldSince).toBeNull()
+
+    s.applyChange('held', {
+      id: 'task-1',
+      status: 'in_review',
+      checkHeldSince: 150,
+      updatedAt: 150,
+    })
+    expect(get()?.checkHeldSince).toBe(150)
+
+    // A later frame that does not say keeps it; the check starting ends it.
+    s.applyChange('held', { id: 'task-1', status: 'in_review', updatedAt: 160 })
+    expect(get()?.checkHeldSince).toBe(150)
+    s.applyChange('held', {
+      id: 'task-1',
+      status: 'in_review',
+      checkHeldSince: null,
+      updatedAt: 170,
+    })
+    expect(get()?.checkHeldSince).toBeNull()
+  })
+
+  it('ends with a move out of review', () => {
+    const s = useBoardStore.getState()
+    s.applyChange('held', {
+      id: 'task-1',
+      status: 'in_review',
+      checkHeldSince: 200,
+      updatedAt: 200,
+    })
+    s.applyChange('held', { id: 'task-1', status: 'done', updatedAt: 210 })
+    expect(get()?.checkHeldSince).toBeNull()
+  })
+})
+
 describe('useBoardStore.applyChange (projection merge)', () => {
   beforeEach(() => useBoardStore.getState().reset('t1'))
 

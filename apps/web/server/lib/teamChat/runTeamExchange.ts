@@ -42,6 +42,7 @@ import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
+import { startFolderRun } from '../runtimes/teamFolderActivity'
 import { teamWorkdirFor } from '../runtimes/teamWorkdir'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
@@ -264,7 +265,7 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
         : null
     // Claude Code / Codex / Hermes / Native start in the team's shared folder.
     const cwd = teamWorkdirFor(participant.runtime, teamId)
-    const turn = () =>
+    const runTurn = () =>
       dispatchChatTurn(
         {
           db,
@@ -281,6 +282,16 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
         },
         turnIndex,
       )
+    // A turn in the team folder reports it, so a team-chat work check waits for it
+    // (see teamFolderActivity).
+    const turn = async () => {
+      const folderRun = cwd ? startFolderRun(cwd, participant.agentId) : null
+      try {
+        return await runTurn()
+      } finally {
+        folderRun?.release()
+      }
+    }
     // Persistent runtimes serialize on the per-home mutex (shared with the executor).
     if (homeDir)
       return homeDispatchMutex

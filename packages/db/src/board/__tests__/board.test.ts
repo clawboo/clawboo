@@ -10,6 +10,7 @@ import { createDb, type ClawbooDb } from '../../db'
 import { executionProcesses, tasks, type DbTask } from '../../schema'
 import {
   addComment,
+  assignTaskDelegation,
   cancelDependents,
   claimTask,
   createCappedRootTask,
@@ -28,6 +29,8 @@ import {
   getReadyTasks,
   getTask,
   linkDep,
+  listExecutions,
+  listRoomsWithEngineTasksInReview,
   listTasks,
   completeExecutionProcess,
   heartbeatTask,
@@ -41,6 +44,7 @@ import {
   updateTaskFields,
   type GuardedCreateResult,
 } from '../repository'
+import { setTaskCheckHeld } from '../verification'
 
 let dir: string
 let dbPath: string
@@ -174,6 +178,67 @@ describe('orphan reconciliation', () => {
     expect(after?.status).toBe('blocked')
     expect(after?.assigneeAgentId).toBe('agent-a')
     expect(getComments(reopened, t.id).map((c) => c.body)).toContain(ORPHANED_REVIEW_NOTE)
+  })
+
+  it('leaves a team-chat check In review to its engine, which tells whoever handed it out', () => {
+    const t = createTask(db, { title: 'checked', teamId: 'team1' })
+    claimTask(db, t.id, 'agent-a')
+    const exec = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    expect(updateStatus(db, t.id, 'in_review').ok).toBe(true)
+
+    const reopened = createDb(dbPath)
+    expect(reconcileOrphans(reopened, { staleAfterMs: -10_000 }).reconciled).toBe(0)
+
+    expect(getTask(reopened, t.id)?.status).toBe('in_review')
+    expect(listExecutions(reopened, t.id).find((e) => e.id === exec.id)?.status).toBe('running')
+    expect(listRoomsWithEngineTasksInReview(reopened)).toEqual([{ teamId: 'team1', roomId: null }])
+  })
+
+  it('still reaps an engine run In review that no engine could ever pick up', () => {
+    const teamless = createTask(db, { title: 'no team' })
+    claimTask(db, teamless.id, 'agent-a')
+    createExecutionProcess(db, { taskId: teamless.id, executorType: 'openclaw' })
+    expect(updateStatus(db, teamless.id, 'in_review').ok).toBe(true)
+    const dropped = createTask(db, { title: 'dropped', teamId: 'team1' })
+    claimTask(db, dropped.id, 'agent-a')
+    createExecutionProcess(db, { taskId: dropped.id, executorType: 'openclaw' })
+    expect(updateStatus(db, dropped.id, 'in_review').ok).toBe(true)
+    dropTask(db, dropped.id)
+
+    const reopened = createDb(dbPath)
+    expect(reconcileOrphans(reopened, { staleAfterMs: -10_000 }).reconciled).toBe(2)
+    expect(getTask(reopened, teamless.id)?.status).toBe('blocked')
+    expect(getTask(reopened, dropped.id)?.status).toBe('blocked')
+  })
+
+  it('clears the waiting mark on every way out of review, the raw writes included', () => {
+    const since = 1_700_000_000_000
+    const reaped = createTask(db, { title: 'reaped', teamId: 'team1' })
+    claimTask(db, reaped.id, 'agent-a')
+    createExecutionProcess(db, { taskId: reaped.id, executorType: 'codex' })
+    expect(updateStatus(db, reaped.id, 'in_review').ok).toBe(true)
+    setTaskCheckHeld(db, reaped.id, since)
+
+    const moved = createTask(db, { title: 'moved', teamId: 'team1' })
+    claimTask(db, moved.id, 'agent-a')
+    expect(updateStatus(db, moved.id, 'in_review').ok).toBe(true)
+    setTaskCheckHeld(db, moved.id, since)
+    expect(getTask(db, moved.id)?.checkHeldSince).toBe(since)
+    expect(updateStatus(db, moved.id, 'blocked').ok).toBe(true)
+    expect(getTask(db, moved.id)?.checkHeldSince).toBeNull()
+
+    // A mark left on a parked task by an older build goes with the next rebind.
+    const rebound = createTask(db, { title: 'rebound', teamId: 'team1' })
+    claimTask(db, rebound.id, 'agent-a')
+    expect(updateStatus(db, rebound.id, 'blocked').ok).toBe(true)
+    setTaskCheckHeld(db, rebound.id, since)
+    expect(assignTaskDelegation(db, rebound.id, 'sdid').ok).toBe(true)
+    expect(getTask(db, rebound.id)?.checkHeldSince).toBeNull()
+
+    const reopened = createDb(dbPath)
+    reconcileOrphans(reopened, { staleAfterMs: -10_000 })
+    expect(getTask(reopened, reaped.id)?.status).toBe('blocked')
+    expect(getTask(reopened, reaped.id)?.checkHeldSince).toBeNull()
   })
 
   it('a STILL-BEATING running exec is NOT reaped (live sibling process / fast restart)', () => {

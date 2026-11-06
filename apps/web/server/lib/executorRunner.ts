@@ -113,6 +113,7 @@ import {
 } from './runtimes/estimateCost'
 import { runtimeIdentityHomePath } from './runtimes/identityHome'
 import { loadAgentConfig } from './runtimes/native/agentConfigStore'
+import { startFolderRun, type FolderRun } from './runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
 import { notifyBlockedByAgent } from './teamChat/inboxNotices'
@@ -520,9 +521,12 @@ async function runTaskOnRuntimeInner(
       },
       (span) => runTaskInner(attempt, span, claimState),
     ).finally(() => {
-      // However the attempt ended, its budget hold goes with it (see budgetHold).
+      // However the attempt ended, its budget hold goes with it (see budgetHold),
+      // and so does its report that it is working in the team folder.
       claimState.hold?.release()
       claimState.hold = null
+      claimState.folderRun?.release()
+      claimState.folderRun = null
     })
 
   // Probe capabilities once (constructing the adapter is side-effect-free — no
@@ -676,6 +680,8 @@ interface ClaimState {
   steer?: SteerSlot
   /** The current attempt's budget hold, released when the attempt ends. */
   hold?: RunBudgetHold | null
+  /** The current attempt's report of working in the team folder, ended with it. */
+  folderRun?: FolderRun | null
 }
 
 /** The scope whose hard cap is paused now, read before a run rotates to a fresh
@@ -893,6 +899,10 @@ async function runTaskInner(
   }
   const { cwd, resume } = workspace
   const runDir = runFolder.ok ? runFolder.runDir : null
+  // No worktree: this run shares the team folder with the team chat, so it reports
+  // that it is working there, and a team-chat work check waits for it. A run in a
+  // worktree has its own checkout (see teamFolderActivity).
+  if (runDir) claimState.folderRun = startFolderRun(runDir, assigneeAgentId)
 
   // Memory auto-injection: seed the most-relevant facts for the task into the
   // VOLATILE tier (cache-safe — never the cached prefix, per the KV-cache

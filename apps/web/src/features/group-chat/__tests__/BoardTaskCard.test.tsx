@@ -162,6 +162,13 @@ describe('the status pill', () => {
     expect(await screen.findByText(label)).toBeInTheDocument()
   })
 
+  it('says a check that is waiting is waiting', async () => {
+    reportUp('')
+    render(task({ status: 'in_review', checkHeldSince: 1_700_000_000_000 }))
+    expect(await screen.findByText('Waiting to check')).toBeInTheDocument()
+    expect(screen.queryByText('Verifying')).not.toBeInTheDocument()
+  })
+
   it('shows an off-list status by its raw name instead of mislabelling it "Queued"', async () => {
     reportUp('')
     render(task({ status: 'archived' }))

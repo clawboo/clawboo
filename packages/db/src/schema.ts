@@ -385,6 +385,10 @@ export const tasks = sqliteTable(
     // Only this frees the task's slot under its parent: an agent that could free
     // slots by cancelling its own children could create without limit.
     personCancelledAt: integer('person_cancelled_at'),
+    // While a team-chat check waits for other runs to leave the team folder: when
+    // it began waiting. NULL otherwise. Read only while the task is `in_review`,
+    // and any move out of review clears it (see `updateStatus`).
+    checkHeldSince: integer('check_held_since'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),

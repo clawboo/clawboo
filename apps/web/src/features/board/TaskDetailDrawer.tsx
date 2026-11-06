@@ -86,8 +86,30 @@ interface Verdict {
       reviewerRuntime?: string | null
       reviewerModel?: string | null
     }
+    hold?: CheckHoldRecord
   }[]
   debtNotes?: DebtNote[]
+}
+
+/** How a team-chat check shared the team folder with other runs. */
+interface CheckHoldRecord {
+  waitedMs?: number
+  limitReached?: boolean
+  runBeside?: boolean
+}
+
+/** The hold line of an attempt: how its check shared the team folder. */
+function holdLine(hold: CheckHoldRecord): { text: string; warn: boolean } {
+  const mins = Math.round((hold.waitedMs ?? 0) / 60_000)
+  const waited = mins < 1 ? 'under a minute' : `${mins} min`
+  if (hold.limitReached)
+    return {
+      text: `Stopped waiting after ${waited}, so this check ran with the team folder still in use`,
+      warn: true,
+    }
+  if (hold.runBeside)
+    return { text: 'A teammate was also working in the team folder during this check', warn: true }
+  return { text: `Waited ${waited} for teammates to finish in the team folder`, warn: false }
 }
 
 /** Where the gate's command came from, in the drawer's words. */
@@ -696,6 +718,13 @@ export function TaskDetailDrawer({
                       }}
                     />
                   </PropRow>
+                  {task.status === 'in_review' && task['checkHeldSince'] != null ? (
+                    <PropRow label="Check">
+                      <span data-testid="task-check-held">
+                        Waiting for teammates to finish in the team folder
+                      </span>
+                    </PropRow>
+                  ) : null}
                   <PropRow label="Priority">
                     <PrioritySelect
                       taskId={task.id}
@@ -786,6 +815,7 @@ export function TaskDetailDrawer({
                     // reviewer model and runtime are shown for the bias caveat. A
                     // review that failed or came back empty says so instead.
                     const line = last?.critic ? reviewerLine(last.critic) : null
+                    const held = last?.hold ? holdLine(last.hold) : null
                     const openItems = openItemsOf(verdict)
                     return (
                       <div className="flex flex-col gap-1.5 text-compact">
@@ -820,6 +850,15 @@ export function TaskDetailDrawer({
                           >
                             {line.warn ? <WarnMark /> : null}
                             {line.text}
+                          </div>
+                        ) : null}
+                        {held ? (
+                          <div
+                            data-testid="task-check-hold"
+                            className={`text-xs ${held.warn ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+                          >
+                            {held.warn ? <WarnMark /> : null}
+                            {held.text}
                           </div>
                         ) : null}
                         {/* A pass or a fail can carry open items from an earlier

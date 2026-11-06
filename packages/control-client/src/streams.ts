@@ -81,6 +81,8 @@ export const boardChangeFrameSchema = z.object({
   summary: z.string().optional(),
   attention: taskAttentionFrameSchema.nullable().optional(),
   roomId: z.string().nullable().optional(),
+  /** When the task's check began waiting for the team folder; null when it stopped. */
+  checkHeldSince: z.number().nullable().optional(),
 })
 export type BoardChangeFrame = z.infer<typeof boardChangeFrameSchema>
 

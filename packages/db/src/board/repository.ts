@@ -133,6 +133,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     identifier: null,
     delegatedByAgentId: input.delegatedByAgentId ?? null,
     personCancelledAt: null,
+    checkHeldSince: null,
   }
 }
 
@@ -943,6 +944,8 @@ export function updateStatus(
         ...(to === 'cancelled' && (opts.actor === 'person' || opts.byPersonCascade)
           ? { personCancelledAt: now }
           : {}),
+        // A check waits only inside In review (see `setTaskCheckHeld`).
+        ...(to !== 'in_review' ? { checkHeldSince: null } : {}),
         // A task moved back to `todo` is released for re-claim — clear the assignee
         // so the atomic claim (`assignee IS NULL`) can re-acquire it (matches
         // releaseTask / orphan reconciliation, which also unassign on release).
@@ -1049,7 +1052,13 @@ export function assignTaskDelegation(
         updatedAt: Date.now(),
         // Released for a fresh run: the same fields `updateStatus(→todo)` clears.
         ...(from !== 'todo'
-          ? { status: 'todo', assigneeAgentId: null, assigneeRuntime: null, verification: null }
+          ? {
+              status: 'todo',
+              assigneeAgentId: null,
+              assigneeRuntime: null,
+              verification: null,
+              checkHeldSince: null,
+            }
           : {}),
       })
       .where(eq(tasks.id, taskId))
@@ -1624,6 +1633,17 @@ export interface ParkedReviewsResult extends ReconcileResult {
 export const ORPHANED_REVIEW_NOTE =
   'The run working on this task stopped when Clawboo restarted while the task was in review, so it is waiting for you. Retry runs it again, or Dismiss drops it.'
 
+/** The task's latest execution, the one `listExecutions` lists last. */
+function latestExecutionId(tx: BoardTx, taskId: string): string | null {
+  const row = tx
+    .select({ id: executionProcesses.id })
+    .from(executionProcesses)
+    .where(eq(executionProcesses.taskId, taskId))
+    .orderBy(desc(executionProcesses.createdAt))
+    .get() as { id: string } | undefined
+  return row?.id ?? null
+}
+
 /**
  * On startup, reap `running` execs whose driver is provably gone. LIVENESS-AWARE:
  * a run is reaped only when its task's `updatedAt` has missed several heartbeats
@@ -1659,6 +1679,18 @@ export function reconcileOrphans(
       .all() as DbExecutionProcess[]
     const orphans = candidates.filter((ex) => {
       const t = tx.select().from(tasks).where(eq(tasks.id, ex.taskId)).get() as DbTask | undefined
+      // A team-chat check does not beat, so its clock says nothing. Its next engine
+      // parks it and tells whoever handed the task out (`resume`), which a raw park
+      // here would take away. The same rows `listRoomsWithEngineTasksInReview` builds
+      // an engine for, so none is left waiting on an engine that never comes.
+      if (
+        t?.status === 'in_review' &&
+        t.teamId &&
+        !t.dropped &&
+        ex.executorType === 'openclaw' &&
+        latestExecutionId(tx, t.id) === ex.id
+      )
+        return false
       // No task row (integrity edge) ⇒ reap. Otherwise reap only when the beat
       // clock is stale — a fresh row means SOMETHING is still driving this run.
       return !t || t.updatedAt < cutoff
@@ -1702,7 +1734,7 @@ export function reconcileOrphans(
       // what any check found.
       const parked = tx
         .update(tasks)
-        .set({ status: 'blocked', updatedAt: now })
+        .set({ status: 'blocked', updatedAt: now, checkHeldSince: null })
         .where(and(eq(tasks.id, ex.taskId), eq(tasks.status, 'in_review')))
         .returning({ teamId: tasks.teamId, assigneeAgentId: tasks.assigneeAgentId })
         .all() as Array<{ teamId: string | null; assigneeAgentId: string | null }>

@@ -31,6 +31,8 @@ export interface BoardTaskView {
   attention?: TaskAttention | null
   /** The chat room the task belongs to; null (or absent) = the team's own group chat. */
   roomId?: string | null
+  /** When its check began waiting for teammates to leave the team folder. */
+  checkHeldSince?: number | null
   createdAt: number
   updatedAt: number
 }
@@ -68,6 +70,13 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame
           : undefined,
     // A task never changes room; a frame that did not say keeps the known one.
     roomId: change.roomId !== undefined ? change.roomId : (existing?.roomId ?? null),
+    // Waiting only ever means In review, so a frame from any other status ends it.
+    checkHeldSince:
+      status !== 'in_review'
+        ? null
+        : change.checkHeldSince !== undefined
+          ? change.checkHeldSince
+          : (existing?.checkHeldSince ?? null),
     createdAt: change.createdAt ?? existing?.createdAt ?? Date.now(),
     updatedAt,
   }
@@ -104,6 +113,7 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             parentTaskId: r.parentTaskId ?? null,
             attention: taskAttentionOf(r),
             roomId: typeof r.roomId === 'string' ? r.roomId : null,
+            checkHeldSince: typeof r['checkHeldSince'] === 'number' ? r['checkHeldSince'] : null,
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
           }),
