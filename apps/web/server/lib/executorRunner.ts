@@ -29,11 +29,13 @@ import {
   packInboxRows,
   splitInboxByAddressing,
   markInboxDelivered,
+  recordExecutionUsage,
   recordRotation,
   recordSpend,
   releaseTask,
   scrubResultSummary,
   setTaskRunnerInputs,
+  startReviewHeartbeat,
   startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
@@ -113,6 +115,7 @@ import { runtimeIdentityHomePath } from './runtimes/identityHome'
 import { loadAgentConfig } from './runtimes/native/agentConfigStore'
 import { ensureTeamWorkdir, taskRunWorkdirFor } from './runtimes/teamWorkdir'
 import { buildPersonaBlock } from './runtimes/personaBlock'
+import { notifyBlockedByAgent } from './teamChat/inboxNotices'
 import {
   actOnTaskWorkspace,
   getTaskWorkspace,
@@ -202,6 +205,8 @@ export interface RunTaskInput {
   maxNodeCents?: number
   /** Override BUDGET_STOP_GRACE_MS (tests). */
   budgetStopGraceMs?: number
+  /** Override how long a run's check may take (tests). */
+  checkDeadlineMs?: number
   /** Tool-loop circuit-breaker overrides. Falls back to
    *  BREAKER_DEFAULTS. The cross-runtime backstop that halts a no-progress /
    *  thrashing loop, composing with — never double-aborting — the budget
@@ -560,6 +565,12 @@ async function runTaskOnRuntimeInner(
   const stopBeat = startTaskHeartbeat(input.db, input.taskId, {
     assigneeAgentId: input.assigneeAgentId,
   })
+  // In review the run is still open while its work is checked, and the other beat
+  // leaves such a task alone. A check can take many minutes, and a silent one reads
+  // as a run that died with its process.
+  const stopReviewBeat = startReviewHeartbeat(input.db, input.taskId, {
+    assigneeAgentId: input.assigneeAgentId,
+  })
   try {
     let result = await runOnce(input)
     // ── The verification fix loop — OUTSIDE the mutex ─────────────────────────
@@ -596,14 +607,52 @@ async function runTaskOnRuntimeInner(
         // verification verdict, which is worse than the stranded claim we're fixing.
         // Close the execution row first: releasing the task without it leaves an
         // orphaned `running` execution that only boot-time reconciliation clears.
-        if (claimState.execId) {
-          completeExecutionProcess(input.db, claimState.execId, {
-            status: 'failed',
-            error: err instanceof Error ? err.message : String(err),
-          })
-        }
-        if (input.db && getTask(input.db, input.taskId)?.status === 'in_progress') {
-          releaseTask(input.db, input.taskId)
+        const message = scrubResultSummary(err instanceof Error ? err.message : String(err))
+        const current = input.db ? getTask(input.db, input.taskId) : null
+        const lastRun = input.db ? listExecutions(input.db, input.taskId).at(-1) : null
+        // The check blew up or never answered, with this run still open. Nothing will
+        // finish it, so the task waits for a person, as when a restart cuts one short.
+        // Parked first: until the move lands the run stays open, so the sweep finds
+        // the task and tries again once the beat stops.
+        const parkingCheck =
+          current?.status === 'in_review' &&
+          lastRun?.id === claimState.execId &&
+          lastRun?.status === 'running'
+        if (!parkingCheck || updateStatus(input.db, input.taskId, 'blocked').ok) {
+          const closed = claimState.execId
+            ? completeExecutionProcess(input.db, claimState.execId, {
+                status: 'failed',
+                error: message,
+              })
+            : null
+          // The closing event is what tells the delegator ("finished with failed").
+          if (closed)
+            emitEvent(input.db, {
+              kind: 'execution_completed',
+              traceId,
+              taskId: input.taskId,
+              teamId: current?.teamId ?? null,
+              agentId: input.assigneeAgentId,
+              runtime: probe.id,
+              data: { execId: closed.id, status: 'failed', error: message },
+            })
+          if (current?.status === 'in_progress') {
+            releaseTask(input.db, input.taskId)
+          } else if (parkingCheck) {
+            addComment(
+              input.db,
+              input.taskId,
+              `The check on this task's work could not finish, so it is waiting for you. Retry runs it again. ${message}`,
+              'system',
+            )
+            emitEvent(input.db, {
+              kind: 'status_changed',
+              taskId: input.taskId,
+              teamId: current.teamId ?? null,
+              agentId: input.assigneeAgentId,
+              data: { to: 'blocked', reason: 'check_interrupted' },
+            })
+          }
         }
       } catch {
         // Best effort — never mask the original error with a cleanup failure.
@@ -612,6 +661,7 @@ async function runTaskOnRuntimeInner(
     throw err
   } finally {
     stopBeat()
+    stopReviewBeat()
   }
 }
 
@@ -641,6 +691,24 @@ function pausedScopeBeforeRotation(
   } catch {
     return null
   }
+}
+
+/**
+ * This run's own agent blocked its task (its `block_task`): the task sits Blocked and
+ * no person put it there. A person's block stops the run (`stopTaskRuns`), and the
+ * move's time on the task catches one the stop could not reach: the instant the run
+ * ended, or a second server. Read with the rule Needs you uses for a person's block.
+ */
+function blockedByOwnAgent(
+  db: ClawbooDb,
+  taskId: string,
+  run: { startedAt: number | null; claimedAt: number | null; createdAt: number },
+  stop: RunStopHandle | undefined,
+): boolean {
+  const task = getTask(db, taskId)
+  if (task?.status !== 'blocked' || stop?.note != null) return false
+  const movedAt = task.personMovedAt
+  return movedAt == null || movedAt <= (run.startedAt ?? run.claimedAt ?? run.createdAt)
 }
 
 /** Point the task's steer registration at `run` (the first run, or a rotated
@@ -1610,7 +1678,12 @@ async function runTaskInner(
     const rotateReason: 'max_turns' | 'context_watermark' | null =
       doneReason === 'max_turns' ? 'max_turns' : watermark ? 'context_watermark' : null
 
-    if (rotateReason && rotations < maxRotations) {
+    // A task its agent blocked waits on a person: no fresh session starts on it.
+    if (
+      rotateReason &&
+      rotations < maxRotations &&
+      !blockedByOwnAgent(db, taskId, exec, claimState.stop)
+    ) {
       // A cap another run paused while this pass went would let the fresh session
       // spend past it before its first cost report stopped it, so the run stops
       // here instead, as at a pause it saw itself. Only a pause: this run was let
@@ -1873,7 +1946,8 @@ async function runTaskInner(
   const safeSummary = scrubResultSummary(summary)
   // What a failed run's records say: why it ran out of room, when it knows, then its output.
   const failureDetail = scrubResultSummary([overflowText, summary].filter(Boolean).join(' '))
-  const reported = compact(safeSummary) || '(no summary)'
+  const reply = compact(safeSummary)
+  const reported = reply || '(no summary)'
   const success = doneReason === 'success'
   let status: string
   let needsVerifyFix = false
@@ -1882,34 +1956,67 @@ async function runTaskInner(
 
   if (success) {
     addComment(db, taskId, reported, 'agent', assigneeAgentId)
-    // BIND the result. `completeExecutionProcess` refuses (returns null) when
-    // the row is already terminal — a stale sweep got there first. Emitting
-    // regardless told obs 'succeeded' while the ledger said 'timed_out'.
-    const ledgerClosed = completeExecutionProcess(db, exec.id, {
-      status: 'succeeded',
-      summary: reported,
-      costUsd,
-      costSource,
-      inputTokens: ledgerInputTokens,
-      outputTokens: ledgerOutputTokens,
-    })
-    if (ledgerClosed)
+    const closeRun = (): void => {
+      // BIND the result. `completeExecutionProcess` refuses (returns null) when
+      // the row is already terminal: a stale sweep got there first. Emitting
+      // regardless told obs 'succeeded' while the ledger said 'timed_out'.
+      const ledgerClosed = completeExecutionProcess(db, exec.id, {
+        status: 'succeeded',
+        summary: reported,
+        costUsd,
+        costSource,
+        inputTokens: ledgerInputTokens,
+        outputTokens: ledgerOutputTokens,
+      })
+      if (ledgerClosed)
+        emitEvent(db, {
+          kind: 'execution_completed',
+          traceId: span.traceId,
+          spanId: span.spanId,
+          taskId,
+          teamId: task.teamId,
+          agentId: assigneeAgentId,
+          runtime: runtimeId,
+          data: {
+            execId: exec.id,
+            status: 'succeeded',
+            costUsd,
+            inputTokens: ledgerInputTokens,
+            outputTokens: ledgerOutputTokens,
+          },
+        })
+    }
+    // The agent blocked its own task during this run: it cannot go on without a
+    // person. The team engine's ending for the same thing: the run itself ended
+    // normally, so its execution succeeded, the card stays blocked, the reply is
+    // kept, and the delegator hears that the task waits on a person. The steps
+    // waiting on it stay queued, so a person's Retry carries the plan on.
+    const selfBlocked = blockedByOwnAgent(db, taskId, exec, claimState.stop)
+    // Work about to be checked keeps its run open until the verdict. A crash during
+    // the check then leaves a `running` row, which the boot reap and the stale sweep
+    // hand to a person; closed first, the card sat on "Verifying" with nothing able
+    // to find it (the order the team chat's work check uses too).
+    const checksWork = cwd != null && !input.keepForResume && !selfBlocked
+    if (!checksWork) closeRun()
+    // What the run cost is on its row before the check: a crash during the check
+    // closes the row with no cost of its own.
+    else if (costUsd != null && costSource)
+      recordExecutionUsage(db, exec.id, {
+        costUsd,
+        costSource,
+        inputTokens: ledgerInputTokens,
+        outputTokens: ledgerOutputTokens,
+      })
+    if (selfBlocked) {
       emitEvent(db, {
-        kind: 'execution_completed',
-        traceId: span.traceId,
-        spanId: span.spanId,
+        kind: 'status_changed',
         taskId,
         teamId: task.teamId,
         agentId: assigneeAgentId,
-        runtime: runtimeId,
-        data: {
-          execId: exec.id,
-          status: 'succeeded',
-          costUsd,
-          inputTokens: ledgerInputTokens,
-          outputTokens: ledgerOutputTokens,
-        },
+        data: { to: 'blocked', reason: 'agent_blocked' },
       })
+      notifyBlockedByAgent(db, taskId, task.teamId ?? null, assigneeAgentId, reply)
+    }
     if (cwd) {
       // Persist the run's native session id (best-effort) so the next SAME-
       // runtime dispatch can resume it natively. The `!== sessionKey` filter
@@ -1931,7 +2038,7 @@ async function runTaskInner(
       const handoff: AgentHandoffInput = {
         handoffFrom: assigneeAgentId,
         runtime: runtimeId,
-        completedSubtasks: input.keepForResume ? [] : [reported],
+        completedSubtasks: input.keepForResume || selfBlocked ? [] : [reported],
         // An interrupted attempt is recorded as UNKNOWN rather than dropped.
         // Silence reads as "it did not happen", which is how a cross-runtime
         // pickup ends up redoing a side effect the dead attempt already
@@ -1947,14 +2054,18 @@ async function runTaskInner(
             : []),
           ...(resume?.broken ?? []),
         ],
-        nextBestStep: input.keepForResume ? reported : '',
+        // A blocked task is not finished: a Retry carries on from here, told why.
+        nextBestStep: selfBlocked ? reply : input.keepForResume ? reported : '',
+        ...(selfBlocked ? { whyBlocked: reply || null } : {}),
         commands: { init: './init.sh', verify: '', start: '' },
         evidence: {},
         warnings: [],
         ...(nativeSessionId ? { nativeSessionId } : {}),
       }
       await writeTaskHandoff(taskId, handoff)
-      if (input.keepForResume) {
+      if (selfBlocked) {
+        status = 'blocked' // the worktree stays as it is, unchecked, for the Retry
+      } else if (input.keepForResume) {
         releaseTask(db, taskId) // pause: another runtime resumes from the handoff
         status = 'todo'
       } else {
@@ -1969,6 +2080,8 @@ async function runTaskInner(
         // caveat stays visible.
         const reviewerModel = process.env['CLAWBOO_REVIEWER_MODEL'] || input.model
         const r = await actOnTaskWorkspace(taskId, 'complete', {
+          runId: exec.id,
+          ...(input.checkDeadlineMs ? { checkDeadlineMs: input.checkDeadlineMs } : {}),
           makeReviewerAdapter: input.makeAdapter,
           reviewerModel,
           mcpBaseUrl: input.mcpBaseUrl,
@@ -2009,17 +2122,34 @@ async function runTaskInner(
             })
           },
         })
+        // The verdict is in and the card has moved: the run's end, from here on.
+        closeRun()
         status =
           r.ok && r.action === 'complete'
             ? r.taskStatus
             : (getTask(db, taskId)?.status ?? 'unknown')
+        // Something closed this run's row and left the task in progress under this
+        // claim. With no run on it, neither the sweep nor Needs you would ever look.
+        if (
+          r.ok &&
+          r.action === 'superseded' &&
+          status === 'in_progress' &&
+          getTask(db, taskId)?.assigneeAgentId === assigneeAgentId &&
+          !listExecutions(db, taskId).some((e) => e.status === 'running')
+        ) {
+          releaseTask(db, taskId)
+          status = 'todo'
+        }
         // A verify FAIL parks the task back `in_progress` with NO run. This
         // inner run only REPORTS it (needsVerifyFix on the result) — the
         // runTaskOnRuntime wrapper re-dispatches OUTSIDE the home mutex (an
         // in-mutex recursion self-deadlocked: KeyedMutex is not reentrant) or,
         // on exhaustion, writes the durable parked alert.
-        if (status === 'in_progress' && r.ok && r.action === 'complete') needsVerifyFix = true
+        if (status === 'in_progress' && r.ok && r.action === 'complete' && !r.superseded)
+          needsVerifyFix = true
       }
+    } else if (selfBlocked) {
+      status = 'blocked'
     } else {
       const promoted = updateStatus(db, taskId, 'done')
       if (promoted.ok) {

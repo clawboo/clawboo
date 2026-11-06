@@ -15,6 +15,7 @@ import { and, asc, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizz
 
 import type { ClawbooDb } from '../db'
 import { agents, roomMembers, rooms, tasks, type DbRoom, type DbTask } from '../schema'
+import { classifyAttempts } from './attempts'
 import { immediateWrite, withWriteRetry } from './contention'
 import {
   completeExecutionProcess,
@@ -263,6 +264,21 @@ export function listRoomIdsForTeam(db: ClawbooDb, teamId: string): string[] {
     .map((r) => r.id)
 }
 
+/** An engine run the room move closed, with what names its session. */
+export interface ClosedRoomRun {
+  taskId: string
+  execId: string
+  teamId: string
+  roomId: string
+  agentId: string
+}
+
+/** What `moveArchivedRoomTasks` did. */
+export interface MovedRoomTasks {
+  moved: DbTask[]
+  closedRuns: ClosedRoomRun[]
+}
+
 /**
  * Move the unfinished tasks of archived rooms to the team's own chat (room null),
  * stopped, and return them. Archiving a room only stamps the room, and the only
@@ -291,11 +307,17 @@ export function listRoomIdsForTeam(db: ClawbooDb, teamId: string): string[] {
  * written. `roomId` limits the move to one archived room (the archive route);
  * without it every archived room is swept (the boot pass, which also covers rooms
  * archived before this existed). Idempotent.
+ *
+ * `closedRuns` lists the engine runs no engine stopped: the ones this closed, and a
+ * moved task's last run if it ended as a crash (the boot reap runs first, and takes a
+ * run already silent past its window). This layer has no Gateway client, so an
+ * OpenClaw one may still be going there, and the server aborts it (see the server's
+ * `gatewayRunAborts`).
  */
 export function moveArchivedRoomTasks(
   db: ClawbooDb,
   opts: { roomId?: string; skip?: (task: DbTask) => boolean } = {},
-): DbTask[] {
+): MovedRoomTasks {
   const archived = db
     .select({ id: rooms.id, teamId: rooms.teamId })
     .from(rooms)
@@ -307,6 +329,7 @@ export function moveArchivedRoomTasks(
     .all()
   const stopped = 'Stopped: its chat room was archived.'
   const moved: DbTask[] = []
+  const closedRuns: ClosedRoomRun[] = []
   for (const room of archived) {
     const running = db
       .select()
@@ -318,8 +341,42 @@ export function moveArchivedRoomTasks(
       const execs = listExecutions(db, task.id)
       const last = execs[execs.length - 1]
       if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
-      completeExecutionProcess(db, last.id, { status: 'cancelled', error: stopped })
+      const closed = completeExecutionProcess(db, last.id, { status: 'cancelled', error: stopped })
+      // Read before the move to To do clears the assignee.
+      const agentId = task.assigneeAgentId ?? delegationTargetOf(task.sourceDelegationId)
+      if (closed && agentId)
+        closedRuns.push({
+          taskId: task.id,
+          execId: last.id,
+          teamId: room.teamId,
+          roomId: room.id,
+          agentId,
+        })
       updateStatus(db, task.id, 'todo')
+    }
+    // Released with its assignee cleared, so the delegation names the agent. Read
+    // before the markers below, which become the task's last run.
+    const released = db
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.roomId, room.id), eq(tasks.status, 'todo'), eq(tasks.dropped, 0)))
+      .all() as DbTask[]
+    for (const task of released) {
+      if (opts.skip?.(task)) continue
+      const agentId = delegationTargetOf(task.sourceDelegationId)
+      const last = listExecutions(db, task.id).at(-1)
+      if (
+        agentId &&
+        last?.executorType === 'openclaw' &&
+        classifyAttempts([last]).lastKind === 'crash'
+      )
+        closedRuns.push({
+          taskId: task.id,
+          execId: last.id,
+          teamId: room.teamId,
+          roomId: room.id,
+          agentId,
+        })
     }
     const waitingOutside = db
       .select()
@@ -351,5 +408,5 @@ export function moveArchivedRoomTasks(
     ) as DbTask[]
     moved.push(...rows)
   }
-  return moved
+  return { moved, closedRuns }
 }

@@ -90,20 +90,37 @@ describe('Tasks tools with the run bound to its task', () => {
     }
   })
 
-  it('outside a team run, block_task still needs the id, while reading and commenting default', async () => {
-    // The task runner binds its run's task too, but does not handle a task its
-    // own agent blocked, so it is not pointed at doing that.
+  it('on a task runner run too, block_task blocks the run’s own task when taskId is left out', async () => {
+    // The runner binds its run's task and ends a run whose agent blocked it the
+    // way the engine does.
     const mine = claimed('Write the parser')
+    const other = createTask(db, { title: 'Write the docs', teamId: 'A' }).id
     const runner = createTasksServer(db, {
       boundScope: { teamId: 'A', agentId: 'coder', taskId: mine },
     })
     const client = await connectInMemory(runner)
     const block = (await client.listTools()).tools.find((t) => t.name === 'block_task')!
+    expect((block.inputSchema as { required?: string[] }).required ?? []).not.toContain('taskId')
+    expect(block.description).toContain('Leave out taskId')
+    expect((await callText(client, 'block_task', {})).isError).toBe(false)
+    expect(getTask(db, mine)?.status).toBe('blocked')
+    // It can still name another task, as this caller always could.
+    expect(getTask(db, other)?.status).toBe('todo')
+    expect((await callText(client, 'block_task', { taskId: other })).isError).toBe(false)
+    expect(getTask(db, other)?.status).toBe('blocked')
+    expect((await callText(client, 'block_task', { taskId: '' })).isError).toBe(true)
+  })
+
+  it('with no task bound, block_task still needs the id', async () => {
+    const mine = claimed('Write the parser')
+    const client = await connectInMemory(
+      createTasksServer(db, { boundScope: { teamId: 'A', agentId: 'coder' } }),
+    )
+    const block = (await client.listTools()).tools.find((t) => t.name === 'block_task')!
     expect((block.inputSchema as { required?: string[] }).required).toContain('taskId')
     expect(block.description).not.toContain('Leave out taskId')
     expect((await callText(client, 'block_task', {})).isError).toBe(true)
     expect(getTask(db, mine)?.status).toBe('in_progress')
-    expect((await callText(client, 'get_task', {})).isError).toBe(false)
   })
 
   it('refuses an empty taskId instead of reading it as "my task"', async () => {

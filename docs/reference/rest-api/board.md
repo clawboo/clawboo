@@ -1039,6 +1039,7 @@ Through this route the check is the task's own verify command only; the separate
   }
   taskStatus: string            // 'done' | 'in_review' | 'in_progress' | 'blocked' | …
   verified?: 'pass' | 'fail' | 'completed_with_debt'   // present only on a dirty-diff complete
+  superseded?: true             // someone moved the task while it was checked, so the verdict moved nothing
 }
 ```
 

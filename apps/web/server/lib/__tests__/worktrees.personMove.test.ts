@@ -23,7 +23,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /** The move a person makes while the check is running, if any. */
-const during = vi.hoisted(() => ({ move: null as 'done' | 'cancelled' | null }))
+const during = vi.hoisted(() => ({ move: null as 'done' | 'cancelled' | 'blocked' | null }))
 
 vi.mock('../verification', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../verification')>()
@@ -45,7 +45,7 @@ vi.mock('../verification', async (importOriginal) => {
   }
 })
 
-const { getDb, resetDb } = await import('../db')
+const { getDb, getDbPath, resetDb } = await import('../db')
 const { actOnTaskWorkspace, provisionTaskWorkspace } = await import('../worktrees')
 
 const execFileAsync = promisify(execFile)
@@ -66,7 +66,10 @@ async function initRepo(): Promise<string> {
 /** A delegated task with a dirty worktree whose check always fails, and two
  *  failed attempts already on record, so this check exhausts the fix loop:
  *  left alone, the task is routed to blocked and the delegator is alerted. */
-async function exhaustingTask(repoPath: string): Promise<string> {
+async function exhaustingTask(
+  repoPath: string,
+  opts: { attemptsSoFar?: number } = {},
+): Promise<string> {
   const db = getDb()
   const task = createTask(db, {
     title: 'ship the parser',
@@ -101,12 +104,14 @@ async function exhaustingTask(repoPath: string): Promise<string> {
     status: 'fail' as const,
     structuredError: null,
   })
-  setTaskVerification(db, task.id, {
-    status: 'fail',
-    attempts: [failAttempt(1), failAttempt(2)],
-    debtNotes: [],
-    updatedAt: 0,
-  })
+  const soFar = opts.attemptsSoFar ?? 2
+  if (soFar > 0)
+    setTaskVerification(db, task.id, {
+      status: 'fail',
+      attempts: Array.from({ length: soFar }, (_, i) => failAttempt(i + 1)),
+      debtNotes: [],
+      updatedAt: 0,
+    })
   return task.id
 }
 
@@ -120,12 +125,16 @@ describe('verification while a person decides the task', () => {
   let repo: string
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-person-verify-home-'))
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     repo = await initRepo()
     during.move = null
   })
@@ -135,6 +144,8 @@ describe('verification while a person decides the task', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
     await rm(repo, { recursive: true, force: true }).catch(() => {})
   })
@@ -152,7 +163,7 @@ describe('verification while a person decides the task', () => {
     WORKTREE_TIMEOUT_MS,
   )
 
-  it.each(['cancelled', 'done'] as const)(
+  it.each(['cancelled', 'done', 'blocked'] as const)(
     'a person moving it to %s during the check keeps their move, with no review note and no alert',
     async (to) => {
       const taskId = await exhaustingTask(repo)
@@ -166,6 +177,20 @@ describe('verification while a person decides the task', () => {
       expect(listUndeliveredInbox(getDb(), 'lead', { teamId: 'team1' })).toEqual([])
       // What the check found is still on the task.
       expect(getTaskVerification(getDb(), taskId)?.status).toBe('completed_with_debt')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a person blocking it during a check with attempts left is not undone by the fix loop',
+    async () => {
+      const taskId = await exhaustingTask(repo, { attemptsSoFar: 0 })
+      during.move = 'blocked'
+      const r = await actOnTaskWorkspace(taskId, 'complete')
+
+      expect(r.ok && r.action === 'complete' ? r.taskStatus : null).toBe('blocked')
+      expect(r.ok && r.action === 'complete' ? r.superseded : null).toBe(true)
+      expect(getTask(getDb(), taskId)?.status).toBe('blocked')
     },
     WORKTREE_TIMEOUT_MS,
   )

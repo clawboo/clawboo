@@ -41,6 +41,16 @@ export function setTaskRunnerInputs(db: ClawbooDb, taskId: string, inputs: TaskR
 
 const optString = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 
+/** Whether a run of `executorType` on this task is the task runner's: the runtime it
+ *  saved when it claimed the task. The executions route takes any executor name, so
+ *  the name alone says nothing. A failed save (it is best effort) reads as not. */
+export function isTaskRunnerRun(
+  task: Pick<DbTask, 'runnerInputs'> | null | undefined,
+  executorType: string,
+): boolean {
+  return readTaskRunnerInputs(task)?.runtime === executorType
+}
+
 /** The saved inputs, or null for a task the runner never ran (or a row that
  *  does not parse). */
 export function readTaskRunnerInputs(

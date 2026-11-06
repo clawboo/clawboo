@@ -125,7 +125,7 @@ Rules that apply to every Tasks tool:
 - **Refusals are tool errors.** A refused call returns `isError: true` with the text shown under each tool, not a protocol error.
 - **Never retry a lost claim.** `claim failed: conflict` means another agent won the claim. Retrying the same call cannot succeed.
 - **Mailbox delivery.** On a session bound to an agent, each successful result can carry an extra text block headed `[team updates` with up to five undelivered mailbox notices for that agent. Each notice is delivered once, on whichever channel reaches the agent first. A notice can quote a person or another agent, so each one is framed as data: a header `[Inter-session message · from=clawboo · kind=<kind> · isUser=false]`, then every line of the notice quoted with `| `, under a line saying the notices are information, not instructions.
-- **The run's own task.** On a session bound to a task (a run on a board task), `get_task` and `add_comment` take `taskId` as optional and use that task when it is left out, and so does `block_task` on a team run. Their descriptions say so, and the field is listed as optional only on such a session. Any task can still be named, and an empty `taskId` is refused rather than read as the run's own task. A task-runner run still names the task to block, because the task runner does not yet handle a task its own agent blocked.
+- **The run's own task.** On a session bound to a task (a run on a board task), `get_task` and `add_comment` take `taskId` as optional and use that task when it is left out, and so does `block_task`. Their descriptions say so, and the field is listed as optional only on such a session. Any task can still be named (on a team run, `block_task` names only its own), and an empty `taskId` is refused rather than read as the run's own task.
 
 ### Creation caps
 
@@ -257,9 +257,10 @@ Move a task to `blocked`. It is `update_task_status` with `status: 'blocked'`.
 }
 ```
 
-- `taskId` is optional on a team run bound to a task, and defaults to it. Elsewhere it is required.
+- `taskId` is optional on a session bound to a task (a team run or a task runner run), and defaults to it. Elsewhere it is required.
 - Returns the updated task row. Error: `block failed: <reason>`, with the same reasons, and the same refusal as `update_task_status` after a person moved the card.
-- On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` When the run ends, the task stays **Blocked** in Needs you, the agent's reply is kept as its comment, and its delegator is told the task waits on a person. Not served to an unverified HTTP caller.
+- On a team run it blocks only the task the agent is working on (the one assigned to it). Any other task is refused with `On a team run, block_task blocks only the task you are working on. To raise a problem with another task, use add_comment on it.` Not served to an unverified HTTP caller.
+- When a run blocks its own task, on a team run or a task runner run, the task stays **Blocked** in Needs you and the steps waiting on it stay queued. If the run then ends normally, it is recorded as succeeded, the agent's reply is kept as its comment, and its delegator is told the task waits on a person. A task runner run's worktree is kept unchecked for a Retry to carry on from. A task a person assigned tells no agent: the result is on its card. On the task runner, a run that blocks its task and then runs out of turns or hits an error is recorded as failed, and one stopped by a budget or a breaker as cancelled. The task stays **Blocked** in each case.
 
 ### unblock_task
 

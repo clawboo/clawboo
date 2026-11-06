@@ -50,7 +50,7 @@ to anyone changing them:
   `block_task` block only the bound agent's own task. A bound agent's `claim_task` claims for that agent. A bound
   team scope forces `list_tasks` to that team and makes `get_task` refuse another team's task. A bound task
   (`boundScope.taskId`, from the signed `scopeTaskId` of a run on a board task; `boundTaskId` on `AttachScope`) is what
-  `get_task` and `add_comment` use when a call leaves out `taskId`, and `block_task` on a team run. Cancelling a task
+  `get_task`, `add_comment` and `block_task` use when a call leaves out `taskId`. Cancelling a task
   with `update_task_status` cancels the plan steps waiting on it and leaves its delegator a mailbox note. A lost
   claim, a dependency cycle in `link_task` and a refused subtask (too many children, too deep) come back as tool
   errors the model should not retry.

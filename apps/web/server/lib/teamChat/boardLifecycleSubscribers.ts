@@ -26,6 +26,7 @@
 import {
   enqueueInbox,
   getTask,
+  isTaskRunnerRun,
   listUndeliveredInbox,
   onBoardLifecycle,
   type BoardLifecycleEvent,
@@ -199,6 +200,17 @@ export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | n
         const recipient = recipientFor(db, ev.taskId, ev.teamId)
         if (!recipient) return
         const task = getTask(db, ev.taskId)
+        // A task runner run that succeeded and left its task blocked did not finish it.
+        // The runner says what happened when its own agent blocked it or its check
+        // failed for good, and a person's block in the instant the run ended has no
+        // result to report: the reply is a late one, on the card. Any other executor
+        // has no notice of its own, so it is still reported here.
+        if (
+          ev.status === 'succeeded' &&
+          task?.status === 'blocked' &&
+          isTaskRunnerRun(task, ev.executorType)
+        )
+          return
         // Cheap dedupe: don't stack an identical undelivered row per rotation.
         const body = `“${task?.title ?? ev.taskId}” finished with ${ev.status}. Check the board for the result.`
         const already = listUndeliveredInbox(db, recipient, { teamId: ev.teamId }).some(

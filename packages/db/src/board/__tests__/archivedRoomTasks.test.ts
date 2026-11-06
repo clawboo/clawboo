@@ -26,6 +26,7 @@ import {
   getTask,
   linkDep,
   listExecutions,
+  reconcileOrphans,
   updateStatus,
 } from '../repository'
 import { archiveRoom, createRoom, moveArchivedRoomTasks } from '../rooms'
@@ -73,7 +74,7 @@ describe('moveArchivedRoomTasks', () => {
     updateStatus(db, blocked, 'blocked')
     archiveRoom(db, roomId)
 
-    const moved = moveArchivedRoomTasks(db)
+    const { moved } = moveArchivedRoomTasks(db)
     expect(moved.map((t) => t.id).sort()).toEqual([queued, blocked].sort())
     expect(getTask(db, queued)?.roomId).toBeNull()
     expect(getTask(db, blocked)?.roomId).toBeNull()
@@ -144,14 +145,14 @@ describe('moveArchivedRoomTasks', () => {
     const cancelled = roomTask('Cancelled')
     updateStatus(db, cancelled, 'cancelled')
     archiveRoom(db, roomId)
-    expect(moveArchivedRoomTasks(db)).toEqual([])
+    expect(moveArchivedRoomTasks(db).moved).toEqual([])
     expect(getTask(db, done)?.roomId).toBe(roomId)
     expect(getTask(db, cancelled)?.roomId).toBe(roomId)
   })
 
   it('leaves the tasks of a room that is still active alone', () => {
     const queued = roomTask('Queued')
-    expect(moveArchivedRoomTasks(db)).toEqual([])
+    expect(moveArchivedRoomTasks(db).moved).toEqual([])
     expect(getTask(db, queued)?.roomId).toBe(roomId)
     expect(listExecutions(db, queued)).toEqual([])
   })
@@ -184,6 +185,64 @@ describe('moveArchivedRoomTasks', () => {
     expect(lastRun(running)).toBe('running')
   })
 
+  it('returns the engine runs it closed, so the server can stop them where they run', () => {
+    const running = roomTask('Running step')
+    claimTask(db, running, 'bea')
+    const run = createExecutionProcess(db, { taskId: running, executorType: 'openclaw' })
+    roomTask('Queued step', 'cy')
+    archiveRoom(db, roomId)
+    expect(moveArchivedRoomTasks(db).closedRuns).toEqual([
+      { taskId: running, execId: run.id, teamId: 'T', roomId, agentId: 'bea' },
+    ])
+    // A marker for a queued task stopped nothing that was running, and a second
+    // pass closes nothing.
+    expect(moveArchivedRoomTasks(db).closedRuns).toEqual([])
+  })
+
+  it('returns a run the boot reap closed first: it was never aborted either', () => {
+    // The reap runs before the move and takes a run silent past its window, so at
+    // boot this is the usual way a crashed server's run reaches the move.
+    const running = roomTask('Running step')
+    claimTask(db, running, 'bea')
+    const run = createExecutionProcess(db, { taskId: running, executorType: 'openclaw' })
+    expect(reconcileOrphans(db, { staleAfterMs: -1 }).reconciled).toBe(1)
+    archiveRoom(db, roomId)
+    expect(moveArchivedRoomTasks(db).closedRuns).toEqual([
+      { taskId: running, execId: run.id, teamId: 'T', roomId, agentId: 'bea' },
+    ])
+    expect(getTask(db, running)).toMatchObject({ status: 'todo', roomId: null })
+    // Marked stopped as any ready task is, and listed only once.
+    expect(lastRun(running)).toBe('cancelled')
+    expect(moveArchivedRoomTasks(db).closedRuns).toEqual([])
+  })
+
+  it('returns no crashed run of the task runner, and no run that reported', () => {
+    const runner = roomTask('Runner run')
+    claimTask(db, runner, 'bea')
+    createExecutionProcess(db, { taskId: runner, executorType: 'claude-code' })
+    reconcileOrphans(db, { staleAfterMs: -1 })
+    const finished = roomTask('Finished run', 'cy')
+    claimTask(db, finished, 'cy')
+    const run = createExecutionProcess(db, { taskId: finished, executorType: 'openclaw' })
+    completeExecutionProcess(db, run.id, { status: 'failed', error: 'it said why' })
+    updateStatus(db, finished, 'todo')
+    archiveRoom(db, roomId)
+    expect(moveArchivedRoomTasks(db).closedRuns).toEqual([])
+  })
+
+  it('returns no run it did not close', () => {
+    const skipped = roomTask('Skipped')
+    claimTask(db, skipped, 'bea')
+    createExecutionProcess(db, { taskId: skipped, executorType: 'openclaw' })
+    const runner = roomTask('Runner run', 'cy')
+    claimTask(db, runner, 'cy')
+    createExecutionProcess(db, { taskId: runner, executorType: 'claude-code' })
+    archiveRoom(db, roomId)
+    const { closedRuns } = moveArchivedRoomTasks(db, { skip: (t) => t.id === skipped })
+    expect(closedRuns).toEqual([])
+    expect(lastRun(skipped)).toBe('running')
+  })
+
   it("leaves a run that is not the engine's alone, even when nothing skips it", () => {
     const running = roomTask('Runner run')
     claimTask(db, running, 'bea')
@@ -200,7 +259,7 @@ describe('moveArchivedRoomTasks', () => {
     const theirs = createTask(db, { title: 'Theirs', teamId: 'T', roomId: otherRoom }).id
     archiveRoom(db, roomId)
     archiveRoom(db, otherRoom)
-    expect(moveArchivedRoomTasks(db, { roomId }).map((t) => t.id)).toEqual([mine])
+    expect(moveArchivedRoomTasks(db, { roomId }).moved.map((t) => t.id)).toEqual([mine])
     expect(getTask(db, theirs)?.roomId).toBe(otherRoom)
   })
 })

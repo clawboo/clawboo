@@ -159,6 +159,8 @@ interface Instance {
   /** No run in flight — safe to evict. A cascade the user walked away from is
    *  NOT quiescent, so the idle-TTL scan can never dispose it mid-work. */
   isQuiescent(): boolean
+  /** A run is going, waiting for a slot, or bound to its task on this session. */
+  ownsSession(sessionKey: string): boolean
   dispose(): void
 }
 
@@ -690,6 +692,11 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // empty map is exactly "nothing running". A work check runs after its run has
     // ended, so the engine counts those itself.
     isQuiescent: () => abortMap.size === 0 && engine.checksInFlight() === 0,
+    ownsSession: (sk) =>
+      abortMap.has(sk) ||
+      queuedRuns.has(sk) ||
+      nudge.isBusy(sk) ||
+      engine.taskForSession(sk) !== null,
     dispose: () => orchestrator.dispose(),
   }
 }
@@ -718,6 +725,13 @@ export function getTeamOrchestrator(
 /** True when a team chat room has a live orchestrator (introspection / tests). */
 export function hasTeamOrchestrator(teamId: string, roomId: string | null = null): boolean {
   return instances.has(orchestratorKey(teamId, roomId))
+}
+
+/** True when a resident engine has work going on this session, so nothing else may
+ *  abort it in the runtime. */
+export function isTeamSessionLive(sessionKey: string): boolean {
+  for (const inst of instances.values()) if (inst.ownsSession(sessionKey)) return true
+  return false
 }
 
 /** Write a team coordination alert to the team chat and to the agent's mailbox:

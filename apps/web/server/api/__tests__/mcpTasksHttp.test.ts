@@ -11,23 +11,28 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
+import { claimTask, createTask, getTask } from '@clawboo/db'
 import { mcpHttpUrl } from '@clawboo/mcp'
 import express from 'express'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { getDb, resetDb } from '../../lib/db'
+import { getDb, getDbPath, resetDb } from '../../lib/db'
 import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
 import { mcpTasksPost } from '../mcp'
 
 let dir: string
 let prevHome: string | undefined
+let prevClawbooHome: string | undefined
 let server: http.Server
 let base: string
 
 beforeAll(async () => {
-  prevHome = process.env['CLAWBOO_HOME']
+  prevHome = process.env['HOME']
+  prevClawbooHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-tasks-http-'))
+  process.env['HOME'] = dir
   process.env['CLAWBOO_HOME'] = dir
+  expect(getDbPath().startsWith(dir)).toBe(true)
   const app = express()
   app.use(express.json())
   app.post('/api/mcp/tasks', mcpTasksPost)
@@ -38,8 +43,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()))
   resetDb()
-  if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
-  else process.env['CLAWBOO_HOME'] = prevHome
+  if (prevHome === undefined) delete process.env['HOME']
+  else process.env['HOME'] = prevHome
+  if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+  else process.env['CLAWBOO_HOME'] = prevClawbooHome
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -136,6 +143,48 @@ describe('Tasks over HTTP', () => {
       for (const withheld of ['claim_task', 'assign_task', 'update_task_status', 'release_task'])
         expect(names, `${server} URL served ${withheld}`).not.toContain(withheld)
     }
+  })
+
+  it('blocks the bound task of a task runner run when block_task names none', async () => {
+    expect(getDbPath().startsWith(dir)).toBe(true)
+    const db = getDb()
+    const task = createTask(db, { title: 'Write the parser', teamId: 'team-A', status: 'todo' })
+    expect(claimTask(db, task.id, 'coder', 'claude-code').ok).toBe(true)
+    // The URL the runner writes: signed, not a team run, with the run's own task.
+    const url = mcpHttpUrl(base, 'tasks', {
+      teamId: 'team-A',
+      agentId: 'coder',
+      boundTaskId: task.id,
+      attachSecret: secret(),
+    })
+    const init = await fetch(url, {
+      method: 'POST',
+      headers: HEADERS,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: VERSION,
+          capabilities: {},
+          clientInfo: { name: 't', version: '0' },
+        },
+      }),
+    })
+    const sessionId = init.headers.get('mcp-session-id')!
+    await init.text()
+    const call = await fetch(url, {
+      method: 'POST',
+      headers: { ...HEADERS, 'mcp-session-id': sessionId, 'mcp-protocol-version': VERSION },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'block_task', arguments: {} },
+      }),
+    })
+    await call.text()
+    expect(getTask(db, task.id)?.status).toBe('blocked')
   })
 
   it("serves an unsigned URL (every OpenClaw agent's) no claim and no status write", async () => {
