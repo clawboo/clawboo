@@ -11,6 +11,8 @@ import {
   getComments,
   getTask,
   listEvents,
+  listWaitingTaskWakes,
+  recordTaskWake,
   setTaskRunnerInputs,
   tasks,
   type ClawbooDb,
@@ -150,6 +152,50 @@ describe('a rerun that does not start', () => {
     expect(
       listEvents(db, { taskId: task.id, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
     ).toEqual([{ to: 'blocked', reason: 'rerun_not_started' }])
+  })
+
+  describe('a refused start with a saved wake waiting on the task', () => {
+    const wakeOn = (task: DbTask): string =>
+      recordTaskWake(db, {
+        teamId: 't',
+        agentId: 'coder',
+        taskId: task.id,
+        reason: 'person_comment',
+      }).id
+    const replaysOf = (id: string): number | undefined =>
+      listWaitingTaskWakes(db).find((w) => w.id === id)?.replays
+
+    it('is counted, so the pump gives up instead of flipping the card for ever', async () => {
+      const task = runnerTask()
+      const wake = wakeOn(task)
+      nextRun = async () => ({ ok: false, reason: 'too_deep' })
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
+      expect(replaysOf(wake)).toBe(1)
+    })
+
+    it('a budget refusal is not counted: it stays pending until the cap rises', async () => {
+      const task = runnerTask()
+      const wake = wakeOn(task)
+      nextRun = async () => ({ ok: false, reason: 'budget_paused' })
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
+      expect(replaysOf(wake)).toBe(0)
+    })
+
+    it('a thrown run is counted', async () => {
+      const task = runnerTask()
+      const wake = wakeOn(task)
+      nextRun = async () => {
+        throw new Error('timed out waiting for the agent')
+      }
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
+      expect(replaysOf(wake)).toBe(1)
+    })
   })
 
   it('does the same when the run throws, for example a timed-out wait for the agent', async () => {

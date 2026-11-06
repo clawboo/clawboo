@@ -311,6 +311,15 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     // which can differ from its runtime's (a Hermes run that fell back to
     // `hermes chat` stops and resumes). null when no run is registered here.
     runSteering: 'live' | 'interrupt-resume' | 'none' | null
+    // A saved wake still waiting to reach the task's agent, and why it waits.
+    // skipReason is null until a pump pass has seen it. held: a person's Stop holds
+    // it for the task's next run. See `task_wake_skipped` for the reasons.
+    pendingWake: {
+      reason: string
+      skipReason: string | null
+      comments: number
+      held: boolean
+    } | null
   }
   comments: Array<{
     id: string
@@ -320,6 +329,8 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     body: string
     tenantId: string | null
     person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
+    kind: string | null // 'person' | 'agent' | 'note' | 'result': what wrote it, set by the writer
+    steeredAt: number | null // when it reached a run live
     createdAt: number
   }>
   ancestors: Array<{
@@ -568,13 +579,14 @@ A `user` comment is a person's reply, and only the dashboard's own page can post
 
 After a person's comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
 
-1. **The mailbox**, always first. The agent's inbox gets `A person commented on your task "<title>": ...` with the comment's first 1000 characters. Every run reads the inbox when it starts.
+1. **A saved wake**, always first, except on a `backlog` task and on a run the task runner is driving now. It is folded into the wake already waiting for that agent and task, if one is, and it holds the comment's id until a run takes it. A task the task runner runs also gets a mailbox note, `A person commented on your task "<title>": ...`, with the comment's first 1000 characters: it has no ticket block.
 2. **Then by status:**
-   - `in_progress` with a run working on it: a steer into that run. How it gets in depends on the runtime (see [Choose a runtime](/runtimes/index)). The route waits up to 2.5 seconds for the steer to land, and the steer carries on in the background after that. When it lands, the mailbox row is marked delivered so the agent does not read the comment twice.
-   - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits in the mailbox. A `todo` task that a reply started less than 15 seconds ago is not dispatched again.
-   - `in_review` and `backlog`: the reply waits in the mailbox.
+   - `in_progress` with a run working on it: a steer into that run, with comments sent within a second of each other going in as one. How it gets in depends on the runtime (see [Choose a runtime](/runtimes/index)). The route waits up to 2.5 seconds for the steer to land, and the steer carries on in the background after that. When it lands whole, that run carries the comment, and it counts as heard when the run ends well; a run that dies gives it back. When it does not land, or does not fit (1,000 characters, with a cut marker that names `get_task`), the comment rides the task's next turn: on team chat work, the agent answers it before the task can be `done`.
+   - `blocked`, `todo`, or `in_progress` with no assignee and no run going: the task is started again, as the retry route above does. A task that is not `todo` moves there first (with a `status_changed` event whose reason is `reply`). If every task it depends on is `done`, the route adds the `system` comment `Started again for a person’s reply.` and dispatches the task to its agent; otherwise the reply waits with the wake. A `todo` task whose reply folded into a wake a run is already on its way for is not dispatched again; a wake that was held, replaying or not a person's starts it now. While the engine is held, nothing moves or starts, and the reply answers `queued`, `held`.
+   - `in_review`: the reply waits with the wake, and the agent reads it in its next turn, whatever the check answers.
+   - `backlog`: nothing starts, and the agent reads the comment in its ticket block when the task next runs.
 
-A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits in the mailbox for its next run. A reply that would start the task again in team chat (a `blocked` or `todo` task, or a stranded `in_progress` one) is not delivered when the task is still filed under an archived chat room (`not-delivered`, `room_archived`), or under a room that went with its team (`no_team`). The comment stays saved; the mailbox and the task are left as they were.
+A task with no team, or one whose move back to `todo` is refused, is not started again: the reply waits for its next run. A reply that would start the task again in team chat (a `blocked` or `todo` task, or a stranded `in_progress` one) is not delivered when the task is still filed under an archived chat room (`not-delivered`, `room_archived`), or under a room that went with its team (`no_team`). The comment stays saved, and the task is left as it was with nothing written for the reply.
 
 - **Path params**: `taskId`.
 - **Request body**:
@@ -608,13 +620,15 @@ A task with no team, or one whose move back to `todo` is refused, is not started
     body: string
     tenantId: string | null
     person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
+    kind: string | null // 'person' for a comment the dashboard's own page sent, else null
+    steeredAt: number | null
     createdAt: number
   }
   forwarded: boolean // true when `delivery` is present and its status is not 'not-delivered'
   delivery?: // present for a `user` comment only
     | { status: 'steered'; agentId: string }
     | { status: 'woke-agent'; agentId: string }
-    | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
+    | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' }
     | {
         status: 'not-delivered'
         agentId: string | null
@@ -625,18 +639,19 @@ A task with no team, or one whose move back to `todo` is refused, is not started
 
 `delivery` says where a person's reply went. `agentId` is the agent the task belongs to.
 
-| `status`        | `reason`        | Meaning                                                                                                                                                        |
-| --------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `steered`       |                 | The reply got into the run working on the task                                                                                                                 |
-| `woke-agent`    |                 | The task was started again for the reply, or a reply less than 15 seconds earlier already started it                                                           |
-| `queued`        | `next-run`      | The reply is in the mailbox for the agent's next run, for example on a `backlog` task, or on an `in_progress` task whose steer did not land within 2.5 seconds |
-| `queued`        | `in-review`     | The task is `in_review`; the agent reads the reply after the check                                                                                             |
-| `queued`        | `waiting`       | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                      |
-| `not-delivered` | `finished`      | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                           |
-| `not-delivered` | `unassigned`    | No agent has the task, and `agentId` is `null`                                                                                                                 |
-| `not-delivered` | `failed`        | Writing to the mailbox or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                     |
-| `not-delivered` | `room_archived` | The task would start in team chat but is still filed under an archived chat room, so nothing could run it. The comment is saved and nothing is sent            |
-| `not-delivered` | `no_team`       | The task would start in team chat but its room went with its team, so no chat is left to run it. The comment is saved and nothing is sent                      |
+| `status`        | `reason`        | Meaning                                                                                                                                                                                                     |
+| --------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `steered`       |                 | The reply got into the run working on the task                                                                                                                                                              |
+| `woke-agent`    |                 | The task was started again for the reply, or the reply folded into a wake already on its way                                                                                                                |
+| `queued`        | `next-run`      | The agent reads it at its next turn: a `backlog` task, or an `in_progress` task whose steer did not land within 2.5 seconds. On a team chat task it is a saved wake, answered before the task can be `done` |
+| `queued`        | `in-review`     | The task is `in_review`; the agent reads the reply in its next turn, whatever the check answers                                                                                                             |
+| `queued`        | `waiting`       | The task waits on a dependency that is not `done`, so it cannot start yet                                                                                                                                   |
+| `queued`        | `held`          | The engine is held, so nothing starts. The task stays where it is, and the wake goes out when the hold lifts                                                                                                |
+| `not-delivered` | `finished`      | The task is `done`, `cancelled` or dropped. The comment is saved and nothing is sent                                                                                                                        |
+| `not-delivered` | `unassigned`    | No agent has the task, and `agentId` is `null`                                                                                                                                                              |
+| `not-delivered` | `failed`        | Saving the wake or starting the task failed. The comment is saved, and the route still answers `200` so the reply is not sent twice                                                                         |
+| `not-delivered` | `room_archived` | The task would start in team chat but is still filed under an archived chat room, so nothing could run it. The comment is saved and nothing is sent                                                         |
+| `not-delivered` | `no_team`       | The task would start in team chat but its room went with its team, so no chat is left to run it. The comment is saved and nothing is sent                                                                   |
 
 For a `finished` reply, the dashboard offers **Send as a follow-up task**, which calls `POST /api/board` (above) with `title: "Follow up: <title>"`, the reply as `description`, the same `teamId` and `assigneeAgentId`, and the finished task as `parentTaskId`.
 

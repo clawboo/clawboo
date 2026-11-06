@@ -561,6 +561,8 @@ function labelFor(ev: ObsEvent): string {
       return `${String(d['toolName'] ?? '')} → ${String(d['decision'] ?? '')}`
     if (ev.kind === 'connector_health')
       return `${String(d['connectorId'] ?? '')} → ${String(d['health'] ?? '')}`
+    if (ev.kind === 'task_wake_skipped') return `waiting: ${String(d['reason'] ?? '')}`
+    if (ev.kind === 'task_wake_recorded') return String(d['reason'] ?? '')
     return ''
   } catch {
     return ''

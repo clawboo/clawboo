@@ -155,7 +155,11 @@ describe('personMovedTask: a person cancels or finishes a running task', () => {
     expect(h.board.completed).toEqual([
       {
         execId,
-        outcome: { status: 'cancelled', error: 'Stopped: a person moved the card to Cancelled.' },
+        outcome: {
+          status: 'cancelled',
+          error: 'Stopped: a person moved the card to Cancelled.',
+          byPerson: true,
+        },
       },
     ])
     expect(h.orchestrator.taskForSession(sk('a2'))).toBeNull()
@@ -190,7 +194,11 @@ describe('personMovedTask: a person cancels or finishes a running task', () => {
     expect(h.board.completed).toEqual([
       {
         execId,
-        outcome: { status: 'cancelled', error: 'Stopped: a person moved the card to Done.' },
+        outcome: {
+          status: 'cancelled',
+          error: 'Stopped: a person moved the card to Done.',
+          byPerson: true,
+        },
       },
     ])
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
@@ -280,7 +288,11 @@ describe('personMovedTask: who hears about it', () => {
     expect(h.aborted).toEqual([sk('a2')])
     expect(h.board.completed).toContainEqual({
       execId,
-      outcome: { status: 'cancelled', error: 'Stopped: a person moved the card to Cancelled.' },
+      outcome: {
+        status: 'cancelled',
+        error: 'Stopped: a person moved the card to Cancelled.',
+        byPerson: true,
+      },
     })
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
     expect(reflections(h.delivered)).toEqual([])
@@ -364,7 +376,11 @@ describe('personMovedTask: back to To do', () => {
     expect(h.board.completed).toEqual([
       {
         execId,
-        outcome: { status: 'cancelled', error: 'Stopped: a person moved the card to To do.' },
+        outcome: {
+          status: 'cancelled',
+          error: 'Stopped: a person moved the card to To do.',
+          byPerson: true,
+        },
       },
     ])
     // Not bound behind the old run: its terminal would complete or fail it.
@@ -427,6 +443,7 @@ describe('a run ending after a person already decided the task', () => {
           outcome: {
             status: 'cancelled',
             error: 'The task was finished by a person before this run ended.',
+            byPerson: true,
           },
         },
       ])
@@ -474,6 +491,7 @@ describe('a run ending after a person already decided the task', () => {
           outcome: {
             status: 'cancelled',
             error: 'The task was finished by a person before this run ended.',
+            byPerson: true,
           },
         },
       ])
@@ -519,6 +537,7 @@ describe('personMovedTask: the run ends while the move is being read', () => {
         outcome: {
           status: 'cancelled',
           error: 'The task was finished by a person before this run ended.',
+          byPerson: true,
         },
       },
     ])

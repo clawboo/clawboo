@@ -305,6 +305,7 @@ Add a comment to a task, such as a progress report or a note for the person.
 - `taskId` is optional on a session bound to a task, and defaults to it.
 - For an unverified HTTP caller both `authorAgentId` and `authorType` are dropped, and the comment posts as a plain `agent` comment with no author. A caller that cannot prove who it is cannot sign as someone else, or as the person.
 - A session bound to an agent always posts as that agent: `authorType` is `agent` and `authorAgentId` is the session's own agent, whatever the call names. A later run's task block names each comment's author, so an agent cannot speak there as the person or as Clawboo.
+- A comment from this tool wakes no one, whoever wrote it. Only a person's comment from the dashboard starts an agent. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent).
 - Returns the new comment row. Error: `not found: <taskId>` for a task outside the session's team.
 
 ### link_task

@@ -22,6 +22,8 @@
 // is neither. Passing that fact costs one argument and makes the classification
 // impossible to get wrong by timing.
 
+import type { TaskWakeReason } from '@clawboo/board-core'
+
 /** The reason a turn is being delivered. */
 export type TurnOrigin =
   /** A human typed into team chat — the leader, or a specialist they @mentioned. */
@@ -33,6 +35,18 @@ export type TurnOrigin =
    *  task dialog, an explicit assignment, a retry). Its result is posted on the
    *  task card for that person; no teammate is waiting on it. */
   | { kind: 'assignment' }
+  /** Something happened on the task and its agent is being woken for it: a saved
+   *  wake (see `task_wakes`). A task run like the two above. `reason` says why,
+   *  `wakeIds` names the rows it carries, settled when this run ends, and
+   *  `fromAgentId` is who the result reports to. `assigned`, present only when
+   *  true: a person assigned the task, so its report stays on the card. */
+  | {
+      kind: 'wake'
+      reason: TaskWakeReason
+      wakeIds: string[]
+      fromAgentId: string | null
+      assigned?: true
+    }
   /** Clawboo itself: a batched `[Task Update]` (the reflection batcher is the
    *  only producer). No human is waiting on the other end of this turn.
    *
@@ -111,10 +125,14 @@ export function classifyTurn(input: {
     input.targetAgentId !== input.leaderAgentId
       ? input.origin.forTaskId
       : null
-  const isUserAssigned = input.origin.kind === 'assignment'
+  const isUserAssigned =
+    input.origin.kind === 'assignment' || (input.origin.kind === 'wake' && !!input.origin.assigned)
   const isWorker =
     reportFor === null &&
-    (input.origin.kind === 'delegation' || isUserAssigned || input.hasBoardTask)
+    (input.origin.kind === 'delegation' ||
+      input.origin.kind === 'wake' ||
+      isUserAssigned ||
+      input.hasBoardTask)
   const isLeader =
     !isWorker && input.leaderAgentId !== null && input.targetAgentId === input.leaderAgentId
   const fromThePerson = input.origin.kind === 'human' || input.origin.kind === 'schedule'
@@ -139,7 +157,10 @@ export function classifyTurn(input: {
 /** What a run was delivered as, fixed at delivery and handed back to the engine
  *  with each of its events. `reportForTaskId` is the framing's `reportsForTask`,
  *  or null. `stopGen` is the host's stop generation at delivery. `reportUpIds`
- *  is a system origin's `reportUpIds`: the durable report-ups this run carries. */
+ *  is a system origin's `reportUpIds`: the durable report-ups this run carries, plus
+ *  any a Stop held for this agent's next run. `execId`, on a task run: the execution
+ *  stamped on the task's claim, so a terminal from a run the task has moved on from
+ *  is not taken for the task's. `wakeIds`: the saved wakes this run carries. */
 export interface RunStamp {
   reportForTaskId: string | null
   stopGen: number
@@ -150,6 +171,8 @@ export interface RunStamp {
    * turn of a resumed session carries the same one.
    */
   deliveryId?: string
+  execId?: string
+  wakeIds?: string[]
 }
 
 /**
@@ -172,6 +195,7 @@ export function isChatVisible(
       return framing.reportsForTask === undefined
     case 'delegation':
     case 'assignment':
+    case 'wake':
       return false
   }
 }

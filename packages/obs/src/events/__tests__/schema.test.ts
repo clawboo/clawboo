@@ -34,15 +34,19 @@ describe('orchestration event schema', () => {
     expect(orchestrationEventSchema.safeParse({ id: 'e', kind: 'cost' }).success).toBe(false)
   })
 
-  it('covers all 25 kinds', () => {
+  it('covers all 29 kinds', () => {
     // A deliberate tripwire: adding a kind must be a decision someone sees in a
     // diff, not something that slips in. Bump the number WITH the kind.
-    expect(ORCHESTRATION_EVENT_KINDS).toHaveLength(25)
+    expect(ORCHESTRATION_EVENT_KINDS).toHaveLength(29)
   })
 
   it('carries the connector/grant plane kinds', () => {
     expect(ORCHESTRATION_EVENT_KINDS).toContain('grant_decision')
     expect(ORCHESTRATION_EVENT_KINDS).toContain('connector_health')
+    expect(ORCHESTRATION_EVENT_KINDS).toContain('task_wake_recorded')
+    expect(ORCHESTRATION_EVENT_KINDS).toContain('task_wake_skipped')
+    expect(ORCHESTRATION_EVENT_KINDS).toContain('task_wake_given_up')
+    expect(ORCHESTRATION_EVENT_KINDS).toContain('task_braked')
   })
 
   it('validates a routine_fired event with its ledger data', () => {

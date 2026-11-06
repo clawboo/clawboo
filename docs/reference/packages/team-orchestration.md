@@ -34,21 +34,22 @@ chat is its default room, and each extra room gets its own engine. Each engine i
 `serverDeliver.ts`. The SPA uses only the helpers (session keys, the `[Task Update]` builder, control-token checks)
 and talks to the server over REST and server-sent events.
 
-| Dependency                                       | Required | What the host provides                                                         |
-| ------------------------------------------------ | -------- | ------------------------------------------------------------------------------ |
-| `board`                                          | yes      | a `BoardClient` over the durable board                                         |
-| `deliver`                                        | yes      | starts an agent's turn with a message and a turn origin                        |
-| `teamId`, `known`, `leaderAgentId`               | yes      | the team, the room's roster and its lead                                       |
-| `sessionKeyForAgent`, `agentIdForSession`        | yes      | the session-key mapping for this room                                          |
-| `stopGen`                                        | yes      | the host's stop generation, so work delivered before a Stop starts nothing new |
-| `isSessionBusy`, `isSessionOccupied`             | no       | whether an agent is mid-run, so a message waits instead of interrupting        |
-| `onBoardChange`, `narrate`                       | no       | push board changes and engine notes (`reflect`, `alert`) to the dashboard      |
-| `compact`                                        | no       | shrink tool output before it is quoted back                                    |
-| `caps`, `onCapHit`                               | no       | the per-turn fan-out limit and a callback when it trips                        |
-| `isRiskyDelegation`, `requestDelegationApproval` | no       | make a risky delegation wait for a person's approval                           |
-| `abortSession`                                   | no       | stop a run when a person moves its card                                        |
-| `reportUps`                                      | no       | a durable outbox for `[Task Update]` items, so they outlive a restart          |
-| `workCheck`                                      | no       | the check a task's work must pass before it is done                            |
+| Dependency                                       | Required | What the host provides                                                                          |
+| ------------------------------------------------ | -------- | ----------------------------------------------------------------------------------------------- |
+| `board`                                          | yes      | a `BoardClient` over the durable board                                                          |
+| `deliver`                                        | yes      | starts an agent's turn with a message and a turn origin                                         |
+| `teamId`, `known`, `leaderAgentId`               | yes      | the team, the room's roster and its lead                                                        |
+| `sessionKeyForAgent`, `agentIdForSession`        | yes      | the session-key mapping for this room                                                           |
+| `stopGen`                                        | yes      | the host's stop generation, so work delivered before a Stop starts nothing new                  |
+| `isSessionBusy`, `isSessionOccupied`             | no       | whether an agent is mid-run, so a message waits instead of interrupting                         |
+| `onBoardChange`, `narrate`                       | no       | push board changes and engine notes (`reflect`, `alert`) to the dashboard                       |
+| `compact`                                        | no       | shrink tool output before it is quoted back                                                     |
+| `caps`, `onCapHit`                               | no       | the per-turn fan-out limit and a callback when it trips                                         |
+| `isRiskyDelegation`, `requestDelegationApproval` | no       | make a risky delegation wait for a person's approval                                            |
+| `abortSession`                                   | no       | stop a run when a person moves its card                                                         |
+| `reportUps`                                      | no       | a durable outbox for `[Task Update]` items, so they outlive a restart                           |
+| `taskWakes`                                      | no       | the saved wakes on this room's tasks, so a comment the run did not hear gets a turn before Done |
+| `workCheck`                                      | no       | the check a task's work must pass before it is done                                             |
 
 <Warning>
 
@@ -94,12 +95,20 @@ would lose to its own claim, and one that completed the task would complete it t
   the delegator. The values are on [Limits and defaults](/reference/limits-and-defaults).
 - **Results are batched.** Finished tasks are gathered for `REFLECT_WINDOW_MS` and delivered to the delegator as
   one `[Task Update]` (`buildTaskUpdateMessage`), which also names work still outstanding.
+- **A Stop holds work for the next run.** `holdWorkForNextRun` is the one place for the rule: a person's Stop drops
+  nothing and starts nothing. Every report-up and saved wake the room holds, and a result from a run delivered before
+  the Stop, stays pending and leaves the sweep. `takeHeldReportUps(sessionKey)` hands the recipient's next run its
+  held report-ups, whatever started it, as text for its context, and the host adds their ids to the run's stamp, so
+  they settle like any other when it ends. Nothing a Stop held is counted as a replay.
+- **Saved wakes.** A claim made with a `run` writes the run, its stamp and the hand-over of the wakes waiting on the
+  task in one write, and the engine delivers a `wake` origin naming them. A run that ends well settles them as
+  delivered. With `taskWakes`, a person's comment the run did not hear gets a turn before Done (`offerCommentTurn`),
+  through the same path as a fix round.
 - **Results survive a restart.** With `reportUps`, each item is recorded when it is queued. The update's `system`
   origin lists the ids it carries in `reportUpIds`, and the host copies them onto the run's `RunStamp`. When that
-  run ends with `done: success` the engine settles them as delivered; when a Stop ended it (its stamp's `stopGen`
-  is behind) they are settled as stopped. Any other ending, `onSessionClosed`, or `onRunNotStarted` (a queued
-  delivery whose start failed) puts them back to pending. A Stop also settles the items already handed to the host,
-  and delivery that runs out of retries gives them up. `resume()` and every `sweepStaleSessions` queue each pending
+  run ends with `done: success` the engine settles them as delivered. Any other ending, `onSessionClosed`, or
+  `onRunNotStarted` (a queued delivery whose start failed) puts them back to pending. Delivery that runs out of
+  retries gives them up. `resume()` and every `sweepStaleSessions` queue each pending
   item the engine does not hold, so a room's next engine sends it again and this one never sends it twice. An
   engine settles only items it still holds, and lets one go only once its settlement is written (the sweep writes a
   settlement that failed), so after `reset()` a run cancelled at teardown leaves its items for the next engine;

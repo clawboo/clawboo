@@ -19,7 +19,7 @@
 import {
   accountFailureOf,
   delegationTargetOf,
-  ledgerAllowsAutoFire,
+  ledgerWillAutoFire,
   trailingFailedRuns,
   type AccountFailure,
   type LedgerRun,
@@ -130,7 +130,9 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
     // A live run owns it (a release racing a run's terminal): not stuck.
     if (last === 'running') return null
     if (last === 'cancelled') return { reason: 'stopped', failedRuns: 0 }
-    if (!ledgerAllowsAutoFire(input.execs)) {
+    // A task the no-progress brake is holding back fires by itself when the wait
+    // ends, so it does not need a person.
+    if (!ledgerWillAutoFire(input.execs)) {
       return {
         reason: last === 'timed_out' ? 'timed_out' : 'failed',
         failedRuns,

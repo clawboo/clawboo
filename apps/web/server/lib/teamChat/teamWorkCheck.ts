@@ -381,7 +381,10 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       // The task is claimed and nothing beats it until its run starts, so a slow
       // snapshot (a big folder, another task's snapshot ahead in the queue) must
       // not read as a dead claim to the board's stale sweep.
-      const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: agentId })
+      const stopBeat = startTaskHeartbeat(db, taskId, {
+        assigneeAgentId: agentId,
+        execId: getTask(db, taskId)?.runExecutionId ?? null,
+      })
       try {
         await ensureTeamWorkdir(target.folder)
         await historyMutex.run(gitDir, async () => {

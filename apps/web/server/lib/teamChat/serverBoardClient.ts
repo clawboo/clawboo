@@ -31,14 +31,17 @@ import {
   listExecutions,
   getTask,
   linkDep,
+  listDirectDependentIds,
   listTasks,
   markDelegationFailureNotified,
   noteDelegationFailure,
   readDelegationFailure,
   updateStatus,
+  wakeCommentIds,
   type ClawbooDb,
   type TaskStatus,
 } from '@clawboo/db'
+import type { TaskWakeReason } from '@clawboo/board-core'
 import type {
   BoardTask,
   ClaimResult,
@@ -186,7 +189,7 @@ export function createServerBoardClient(
       }
     },
 
-    async claim(taskId, assigneeAgentId, assigneeRuntime): Promise<ClaimResult> {
+    async claim(taskId, assigneeAgentId, assigneeRuntime, run): Promise<ClaimResult> {
       // A held engine (see engineHold) claims nothing: a claimed task would sit
       // `in_progress` waiting for a run slot across the stop the hold is for.
       // Refused as a conflict, the engine leaves the task in To do, as it does
@@ -194,19 +197,43 @@ export function createServerBoardClient(
       // it once the hold lifts or after the next start.
       if (engineHeld()) return { ok: false, reason: 'conflict' }
       try {
-        const result = claimTask(db, taskId, assigneeAgentId, assigneeRuntime)
-        if (result.ok && result.task) {
-          const t = result.task
-          emitEvent(db, {
-            kind: 'task_claimed',
-            taskId: t.id,
-            teamId: t.teamId,
-            agentId: t.assigneeAgentId,
-            runtime: t.assigneeRuntime,
-            data: { assigneeAgentId: t.assigneeAgentId, assigneeRuntime: t.assigneeRuntime },
-          })
+        // The run opens with the claim, in one write: the execution, its stamp on the
+        // task and the saved wakes it takes.
+        const result = claimTask(db, taskId, assigneeAgentId, assigneeRuntime, run ? { run } : {})
+        if (!result.ok || !result.task) return result as ClaimResult
+        const t = result.task
+        emitEvent(db, {
+          kind: 'task_claimed',
+          taskId: t.id,
+          teamId: t.teamId,
+          agentId: t.assigneeAgentId,
+          runtime: t.assigneeRuntime,
+          data: { assigneeAgentId: t.assigneeAgentId, assigneeRuntime: t.assigneeRuntime },
+        })
+        const execution = result.execution
+        if (!execution) return result as ClaimResult
+        emitEvent(db, {
+          kind: 'execution_started',
+          taskId,
+          teamId: t.teamId,
+          agentId: t.assigneeAgentId,
+          runtime: execution.executorType,
+          data: {
+            execId: execution.id,
+            executorType: execution.executorType,
+            runReason: execution.runReason,
+          },
+        })
+        return {
+          ok: true,
+          task: t as BoardTask,
+          execution: { id: execution.id },
+          wakes: (result.wakes ?? []).map((w) => ({
+            id: w.id,
+            reason: w.reason as TaskWakeReason,
+            commentIds: wakeCommentIds(w),
+          })),
         }
-        return result as ClaimResult
       } catch {
         return { ok: false, reason: 'error' }
       }
@@ -237,7 +264,10 @@ export function createServerBoardClient(
 
     async addComment(taskId, body, authorType = 'system', authorAgentId): Promise<void> {
       try {
-        addComment(db, taskId, body, authorType, authorAgentId ?? null)
+        // Clawboo's own note, or a run's result recorded by the engine.
+        addComment(db, taskId, body, authorType, authorAgentId ?? null, {
+          kind: authorType === 'system' ? 'note' : authorType === 'agent' ? 'result' : null,
+        })
         emitEvent(db, {
           kind: 'comment_added',
           taskId,
@@ -263,12 +293,12 @@ export function createServerBoardClient(
       }
     },
 
-    async createExecution(taskId, executorType): Promise<ExecutionRef | null> {
+    async createExecution(taskId, executorType, opts): Promise<ExecutionRef | null> {
       try {
         const execution = createExecutionProcess(db, {
           taskId,
           executorType,
-          runReason: 'team-orchestration',
+          runReason: opts?.runReason ?? null,
         })
         const task = getTask(db, taskId)
         emitEvent(db, {
@@ -277,7 +307,11 @@ export function createServerBoardClient(
           teamId: task?.teamId ?? null,
           agentId: task?.assigneeAgentId ?? null,
           runtime: execution.executorType,
-          data: { execId: execution.id, executorType: execution.executorType },
+          data: {
+            execId: execution.id,
+            executorType: execution.executorType,
+            runReason: execution.runReason,
+          },
         })
         return { id: execution.id }
       } catch {
@@ -354,6 +388,8 @@ export function createServerBoardClient(
           status: e.status,
           executorType: e.executorType,
           errorClass: e.errorClass,
+          completedAt: e.completedAt,
+          madeProgress: e.madeProgress,
         }))
       } catch {
         // NOT `[]` — see the interface note. An unreadable ledger must not read
@@ -365,6 +401,14 @@ export function createServerBoardClient(
     async listTasks(teamId): Promise<BoardTask[]> {
       try {
         return listTasks(db, scoped ? { teamId, roomId } : { teamId }) as BoardTask[]
+      } catch {
+        return []
+      }
+    },
+
+    async directDependents(taskId): Promise<string[]> {
+      try {
+        return listDirectDependentIds(db, taskId)
       } catch {
         return []
       }

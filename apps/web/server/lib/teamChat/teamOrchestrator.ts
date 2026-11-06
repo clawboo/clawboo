@@ -25,6 +25,7 @@ import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   enqueueInbox,
   getActiveRoom,
+  listHeldReportUps,
   listPendingReportUps,
   listRoomsWithEngineTasksInReview,
   listRoomsWithPendingReportUps,
@@ -58,6 +59,7 @@ import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { createReportUpOutbox } from './reportUpOutbox'
+import { createTaskWakeOutbox } from './taskWakes'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import { createServerDeliver, type QueuedRun, type RunEntry } from './serverDeliver'
@@ -255,6 +257,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // whose runs have all finished — the case the idle TTL exists to reclaim.
     onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
     onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
+    takeHeldReportUps: (sk) => engineRef.current!.takeHeldReportUps(sk),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     execForSession: (sk) => engineRef.current!.execForSession(sk),
     // The start gate reads it: a delivery made before a Stop or a dispose never
@@ -416,6 +419,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // failed in the queue) stays pending, and this engine's sweep or the room's
     // next engine sends it again.
     reportUps: createReportUpOutbox(db, teamId, roomId),
+    // The saved wakes on this room's tasks (see ./taskWakes).
+    taskWakes: createTaskWakeOutbox(db, teamId, roomId),
     // The task runner's verification gate, run on the team folder: a task whose
     // run changed it is done only once the team's verify command (and, for a
     // large, risky or handed-down change, a reviewer) passes it.
@@ -588,8 +593,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // Queued (not-yet-started) deliveries must die with the Stop too: a
       // markIdle after the aborts would otherwise FLUSH them into brand-new
       // post-Stop runs. Dropping them loses nothing durable: alerts live in the
-      // mailbox, a dropped task update is settled as stopped by markStopped (its
-      // result stays on the board), and stopped work is tombstoned below.
+      // mailbox, a dropped task update is held by markStopped for the recipient's next
+      // run, and stopped work is tombstoned below.
       // A delivery the queue already released but whose run has not started
       // (waiting on the agent's lock, or inside adapter.start) is refused by
       // serverDeliver's start gate on the bumped generation, so it dies with the
@@ -831,14 +836,20 @@ export async function retireRoomOrchestrator(teamId: string, roomId: string): Pr
       log.error({ err, teamId, roomId }, 'team-orchestrator room retire failed')
     }
   }
-  // No engine builds an archived room, so its report-ups would never be sent.
-  // Archiving stops the room's work, so they are dropped as a Stop drops them;
-  // the results stay on their cards. Done whether or not an engine was loaded:
-  // rows a previous process left pending belong to the room too.
+  // No engine builds an archived room and none of its agents will run there again,
+  // so its report-ups, held by a Stop or not, have no next run to ride. They are
+  // closed here; the results stay on their cards. Done whether or not an engine was
+  // loaded: rows a previous process left pending belong to the room too. Its saved
+  // wakes are not closed: its tasks move to the team's own chat, where a next run can
+  // still come. Archiving stops the room's work, so they are held as a Stop holds them.
   try {
     const db = getDb()
-    const ids = listPendingReportUps(db, teamId, roomId).map((r) => r.id)
+    const ids = [
+      ...listPendingReportUps(db, teamId, roomId),
+      ...listHeldReportUps(db, teamId, roomId),
+    ].map((r) => r.id)
     if (ids.length > 0) settleReportUps(db, ids, 'stopped')
+    createTaskWakeOutbox(db, teamId, roomId).holdAll()
   } catch (err) {
     log.error({ err, teamId, roomId }, "could not settle the archived room's report-ups")
   }

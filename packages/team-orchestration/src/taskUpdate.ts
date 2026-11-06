@@ -110,6 +110,14 @@ export interface TaskUpdateOptions {
    *  closed: its reply is a follow-up on that task, not a message to the user.
    *  `title` is that task's title, when known. */
   followUp?: { title?: string }
+  /** What this recipient handed off here, for one line when nothing is still running:
+   *  all of it is in, or, when `notStarted` holds any, that it is not. `needPerson`
+   *  lists the ones that closed waiting on a person (blocked, a check that failed or
+   *  was cut short, a Done the board refused). `notStarted` lists the ones that will
+   *  not start without a person (stopped, parked, in Backlog). */
+  allIn?: { needPerson: OutstandingDelegation[]; notStarted: OutstandingDelegation[] }
+  /** These came back after a person's Stop and waited for this run. */
+  heldByStop?: boolean
 }
 
 /** Shorten a title exactly as the item headers below do, on one line. */
@@ -175,7 +183,9 @@ export function buildTaskUpdateMessage(
         : `${finished} ${plural} on the board reached a terminal state, and ${foundPhrase}`
   const where = opts.followUp?.title ? `"${clipTitle(opts.followUp.title)}"` : 'a task'
   const headerLines = [
-    `[Task Update] — ${opening} (not a fresh user message).`,
+    opts.heldByStop
+      ? `[Task Update] ${finished} ${plural} on the board reached a terminal state after a person pressed Stop. Nothing was started for them: they waited for this run, and they are not what this run is for.`
+      : `[Task Update] — ${opening} (not a fresh user message).`,
     opts.followUp
       ? `These came back from work you handed to teammates while on ${where}, which has since closed. Your reply is not shown to the user: it is recorded on that task and passed to whoever gave it to you. Reply with ONE short, concrete follow-up on what these results add to it. Do not address the user or ask them anything, and do NOT acknowledge the results individually.`
       : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
@@ -190,6 +200,29 @@ export function buildTaskUpdateMessage(
     headerLines.push(
       `Still outstanding: ${outstanding.length} — ${named}${more}. These have NOT reported yet, so do not treat the results below as the complete picture.`,
     )
+  }
+  if (outstanding.length === 0 && opts.allIn) {
+    const { needPerson, notStarted } = opts.allIn
+    const names = (list: OutstandingDelegation[]): string => {
+      const named = list
+        .slice(0, 3)
+        .map((o) => (o.title ? `${oneLine(o.by)} ("${clipTitle(o.title)}")` : oneLine(o.by)))
+        .join(', ')
+      return list.length > 3 ? `${named}, and ${list.length - 3} more` : named
+    }
+    const waiting = [...notStarted, ...needPerson]
+    if (notStarted.length > 0) {
+      headerLines.push(
+        `Nothing else you handed off here is running, but it is not all in: ${notStarted.length} of it will not start without a person, so do not treat the results below as the complete picture. Waiting on a person: ${names(waiting)}.`,
+      )
+    } else {
+      headerLines.push(
+        'All of the work you handed off here is in: nothing is outstanding.' +
+          (needPerson.length > 0
+            ? ` ${needPerson.length} of it needs a person before it can go on: ${names(needPerson)}.`
+            : ''),
+      )
+    }
   }
   const cancelledByPerson = items.filter((i) => i.outcome === 'person_cancelled').length
   if (cancelledByPerson > 0) {

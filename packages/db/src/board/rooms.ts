@@ -341,7 +341,11 @@ export function moveArchivedRoomTasks(
       const execs = listExecutions(db, task.id)
       const last = execs[execs.length - 1]
       if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
-      const closed = completeExecutionProcess(db, last.id, { status: 'cancelled', error: stopped })
+      const closed = completeExecutionProcess(db, last.id, {
+        status: 'cancelled',
+        error: stopped,
+        byPerson: true,
+      })
       // Read before the move to To do clears the assignee.
       const agentId = task.assigneeAgentId ?? delegationTargetOf(task.sourceDelegationId)
       if (closed && agentId)
@@ -396,7 +400,7 @@ export function moveArchivedRoomTasks(
       const execs = listExecutions(db, task.id)
       if (execs.length > 0 && execs[execs.length - 1]!.status === 'cancelled') continue
       const stop = createExecutionProcess(db, { taskId: task.id, executorType: 'openclaw' })
-      completeExecutionProcess(db, stop.id, { status: 'cancelled', error: stopped })
+      completeExecutionProcess(db, stop.id, { status: 'cancelled', error: stopped, byPerson: true })
     }
     const rows = withWriteRetry(() =>
       db

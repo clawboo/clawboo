@@ -64,6 +64,7 @@ to anyone changing them:
 - **Tools.** Every call runs through the `@clawboo/db` broker, so a connector tool is checked against the agent's
   grants. A connector tool is listed only to an agent whose grant would allow it.
 - **TeamChat.** `team_delegate` only signals: the team engine sees the tool call and creates the board task.
+- **Comments wake no one.** `add_comment` on a session bound to an agent labels the comment `agent`, and no other caller labels it at all. Only the board route's `person` comment starts a run (`commentMayWake` in `@clawboo/board-core`). A move to Done saves its dependents' wakes in the write itself, so a stdio bin's does too; they wait for the server's next pump pass.
 - **Mailbox delivery.** For a bound agent, its undelivered mailbox rows ride along on the next Tasks or TeamChat
   tool response as a second content block, each framed as data with `formatInterSessionMessage` (from
   `@clawboo/board-core`, which `formatPeerPost` is now built on).

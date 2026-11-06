@@ -28,7 +28,15 @@ import {
   teams,
   getSetting,
   setSetting,
+  getComments,
+  linkDep,
+  listEvents,
+  listWaitingTaskWakes,
+  reconcileStaleInProgress,
+  recordTaskWake,
+  tasks,
 } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 
 import { encodeTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
 import { engineHold } from '../../engineHold'
@@ -417,5 +425,126 @@ describe('board lifecycle subscribers', () => {
       // Blocked waits on a person; its next run resumes the same session.
       expect(getSetting(db, taskSessionSettingKey(agent, TEAM, blocked.id))).toBe(pointer)
     }
+  })
+})
+
+describe('saved wakes reach the pump within seconds', () => {
+  let home: string
+  const prev: Record<string, string | undefined> = {}
+  let wakePasses = 0
+
+  beforeEach(async () => {
+    home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-lifecycle-wakes-'))
+    for (const k of ['HOME', 'CLAWBOO_HOME']) prev[k] = process.env[k]
+    process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
+    wakePasses = 0
+    const now = Date.now()
+    getDb()
+      .insert(teams)
+      .values({
+        id: TEAM,
+        name: 'Team T',
+        icon: 'x',
+        color: '#e94560',
+        leaderAgentId: LEADER,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run()
+    registerBoardLifecycleSubscribers({
+      mcpBaseUrl: null,
+      pumpWakes: () => {
+        wakePasses += 1
+      },
+    })
+  })
+  afterEach(async () => {
+    resetBoardLifecycleRegistration()
+    resetBoardLifecycleListeners()
+    resetDb()
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
+    await rm(home, { recursive: true, force: true })
+  })
+
+  const blockerAndDependent = () => {
+    const db = getDb()
+    const blocker = createTask(db, { title: 'first', teamId: TEAM })
+    const dependent = createTask(db, {
+      title: 'next',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    linkDep(db, dependent.id, blocker.id)
+    claimTask(db, blocker.id, 'a9')
+    return { blocker, dependent }
+  }
+
+  it('a dependency finished in this process (the HTTP Tasks MCP, the engine, a person) wakes its dependent', async () => {
+    vi.useFakeTimers()
+    try {
+      const { blocker, dependent } = blockerAndDependent()
+      updateStatus(getDb(), blocker.id, 'done')
+      expect(listWaitingTaskWakes(getDb()).map((w) => w.taskId)).toEqual([dependent.id])
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(wakePasses).toBe(1)
+      const recorded = listEvents(getDb(), { kinds: ['task_wake_recorded'] })
+      expect(recorded.map((e) => e.taskId)).toEqual([dependent.id])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('one finished by a stdio bin, which the bus does not reach, saves the wake for the next pump pass', async () => {
+    vi.useFakeTimers()
+    try {
+      const { blocker, dependent } = blockerAndDependent()
+      // A stdio bin is another process: the server's subscribers never hear its write.
+      resetBoardLifecycleListeners()
+      updateStatus(getDb(), blocker.id, 'done')
+      await vi.advanceTimersByTimeAsync(10_000)
+      expect(wakePasses).toBe(0)
+      expect(listWaitingTaskWakes(getDb()).map((w) => w.taskId)).toEqual([dependent.id])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a burst of wakes is one pass', async () => {
+    vi.useFakeTimers()
+    try {
+      const db = getDb()
+      for (let i = 0; i < 5; i++) {
+        const t = createTask(db, { title: `t${i}`, teamId: TEAM })
+        recordTaskWake(db, { teamId: TEAM, agentId: 'a2', taskId: t.id, reason: 'person_comment' })
+      }
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(wakePasses).toBe(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a task released with no progress on its last runs says it waits, once', async () => {
+    const db = getDb()
+    const t = createTask(db, {
+      title: 'flaky',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    for (let i = 0; i < 2; i++) {
+      const c = claimTask(db, t.id, 'a2', 'codex', { run: { executorType: 'openclaw' } })
+      expect(c.ok).toBe(true)
+      db.update(tasks).set({ updatedAt: 1 }).where(eq(tasks.id, t.id)).run()
+      expect(reconcileStaleInProgress(db, 1_000).reconciled).toBe(1)
+    }
+    const notes = getComments(db, t.id).filter((c) => c.body.includes('made no visible progress'))
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.kind).toBe('note')
+    expect(listEvents(db, { kinds: ['task_braked'] })).toHaveLength(1)
   })
 })

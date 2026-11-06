@@ -30,6 +30,7 @@ import {
   updateStatus,
 } from '../repository'
 import { archiveRoom, createRoom, moveArchivedRoomTasks } from '../rooms'
+import { listWaitingTaskWakes, recordTaskWake } from '../../taskWakes'
 
 let dir: string
 let db: ClawbooDb
@@ -169,6 +170,22 @@ describe('moveArchivedRoomTasks', () => {
     expect(getTask(db, running)).toMatchObject({ status: 'todo', roomId: null })
     expect(lastRun(running)).toBe('cancelled')
     expect(ledgerAllowsAutoFire(listExecutions(db, running))).toBe(false)
+  })
+
+  it('holds a saved wake the run carried: a person archived the room', () => {
+    const id = roomTask('Going')
+    const wake = recordTaskWake(db, {
+      teamId: 'T',
+      agentId: 'bea',
+      taskId: id,
+      reason: 'person_comment',
+    })
+    claimTask(db, id, 'bea', 'openclaw', { run: { executorType: 'openclaw' } })
+    archiveRoom(db, roomId)
+    moveArchivedRoomTasks(db)
+    const row = listWaitingTaskWakes(db, { includeHeld: true }).find((w) => w.id === wake.id)
+    expect(row?.heldAt).not.toBeNull()
+    expect(row?.replays).toBe(0)
   })
 
   it('leaves a run the task runner owns alone, and its task out of the Stop', () => {

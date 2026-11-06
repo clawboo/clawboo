@@ -39,11 +39,13 @@ import {
   startTaskHeartbeat,
   updateStatus,
   type ClawbooDb,
+  type DbExecutionProcess,
   type RunCostSource,
 } from '@clawboo/db'
 import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 
+import { BUDGET_REFUSED_CLASS } from '@clawboo/board-core'
 import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   DEFAULT_ROTATION,
@@ -566,8 +568,10 @@ async function runTaskOnRuntimeInner(
   // it stops on EVERY exit including a throw. (A leaked beat kept a parked task
   // eternally fresh: the sweep could never reclaim it while the process lived.)
   // Pre-claim beats no-op via the in_progress + assignee guard.
+  // It follows this run's execution, which each fix cycle replaces.
   const stopBeat = startTaskHeartbeat(input.db, input.taskId, {
     assigneeAgentId: input.assigneeAgentId,
+    execId: () => claimState.execId ?? null,
   })
   // In review the run is still open while its work is checked, and the other beat
   // leaves such a task alone. A check can take many minutes, and a silent one reads
@@ -786,10 +790,20 @@ async function runTaskInner(
   const hold = gate.hold
   claimState.hold = hold
 
+  const runReason = input.fixCycle
+    ? 'verify-fix'
+    : degr.resumeViaHandoff
+      ? 'resume-via-handoff'
+      : 'run'
+  let claimedExec: DbExecutionProcess | null = null
   if (!input.fixCycle) {
-    // Atomic claim — a lost claim is a conflict and is NEVER retried.
-    const claim = claimTask(db, taskId, assigneeAgentId, runtimeId)
-    if (!claim.ok) return { ok: false, reason: 'conflict' }
+    // Atomic claim: a lost claim is a conflict and is NEVER retried. The run opens in
+    // the same write, so the task is stamped with it and takes what waits on it.
+    const claim = claimTask(db, taskId, assigneeAgentId, runtimeId, {
+      run: { executorType: runtimeId, runReason },
+    })
+    if (!claim.ok || !claim.execution) return { ok: false, reason: 'conflict' }
+    claimedExec = claim.execution
   } else {
     // Fix re-dispatch of a task this runner already owns (verify FAIL keeps it
     // `in_progress`): verify ownership instead of claiming. Anything else —
@@ -833,11 +847,9 @@ async function runTaskInner(
     }
   }
 
-  const exec = createExecutionProcess(db, {
-    taskId,
-    executorType: runtimeId,
-    runReason: input.fixCycle ? 'verify-fix' : degr.resumeViaHandoff ? 'resume-via-handoff' : 'run',
-  })
+  // A fix cycle holds the claim already: its run moves the task's stamp to itself.
+  const exec =
+    claimedExec ?? createExecutionProcess(db, { taskId, executorType: runtimeId, runReason })
   // Share it with the outer safety net so an unexpected throw can close the row
   // instead of leaving it `running` with no runner behind it. (The liveness beat
   // is owned by the runTaskOnRuntime wrapper — one interval spanning the mutex
@@ -1100,7 +1112,11 @@ async function runTaskInner(
   if (finalGate.blocked) {
     const error = `budget_${finalGate.reason}:${finalGate.scope}`
     addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
-    const ledgerClosed = completeExecutionProcess(db, exec.id, { status: 'cancelled', error })
+    const ledgerClosed = completeExecutionProcess(db, exec.id, {
+      status: 'cancelled',
+      error,
+      errorClass: BUDGET_REFUSED_CLASS,
+    })
     if (ledgerClosed)
       emitEvent(db, {
         kind: 'execution_completed',
@@ -1821,6 +1837,7 @@ async function runTaskInner(
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: 'cancelled',
       error: `budget_paused:${stopForBudget}`,
+      errorClass: BUDGET_REFUSED_CLASS,
       costUsd,
       costSource,
       inputTokens: ledgerInputTokens,
@@ -2206,6 +2223,8 @@ async function runTaskInner(
       status: doneReason === 'aborted' ? 'cancelled' : 'failed',
       error: failureDetail || doneReason,
       ...(errorClass ? { errorClass } : {}),
+      // Aborted with a person's note: they moved the card. Any other abort is not theirs.
+      ...(stopNote !== null ? { byPerson: true } : {}),
       costUsd,
       costSource,
       inputTokens: ledgerInputTokens,

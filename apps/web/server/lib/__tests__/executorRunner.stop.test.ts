@@ -9,7 +9,15 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { createTask, getComments, getTask, listExecutions, updateStatus } from '@clawboo/db'
+import {
+  createTask,
+  getComments,
+  getTask,
+  listExecutions,
+  listWaitingTaskWakes,
+  recordTaskWake,
+  updateStatus,
+} from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -193,6 +201,49 @@ describe('stopTaskRuns', () => {
     expect(rb.ok && rb.doneReason).toBe('success')
     expect(rb.ok && rb.stoppedByPerson).toBeUndefined()
     expect(getComments(getDb(), other).some((c) => c.body === NOTE)).toBe(false)
+  })
+
+  describe('a saved wake the run carried', () => {
+    const wakeOn = (taskId: string, agentId: string): string =>
+      recordTaskWake(getDb(), { teamId: 'team-1', agentId, taskId, reason: 'person_comment' }).id
+
+    it("is held when a person's stop ended the run", async () => {
+      const taskId = newTask('stopped by a person')
+      const wake = wakeOn(taskId, 'agent-held')
+      const { adapter, state } = hangingAdapter()
+      const p = runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: () => adapter,
+        taskId,
+        assigneeAgentId: 'agent-held',
+      })
+      await parked(state)
+      stopTaskRuns(taskId, NOTE)
+      await p
+      const row = listWaitingTaskWakes(getDb(), { includeHeld: true }).find((w) => w.id === wake)
+      expect(row?.heldAt).not.toBeNull()
+      expect(row?.replays).toBe(0)
+    })
+
+    it('goes back to the pump, counted, when an abort no person asked for ended it', async () => {
+      const taskId = newTask('caller went away')
+      const wake = wakeOn(taskId, 'agent-counted')
+      const { adapter, state } = hangingAdapter()
+      const ctl = new AbortController()
+      const p = runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: () => adapter,
+        taskId,
+        assigneeAgentId: 'agent-counted',
+        abortSignal: ctl.signal,
+      })
+      await parked(state)
+      ctl.abort()
+      await p
+      const row = listWaitingTaskWakes(getDb(), { includeHeld: true }).find((w) => w.id === wake)
+      expect(row?.heldAt).toBeNull()
+      expect(row?.replays).toBe(1)
+    })
   })
 
   it('a caller abort with no stop note still says "Run aborted"', async () => {

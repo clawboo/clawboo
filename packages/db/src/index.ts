@@ -27,6 +27,7 @@ export {
   taskComments,
   taskDeps,
   tasks,
+  taskWakes,
   teamChat,
   teams,
   teamProfiles,
@@ -70,6 +71,7 @@ export type {
   DbSkillInsert,
   DbTask,
   DbTaskComment,
+  DbTaskWake,
   DbTaskCommentInsert,
   DbTaskDep,
   DbTaskDepInsert,
@@ -133,6 +135,7 @@ export * from './teamChat'
 export * from './inbox'
 // ── Durable [Task Update] outbox (team chat report-ups) ──
 export * from './reportUps'
+export * from './taskWakes'
 
 // ── chat_messages — the durable transcript tail (live team-chat SSE) ──
 export * from './chat'

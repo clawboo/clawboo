@@ -41,6 +41,7 @@ import { startMemoryEmbedding } from './lib/memoryEmbedding'
 import { createStaleTaskSweep, reapOrphanedRuns, sweepStaleRuns } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
+import { pumpTaskWakes, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
 import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
@@ -50,10 +51,13 @@ import {
   orchestratorKey,
   roomsWithUnheldChecks,
   roomsWithUnheldReportUps,
+  writeTeamAlert,
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { engineHeld, engineHold } from './lib/engineHold'
-import { pumpRunnerReruns } from './lib/runnerRerun'
+import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
+import { runnerTargetOf } from './lib/runnerRoute'
+import { startTask } from './lib/startBoardTask'
 import { runsOnTaskRunner } from './lib/runnerRoute'
 import { and, desc, eq } from 'drizzle-orm'
 import { getRegistry } from './lib/agentSource'
@@ -748,9 +752,50 @@ async function main() {
     // The bus subscribers make pushes immediate; this interval is the durable
     // BACKSTOP (and the boot-resume path: the first pass rebuilds every team
     // holding fireable work OR undelivered mail, so a restart is a pause).
-    registerBoardLifecycleSubscribers({ mcpBaseUrl: mcpBase })
+    /** The wake pump's hands: start a task for a person, or pump a room's engine. */
+    const wakeDeps = (
+      pumpRoom: (teamId: string, roomId: string | null) => void,
+    ): TaskWakePumpDeps => ({
+      held: engineHeld,
+      startForPerson: (task) => {
+        // One already on its way keeps its place in the queue for a run slot.
+        if (isRunnerRerunWaiting(task.id)) return
+        startTask(getDb(), task.id, task.teamId, runnerTargetOf(getDb(), task), mcpBase)
+      },
+      pumpRoom,
+      alert: (alert) => writeTeamAlert(getDb(), alert),
+    })
+    const pumpRoomNow = (teamId: string, roomId: string | null): void => {
+      if (!isActiveTeamRoom(teamId, roomId)) return
+      getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
+        .pump()
+        .catch((err: unknown) => log.error({ err, teamId, roomId }, 'Board: wake pump failed'))
+    }
+    registerBoardLifecycleSubscribers({
+      mcpBaseUrl: mcpBase,
+      pumpWakes: () => {
+        try {
+          pumpTaskWakes(getDb(), wakeDeps(pumpRoomNow))
+          // A woken task the runner runs goes through the runner's own pump.
+          if (!engineHeld()) pumpRunnerReruns(getDb(), mcpBase)
+        } catch (err) {
+          log.error({ err }, 'Board: wake pump scan failed (non-fatal)')
+        }
+      },
+    })
     const pump = (): void => {
-      if (engineHeld()) return
+      if (engineHeld()) {
+        // Nothing starts. Each waiting wake still says why it waits.
+        try {
+          pumpTaskWakes(
+            getDb(),
+            wakeDeps(() => undefined),
+          )
+        } catch (err) {
+          log.error({ err }, 'Board: wake pump scan failed (non-fatal)')
+        }
+        return
+      }
       try {
         const db = getDb()
         // Tasks the task runner ran re-fire through the runner, not team chat
@@ -761,6 +806,15 @@ async function main() {
         const wake = new Map<string, { teamId: string; roomId: string | null }>()
         for (const r of listRoomsWithFireableDelegations(db))
           wake.set(orchestratorKey(r.teamId, r.roomId), r)
+        // Saved wakes. The room is read now, at fire time: archiving a room moves its
+        // tasks. Ones a person is behind start at once; the rest go through the room's
+        // engine and its fire policy.
+        pumpTaskWakes(
+          db,
+          wakeDeps((teamId, roomId) =>
+            wake.set(orchestratorKey(teamId, roomId), { teamId, roomId }),
+          ),
+        )
         // Teams whose agents hold undelivered mailbox rows: waking the team
         // rebuilds its orchestrator; the rows ride the next run's digest (or,
         // for a team that stays idle, wait for the next user turn — waking is

@@ -26,6 +26,8 @@ import {
   listExecutions,
   listUndeliveredInbox,
   packInboxRows,
+  recordTaskWake,
+  taskWakes,
   teams,
   updateStatus,
 } from '@clawboo/db'
@@ -37,6 +39,7 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
+import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../db'
@@ -187,6 +190,26 @@ describe('task runner: a task its own agent blocked', () => {
     expect(
       listEvents(getDb(), { taskId, kinds: ['status_changed'] }).map((e) => JSON.parse(e.data)),
     ).toContainEqual({ to: 'blocked', reason: 'agent_blocked' })
+  })
+
+  it('a saved wake the run carried was heard, since the run ended well', async () => {
+    const taskId = task('Deploy to staging')
+    const wake = recordTaskWake(getDb(), {
+      teamId: 'team-1',
+      agentId: 'coder',
+      taskId,
+      reason: 'person_comment',
+    })
+    const { adapter } = agentRun(block(taskId), { caps: NO_WORKTREE })
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'coder',
+    })
+    const row = getDb().select().from(taskWakes).where(eq(taskWakes.id, wake.id)).get()
+    expect(row?.settledHow).toBe('delivered')
+    expect(getTask(getDb(), taskId)?.runExecutionId).toBeNull()
   })
 
   it('leaves the steps waiting on it queued, and tells the delegator why', async () => {

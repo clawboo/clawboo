@@ -18,6 +18,7 @@ import {
   claimTask,
   createApproval,
   createTask,
+  listWaitingTaskWakes,
   tasks,
   teams,
   updateStatus,
@@ -43,7 +44,6 @@ const {
   boardUpdatePATCH,
 } = await import('../board')
 const { boardInboxGET, boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
-const { resetReplyWakes } = await import('../../lib/teamChat/personReply')
 
 const TEAM = 'T'
 const AGENT = 'coder'
@@ -158,7 +158,6 @@ describe('a person’s inbox', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     expect(getDbPath().startsWith(home)).toBe(true)
     dispatched.length = 0
-    resetReplyWakes()
     const db = getDb()
     const now = Date.now()
     db.insert(teams)
@@ -355,6 +354,9 @@ describe('a person’s inbox', () => {
         body: { body: 'Use the staging key.', authorType: 'user' },
       })
       expect(r.body['delivery']).toMatchObject({ status: 'woke-agent' })
+      expect(await unreadIds()).toEqual([])
+      // The wake it saved is no news either.
+      expect(listWaitingTaskWakes(db, { taskId: id })).toHaveLength(1)
       expect(await unreadIds()).toEqual([])
     })
 

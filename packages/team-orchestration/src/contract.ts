@@ -18,7 +18,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { encodeHumanAssignment } from '@clawboo/board-core'
+import { BRAKE_MAX_WAIT_MS, encodeHumanAssignment } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import {
@@ -1004,28 +1004,35 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     })
 
     it('a permafailing delegation stops being auto-fed at MAX_AUTO_FIRES', async () => {
-      const h = makeHarness()
+      // The clock moves past the no-progress brake's wait on each cycle, so what
+      // stops the fires here is the cap, not the brake.
+      let skew = 0
+      const h = makeHarness({ now: () => Date.now() + skew })
       await delegate(h)
       const { board, orchestrator } = h
       const t1 = idsOf(board)[0]!
 
       // Fail-and-release cycles (infra death, not user Stop) until the ledger
-      // holds MAX_AUTO_FIRES executions.
-      for (;;) {
+      // holds MAX_AUTO_FIRES executions. Bounded: a board that stops firing early
+      // fails the assertion below instead of spinning here.
+      for (let cycle = 0; cycle < MAX_AUTO_FIRES + 2; cycle++) {
         const execs = await ledgerOf(board, t1)
         if (execs.length >= MAX_AUTO_FIRES) break
         const last = execs[execs.length - 1]!
         await board.completeExecution(last.id, { status: 'timed_out' })
         board.forceRelease(t1)
         orchestrator.reset()
+        skew += BRAKE_MAX_WAIT_MS + 1
         await orchestrator.resume()
       }
+      expect((await ledgerOf(board, t1)).length).toBe(MAX_AUTO_FIRES)
       const fires = board.claims.filter((id) => id === t1).length
       // One more release cycle: the cap holds, no further fire.
       const execs = await ledgerOf(board, t1)
       await board.completeExecution(execs[execs.length - 1]!.id, { status: 'timed_out' })
       board.forceRelease(t1)
       orchestrator.reset()
+      skew += BRAKE_MAX_WAIT_MS + 1
       await orchestrator.resume()
       expect(board.claims.filter((id) => id === t1)).toHaveLength(fires)
       expect(board.statusOf(t1)).toBe('todo')

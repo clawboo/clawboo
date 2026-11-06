@@ -45,6 +45,14 @@ export const ORCHESTRATION_EVENT_KINDS = [
   // very stream you would use to audit it.
   'grant_decision',
   'connector_health',
+  // ─── Saved wakes ──────────────────────────────────────────────────────────
+  // Something happened on a task and its agent is to hear it. Skips are their own
+  // kind because they are the case worth finding: a wake that did not start a run,
+  // and why.
+  'task_wake_recorded',
+  'task_wake_skipped',
+  'task_wake_given_up',
+  'task_braked',
 ] as const
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number]
@@ -118,6 +126,29 @@ export interface CommentAddedData {
   authorType?: string
   body?: string
   person?: EventPerson
+}
+export interface TaskWakeRecordedData {
+  /** `TaskWakeReason` in @clawboo/board-core. */
+  reason: string
+}
+export interface TaskWakeSkippedData {
+  wakeId: string
+  /** Why it is still waiting (`WakeSkipReason` in @clawboo/board-core), or `finished`
+   *  when the task closed first and the wake was settled. */
+  reason: string
+  /** Why it was saved. */
+  wakeReason: string
+}
+export interface TaskWakeGivenUpData {
+  wakeId: string
+  wakeReason: string
+  replays: number
+}
+export interface TaskBrakedData {
+  /** Runs in a row with no visible progress. */
+  runs: number
+  /** When the next automatic start may happen (epoch ms). */
+  until: number
 }
 export interface DepLinkedData {
   dependsOnTaskId: string
@@ -333,6 +364,10 @@ export interface KindToData {
   turn_bound_hit: TurnBoundHitData
   grant_decision: GrantDecisionData
   connector_health: ConnectorHealthData
+  task_wake_recorded: TaskWakeRecordedData
+  task_wake_skipped: TaskWakeSkippedData
+  task_wake_given_up: TaskWakeGivenUpData
+  task_braked: TaskBrakedData
 }
 
 /** A producer-side typed event: the envelope minus the server-assigned bits, plus

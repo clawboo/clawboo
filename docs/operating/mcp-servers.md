@@ -195,6 +195,8 @@ HTTP attach is built for agents on the same machine as Clawboo. For an agent som
 
 The four bins come with the `clawboo` npm package, which needs Node.js 22.12 or newer. A bin talks over its standard input and output, so it needs no running server and no access token. It opens the database named by `CLAWBOO_DB_PATH`, which by default is a different file from the server's (see [Data and state](/operating/data-and-state)). The stdio snippet sets it for you:
 
+A board write from a bin goes straight to the database, in its own process, so the server's in-process board bus does not hear it. A task moved to Done saves its dependents' wakes in that same write, and they go out at the server's next pump pass, up to a minute later, rather than within seconds as they do for the HTTP Tasks server.
+
 ```bash
 curl -s 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&transport=stdio'
 ```

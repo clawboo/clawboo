@@ -83,6 +83,7 @@ const PINNED_FEATURES = [
   'board.readableIds',
   'board.labels',
   'board.inbox',
+  'board.wakes',
   'workspace.view',
   'workspace.preview',
   'agent.nativeShell',

@@ -34,6 +34,7 @@ import {
   packInboxRows,
   splitInboxByAddressing,
   setSetting,
+  adoptTaskWakes,
   startTaskHeartbeat,
   updateTaskFields,
   type BudgetRefusalReason,
@@ -56,6 +57,7 @@ import { classifyError, isHarnessBug } from '@clawboo/obs'
 import {
   buildTurnEnvelope,
   classifyTurn,
+  BUDGET_REFUSED_CODE,
   DeliveryRefusedError,
   isChatVisible,
   isTeamSessionKey,
@@ -204,6 +206,9 @@ export interface ServerDeliverDeps {
    *  resolved (it waited in the queue) could not start its run. Called only for
    *  one that carries report-ups. */
   onRunNotStarted?: (run: RunStamp) => void
+  /** The engine's `takeHeldReportUps`: what a person's Stop held for this agent's
+   *  next run, as text for the context a run starts with. */
+  takeHeldReportUps?: (sessionKey: string) => { ids: string[]; text: string } | null
   /** The engine's `taskForSession`, used to attribute a delegated run's mission
    *  spend, as framing's second witness, and by the start gate to check that a
    *  task run's session still holds its task. */
@@ -914,10 +919,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // immediately before it calls deliver, with no await between), and whether the
     // turn is a follow-up report. Chat visibility follows from the origin alone.
     const deliveredGen = stopGen()
-    const runTaskId =
-      origin.kind === 'delegation' || origin.kind === 'assignment'
-        ? taskForSession(targetSessionKey)
-        : null
+    const isTaskRunOrigin =
+      origin.kind === 'delegation' || origin.kind === 'assignment' || origin.kind === 'wake'
+    const runTaskId = isTaskRunOrigin ? taskForSession(targetSessionKey) : null
     // The run's own execution row, read with its task: the engine opens it right
     // before it calls deliver, and forgets it when the run ends.
     const runExecId = runTaskId !== null ? execForSession(targetSessionKey) : null
@@ -931,11 +935,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // The durable report-ups a `[Task Update]` carries ride the stamp, so the
     // engine settles them when THIS run ends, not whichever run ends next.
     const reportUpIds = origin.kind === 'system' ? origin.reportUpIds : undefined
+    const wakeIds = origin.kind === 'wake' ? origin.wakeIds : undefined
     const stamp: RunStamp = {
       reportForTaskId,
       stopGen: deliveredGen,
       deliveryId: randomUUID(),
       ...(reportUpIds?.length ? { reportUpIds } : {}),
+      // The run stamped on the task's claim, and the saved wakes it carries: both
+      // ride every event of this run back to the engine.
+      ...(runExecId !== null ? { execId: runExecId } : {}),
+      ...(wakeIds?.length ? { wakeIds: [...wakeIds] } : {}),
     }
     // A follow-up holds work too: it neither resumes the agent's user-facing
     // session nor overwrites its pointer.
@@ -949,6 +958,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const refusal = (): 'stopped' | 'released' | null => {
       if (stopGen() !== deliveredGen) return 'stopped'
       if (runTaskId !== null && taskForSession(targetSessionKey) !== runTaskId) return 'released'
+      // The same task, but the engine has opened a newer run for it: one live run.
+      if (runExecId !== null && execForSession(targetSessionKey) !== runExecId) return 'released'
       return null
     }
     // Volatile-tier team context: rules + the user's self-intro + the live roster
@@ -972,6 +983,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // prompt cache, and everything that changes from run to run comes after it.
     const renderWaiting = (
       ticketBlock: string | null,
+      heldUpdate: string | null,
     ): {
       teamContext: string | null
       digestIds: string[]
@@ -1015,7 +1027,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         ],
       })
       return {
-        teamContext: [baseTeamContext, ticketBlock, envelope].filter(Boolean).join('\n\n') || null,
+        teamContext:
+          [baseTeamContext, ticketBlock, heldUpdate, envelope].filter(Boolean).join('\n\n') || null,
         // Only rows that actually FIT get marked — a row truncated out of the
         // budget was not delivered and rides the next digest.
         digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
@@ -1230,6 +1243,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // pointer on the terminal, with the brief's ticket hash. Set by
           // `renderRunContext`.
           let seenAt = 0
+          /** Report-ups a Stop held that this run took at render (see below). */
+          let heldReportUpIds: string[] = []
+          /** The run will not start after all: what it took at render goes back. Its
+           *  wakes go back when the engine closes its execution. */
+          const giveBackHeldReportUps = (): void => {
+            if (heldReportUpIds.length > 0)
+              deps.onRunNotStarted?.({
+                reportForTaskId,
+                stopGen: deliveredGen,
+                reportUpIds: heldReportUpIds,
+              })
+            heldReportUpIds = []
+          }
           /**
            * The context the run starts with: the stable preamble, a task run's
            * ticket block, then what is waiting. Called inside runJob, with the
@@ -1245,9 +1271,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (
               runTaskId !== null &&
               isTeamSessionKey(targetSessionKey) &&
-              (origin.kind === 'delegation' || origin.kind === 'assignment')
+              (origin.kind === 'delegation' ||
+                origin.kind === 'assignment' ||
+                origin.kind === 'wake')
             ) {
               try {
+                // Whatever waits on the task rides this run, with no wake of its
+                // own: a comment that came while it waited for a slot or the lock, a
+                // comment that waited through a check, a wake a Stop held. Taken
+                // BEFORE the block is read, so what comes after waits in a new row.
+                if (runExecId !== null) {
+                  const taken = adoptTaskWakes(db, runTaskId, runExecId).map((w) => w.id)
+                  if (taken.length > 0)
+                    stamp.wakeIds = [...new Set([...(stamp.wakeIds ?? []), ...taken])]
+                }
                 ticketBlock = buildTicketBlock(db, targetAgentId, {
                   taskId: runTaskId,
                   execId: runExecId,
@@ -1267,7 +1304,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
               }
             }
-            return renderWaiting(ticketBlock)
+            // Report-ups a person's Stop held for this agent's next run: this one.
+            const held = isTeamSessionKey(targetSessionKey)
+              ? (deps.takeHeldReportUps?.(targetSessionKey) ?? null)
+              : null
+            if (held) {
+              heldReportUpIds = held.ids
+              stamp.reportUpIds = [...(stamp.reportUpIds ?? []), ...held.ids]
+            }
+            return renderWaiting(ticketBlock, held?.text ?? null)
           }
 
           // The resume pointer to update on the terminal. Threaded into the drain
@@ -1382,7 +1427,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const ending: RuntimeEvent =
               outcome === 'stopped'
                 ? { ...base, kind: 'done', reason: 'aborted', summary: '' }
-                : { ...base, kind: 'error', code: null, message: outcome.message, fatal: true }
+                : {
+                    ...base,
+                    kind: 'error',
+                    code:
+                      outcome instanceof DeliveryRefusedError && outcome.budget
+                        ? BUDGET_REFUSED_CODE
+                        : null,
+                    message: outcome.message,
+                    fatal: true,
+                  }
             try {
               await onEvent(targetSessionKey, ending, stamp)
             } catch (err) {
@@ -1452,7 +1506,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 budgetNoticeShown.add(targetAgentId)
                 deps.persistMeta?.(targetSessionKey, text)
               }
-              settleFailed(new DeliveryRefusedError(text))
+              settleFailed(new DeliveryRefusedError(text, { budget: true }))
             }
             if (budget.blocked) {
               refuseForBudget(budget.scope, budget.reason)
@@ -1486,6 +1540,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const finalGate = hold.recheck()
             if (finalGate.blocked) {
               hold.release()
+              giveBackHeldReportUps()
               refuseForBudget(finalGate.scope, finalGate.reason)
               return
             }
@@ -1516,6 +1571,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               // Nothing ran, so nothing was spent: the hold goes before the engine
               // hears about it.
               hold.release()
+              giveBackHeldReportUps()
               // Gate 2: a start that threw after a Stop or a release is not a
               // failure of whatever task holds the session now.
               const why = refusal()
@@ -1544,6 +1600,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             const after = refusal()
             if (after) {
               hold.release()
+              giveBackHeldReportUps()
               // A delivery settled early has to tell the engine itself that a Stop
               // ended it.
               if (!settledEarly) started()
@@ -1641,11 +1698,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // sibling run), adapter start, and every silent stretch of the drain.
           // Beat = this process owns the delivery; the interval dies with the
           // process, which is exactly what the minutes-scale stale sweep reads.
-          // Delegated task runs only (a leader/user turn has no task row).
-          const beatTaskId = taskForSession(targetSessionKey)
-          const stopBeat = beatTaskId
-            ? startTaskHeartbeat(db, beatTaskId, { assigneeAgentId: targetAgentId })
-            : (): void => undefined
+          // Task runs only (a leader/user turn has no task row), and it matches this
+          // run's own execution, so an older run cannot keep a newer one looking alive.
+          const stopBeat =
+            runTaskId !== null
+              ? startTaskHeartbeat(db, runTaskId, {
+                  assigneeAgentId: targetAgentId,
+                  execId: runExecId,
+                })
+              : (): void => undefined
           const runWithSlot = (slot: RunSlot): void => {
             runSlot = slot
             void job()

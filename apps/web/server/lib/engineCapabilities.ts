@@ -127,6 +127,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.readableIds': true,
     'board.labels': true,
     'board.inbox': true,
+    // Part of the board's own writes and the dispatch pump, so it has no route of its
+    // own and no switch. What a comment did is in its reply's `delivery`.
+    'board.wakes': true,
     'workspace.view': true,
     'workspace.preview': true,
     'agent.nativeShell': true,

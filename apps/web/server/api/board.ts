@@ -10,6 +10,7 @@ import { existsSync } from 'node:fs'
 
 import {
   clampAgentTaskPriority,
+  commentMayWake,
   delegationTargetOf,
   encodeHumanAssignment,
 } from '@clawboo/board-core'
@@ -39,6 +40,7 @@ import {
   listExecutions,
   listTasks,
   provisionWorkspaceBody,
+  listWaitingTaskWakes,
   readTaskRunnerInputs,
   runCostForTasks,
   runOwnWrite,
@@ -54,6 +56,7 @@ import {
   setTaskLabels,
   taskLabelsBody,
   type ClawbooDb,
+  wakeCommentIds,
   type DbTask,
   type TaskLabel,
   type TaskRunCost,
@@ -67,15 +70,13 @@ import { personField, personOf } from '../lib/auth'
 import { ownWriterOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { isDashboardRequest } from '../lib/dashboardRequest'
+import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
-import {
-  cancelRunnerRerun,
-  requestRunnerRerun,
-  runnerRerunFor,
-  type RunnerRerun,
-} from '../lib/runnerRerun'
+import { runnerRerunFor } from '../lib/runnerRerun'
 import { taskRunSteering } from '../lib/runSteers'
+import { runnerTargetOf } from '../lib/runnerRoute'
+import { startTask } from '../lib/startBoardTask'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
@@ -156,6 +157,8 @@ export function boardGetGET(req: Request, res: Response): void {
         // How the run on it takes a comment right now, for the composer's hint.
         runSteering: taskRunSteering(taskId),
         labels: labelsForTasks(db, [taskId]).get(taskId) ?? [],
+        // A saved wake still waiting to reach its agent, and why it waits.
+        pendingWake: pendingWakeOf(db, taskId),
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
@@ -163,6 +166,24 @@ export function boardGetGET(req: Request, res: Response): void {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+}
+
+/** The oldest saved wake still waiting on a task, for the drawer's line saying why:
+ *  its reason, the reason the pump left it waiting (null before the pump has seen
+ *  it), how many comments it carries, and whether a Stop holds it. */
+function pendingWakeOf(
+  db: ClawbooDb,
+  taskId: string,
+): { reason: string; skipReason: string | null; comments: number; held: boolean } | null {
+  const row = listWaitingTaskWakes(db, { taskId, includeHeld: true })[0]
+  return row
+    ? {
+        reason: row.reason,
+        skipReason: row.skipReason,
+        comments: wakeCommentIds(row).length,
+        held: row.heldAt !== null,
+      }
+    : null
 }
 
 /** Each task with why it needs a person (`attention`, null when it does not), so
@@ -323,32 +344,6 @@ export function boardCreatePOST(req: Request, res: Response): void {
   }
 }
 
-/**
- * Start a task a person asked for: through the task runner when `runner` is
- * given, else through its team's chat. Either way, a rerun of this task still
- * waiting to claim it is stopped first, so it cannot claim the task after the
- * run started here.
- */
-function startTask(
-  db: ClawbooDb,
-  taskId: string,
-  teamId: string | null,
-  runner: { agentId: string; rerun: RunnerRerun } | null,
-  mcpBaseUrl: string | null,
-): void {
-  cancelRunnerRerun(taskId)
-  if (runner) {
-    requestRunnerRerun(db, {
-      taskId,
-      assigneeAgentId: runner.agentId,
-      rerun: runner.rerun,
-      mcpBaseUrl,
-    })
-  } else if (teamId) {
-    requestTaskDispatch(teamId, taskId, mcpBaseUrl)
-  }
-}
-
 // ─── PUT /api/board/:taskId/labels ──────────────────────────────────────────
 // Body: { labelIds }. Replaces the task's labels, all from its own team's. A person's
 // call, so it must come from the dashboard's own page.
@@ -454,7 +449,7 @@ export function boardRetryPOST(req: Request, res: Response): void {
       })
     }
     runOwnWrite(db, ownWriterOf(req), taskId, () =>
-      addComment(db, taskId, 'Retry requested.', 'user'),
+      addComment(db, taskId, 'Retry requested.', 'user', null, { kind: 'note' }),
     )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
@@ -536,7 +531,7 @@ export function boardAssignPOST(req: Request, res: Response): void {
       }
     }
     runOwnWrite(db, ownWriterOf(req), taskId, () =>
-      addComment(db, taskId, `Assigned to ${member.name}.`, 'user'),
+      addComment(db, taskId, `Assigned to ${member.name}.`, 'user', null, { kind: 'note' }),
     )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.json({ ok: true, task: getTask(db, taskId) })
@@ -712,9 +707,16 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         : parsed.data.authorType
     const ownWriter = ownWriterOf(req)
     const comment = runOwnWrite(db, authorType === 'user' ? ownWriter : null, taskId, () =>
-      addComment(db, taskId, parsed.data.body, authorType, parsed.data.authorAgentId, {
-        person: personOf(req),
-      }),
+      addComment(
+        db,
+        taskId,
+        parsed.data.body,
+        authorType,
+        parsed.data.authorAgentId,
+        // Set here, by the writer: a person's comment is one the dashboard's own page
+        // sent. What may wake an agent is read from this, never from the author type.
+        { person: personOf(req), ...(authorType === 'user' ? { kind: 'person' as const } : {}) },
+      ),
     )
     emitEvent(db, {
       kind: 'comment_added',
@@ -733,33 +735,28 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         task.teamId,
         `${author} on "${task.title}": ${parsed.data.body.slice(0, 160)}`,
       )
-      // A person's comment is a reply to the agent the task belongs to: deliver
-      // it, starting the task again when it waits on the person, and say where
-      // it went (see personReply).
-      if (authorType === 'user') {
+      // A comment that may wake its agent is a reply to the agent the task belongs
+      // to: deliver it, starting the task again when it waits on the person, and say
+      // where it went (see personReply). Any other comment wakes no one.
+      if (commentMayWake(comment)) {
         const mcpBaseUrl = loopbackMcpBaseUrl(req)
         try {
-          /** The run the reply would start: through the runner, as Retry does,
-           *  for a task the runner ran (named by its binding, or else by what the
-           *  runner was last given); null for team chat. */
-          const rerunOf = (t: DbTask) => {
-            const agentId =
-              delegationTargetOf(t.sourceDelegationId) ??
-              readTaskRunnerInputs(t)?.assigneeAgentId ??
-              null
-            const rerun = agentId ? runnerRerunFor(db, t, agentId) : null
-            return agentId && rerun ? { agentId, rerun } : null
-          }
-          delivery = await deliverPersonReply(db, task, parsed.data.body, {
-            dispatch: (teamId, id) => {
-              const current = getTask(db, id)
-              startTask(db, id, teamId, current ? rerunOf(current) : null, mcpBaseUrl)
+          delivery = await deliverPersonReply(
+            db,
+            task,
+            { id: comment.id, body: parsed.data.body },
+            {
+              dispatch: (teamId, id) => {
+                const current = getTask(db, id)
+                startTask(db, id, teamId, current ? runnerTargetOf(db, current) : null, mcpBaseUrl)
+              },
+              // As Retry: team chat could not run a task its engine cannot see.
+              startRefusal: (t) => (runnerTargetOf(db, t) ? null : engineRefusal(db, t)),
+              held: engineHeld,
+              // Restarting it for the reply is part of the person's own write.
+              asOwnWrite: (write) => runOwnWrite(db, ownWriter, taskId, write),
             },
-            // As Retry: team chat could not run a task its engine cannot see.
-            startRefusal: (t) => (rerunOf(t) ? null : engineRefusal(db, t)),
-            // Restarting it for the reply is part of the person's own write.
-            asOwnWrite: (write) => runOwnWrite(db, ownWriter, taskId, write),
-          })
+          )
         } catch (err) {
           // The comment is saved: say it was not delivered rather than fail the
           // request, which would have the person send it a second time.

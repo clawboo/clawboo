@@ -6,6 +6,8 @@
 // write is logged and the report-up still goes out from memory, as before.
 
 import {
+  holdReportUps,
+  listHeldReportUps,
   listPendingReportUps,
   markReportUpsReplayed,
   recordReportUp,
@@ -42,7 +44,7 @@ export function createReportUpOutbox(
   roomId: string | null,
 ): ReportUpOutbox {
   return {
-    record(item) {
+    record(item, opts) {
       try {
         return recordReportUp(db, {
           teamId,
@@ -50,6 +52,7 @@ export function createReportUpOutbox(
           recipientAgentId: item.toAgentId,
           taskId: item.taskId ?? null,
           payload: JSON.stringify(item),
+          ...(opts?.held ? { held: true } : {}),
         })
       } catch (err) {
         log.error({ err, teamId, roomId }, 'report-up outbox write failed')
@@ -82,6 +85,33 @@ export function createReportUpOutbox(
       } catch (err) {
         log.error({ err, teamId, roomId }, 'report-up replay count failed')
         return false
+      }
+    },
+    hold(ids) {
+      try {
+        holdReportUps(db, ids)
+        return true
+      } catch (err) {
+        log.error({ err, teamId, roomId }, 'report-up hold failed')
+        return false
+      }
+    },
+    held() {
+      try {
+        const out: Array<{ id: string; item: ReportUp }> = []
+        for (const row of listHeldReportUps(db, teamId, roomId)) {
+          const item = parseReportUp(row.payload)
+          if (item) {
+            out.push({ id: row.id, item })
+            continue
+          }
+          log.error({ teamId, roomId, id: row.id }, 'unreadable report-up dropped')
+          settleReportUps(db, [row.id], 'gave_up')
+        }
+        return out
+      } catch (err) {
+        log.error({ err, teamId, roomId }, 'report-up outbox read failed')
+        return []
       }
     },
     settle(ids, how) {

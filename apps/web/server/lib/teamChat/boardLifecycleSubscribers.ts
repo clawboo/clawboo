@@ -19,22 +19,33 @@
 //      for a delegated task is also pushed mid-run through the adapter's
 //      writeContext seam (ambient FYI; the engine's `[Task Update]` remains the
 //      actionable envelope).
+//   5. Saved wakes: a wake saved on a task (a person's comment, a dependency moving
+//      to done), or a run ending or a task being released that may free one, gets
+//      the wake pump within seconds instead of the 60-s interval. The bus is
+//      in-process, so a done an MCP stdio bin wrote saves its wake but waits for the
+//      interval. A task released with the no-progress brake engaged says so.
 //
 // Registered once at boot. Every handler is best-effort and synchronous-cheap;
 // anything heavier (the pump) is debounced and detached.
 
+import { brakeUntil, trailingNoProgressRuns } from '@clawboo/board-core'
 import {
+  addComment,
   enqueueInbox,
   getTask,
   isTaskRunnerRun,
+  listExecutions,
   listUndeliveredInbox,
+  listWaitingTaskWakes,
   onBoardLifecycle,
   type BoardLifecycleEvent,
+  type ClawbooDb,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 
 import { getDb } from '../db'
 import { engineHeld } from '../engineHold'
+import { emitEvent } from '../obs'
 import { recipientFor } from './inboxNotices'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { clearTaskSessionPointers } from './taskSessionPointers'
@@ -75,6 +86,29 @@ function schedulePump(teamId: string, taskId: string, mcpBaseUrl: string | null)
   pendingPumps.set(key, t)
 }
 
+/** At most one wake pass per window, however many events ask for one. */
+let wakePass: ReturnType<typeof setTimeout> | null = null
+const WAKE_PASS_DEBOUNCE_MS = 2_000
+
+/** A released task the no-progress brake now holds back says so on its card, once
+ *  per release. It is not in Needs you: it starts again by itself. */
+function noteBrake(db: ClawbooDb, taskId: string, teamId: string | null): void {
+  const execs = listExecutions(db, taskId)
+  const until = brakeUntil(execs)
+  if (until === null || until <= Date.now()) return
+  const runs = trailingNoProgressRuns(execs)
+  const minutes = Math.max(1, Math.round((until - Date.now()) / 60_000))
+  emitEvent(db, { kind: 'task_braked', taskId, teamId, data: { runs, until } })
+  addComment(
+    db,
+    taskId,
+    `The last ${runs} runs on this task made no visible progress, so it waits ${minutes} minute${minutes === 1 ? '' : 's'} before it starts again by itself. A comment from you starts it now.`,
+    'system',
+    null,
+    { kind: 'note' },
+  )
+}
+
 function statusForSse(
   ev: BoardLifecycleEvent,
 ): { status?: string; assigneeAgentId?: string | null } | null {
@@ -100,11 +134,47 @@ function statusForSse(
 let registered = false
 
 /** Register all subscribers (idempotent; called once from boot). */
-export function registerBoardLifecycleSubscribers(opts: { mcpBaseUrl: string | null }): void {
+export function registerBoardLifecycleSubscribers(opts: {
+  mcpBaseUrl: string | null
+  /** One pass of the wake pump (see ./taskWakes). */
+  pumpWakes?: () => void
+}): void {
   if (registered) return
   registered = true
 
+  const scheduleWakePass = (): void => {
+    if (wakePass || !opts.pumpWakes) return
+    wakePass = setTimeout(() => {
+      wakePass = null
+      opts.pumpWakes?.()
+    }, WAKE_PASS_DEBOUNCE_MS)
+    ;(wakePass as { unref?: () => void }).unref?.()
+  }
+
   onBoardLifecycle((ev) => {
+    // 5. Saved wakes. Written first and alone, so nothing below can skip them.
+    try {
+      if (ev.kind === 'task_wake_recorded') {
+        emitEvent(getDb(), {
+          kind: 'task_wake_recorded',
+          taskId: ev.taskId,
+          teamId: ev.teamId,
+          data: { reason: ev.reason },
+        })
+        scheduleWakePass()
+      } else if (ev.kind === 'task_released') {
+        if (ev.via !== 'release') noteBrake(getDb(), ev.taskId, ev.teamId)
+        scheduleWakePass()
+      } else if (
+        ev.kind === 'execution_completed' &&
+        listWaitingTaskWakes(getDb(), { taskId: ev.taskId }).length > 0
+      ) {
+        scheduleWakePass()
+      }
+    } catch (err) {
+      log.error({ err, taskId: ev.taskId, kind: ev.kind }, 'saved-wake subscriber failed')
+    }
+
     // 1. SSE forward — live cards for mutations from every path. Duplicate
     // patches with the engine's own onBoardChange are harmless (idempotent
     // client patch, the documented convergence property).
@@ -246,4 +316,6 @@ export function resetBoardLifecycleRegistration(): void {
   registered = false
   for (const t of pendingPumps.values()) clearTimeout(t)
   pendingPumps.clear()
+  if (wakePass) clearTimeout(wakePass)
+  wakePass = null
 }

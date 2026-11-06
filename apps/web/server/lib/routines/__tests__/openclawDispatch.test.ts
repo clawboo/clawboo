@@ -16,6 +16,7 @@ import {
   agents,
   budgetReservations,
   createDb,
+  adoptTaskWakes,
   createTask,
   getComments,
   getTask,
@@ -33,6 +34,8 @@ import {
   type ClawbooDb,
   type DbAgent,
   type DbScheduledRun,
+  listWaitingTaskWakes,
+  recordTaskWake,
 } from '@clawboo/db'
 import { createAsyncQueue } from '@clawboo/executor'
 import type { TaskTemplate } from '@clawboo/scheduler'
@@ -1037,6 +1040,25 @@ describe('dispatchConnectedSubstrate', () => {
       expect(listExecutions(db, taskId)[0]?.status).toBe('cancelled')
     })
 
+    it('holds a saved wake the run carried, because a person ended it', async () => {
+      const { taskId, outcome } = await startSilentRun()
+      const wake = recordTaskWake(db, {
+        teamId: 'team-1',
+        agentId: 'agent-1',
+        taskId,
+        reason: 'person_comment',
+      })
+      adoptTaskWakes(db, taskId, listExecutions(db, taskId)[0]!.id)
+
+      updateStatus(db, taskId, 'todo', { actor: 'person' })
+      noteHumanMove(db, { taskId, teamId: 'team-1', from: 'in_progress', to: 'todo' })
+      await outcome
+
+      const row = listWaitingTaskWakes(db, { includeHeld: true }).find((w) => w.id === wake.id)
+      expect(row?.heldAt).not.toBeNull()
+      expect(row?.replays).toBe(0)
+    })
+
     it('leaves a run on another task alone', async () => {
       const { taskId, outcome } = await startSilentRun()
       noteHumanMove(db, { taskId: 'another-task', teamId: 'team-1', from: 'todo', to: 'cancelled' })
@@ -1160,6 +1182,7 @@ describe('budget holds on a scheduled OpenClaw fire', () => {
     expect(listExecutions(db, taskId)[0]).toMatchObject({
       status: 'cancelled',
       error: 'budget_paused:agent',
+      errorClass: 'BudgetRefused',
     })
     expect(holds()).toEqual([])
   })

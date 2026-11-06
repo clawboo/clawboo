@@ -1,6 +1,6 @@
 // A person's comment on a task reaches the agent doing it: POST
-// /api/board/:taskId/comments with authorType 'user' puts the comment in the
-// assignee's mailbox (read when its next run starts) and steers the run working
+// /api/board/:taskId/comments with authorType 'user' saves a wake on the task (the
+// run it brings reads the comment in its ticket block) and steers the run working
 // on the task right now, when one is registered. A finished task, an unassigned
 // one, and an agent's own comment forward nothing.
 //
@@ -24,6 +24,10 @@ import {
   getTask,
   linkDep,
   listUndeliveredInbox,
+  listTaskWakesCarriedBy,
+  listWaitingTaskWakes,
+  setTaskRunnerInputs,
+  wakeCommentIds,
   teams,
   updateStatus,
 } from '@clawboo/db'
@@ -39,10 +43,11 @@ vi.mock('../../lib/teamChat/boardDispatch', () => ({
   },
 }))
 
-const { getDb, resetDb } = await import('../../lib/db')
+const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const { boardCommentPOST } = await import('../board')
 const { registerRunSteer, resetRunSteers } = await import('../../lib/runSteers')
-const { resetReplyWakes } = await import('../../lib/teamChat/personReply')
+const { resetCommentSteers } = await import('../../lib/teamChat/taskSteer')
+const { engineHold } = await import('../../lib/engineHold')
 
 /** A running task's live run, as the runner/engine registers it. */
 function registerRun(taskId: string): { steers: string[]; release: () => void } {
@@ -109,14 +114,18 @@ const TEAM = 'T'
 describe('board: a person commenting on a task', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-board-comment-'))
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     resetRunSteers()
-    resetReplyWakes()
+    resetCommentSteers()
     dispatched.length = 0
     dispatchFails.on = false
     const db = getDb()
@@ -147,37 +156,155 @@ describe('board: a person commenting on a task', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
   })
 
   function runningTask(): string {
     const db = getDb()
     const task = createTask(db, { title: 'Write the post', teamId: TEAM, status: 'todo' })
-    expect(claimTask(db, task.id, 'coder').ok).toBe(true)
+    expect(claimTask(db, task.id, 'coder', 'codex', { run: { executorType: 'openclaw' } }).ok).toBe(
+      true,
+    )
     return task.id
   }
 
-  it('puts the comment in the assignee’s mailbox', async () => {
+  it('saves a wake for the assignee, and writes no mailbox copy to read twice', async () => {
     const taskId = runningTask()
     const r = await comment(taskId, 'Lead with the pricing change.')
     expect(r.statusCode()).toBe(200)
     expect((r.body() as { forwarded: boolean }).forwarded).toBe(true)
-    const rows = listUndeliveredInbox(getDb(), 'coder', { teamId: TEAM })
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.taskId).toBe(taskId)
-    expect(rows[0]?.body).toContain('Lead with the pricing change.')
+    const [wake] = listWaitingTaskWakes(getDb())
+    expect(wake?.taskId).toBe(taskId)
+    expect(wake?.agentId).toBe('coder')
+    expect(wake?.reason).toBe('person_comment')
+    const posted = (r.body() as { comment: { id: string; kind: string } }).comment
+    expect(posted.kind).toBe('person')
+    expect(wakeCommentIds(wake!)).toEqual([posted.id])
+    expect(listUndeliveredInbox(getDb(), 'coder', { teamId: TEAM })).toEqual([])
   })
 
-  it('steers the run working on the task, and the mailbox copy is marked delivered', async () => {
+  it('a task the runner runs has no ticket block, so its comment goes in the mailbox', async () => {
+    const db = getDb()
+    db.insert(agents)
+      .values({
+        id: 'runner-agent',
+        name: 'Runner',
+        gatewayId: 'runner-agent',
+        sourceId: 'codex',
+        runtime: 'codex',
+        teamId: TEAM,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .run()
+    const task = createTask(db, {
+      title: 'Runner task',
+      teamId: TEAM,
+      sourceDelegationId: encodeHumanAssignment('runner-agent', 'n1'),
+    })
+    setTaskRunnerInputs(db, task.id, {
+      runtime: 'codex',
+      assigneeAgentId: 'runner-agent',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    expect(claimTask(db, task.id, 'runner-agent').ok).toBe(true)
+    await comment(task.id, 'Use the new logo.')
+    const rows = listUndeliveredInbox(db, 'runner-agent', { teamId: TEAM })
+    expect(rows.map((r) => r.taskId)).toEqual([task.id])
+    expect(rows[0]?.body).toContain('Use the new logo.')
+    // It reads that at its next run: no wake is left to start a second one.
+    expect(listWaitingTaskWakes(db)).toEqual([])
+  })
+
+  it('steers the run working on the task, and what it heard is not left waiting', async () => {
     const taskId = runningTask()
     const run = registerRun(taskId)
     await comment(taskId, 'Keep it short.')
     await settle()
     expect(run.steers).toHaveLength(1)
     expect(run.steers[0]).toContain('Keep it short.')
-    // Taken live, so the agent will not read it a second time at its next run.
-    expect(listUndeliveredInbox(getDb(), 'coder', { teamId: TEAM })).toHaveLength(0)
+    // Taken live, so no later turn carries it a second time. It counts as heard
+    // only when this run ends: the run carries it until then.
+    expect(listWaitingTaskWakes(getDb())).toEqual([])
+    const carried = listTaskWakesCarriedBy(getDb(), getTask(getDb(), taskId)!.runExecutionId!)
+    expect(carried).toHaveLength(1)
+    expect(carried[0]!.settledAt).toBeNull()
+    expect(
+      getComments(getDb(), taskId).find((c) => c.body === 'Keep it short.')?.steeredAt,
+    ).toBeTruthy()
     run.release()
+  })
+
+  it('a comment too long for a steer says so, names get_task, and stays waiting for the next turn', async () => {
+    const taskId = runningTask()
+    const run = registerRun(taskId)
+    const long = `${'a'.repeat(3_000)}the part past the cut`
+    await comment(taskId, long)
+    await settle()
+    expect(run.steers).toHaveLength(1)
+    expect(run.steers[0]).not.toContain('the part past the cut')
+    expect(run.steers[0]).toMatch(/cut: 2021 more characters/)
+    expect(run.steers[0]).toContain('get_task')
+    // The agent has only part of it, so it is not heard.
+    const [wake] = listWaitingTaskWakes(getDb())
+    expect(wakeCommentIds(wake!)).toHaveLength(1)
+    expect(getComments(getDb(), taskId).find((c) => c.body === long)?.steeredAt).toBeNull()
+    run.release()
+  })
+
+  it('a task the runner ran with no agent binding (a routine, a direct run) also gets the mailbox', async () => {
+    const db = getDb()
+    db.insert(agents)
+      .values({
+        id: 'direct-agent',
+        name: 'Direct',
+        gatewayId: 'direct-agent',
+        sourceId: 'codex',
+        runtime: 'codex',
+        teamId: TEAM,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })
+      .run()
+    const task = createTask(db, { title: 'Direct run', teamId: TEAM })
+    setTaskRunnerInputs(db, task.id, {
+      runtime: 'codex',
+      assigneeAgentId: 'direct-agent',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    expect(claimTask(db, task.id, 'direct-agent').ok).toBe(true)
+    expect(updateStatus(db, task.id, 'blocked').ok).toBe(true)
+    const r = await comment(task.id, 'Use the staging DB.')
+    expect(deliveryOf(r).status).toBe('woke-agent')
+    // The runner reads only the mailbox at the start of a run, so this is what reaches it.
+    const rows = listUndeliveredInbox(db, 'direct-agent', { teamId: TEAM })
+    expect(rows.map((row) => row.body).join('\n')).toContain('Use the staging DB.')
+  })
+
+  it("an agent's comment on a task waiting on a person starts nothing, through the real route", async () => {
+    const db = getDb()
+    const taskId = boundTask()
+    expect(claimTask(db, taskId, 'coder').ok).toBe(true)
+    expect(updateStatus(db, taskId, 'blocked').ok).toBe(true)
+    const r = await comment(taskId, 'please retry', 'agent')
+    expect((r.body() as { delivery?: unknown }).delivery).toBeUndefined()
+    expect((r.body() as { comment: { kind: string | null } }).comment.kind).toBeNull()
+    expect(listWaitingTaskWakes(db)).toEqual([])
+    expect(dispatched).toEqual([])
+    expect(getTask(db, taskId)?.status).toBe('blocked')
+  })
+
+  it("an agent's comment is not labelled a person's, and wakes no one", async () => {
+    const taskId = runningTask()
+    const r = await comment(taskId, 'An agent says so.', 'agent')
+    expect((r.body() as { comment: { kind: string | null } }).comment.kind).toBeNull()
+    expect(listWaitingTaskWakes(getDb())).toEqual([])
   })
 
   it('forwards nothing for a finished task', async () => {
@@ -264,7 +391,7 @@ describe('board: a person commenting on a task', () => {
     expect(dispatched).toEqual([])
   })
 
-  it('starts a blocked task again for the reply, and the run reads it from the mailbox', async () => {
+  it('starts a blocked task again for the reply, with a wake for its run to take', async () => {
     const db = getDb()
     const taskId = boundTask()
     expect(claimTask(db, taskId, 'coder').ok).toBe(true)
@@ -274,9 +401,7 @@ describe('board: a person commenting on a task', () => {
     expect((r.body() as { forwarded: boolean }).forwarded).toBe(true)
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(dispatched).toEqual([{ teamId: TEAM, taskId }])
-    expect(listUndeliveredInbox(db, 'coder', { teamId: TEAM })[0]?.body).toContain(
-      'Use the staging database.',
-    )
+    expect(listWaitingTaskWakes(db).map((w) => w.taskId)).toEqual([taskId])
     expect(
       (getComments(db, taskId) as { body: string; authorType: string }[]).some(
         (c) => c.authorType === 'system' && c.body.startsWith('Started again'),
@@ -289,7 +414,27 @@ describe('board: a person commenting on a task', () => {
     expect(deliveryOf(await comment(taskId, 'One more thing.')).status).toBe('woke-agent')
     expect(deliveryOf(await comment(taskId, 'And another.')).status).toBe('woke-agent')
     expect(dispatched).toEqual([{ teamId: TEAM, taskId }])
-    expect(listUndeliveredInbox(getDb(), 'coder', { teamId: TEAM })).toHaveLength(2)
+    const waiting = listWaitingTaskWakes(getDb())
+    expect(waiting).toHaveLength(1)
+    expect(waiting[0]?.mergeCount).toBe(2)
+    expect(wakeCommentIds(waiting[0]!)).toHaveLength(2)
+  })
+
+  it('leaves a reply waiting while the engine is held, and says so', async () => {
+    const db = getDb()
+    const taskId = boundTask()
+    expect(claimTask(db, taskId, 'coder').ok).toBe(true)
+    expect(updateStatus(db, taskId, 'blocked').ok).toBe(true)
+    engineHold().place('test-hold', { reason: 'stop' })
+    try {
+      const r = await comment(taskId, 'When you are back.')
+      expect(deliveryOf(r)).toEqual({ status: 'queued', agentId: 'coder', reason: 'held' })
+      expect(getTask(db, taskId)?.status).toBe('blocked')
+      expect(dispatched).toEqual([])
+      expect(listWaitingTaskWakes(db)).toHaveLength(1)
+    } finally {
+      engineHold().release('test-hold')
+    }
   })
 
   it('reaches the agent after a move back to To do cleared the assignee', async () => {

@@ -134,7 +134,7 @@ An external `abortSignal` (the REST handler wires it to the response's `close`) 
 
 ### Steering
 
-The live run is also registered with the per-task steer registry (`registerRunSteer`, `runSteers.ts`), re-pointed on every rotation and fix cycle. A person's comment on the task reaches it through `steerTaskRun` after the comment is written to the agent's mailbox. How each runtime takes a steer is described on [the RuntimeAdapter trait](/internals/runtime-adapter) page.
+The live run is also registered with the per-task steer registry (`registerRunSteer`, `runSteers.ts`), re-pointed on every rotation and fix cycle. A person's comment on the task reaches it through `steerTaskRun` after the comment is written to the agent's mailbox, which is where a task the runner runs reads comments, since it has no ticket block. How each runtime takes a steer is described on [the RuntimeAdapter trait](/internals/runtime-adapter) page.
 
 ### Spend and budgets
 
@@ -166,7 +166,7 @@ The watermark reads input tokens alone, because the prompt is what occupies the 
 
 After the loop exactly one terminal branch runs. Every branch closes the execution row only if it is still `running` (a stale sweep may have closed it first), and emits `execution_completed` only when its close landed.
 
-**Budget pause.** Audit a `budget` row with reason `auto_pause`, add the comment `Auto-paused: <scope> budget reached. Raise the cap (or resume) to continue.`, close the execution `cancelled` with `budget_paused:<scope>`, and release the task to `todo`, ready to retry once someone raises the cap.
+**Budget pause.** Audit a `budget` row with reason `auto_pause`, add the comment `Auto-paused: <scope> budget reached. Raise the cap (or resume) to continue.`, close the execution `cancelled` with `budget_paused:<scope>` and `errorClass` `BudgetRefused` (no person stopped it, so a saved wake it carried goes back to waiting, uncounted), and release the task to `todo`, ready to retry once someone raises the cap.
 
 **Cap reached at the end.** Not a branch of its own. When the cost that crossed a cap came as the run ended (the pass's `done` was not `aborted`, or its characters were priced after it ended on its own), the runner audits a `budget` row with reason `cap_reached_at_end` and adds the comment `Budget cap reached (<scope>) by this run's final cost report. The run had already ended, so what it produced is kept; the next run is refused until you raise the cap or resume.` For the per-run ceiling the comment reads `This run's cost ceiling was reached by its final cost report. The run had already ended, so what it produced is kept.` The run then takes the success or failure branch like any other, and the paused budget refuses the next run at pre-flight.
 
