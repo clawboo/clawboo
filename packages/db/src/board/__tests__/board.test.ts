@@ -183,7 +183,11 @@ describe('orphan reconciliation', () => {
   it('leaves a team-chat check In review to its engine, which tells whoever handed it out', () => {
     const t = createTask(db, { title: 'checked', teamId: 'team1' })
     claimTask(db, t.id, 'agent-a')
-    const exec = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    const exec = createExecutionProcess(db, {
+      taskId: t.id,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     expect(updateStatus(db, t.id, 'in_review').ok).toBe(true)
 
     const reopened = createDb(dbPath)
@@ -197,11 +201,11 @@ describe('orphan reconciliation', () => {
   it('still reaps an engine run In review that no engine could ever pick up', () => {
     const teamless = createTask(db, { title: 'no team' })
     claimTask(db, teamless.id, 'agent-a')
-    createExecutionProcess(db, { taskId: teamless.id, executorType: 'openclaw' })
+    createExecutionProcess(db, { taskId: teamless.id, executorType: 'openclaw', engineRun: true })
     expect(updateStatus(db, teamless.id, 'in_review').ok).toBe(true)
     const dropped = createTask(db, { title: 'dropped', teamId: 'team1' })
     claimTask(db, dropped.id, 'agent-a')
-    createExecutionProcess(db, { taskId: dropped.id, executorType: 'openclaw' })
+    createExecutionProcess(db, { taskId: dropped.id, executorType: 'openclaw', engineRun: true })
     expect(updateStatus(db, dropped.id, 'in_review').ok).toBe(true)
     dropTask(db, dropped.id)
 

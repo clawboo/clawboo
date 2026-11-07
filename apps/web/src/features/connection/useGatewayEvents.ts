@@ -48,6 +48,14 @@ const CONTEXT_OVERFLOW_RE =
   /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|exceeds? (?:the )?(?:maximum )?context|too many tokens|reduce the length of the (?:messages|prompt)/i
 
 /**
+ * A rate limit can use the same words ("too many tokens"), and waiting fixes that one.
+ * Beside the copy above, never inside it. Kept character-for-character with
+ * RATE_LIMIT_MESSAGE_RE in the same server file, for the same reason.
+ */
+const RATE_LIMIT_MESSAGE_RE =
+  /^\s*429\b|\b(?:http|status|error code:?)\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|per[\s_-]?min(?:ute)?\b|\btpm\b|wait before/i
+
+/**
  * The sentence for a Gateway run that ended in `error` having said nothing.
  *
  * PARITY WITH THE SERVER'S `runFailureText`, COPIED RATHER THAN IMPORTED. That
@@ -77,7 +85,7 @@ export function gatewayRunFailureText(reason: string | null | undefined): string
   // The runtime's own advice is "/reset (or /new)", which clears the
   // conversation: the one part that was not the problem. An operator followed it
   // five times.
-  if (CONTEXT_OVERFLOW_RE.test(trimmed)) {
+  if (CONTEXT_OVERFLOW_RE.test(trimmed) && !RATE_LIMIT_MESSAGE_RE.test(trimmed)) {
     return (
       'This run stopped because the runtime believed it was out of context room. ' +
       'That is usually a wrong context-window setting rather than a genuinely oversized prompt: ' +

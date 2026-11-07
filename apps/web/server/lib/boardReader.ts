@@ -9,8 +9,8 @@ import type { Request } from 'express'
 import {
   getTask,
   listTasks,
-  LOCAL_READER,
   markTaskRead,
+  readerOfPerson,
   taskReadStates,
   type ClawbooDb,
   type DbTask,
@@ -29,8 +29,7 @@ const RELEASED_TO = 'todo'
 
 /** Whose read state this request reads. */
 export function readerOf(req: Request): string {
-  const person = personOf(req)
-  return person ? `person:${person.id}` : LOCAL_READER
+  return readerOfPerson(personOf(req))
 }
 
 /**

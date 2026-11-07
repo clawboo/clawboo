@@ -345,10 +345,9 @@ describe('executor runner (real board + real git worktree)', () => {
     expect(broken.join('\n')).toMatch(/No response from the delegate for 8 minutes/)
   })
 
-  it('splits the mailbox into addressed and ambient on the EXECUTOR path too', async () => {
+  it('renders the mailbox as addressed on the EXECUTOR path too', async () => {
     // The same mailbox must not render two different ways depending on which path
-    // woke the agent. This path had no test at all for the digest, so the split
-    // going in here is asserted rather than assumed.
+    // woke the agent.
     const db = getDb()
     const taskId = newCodeTask()
     const update = enqueueInbox(db, {
@@ -357,10 +356,11 @@ describe('executor runner (real board + real git worktree)', () => {
       kind: 'task_update',
       body: 'your sub-task finished: parser done',
     })
-    const fyi = enqueueInbox(db, {
+    // A row of a kind nothing writes any more still reaches the agent, and not as ambient.
+    const older = enqueueInbox(db, {
       agentId: 'codex-1',
       teamId: 'team-1',
-      kind: 'signal',
+      kind: 'signal' as never,
       body: 'Design Boo is touching the same file',
     })
 
@@ -375,15 +375,13 @@ describe('executor runner (real board + real git worktree)', () => {
     })
     const ctx = fake.startedOpts?.context ?? ''
     const addressedAt = ctx.indexOf('[Addressed to you')
-    const ambientAt = ctx.indexOf('[Ambient')
     expect(addressedAt).toBeGreaterThan(-1)
-    expect(ambientAt).toBeGreaterThan(addressedAt)
-    expect(ctx.slice(addressedAt, ambientAt)).toContain('parser done')
-    expect(ctx.slice(ambientAt)).toContain('touching the same file')
-    // Both rendered → both marked, from the one union.
+    expect(ctx.slice(addressedAt)).toContain('parser done')
+    expect(ctx.slice(addressedAt)).toContain('touching the same file')
+    expect(ctx).not.toContain('[Ambient')
     // Per-id: each enqueued row must be gone, not merely "the list is empty".
     const undelivered = listUndeliveredInbox(db, 'codex-1', { teamId: 'team-1' }).map((r) => r.id)
-    for (const id of [update.id, fyi.id]) expect(undelivered).not.toContain(id)
+    for (const id of [update.id, older.id]) expect(undelivered).not.toContain(id)
     expect(undelivered).toEqual([])
   })
 

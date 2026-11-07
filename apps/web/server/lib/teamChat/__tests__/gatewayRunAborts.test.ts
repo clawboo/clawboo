@@ -238,7 +238,7 @@ describe('gateway run aborts', () => {
       }).id
       claimTask(db, task, 'bea')
       // The engine labels every run it drives `openclaw`, whatever the runtime.
-      createExecutionProcess(db, { taskId: task, executorType: 'openclaw' })
+      createExecutionProcess(db, { taskId: task, executorType: 'openclaw', engineRun: true })
       archiveRoom(db, room.id)
     }
 

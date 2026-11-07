@@ -56,6 +56,7 @@ import {
   reconcileOrphans,
   reconcileStaleInProgress,
   recordTaskWake,
+  runOwnWrite,
   reopenTask,
   saveAgentCommentWake,
   setTaskRunnerInputs,
@@ -844,6 +845,39 @@ describe('saved wakes, end to end', () => {
   })
 
   describe("a person's comment", () => {
+    it('a run it starts later reads as theirs, and what the run does next is news', async () => {
+      const task = newTask()
+      updateStatus(db, task.id, 'blocked')
+      const comment = runOwnWrite(db, LOCAL_READER, task.id, () =>
+        personComment(task.id, 'try the other file'),
+      )
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'person_comment',
+        commentIds: [comment.id],
+      })
+      const unread = () => taskReadStates(db, LOCAL_READER).get(task.id)?.unread
+      let duringRun: boolean | undefined
+      script([
+        () => {
+          duringRun = unread()
+        },
+        done('fixed it'),
+      ])
+      pumpTaskWakes(db, pumpDeps({ held: () => true }))
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(started()).toEqual([])
+
+      pumpTaskWakes(db, pumpDeps())
+
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+      expect(duringRun).toBe(false)
+      expect(unread()).toBe(true)
+    })
+
     it('shows once in the run it wakes', async () => {
       const task = newTask()
       updateStatus(db, task.id, 'blocked')

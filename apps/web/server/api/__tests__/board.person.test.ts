@@ -72,6 +72,7 @@ vi.mock('../../lib/teamChat/personWake', async (importOriginal) => {
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const { engineHold } = await import('../../lib/engineHold')
 const {
+  boardAssignPOST,
   boardClaimPOST,
   boardCommentPOST,
   boardCreatePOST,
@@ -529,6 +530,42 @@ describe('a person’s writes on the board', () => {
     const t = createTask(db, { title: 'Mine now', teamId: TEAM, status: 'todo' })
     boardAssignPersonPOST(req({ params: { taskId: t.id }, headers: DASHBOARD }), mockRes().res)
     expect(taskReadStates(db, LOCAL_READER, { taskId: t.id }).get(t.id)?.unread).toBe(false)
+  })
+
+  describe('who asked, on the notes Retry and Assign leave', () => {
+    const noteOf = (taskId: string, body: RegExp) => {
+      const note = getComments(getDb(), taskId).find((c) => body.test(c.body))
+      expect(note).toBeDefined()
+      return note!.person ? (JSON.parse(note!.person) as { id: string }) : null
+    }
+    const bound = () =>
+      createTask(getDb(), { title: 'Retry me', teamId: TEAM, sourceDelegationId: BOUND })
+    const assign = (
+      taskId: string,
+      who: { person: typeof PRIYA } | { headers: typeof DASHBOARD },
+    ) =>
+      boardAssignPOST(req({ params: { taskId }, body: { agentId: 'a1' }, ...who }), mockRes().res)
+
+    it('Retry names the person a proxy vouched for', () => {
+      const t = bound()
+      boardRetryPOST(req({ params: { taskId: t.id }, person: PRIYA }), mockRes().res)
+      expect(noteOf(t.id, /^Retry requested/)).toMatchObject({ id: PRIYA.id })
+    })
+
+    it('Assign names the person a proxy vouched for', () => {
+      const t = bound()
+      assign(t.id, { person: PRIYA })
+      expect(noteOf(t.id, /^Assigned to /)).toMatchObject({ id: PRIYA.id })
+    })
+
+    it('neither names anyone on the dashboard, where nothing vouched for them', () => {
+      const retried = bound()
+      boardRetryPOST(req({ params: { taskId: retried.id }, headers: DASHBOARD }), mockRes().res)
+      expect(noteOf(retried.id, /^Retry requested/)).toBeNull()
+      const assigned = bound()
+      assign(assigned.id, { headers: DASHBOARD })
+      expect(noteOf(assigned.id, /^Assigned to /)).toBeNull()
+    })
   })
 
   describe('one assignee on the other routes', () => {

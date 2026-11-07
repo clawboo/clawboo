@@ -8,7 +8,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   agents,
@@ -221,6 +221,44 @@ describe('team chat work check', () => {
     expect(getTaskVerification(db, id)?.attempts).toHaveLength(2)
   })
 
+  it('counts only the failures when it parks a task, not an earlier pass', async () => {
+    process.env['CLAWBOO_MAX_FIX_CYCLES'] = '1'
+    setCommand('test -f tests-pass')
+    const wc = check()
+    const id = startTask()
+    await wc.begin(id, AGENT)
+    await writeFile(path.join(folder, 'tests-pass'), '')
+    await writeFile(path.join(folder, 'parser.ts'), 'works\n')
+    expect((await runCheck(wc, id))?.verdict).toBe('pass')
+
+    // A person's comment gets a turn before Done, and that turn breaks the check.
+    updateStatus(db, id, 'in_progress')
+    await wc.begin(id, AGENT)
+    await rm(path.join(folder, 'tests-pass'))
+    expect((await runCheck(wc, id))?.verdict).toBe('failed')
+
+    expect(getTaskVerification(db, id)?.attempts).toHaveLength(2)
+    const parked = getComments(db, id)
+      .map((c) => c.body)
+      .filter((b) => /fix loop is exhausted/.test(b))
+    expect(parked).toHaveLength(1)
+    expect(parked[0]).toMatch(/^Verification failed once and the fix loop is exhausted/)
+  })
+
+  it('counts every failure when none of them passed', async () => {
+    process.env['CLAWBOO_MAX_FIX_CYCLES'] = '1'
+    setCommand('test -f tests-pass')
+    const wc = check()
+    const id = startTask()
+    await wc.begin(id, AGENT)
+    await writeFile(path.join(folder, 'parser.ts'), 'broken\n')
+    expect((await runCheck(wc, id))?.verdict).toBe('retry')
+    await writeFile(path.join(folder, 'parser.ts'), 'still broken\n')
+    expect((await runCheck(wc, id))?.verdict).toBe('failed')
+    const parked = getComments(db, id).find((c) => /fix loop is exhausted/.test(c.body))
+    expect(parked?.body).toMatch(/^Verification failed 2 times and/)
+  })
+
   it('measures a fix round from where the task began, not from the first attempt', async () => {
     setCommand('test -f a.txt && test -f b.txt')
     const wc = check()
@@ -358,20 +396,34 @@ describe('team chat work check', () => {
     expect(getTask(db, id)?.status).toBe('blocked')
   })
 
-  // These two need a command that waits, then fails. `sleep 1; exit 1` is POSIX;
-  // under cmd.exe it fails at once, before the move they make mid-check. The
+  // These two need a command that waits, then fails, and that shell loop is POSIX. The
   // engine's handling of a check that is overtaken is the same on every platform.
+  //
+  // The check first runs a few git calls, and only then says which run it speaks for
+  // and moves the card. So the move these tests make waits for the card, and the command
+  // waits for the test: with a fixed sleep, a loaded machine ran the "next run" before
+  // the check had read the task's latest run, and the check took it for its own.
+  const failsWhenReleased = async (id: string, move: () => void): Promise<void> => {
+    await vi.waitFor(() => expect(getTask(db, id)?.status).toBe('in_review'), {
+      timeout: 25_000,
+      interval: 10,
+    })
+    move()
+    await writeFile(path.join(home, 'release-check'), '')
+  }
+  const holdUntilReleased = (): string =>
+    `i=0; until [ -e "${path.join(home, 'release-check')}" ] || [ $i -ge 500 ]; do sleep 0.05; i=$((i+1)); done; exit 1`
+
   it.skipIf(process.platform === 'win32')(
     "keeps a person's move to Blocked made while the check ran",
     async () => {
-      setCommand('sleep 1; exit 1')
+      setCommand(holdUntilReleased())
       const wc = check()
       const id = startTask()
       await wc.begin(id, AGENT)
       await writeFile(path.join(folder, 'parser.ts'), 'x\n')
       const running = runCheck(wc, id)
-      await new Promise((r) => setTimeout(r, 300))
-      updateStatus(db, id, 'blocked') // a person parks it
+      await failsWhenReleased(id, () => updateStatus(db, id, 'blocked')) // a person parks it
 
       expect(await running).toEqual({ verdict: 'decided' })
       expect(getTask(db, id)?.status).toBe('blocked')
@@ -383,16 +435,17 @@ describe('team chat work check', () => {
   it.skipIf(process.platform === 'win32')(
     'records nothing once another run of the task has started',
     async () => {
-      setCommand('sleep 1; exit 1')
+      setCommand(holdUntilReleased())
       const wc = check()
       const id = startTask()
       createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
       await wc.begin(id, AGENT)
       await writeFile(path.join(folder, 'parser.ts'), 'x\n')
       const running = runCheck(wc, id)
-      await new Promise((r) => setTimeout(r, 300))
       // The engine gave up on this check, and the task was run again since.
-      createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+      await failsWhenReleased(id, () => {
+        createExecutionProcess(db, { taskId: id, executorType: 'openclaw' })
+      })
 
       expect(await running).toEqual({ verdict: 'decided' })
       expect(getTaskVerification(db, id)).toBeNull()

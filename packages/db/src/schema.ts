@@ -675,9 +675,13 @@ export const executionProcesses = sqliteTable(
     workspaceId: text('workspace_id').references(() => workspaces.id),
     executorType: text('executor_type').notNull(), // 'openclaw' | 'claude-code' | 'codex' | …
     // The runtime that actually ran, when executor_type records an owner rather than
-    // a runtime: the team engine types every fire 'openclaw', the marker resume()
-    // keys ownership on. Null means executor_type is the runtime.
+    // a runtime: the team engine types every fire 'openclaw'. Null means executor_type
+    // is the runtime.
     runtime: text('runtime'),
+    // Whether the team engine owns this run: 1 or 0. Null on a row from before this
+    // column, which only the engine labelled 'openclaw'. Read through `isEngineRun` in
+    // board-core, never from the label.
+    engineRun: integer('engine_run'),
     // queued | running | succeeded | failed | timed_out | cancelled
     status: text('status').notNull().default('queued'),
     claimedAt: integer('claimed_at'),
@@ -1333,14 +1337,15 @@ export const agentInbox = sqliteTable(
     /** The recipient. */
     agentId: text('agent_id').notNull(),
     // 'task_update' = a delegated/executor task reached a terminal ·
-    // 'alert' = a coordination failure (parked, delivery-exhausted) ·
-    // 'signal' = an FYI peer event worth ambient delivery.
+    // 'alert' = a coordination failure (parked, delivery-exhausted).
+    // Both ask something of the agent. What a peer says in passing reaches it through
+    // the peer room's catch-up instead.
     kind: text('kind').notNull(),
     body: text('body').notNull(),
     taskId: text('task_id'),
     createdAt: integer('created_at').notNull(),
     deliveredAt: integer('delivered_at'),
-    /** Which channel delivered it ('digest' | 'mcp' | 'signal'). */
+    /** Which channel delivered it ('digest' | 'mcp' | 'signal', a steer into its run). */
     deliveredVia: text('delivered_via'),
     tenantId: text('tenant_id'),
   },

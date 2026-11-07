@@ -27,6 +27,7 @@ import {
   MAX_AUTO_FIRES,
   parseWaitingOn,
   delegationFailureKey,
+  isEngineRun,
   normalizeTaskTitle,
   PAUSED_RUN_CLASS,
   strongerWakeReason,
@@ -3593,7 +3594,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const execs = await deps.board.listExecutions(t.id)
     const last = execs?.[execs.length - 1]
     if (!last || last.status !== 'running') return
-    if (last.executorType !== undefined && last.executorType !== 'openclaw') return
+    if (last.executorType !== undefined && !isEngineRun(last)) return
     // Parked first: until the move lands the run stays open, so the next
     // `resume()` finds the task the same way and tries again.
     if (
@@ -3645,7 +3646,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         //  • no running exec (claimed-but-runless / mid-handoff) → an 8-min
         //    clock nothing refreshes — a guaranteed false `blocked`;
         //  • a running exec from the EXECUTOR runner (claude-code/codex/native
-        //    one-shot — anything not the engine's own 'openclaw' fire) → the
+        //    one-shot: anything not the engine's own fire) → the
         //    engine will never observe its events, so the watchdog would
         //    falsely fail a healthy heartbeat-governed run at 8 minutes.
         const execs = await deps.board.listExecutions(t.id)
@@ -3653,7 +3654,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         if (execs === null) continue
         const last = execs[execs.length - 1]
         if (!last || last.status !== 'running') continue
-        if (last.executorType !== undefined && last.executorType !== 'openclaw') continue
+        if (last.executorType !== undefined && !isEngineRun(last)) continue
         const sk = deps.sessionKeyForAgent(assignee)
         if (sk && !sessionToTask.has(sk) && !takingSession.has(sk)) {
           sessionToTask.set(sk, t.id)

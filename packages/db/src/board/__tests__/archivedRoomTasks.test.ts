@@ -131,7 +131,11 @@ describe('moveArchivedRoomTasks', () => {
 
   it('does not mark a task stopped again when its Stop already did', () => {
     const queued = roomTask('Queued')
-    const stop = createExecutionProcess(db, { taskId: queued, executorType: 'openclaw' })
+    const stop = createExecutionProcess(db, {
+      taskId: queued,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     completeExecutionProcess(db, stop.id, { status: 'cancelled' })
     archiveRoom(db, roomId)
     moveArchivedRoomTasks(db)
@@ -164,7 +168,7 @@ describe('moveArchivedRoomTasks', () => {
     // stale sweep would release it and the team chat would start it again.
     const running = roomTask('Running step')
     claimTask(db, running, 'bea')
-    createExecutionProcess(db, { taskId: running, executorType: 'openclaw' })
+    createExecutionProcess(db, { taskId: running, executorType: 'openclaw', engineRun: true })
     archiveRoom(db, roomId)
     moveArchivedRoomTasks(db)
     expect(getTask(db, running)).toMatchObject({ status: 'todo', roomId: null })
@@ -180,7 +184,7 @@ describe('moveArchivedRoomTasks', () => {
       taskId: id,
       reason: 'person_comment',
     })
-    claimTask(db, id, 'bea', 'openclaw', { run: { executorType: 'openclaw' } })
+    claimTask(db, id, 'bea', 'openclaw', { run: { executorType: 'openclaw', engineRun: true } })
     archiveRoom(db, roomId)
     moveArchivedRoomTasks(db)
     const row = listWaitingTaskWakes(db, { includeHeld: true }).find((w) => w.id === wake.id)
@@ -205,7 +209,11 @@ describe('moveArchivedRoomTasks', () => {
   it('returns the engine runs it closed, so the server can stop them where they run', () => {
     const running = roomTask('Running step')
     claimTask(db, running, 'bea')
-    const run = createExecutionProcess(db, { taskId: running, executorType: 'openclaw' })
+    const run = createExecutionProcess(db, {
+      taskId: running,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     roomTask('Queued step', 'cy')
     archiveRoom(db, roomId)
     expect(moveArchivedRoomTasks(db).closedRuns).toEqual([
@@ -221,7 +229,11 @@ describe('moveArchivedRoomTasks', () => {
     // boot this is the usual way a crashed server's run reaches the move.
     const running = roomTask('Running step')
     claimTask(db, running, 'bea')
-    const run = createExecutionProcess(db, { taskId: running, executorType: 'openclaw' })
+    const run = createExecutionProcess(db, {
+      taskId: running,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     expect(reconcileOrphans(db, { staleAfterMs: -1 }).reconciled).toBe(1)
     archiveRoom(db, roomId)
     expect(moveArchivedRoomTasks(db).closedRuns).toEqual([
@@ -240,7 +252,11 @@ describe('moveArchivedRoomTasks', () => {
     reconcileOrphans(db, { staleAfterMs: -1 })
     const finished = roomTask('Finished run', 'cy')
     claimTask(db, finished, 'cy')
-    const run = createExecutionProcess(db, { taskId: finished, executorType: 'openclaw' })
+    const run = createExecutionProcess(db, {
+      taskId: finished,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     completeExecutionProcess(db, run.id, { status: 'failed', error: 'it said why' })
     updateStatus(db, finished, 'todo')
     archiveRoom(db, roomId)
@@ -250,7 +266,7 @@ describe('moveArchivedRoomTasks', () => {
   it('returns no run it did not close', () => {
     const skipped = roomTask('Skipped')
     claimTask(db, skipped, 'bea')
-    createExecutionProcess(db, { taskId: skipped, executorType: 'openclaw' })
+    createExecutionProcess(db, { taskId: skipped, executorType: 'openclaw', engineRun: true })
     const runner = roomTask('Runner run', 'cy')
     claimTask(db, runner, 'cy')
     createExecutionProcess(db, { taskId: runner, executorType: 'claude-code' })

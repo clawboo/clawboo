@@ -53,9 +53,11 @@ export type BoardLifecycleEvent =
       teamId: string | null
       execId: string
       status: string
-      /** The run's executor ('openclaw' = an engine-owned fire whose reflection
-       *  the engine itself delivers; anything else = the executor runner). */
+      /** The run's executor. Whose it is reads through `isEngineRun`: the engine
+       *  delivers its own run's reflection itself. */
       executorType: string
+      /** The run's engine marker, as stored. */
+      engineRun?: number | null
     }
   | {
       /** A wake was saved for this task (see task_wakes). */

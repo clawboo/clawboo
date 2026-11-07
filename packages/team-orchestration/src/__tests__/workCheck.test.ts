@@ -303,6 +303,32 @@ describe('team-chat work check', () => {
     expect(h.toWorker()).toHaveLength(2)
   })
 
+  it('a restart leaves a task In review under a run someone else labelled openclaw', async () => {
+    const before = makeHarness()
+    const id = await delegate(before)
+    await before.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    expect(statusOf(before.board, id)).toBe('in_review')
+    vi.clearAllTimers()
+    for (const [execId, taskId] of before.board.execs)
+      if (taskId === id) before.board.execMarks.set(execId, 0)
+
+    const after = createBoardOrchestrator({
+      teamId: 't1',
+      board: before.board,
+      known: () => KNOWN,
+      leaderAgentId: () => 'leader',
+      sessionKeyForAgent: sk,
+      agentIdForSession,
+      deliver: async () => undefined,
+      stopGen: () => 0,
+      workCheck: { begin: async () => undefined, prepare: async () => null },
+    })
+    await after.resume()
+
+    expect(statusOf(before.board, id)).toBe('in_review')
+  })
+
   it('a check a restart cut short leaves the task for a person, and the lead is told', async () => {
     const before = makeHarness()
     const id = await delegate(before)

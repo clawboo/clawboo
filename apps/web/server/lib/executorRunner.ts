@@ -28,7 +28,6 @@ import {
   listUndeliveredInbox,
   INBOX_BUDGET_CHARS,
   packInboxRows,
-  splitInboxByAddressing,
   markInboxDelivered,
   recordExecutionUsage,
   recordRotation,
@@ -1048,24 +1047,14 @@ async function runTaskInner(
     teamId: task.teamId ?? null,
     limit: 20,
   })
-  // Split by addressing, exactly as the team-chat path does. The SAME mailbox
-  // must not render two different ways depending on which path woke the agent —
-  // that is how an agent learns that one framing means something and the other
-  // does not. One budget across both sections; only rendered rows get marked
-  // (the delivery guarantee lives in packInboxRows).
-  const inboxSplit = splitInboxByAddressing(inboxRows)
-  const packedAddressed = packInboxRows(inboxSplit.addressed, INBOX_BUDGET_CHARS)
-  const packedAmbient = packInboxRows(
-    inboxSplit.ambient,
-    INBOX_BUDGET_CHARS - packedAddressed.usedChars,
-  )
-  const renderedDigest = {
-    includedIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
-  }
+  // Addressed, exactly as on the team-chat path. The SAME mailbox must not render two
+  // different ways depending on which path woke the agent: that is how an agent learns
+  // that one framing means something and the other does not. Only rendered rows get
+  // marked (the delivery guarantee lives in packInboxRows).
+  const renderedDigest = packInboxRows(inboxRows, INBOX_BUDGET_CHARS)
   const inboxDigest =
     buildTurnEnvelope({
-      addressed: packedAddressed.bodies.length ? [{ text: packedAddressed.bodies.join('\n') }] : [],
-      ambient: packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : [],
+      addressed: renderedDigest.bodies.length ? [{ text: renderedDigest.bodies.join('\n') }] : [],
     }) ?? ''
   // A board run does NOT go through the team preamble, so the persona has to be
   // injected here too or a codex/claude-code/hermes agent works its tasks with

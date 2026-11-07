@@ -179,7 +179,11 @@ describe('board tasks and rooms', () => {
     const inReview = (title: string, roomId: string | null, executorType: string): string => {
       const t = createTask(db, { title, teamId: 'T', roomId })
       claimTask(db, t.id, 'a1')
-      createExecutionProcess(db, { taskId: t.id, executorType })
+      createExecutionProcess(db, {
+        taskId: t.id,
+        executorType,
+        engineRun: executorType === 'openclaw',
+      })
       updateStatus(db, t.id, 'in_review')
       return t.id
     }

@@ -872,7 +872,8 @@ A new run is what ends a person's hold on a card (see `PATCH` above), so while a
 
 ```ts
 {
-  executorType: string          // required, 1 to 100 chars (the runtime id)
+  executorType: string          // required, 1 to 100 chars (the runtime id). Any name is
+                                // accepted, and none makes the run the team engine's
   workspaceId?: string
   runReason?: string            // up to 2000 chars
   beforeCommit?: string         // up to 200 chars (git checkpoint)
@@ -906,6 +907,9 @@ A new run is what ends a person's hold on a card (see `PATCH` above), so while a
     // The runtime that actually ran, when executorType names an owner instead: the
     // team engine records every run it starts as 'openclaw'. Null otherwise.
     runtime: string | null
+    // 1 when the team engine owns the run, 0 when anything else opened it, null on a row
+    // from before this field. Only the engine sets it.
+    engineRun: number | null
     status: 'queued' | 'running' | 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
     claimedAt: number | null
     startedAt: number | null
