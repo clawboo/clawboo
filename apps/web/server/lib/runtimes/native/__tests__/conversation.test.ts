@@ -613,6 +613,36 @@ describe('Conversation turn loop', () => {
     expect(result.errorMessage).not.toContain('larger-context')
     expect(result.errorMessage).toContain('context window')
   })
+
+  it("a rate limit in an overflow's words stays a rate limit", async () => {
+    const { ProviderError } = await import('../providers/types')
+    // The wording of one provider's tokens-per-minute 429, and a 429 that says only that.
+    for (const message of [
+      '429 Tokens per minute limit exceeded - too many tokens processed.',
+      'too many tokens',
+    ]) {
+      const scripted: Scripted = {
+        seenParams: [],
+        setModelCalls: [],
+        client: {
+          activeModel: () => 'claude-haiku-4-5',
+          activeProvider: () => 'anthropic',
+          setModel: () => {},
+          // eslint-disable-next-line require-yield
+          async *streamTurn() {
+            throw new ProviderError(message, 'rate_limit', 429)
+          },
+        },
+      }
+      await makeConversation(scripted).run()
+      expect(events[events.length - 1]).toMatchObject({
+        type: 'result',
+        ok: false,
+        errorCode: 'rate_limit',
+        errorMessage: message,
+      })
+    }
+  })
 })
 
 describe('isContextOverflowMessage', () => {
@@ -623,6 +653,9 @@ describe('isContextOverflowMessage', () => {
       'prompt is too long: 250000 tokens > 200000 maximum',
       'input length and max_tokens exceed context limit',
       'too many tokens in the request',
+      'The input token count (40000) exceeds the maximum number of tokens allowed (32768).',
+      'Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)',
+      "This model's maximum prompt length is 131072 but the request contains 200000 tokens.",
     ]) {
       expect(isContextOverflowMessage(msg)).toBe(true)
     }
@@ -636,6 +669,30 @@ describe('isContextOverflowMessage', () => {
     ]) {
       expect(isContextOverflowMessage(msg)).toBe(false)
     }
+  })
+
+  it('does NOT match a rate limit that uses the same words', () => {
+    for (const msg of [
+      'Tokens per minute limit exceeded - too many tokens processed.',
+      '429 too many tokens',
+      'HTTP 429: too many tokens',
+      "Error code: 429 - {'error': {'message': 'too many tokens'}}",
+      'Too many tokens, please wait before trying again.',
+      'Rate limit reached for gpt-4o on tokens per min (TPM): too many tokens in the request',
+      '{"type":"error","error":{"type":"rate_limit_error","message":"too many tokens"}}',
+      'RESOURCE_EXHAUSTED: too many tokens',
+    ]) {
+      expect(isContextOverflowMessage(msg)).toBe(false)
+    }
+  })
+
+  it('still matches an overflow that merely has 429 among its numbers', () => {
+    expect(isContextOverflowMessage('prompt is too long: 214290 tokens > 200000 maximum')).toBe(
+      true,
+    )
+    expect(
+      isContextOverflowMessage('maximum context length is 4096 tokens, you sent 429 more'),
+    ).toBe(true)
   })
 })
 

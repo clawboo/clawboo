@@ -30,8 +30,9 @@ export type ClaudeNativeEvent =
        *  and continue rather than fail the task. */
       maxTurns?: boolean
       /** The conversation outgrew the model's context window (SDK
-       *  `result.terminal_reason === 'prompt_too_long'`). Out of room like
-       *  `maxTurns`, so the host rotates the session rather than fail the task. */
+       *  `result.terminal_reason` of `prompt_too_long`, `blocking_limit` or
+       *  `rapid_refill_breaker`). Out of room like `maxTurns`, so the host rotates the
+       *  session rather than fail the task. */
       contextFull?: boolean
       errorMessage?: string
       /** The SDK's typed cause when the run ended on an API error

@@ -258,7 +258,8 @@ export class Conversation {
         // code — NOT the raw provider text (which often points at CLI-only remediation
         // like "Try /reset (or /new)" that doesn't apply to a team run). The typed code
         // also lets obs classify it as its own class instead of an "Unknown" harness bug.
-        if (isContextOverflowMessage(rawMessage)) {
+        // A rate limit never is one, whatever its words: the session behind it is sound.
+        if (pe?.code !== 'rate_limit' && isContextOverflowMessage(rawMessage)) {
           return this.terminal({
             ok: false,
             summary: finalText || turnText,

@@ -82,7 +82,7 @@ export interface AttemptSummary {
  *
  * Any other `timed_out` row is a watchdog's: the team engine's idle watchdog or
  * the OpenClaw routine dispatcher's stopped a run whose process was alive. That
- * is a timeout, not a crash (K17).
+ * is a timeout, not a crash.
  *
  * Anything else that failed actually ran, which is an error attempt.
  *
@@ -125,7 +125,7 @@ export function classifyAttempts(execs: AttemptRow[]): AttemptSummary {
   // still-`running` row (or a leaked one) would otherwise classify as an error,
   // inflate the streak, and even become `lastKind`. The caller filters its OWN
   // open row; this covers everyone else's. The fire policy's streak skips the
-  // same rows (`isFinishedRun`), so the two readers agree (K17).
+  // same rows (`isFinishedRun`), so the two readers agree.
   const terminal = execs.filter((e) => isFinishedRun(e.status))
   if (terminal.length === 0) return empty
 

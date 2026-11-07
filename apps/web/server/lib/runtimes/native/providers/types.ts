@@ -105,10 +105,61 @@ export function isFallbackWorthy(code: ProviderErrorCode): boolean {
 const CONTEXT_OVERFLOW_RE =
   /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|exceeds? (?:the )?(?:maximum )?context|too many tokens|reduce the length of the (?:messages|prompt)/i
 
+// Wordings the pattern above misses: Gemini's "The input token count (N) exceeds the
+// maximum number of tokens allowed (M).", Moonshot's "Your request exceeded model token
+// limit: N (requested: M)", and xAI's "maximum prompt length". Kept apart from it for
+// the same reason as below: it has a character-for-character copy in the browser.
+const MORE_CONTEXT_OVERFLOW_RE =
+  /exceed(?:s|ed)? (?:the )?(?:maximum number of tokens|model token limit)|maximum prompt length/i
+
+// A rate limit can use the same words: a tokens-per-minute 429 reads "Tokens per
+// minute limit exceeded - too many tokens processed." Waiting fixes that one, and the
+// session behind it is sound, so its words rule an overflow out. The SDKs start an
+// HTTP error's message with its status. CONTEXT_OVERFLOW_RE stays as it is: the browser
+// keeps a copy of it, character for character.
+const RATE_LIMIT_MESSAGE_RE =
+  /^\s*429\b|\b(?:http|status|error code:?)\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|per[\s_-]?min(?:ute)?\b|\btpm\b|wait before/i
+
 /** True when a provider error message indicates the prompt exceeded the model's
- *  context window (an oversized-input 400), as opposed to another bad_request. */
+ *  context window (an oversized-input 400), as opposed to a rate limit or another
+ *  bad_request. */
 export function isContextOverflowMessage(message: string): boolean {
-  return CONTEXT_OVERFLOW_RE.test(message)
+  return (
+    (CONTEXT_OVERFLOW_RE.test(message) || MORE_CONTEXT_OVERFLOW_RE.test(message)) &&
+    !RATE_LIMIT_MESSAGE_RE.test(message)
+  )
+}
+
+/** A provider's own name for a rate limit, in an error field. */
+const RATE_LIMIT_NAME_RE = /rate[_-]?limit|too[_-]?many[_-]?requests|resource[_-]?exhausted/i
+
+/** Whether an SDK error names a rate limit. An error frame inside a stream carries
+ *  no HTTP status: the OpenAI SDK sets `code` and `type` from its body, and the
+ *  Anthropic SDK sets `type` and keeps the whole body as `error`. Some providers send
+ *  the status as a number in `code`. */
+function namesRateLimit(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as {
+    code?: unknown
+    type?: unknown
+    error?: { code?: unknown; type?: unknown; error?: { code?: unknown; type?: unknown } }
+  }
+  return [
+    e.code,
+    e.type,
+    e.error?.code,
+    e.error?.type,
+    e.error?.error?.code,
+    e.error?.error?.type,
+  ].some((name) =>
+    typeof name === 'string' ? RATE_LIMIT_NAME_RE.test(name) || name === '429' : name === 429,
+  )
+}
+
+/** A rate limit's message as a failure notice should read it. The notice reads the
+ *  message alone, so one that does not say it is a rate limit has to be told to. */
+export function rateLimitMessage(message: string): string {
+  return RATE_LIMIT_MESSAGE_RE.test(message) ? message : `Rate limit: ${message}`
 }
 
 /** Normalize an SDK/network error into a typed ProviderError. Reads `.status`
@@ -124,7 +175,9 @@ export function normalizeProviderError(err: unknown): ProviderError {
       ? (err as { status: number }).status
       : undefined
   if (status === 401 || status === 403) return new ProviderError(message, 'auth', status)
-  if (status === 429) return new ProviderError(message, 'rate_limit', status)
+  if (status === 429 || namesRateLimit(err)) {
+    return new ProviderError(rateLimitMessage(message), 'rate_limit', status)
+  }
   if (status === 529 || (status != null && status >= 500))
     return new ProviderError(message, 'overloaded', status)
   if (status === 400 || status === 404 || status === 422)

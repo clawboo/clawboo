@@ -9,6 +9,8 @@
 // Shared by the 1:1 chat drain (`agentChat/driveAgentChat.ts`) and the team-chat
 // drain (`teamChat/serverDeliver.ts`) so the two surfaces cannot drift.
 
+import { classifyError, isAccountError, isTransientError } from '@clawboo/obs'
+
 import { getDescriptor, isRuntimeId } from './runtimes/descriptor'
 import { OLLAMA_FALLBACK_MODEL, ollamaPullCommand } from './runtimes/native/ollamaModels'
 import { isContextOverflowMessage } from './runtimes/native/providers/types'
@@ -20,6 +22,88 @@ import { isContextOverflowMessage } from './runtimes/native/providers/types'
  */
 export const RUN_ENDED_WITHOUT_RESULT =
   'The run ended without reporting a result. The connection to the runtime may have dropped; try sending again.'
+
+/**
+ * What a 1:1 chat shows when a context overflow costs the agent the conversation: its
+ * saved session was dropped, and nothing else is said about that turn. Worded as the
+ * `/reset` divider is, since the same thing has happened.
+ */
+export const SESSION_DROPPED_TEXT =
+  "This conversation outgrew the model's context window, so your next message starts fresh. Everything above stays for you to read. Your boo is no longer carrying the conversation, though it still has anything it saved to memory."
+
+/** The same, when the session could not be dropped: the next turn may fail the same way. */
+export const SESSION_NOT_DROPPED_TEXT =
+  "This conversation outgrew the model's context window, and Clawboo could not clear its session, so your next message may fail the same way. Type /reset to start fresh."
+
+/**
+ * A Clawboo Native turn that overflowed where trimming can make room. The session is
+ * kept, and the next resume drops its oldest turns, so the agent loses those without
+ * losing the conversation.
+ */
+export const CONVERSATION_TRIMMED_TEXT =
+  "This turn did not fit in the model's context window, so it stopped before finishing. Your boo keeps this conversation, but from your next message it carries only the most recent part, so it may not remember the oldest messages."
+
+/**
+ * A 1:1 turn that overflowed with no earlier conversation behind it: a first turn, or the
+ * first after a reset. The agent lost nothing it was carrying, so saying it had would be
+ * untrue, and starting fresh is no remedy when its instructions and tools alone fill the
+ * window, in which case every message ends here.
+ */
+export const TURN_TOO_LARGE_TEXT =
+  "This turn did not fit in the model's context window, so it stopped before finishing, and your next message starts fresh. Try a smaller request, or a model with a larger window. If every message does this, this agent's instructions and tools may be too large for the model."
+
+/**
+ * Whether a run's typed cause is one that passes by itself (a rate limit, an overload, a
+ * provider outage). Such a failure says nothing about the session it was resuming, so
+ * that session stays.
+ */
+export function isPassingCause(code: string | null | undefined): boolean {
+  return !!code && isTransientError(classifyError(code))
+}
+
+/**
+ * Whether a provider refused a run's request as sent, so that sending it again can only
+ * fail the same way. A `bad_request` is that, unless it is about something other than
+ * the request: a model that is gone or cannot use tools, a refused account, or a limit
+ * that passes. Comma-grouped numbers go first: a token count is not a status.
+ */
+export function isRefusedRequest(
+  code: string | null | undefined,
+  message: string | null | undefined,
+): boolean {
+  if (code !== 'bad_request' || !message) return false
+  if (/^\s*404\b|does not support tools/i.test(message)) return false
+  const cls = classifyError(code, message.replace(/\d{1,3}(?:,\d{3})+/g, 'N'))
+  return !isAccountError(cls) && !isTransientError(cls)
+}
+
+/**
+ * A 1:1 notice for a resumed Clawboo Native turn the provider refused, when trimming
+ * cannot change what a resume sends. Its wording may be one nobody has seen, so this
+ * gives the provider's reason and does not claim to know the cause.
+ */
+export function refusedSessionDroppedText(reason: string): string {
+  return `The run failed: ${reason.trim().replace(/\.+$/, '')}. Resuming this conversation would send the same request again, so your next message starts fresh. Everything above stays for you to read. Your boo is no longer carrying the conversation, though it still has anything it saved to memory.`
+}
+
+/**
+ * Team chat's notices for the same two cases, naming the agent: a room has several, and
+ * only this one is affected. `wasResuming`: it had a session to lose.
+ */
+export function teamOverflowText(
+  agentName: string | null | undefined,
+  wasResuming: boolean,
+): string {
+  const who = agentName?.trim() || 'This agent'
+  return wasResuming
+    ? `${who} outgrew the model's context window, so it starts fresh on its next turn. Everything above stays for you to read, and it still has anything it saved to memory.`
+    : `${who}'s turn did not fit in the model's context window, so it stopped before finishing, and it starts fresh on its next turn. Try a smaller request, or a model with a larger window.`
+}
+
+/** Team chat's notice when the session could not be dropped: its next turn resumes it. */
+export function teamOverflowNotClearedText(agentName: string | null | undefined): string {
+  return `${agentName?.trim() || 'This agent'} outgrew the model's context window, and Clawboo could not clear its session, so its next turn may fail the same way. Type /reset to start fresh.`
+}
 
 /**
  * The message to show for a failed run, given whatever reason the runtime gave.
@@ -65,7 +149,15 @@ export function runFailureText(
   // `/reset` clears the conversation, which is the one part that was not the
   // problem, so the advice sends the operator somewhere that cannot help. What
   // fixes it permanently is telling the runtime the model's real window.
+  //
+  // That is OpenClaw's story, where a Gateway resolves its own budget. A runtime
+  // Clawboo runs itself gets a plain sentence: the drains that drop its session say so
+  // instead of this (see SESSION_DROPPED_TEXT), and this covers an overflow they could
+  // not confirm.
   if (isContextOverflowMessage(errorMessage ?? '')) {
+    if (runtime && isRuntimeId(runtime)) {
+      return "This run outgrew the model's context window and stopped before it finished."
+    }
     return (
       'This run stopped because the runtime believed it was out of context room. ' +
       'That is usually a wrong context-window setting rather than a genuinely oversized prompt: ' +

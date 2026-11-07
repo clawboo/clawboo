@@ -45,6 +45,7 @@ import { resolveRuntimeBin } from '../platform'
 import { userCodexAuthPath } from './codexAuth'
 import { createCodexAppServerDriver, type CodexAppServerDeps } from './codexAppServerDriver'
 import { backendErrorText, codexFailureMessage } from './codexFailure'
+import { isContextOverflowMessage, rateLimitMessage } from './native/providers/types'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
 
@@ -140,10 +141,40 @@ interface CodexRunState {
   sawResult: boolean
   /** The failed turn's own reason, from the JSON stream (see codexFailureMessage). */
   streamError?: string
+  /** The cause that reason names, when it is one the host acts on. */
+  streamErrorCode?: 'context_overflow' | 'rate_limit' | null
 }
 
 // Re-exported for the driver tests, which reach every exec-path helper here.
 export { codexFailureMessage }
+
+/**
+ * The cause of a failed turn on the `codex exec` stream, or null. The app-server types
+ * its causes (`codexErrorInfo`); exec's JSON carries only text: the CLI's own "Codex ran
+ * out of room in the model's context window. ..." (0.136, when the stream reports it),
+ * or the backend's body, forwarded as a JSON string. Only the two causes that change
+ * what happens next are read: an overflow drops the session, and a rate limit is worth
+ * retrying, which its wording may not say ("too many tokens"). Only the turn's own error
+ * is read, never stderr, which is the CLI's log.
+ */
+export function codexExecErrorCode(raw: string): 'context_overflow' | 'rate_limit' | null {
+  try {
+    const body = asRecord(JSON.parse(raw))
+    const error = asRecord(body?.['error'])
+    const code = error?.['code'] ?? body?.['code']
+    const name = asStr(code)
+    if (name === 'context_length_exceeded') return 'context_overflow'
+    if (name && /rate.?limit/i.test(name)) return 'rate_limit'
+    // Another typed cause (`insufficient_quota` also comes as a 429) is not one of these.
+    if (name && name !== '429') return null
+    const status = body?.['status'] ?? error?.['status']
+    if (status === 429 || code === 429 || name === '429') return 'rate_limit'
+    if (/rate.?limit/i.test(asStr(error?.['type']) ?? '')) return 'rate_limit'
+  } catch {
+    // Not JSON: the CLI's own sentence.
+  }
+  return isContextOverflowMessage(backendErrorText(raw)) ? 'context_overflow' : null
+}
 
 /** Best-effort translate of one Codex JSON event. Tolerant of shape drift. */
 export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNativeEvent[] {
@@ -212,7 +243,10 @@ export function translateCodexEvent(raw: unknown, state: CodexRunState): CodexNa
   // error:{ message } }`. Kept for the close-synthesized terminal (codex exits non-zero).
   if (type === 'error' || type === 'turn.failed') {
     const raw = asStr(j['message']) ?? asStr(asRecord(j['error'])?.['message'])
-    if (raw) state.streamError = backendErrorText(raw)
+    if (raw) {
+      state.streamError = backendErrorText(raw)
+      state.streamErrorCode = codexExecErrorCode(raw)
+    }
     return []
   }
 
@@ -362,6 +396,10 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
       // surface it as a clean `aborted` terminal, not a spurious error.
       const aborted = signal === 'SIGTERM' || signal === 'SIGKILL'
       const ok = code === 0
+      const reason =
+        ok || aborted
+          ? ''
+          : codexFailureMessage({ streamError: state.streamError, stderr, code, modelPinned })
       return [
         {
           type: 'result',
@@ -373,12 +411,9 @@ export function createCodexExecDriver(opts: StartOpts, ctx: RuntimeRunContext): 
           ...(ok || aborted
             ? {}
             : {
-                errorMessage: codexFailureMessage({
-                  streamError: state.streamError,
-                  stderr,
-                  code,
-                  modelPinned,
-                }),
+                errorMessage:
+                  state.streamErrorCode === 'rate_limit' ? rateLimitMessage(reason) : reason,
+                ...(state.streamErrorCode ? { errorCode: state.streamErrorCode } : {}),
               }),
         },
       ]

@@ -249,9 +249,72 @@ describe('createClaudeCodeDriver: an API error is a failed run', () => {
       type: 'result',
       ok: false,
       contextFull: true,
+      // The CLI's text is the reason, never a reply: team chat commits a summary.
+      summary: '',
       errorMessage: 'Prompt is too long',
     })
     expect(ev).not.toHaveProperty('errorCode')
+  })
+
+  it('reports the other two context-limit endings as out of room, as the CLI sends them', () => {
+    // Captured from Claude Code 2.1.268 against a stand-in Messages API. The CLI pairs
+    // each with an assistant message whose `error` is `invalid_request`.
+    const endings = [
+      { terminal_reason: 'blocking_limit', result: 'Prompt is too long' },
+      {
+        terminal_reason: 'rapid_refill_breaker',
+        result:
+          'Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.',
+      },
+    ]
+    for (const ending of endings) {
+      const [ev] = translateClaudeMessage(
+        { type: 'result', subtype: 'success', is_error: true, session_id: 'sess-1', ...ending },
+        { apiError: 'invalid_request' },
+      )
+      expect(ev).toMatchObject({
+        type: 'result',
+        ok: false,
+        contextFull: true,
+        summary: '',
+        errorMessage: ending.result,
+      })
+      expect(ev).not.toHaveProperty('errorCode')
+    }
+  })
+
+  it("never streams the CLI's text for these endings: its assistant frame carries the error", () => {
+    // Captured from Claude Code 2.1.268 against a stand-in Messages API: the frame just
+    // before each `result`. Without its `error` field this text would stream as a reply.
+    for (const text of [
+      'Prompt is too long',
+      'Autocompact is thrashing: the context refilled to the limit within 3 turns of the previous compact, 3 times in a row. A file being read or a tool output is likely too large for the context window. Try reading in smaller chunks, or use /clear to start fresh.',
+    ]) {
+      expect(
+        translateClaudeMessage({
+          type: 'assistant',
+          error: 'invalid_request',
+          message: { content: [{ type: 'text', text }] },
+        }),
+      ).toEqual([])
+    }
+  })
+
+  it('leaves every other failed ending as the API error it is', () => {
+    for (const terminal_reason of ['api_error', 'model_error', 'image_error', 'budget_exhausted']) {
+      const [ev] = translateClaudeMessage(
+        {
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          terminal_reason,
+          result: 'refused',
+        },
+        { apiError: 'rate_limit' },
+      )
+      expect(ev).toMatchObject({ type: 'result', ok: false, errorCode: 'rate_limit' })
+      expect(ev).not.toHaveProperty('contextFull')
+    }
   })
 
   it('the adapter rotates a full context instead of failing the run', () => {

@@ -44,11 +44,14 @@ import { createAcpConnection, type AcpConnection, type AcpSessionUpdate } from '
 import { acpPromptUsage, acpStopReason, normalizeAcpUpdate } from './acp/updates'
 import { buildChildEnv } from './childEnv'
 import {
+  HERMES_ERROR_LINE_RE,
   HERMES_HEARTBEAT_MAX_MS,
   HERMES_HEARTBEAT_MS,
   hermesErrorCode,
   hermesMcpServers,
   resolveHermesRun,
+  withoutOverflowLines,
+  withoutRecoveredOverflow,
   type HermesRunSettings,
 } from './hermesDriver'
 import { provisionHermesHome, type ProvisionedHermesHome } from './hermesHome'
@@ -93,8 +96,12 @@ const STEER_JOINED_RE = /^\s*(?:⏩\s*Steer queued|Redirected the active turn)/u
 /** An acknowledgement that Hermes queued it as a turn of its own after this one. */
 const STEER_QUEUED_RE = /^\s*(?:No active turn|Queued for the next turn)/u
 
-/** Lines on Hermes's stderr that state why a turn failed. */
-const STDERR_ERROR_RE = /❌|\[ERROR\]|Error code:|\bError:/
+/** A failed turn with no error line on stderr to explain it. */
+const NO_REASON = 'Hermes ended the turn without a result.'
+/** How long stderr must stay quiet, once it holds a reason, for that reason to stand. */
+const STDERR_QUIET_MS = 50
+/** The longest a failed turn waits for the reason Hermes logged. */
+const STDERR_SETTLE_MAX_MS = 500
 
 /** The tool a Hermes tool-call title names: Hermes titles a call
  *  `<tool name>: <preview>`, or the bare name when there is no preview. */
@@ -133,16 +140,22 @@ export function hermesLateSteerPrompt(texts: string[]): string {
   ].join('\n\n')
 }
 
-/** Why a turn that reported no usage failed: the error lines Hermes logged on
- *  stderr while it ran, else a plain statement. */
-export function hermesAcpFailure(stderr: string): string {
+/**
+ * Why a turn failed: the error lines Hermes logged on stderr while it ran, else a plain
+ * statement. `answered`: Hermes answered the turn as finished, with no usage, which is how
+ * it gives up on the context window. A process that died, or a turn stopped some other
+ * way, did not end on that, whatever the log says about earlier in the turn.
+ */
+export function hermesAcpFailure(stderr: string, { answered = true } = {}): string {
   const lines = stderr
     .split('\n')
     .map((l) => l.trim())
-    .filter((l) => l && STDERR_ERROR_RE.test(l))
-  const unique = [...new Set(lines)]
-  const text = unique.slice(-4).join('\n')
-  return text ? text.slice(-1500) : 'Hermes ended the turn without a result.'
+    .filter((l) => l && HERMES_ERROR_LINE_RE.test(l))
+  // A line logged twice counts where it was logged last: the last line is the verdict.
+  const unique = lines.filter((l, i) => lines.lastIndexOf(l) === i).join('\n')
+  const own = answered ? withoutRecoveredOverflow(unique) : withoutOverflowLines(unique)
+  const text = own.split('\n').slice(-4).join('\n')
+  return text ? text.slice(-1500) : NO_REASON
 }
 
 type ResultFields = Omit<Extract<HermesNativeEvent, { type: 'result' }>, 'type'>
@@ -163,6 +176,10 @@ export function createHermesAcpDriver(
   let fallback: HermesDriver | null = null
   let handshaken = false
   let stderr = ''
+  /** Every character stderr has delivered, trimmed or not. */
+  let stderrChars = 0
+  /** Hermes answered the turn as finished with no usage: it failed, and said so. */
+  let answeredFailed = false
   /** Where this turn's stderr starts (the failure reason is read from there on). */
   let turnStderrStart = 0
 
@@ -369,6 +386,7 @@ export function createHermesAcpDriver(
     })
     spawned.stderr?.on('data', (d: Buffer) => {
       stderr += d.toString()
+      stderrChars += d.length
       // Keep the turn's start in view; trim only what came before it.
       if (stderr.length > 64_000) {
         const cut = Math.min(stderr.length - 32_000, turnStderrStart)
@@ -386,9 +404,9 @@ export function createHermesAcpDriver(
       if (finished || fallback || !handshaken) return
       if (abortRequested) finish({ ok: true, aborted: true, summary: closingText.trim() })
       else {
-        const why = hermesAcpFailure(stderr.slice(turnStderrStart))
+        const why = hermesAcpFailure(stderr.slice(turnStderrStart), { answered: answeredFailed })
         fail(
-          why === 'Hermes ended the turn without a result.'
+          why === NO_REASON
             ? `hermes acp exited${code != null ? ` with code ${code}` : ''} before the turn finished`
             : why,
         )
@@ -423,6 +441,22 @@ export function createHermesAcpDriver(
       return
     }
     await fallback.start()
+  }
+
+  /**
+   * Wait for what Hermes logged about a failed turn. The answer and stderr come down
+   * separate pipes, so the answer can land first, and the reason (the overflow, the
+   * refused key) would be missed. Ends once stderr holds a reason and has gone quiet.
+   */
+  async function stderrSettled(): Promise<void> {
+    const deadline = Date.now() + STDERR_SETTLE_MAX_MS
+    let seen = stderrChars
+    do {
+      await new Promise((r) => setTimeout(r, STDERR_QUIET_MS))
+      const quiet = stderrChars === seen
+      if (quiet && hermesAcpFailure(stderr.slice(turnStderrStart)) !== NO_REASON) return
+      seen = stderrChars
+    } while (!finished && Date.now() < deadline)
   }
 
   /** One `session/prompt`, answered when the turn ends. */
@@ -529,13 +563,18 @@ export function createHermesAcpDriver(
         }
         const stop = acpStopReason(result)
         const usage: Usage | undefined = acpPromptUsage(result)
+        if (stop !== 'end_turn' || !usage) {
+          answeredFailed = stop === 'end_turn'
+          await stderrSettled()
+          if (finished) return
+          if (abortRequested) {
+            finish({ ok: true, aborted: true, summary: closingText.trim() })
+            return
+          }
+        }
         if (stop !== 'end_turn') {
-          const why = hermesAcpFailure(stderr.slice(turnStderrStart))
-          fail(
-            why === 'Hermes ended the turn without a result.'
-              ? `Hermes stopped the turn (${stop ?? 'no reason given'})`
-              : why,
-          )
+          const why = hermesAcpFailure(stderr.slice(turnStderrStart), { answered: false })
+          fail(why === NO_REASON ? `Hermes stopped the turn (${stop ?? 'no reason given'})` : why)
           return
         }
         // A finished turn reports its usage; one that failed reports none.

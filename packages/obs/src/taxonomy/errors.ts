@@ -85,6 +85,9 @@ const RULES: Rule[] = [
  * then flags as an alertable harness defect.
  */
 export function classifyError(code?: string | null, message?: string | null): RuntimeErrorClass {
+  // The runtime's own verdict on the run. The rules below also read the message, and a
+  // token count in it ("201,402 tokens") would match a status number first.
+  if (code === 'context_overflow') return 'ContextOverflow'
   // A snake_case code is also read word by word, so `rate_limit_error` matches
   // the rate-limit rule the way "rate limit error" would.
   const words = code?.includes('_') ? code.replace(/_/g, ' ') : ''

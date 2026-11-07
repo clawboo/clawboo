@@ -484,7 +484,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 
 <Accordion title="This run stopped because the runtime believed it was out of context room.">
 
-**What it means:** the runtime decided the conversation was too big for the model. That usually comes from a wrong context-window setting, or a long list of connector tools, rather than a long conversation.
+**What it means:** this is an OpenClaw run, and the runtime decided the conversation was too big for the model. That usually comes from a wrong context-window setting, or a long list of connector tools, rather than a long conversation.
 
 **Fix:** check the model's real context window in **Settings > Runtimes**, and give the agent fewer connectors. Starting the conversation fresh does not fix the cause.
 

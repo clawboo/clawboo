@@ -12,9 +12,12 @@ import os from 'node:os'
 import path from 'node:path'
 
 import type { HermesDriver, HermesNativeEvent } from '@clawboo/adapter-hermes'
+import { mapHermesEvent } from '@clawboo/adapter-hermes'
 import type { StartOpts } from '@clawboo/executor'
+import { classifyError } from '@clawboo/obs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { runFailureText } from '../../runFailureText'
 import {
   createHermesAcpDriver,
   hermesAcpFailure,
@@ -22,6 +25,7 @@ import {
   hermesPromptText,
   hermesToolName,
 } from '../hermesAcpDriver'
+import { hermesErrorCode } from '../hermesDriver'
 import type { RuntimeRunContext } from '../types'
 
 const FAKE_AGENT = String.raw`
@@ -130,6 +134,47 @@ process.stdin.on('data', (d) => {
           update(sid, { sessionUpdate: 'usage_update', size: 128000, used: 12601 })
           finishMain({ stopReason: 'end_turn' })
         }, 20)
+      } else if (scenario === 'overflow-live') {
+        // Captured from hermes-agent 0.19.0 against a stand-in API that refuses every
+        // request as over the context window.
+        process.stderr.write("2026-11-05 01:17:58 [INFO] agent.chat_completion_helpers: Streaming failed before delivery: Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens.\", 'type': 'invalid_request_error', 'param': 'messages', 'code': 'context_length_exceeded'}}\n")
+        process.stderr.write("⚠️  API call failed (attempt 1/3): BadRequestError [HTTP 400]\n   📝 Error: HTTP 400: This model's maximum context length is 8192 tokens.\n")
+        process.stderr.write("⚠️  Context length exceeded \u2014 using provider limit: 200,000 → 8,192 tokens\n🗜️ Context too large (~1,569 tokens) \u2014 compressing (1/3)...\n")
+        process.stderr.write("❌ Context length exceeded and cannot compress further.\n   💡 The conversation has accumulated too much content. Try /new to start fresh, or /compress to manually trigger compression.\n")
+        process.stderr.write("2026-11-05 01:17:58 [ERROR] agent.conversation_loop: Context length exceeded: 15 tokens. Cannot compress further.\n")
+        setTimeout(() => {
+          update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Context length exceeded (15 tokens). Cannot compress further.') })
+          finishMain({ stopReason: 'end_turn' })
+        }, 20)
+      } else if (scenario === 'overflow-answer-first') {
+        // The same turn with the answer overtaking stderr, as separate pipes allow.
+        update(sid, { sessionUpdate: 'agent_message_chunk', content: text('Context length exceeded (15 tokens). Cannot compress further.') })
+        finishMain({ stopReason: 'end_turn' })
+        setTimeout(() => {
+          process.stderr.write("❌ Context length exceeded and cannot compress further.\n")
+          process.stderr.write("2026-11-05 01:17:58 [ERROR] agent.conversation_loop: Context length exceeded: 15 tokens. Cannot compress further.\n")
+        }, 20)
+      } else if (scenario === 'subagent-gave-up') {
+        // A sub-agent ran out of room, and then the parent's own key was refused.
+        process.stderr.write("[subagent-0] ❌ Context length exceeded and cannot compress further.\n")
+        process.stderr.write("2026-11-05 01:17:58 [ERROR] agent.conversation_loop: [subagent-0] Context length exceeded: 15 tokens. Cannot compress further.\n")
+        process.stderr.write("2026-11-05 01:17:59 [ERROR] agent.conversation_loop: Non-retryable client error: Error code: 401 - {'error': {'message': 'Incorrect API key provided', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}}\n")
+        process.stderr.write("❌ Non-retryable client error (HTTP 401). Aborting.\n")
+        setTimeout(() => finishMain({ stopReason: 'end_turn' }), 20)
+      } else if (scenario === 'overflow-then-exit') {
+        // An overflow in the log, then the process dies without answering the turn.
+        process.stderr.write("Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens.\", 'code': 'context_length_exceeded'}}\n")
+        setTimeout(() => process.exit(1), 20)
+      } else if (scenario === 'overflow-then-stop') {
+        // An overflow in the log, then the turn is stopped for some other reason.
+        process.stderr.write("Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens.\", 'code': 'context_length_exceeded'}}\n")
+        setTimeout(() => finishMain({ stopReason: 'refusal' }), 20)
+      } else if (scenario === 'overflow-recovered') {
+        // An overflow Hermes compressed its way out of, then a refused key.
+        process.stderr.write("[INFO] x: Streaming failed before delivery: Error code: 400 - {'error': {'message': \"This model's maximum context length is 8192 tokens.\", 'type': 'invalid_request_error', 'code': 'context_length_exceeded'}}\n")
+        process.stderr.write("⚠️  Context length exceeded \u2014 using provider limit: 200,000 → 8,192 tokens\n")
+        process.stderr.write("[ERROR] x: Non-retryable client error: Error code: 401 - {'error': {'message': 'User not found.', 'code': 401}}\n")
+        setTimeout(() => finishMain({ stopReason: 'end_turn' }), 20)
       } else if (scenario === 'steer' || scenario === 'tool-done-before-ack') {
         update(sid, { sessionUpdate: 'tool_call', toolCallId: 'tc-1', title: 'terminal: npm run build', kind: 'execute', status: 'in_progress' })
       } else if (scenario === 'split-utf8') {
@@ -329,6 +374,96 @@ describe('createHermesAcpDriver', () => {
     expect(result.ok).toBe(false)
     expect(result.errorMessage).toContain('Non-retryable client error (HTTP 401)')
     expect(result.errorMessage).toContain("Error code: 401 - {'error'")
+  })
+
+  it('types a turn that ended on the context window, exactly as Hermes 0.19.0 sends it', async () => {
+    const { driver, seen } = driverFor('overflow-live')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBe('context_overflow')
+    expect(result.errorMessage).toContain('Context length exceeded')
+    expect(result.summary).toContain('Cannot compress further')
+    const [error] = mapHermesEvent(
+      result,
+      { runId: 'r', sessionId: null },
+      () => 1,
+      () => 0,
+    )
+    expect(error).toMatchObject({ kind: 'error', code: 'context_overflow', fatal: true })
+  })
+
+  it('still types the overflow when the answer lands before stderr does', async () => {
+    const { driver, seen } = driverFor('overflow-answer-first')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.errorCode).toBe('context_overflow')
+    expect(result.errorMessage).toContain('cannot compress further')
+  })
+
+  it("does not read a sub-agent's give-up as the parent's overflow", async () => {
+    const { driver, seen } = driverFor('subagent-gave-up')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.errorCode).toBe('invalid_api_key')
+    expect(result.errorMessage).not.toMatch(/context length/i)
+    expect(classifyError(result.errorCode, result.errorMessage)).toBe('Auth')
+  })
+
+  it('an overflow in the log, then a process that dies, did not end on the overflow', async () => {
+    const { driver, seen } = driverFor('overflow-then-exit')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBeUndefined()
+    expect(result.errorMessage).toBe('hermes acp exited with code 1 before the turn finished')
+  })
+
+  it('an overflow in the log, then another stop reason, did not end on the overflow', async () => {
+    const { driver, seen } = driverFor('overflow-then-stop')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.errorCode).toBeUndefined()
+    expect(result.errorMessage).toBe('Hermes stopped the turn (refusal)')
+  })
+
+  it('a line logged twice counts where it was logged last, so an older overflow stays older', () => {
+    const key =
+      "[ERROR] x: Error code: 401 - {'error': {'message': 'Bad key', 'code': 'invalid_api_key'}}"
+    const overflow =
+      "[ERROR] x: Error code: 400 - {'error': {'message': 'maximum context length', 'code': 'context_length_exceeded'}}"
+    expect(hermesErrorCode(hermesAcpFailure(`${key}\n${overflow}\n${key}`))).toBe('invalid_api_key')
+    expect(hermesErrorCode(hermesAcpFailure(`${overflow}\n${key}\n${overflow}`))).toBe(
+      'context_overflow',
+    )
+  })
+
+  it('a refused attempt logged below error level is not a reason', () => {
+    expect(
+      hermesAcpFailure(
+        "2026-11-05 [INFO] x: Streaming failed before delivery: Error code: 400 - {'error': {'message': 'maximum context length', 'code': 'context_length_exceeded'}}",
+      ),
+    ).toBe('Hermes ended the turn without a result.')
+  })
+
+  it('does not read an overflow Hermes recovered from as how the turn ended', async () => {
+    const { driver, seen } = driverFor('overflow-recovered')
+    await driver.start()
+    await until(() => seen.some((e) => e.type === 'result'))
+    const result = resultOf(seen)
+    expect(result.ok).toBe(false)
+    expect(result.errorCode).toBeUndefined()
+    expect(result.errorMessage).not.toMatch(/context length/i)
+    expect(result.errorMessage).toContain('User not found')
+    expect(classifyError(result.errorCode, result.errorMessage)).toBe('Auth')
+    expect(runFailureText(result.errorMessage, 'hermes')).toMatch(
+      /^The run failed: .*User not found/,
+    )
   })
 
   it('answers a permission request with allow-once, as the quiet path runs with --yolo', async () => {
