@@ -454,8 +454,9 @@ export function stripActionableHandOffs(text: string): string {
   return (out + text.slice(cursor)).trim()
 }
 
+// Bounded before `to=`, so a long reply full of `<delegate ` stays linear.
 const BROKEN_HAND_OFF_RE =
-  /<\s*delegate\s[^>\n]*to\s*=|\bdelegate\s+to\s*=|<\/\s*delegate\s*>|<\s*step\s[^>\n]*to\s*=/i
+  /<\s*delegate\s[^>\n]{0,200}to\s*=|\bdelegate\s+to\s*=|<\/\s*delegate\s*>|<\s*step\s[^>\n]{0,200}to\s*=/i
 
 /**
  * Does this reply try to hand off in a tag that could not be read? It takes a tag's

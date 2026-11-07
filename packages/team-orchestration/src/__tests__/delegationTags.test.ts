@@ -557,3 +557,16 @@ describe('a name with an apostrophe in a tag', () => {
     expect(findDelegationBlocks(text).map((b) => b.targetName)).toEqual(['@Coder'])
   })
 })
+
+describe('looksLikeBrokenHandOff on a very long reply', () => {
+  it('stays fast on a long run of opening tags', () => {
+    const reply = '<delegate\t'.repeat(40_000)
+    const started = Date.now()
+    expect(looksLikeBrokenHandOff(reply)).toBe(false)
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it('still sees a mangled tag', () => {
+    expect(looksLikeBrokenHandOff('<delegate team="x" to="@Bug Boo">fix it')).toBe(true)
+  })
+})
