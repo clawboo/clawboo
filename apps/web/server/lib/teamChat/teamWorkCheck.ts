@@ -31,6 +31,7 @@ import {
   getTask,
   getTaskVerification,
   listExecutions,
+  isPlanHolder,
   recordSpend,
   setTaskCheckHeld,
   startTaskHeartbeat,
@@ -422,7 +423,10 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     },
 
     async prepare(taskId, agentId) {
-      if (getTask(db, taskId)?.status !== 'in_progress') return null
+      const task = getTask(db, taskId)
+      if (task?.status !== 'in_progress') return null
+      // A card that only held a plan did no work, and what is in the folder is someone else's.
+      if (isPlanHolder(task.sourceDelegationId)) return null
       const tried = (getTaskVerification(db, taskId)?.attempts.length ?? 0) > 0
       const target = targetFor(agentId)
       if (!target)

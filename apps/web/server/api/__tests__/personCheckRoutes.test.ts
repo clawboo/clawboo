@@ -1,7 +1,7 @@
 // The routes other builds added take the one person check too: Reopen, assign to a
 // person, answering a question, the card about agents waking each other and a team's
-// always allow, a team's letters and labels, a task's labels, read marks, and pausing and
-// resuming. A person a sign-in proxy vouched for passes it from a script; a caller nothing
+// always allow, a team's switch for asking before a plan starts, a team's letters and labels,
+// a task's labels, read marks, and pausing and resuming. A person a sign-in proxy vouched for passes it from a script; a caller nothing
 // vouches for gets `person_only`. And what they write says who did it.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -24,16 +24,22 @@ import {
   listTaskQuestions,
   openAgentWakeCard,
   placePause,
+  planApprovalSettingKey,
+  proposePlan,
   readAgentWakeGate,
   readTeamAlwaysAllow,
   saveAgentCommentWake,
+  setSetting,
   teams,
   updateStatus,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../../lib/teamChat/boardDispatch', () => ({ requestTaskDispatch: () => undefined }))
+vi.mock('../../lib/teamChat/boardDispatch', () => ({
+  requestTaskDispatch: () => undefined,
+  pumpRoomOfTask: () => undefined,
+}))
 vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../lib/runnerRerun')>()),
   requestRunnerRerun: () => undefined,
@@ -44,6 +50,7 @@ const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT } = await import('
 const { boardAgentWakesPOST, boardAssignPersonPOST, boardQuestionAnswerPOST, boardReopenPOST } =
   await import('../boardPerson')
 const { teamAgentWakesPUT } = await import('../teamAgentWakes')
+const { teamPlanApprovalPUT } = await import('../teamPlanApproval')
 const { boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
 const { teamLabelDELETE, teamLabelPATCH, teamLabelsPOST, teamTaskPrefixPUT } =
   await import('../teamLabels')
@@ -262,6 +269,35 @@ const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
     "a team's always allow for agents waking each other",
     (who, res) =>
       teamAgentWakesPUT(req({ params: { teamId: TEAM }, body: { always: true }, ...who }), res),
+  ],
+  [
+    "a team's switch for asking before a plan starts",
+    (who, res) =>
+      teamPlanApprovalPUT(req({ params: { teamId: TEAM }, body: { on: true }, ...who }), res),
+  ],
+  [
+    'answering a plan',
+    (who, res) => {
+      setSetting(getDb(), planApprovalSettingKey(TEAM), JSON.stringify({ on: true }))
+      const made = proposePlan(getDb(), {
+        teamId: TEAM,
+        agentId: 'lead',
+        prompt: 'A plan.',
+        steps: [{ title: 'One', agentId: 'coder' }],
+        taskId: null,
+        parentTaskId: null,
+        turnId: `turn-${Math.random()}`,
+      })
+      if (made.status !== 'proposed') throw new Error(made.status)
+      return boardQuestionAnswerPOST(
+        req({
+          params: { questionId: made.question.id },
+          body: { answer: { accepted: true } },
+          ...who,
+        }),
+        res,
+      )
+    },
   ],
   ['pausing', (who, res) => pausesPOST(req({ body: { kind: 'agent', id: 'coder' }, ...who }), res)],
   [

@@ -22,6 +22,7 @@ import {
   getComments,
   getReadyTasks,
   getTask,
+  getTaskDocument,
   handBackTask,
   handOffChain,
   isTaskIdentifier,
@@ -32,15 +33,20 @@ import {
   openSubtasksOf,
   parseQuestionPayload,
   recordResultClaim,
+  planApprovalOn,
+  proposePlan,
   releaseTask,
   resolveTaskRef,
   saveAgentCommentWake,
   setTaskDelegator,
   TaskDependencyCycleError,
+  TASK_DOCUMENT_MAX_CHARS,
+  TASK_DOCUMENT_MAX_REVISIONS,
   taskStatusSchema,
   unblockTask,
   updateStatus,
   waitReaches,
+  writeTaskDocument,
   type ClawbooDb,
   type CreatedTask,
   type CreateTaskInput,
@@ -279,6 +285,18 @@ const ASK_REFUSAL: Record<string, string> = {
   illegal_transition: 'This task cannot wait for an answer from where it is now.',
 }
 
+/** The most a plan's body may hold, as an agent reads it. */
+const PLAN_MAX_WORDS = TASK_DOCUMENT_MAX_CHARS.toLocaleString('en-US')
+
+const WRITE_PLAN_REFUSAL: Record<string, string> = {
+  not_found: 'This task no longer exists.',
+  not_yours: 'You are not working on this task, so its plan is not yours to write.',
+  finished: 'This task is finished, so its plan is closed.',
+  empty: 'write_plan needs body: the plan, as text.',
+  too_long: `A plan can be at most ${PLAN_MAX_WORDS} characters. Shorten it, and leave the detail to the steps.`,
+  too_many_revisions: `This task has had ${TASK_DOCUMENT_MAX_REVISIONS} revisions of its plan, the most it keeps. Carry on with the newest.`,
+}
+
 /** What an agent does after its question went in. */
 const ASK_STOP =
   'The task now waits for the answer, so stop here: end your turn with one short line saying what you asked. When the person answers, the task starts again with their answer in it.'
@@ -304,8 +322,9 @@ function repeatedAskText(q: DbTaskQuestion): string {
 const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
 /** Served to a read-only team run as well: asking a person moves only the run's own
  *  task, and it is the only way such a run can wait for someone. Reporting moves
- *  nothing at all: it is evidence for the server's decision when the run ends. */
-const ASK_TOOL_NAMES = new Set(['ask_person', 'report_result'])
+ *  nothing at all: it is evidence for the server's decision when the run ends. Its plan
+ *  is a document on that task, which moves no card either. */
+const ASK_TOOL_NAMES = new Set(['ask_person', 'report_result', 'write_plan'])
 /** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
 const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
 /** Tools that move a card: who may call them depends on who is calling. */
@@ -541,6 +560,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   // is handled as an agent's block. Without one they are not served, because no run
   // would be woken by the answer.
   const ownTask = teamRun && boundTaskId && boundAgentId ? boundTaskId : undefined
+  // The task `write_plan` writes on: only ever the one signed on the run's URL, for the
+  // agent signed with it.
+  const planTask = boundTaskId && boundAgentId ? boundTaskId : undefined
 
   /**
    * What a task waits for, from an agent's arguments, or the refusal that tells the
@@ -674,7 +696,13 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         // Out-of-team reads are refused as not-found: a bound run must not be
         // able to probe another team's board by guessing ids.
         if (boundTeamId && task.teamId !== boundTeamId) return textResult(`not found: ${id}`, true)
-        return jsonResult({ task, comments: getComments(db, id), ancestors: getAncestors(db, id) })
+        const plan = getTaskDocument(db, id)
+        return jsonResult({
+          task,
+          comments: getComments(db, id),
+          ancestors: getAncestors(db, id),
+          ...(plan ? { plan: { revision: plan.revision, body: plan.body } } : {}),
+        })
       },
     },
     {
@@ -944,6 +972,53 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
                 ...(kind === 'question' && args['allowOther'] === true ? { allowOther: true } : {}),
                 ...(kind === 'suggest_tasks' ? { tasks: tasks.map((title) => ({ title })) } : {}),
               }
+              // On a team that asks before a plan starts, a proposed breakdown is a plan:
+              // accepting it creates the tasks.
+              const teamOfTask = getTask(db, ownTask)?.teamId
+              if (kind === 'suggest_tasks' && teamOfTask && planApprovalOn(db, teamOfTask)) {
+                const proposed = proposePlan(db, {
+                  teamId: teamOfTask,
+                  agentId: boundAgentId ?? '',
+                  prompt: payload.prompt,
+                  steps: payload.tasks ?? [],
+                  taskId: ownTask,
+                  parentTaskId: null,
+                  holderAllowed: false,
+                  executionId: boundExecutionId ?? null,
+                })
+                if (proposed.status === 'proposed')
+                  return textResult(
+                    `Asked. If they accept, the tasks are created for you and start in order, so do not create them yourself. ${ASK_STOP}`,
+                  )
+                if (proposed.status === 'waiting')
+                  return textResult(`You already asked this. ${ASK_STOP}`)
+                if (proposed.status === 'already_accepted')
+                  return textResult(
+                    'A person already accepted this breakdown, and its tasks are on the board. Do not create them again.',
+                  )
+                if (proposed.status === 'already_declined')
+                  return textResult(
+                    'A person already turned this breakdown down. Change it before you ask again, or carry on without it.',
+                    true,
+                  )
+                if (proposed.status === 'refused') {
+                  if (proposed.reason === 'person_moved')
+                    return statusWriteResult(
+                      {
+                        ok: false,
+                        reason: 'person_moved',
+                        ...(proposed.task ? { task: proposed.task } : {}),
+                      },
+                      'ask',
+                    )
+                  return textResult(
+                    proposed.reason === 'too_deep'
+                      ? 'This task is already as deep as tasks go, so it cannot be split further. Do the work here, or report back.'
+                      : (ASK_REFUSAL[proposed.reason] ?? `ask failed: ${proposed.reason}`),
+                    true,
+                  )
+                }
+              }
               const r = askQuestion(db, {
                 taskId: ownTask,
                 agentId: boundAgentId ?? '',
@@ -1055,6 +1130,42 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
                     ? ROUTINE_NO_WAIT
                     : `hand back failed: ${r.reason}`,
                 true,
+              )
+            },
+          },
+        ]
+      : []),
+    ...(planTask
+      ? [
+          {
+            name: 'write_plan',
+            description: `Write or revise the plan for the task you are working on: a document people read on the task, and your later runs read in their ticket. Each call is a new revision, and earlier ones stay readable. At most ${PLAN_MAX_WORDS} characters. Writing a plan starts nothing and asks no one.`,
+            inputSchema: z.object({ body: z.string() }),
+            handler: (args: Record<string, unknown>): McpToolResult => {
+              const denied = outOfTeam(planTask)
+              if (denied) return denied
+              const r = writeTaskDocument(db, {
+                taskId: planTask,
+                agentId: boundAgentId ?? '',
+                body: str(args['body']),
+                executionId: boundExecutionId ?? null,
+              })
+              if (!r.ok)
+                return textResult(WRITE_PLAN_REFUSAL[r.reason] ?? `write failed: ${r.reason}`, true)
+              // Who wrote it and on which run, from the binding. Never its words: the log is
+              // read more widely than the row. A plan moves nothing, so `to` is where the task
+              // still is, as for a report.
+              const written = r.unchanged ? null : getTask(db, planTask)
+              if (written)
+                recordWrite('status_changed', written, {
+                  to: written.status,
+                  reason: 'plan_written',
+                  revision: r.revision,
+                })
+              return textResult(
+                r.unchanged
+                  ? `The plan is unchanged: revision ${r.revision} already says this.`
+                  : `Saved as revision ${r.revision} of this task's plan.`,
               )
             },
           },
@@ -1185,7 +1296,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   const withheld = new Set<string>()
   if (teamRun) for (const name of TEAM_RUN_WITHHELD_TOOL_NAMES) withheld.add(name)
   if (opts?.unverifiedCaller === true)
-    for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES]) withheld.add(name)
+    for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES, 'write_plan'])
+      withheld.add(name)
   const active = (
     opts?.readOnly === true
       ? tools.filter(

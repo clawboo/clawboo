@@ -26,14 +26,20 @@ import type { ResultClaim } from '@clawboo/board-core'
 import { describe, expect } from 'vitest'
 
 import {
+  answerQuestion,
   claimTask,
   createDb,
   createExecutionProcess,
   executionProcesses,
   createTask,
   getTask,
+  listTaskQuestions,
   listTasks,
   recordResultClaim,
+  LOCAL_PERSON,
+  parseQuestionPayload,
+  planApprovalSettingKey,
+  setSetting,
   updateStatus,
   type ClawbooDb,
   type TaskStatus,
@@ -56,6 +62,8 @@ import type {
   HandOffInput,
   HandOffLink,
   HandOffResult,
+  PlanProposal,
+  ProposePlanInput,
   TaskDetail,
 } from '@clawboo/team-orchestration'
 
@@ -109,6 +117,46 @@ class RealCascadeBoard implements CascadeBoard {
       this.db,
       this.roomId === undefined ? { teamId: TEAM } : { teamId: TEAM, roomId: this.roomId },
     )
+  }
+
+  // ── A plan that waits for a person ──
+  setPlanApproval(on: boolean): void {
+    setSetting(this.db, planApprovalSettingKey(TEAM), JSON.stringify({ on }))
+  }
+  waitingPlans(): Array<{ questionId: string; taskId: string; steps: string[] }> {
+    return this.ownTasks().flatMap((t) =>
+      listTaskQuestions(this.db, t.id)
+        .filter((q) => q.status === 'pending' && q.kind === 'suggest_tasks')
+        .map((q) => ({
+          questionId: q.id,
+          taskId: q.taskId,
+          steps: (parseQuestionPayload(q.payload)?.tasks ?? []).map((step) => step.title),
+        })),
+    )
+  }
+  answerPlan(
+    questionId: string,
+    answer: { accepted: boolean; note?: string },
+  ): { ok: boolean; created: number } {
+    const r = answerQuestion(this.db, questionId, answer, { person: LOCAL_PERSON })
+    return r.ok ? { ok: true, created: r.created?.length ?? 0 } : { ok: false, created: 0 }
+  }
+  planApprovalOn(teamId: string): Promise<boolean> {
+    return this.real.planApprovalOn!(teamId)
+  }
+  proposePlan(input: ProposePlanInput): Promise<PlanProposal> {
+    return this.real.proposePlan!(input)
+  }
+  closeWaitingPlans(teamId: string): Promise<void> {
+    return this.real.closeWaitingPlans!(teamId)
+  }
+  startingWithoutAsking(input: {
+    teamId: string
+    agentId: string
+    taskId: string | null
+    parentTaskId: string | null
+  }): Promise<void> {
+    return this.real.startingWithoutAsking!(input)
   }
 
   // ── BoardClient (recorded + delegated to the real client) ──

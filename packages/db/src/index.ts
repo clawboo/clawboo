@@ -26,6 +26,7 @@ export {
   skills,
   taskComments,
   taskDeps,
+  taskDocuments,
   taskQuestions,
   tasks,
   agentWakeChains,

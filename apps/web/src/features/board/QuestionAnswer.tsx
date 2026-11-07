@@ -1,13 +1,18 @@
 // A question an agent asked, and the controls that answer it: the same on a Needs you
 // card and in the task drawer. The kinds: a question with options or free text, a yes
-// or no, and a proposed list of tasks the person edits, accepts or turns down. The
+// or no, and a proposed list of tasks the person reads whole, edits, accepts or turns down. The
 // answer starts the task again, so a press is final: a refusal (the task moved on, or
 // someone else answered first) is said plainly and the board's next read tidies up.
 
 import { useState, type ReactNode } from 'react'
 import { Check, Plus, X } from 'lucide-react'
 
-import { parseQuestionPayload, type SuggestedTask } from '@clawboo/board-core'
+import {
+  HAND_OFF_TITLE_CHARS,
+  parseQuestionPayload,
+  QUESTION_ANSWER_MAX_CHARS,
+  type SuggestedTask,
+} from '@clawboo/board-core'
 
 import { Button } from '@/features/shared/Button'
 import { answerTaskQuestion, type QuestionAnswerInput } from '@/lib/boardClient'
@@ -24,6 +29,9 @@ export interface OpenQuestion {
 }
 
 const REFUSED: Record<string, string> = {
+  too_many_steps: 'A plan can have 25 steps at most. Remove some, then accept it.',
+  no_room: 'Those tasks do not all fit under this task. Remove some, then accept it.',
+  too_deep: 'This task is already as deep as tasks go, so its plan cannot start under it.',
   expired: 'That question has closed: the task moved on without it.',
   answered: 'Someone has already answered that.',
   cancelled: 'That question has closed.',
@@ -41,6 +49,13 @@ export function QuestionAnswer(props: { question: OpenQuestion; onAnswered: () =
   return <QuestionControls key={props.question.id} {...props} />
 }
 
+/** A step with these words: the title is their start, and the rest, if any, goes with it. */
+function withWords(step: SuggestedTask, words: string): SuggestedTask {
+  const { description: _old, ...rest } = step
+  const title = words.slice(0, HAND_OFF_TITLE_CHARS)
+  return { ...rest, title, ...(words !== title ? { description: words } : {}) }
+}
+
 function QuestionControls({
   question,
   onAnswered,
@@ -53,6 +68,7 @@ function QuestionControls({
   const [busy, setBusy] = useState(false)
   const [text, setText] = useState('')
   const [tasks, setTasks] = useState<SuggestedTask[]>(payload?.tasks ?? [])
+  const [note, setNote] = useState('')
 
   if (!payload) {
     return <p className="text-xs text-muted-foreground">This question could not be read.</p>
@@ -64,6 +80,14 @@ function QuestionControls({
     const result = await answerTaskQuestion(question.id, answer)
     setBusy(false)
     if (result.ok) {
+      if (result.created || result.alreadyOpen) {
+        const made = result.created ?? 0
+        const open = result.alreadyOpen ? ` ${result.alreadyOpen} already open.` : ''
+        addToast({
+          type: 'success',
+          message: `Plan accepted. ${made === 1 ? '1 task is' : `${made} tasks are`} on the board.${open}`,
+        })
+      }
       // Saved is not delivered: the agent may not have been started.
       if (result.delivery?.status === 'queued' && result.delivery.reason === 'paused') {
         addToast({
@@ -117,28 +141,38 @@ function QuestionControls({
       </div>
     )
   } else if (question.kind === 'suggest_tasks') {
-    const edit = (i: number, title: string): void =>
-      setTasks((prev) => prev.map((t, at) => (at === i ? { ...t, title } : t)))
-    const usable = tasks.filter((t) => t.title.trim())
+    // A step is edited whole. Its title is only ever the start of what runs, so what the
+    // person reads here, and leaves here, is what the agent gets.
+    const wordsOf = (t: SuggestedTask): string => t.description ?? t.title
+    const edit = (i: number, words: string): void =>
+      setTasks((prev) => prev.map((t, at) => (at === i ? withWords(t, words) : t)))
+    const usable = tasks.filter((t) => wordsOf(t).trim())
     controls = (
       <div className="flex flex-col gap-1.5">
         {tasks.map((t, i) => (
-          <div key={i} className="flex min-w-0 items-center gap-1.5">
-            <input
-              type="text"
-              aria-label={`Suggested task ${i + 1}`}
-              value={t.title}
-              onChange={(e) => edit(i, e.target.value)}
-              className="min-w-0 flex-1 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
-            />
-            <button
-              type="button"
-              aria-label={`Remove “${t.title}”`}
-              onClick={() => setTasks((prev) => prev.filter((_, at) => at !== i))}
-              className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              <X size={12} strokeWidth={2} aria-hidden />
-            </button>
+          <div key={i} className="flex min-w-0 flex-col gap-0.5">
+            <div className="flex min-w-0 items-start gap-1.5">
+              {/* Grows with its words: a step has to be read before it is accepted. */}
+              <textarea
+                rows={1}
+                aria-label={`Suggested task ${i + 1}`}
+                maxLength={QUESTION_ANSWER_MAX_CHARS}
+                value={wordsOf(t)}
+                onChange={(e) => edit(i, e.target.value)}
+                className="max-h-48 min-w-0 flex-1 resize-none rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground [field-sizing:content] focus-visible:outline-2 focus-visible:outline-offset-2"
+              />
+              <button
+                type="button"
+                aria-label={`Remove “${t.title}”`}
+                onClick={() => setTasks((prev) => prev.filter((_, at) => at !== i))}
+                className="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                <X size={12} strokeWidth={2} aria-hidden />
+              </button>
+            </div>
+            {t.agentName ? (
+              <span className="truncate pl-2 text-xs text-muted-foreground">{t.agentName}</span>
+            ) : null}
           </div>
         ))}
         <button
@@ -149,6 +183,15 @@ function QuestionControls({
           <Plus size={12} strokeWidth={2} aria-hidden />
           Add a task
         </button>
+        <input
+          type="text"
+          aria-label="A note for the agent"
+          placeholder="Anything to add? The agent reads this."
+          maxLength={QUESTION_ANSWER_MAX_CHARS}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="mt-1 min-w-0 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+        />
         <div className="mt-1 flex flex-wrap gap-2">
           <Button
             size="sm"
@@ -157,7 +200,8 @@ function QuestionControls({
             onClick={() =>
               void send({
                 accepted: true,
-                tasks: usable.map((t) => ({ ...t, title: t.title.trim() })),
+                tasks: usable.map((t) => withWords(t, wordsOf(t).trim())),
+                ...(note.trim() ? { note: note.trim() } : {}),
               })
             }
           >
@@ -168,7 +212,9 @@ function QuestionControls({
             size="sm"
             variant="ghost"
             disabled={busy}
-            onClick={() => void send({ accepted: false })}
+            onClick={() =>
+              void send({ accepted: false, ...(note.trim() ? { note: note.trim() } : {}) })
+            }
           >
             Turn down
           </Button>

@@ -8,6 +8,7 @@ import {
   canTransition,
   delegationTargetOf,
   delegatorOf,
+  encodePlanHolder,
   HAND_OFF_TITLE_CHARS,
   isTaskStatus,
   ledgerWillAutoFire,
@@ -41,6 +42,8 @@ import type {
   HandOffCapacity,
   HandOffInput,
   HandOffResult,
+  PlanProposal,
+  ProposePlanInput,
   TaskDetail,
 } from '../boardClient'
 import type { CascadeBoard, SeedExecState } from '../contract'
@@ -331,6 +334,181 @@ export class FakeBoard implements CascadeBoard {
     if (key) this.keys.set(key, task.id)
     return { ok: true, task }
   }
+  // ── A plan that waits for a person ──
+  planApproval = false
+  private planQuestions = new Map<
+    string,
+    {
+      taskId: string
+      agentId: string
+      steps: ProposePlanInput['steps']
+      parentTaskId: string | null
+      holder: boolean
+      parallel: boolean
+      status: 'pending' | 'accepted' | 'declined' | 'closed'
+    }
+  >()
+  private planN = 0
+  private planCards = new Map<string, string>()
+  setPlanApproval(on: boolean): void {
+    this.planApproval = on
+  }
+  waitingPlans(): Array<{ questionId: string; taskId: string; steps: string[] }> {
+    return [...this.planQuestions]
+      .filter(([, q]) => q.status === 'pending')
+      .map(([questionId, q]) => ({
+        questionId,
+        taskId: q.taskId,
+        steps: q.steps.map((s) => s.title),
+      }))
+  }
+  answerPlan(
+    questionId: string,
+    answer: { accepted: boolean; note?: string },
+  ): { ok: boolean; created: number } {
+    const q = this.planQuestions.get(questionId)
+    if (!q || q.status !== 'pending') return { ok: false, created: 0 }
+    q.status = answer.accepted ? 'accepted' : 'declined'
+    this.waits.delete(q.taskId)
+    const task = this.tasks.get(q.taskId)
+    // A card that only held the plan closes with its answer. It never runs.
+    if (task && q.holder) task.status = answer.accepted ? 'done' : 'cancelled'
+    if (!answer.accepted) {
+      if (task && q.holder) this.releaseParent(task.parentTaskId)
+      return { ok: true, created: 0 }
+    }
+    let previous: string | null = null
+    q.steps.forEach((step, i) => {
+      const id = `task-${++this.taskN}`
+      this.tasks.set(id, {
+        id,
+        status: 'todo',
+        parentTaskId: q.parentTaskId,
+        title: step.title,
+        description: step.description ?? step.title,
+        sourceDelegationId: `${questionId}:plan:${i}:agent:${step.agentId}:reflectTo:${q.agentId}`,
+        assigneeAgentId: null,
+      })
+      if (previous && !q.parallel) this.depMap.set(id, [previous])
+      previous = id
+    })
+    if (task && q.holder) this.releaseParent(task.parentTaskId)
+    return { ok: true, created: q.steps.length }
+  }
+  async planApprovalOn(): Promise<boolean> {
+    return this.planApproval
+  }
+  async proposePlan(input: ProposePlanInput): Promise<PlanProposal> {
+    if (!this.planApproval) {
+      await this.startingWithoutAsking(input)
+      return { status: 'off' }
+    }
+    if (input.steps.some((s) => (s.description ?? s.title).length > 4_000))
+      return { status: 'refused', reason: 'step_too_long' }
+    const own = input.taskId ? this.tasks.get(input.taskId) : undefined
+    const onOwnTask = !!own && own.assigneeAgentId === input.agentId && own.status === 'in_progress'
+    const cardKey = `${input.agentId}|${input.turnId}`
+    const held = [...this.planQuestions.values()].find(
+      (q) => q.status === 'pending' && q.holder && q.agentId === input.agentId,
+    )
+    const byTurn = held ? undefined : this.planCards.get(cardKey)
+    const homeId = onOwnTask ? own!.id : (held?.taskId ?? byTurn)
+    const same = (a: ProposePlanInput['steps'], b: ProposePlanInput['steps']): boolean =>
+      a.length === b.length &&
+      a.every((s, i) => s.title === b[i]!.title && s.agentId === b[i]!.agentId)
+    let replaced: { title: string } | undefined
+    if (homeId) {
+      const last = [...this.planQuestions.values()].filter((q) => q.taskId === homeId).at(-1)
+      if (last && same(last.steps, input.steps)) {
+        if (last.status === 'pending') return { status: 'waiting', taskId: homeId }
+        if (last.status === 'accepted' || last.status === 'declined')
+          return {
+            status: last.status === 'accepted' ? 'already_accepted' : 'already_declined',
+            taskId: homeId,
+            ...(byTurn ? { replay: true } : {}),
+          }
+      }
+      for (const q of this.planQuestions.values())
+        if (q.taskId === homeId && q.status === 'pending') {
+          q.status = 'closed'
+          replaced = { title: this.tasks.get(homeId)?.title ?? '' }
+        }
+    }
+    if (!onOwnTask) {
+      // What this agent already had answered, from any earlier turn.
+      const answered = [...this.planQuestions.values()]
+        .filter(
+          (q) =>
+            q.holder &&
+            q.agentId === input.agentId &&
+            (q.status === 'accepted' || q.status === 'declined') &&
+            same(q.steps, input.steps),
+        )
+        .at(-1)
+      if (answered)
+        return {
+          status: answered.status === 'accepted' ? 'already_accepted' : 'already_declined',
+          taskId: answered.taskId,
+        }
+    }
+    let task = homeId ? this.tasks.get(homeId) : undefined
+    if (!task) {
+      const id = `task-${++this.taskN}`
+      task = {
+        id,
+        status: 'blocked',
+        parentTaskId: input.parentTaskId,
+        title: '',
+        description: 'hold',
+        sourceDelegationId: encodePlanHolder(input.agentId, id),
+        assigneeAgentId: input.agentId,
+      }
+      this.tasks.set(id, task)
+      this.planCards.set(cardKey, id)
+    }
+    if (!onOwnTask) task.title = `Plan: ${input.steps[0]!.title}`
+    task.status = 'blocked'
+    this.waits.set(task.id, { kind: 'question', questionId: `q-${this.planN + 1}` })
+    this.planQuestions.set(`q-${++this.planN}`, {
+      taskId: task.id,
+      agentId: input.agentId,
+      steps: input.steps,
+      parentTaskId: onOwnTask ? own!.id : input.parentTaskId,
+      holder: !onOwnTask,
+      parallel: input.parallel === true,
+      status: 'pending',
+    })
+    return {
+      status: 'proposed',
+      task: this.toBoardTask(task),
+      holder: !onOwnTask,
+      ...(replaced ? { replaced } : {}),
+    }
+  }
+  async startingWithoutAsking(input: { agentId: string }): Promise<void> {
+    for (const q of this.planQuestions.values()) {
+      if (q.status !== 'pending' || !q.holder || q.agentId !== input.agentId) continue
+      q.status = 'closed'
+      this.waits.delete(q.taskId)
+      const task = this.tasks.get(q.taskId)
+      if (task) task.status = 'cancelled'
+    }
+  }
+  async closeWaitingPlans(): Promise<void> {
+    for (const q of this.planQuestions.values()) {
+      if (q.status !== 'pending') continue
+      q.status = 'closed'
+      const task = this.tasks.get(q.taskId)
+      if (!task) continue
+      this.waits.delete(task.id)
+      task.status = q.holder ? 'cancelled' : 'todo'
+      if (q.holder) continue
+      task.assigneeAgentId = null
+      const ref = await this.createExecution(task.id)
+      if (ref) await this.completeExecution(ref.id, { status: 'cancelled', byPerson: true })
+    }
+  }
+
   async handOffRoom(_teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null> {
     if (parentTaskId === null) {
       return {

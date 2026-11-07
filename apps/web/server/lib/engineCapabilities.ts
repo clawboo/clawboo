@@ -49,6 +49,11 @@ export const FEATURE_ROUTES = {
     'GET /api/team-agent-wakes/:teamId',
     'PUT /api/team-agent-wakes/:teamId',
   ],
+  'board.planDocuments': ['GET /api/board/:taskId/plan'],
+  'board.planApproval': [
+    'GET /api/team-plan-approval/:teamId',
+    'PUT /api/team-plan-approval/:teamId',
+  ],
   'board.readableIds': ['GET /api/teams/:id/task-prefix', 'PUT /api/teams/:id/task-prefix'],
   'board.labels': [
     'GET /api/teams/:id/labels',
@@ -156,6 +161,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.reopen': true,
     'board.personAssignees': true,
     'board.questions': true,
+    'board.planDocuments': true,
+    'board.planApproval': true,
     'workspace.view': true,
     'workspace.preview': true,
     'agent.nativeShell': true,

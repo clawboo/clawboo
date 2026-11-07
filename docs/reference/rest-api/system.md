@@ -725,6 +725,8 @@ The answer is built from the running process alone: no database read, no network
     "board.inbox": true,
     "board.wakes": true,
     "board.agentWakes": true,
+    "board.planDocuments": true,
+    "board.planApproval": true,
     "board.reopen": true,
     "board.personAssignees": true,
     "board.questions": true,
@@ -773,6 +775,8 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.inbox`                                                               | Always. Read state per task on the server (`/api/board/inbox`, `POST /api/board/:taskId/read`). The event stream says when to read it.                                                                                                                                                                            |
 | `board.wakes`                                                               | Always. A person's comment and a dependency moving to done save a wake that starts the task's agent, one per agent and task, within seconds.                                                                                                                                                                      |
 | `board.agentWakes`                                                          | Always. An agent's comment can wake a teammate once a person has allowed it on the job: `POST /api/board/agent-wakes/:jobTaskId`, `/api/team-agent-wakes/:teamId`.                                                                                                                                                |
+| `board.planDocuments`                                                       | Always. A task's plan as a document, in revisions: `GET /api/board/:taskId/plan`, and `write_plan` for an agent's run.                                                                                                                                                                                            |
+| `board.planApproval`                                                        | Always. A team can ask a person before a plan starts: `/api/team-plan-approval/:teamId`.                                                                                                                                                                                                                          |
 | `board.personCheck`                                                         | Always. Moves, Retry, Assign, Reopen, approval and question answers, the card about agents waking each other, labels, read marks and a team's work check take a person's authority only from the dashboard's page or a person a sign-in proxy vouched for (see [Security](/operating/security#the-person-check)). |
 | `workspace.view`                                                            | Always. The read-only view of a task's worktree: tree, file, diff and status.                                                                                                                                                                                                                                     |
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                                                                        |

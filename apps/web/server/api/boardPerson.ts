@@ -36,6 +36,8 @@ import {
   reopenTask,
   reopenTaskBody,
   runOwnWrite,
+  markTaskRead,
+  activitySeqOf,
   type ClawbooDb,
   type QuestionAnswer,
 } from '@clawboo/db'
@@ -49,6 +51,7 @@ import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
 import { runnerTargetOf } from '../lib/runnerRoute'
 import { startTask } from '../lib/startBoardTask'
+import { pumpRoomOfTask } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove } from '../lib/teamChat/humanMove'
 import type { ReplyDelivery } from '../lib/teamChat/personReply'
 import {
@@ -373,49 +376,96 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
     }
     // The answer, its place on the thread and its wake are one write, so a restart
     // finds all of them or none, and the person's own answer does not read as news.
-    const answered = runOwnWrite(db, ownWriterOf(req), asked.taskId, () => {
+    const writer = ownWriterOf(req)
+    const answered = runOwnWrite(db, writer, asked.taskId, () => {
       const result = answerQuestion(db, questionId, parsed.data.answer, { person })
       if (!result.ok) return { result, wake: null, words: '' }
+      // The steps an acceptance creates are this person's own doing too, so they read as
+      // new only once someone else changes them.
+      if (writer)
+        for (const made of result.created ?? [])
+          markTaskRead(db, writer, made.id, activitySeqOf(db, made.id))
       const { question, task } = result
-      const prompt = parseQuestionPayload(question.payload)?.prompt ?? 'your question'
+      const payload = parseQuestionPayload(question.payload)
+      const prompt = payload?.prompt ?? 'your question'
       const answer = JSON.parse(question.answer ?? '{}') as QuestionAnswer
+      // A plan's tasks exist by now, so the words must not read as asking for them.
+      const planCreated = { planCreated: payload?.plan !== undefined }
       addComment(db, task.id, askedWords(prompt), 'agent', question.agentId, {
         kind: 'agent',
         executionId: question.executionId,
       })
-      const written = addComment(db, task.id, answerWords(answer), 'user', null, {
+      const written = addComment(db, task.id, answerWords(answer, planCreated), 'user', null, {
         person,
         kind: 'person',
       })
-      const words = answerForAgent(prompt, answer)
-      const wake = savePersonWake(
-        db,
-        task,
-        'question_answered',
-        { id: written.id, body: words },
-        saveDeps(db),
-      )
+      const words = answerForAgent(prompt, answer, planCreated)
+      // A card that only held a plan closed with this answer, and its agent hears through
+      // the update written with it, in its own session. Nothing runs on the card.
+      const wake = payload?.plan?.holder
+        ? null
+        : savePersonWake(
+            db,
+            task,
+            'question_answered',
+            { id: written.id, body: words },
+            saveDeps(db),
+          )
       return { result, wake, words }
     })
     const { result, wake } = answered
     if (!result.ok) {
       res
         .status(
-          result.reason === 'not_found' ? 404 : result.reason === 'invalid_answer' ? 400 : 409,
+          result.reason === 'not_found'
+            ? 404
+            : result.reason === 'invalid_answer' || result.reason === 'too_many_steps'
+              ? 400
+              : 409,
         )
-        .json({ ok: false, error: result.reason })
+        .json({
+          ok: false,
+          error: result.reason,
+          ...('room' in result ? { room: result.room } : {}),
+          ...('max' in result ? { max: result.max } : {}),
+        })
       return
     }
     const { question, task } = result
     const asker = question.agentId
       ? ({ kind: 'agent', agentId: question.agentId, execId: question.executionId } as const)
       : ({ kind: 'caller' } as const)
+    // An accepted plan's steps, for the board's readers and what they wake. A person's
+    // acceptance is what made them.
+    for (const made of result.created ?? [])
+      emitEvent(db, {
+        kind: 'task_created',
+        taskId: made.id,
+        teamId: made.teamId,
+        data: {
+          title: made.title,
+          status: made.status,
+          parentTaskId: made.parentTaskId,
+          ...actorField(req),
+        },
+      })
+    // A card that only held the plan closed with this answer, by this person.
+    if (parseQuestionPayload(question.payload)?.plan?.holder)
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId: task.id,
+        teamId: task.teamId,
+        data: { to: task.status, reason: 'plan_answered', ...actorField(req) },
+      })
     for (const data of [
       { authorType: 'agent', questionId: question.id, actor: asker },
       { authorType: 'user', questionId: question.id, person, actor: { kind: 'person' } as const },
     ])
       emitEvent(db, { kind: 'comment_added', taskId: task.id, teamId: task.teamId, data })
-    const delivery = startWake(db, req, task.id, wake as SavedPersonWake)
+    const delivery: ReplyDelivery = wake
+      ? startWake(db, req, task.id, wake)
+      : { status: 'queued', agentId: question.agentId ?? '', reason: 'next-run' }
+    if (!wake && task.teamId) pumpRoomOfTask(task.teamId, task.id, loopbackMcpBaseUrl(req))
     // The answer is saved. A task that stayed Blocked says so on its card, and the
     // person is never made to answer again. A run still ending starts it again in a
     // moment, so there is nothing to say.
@@ -438,6 +488,9 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
       question: getQuestion(db, question.id),
       task: getTask(db, task.id),
       delivery,
+      ...(result.created || result.linked
+        ? { created: result.created?.length ?? 0, alreadyOpen: result.linked?.length ?? 0 }
+        : {}),
     })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })

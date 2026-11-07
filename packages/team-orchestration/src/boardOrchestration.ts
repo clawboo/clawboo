@@ -34,6 +34,7 @@ import {
   parseWaitingOn,
   delegationFailureKey,
   isEngineRun,
+  isPlanHolder,
   normalizeTaskTitle,
   PAUSED_RUN_CLASS,
   PROVIDER_RETRY_WAITS_MS,
@@ -1826,6 +1827,104 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   /**
+   * On a team that asks first, put the plan in front of a person instead of starting it.
+   * True when that settled it. A person's acceptance creates the steps, on the board, and
+   * the ready-pump fires them from there as it fires any plan's. A person's answer reaches
+   * the proposing agent as any answered question does: a saved wake on the task it waits on.
+   */
+  async function askAboutPlan(
+    steps: DelegationSignal[],
+    sourceTaskId: string | null,
+    delegatorAgentId: string | null,
+    runId: string,
+    ownTask: boolean,
+    refusePlan: (summary: string) => Promise<void>,
+    startGen: number,
+    parallel: boolean,
+  ): Promise<boolean> {
+    if (!deps.board.proposePlan) return false
+    // A Stop since the plan's checks began: it closed what waited, so nothing may land after.
+    if (deps.stopGen() !== startGen)
+      return (await deps.board.planApprovalOn?.(deps.teamId)) === true
+    const agentId = delegatorAgentId ?? deps.leaderAgentId() ?? ''
+    const count = steps.length === 1 ? 'one step' : `${steps.length} steps`
+    const proposal = await deps.board.proposePlan({
+      teamId: deps.teamId,
+      agentId,
+      prompt: parallel
+        ? `${nameOf(agentId)} wants to hand out ${steps.length} tasks at once. Nothing starts until you accept it.`
+        : `${nameOf(agentId)} proposes a plan of ${count}. Nothing starts until you accept it.`,
+      steps: steps.map((step) => {
+        const title = step.task.slice(0, HAND_OFF_TITLE_CHARS)
+        return {
+          title,
+          ...(step.task !== title ? { description: step.task } : {}),
+          agentId: step.targetAgentId,
+          agentName: step.targetAgentName,
+        }
+      }),
+      taskId: ownTask ? sourceTaskId : null,
+      parentTaskId: sourceTaskId,
+      turnId: runId,
+      ...(parallel ? { parallel: true } : {}),
+    })
+    switch (proposal.status) {
+      case 'off':
+        return false
+      case 'proposed': {
+        if (proposal.holder) {
+          const { task } = proposal
+          emit({
+            id: task.id,
+            identifier: task.identifier ?? null,
+            ...(task.title ? { title: task.title } : {}),
+            status: 'blocked',
+            ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
+            ...(task.updatedAt !== undefined ? { updatedAt: task.updatedAt } : {}),
+          })
+        }
+        // Said in the chat, where it reaches the person and starts no run: a run told its
+        // plan was dropped could bring that one back and drop this one.
+        const toSk = proposal.replaced ? deps.sessionKeyForAgent(agentId) : null
+        if (proposal.replaced && toSk)
+          deps.narrate?.(
+            toSk,
+            `${nameOf(agentId)}'s new plan took the place of the one waiting for an answer: "${proposal.replaced.title}". Nothing from that one started.`,
+            'alert',
+          )
+        return true
+      }
+      case 'waiting':
+      case 'closed':
+        return true
+      case 'already_accepted':
+        if (!proposal.replay)
+          await refusePlan(
+            'Plan not started: a person already accepted these same steps, and they are on the board. Do not hand them out again.',
+          )
+        return true
+      case 'already_declined':
+        if (!proposal.replay)
+          await refusePlan(
+            'Plan not started: a person already turned these same steps down. Change the plan, or ask them what they want.',
+          )
+        return true
+      case 'refused':
+        await refusePlan(
+          proposal.reason === 'step_too_long'
+            ? 'Plan not started: a step is too long for a person to read. Keep each step under 4,000 characters.'
+            : 'Plan not started: it could not be put in front of a person. Tell them what you want to do.',
+        )
+        return true
+      default:
+        await refusePlan(
+          'Plan not started: it could not be saved for a person to read. Try again in your next turn.',
+        )
+        return true
+    }
+  }
+
+  /**
    * Create a plan as a durable dependency chain: step i depends on step i-1, so
    * only step 0 is ready. The ready-pump fires each subsequent step when its
    * blocker completes. Targets are stored in `pendingTargets` so the pump knows
@@ -1837,7 +1936,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     delegatorAgentId: string | null,
     runId: string,
     ownTask: boolean,
-  ): Promise<void> {
+    /** A batch of hand-offs on a team that asks first: it is only ever asked about. False
+     *  back means nobody was asked, and the batch goes out as hand-offs after all. */
+    batch = false,
+  ): Promise<boolean> {
+    const startGen = deps.stopGen()
     /** Refuse the whole plan, before any step exists: a plan cut short is worse than
      *  none, since its later steps may rely on the ones left out. */
     const refusePlan = async (summary: string): Promise<void> => {
@@ -1856,13 +1959,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await refusePlan(
         `Plan not started: it has ${steps.length} steps, and a plan can have ${MAX_PLAN_STEPS}. Plan less at once and hand out the rest when these are done.`,
       )
-      return
+      return true
     }
     for (const step of steps) {
       const cycle = await cycleFor(step.targetAgentId, sourceTaskId, ownTask)
       if (cycle) {
         await refusePlan(`Plan not started. ${cycleRefusal(step.targetAgentName, cycle)}`)
-        return
+        return true
       }
     }
     const capacity = await deps.board.handOffRoom(deps.teamId, sourceTaskId)
@@ -1871,7 +1974,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       await refusePlan(
         `Plan not started: it has ${steps.length} steps and only ${capacity.room} more tasks fit right now (the limit is ${capacity.max}). Plan less at once, or tell the person.`,
       )
-      return
+      return true
     }
 
     // Depth preflight for the WHOLE plan. `spawn` gates each immediate delegation,
@@ -1898,8 +2001,21 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
         })
       }
-      return
+      return true
     }
+
+    const asked = await askAboutPlan(
+      steps,
+      sourceTaskId,
+      delegatorAgentId,
+      runId,
+      ownTask,
+      refusePlan,
+      startGen,
+      batch,
+    )
+    if (asked) return true
+    if (batch) return false
 
     let prevTaskId: string | null = null
     let index = 0
@@ -1976,6 +2092,68 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
     // Fire whatever is ready now (step 0 has no dep).
     await pumpReady()
+    return true
+  }
+
+  /**
+   * Two or more hand-off tags in one reply, on a team that asks first. They arrive whole,
+   * in the one event that ends the turn, so they can wait for a person as a plan does. A
+   * hand-off by tool call cannot: the first has started before the next exists. Held to
+   * the same per-turn cap they would have met going out. True when it is settled here.
+   */
+  async function askAboutBatch(
+    batch: DelegationSignal[],
+    sourceTaskId: string | null,
+    delegatorAgentId: string | null,
+    runId: string,
+    ownTask: boolean,
+    sessionKey: string,
+  ): Promise<boolean> {
+    const planId = `${deps.teamId}:${runId}:plan`
+    if (processed.has(planId)) return true
+    const maxFanout = deps.caps?.maxFanout
+    const used = handOffsByTurn.get(`${sessionKey}:${runId}`)?.count ?? 0
+    const room = maxFanout == null ? batch.length : Math.max(0, maxFanout - used)
+    processed.set(planId, now())
+    const settled = await startPlan(
+      batch.slice(0, room),
+      sourceTaskId,
+      delegatorAgentId,
+      runId,
+      ownTask,
+      true,
+    )
+    if (!settled) {
+      // The switch went off in between: they go out as hand-offs, with their own latch.
+      processed.delete(planId)
+      return false
+    }
+    if (batch.length > room)
+      await noteFanoutCap(batch.length - room, sourceTaskId, delegatorAgentId)
+    return true
+  }
+
+  /** Hand-offs a turn asked for past its cap: counted and said, never dropped in silence. */
+  async function noteFanoutCap(
+    capped: number,
+    sourceTaskId: string | null,
+    delegatorAgentId: string | null,
+  ): Promise<void> {
+    const maxFanout = deps.caps?.maxFanout
+    if (sourceTaskId)
+      await deps.board.addComment(
+        sourceTaskId,
+        `Fan-out cap (${maxFanout}) reached — ${capped} delegation(s) this turn were not started.`,
+        'system',
+      )
+    deps.onCapHit?.({ kind: 'fanout', sourceTaskId })
+    enqueueReflection({
+      toAgentId: delegatorAgentId,
+      by: 'System',
+      summary: `Fan-out cap (${maxFanout}) reached — ${capped} delegation(s) this turn were not started. Re-issue them in a follow-up if still needed.`,
+      outcome: 'error',
+      ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+    })
   }
 
   /** Resolve a ready plan step's intended agent — the in-memory map, else decoded
@@ -3466,6 +3644,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     handOffs: number,
   ): Promise<{ empty: boolean; again: boolean; why: NoTextWhy | null } | null> {
     const detail = await deps.board.getTask(taskId)
+    // A card that only held a plan runs only if a person moved it back. It has no work to
+    // show, so saying nothing is not a run that went wrong, and it earns no extra turn.
+    if (detail && isPlanHolder(detail.task.sourceDelegationId as string | null | undefined))
+      return { empty: false, again: false, why: null }
     const execs = await deps.board.listExecutions(taskId).catch(() => null)
     if (!detail || !execs) return null
     const at = currentRunIndex(execs, taskId)
@@ -4831,7 +5013,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         // A successful done may ALSO carry <delegate>/<plan> to spawn. They go on the
         // board first, so the task's ending counts them. One a board refused, or a
         // repeat of one it refused already, leaves nothing to wait for, so an agent
-        // that keeps asking cannot loop through follow-ups.
+        // that keeps asking cannot loop through follow-ups. On a team that asks first this
+        // is also what puts the plan in front of a person before the run's end is handled:
+        // the task then stays open, waiting on the question, and the run closes as one
+        // that asked, rather than as Done with its plan unanswered.
         const turn = `${sessionKey}:${turnIdOf(event, run)}`
         const inDone = extractSignals(event, sourceAgentId, deps.known())
         if (inDone.parallel.length + inDone.plan.length + inDone.unrouted.length > 0) {
@@ -4920,7 +5105,27 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // The run's own task, as opposed to one a follow-up run reports on.
     const ownTask = mapped !== null
     let cappedThisTurn = 0
-    for (const sig of signals.parallel) {
+    // Tags that arrive as a batch wait for a person on a team that asks first.
+    const isBatch = event.kind === 'done' && signals.parallel.length >= 2
+    const asksFirst = isBatch ? await deps.board.planApprovalOn?.(deps.teamId) : undefined
+    const batchAsked =
+      asksFirst === true &&
+      (await askAboutBatch(
+        signals.parallel,
+        sourceTaskId,
+        delegatorAgentId,
+        runId,
+        ownTask,
+        sessionKey,
+      ))
+    if (asksFirst === false && delegatorAgentId)
+      await deps.board.startingWithoutAsking?.({
+        teamId: deps.teamId,
+        agentId: delegatorAgentId,
+        taskId: ownTask ? sourceTaskId : null,
+        parentTaskId: sourceTaskId,
+      })
+    for (const sig of batchAsked ? [] : signals.parallel) {
       // A latch for what THIS engine has acted on, so a refused hand-off seen again is
       // not refused out loud again, and two overlapping events do not both start it.
       // The task's own idempotency key is what makes a replay safe: it lives on the
@@ -4942,22 +5147,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const id = await spawn(sig, sourceTaskId, delegatorAgentId, runId, ownTask, foundItOpen)
       if (!id) addHandOff(-1)
     }
-    if (cappedThisTurn > 0) {
-      if (sourceTaskId)
-        await deps.board.addComment(
-          sourceTaskId,
-          `Fan-out cap (${maxFanout}) reached — ${cappedThisTurn} delegation(s) this turn were not started.`,
-          'system',
-        )
-      deps.onCapHit?.({ kind: 'fanout', sourceTaskId })
-      enqueueReflection({
-        toAgentId: delegatorAgentId,
-        by: 'System',
-        summary: `Fan-out cap (${maxFanout}) reached — ${cappedThisTurn} delegation(s) this turn were not started. Re-issue them in a follow-up if still needed.`,
-        outcome: 'error',
-        ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
-      })
-    }
+    if (cappedThisTurn > 0) await noteFanoutCap(cappedThisTurn, sourceTaskId, delegatorAgentId)
 
     if (signals.plan.length > 0) {
       const planId = `${deps.teamId}:${runId}:plan`
@@ -5251,6 +5441,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       }
       await deps.board.updateStatus(taskId, 'todo')
     }
+    // A plan waiting for an answer is work about to start, and a person just halted the
+    // team. Before the ready list: a task it sends back must read as stopped too.
+    await deps.board.closeWaitingPlans?.(deps.teamId)
     // A task waiting on its sub-tasks: a Stop ends the wait (see stopWaitingParent).
     for (const task of await deps.board.listTasks(deps.teamId))
       if (task.status === 'blocked' && parseWaitingOn(task['waitingOn'])?.kind === 'subtasks')

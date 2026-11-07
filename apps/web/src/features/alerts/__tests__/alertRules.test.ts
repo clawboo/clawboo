@@ -276,6 +276,17 @@ describe('foldAlertRead', () => {
 })
 
 describe('alertNotice', () => {
+  it('announces a plan waiting for a person, on its own card', () => {
+    const [item] = collectAlertItems(
+      [task('p', 'question', { title: 'Plan: write the post and 1 more' })],
+      [],
+    )
+    expect(alertNotice([item!], agentOf)).toMatchObject({
+      body: '"Plan: write the post and 1 more" has a question for you. Click to open it.',
+      target: { kind: 'task', taskId: 'p' },
+    })
+  })
+
   it('says what happened to one task and opens it', () => {
     const [item] = collectAlertItems([task('f', 'timed_out', { title: 'Send the invoice' })], [])
     expect(alertNotice([item!], agentOf)).toMatchObject({

@@ -183,7 +183,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
 
 /** Write a new task inside the caller's transaction: its row, its readable id and
  *  its idempotency key, so all three land or none do. */
-function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
+export function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
   const row = buildTaskRow(input)
   row.identifier = allocateTaskIdentifier(tx, row.teamId)
   tx.insert(tasks).values(row).run()
@@ -281,7 +281,7 @@ export type GuardedCreateResult =
  * agent cannot cancel its own children and create more. Only a person's cancel frees
  * a slot (`personCancelledAt`).
  */
-function countChildSlots(tx: ClawbooDb | BoardTx, parentTaskId: string): number {
+export function countChildSlots(tx: ClawbooDb | BoardTx, parentTaskId: string): number {
   const row = tx
     .select({ n: count() })
     .from(tasks)

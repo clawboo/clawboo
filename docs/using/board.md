@@ -141,7 +141,7 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 | **Stopped**                 | You pressed **Stop** on its run. It never restarts by itself                                                                              |
 | **Needs review**            | Verification could not pass it                                                                                                            |
 | **Blocked**                 | An agent marked it blocked. The card says what it needs                                                                                   |
-| **Waiting for your answer** | An agent asked you a question and stopped. The card has the answer controls                                                               |
+| **Waiting for your answer** | An agent asked you a question and stopped, or a plan waits for you. The card has the answer controls                                      |
 | **Assigned to you**         | The task is yours, or an agent handed it back to you and says what it needs                                                               |
 | **Waiting for your OK**     | A teammate's comment would start this task, and you have not said yes for this job, or agents on it hit a limit. The card has the buttons |
 | **Unassigned**              | No agent is bound to it, so nobody will pick it up                                                                                        |
@@ -365,6 +365,8 @@ Each section folds from its heading, and a section with nothing in it is not sho
 | **Comments**       | Your replies and actions (**You**) and the notes Clawboo writes (**Clawboo**), then a box to reply to the agent. See [Steer a running task](#steer-a-running-task)                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **Activity**       | The task's live tool calls, results and errors, or one line saying there are none yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
+When the task has a plan, a **Details** and **Plan** tab pair shows under the title. **Plan** shows the plan as a document, with a button for each older revision and who accepted or turned it down. If the plan on show is waiting for you, its controls are there as well, with each step in full. The document is the agent's own summary, and the steps are what would run. See [Decide on a plan](#decide-on-a-plan).
+
 Click the **Parent** to open that task in the drawer. A run that is still going can show OpenClaw as its runtime in **Run history** until it ends. The drawer's cost is the same total as the card's, to four decimal places, or `free` for a task that ran only on a local model.
 
 An image in the agent's report or its comments shows as a link named after its alt text, such as **Image: sales chart**. It opens in a new tab only when you click it. Clawboo never loads it by itself, so an agent cannot send data out in an image's address without your click. An address that is not a web or same-site one is only named, not linked.
@@ -429,6 +431,26 @@ Clawboo does not merge the branch. Review it and merge it yourself.
 Clawboo checks an agent's work in two cases: a run in its own git worktree that changed files, and team chat work (a hand-off, or a task you give from the board) that changed the team's folder on a team with a [work check](/using/teams#work-check), by an agent that works in that folder, so not an OpenClaw agent (see [which team chat work is checked](/concepts/verification#team-chat)). The check runs the verify command and, for a larger or risky change, or a task handed down from another task, a separate review by a model. Clawboo knows your project's test command only if you set the team's work check. Without one, a worktree's check fails until the `VERIFY_CMD` line in its `init.sh` names one, and team chat work is not checked. Agent routines you create in the dashboard are not checked. A task with no check result reaches **Done** normally.
 
 While a check runs, the card shows **Verifying**. In team chat a check waits while a teammate is still working in the team folder, or another task's check is running, and the card shows **Waiting to check** until then, for 15 minutes at most. A comment on the task says who it is waiting for. A pass lands in **Done**, and a failed check sends the work back to the agent for another attempt. When the attempts run out, or the work passes with debt, the task goes to **Needs you**. It shows **Needs review** if its result cannot pass, or **Blocked** if it passed with debt. **Retry** runs the task again and clears the old result. See [Verification](/concepts/verification).
+
+### Decide on a plan
+
+To decide before an agent splits up work, open the team's settings and turn on **Ask me before splitting work**, under **Plans**. It is off at first. It covers a plan, a list of tasks an agent proposes, and two or more `<delegate>` tags in one reply. A hand-off an agent makes by tool call, or one tag alone, still goes straight through.
+
+With it on, the work shows in **Needs you** as **Waiting for your answer**, with an alert if you have them on, and lists each step and who it goes to:
+
+1. Read the steps. Each box holds the whole of what the agent will be told. Open the card and pick **Plan** for the document, if the agent wrote one.
+2. Change a step's words, remove a step, or add one with **Add a task**. What is in the box when you accept is what runs, and nothing you took out reaches the agent. A step you add goes to the agent that proposed the plan.
+3. Press **Accept**. The steps go on the board in that order, and the first starts. Tasks from several `<delegate>` tags all start at once. Or press **Turn down**, and nothing is created.
+
+The box above the buttons is for anything you want the agent to read. Your note comes first in what it reads. Say why when you turn a plan down.
+
+The agent always hears your answer. A plan on the agent's own task starts that task again. A plan on a card of its own closes the card, **Done** or **Cancelled**, with no run on it, and the agent gets a task update in its chat, so its reply shows there.
+
+**Accept** refuses a plan of more than 25 steps, or one that does not fit under its task, and leaves it open for you to shorten. Accepting twice creates nothing the second time. If an agent sends the same steps again within 48 hours of your answer, nothing new is created, and it is told you already decided. To run them again, create the tasks yourself.
+
+If a different plan arrives while one waits, it takes that one's place. The card says so, and the old plan stays on the **Plan** tab.
+
+**Stop** closes a waiting plan, and nothing starts: a task with work of its own goes back as **Stopped**, and a card that held only the plan is cancelled. Moving the card closes it too, and then what happens depends on where it goes. **Cancelled** starts nothing. **To do** starts the agent again within seconds, without the plan's steps. The revisions stay on the **Plan** tab.
 
 ## Routine runs
 

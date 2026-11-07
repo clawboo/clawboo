@@ -369,7 +369,15 @@ export async function fetchMemberRoles(): Promise<Record<string, string>> {
 
 /** The outcome of a hand-off: ok, or the server's reason for refusing it. A write that
  *  carries a person's words also says where they went: saved is not delivered. */
-export type HandOffResult = { ok: true; delivery?: ReplyDelivery } | { ok: false; reason: string }
+export type HandOffResult =
+  | {
+      ok: true
+      delivery?: ReplyDelivery
+      /** For an accepted plan: the tasks it made, and the open ones that stood in. */
+      created?: number
+      alreadyOpen?: number
+    }
+  | { ok: false; reason: string }
 
 async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> {
   try {
@@ -379,8 +387,17 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
       body: JSON.stringify(body ?? {}),
     })
     if (r.ok) {
-      const done = (await r.json().catch(() => null)) as { delivery?: ReplyDelivery } | null
-      return done?.delivery ? { ok: true, delivery: done.delivery } : { ok: true }
+      const done = (await r.json().catch(() => null)) as {
+        delivery?: ReplyDelivery
+        created?: number
+        alreadyOpen?: number
+      } | null
+      return {
+        ok: true,
+        ...(done?.delivery ? { delivery: done.delivery } : {}),
+        ...(typeof done?.created === 'number' ? { created: done.created } : {}),
+        ...(typeof done?.alreadyOpen === 'number' ? { alreadyOpen: done.alreadyOpen } : {}),
+      }
     }
     const payload = (await r.json().catch(() => null)) as { error?: string } | null
     return { ok: false, reason: payload?.error ?? 'error' }
@@ -478,7 +495,16 @@ export type QuestionAnswerInput =
   | { choice: string }
   | { text: string }
   | { confirmed: boolean }
-  | { accepted: boolean; tasks?: Array<{ title: string; description?: string }> }
+  | {
+      accepted: boolean
+      tasks?: Array<{
+        title: string
+        description?: string
+        agentId?: string
+        agentName?: string
+      }>
+      note?: string
+    }
 
 /** A person's answer about agents waking each other on a job. */
 export function decideAgentWakes(
@@ -494,6 +520,37 @@ export function answerTaskQuestion(
   answer: QuestionAnswerInput,
 ): Promise<HandOffResult> {
   return postHandOff(`/api/board/questions/${encodeURIComponent(questionId)}/answer`, { answer })
+}
+
+/** One revision of a task's plan, as the Plan tab lists it. */
+export interface TaskPlanRevision {
+  revision: number
+  authorAgentId: string | null
+  questionId: string | null
+  decision: string | null
+  decidedBy: string | null
+  decidedAt: number | null
+  createdAt: number
+}
+
+export interface TaskPlan {
+  /** The revision asked for, or the newest. Null: the task has no plan. */
+  plan: (TaskPlanRevision & { body: string }) | null
+  /** All of them, newest first. */
+  revisions: TaskPlanRevision[]
+}
+
+/** A task's plan document. Null when it could not be read. */
+export async function fetchTaskPlan(taskId: string, revision?: number): Promise<TaskPlan | null> {
+  try {
+    const r = await apiFetch(
+      `/api/board/${encodeURIComponent(taskId)}/plan${revision ? `?revision=${revision}` : ''}`,
+    )
+    if (!r.ok) return null
+    return (await r.json()) as TaskPlan
+  } catch {
+    return null
+  }
 }
 
 /** Who "you" is: the verified person behind a sign-in proxy, else the install's

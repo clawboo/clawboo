@@ -60,6 +60,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | Team labels on tasks                                | `board.labels`                                                                     |
 | Agents that wake on what happens to their task      | `board.wakes`                                                                      | Supported                      | Planned     | Planned       |
 | Agents waking each other, once you allow it         | `board.agentWakes`                                                                 | Supported                      |
+| Plans, and asking before one starts                 | `board.planDocuments`, `board.planApproval`                                        | Supported                      |
 | Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                         | Supported                      | Planned     | Planned       |
 | The person check on person writes                   | `board.personCheck`                                                                | Supported                      | Planned     | Planned       |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                              | Supported                      | Planned     | Planned       |

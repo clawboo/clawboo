@@ -265,11 +265,32 @@ A pause does not cover a 1:1 chat with an OpenClaw agent, which runs in the Open
 
 [Track work on the board](/using/board) has the steps for each.
 
+## Plans
+
+A plan is a list of steps an agent hands out in order: each step starts when the one before it is done. An agent can also write a plan as a document on its task, with `write_plan`. You read it on the task's **Plan** tab, and the agent's later runs read it in their ticket. Every revision is kept, so a newer one never costs you an older one. A document starts nothing by itself.
+
+By default a plan's steps start as soon as the agent writes them. To decide first, turn on **Ask me before splitting work** in the team's settings. It is off until you turn it on, and it is per team. With it on:
+
+- A plan waits for you in **Needs you** and raises an alert. So does a list of tasks an agent proposes with `ask_person`, and two or more `<delegate>` tags in one reply, which start together if you accept them. None of the work exists yet.
+- You read each step whole and can change its words. What is in the box when you accept is what the agent gets, and nothing you took out reaches it.
+- **Accept** creates the steps and their order in one go, once. Pressing it again creates nothing, and neither does a restart. A plan of more than 25 steps is refused whole.
+- **Turn down** creates nothing, and the agent hears what you wrote.
+- A plan an agent repeats while one waits never stacks up. The same steps change nothing. Different steps take the waiting plan's place: the card says so, its title changes, the chat says so too, and the old plan stays readable as a revision.
+- The same steps from a later turn are recognised for 48 hours after you answer. Nothing new is created, and the agent is told you already decided.
+- **Stop** closes what waits: nothing starts, and a later press of **Accept** creates nothing. Moving the task's card closes it too.
+
+The plan waits on the task the agent was running, which stays **Blocked** until you answer, and your answer starts that task again. A lead writing a plan from chat has no such task, and neither does a follow-up on a finished task or a routine's run, so its plan waits on a card of its own, titled **Plan:** and the first step. You answer it the same way. That card holds only the plan: its steps are created beside it, not under it, and no agent runs on it. Your answer closes it, **Done** if you accepted and **Cancelled** if you did not, and the agent hears your answer in its chat as a task update. A task does not wait for such a card as it waits for work it handed out: only the steps you accept count as that.
+
+The switch does not cover everything. A hand-off made by tool call starts when it arrives, one at a time, because nothing can know another is coming. So a lead can still hand off a task, or several in turn, without a question. So can one `<delegate>` tag in a reply.
+
+Turning the switch off leaves a waiting plan for you to answer. If its agent then starts a plan without asking, that plan takes the waiting one's place: the card is cancelled, so the same work cannot run twice.
+
 ## Limits
 
 - One agent works a task at a time. To split work, hand out separate tasks.
 - Agents that create tasks with Clawboo's task tools, or hand them off in team chat, are capped: at most 24 child tasks under one parent and 30 new top-level tasks in 5 minutes (for a hand-off, per team). Finished and cancelled children count, so an agent cannot clear its own way; only your cancel frees a place. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
 - One team-chat turn can start at most 8 hand-offs, counted across the whole turn, and a plan can have at most 25 steps. A plan too long, or with no room, is refused whole.
+- A plan's steps start at once unless the team asks first. See [Plans](#plans).
 - An agent can set a task's priority up to High. Only you can make a task Urgent.
 - Most work runs without a worktree or a check, as described in [Where the work happens](#where-the-work-happens).
 

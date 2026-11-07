@@ -25,17 +25,24 @@ export {
   isLocked,
   isTaskStatus,
   isTaskIdentifier,
+  isPlanHolder,
   isTerminal,
   legalTargets,
   LOCAL_PERSON,
   normalizeAnswer,
   parseQuestionPayload,
   parseWaitingOn,
+  planStepsMatch,
+  renderPlanBody,
   summarizeRunCost,
+  TASK_DOCUMENT_MAX_CHARS,
+  TASK_DOCUMENT_MAX_REVISIONS,
+  TASK_DOCUMENT_PLAN_KEY,
   waitingOnJson,
   waitsOnOtherWork,
 } from '@clawboo/board-core'
 export type {
+  PlanRef,
   HandOffLink,
   AttentionReason,
   InterSessionAttribution,
@@ -59,6 +66,7 @@ export * from './identifiers'
 export * from './labels'
 export * from './events'
 export * from './pauses'
+export * from './plans'
 export * from './questionExpiry'
 export * from './questions'
 export * from './readState'

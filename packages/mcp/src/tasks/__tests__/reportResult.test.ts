@@ -67,9 +67,15 @@ describe('report_result', () => {
     const { id } = running('coder')
     const names = await listToolNames(await connect({ ...teamRun(id), readOnly: true }))
     expect(names).toEqual(
-      expect.arrayContaining(['list_tasks', 'get_task', 'ask_person', 'report_result']),
+      expect.arrayContaining([
+        'list_tasks',
+        'get_task',
+        'ask_person',
+        'report_result',
+        'write_plan',
+      ]),
     )
-    expect(names).toHaveLength(4)
+    expect(names).toHaveLength(5)
   })
 
   it('takes a run’s own task by its id, and refuses another task', async () => {

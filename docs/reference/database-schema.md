@@ -39,6 +39,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                                        |
 | [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                                       |
 | [`task_questions`](#task_questions)             | Board                    | What agents asked people, and the answers                         |
+| [`task_documents`](#task_documents)             | Board                    | Documents on tasks, in revisions: today, plans                    |
 | [`task_activity`](#task_activity)               | Board                    | Each task's newest change, for read state                         |
 | [`task_readers`](#task_readers)                 | Board                    | How far each reader has read the whole board                      |
 | [`task_reads`](#task_reads)                     | Board                    | How far each reader has read one task                             |
@@ -100,6 +101,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | `task_deps.task_id`, `task_deps.depends_on_task_id` | `tasks.id`      | Refused while rows point at it     |
 | `task_comments.task_id`                             | `tasks.id`      | Refused while rows point at it     |
 | `task_questions.task_id`                            | `tasks.id`      | Refused while rows point at it     |
+| `task_documents.task_id`                            | `tasks.id`      | Refused while rows point at it     |
 | `workspaces.task_id`                                | `tasks.id`      | Refused while rows point at it     |
 | `execution_processes.task_id`                       | `tasks.id`      | Refused while rows point at it     |
 | `execution_processes.workspace_id`                  | `workspaces.id` | Refused while rows point at it     |
@@ -383,12 +385,36 @@ What an agent asked a person about a task, and the answer. A task has at most on
 | `execution_id`    | `TEXT`                                | The `execution_processes` row of the run that asked, when an agent's run did. Null otherwise          |
 | `answer`          | `TEXT`                                | JSON: the answer                                                                                      |
 | `answered_by`     | `TEXT`                                | JSON `{ id, name, role }`: the person a sign-in proxy vouched for, else the install's built-in person |
-| `close_reason`    | `TEXT`                                | Why it closed unanswered: `replaced`, `task_closed` or `moved`                                        |
+| `close_reason`    | `TEXT`                                | Why it closed unanswered: `replaced`, `task_closed`, `moved` or `stopped`                             |
 | `created_at`      | `INTEGER`, not null                   |                                                                                                       |
 | `updated_at`      | `INTEGER`, not null                   |                                                                                                       |
 | `answered_at`     | `INTEGER`                             |                                                                                                       |
 
 Indexes: `idx_task_questions_task` (`task_id`, `status`), and the unique `idx_task_questions_idempotency` (`task_id`, `idempotency_key`).
+
+### task_documents
+
+A document on a task, one row per revision. A new revision is a new row, so none is ever overwritten. The only key today is `plan`.
+
+| Column            | Type                            | Notes                                                                                              |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`, PK                      |                                                                                                    |
+| `task_id`         | `TEXT`, not null, FK `tasks.id` |                                                                                                    |
+| `team_id`         | `TEXT`                          | Plain reference to `teams.id`                                                                      |
+| `key`             | `TEXT`, not null                | What the document is: `plan`                                                                       |
+| `revision`        | `INTEGER`, not null             | 1, 2, 3 for a task and key. At most 100                                                            |
+| `body`            | `TEXT`, not null                | At most 32,000 characters                                                                          |
+| `author_agent_id` | `TEXT`                          | The agent that wrote it                                                                            |
+| `execution_id`    | `TEXT`                          | The run that wrote it, when an agent's run did. Plain reference to `execution_processes.id`        |
+| `question_id`     | `TEXT`                          | The question that asks a person about this revision, if one has. Plain reference                   |
+| `decision`        | `TEXT`                          | `accepted` or `declined`, once a person answered. Guarded, so a revision is accepted only once     |
+| `decided_by`      | `TEXT`                          | JSON `{ id, name, role }`: the person a sign-in proxy vouched for, else the install's built-in one |
+| `decided_at`      | `INTEGER`                       |                                                                                                    |
+| `created_at`      | `INTEGER`, not null             |                                                                                                    |
+
+Index: the unique `idx_task_documents_revision` (`task_id`, `key`, `revision`).
+
+A team's switch for asking before a plan starts lives in `settings`, as `team-plan-approval:<teamId>`: JSON `{ on }`.
 
 ### task_comments
 

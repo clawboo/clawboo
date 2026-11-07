@@ -26,12 +26,14 @@ import type { DebtNote } from '@clawboo/governance'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import {
   boardClient,
+  fetchTaskPlan,
   getTaskExecutions,
   getWorkspaceDetail,
   type BoardExecution,
   type BoardTask,
   type ReplyDelivery,
   type TaskDetail,
+  type TaskPlan,
   type WorkspaceDetail,
 } from '@/lib/boardClient'
 import { labelsOfTask } from '@/lib/teamLabels'
@@ -43,6 +45,7 @@ import { MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { Button, IconButton } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { Skeleton } from '@/features/shared/Skeleton'
+import { Tabs } from '@/features/shared/Tabs'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { WorkspacePanel } from '@/features/workspace/WorkspacePanel'
 import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
@@ -55,6 +58,7 @@ import { AssignAgentSelect } from './AssignAgentSelect'
 import { AgentWakesCard } from './AgentWakesCard'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { QuestionAnswer, type OpenQuestion } from './QuestionAnswer'
+import { TaskPlanTab } from './TaskPlanTab'
 import { useBoardPerson } from './useBoardPerson'
 import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
@@ -494,6 +498,9 @@ export function TaskDetailDrawer({
   const [receipts, setReceipts] = useState<Map<string, { delivery: ReplyDelivery; body: string }>>(
     () => new Map(),
   )
+  // The task's plan, and which of the two tabs is showing. Another task starts on Details.
+  const [plan, setPlan] = useState<TaskPlan | null>(null)
+  const [view, setView] = useState<{ taskId: string; tab: 'details' | 'plan' } | null>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   // The task open now. A reply or a status write for a task the drawer has
   // stepped away from (J or K mid-flight) must not land on the one it shows.
@@ -502,16 +509,18 @@ export function TaskDetailDrawer({
 
   const load = useCallback(
     async (live: () => boolean = () => true) => {
-      const [d, ex, ws] = await Promise.all([
+      const [d, ex, ws, p] = await Promise.all([
         boardClient.getTask(taskId),
         getTaskExecutions(taskId),
         getWorkspaceDetail(taskId),
+        fetchTaskPlan(taskId),
       ])
       // A quick J or K can land an older task's reply after a newer one's.
       if (!live() || openTaskRef.current !== taskId) return
       setDetail(d)
       setExecutions(ex)
       setWorkspace(ws)
+      setPlan(p)
       setLoadedFor(taskId)
       // Opening a task is what reads it, through what this read shows: a change that
       // landed since stays unread. Asking the server is the point of the check, so a
@@ -644,6 +653,19 @@ export function TaskDetailDrawer({
     void load()
     onChanged?.()
   }
+  const hasPlan = loadedFor === taskId && !!plan?.plan
+  const planTab = hasPlan && view?.taskId === taskId && view.tab === 'plan'
+  const tabs = hasPlan ? (
+    <Tabs
+      className="mt-3"
+      tabs={[
+        { id: 'details', label: 'Details' },
+        { id: 'plan', label: 'Plan' },
+      ]}
+      value={planTab ? 'plan' : 'details'}
+      onChange={(tab) => setView({ taskId, tab })}
+    />
+  ) : null
 
   return (
     <Modal
@@ -722,6 +744,22 @@ export function TaskDetailDrawer({
                 helper="This task may have been dropped or is no longer on the board."
               />
             </>
+          ) : planTab ? (
+            <TaskPlanTab
+              taskId={task.id}
+              plan={plan!}
+              question={openQuestionOf(task)}
+              title={
+                <h2
+                  id={headingId}
+                  className="m-0 break-words text-xl font-semibold tracking-tight text-foreground"
+                >
+                  {task.title || 'Untitled task'}
+                </h2>
+              }
+              tabs={tabs}
+              onChanged={refreshAfterAction}
+            />
           ) : (
             <>
               <h2
@@ -795,6 +833,8 @@ export function TaskDetailDrawer({
                   onChanged={refreshAfterAction}
                 />
               )}
+
+              {tabs}
 
               {(task.status === 'done' || task.status === 'cancelled') && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
