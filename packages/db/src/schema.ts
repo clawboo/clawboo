@@ -539,7 +539,7 @@ export const taskQuestions = sqliteTable(
     teamId: text('team_id'),
     // The agent that asked.
     agentId: text('agent_id'),
-    // question | confirm | suggest_tasks | agent_wakes
+    // question | confirm | suggest_tasks
     kind: text('kind').notNull(),
     // JSON QuestionPayload (@clawboo/board-core).
     payload: text('payload').notNull(),
@@ -1423,6 +1423,60 @@ export const taskWakes = sqliteTable(
 )
 
 export type DbTaskWake = typeof taskWakes.$inferSelect
+
+// ─── Agents waking each other, per job ──────────────────────────────────────
+// One row per job (a task's top-level ancestor): what a person said about its agents
+// waking each other, the card asking them, and this hour's count. In the database so a
+// restart or an evicted engine resets none of it. See board/agentWakes.ts.
+export const agentWakeGates = sqliteTable(
+  'agent_wake_gates',
+  {
+    jobTaskId: text('job_task_id').primaryKey(),
+    teamId: text('team_id'),
+    /** `allow` or `deny`. Null: not asked yet, or not answered. */
+    decision: text('decision'),
+    /** Who answered: a JSON {id, name, role}. */
+    decidedBy: text('decided_by'),
+    decidedAt: integer('decided_at'),
+    /** The card up now: `AgentWakeCardKind` in board-core. Null when there is none. */
+    cardKind: text('card_kind'),
+    /** The task it shows on, where the wake that raised it is waiting. */
+    cardTaskId: text('card_task_id'),
+    cardFromAgentId: text('card_from_agent_id'),
+    cardToAgentId: text('card_to_agent_id'),
+    cardAt: integer('card_at'),
+    /** When this hour's count began, and how many wakes it has. */
+    windowStartedAt: integer('window_started_at'),
+    windowCount: integer('window_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('idx_agent_wake_gates_card').on(t.cardTaskId),
+    index('idx_agent_wake_gates_team').on(t.teamId),
+  ],
+)
+
+export type DbAgentWakeGate = typeof agentWakeGates.$inferSelect
+
+// One row per pair of agents in a team: how many wakes in a row answered each other.
+// Per pair and not per job, because a lead's hand-offs are often top-level tasks, so two
+// helpers answering each other can be two jobs. See board/agentWakeState.ts.
+export const agentWakeChains = sqliteTable(
+  'agent_wake_chains',
+  {
+    /** The team, or an empty string for a task with none. */
+    teamKey: text('team_key').notNull(),
+    /** The two agents, in sorted order, so a pair has one row either way round. */
+    agentA: text('agent_a').notNull(),
+    agentB: text('agent_b').notNull(),
+    lastFromAgentId: text('last_from_agent_id'),
+    chainCount: integer('chain_count').notNull().default(0),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.teamKey, t.agentA, t.agentB] })],
+)
+
+export type DbAgentWakeChain = typeof agentWakeChains.$inferSelect
 
 export const teamChat = sqliteTable(
   'team_chat',

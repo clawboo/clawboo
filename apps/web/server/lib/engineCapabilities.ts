@@ -44,6 +44,11 @@ export const FEATURE_ROUTES = {
     'GET /api/board/:taskId/questions',
     'POST /api/board/questions/:questionId/answer',
   ],
+  'board.agentWakes': [
+    'POST /api/board/agent-wakes/:jobTaskId',
+    'GET /api/team-agent-wakes/:teamId',
+    'PUT /api/team-agent-wakes/:teamId',
+  ],
   'board.readableIds': ['GET /api/teams/:id/task-prefix', 'PUT /api/teams/:id/task-prefix'],
   'board.labels': [
     'GET /api/teams/:id/labels',
@@ -137,6 +142,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // Part of the board's own writes and the dispatch pump, so it has no route of its
     // own and no switch. What a comment did is in its reply's `delivery`.
     'board.wakes': true,
+    // Agents waking each other once a person said yes for the job.
+    'board.agentWakes': true,
     'board.reopen': true,
     'board.personAssignees': true,
     'board.questions': true,

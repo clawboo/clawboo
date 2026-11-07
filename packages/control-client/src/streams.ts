@@ -65,6 +65,16 @@ export const taskAttentionFrameSchema = z.object({
   reason: z.string(),
   failedRuns: z.number(),
   detail: z.string().optional(),
+  // For `agent_wakes`: the card and what it is about.
+  agentWakes: z
+    .object({
+      jobTaskId: z.string(),
+      kind: z.string(),
+      fromAgentId: z.string().nullable(),
+      toAgentId: z.string().nullable(),
+      alsoWaiting: z.number().optional(),
+    })
+    .optional(),
 })
 
 /** A board task changed (`event: board`, team chat only). Only `id` is always

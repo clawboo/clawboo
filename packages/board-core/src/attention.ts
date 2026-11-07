@@ -10,7 +10,9 @@
 //   · it is `in_progress` with no agent on it and no run going: moved there by
 //     hand, which starts nothing, so it would sit there looking worked on;
 //   · it waits on a person (`waiting_on`), which includes a question an agent
-//     asked, or it is assigned to a person.
+//     asked, or it is assigned to a person;
+//   · a teammate's comment would start it, and a person has to say whether agents may
+//     wake each other on this job, or they have been pausing and it is theirs to lift.
 //
 // A task waiting on another task or on its own sub-tasks is not on this list: the
 // board moves it on when that work finishes.
@@ -21,6 +23,7 @@
 // Pure and import-free apart from the sibling dispatch rules, so the server that
 // computes it and the board UI that renders it agree by construction.
 
+import { teammateMayEndWait, type AgentWakeCard } from './agentWakes'
 import {
   accountFailureOf,
   delegationTargetOf,
@@ -51,6 +54,9 @@ export type AttentionReason =
   | 'question'
   /** It is assigned to a person: their turn. */
   | 'assigned'
+  /** A person is asked whether agents may wake each other on this job, or has to lift a
+   *  pause in those wakes. The task's own wait is untouched. */
+  | 'agent_wakes'
 
 export interface TaskAttention {
   reason: AttentionReason
@@ -74,6 +80,8 @@ export interface TaskAttention {
   /** For `assigned`: an agent handed the task back, as opposed to a person taking
    *  it themselves. Only the first is news to anyone. */
   handedBack?: boolean
+  /** For `agent_wakes`: the card and what it is about. */
+  agentWakes?: AgentWakeCard
 }
 
 /** Longest failure reason a card shows; the full text stays on the task. */
@@ -114,6 +122,8 @@ export interface AttentionInput {
   waitingOn?: unknown
   /** The person it is assigned to. */
   assigneePersonId?: string | null
+  /** The card on this task, if the job has one open here. */
+  agentWakes?: AgentWakeCard | null
 }
 
 /** When the latest run started: its start, else its claim, else its creation. */
@@ -156,6 +166,10 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
       ...(need?.by === 'agent' ? { handedBack: true } : {}),
     }
   }
+  // Only for a wait a teammate's comment could end, so a card left over from before can
+  // never stand in front of a failure and the Retry it comes with.
+  if (input.status === 'blocked' && input.agentWakes && teammateMayEndWait(waiting))
+    return { reason: 'agent_wakes', failedRuns, agentWakes: input.agentWakes }
   // A check that could not be parked: In progress or In review to the board, but
   // nothing is coming for it until a person looks or the move lands.
   if (open && waiting?.kind === 'verification' && waiting.state === 'park_pending')

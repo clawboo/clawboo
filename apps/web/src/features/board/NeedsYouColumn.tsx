@@ -53,6 +53,7 @@ import {
 import { countLabel, longDate, timeLabel } from './calendar/calendarFormat'
 import { StatusGlyph } from './StatusGlyph'
 import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
+import { AgentWakesCard } from './AgentWakesCard'
 import { QuestionAnswer } from './QuestionAnswer'
 import { useBoardPerson } from './useBoardPerson'
 import { useTaskActions } from './useTaskActions'
@@ -176,7 +177,8 @@ function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
   const keyOf = (s: StuckItem) => {
     const { reason, detail, cause, runtime } = s.attention
     // Each of these is one person's turn, with its own controls.
-    if (!detail || reason === 'question' || reason === 'assigned') return null
+    if (!detail || reason === 'question' || reason === 'assigned' || reason === 'agent_wakes')
+      return null
     return `${reason}:${causeOf(detail)}${cause ? `|${cause}:${runtime ?? ''}` : ''}`
   }
   const members = new Map<string, StuckItem[]>()
@@ -369,6 +371,7 @@ function primaryActionOf(
       return 'open'
     // The answer controls are the action.
     case 'question':
+    case 'agent_wakes':
       return 'none'
     case 'assigned':
       return 'done'
@@ -480,6 +483,7 @@ function NeedsYouTaskCard({
   const unassigned = attention.reason === 'unassigned'
   const assigned = attention.reason === 'assigned'
   const question = attention.reason === 'question' ? openQuestionOf(task) : null
+  const agentWakes = attention.reason === 'agent_wakes' ? (attention.agentWakes ?? null) : null
   const handBackNeed = assigned ? (attention.detail ?? null) : null
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
@@ -602,7 +606,7 @@ function NeedsYouTaskCard({
             <span className="min-w-0 truncate" title={`Handed back by ${handedBy}`}>
               from {handedBy}
             </span>
-          ) : question || handBackNeed ? null : (
+          ) : question || handBackNeed || agentWakes ? null : (
             <span className="min-w-0 truncate" title={detail}>
               {detail}
             </span>
@@ -618,6 +622,11 @@ function NeedsYouTaskCard({
       {question ? (
         <div className="mt-2">
           <QuestionAnswer question={question} onAnswered={onChanged} />
+        </div>
+      ) : null}
+      {agentWakes ? (
+        <div className="mt-2">
+          <AgentWakesCard card={agentWakes} teamId={teamId} onDecided={onChanged} />
         </div>
       ) : null}
       <div className="mt-2 flex min-h-7 items-center gap-1">

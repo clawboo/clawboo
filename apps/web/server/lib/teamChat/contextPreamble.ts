@@ -495,6 +495,8 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     why = 'a task it was waiting on is finished; its result is below.'
   } else if (reason === 'question_answered') {
     why = 'a person answered your question; their answer is below.'
+  } else if (reason === 'agent_comment') {
+    why = 'a teammate commented on this task; what they wrote is below.'
   } else if (reason === 'reopened') {
     why = 'a person reopened this task after it finished; anything they said is below.'
   } else if (reason === 'fix_round') {

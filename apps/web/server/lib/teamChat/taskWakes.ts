@@ -9,7 +9,9 @@
 import {
   delegationTargetOf,
   parseWaitingOn,
+  teammateMayEndWait,
   wakeDecision,
+  type AgentWakeCardKind,
   type WakeDecision,
   type WakeDecisionInput,
   wakeFromPerson,
@@ -17,16 +19,21 @@ import {
 } from '@clawboo/board-core'
 import {
   addComment,
+  agentWakeFromOf,
+  agentWakeVerdictFor,
   getAncestors,
   getTask,
   holdTaskWakes,
+  immediateWrite,
   listExecutions,
   listTaskWakesCarriedBy,
   listUndeliveredInbox,
   listUnsettledTaskWakes,
   listWaitingTaskWakes,
   markInboxDelivered,
+  noteAgentWakeStarted,
   noteTaskWakeSkip,
+  openAgentWakeCard,
   readTaskRunnerInputs,
   reapTaskWakes,
   settleTaskWakes,
@@ -135,7 +142,8 @@ export function createTaskWakeOutbox(
 export interface TaskWakePumpDeps {
   /** Is the engine held (see engineHold)? */
   held: () => boolean
-  /** Start a task for a wake a person is behind, the way their Retry would. */
+  /** Start a task straight away, the way a person's Retry would: for a wake a person is
+   *  behind, or one on a task no pump would pick up. */
   startForPerson: (task: DbTask, agentId: string) => void
   /** Pump the room's engine: an automatic start goes through its fire policy. */
   pumpRoom: (teamId: string, roomId: string | null) => void
@@ -158,6 +166,14 @@ export interface TaskWakePumpDeps {
 /** The note on a card a wake moved back to To do, by what is behind the wake. */
 const STARTED_AGAIN: Partial<Record<string, string>> = {
   question_answered: 'Started again with a person’s answer.',
+  agent_comment: 'Started again for a teammate’s comment.',
+}
+
+/** The card a person sees when a teammate's wake has to wait for them. */
+const CARD_FOR_SKIP: Partial<Record<WakeSkipReason, AgentWakeCardKind>> = {
+  ask_once: 'ask',
+  hourly_cap: 'hourly_cap',
+  back_and_forth: 'back_and_forth',
 }
 const STARTED_AGAIN_FOR_REPLY = 'Started again for a person’s reply.'
 
@@ -192,6 +208,8 @@ function settleFinished(db: ClawbooDb, task: DbTask | null, row: DbTaskWake): vo
     data: { wakeId: row.id, reason: 'finished', wakeReason: row.reason },
   })
   if (!task || wakeCommentIds(row).length === 0) return
+  // That note is for the person who wrote the comment: a teammate's stays on the thread.
+  if (!wakeFromPerson(row.reason)) return
   // A mailbox row for it would otherwise land in the agent's next, unrelated run.
   const stale = listUndeliveredInbox(db, row.agentId, { teamId: row.teamId, limit: 50 })
     .filter((m) => m.taskId === task.id)
@@ -261,6 +279,12 @@ function pumpOne(
     delegationTargetOf(task.sourceDelegationId) ??
     readTaskRunnerInputs(task)?.assigneeAgentId ??
     null
+  const waiting = parseWaitingOn(task.waitingOn)
+  // A teammate's comment: who is waking whom, for the job's decision and brakes.
+  const pair =
+    row.reason === 'agent_comment'
+      ? { fromAgentId: agentWakeFromOf(db, row), toAgentId: agentId }
+      : null
   const startRefusal = startRefusedByTask(db, task)
   const input: WakeDecisionInput = {
     reason: row.reason,
@@ -286,15 +310,20 @@ function pumpOne(
             : 'no_team',
     budgetRefused: false,
     personAssigned: task.assigneePersonId !== null,
-    waitingOnQuestion: parseWaitingOn(task.waitingOn)?.kind === 'question',
+    waitingOnQuestion: waiting?.kind === 'question',
+    teammateMayEndWait: teammateMayEndWait(waiting),
+    ...(pair ? { agentWakes: agentWakeVerdictFor(db, task.id, pair, now) } : {}),
     now,
   }
   let decision = wakeDecision(input)
   // A run the gate would refuse must not move the card or leave a note. It may have
   // no ledger row saying so yet: the task runner refuses before its claim. A raised
-  // cap lets it through on the next pass.
+  // cap lets it through on the next pass. Nor is a person asked about a wake the gate
+  // would then refuse: every wait that puts a card up is one more step from starting.
+  const startsOrAsks =
+    decision.do === 'fire' || (decision.do === 'wait' && CARD_FOR_SKIP[decision.skip] != null)
   if (
-    decision.do === 'fire' &&
+    startsOrAsks &&
     row.heldAt === null &&
     agentId !== null &&
     (deps.budgetRefuses ?? ((t, a) => budgetGateRefuses(db, t, a)))(task, agentId)
@@ -307,12 +336,18 @@ function pumpOne(
     return decision
   }
   if (decision.do === 'wait') {
+    const card = CARD_FOR_SKIP[decision.skip]
+    if (card && pair) openAgentWakeCard(db, { taskId: task.id, kind: card, ...pair })
     noteSkip(db, row, decision.skip)
     return decision
   }
   if (decision.do === 'settle') {
     if (decision.how === 'finished') {
       settleFinished(db, task, row)
+      return decision
+    }
+    if (decision.how === 'declined') {
+      settleTaskWakes(db, [row.id], 'declined')
       return decision
     }
     giveUp(db, task, row, agentId, deps)
@@ -323,6 +358,7 @@ function pumpOne(
     const move = (): boolean => {
       const moved = updateStatus(db, task.id, 'todo')
       if (!moved.ok) return false
+      if (pair) noteAgentWakeStarted(db, task.id, pair, now)
       addComment(
         db,
         task.id,
@@ -333,7 +369,8 @@ function pumpOne(
       )
       return true
     }
-    if (!(deps.asOwnWrite ? deps.asOwnWrite(move) : move())) return decision
+    // One write, so a wake that went is always counted against the job's brakes.
+    if (!(deps.asOwnWrite ? deps.asOwnWrite(move) : immediateWrite(db, move))) return decision
     emitEvent(db, {
       kind: 'status_changed',
       taskId: task.id,
@@ -341,7 +378,12 @@ function pumpOne(
       data: { to: 'todo', reason: 'wake' },
     })
   }
-  if (decision.force) {
+  // The runner's own pump reads only a binding, so a wake that ended a wait on one with
+  // none has nothing else to start it. Everything that could refuse it has had its say.
+  if (
+    decision.force ||
+    (decision.moveToTodo && runner && !delegationTargetOf(task.sourceDelegationId))
+  ) {
     deps.startForPerson(getTask(db, task.id) ?? task, agentId)
     return decision
   }

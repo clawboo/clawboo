@@ -2,6 +2,7 @@
 // the person's task an agent cannot take.
 
 import {
+  addComment,
   answerQuestion,
   askQuestion,
   assignTaskToPerson,
@@ -9,12 +10,17 @@ import {
   createDb,
   createSubtask,
   createTask,
+  decideAgentWakes,
   getTask,
   linkDep,
   listTaskQuestions,
+  listWaitingTaskWakes,
   LOCAL_PERSON,
+  openAgentWakeCard,
+  saveAgentCommentWake,
   parseWaitingOn,
   updateStatus,
+  wakeCommentIds,
   type ClawbooDb,
 } from '@clawboo/db'
 import { beforeEach, describe, expect, it } from 'vitest'
@@ -581,6 +587,97 @@ describe('an agent on a task-runner run, which keeps the status tools', () => {
     const theirs = claimedBy('coder')
     updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'person', need: 'x', by: 'agent' } })
     expect((await callText(client, 'unblock_task', { taskId: theirs })).isError).toBe(false)
+  })
+})
+
+describe('add_comment on a teammate’s task', () => {
+  const runner = (taskId: string, agentId = 'teammate'): TasksServerOptions => ({
+    boundScope: { teamId: 'A', agentId, taskId },
+  })
+
+  it('saves a wake for its agent, carrying the comment, and says so', async () => {
+    const theirs = claimedBy('coder')
+    updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'person', need: 'x', by: 'agent' } })
+    const res = await callText(await connect(runner(claimedBy('teammate'))), 'add_comment', {
+      taskId: theirs,
+      body: 'Here is the key',
+    })
+    expect(res.isError).toBe(false)
+    const reply = JSON.parse(res.text) as { id: string; kind: string; wake?: { state: string } }
+    expect(reply.kind).toBe('agent')
+    expect(reply.wake?.state).toBe('saved')
+    const [row] = listWaitingTaskWakes(db, { taskId: theirs })
+    expect(row?.reason).toBe('agent_comment')
+    expect(wakeCommentIds(row!)).toEqual([reply.id])
+  })
+
+  it('says when a person has said no, and saves nothing', async () => {
+    const theirs = claimedBy('coder')
+    updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'person', need: 'x', by: 'agent' } })
+    saveAgentCommentWake(
+      db,
+      theirs,
+      addComment(db, theirs, 'First', 'agent', 'teammate', { kind: 'agent' }),
+    )
+    openAgentWakeCard(db, {
+      taskId: theirs,
+      kind: 'ask',
+      fromAgentId: 'teammate',
+      toAgentId: 'coder',
+    })
+    expect(decideAgentWakes(db, theirs, 'no', LOCAL_PERSON).ok).toBe(true)
+    const res = await callText(await connect(runner(claimedBy('teammate'))), 'add_comment', {
+      taskId: theirs,
+      body: 'Here is the key',
+    })
+    const reply = JSON.parse(res.text) as { wake?: { state: string; note: string } }
+    expect(reply.wake?.state).toBe('declined')
+    expect(reply.wake?.note).toMatch(/said/)
+    expect(listWaitingTaskWakes(db, { taskId: theirs })).toEqual([])
+  })
+
+  it('does not promise a run reads it, or that anything starts soon', async () => {
+    const theirs = claimedBy('coder')
+    updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'person', need: 'x', by: 'agent' } })
+    const res = await callText(await connect(runner(claimedBy('teammate'))), 'add_comment', {
+      taskId: theirs,
+      body: 'Here is the key',
+    })
+    const reply = JSON.parse(res.text) as { wake?: { note: string } }
+    expect(reply.wake?.note).toMatch(/next run/)
+    expect(reply.wake?.note).toMatch(/do not wait/i)
+  })
+
+  it('a task waiting on other work wakes nothing, and the result says nothing about it', async () => {
+    const theirs = claimedBy('coder')
+    createSubtask(db, theirs, { title: 'A part', status: 'todo' })
+    updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'subtasks' } })
+    const res = await callText(await connect(runner(claimedBy('teammate'))), 'add_comment', {
+      taskId: theirs,
+      body: 'How is it going?',
+    })
+    expect((JSON.parse(res.text) as { wake?: unknown }).wake).toBeUndefined()
+    expect(listWaitingTaskWakes(db, { taskId: theirs })).toEqual([])
+    expect(getTask(db, theirs)?.status).toBe('blocked')
+  })
+
+  it('its own task wakes no one, and the result says nothing about it', async () => {
+    const mine = claimedBy('teammate')
+    const res = await callText(await connect(runner(mine)), 'add_comment', { body: 'A note' })
+    expect((JSON.parse(res.text) as { wake?: unknown }).wake).toBeUndefined()
+    expect(listWaitingTaskWakes(db, { taskId: mine })).toEqual([])
+  })
+
+  it('a caller no binding vouches for wakes no one', async () => {
+    const theirs = claimedBy('coder')
+    updateStatus(db, theirs, 'blocked', { waitingOn: { kind: 'person', need: 'x', by: 'agent' } })
+    const res = await callText(await connect({ unverifiedCaller: true }), 'add_comment', {
+      taskId: theirs,
+      body: 'From nobody',
+      authorAgentId: 'teammate',
+    })
+    expect(res.isError).toBe(false)
+    expect(listWaitingTaskWakes(db, { taskId: theirs })).toEqual([])
   })
 })
 

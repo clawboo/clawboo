@@ -26,6 +26,7 @@ import {
   parseWaitingOn,
   waitsOnOtherWork,
   type AccountFailure,
+  type AgentWakeCard,
   type AttentionReason,
   type TaskAttention,
   type TaskStatus,
@@ -125,6 +126,7 @@ const ATTENTION_REASONS = new Set<string>([
   'unstarted',
   'question',
   'assigned',
+  'agent_wakes',
 ])
 
 /** How each reason reads on a card: a short badge and one line of guidance. */
@@ -177,6 +179,11 @@ export const ATTENTION_META: Record<
     tone: 'warning',
     hint: 'This one is yours. Mark it done when it is finished, or give it to an agent.',
   },
+  agent_wakes: {
+    label: 'Waiting for your OK',
+    tone: 'warning',
+    hint: 'An agent wants to start a teammate on this job. Say whether agents may wake each other.',
+  },
 }
 
 /** A run the provider refused for the account: the badge in place of "Failed",
@@ -209,6 +216,23 @@ export function attentionLabel(attention: TaskAttention, assignee?: string | nul
   return repeated ? `${base} ${attention.failedRuns}×` : base
 }
 
+/** The card about agents waking each other, off a task's attention. */
+function readAgentWakeCard(value: unknown): AgentWakeCard | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  if (typeof v['jobTaskId'] !== 'string') return null
+  const kind = v['kind']
+  if (kind !== 'ask' && kind !== 'hourly_cap' && kind !== 'back_and_forth') return null
+  const id = (x: unknown): string | null => (typeof x === 'string' ? x : null)
+  return {
+    jobTaskId: v['jobTaskId'],
+    kind,
+    fromAgentId: id(v['fromAgentId']),
+    toAgentId: id(v['toAgentId']),
+    ...(typeof v['alsoWaiting'] === 'number' ? { alsoWaiting: v['alsoWaiting'] } : {}),
+  }
+}
+
 /**
  * A task's needs-you state as the board should render it. Reads the server's
  * `attention` field; a `blocked` task always needs a person, so one that arrives
@@ -233,6 +257,7 @@ export function taskAttentionOf(task: {
       questionId,
       personId,
       handedBack,
+      agentWakes,
     } = a as {
       reason?: unknown
       failedRuns?: unknown
@@ -243,9 +268,11 @@ export function taskAttentionOf(task: {
       questionId?: unknown
       personId?: unknown
       handedBack?: unknown
+      agentWakes?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
       const known = cause === 'sign_in' || cause === 'billing' ? cause : null
+      const card = readAgentWakeCard(agentWakes)
       return {
         reason: reason as AttentionReason,
         failedRuns: typeof failedRuns === 'number' ? failedRuns : 0,
@@ -257,6 +284,7 @@ export function taskAttentionOf(task: {
         ...(typeof questionId === 'string' ? { questionId } : {}),
         ...(typeof personId === 'string' ? { personId } : {}),
         ...(handedBack === true ? { handedBack: true } : {}),
+        ...(card ? { agentWakes: card } : {}),
       }
     }
   }

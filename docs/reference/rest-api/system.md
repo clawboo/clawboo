@@ -722,6 +722,7 @@ The answer is built from the running process alone: no database read, no network
     "board.labels": true,
     "board.inbox": true,
     "board.wakes": true,
+    "board.agentWakes": true,
     "board.reopen": true,
     "board.personAssignees": true,
     "board.questions": true,
@@ -766,6 +767,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                      |
 | `board.inbox`                                                               | Always. Read state per task on the server (`/api/board/inbox`, `POST /api/board/:taskId/read`). The event stream says when to read it.                                                                                                                    |
 | `board.wakes`                                                               | Always. A person's comment and a dependency moving to done save a wake that starts the task's agent, one per agent and task, within seconds.                                                                                                              |
+| `board.agentWakes`                                                          | Always. An agent's comment can wake a teammate once a person has allowed it on the job: `POST /api/board/agent-wakes/:jobTaskId`, `/api/team-agent-wakes/:teamId`.                                                                                        |
 | `workspace.view`                                                            | Always. The read-only view of a task's worktree: tree, file, diff and status.                                                                                                                                                                             |
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                |
 | `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                                                                                                                                  |

@@ -13,6 +13,7 @@
 
 export * from './state-machine'
 export * from './dispatch'
+export * from './agentWakes'
 export * from './wakes'
 export * from './attention'
 export * from './waitingOn'

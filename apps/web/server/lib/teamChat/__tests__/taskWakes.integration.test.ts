@@ -11,10 +11,18 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { encodeHumanAssignment, parseWaitingOn, PAUSED_RUN_CLASS } from '@clawboo/board-core'
+import {
+  AGENT_WAKE_WINDOW_MS,
+  encodeHumanAssignment,
+  MAX_AGENT_WAKES_PER_HOUR,
+  MAX_BACK_AND_FORTH,
+  parseWaitingOn,
+  PAUSED_RUN_CLASS,
+} from '@clawboo/board-core'
 import {
   addComment,
   agents,
+  agentWakeGates,
   attentionForTask,
   answerQuestion,
   askQuestion,
@@ -22,27 +30,36 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  decideAgentWakes,
   executionProcesses,
   getComments,
   getTask,
   handBackTask,
+  holdTaskWakes,
   linkDep,
   listEvents,
   listExecutions,
   listRoomsWithFireableDelegations,
   listTaskQuestions,
   listTasks,
+  listUndeliveredInbox,
   listUnsettledTaskWakes,
   listWaitingTaskWakes,
   liftPause,
   LOCAL_PERSON,
   LOCAL_READER,
   markTaskRead,
+  noteAgentWakeStarted,
+  agentWakeVerdictFor,
+  readAgentWakeGate,
   placePause,
   reconcileOrphans,
   reconcileStaleInProgress,
   recordTaskWake,
   reopenTask,
+  saveAgentCommentWake,
+  setTaskRunnerInputs,
+  setTeamAlwaysAllow,
   startRefusedBy,
   taskReadStates,
   tasks,
@@ -1919,6 +1936,415 @@ describe('saved wakes, end to end', () => {
       await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the brake')
       expect(started()[0]!.context).toMatch(/from=person[^\n]*\n\| No\./)
       expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+    })
+  })
+
+  describe('an agent’s comment on a teammate’s task', () => {
+    /** The worker's task, parked on what it says it needs, its run over. */
+    const parked = (): DbTask => {
+      const task = newTask()
+      const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      completeExecutionProcess(db, c.execution!.id, { status: 'succeeded' })
+      updateStatus(db, task.id, 'blocked', {
+        waitingOn: { kind: 'person', need: 'The key', by: 'agent' },
+      })
+      return getTask(db, task.id)!
+    }
+    /** What `add_comment` does for a bound session. */
+    const teammateSays = (taskId: string, body = 'Here is the key', from = OTHER) =>
+      saveAgentCommentWake(
+        db,
+        taskId,
+        addComment(db, taskId, body, 'agent', from, { kind: 'agent' }),
+      )
+    const card = (taskId: string) => attentionForTask(db, taskId)?.agentWakes
+
+    it('starts nothing until a person says yes, and the card asks once', async () => {
+      const task = parked()
+      expect(teammateSays(task.id)).toMatchObject({ state: 'saved', agentId: WORKER })
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['ask_once'])
+      expect(started()).toEqual([])
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+      expect(card(task.id)).toMatchObject({
+        jobTaskId: task.id,
+        kind: 'ask',
+        fromAgentId: OTHER,
+        toAgentId: WORKER,
+      })
+
+      // A restart resets nothing: the card and the wake are both still there.
+      vi.clearAllTimers()
+      proc = bootProcess(db, adapters)
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(started()).toEqual([])
+      expect(card(task.id)?.kind).toBe('ask')
+
+      // Yes on this job: the wake goes, and says why.
+      expect(decideAgentWakes(db, task.id, 'job', LOCAL_PERSON).ok).toBe(true)
+      script([done('used the key')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+      expect(started()[0]!.context).toContain('Why this run: a teammate commented on this task')
+      expect(started()[0]!.context).toContain('Here is the key')
+      expect(listExecutions(db, task.id).at(-1)?.runReason).toBe('agent_comment')
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+      expect(readAgentWakeGate(db, task.id)?.windowCount).toBe(1)
+      expect(
+        getComments(db, task.id).some((c) => c.body === 'Started again for a teammate’s comment.'),
+      ).toBe(true)
+    })
+
+    it('after a yes the job’s other tasks go without asking, and another job still asks', async () => {
+      const root = newTask({ title: 'The job', sourceDelegationId: null })
+      const first = newTask({ title: 'One part', parentTaskId: root.id })
+      const second = newTask({ title: 'Other part', parentTaskId: root.id })
+      const elsewhere = newTask({ title: 'Another job' })
+      for (const t of [first, second, elsewhere]) {
+        const c = claimTask(db, t.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+        completeExecutionProcess(db, c.execution!.id, { status: 'succeeded' })
+        updateStatus(db, t.id, 'blocked', {
+          waitingOn: { kind: 'person', need: 'x', by: 'agent' },
+        })
+      }
+      teammateSays(first.id)
+      pumpTaskWakes(db, pumpDeps())
+      expect(card(first.id)?.jobTaskId).toBe(root.id)
+      expect(decideAgentWakes(db, root.id, 'job', LOCAL_PERSON).ok).toBe(true)
+
+      teammateSays(second.id)
+      teammateSays(elsewhere.id)
+      script([done('one')], [done('two')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(
+        () => getTask(db, first.id)?.status === 'done' && getTask(db, second.id)?.status === 'done',
+        'both parts',
+      )
+      expect(card(second.id)).toBeUndefined()
+      expect(getTask(db, elsewhere.id)?.status).toBe('blocked')
+      expect(card(elsewhere.id)?.kind).toBe('ask')
+    })
+
+    it('a no closes it, starts nothing, and is not asked again on this job', async () => {
+      const task = parked()
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps())
+      expect(decideAgentWakes(db, task.id, 'no', LOCAL_PERSON).ok).toBe(true)
+      expect(listWaitingTaskWakes(db)).toEqual([])
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['declined'])
+      expect(card(task.id)).toBeUndefined()
+
+      expect(teammateSays(task.id, 'Again')).toEqual({ state: 'declined', agentId: WORKER })
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(started()).toEqual([])
+      expect(card(task.id)).toBeUndefined()
+
+      // A person's comment still wakes at once, and reads what was said.
+      script([done('heard')])
+      expect((await reply(task.id, 'Carry on')).status).toBe('woke-agent')
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()[0]!.context).toContain('Again')
+    })
+
+    it('a person’s comment wakes at once while the card waits, and carries what waited', async () => {
+      const task = parked()
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps())
+      expect(card(task.id)?.kind).toBe('ask')
+      script([done('heard')])
+      expect((await reply(task.id, 'Carry on')).status).toBe('woke-agent')
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+      expect(started()[0]!.context).toContain('Here is the key')
+      expect(listExecutions(db, task.id).at(-1)?.runReason).toBe('person_comment')
+    })
+
+    it('the team’s always needs no card', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      teammateSays(task.id)
+      script([done('used it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(skips()).toEqual([])
+      expect(card(task.id)).toBeUndefined()
+    })
+
+    it('pauses at the hourly cap and says so, through a restart, until the hour is over', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      for (let i = 0; i < MAX_AGENT_WAKES_PER_HOUR; i++)
+        noteAgentWakeStarted(db, task.id, { fromAgentId: OTHER, toAgentId: WORKER })
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['hourly_cap'])
+      expect(card(task.id)?.kind).toBe('hourly_cap')
+
+      vi.clearAllTimers()
+      proc = bootProcess(db, adapters)
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(5_000)
+      expect(started()).toEqual([])
+
+      // The hour ends: it goes by itself, and the card comes down.
+      db.update(agentWakeGates)
+        .set({ windowStartedAt: Date.now() - AGENT_WAKE_WINDOW_MS })
+        .where(eq(agentWakeGates.jobTaskId, task.id))
+        .run()
+      expect(card(task.id)).toBeUndefined()
+      script([done('used it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(readAgentWakeGate(db, task.id)?.cardKind).toBeNull()
+      expect(readAgentWakeGate(db, task.id)?.windowCount).toBe(1)
+    })
+
+    it('stops a back-and-forth and shows it, until a person steps in', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+        noteAgentWakeStarted(
+          db,
+          task.id,
+          i % 2 === 0
+            ? { fromAgentId: OTHER, toAgentId: WORKER }
+            : { fromAgentId: WORKER, toAgentId: OTHER },
+        )
+      teammateSays(task.id, 'Your turn again')
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['back_and_forth'])
+      expect(started()).toEqual([])
+      expect(card(task.id)).toMatchObject({ kind: 'back_and_forth', toAgentId: WORKER })
+
+      script([done('heard')])
+      expect((await reply(task.id, 'Enough, do this')).status).toBe('woke-agent')
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(readAgentWakeGate(db, task.id)?.cardKind).toBeNull()
+      expect(
+        agentWakeVerdictFor(db, task.id, { fromAgentId: WORKER, toAgentId: OTHER }, Date.now()),
+      ).toBe('allowed')
+    })
+
+    it('holds across jobs: two agents answering each other on two tasks stop too', async () => {
+      const mine = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      const theirs = newTask({
+        title: 'Their task',
+        sourceDelegationId: `r0:deleg:agent:${OTHER}:reflectTo:${LEAD}`,
+      })
+      // Each job only ever saw one direction, and two of its wakes.
+      for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+        noteAgentWakeStarted(
+          db,
+          i % 2 === 0 ? mine.id : theirs.id,
+          i % 2 === 0
+            ? { fromAgentId: OTHER, toAgentId: WORKER }
+            : { fromAgentId: WORKER, toAgentId: OTHER },
+        )
+      teammateSays(mine.id, 'Your turn again')
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['back_and_forth'])
+      expect(started()).toEqual([])
+      expect(card(mine.id)?.kind).toBe('back_and_forth')
+    })
+
+    it('a run that took the wake and failed shows the failure, not a stale card', async () => {
+      const task = parked()
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps())
+      expect(card(task.id)?.kind).toBe('ask')
+      // A person's Retry: its run takes the wake, and that run fails.
+      updateStatus(db, task.id, 'todo')
+      script([{ kind: 'done', reason: 'error', summary: 'boom' } as RuntimeEvent])
+      await proc.engine.dispatchTask(task.id)
+      await settle(() => getTask(db, task.id)?.status === 'blocked', 'the failed run')
+      expect(attentionForTask(db, task.id)?.reason).toBe('failed')
+      expect(card(task.id)).toBeUndefined()
+      // The wake came back, and it does not raise a card on a failed task.
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(attentionForTask(db, task.id)?.reason).toBe('failed')
+    })
+
+    it('one ask for a fan-out: the answer covers every task waiting on it', async () => {
+      const first = parked()
+      const second = parked()
+      teammateSays(first.id)
+      teammateSays(second.id)
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().filter((s) => s === 'ask_once').length === 2, 'both skip notes')
+      expect(card(first.id)?.alsoWaiting).toBe(1)
+      expect(card(second.id)).toBeUndefined()
+      const answered = decideAgentWakes(db, first.id, 'job', LOCAL_PERSON)
+      expect(answered.ok).toBe(true)
+      script([done('one')], [done('two')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(
+        () => getTask(db, first.id)?.status === 'done' && getTask(db, second.id)?.status === 'done',
+        'both tasks',
+      )
+    })
+
+    it('a budget cap comes before asking: no card over a wake that could not start', async () => {
+      const task = parked()
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => true }))
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['budget'])
+      expect(card(task.id)).toBeUndefined()
+      expect(readAgentWakeGate(db, task.id)?.cardKind ?? null).toBeNull()
+      // The cap is raised: now it asks.
+      pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => false }))
+      expect(card(task.id)?.kind).toBe('ask')
+    })
+
+    it('a budget cap comes before the pauses too', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      for (let i = 0; i < MAX_AGENT_WAKES_PER_HOUR; i++)
+        noteAgentWakeStarted(db, task.id, { fromAgentId: OTHER, toAgentId: WORKER })
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => true }))
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['budget'])
+      expect(card(task.id)).toBeUndefined()
+    })
+
+    it('a comment on a task waiting on its sub-tasks wakes nothing, and the wait stands', async () => {
+      const parent = newTask({ title: 'The parent' })
+      claimTask(db, parent.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+      completeExecutionProcess(db, listExecutions(db, parent.id).at(-1)!.id, {
+        status: 'succeeded',
+      })
+      const sub = newTask({ title: 'A part', parentTaskId: parent.id })
+      updateStatus(db, parent.id, 'blocked', { waitingOn: { kind: 'subtasks' } })
+      expect(teammateSays(parent.id)).toEqual({ state: 'none' })
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(card(parent.id)).toBeUndefined()
+      expect(attentionForTask(db, parent.id)).toBeNull()
+      expect(parseWaitingOn(getTask(db, parent.id)?.waitingOn)).toEqual({ kind: 'subtasks' })
+      // The parent still goes back to the queue when the sub-task is done.
+      claimTask(db, sub.id, OTHER, 'codex')
+      updateStatus(db, sub.id, 'done')
+      expect(getTask(db, parent.id)?.status).toBe('todo')
+    })
+
+    describe('on a task the task runner runs', () => {
+      const runnerTask = (sourceDelegationId: string | null): DbTask => {
+        const task = newTask({ sourceDelegationId })
+        setTaskRunnerInputs(db, task.id, {
+          runtime: 'codex',
+          assigneeAgentId: WORKER,
+          repoPath: null,
+          kind: null,
+          model: null,
+        })
+        const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'codex' } })
+        completeExecutionProcess(db, c.execution!.id, { status: 'succeeded' })
+        updateStatus(db, task.id, 'blocked', {
+          waitingOn: { kind: 'person', need: 'The key', by: 'agent' },
+        })
+        return getTask(db, task.id)!
+      }
+
+      it('the run can read the comment: it is in the mailbox, as a teammate’s', () => {
+        const task = runnerTask(BOUND)
+        teammateSays(task.id)
+        const mail = listUndeliveredInbox(db, WORKER, { teamId: TEAM })
+        expect(mail.map((r) => r.body).join()).toContain('Here is the key')
+      })
+
+      it('with no binding, To do stays put: only a wake that ends a wait starts it', () => {
+        const task = runnerTask(null)
+        updateStatus(db, task.id, 'todo')
+        setTeamAlwaysAllow(db, TEAM, true)
+        teammateSays(task.id)
+        const startedHere: string[] = []
+        pumpTaskWakes(db, pumpDeps({ startForPerson: (t) => startedHere.push(t.id) }))
+        expect(startedHere).toEqual([])
+      })
+
+      it('with no binding, a yes still starts it: no pump would pick it up', async () => {
+        const task = runnerTask(null)
+        setTeamAlwaysAllow(db, TEAM, true)
+        teammateSays(task.id)
+        const startedHere: string[] = []
+        pumpTaskWakes(
+          db,
+          pumpDeps({
+            startForPerson: (t) => startedHere.push(t.id),
+            pumpRoom: () => {
+              throw new Error('the room’s engine does not run this task')
+            },
+          }),
+        )
+        expect(getTask(db, task.id)?.status).toBe('todo')
+        expect(startedHere).toEqual([task.id])
+      })
+
+      it('with a binding, the runner’s own pump starts it', () => {
+        const task = runnerTask(BOUND)
+        setTeamAlwaysAllow(db, TEAM, true)
+        teammateSays(task.id)
+        const startedHere: string[] = []
+        pumpTaskWakes(db, pumpDeps({ startForPerson: (t) => startedHere.push(t.id) }))
+        expect(getTask(db, task.id)?.status).toBe('todo')
+        expect(startedHere).toEqual([])
+      })
+    })
+
+    it('a wait that is not the agent’s to give up: no card, and nothing moves', async () => {
+      const task = parked()
+      updateStatus(db, task.id, 'blocked', { waitingOn: { kind: 'failure' } })
+      teammateSays(task.id)
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['blocked'])
+      expect(card(task.id)).toBeUndefined()
+      expect(started()).toEqual([])
+    })
+
+    it('a Stop’s hold and a budget cap both come before asking', async () => {
+      const held = parked()
+      teammateSays(held.id)
+      holdTaskWakes(
+        db,
+        listWaitingTaskWakes(db).map((w) => w.id),
+      )
+      pumpTaskWakes(db, pumpDeps())
+      await vi.advanceTimersByTimeAsync(2_000)
+      expect(card(held.id)).toBeUndefined()
+      expect(started()).toEqual([])
+
+      setTeamAlwaysAllow(db, TEAM, true)
+      const capped = parked()
+      teammateSays(capped.id)
+      pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => true }))
+      await settle(() => skips().includes('budget'), 'the skip note')
+      expect(getTask(db, capped.id)?.status).toBe('blocked')
+      expect(started()).toEqual([])
+    })
+
+    it('a comment during a run gets no turn before Done: that stays a person’s', async () => {
+      const task = newTask()
+      script([() => void teammateSays(task.id, 'Too late for this run'), done('finished it')])
+      await proc.engine.dispatchTask(task.id)
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run')
+      expect(started()).toHaveLength(1)
+      expect(listExecutions(db, task.id)).toHaveLength(1)
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => allWakes().every((w) => w.settledAt !== null), 'the wake to close')
+      expect(allWakes().map((w) => w.settledHow)).toEqual(['finished'])
+      // Only a person is told that nobody read their comment.
+      expect(getComments(db, task.id).some((c) => c.body.includes('finished before'))).toBe(false)
     })
   })
 

@@ -20,6 +20,7 @@ import { TeamAccentPicker } from '@/features/teams/TeamAccentPicker'
 import { TeamIconPicker } from '@/features/teams/TeamIconPicker'
 import { TeamBriefForm } from './TeamBriefForm'
 import { TeamRulesEditor } from './TeamRulesEditor'
+import { TeamAgentWakesToggle } from './TeamAgentWakesToggle'
 import { TeamVerifyCommandEditor } from './TeamVerifyCommandEditor'
 import { TeamTaskPrefixEditor } from './TeamTaskPrefixEditor'
 import { TeamLabelsEditor } from './TeamLabelsEditor'
@@ -169,6 +170,13 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             Work check
           </h3>
           <TeamVerifyCommandEditor teamId={team.id} />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Agents waking each other
+          </h3>
+          <TeamAgentWakesToggle teamId={team.id} />
         </section>
 
         <section className="flex flex-col gap-2">

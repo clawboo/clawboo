@@ -65,6 +65,8 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | PUT    | `/api/team-rules/:teamId`          | Replace the team-rules text (4000-char cap)                  | No      |
 | GET    | `/api/team-verify-command/:teamId` | Read the command the verification gate runs for the team     | No      |
 | PUT    | `/api/team-verify-command/:teamId` | Set or clear that command                                    | No      |
+| GET    | `/api/team-agent-wakes/:teamId`    | Read whether its agents may wake each other without asking   | No      |
+| PUT    | `/api/team-agent-wakes/:teamId`    | Set that (dashboard only)                                    | No      |
 | GET    | `/api/team-chat`                   | Read the team's peer-chat room from a cursor                 | No      |
 | POST   | `/api/team-chat/exchange`          | Start one bounded peer-chat exchange                         | No      |
 
@@ -1402,6 +1404,20 @@ curl -X PUT http://localhost:18790/api/team-verify-command/<team-id> \
 ```
 
 ---
+
+## `GET /api/team-agent-wakes/:teamId`
+
+Whether the team's agents may wake each other without a person being asked once per job. Off by default. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent).
+
+**`200 OK`**: `{ "always": boolean }`.
+
+## `PUT /api/team-agent-wakes/:teamId`
+
+Set that. A person's route: it answers `403 { "ok": false, "error": "dashboard_only" }` to a request the dashboard's own page did not send. Each change goes in the audit log. The limits on wakes hold either way, and a job a person said no to stays no.
+
+- **Request body**: `{ "always": boolean }`
+
+**`200 OK`**: `{ "always": boolean }`. **`400 Bad Request`**: `always` is not a boolean. **`404 Not Found`**: no such team.
 
 ## `GET /api/team-chat`
 

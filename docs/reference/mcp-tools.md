@@ -356,8 +356,9 @@ Add a comment to a task, such as a progress report or a note for the person.
 - `taskId` is optional on a session bound to a task, and defaults to it.
 - For an unverified HTTP caller both `authorAgentId` and `authorType` are dropped, and the comment posts as a plain `agent` comment with no author. A caller that cannot prove who it is cannot sign as someone else, or as the person.
 - A session bound to an agent always posts as that agent: `authorType` is `agent` and `authorAgentId` is the session's own agent, whatever the call names. A later run's task block names each comment's author, so an agent cannot speak there as the person or as Clawboo.
-- A comment from this tool wakes no one, whoever wrote it. Only a person's comment from the dashboard starts an agent. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent).
-- Returns the new comment row. Error: `not found: <taskId>` for a task outside the session's team.
+- From a session bound to an agent, on someone else's task, it can wake that task's agent if the task is Blocked on what that agent said it needs, once a person has allowed that on the job. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent). On a task waiting on another task or on sub-tasks it wakes no one, and from any other caller it wakes no one.
+- A run going is not told. The agent reads the comment in a later run, from its task block, or from its mailbox on a task the task runner runs.
+- Returns the new comment row. When it could wake someone, the row also has `wake: { state, agent, note }`: `saved`, or `declined` when a person said no on this job. `saved` does not mean a run has started, so do not wait for a reply. Error: `not found: <taskId>` for a task outside the session's team.
 
 ### link_task
 

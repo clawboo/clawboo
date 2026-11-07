@@ -4,6 +4,7 @@
 // on a task, and its agent has not heard. These are the decisions over that row,
 // import-free apart from the sibling dispatch rules, like the state machine.
 
+import type { AgentWakeVerdict } from './agentWakes'
 import { autoFireRefusal, type LedgerRun } from './dispatch'
 
 /** Why a task's agent is being woken. */
@@ -16,6 +17,9 @@ export type TaskWakeReason =
   | 'question_answered'
   /** A person reopened a finished task. */
   | 'reopened'
+  /** A teammate's comment, through a Tasks session bound to that agent. A person has
+   *  to allow these once per job: see ./agentWakes. */
+  | 'agent_comment'
 
 /** Why a run on a task started, written to its `execution_processes.run_reason`
  *  and read back by the ticket block's "Why this run" line. */
@@ -34,12 +38,17 @@ export type TaskRunReason = TaskWakeReason | 'delegation' | 'assignment' | 'fix_
 export type CommentKind = 'person' | 'agent' | 'note' | 'result'
 
 /**
- * May this comment wake the task's agent? The one place that decides. Until the
- * per-job confirmation exists, only a person's comment wakes anyone, and
- * widening this function is all it takes to change that. An @-mention is text.
+ * May this comment wake the task's agent? The one place that decides. A person's
+ * always may. An agent's may only where a person has not said no (`agentWakes`), and
+ * whether it goes yet is the pump's to decide, once it would really start the task.
+ * An @-mention is text.
  */
-export function commentMayWake(comment: { kind?: string | null; authorType?: string }): boolean {
-  return comment.kind === 'person'
+export function commentMayWake(
+  comment: { kind?: string | null; authorType?: string },
+  opts: { agentWakes?: boolean } = {},
+): boolean {
+  if (comment.kind === 'person') return true
+  return comment.kind === 'agent' && opts.agentWakes === true
 }
 
 /** Is a person behind this wake? Their first start skips the no-progress brake and
@@ -48,9 +57,14 @@ export function wakeFromPerson(reason: string): boolean {
   return reason === 'person_comment' || reason === 'question_answered' || reason === 'reopened'
 }
 
-/** The reason a merged row keeps: the one a person is behind. */
+/** How much a reason outranks: a person, then the board's own, then a teammate's, which
+ *  alone has to wait for a person's yes and must not hold the others back. */
+const wakeRank = (reason: string): number =>
+  wakeFromPerson(reason) ? 2 : reason === 'agent_comment' ? 0 : 1
+
+/** The reason a merged row keeps: the one that outranks, else the first. */
 export function strongerWakeReason<R extends string>(a: R, b: R): R {
-  return wakeFromPerson(b) && !wakeFromPerson(a) ? b : a
+  return wakeRank(b) > wakeRank(a) ? b : a
 }
 
 /** Why a saved wake is still waiting. Each names what ends the wait. */
@@ -93,6 +107,15 @@ export type WakeSkipReason =
   | 'person_assigned'
   /** It waits on a person's answer: ends when they answer, or move it on. */
   | 'question'
+  /** A teammate's comment would start it, and a person has not said yes for this job:
+   *  ends at their answer on the card. */
+  | 'ask_once'
+  /** The job's agents woke each other too often this hour: ends when the hour is over,
+   *  or when a person lets them carry on. */
+  | 'hourly_cap'
+  /** Two agents keep waking each other: ends when a person lets them carry on, or
+   *  comments on the job. */
+  | 'back_and_forth'
   /** A person parked it in Backlog. */
   | 'backlog'
   /** No agent is bound to it: a person assigns one. */
@@ -122,14 +145,19 @@ export const WAKE_SKIP_REASONS: readonly WakeSkipReason[] = [
   'blocked',
   'person_assigned',
   'question',
+  'ask_once',
+  'hourly_cap',
+  'back_and_forth',
   'backlog',
   'no_agent',
   'room_archived',
   'no_team',
 ]
 
-/** How a saved wake was closed. `merged`: folded into another row that was waiting. */
-export type TaskWakeSettlement = 'delivered' | 'stopped' | 'gave_up' | 'finished' | 'merged'
+/** How a saved wake was closed. `merged`: folded into another row that was waiting.
+ *  `declined`: a person said agents do not wake each other on this job. */
+export type TaskWakeSettlement =
+  'delivered' | 'stopped' | 'gave_up' | 'finished' | 'merged' | 'declined'
 
 /** Times a wake is sent again because the run carrying it did not finish. Past
  *  this it is given up, with an alert. */
@@ -162,6 +190,10 @@ export interface WakeDecisionInput {
   /** It waits on a question still open, so a comment from before the agent asked
    *  does not end that wait. A person's reply does, through its own path. */
   waitingOnQuestion?: boolean
+  /** A Blocked task: is the wait one a teammate's comment could end? */
+  teammateMayEndWait?: boolean
+  /** A teammate's comment: what the job's decision and brakes say. */
+  agentWakes?: AgentWakeVerdict
   now: number
 }
 
@@ -173,7 +205,7 @@ export type WakeDecision =
       /** The task is Blocked and goes back to To do first. */
       moveToTodo: boolean
     }
-  | { do: 'settle'; how: 'finished' | 'gave_up' }
+  | { do: 'settle'; how: 'finished' | 'gave_up' | 'declined' }
   | { do: 'wait'; skip: WakeSkipReason }
 
 const wait = (skip: WakeSkipReason): WakeDecision => ({ do: 'wait', skip })
@@ -188,6 +220,8 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
   if (input.dropped || status === 'done' || status === 'cancelled')
     return { do: 'settle', how: 'finished' }
   if (input.replays >= MAX_TASK_WAKE_REPLAYS) return { do: 'settle', how: 'gave_up' }
+  const teammate = input.reason === 'agent_comment'
+  if (teammate && input.agentWakes === 'no') return { do: 'settle', how: 'declined' }
   if (input.held) return wait('held')
   if (input.paused) return wait('paused')
   if (input.refusal) return wait(input.refusal)
@@ -201,7 +235,8 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
     return wait(input.execs.at(-1)?.status === 'running' ? 'run_unproven' : 'no_run')
   }
   const fromPerson = wakeFromPerson(input.reason)
-  if (status === 'blocked' && !fromPerson) return wait('blocked')
+  if (status === 'blocked' && !fromPerson && !(teammate && input.teammateMayEndWait))
+    return wait('blocked')
   if (!input.ready) return wait('dependency')
   if (input.budgetRefused) return wait('budget')
   // A person's first start waives what guards the AUTOMATIC pump. What it cannot
@@ -218,6 +253,13 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
     if (refusal === 'braked') return wait('braked')
     if (refusal === 'stopped') return wait('stopped')
     if (refusal === 'failed_too_often') return wait('parked')
+  }
+  // Asked last, so a person is asked only about a wake that would really start now. A
+  // task in To do starts by itself, so nothing about it is a wake to ask about.
+  if (teammate && status === 'blocked') {
+    if (input.agentWakes === 'ask') return wait('ask_once')
+    if (input.agentWakes === 'hourly_cap' || input.agentWakes === 'back_and_forth')
+      return wait(input.agentWakes)
   }
   return { do: 'fire', force: first || capRaised, moveToTodo: status === 'blocked' }
 }

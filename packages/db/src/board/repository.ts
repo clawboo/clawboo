@@ -17,6 +17,7 @@ import {
   LOCAL_PERSON,
   parseWaitingOn,
   personMoveAllowed,
+  strongerWakeReason,
   waitingOnJson,
   runMadeProgress,
   type CommentKind,
@@ -700,7 +701,10 @@ export function claimTask(
     }
     if (!run || !execId) return { ok: true, task: claimed[0] }
     const wakes = adoptTaskWakesTx(tx, taskId, execId, now)
-    const strongest = wakes.find((w) => w.reason === 'person_comment') ?? wakes[0]
+    const strongest = wakes.reduce<(typeof wakes)[number] | undefined>(
+      (best, w) => (best && strongerWakeReason(best.reason, w.reason) === best.reason ? best : w),
+      undefined,
+    )
     const execution = buildExecutionRow(
       {
         taskId,

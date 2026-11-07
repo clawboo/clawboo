@@ -85,6 +85,7 @@ import { teamOnboardingGET, teamOnboardingPATCH } from './teamOnboarding'
 import { teamActivitySummaryGET } from './teamActivity'
 import { teamMemberRolesGET } from './teamMemberRoles'
 import { teamRulesGET, teamRulesPUT } from './teamRules'
+import { teamAgentWakesGET, teamAgentWakesPUT } from './teamAgentWakes'
 import { teamVerifyCommandGET, teamVerifyCommandPUT } from './teamVerifyCommand'
 import {
   teamBriefGET,
@@ -125,6 +126,7 @@ import {
 } from './board'
 import { boardInboxGET, boardInboxReadPOST, boardTaskReadPOST } from './boardInbox'
 import {
+  boardAgentWakesPOST,
   boardAssignPersonPOST,
   boardQuestionAnswerPOST,
   boardQuestionsGET,
@@ -390,6 +392,8 @@ router.get('/api/team-verify-command/:teamId', teamVerifyCommandGET)
 // Sets a shell command the verification gate later runs: rate-limited like the
 // other routes that change what runs.
 router.put('/api/team-verify-command/:teamId', sensitiveLimiter, teamVerifyCommandPUT)
+router.get('/api/team-agent-wakes/:teamId', teamAgentWakesGET)
+router.put('/api/team-agent-wakes/:teamId', sensitiveLimiter, teamAgentWakesPUT)
 
 // Agents — the registry-of-record (AgentSource decoupling). SQLite is the source
 // of truth; the OpenClawAgentSource syncs the Gateway IN. Reads serve SQLite (work
@@ -455,6 +459,7 @@ router.post('/api/board/:taskId/assign', boardAssignPOST)
 router.post('/api/board/:taskId/reopen', boardReopenPOST)
 router.post('/api/board/:taskId/assign-person', boardAssignPersonPOST)
 router.get('/api/board/:taskId/questions', boardQuestionsGET)
+router.post('/api/board/agent-wakes/:jobTaskId', boardAgentWakesPOST)
 router.post('/api/board/questions/:questionId/answer', boardQuestionAnswerPOST)
 // Execution ledger (distinct two-segment paths — no collision with /:taskId).
 router.get('/api/board/:taskId/executions', boardExecutionsGET)

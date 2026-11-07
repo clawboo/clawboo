@@ -49,6 +49,7 @@ export const ENGINE_FEATURES = [
   // the badge. The event stream says when to read it (`?activity=1`).
   'board.inbox',
   'board.wakes',
+  'board.agentWakes',
   // A person's writes on the board: Reopen, tasks assigned to a person, and questions
   // an agent asks a person.
   'board.reopen',

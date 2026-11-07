@@ -21,55 +21,57 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 
 ## Tables at a glance
 
-| Table                                           | Group                    | Holds                                            |
-| ----------------------------------------------- | ------------------------ | ------------------------------------------------ |
-| [`teams`](#teams)                               | Teams and agents         | Teams                                            |
-| [`agents`](#agents)                             | Teams and agents         | The agent registry, for every runtime            |
-| [`sessions`](#sessions)                         | Teams and agents         | Clawboo Native sessions and rotated run sessions |
-| [`boo_zero_team_briefs`](#boo_zero_team_briefs) | Teams and agents         | Boo Zero's brief for each team                   |
-| [`team_profiles`](#team_profiles)               | Teams and agents         | Stored team templates (unused by the server)     |
-| [`chat_messages`](#chat_messages)               | Chat                     | Chat transcripts                                 |
-| [`rooms`](#rooms)                               | Chat                     | A team's chat rooms                              |
-| [`room_members`](#room_members)                 | Chat                     | Room membership                                  |
-| [`tasks`](#tasks)                               | Board                    | Task cards                                       |
-| [`task_create_keys`](#task_create_keys)         | Board                    | What makes a create safe to repeat               |
-| [`delegation_failures`](#delegation_failures)   | Board                    | The team engine's failure breaker                |
-| [`labels`](#labels)                             | Board                    | A team's labels                                  |
-| [`task_labels`](#task_labels)                   | Board                    | Which task carries which label                   |
-| [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                       |
-| [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                      |
-| [`task_questions`](#task_questions)             | Board                    | What agents asked people, and the answers        |
-| [`task_activity`](#task_activity)               | Board                    | Each task's newest change, for read state        |
-| [`task_readers`](#task_readers)                 | Board                    | How far each reader has read the whole board     |
-| [`task_reads`](#task_reads)                     | Board                    | How far each reader has read one task            |
-| [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                   |
-| [`execution_processes`](#execution_processes)   | Board                    | One row per run, with cost and status            |
-| [`scheduled_runs`](#scheduled_runs)             | Routines                 | Routines                                         |
-| [`memory_facts`](#memory_facts)                 | Memory                   | Facts                                            |
-| [`memory_procedures`](#memory_procedures)       | Memory                   | Versioned procedures                             |
-| [`memory_outcomes`](#memory_outcomes)           | Memory                   | Feedback on facts                                |
-| [`tool_registry`](#tool_registry)               | Tools and approvals      | Tool metadata and on/off switches                |
-| [`tool_call_audit`](#tool_call_audit)           | Tools and approvals      | Audit of every brokered tool call                |
-| [`tool_call_approvals`](#tool_call_approvals)   | Tools and approvals      | Approval requests                                |
-| [`tool_result_blobs`](#tool_result_blobs)       | Tools and approvals      | Oversized tool results, kept whole               |
-| [`approval_history`](#approval_history)         | Tools and approvals      | A log of approval decisions                      |
-| [`connectors`](#connectors)                     | Connectors and grants    | Connected connectors                             |
-| [`capability_grants`](#capability_grants)       | Connectors and grants    | Who may use which connector, tool or skill       |
-| [`approval_rules`](#approval_rules)             | Connectors and grants    | Remembered **Always** decisions                  |
-| [`capabilities`](#capabilities)                 | Capabilities and skills  | Every runtime's skills, tools and connectors     |
-| [`skills`](#skills)                             | Capabilities and skills  | Skills added to agents                           |
-| [`team_chat`](#team_chat)                       | Peer room and mailbox    | Posts in the agents' own peer room               |
-| [`agent_inbox`](#agent_inbox)                   | Peer room and mailbox    | Each agent's mailbox                             |
-| [`task_wakes`](#task_wakes)                     | Peer room and mailbox    | Wakes saved on tasks, until their run ends       |
-| [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient    |
-| [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
-| [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
-| [`budget_reservations`](#budget_reservations)   | Spend, budgets and audit | What runs going hold against each budget         |
-| [`pauses`](#pauses)                             | Board                    | What a person has paused                         |
-| [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                    |
-| [`orchestration_events`](#orchestration_events) | Event log                | The event log                                    |
-| [`settings`](#settings)                         | Settings and layout      | Key and value settings                           |
-| [`graph_layouts`](#graph_layouts)               | Settings and layout      | Saved graph positions                            |
+| Table                                           | Group                    | Holds                                                             |
+| ----------------------------------------------- | ------------------------ | ----------------------------------------------------------------- |
+| [`teams`](#teams)                               | Teams and agents         | Teams                                                             |
+| [`agents`](#agents)                             | Teams and agents         | The agent registry, for every runtime                             |
+| [`sessions`](#sessions)                         | Teams and agents         | Clawboo Native sessions and rotated run sessions                  |
+| [`boo_zero_team_briefs`](#boo_zero_team_briefs) | Teams and agents         | Boo Zero's brief for each team                                    |
+| [`team_profiles`](#team_profiles)               | Teams and agents         | Stored team templates (unused by the server)                      |
+| [`chat_messages`](#chat_messages)               | Chat                     | Chat transcripts                                                  |
+| [`rooms`](#rooms)                               | Chat                     | A team's chat rooms                                               |
+| [`room_members`](#room_members)                 | Chat                     | Room membership                                                   |
+| [`tasks`](#tasks)                               | Board                    | Task cards                                                        |
+| [`task_create_keys`](#task_create_keys)         | Board                    | What makes a create safe to repeat                                |
+| [`delegation_failures`](#delegation_failures)   | Board                    | The team engine's failure breaker                                 |
+| [`labels`](#labels)                             | Board                    | A team's labels                                                   |
+| [`task_labels`](#task_labels)                   | Board                    | Which task carries which label                                    |
+| [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                                        |
+| [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                                       |
+| [`task_questions`](#task_questions)             | Board                    | What agents asked people, and the answers                         |
+| [`task_activity`](#task_activity)               | Board                    | Each task's newest change, for read state                         |
+| [`task_readers`](#task_readers)                 | Board                    | How far each reader has read the whole board                      |
+| [`task_reads`](#task_reads)                     | Board                    | How far each reader has read one task                             |
+| [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                                    |
+| [`execution_processes`](#execution_processes)   | Board                    | One row per run, with cost and status                             |
+| [`scheduled_runs`](#scheduled_runs)             | Routines                 | Routines                                                          |
+| [`memory_facts`](#memory_facts)                 | Memory                   | Facts                                                             |
+| [`memory_procedures`](#memory_procedures)       | Memory                   | Versioned procedures                                              |
+| [`memory_outcomes`](#memory_outcomes)           | Memory                   | Feedback on facts                                                 |
+| [`tool_registry`](#tool_registry)               | Tools and approvals      | Tool metadata and on/off switches                                 |
+| [`tool_call_audit`](#tool_call_audit)           | Tools and approvals      | Audit of every brokered tool call                                 |
+| [`tool_call_approvals`](#tool_call_approvals)   | Tools and approvals      | Approval requests                                                 |
+| [`tool_result_blobs`](#tool_result_blobs)       | Tools and approvals      | Oversized tool results, kept whole                                |
+| [`approval_history`](#approval_history)         | Tools and approvals      | A log of approval decisions                                       |
+| [`connectors`](#connectors)                     | Connectors and grants    | Connected connectors                                              |
+| [`capability_grants`](#capability_grants)       | Connectors and grants    | Who may use which connector, tool or skill                        |
+| [`approval_rules`](#approval_rules)             | Connectors and grants    | Remembered **Always** decisions                                   |
+| [`capabilities`](#capabilities)                 | Capabilities and skills  | Every runtime's skills, tools and connectors                      |
+| [`skills`](#skills)                             | Capabilities and skills  | Skills added to agents                                            |
+| [`team_chat`](#team_chat)                       | Peer room and mailbox    | Posts in the agents' own peer room                                |
+| [`agent_inbox`](#agent_inbox)                   | Peer room and mailbox    | Each agent's mailbox                                              |
+| [`task_wakes`](#task_wakes)                     | Peer room and mailbox    | Wakes saved on tasks, until their run ends                        |
+| [`agent_wake_gates`](#agent_wake_gates)         | Peer room and mailbox    | Whether a job's agents may wake each other, and this hour's count |
+| [`agent_wake_chains`](#agent_wake_chains)       | Peer room and mailbox    | Two agents in a team waking each other in a row                   |
+| [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient                     |
+| [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                                           |
+| [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                                     |
+| [`budget_reservations`](#budget_reservations)   | Spend, budgets and audit | What runs going hold against each budget                          |
+| [`pauses`](#pauses)                             | Board                    | What a person has paused                                          |
+| [`governance_audit`](#governance_audit)         | Spend, budgets and audit | Audit of governance decisions                                     |
+| [`orchestration_events`](#orchestration_events) | Event log                | The event log                                                     |
+| [`settings`](#settings)                         | Settings and layout      | Key and value settings                                            |
+| [`graph_layouts`](#graph_layouts)               | Settings and layout      | Saved graph positions                                             |
 
 ## Conventions
 
@@ -480,33 +482,33 @@ Indexes: `uniq_pauses_scope` (unique: `scope_kind`, `scope_id`).
 
 One row per run of a task, on any runtime: its status, git checkpoints, and token and cost totals.
 
-| Column               | Type                                 | Notes                                                                                                                                                                                                                              |
-| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                                                    |
-| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                                                    |
-| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                                                  |
-| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                                                    |
-| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                                                    |
-| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                                                             |
-| `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `started_at`         | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `completed_at`       | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                                                                                                                                          |
-| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                                                                                                                                           |
-| `input_tokens`       | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `output_tokens`      | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `cache_read`         | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `cache_write`        | `INTEGER`                            |                                                                                                                                                                                                                                    |
-| `cost_usd`           | `REAL`                               |                                                                                                                                                                                                                                    |
-| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost                                                                                                                       |
-| `summary`            | `TEXT`                               | The run's result summary                                                                                                                                                                                                           |
-| `run_reason`         | `TEXT`                               | Why the run started. Team chat: `delegation`, `assignment`, `fix_round`, `person_comment`, `dependency_done`, `question_answered` or `reopened`; older rows say `team-orchestration`. The task runner and routines write their own |
-| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                                                   |
-| `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one                                 |
-| `made_progress`      | `INTEGER`                            | Whether the run made [visible progress](/internals/board-internals#the-no-progress-brake): `1` or `0`. Null for a run with no verdict (a Stop, an account or budget refusal) and for older rows                                    |
-| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                                                         |
-| `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                                                             |
-| `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                                                    |
+| Column               | Type                                 | Notes                                                                                                                                                                                                                                               |
+| -------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                                                                     |
+| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                                                                     |
+| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                                                                   |
+| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                                                                     |
+| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                                                                     |
+| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                                                                              |
+| `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `started_at`         | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `completed_at`       | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                                                                                                                                                           |
+| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                                                                                                                                                            |
+| `input_tokens`       | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `output_tokens`      | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `cache_read`         | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `cache_write`        | `INTEGER`                            |                                                                                                                                                                                                                                                     |
+| `cost_usd`           | `REAL`                               |                                                                                                                                                                                                                                                     |
+| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost                                                                                                                                        |
+| `summary`            | `TEXT`                               | The run's result summary                                                                                                                                                                                                                            |
+| `run_reason`         | `TEXT`                               | Why the run started. Team chat: `delegation`, `assignment`, `fix_round`, `person_comment`, `dependency_done`, `question_answered`, `reopened` or `agent_comment`; older rows say `team-orchestration`. The task runner and routines write their own |
+| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                                                                    |
+| `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one                                                  |
+| `made_progress`      | `INTEGER`                            | Whether the run made [visible progress](/internals/board-internals#the-no-progress-brake): `1` or `0`. Null for a run with no verdict (a Stop, an account or budget refusal) and for older rows                                                     |
+| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                                                                          |
+| `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                                                                              |
+| `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                                                                     |
 
 Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
@@ -908,7 +910,7 @@ Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
 | `team_id`         | `TEXT`                           | Null for a task with no team                                                                                 |
 | `agent_id`        | `TEXT`, not null                 | The agent the task belonged to when the wake happened                                                        |
 | `task_id`         | `TEXT`, not null                 |                                                                                                              |
-| `reason`          | `TEXT`, not null                 | `person_comment`, `dependency_done`, `question_answered` or `reopened`                                       |
+| `reason`          | `TEXT`, not null                 | `person_comment`, `dependency_done`, `question_answered`, `reopened` or `agent_comment`                      |
 | `comment_ids`     | `TEXT`, not null, default `'[]'` | JSON array of the comments it carries                                                                        |
 | `merge_count`     | `INTEGER`, not null, default 1   | How many wakes were folded into it                                                                           |
 | `replays`         | `INTEGER`, not null, default 0   | Times it was sent again; given up after 3                                                                    |
@@ -918,9 +920,44 @@ Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
 | `created_at`      | `INTEGER`, not null              |                                                                                                              |
 | `updated_at`      | `INTEGER`, not null              |                                                                                                              |
 | `settled_at`      | `INTEGER`                        | Null while open                                                                                              |
-| `settled_how`     | `TEXT`                           | `delivered`, `stopped`, `gave_up`, `finished` or `merged`                                                    |
+| `settled_how`     | `TEXT`                           | `delivered`, `stopped`, `gave_up`, `finished`, `merged` or `declined`                                        |
 
 Indexes: `uniq_task_wakes_waiting`, unique on (`agent_id`, `task_id`) where `settled_at` and `carried_exec_id` are null; `idx_task_wakes_pending` (`settled_at`, `carried_exec_id`); `idx_task_wakes_task` (`task_id`).
+
+### agent_wake_gates
+
+One row per job, the task's top-level ancestor: what a person said about its agents waking each other, the card asking them, and this hour's count. In the database so a restart resets none of it.
+
+| Column               | Type                | Notes                                                                  |
+| -------------------- | ------------------- | ---------------------------------------------------------------------- |
+| `job_task_id`        | `TEXT`, PK          | The job's task                                                         |
+| `team_id`            | `TEXT`              | Plain reference to `teams.id`                                          |
+| `decision`           | `TEXT`              | `allow` or `deny`. Null until a person answers                         |
+| `decided_by`         | `TEXT`              | JSON `{ id, name, role }` of who answered                              |
+| `decided_at`         | `INTEGER`           |                                                                        |
+| `card_kind`          | `TEXT`              | The card up now: `ask`, `hourly_cap` or `back_and_forth`. Null if none |
+| `card_task_id`       | `TEXT`              | The task it shows on                                                   |
+| `card_from_agent_id` | `TEXT`              | The agent whose comment raised it                                      |
+| `card_to_agent_id`   | `TEXT`              | The agent it would start                                               |
+| `card_at`            | `INTEGER`           |                                                                        |
+| `window_started_at`  | `INTEGER`           | When this hour's count began                                           |
+| `window_count`       | `INTEGER`, not null | Wakes that started a run in this hour                                  |
+| `updated_at`         | `INTEGER`, not null |                                                                        |
+
+Indexes: `idx_agent_wake_gates_card` (`card_task_id`), `idx_agent_wake_gates_team` (`team_id`).
+
+### agent_wake_chains
+
+One row per pair of agents in a team: how many wakes in a row answered each other. Per pair and not per job, so the brake holds when two helpers each have a top-level task. A chain quiet for an hour is over.
+
+| Column               | Type                | Notes                                                 |
+| -------------------- | ------------------- | ----------------------------------------------------- |
+| `team_key`           | `TEXT`, PK          | The team, or an empty string for a task with none     |
+| `agent_a`            | `TEXT`, PK          | The two agents in sorted order, so a pair has one row |
+| `agent_b`            | `TEXT`, PK          |                                                       |
+| `last_from_agent_id` | `TEXT`              | Who woke the other last                               |
+| `chain_count`        | `INTEGER`, not null | Wakes in a row that answered each other               |
+| `updated_at`         | `INTEGER`, not null | When the last one started a run                       |
 
 ## Spend, budgets and audit
 

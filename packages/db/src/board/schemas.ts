@@ -53,6 +53,11 @@ export const answerQuestionBody = z.object({
   answer: z.record(z.string(), z.unknown()),
 })
 
+// What a person pressed on the card about agents waking each other.
+export const agentWakesBody = z.object({
+  decision: z.enum(['job', 'team', 'no']),
+})
+
 export const taskLabelsBody = z.object({
   labelIds: z.array(z.string().min(1)).max(100),
 })
