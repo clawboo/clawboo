@@ -29,7 +29,7 @@ keywords:
 
 The board shows every task your teams work on. Each task is a card, and its column says where it stands. Agents add and move cards as they work. You use the board to see what is happening, act on work that waits on you, give an agent a task, and steer one that is running.
 
-The board opens on **Kanban**: every task by status, newest first. **Today**, **Week** and **Month** are calendar views that lay the same cards out by the day each was added or finished. Every task handed out in a [team chat](/using/team-chat) is a card here. How tasks, statuses and dependencies work underneath is explained in [The board](/concepts/the-board).
+The board opens on **Kanban**: every task by status, newest first. **Today**, **Week** and **Month** are calendar views that lay the same cards out by the day each was added or finished. Every task handed out in a [team chat](/using/team-chat), or from [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat), is a card here. How tasks, statuses and dependencies work underneath is explained in [The board](/concepts/the-board).
 
 ![The board on Kanban for all teams: five tasks that need a person lead the first column, each with its reason and one button, then Backlog, To do, In progress and Done, with Cancelled folded into a rail](/images/board-kanban.png)
 
@@ -554,6 +554,8 @@ This chip is kept in the browser, and compares where cards sit now with where th
 ## Tasks in team chat
 
 The same tasks appear in the team chat they came from: as cards in the conversation, and in the chat's **Tasks** card. A request shows as one card in the conversation, with each sub-task's own card inside it, and in the **Tasks** card its sub-tasks sit right under it. General shows the tasks handed out in General, and each room shows only its own. The expand icon on a chat card, and **Open on Board** in the **Tasks** card, open the task here with its drawer open. See [Team chat](/using/team-chat).
+
+A task handed off from [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) belongs to the team's General, so it shows there as well as in Boo Zero's chat, and its result goes back to Boo Zero's chat. The message it came from is a request with its own main task, which closes after Boo Zero's reply in that chat.
 
 ## Troubleshooting
 

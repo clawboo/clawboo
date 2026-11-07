@@ -181,8 +181,10 @@ describe('chat streams resume after a drop before the first stored row', () => {
     )
 
     expect(rows.map((f) => (JSON.parse(f.data) as { text: string }).text)).toEqual(['missed'])
-    expect(first.map((f) => f.event)).toEqual(['cursor'])
+    // Whether this chat hands off is said too, with no id, so it moves no cursor.
+    expect(first.map((f) => f.event).filter((e) => e !== 'handOffs')).toEqual(['cursor'])
     expect(first[0]!.id).toBe(String(head))
+    expect(first.find((f) => f.event === 'handOffs')?.id).toBeUndefined()
   })
 
   it('opens a resumed stream with the cursor it was given', async () => {

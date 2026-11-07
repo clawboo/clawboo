@@ -14,6 +14,7 @@ import {
   createHandOffUnderRequest,
   getComments,
   getTask,
+  listPendingChatReportUps,
   listPendingReportUps,
   recordReportUp,
   settleReportUps,
@@ -163,6 +164,55 @@ describe('reopening a request after its engine has gone', () => {
     expect(delivered[0]!.task).toContain('Please try again')
     expect(delivered[0]!.origin).toMatchObject({ kind: 'system', mainTaskId: mainId })
     expect(getTask(getDb(), mainId)?.status).toBe('in_progress')
+  })
+
+  it('a request from a one-to-one chat is answered there, not in a team session', async () => {
+    const CHAT = 'agent:lead:codex'
+    const db = getDb()
+    const made = createHandOffUnderRequest(
+      db,
+      {
+        title: 'Build it',
+        description: 'Build it',
+        leadAgentId: LEAD,
+        key: 'main:T:chat-message',
+        chatSessionKey: CHAT,
+      },
+      {
+        title: 'one',
+        teamId: TEAM,
+        sourceDelegationId: 'd1:deleg:agent:W:reflectTo:L',
+        chatSessionKey: CHAT,
+      },
+    )
+    if (!made.ok) throw new Error(made.reason)
+    const mainId = made.task.parentTaskId as string
+    updateStatus(db, made.task.id, 'in_progress')
+    updateStatus(db, made.task.id, 'done')
+    closeMainTask(db, mainId, 'done')
+
+    const r = mockRes()
+    await boardReopenPOST(reopen(mainId, { comment: 'Please try again' }), r.res)
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    await settle()
+
+    expect(getTask(db, mainId)?.status).toBe('in_progress')
+    const kept = listPendingChatReportUps(db, CHAT).map(
+      (row) => JSON.parse(row.payload) as { outcome: string; summary: string; taskId: string },
+    )
+    expect(kept).toEqual([
+      expect.objectContaining({
+        outcome: 'person_comment',
+        summary: 'Please try again',
+        taskId: mainId,
+      }),
+    ])
+    expect(listPendingReportUps(db, TEAM, null)).toEqual([])
+    expect(delivered).toEqual([])
+    const chat = db.select().from(chatMessages).all()
+    expect(chat.map((m) => m.sessionKey)).toEqual([CHAT])
+    expect(chat[0]!.data).toContain('A person reopened')
   })
 
   it('tells its lead with no words too, and says so in the chat', async () => {

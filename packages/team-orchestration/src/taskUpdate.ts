@@ -154,6 +154,9 @@ export interface TaskUpdateOptions {
   /** The person's request these are about. `closes`: nothing is left open under it,
    *  so the reply is the summary that closes it. */
   request?: { title?: string; identifier?: string | null; closes: boolean }
+  /** These waited for this run in a one-to-one chat, for whatever reason: a Stop, a
+   *  budget that refused the turn sent for them, or a hand-off the board refused. */
+  heldForThisRun?: boolean
 }
 
 /** Shorten a title exactly as the item headers below do, on one line. */
@@ -235,9 +238,11 @@ export function buildTaskUpdateMessage(
       ? finished === 0
         ? "[Task Update] There is news on a person's request from after they pressed Stop. Nothing was started for it: it waited for this run, and it is not what this run is for."
         : `[Task Update] ${finished} ${plural} on the board reached a terminal state after a person pressed Stop. Nothing was started for them: they waited for this run, and they are not what this run is for.`
-      : opts.ownTask
-        ? `[Task Update] Results of the work you handed out on the task this run is on: ${finished} ${plural}.`
-        : `[Task Update] — ${opening} (not a fresh user message).`,
+      : opts.heldForThisRun
+        ? `[Task Update] ${items.length} earlier ${items.length === 1 ? 'update' : 'updates'} about hand-offs from this chat. Nothing was started for them: they waited for this run, and they are not what this run is for.`
+        : opts.ownTask
+          ? `[Task Update] Results of the work you handed out on the task this run is on: ${finished} ${plural}.`
+          : `[Task Update] — ${opening} (not a fresh user message).`,
     opts.ownTask
       ? 'Use them to finish this task. Do NOT acknowledge them individually.'
       : opts.followUp

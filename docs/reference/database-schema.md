@@ -297,12 +297,13 @@ The task cards.
 | `check_held_since`      | `INTEGER`                             | When the task's team-chat check began waiting for the team folder, or `NULL`. Read only while the task is `in_review`; any move out of review clears it                                                                                                                                                |
 | `run_execution_id`      | `TEXT`                                | The execution holding the task's claim, written with the claim and moved to a fix round's execution. Cleared when the run ends or the task is let go. Null for a claim that opened no run                                                                                                              |
 | `is_main_task`          | `INTEGER NOT NULL DEFAULT 0`          | `1`: it holds a person's request from the chat, with the helpers' work filed under it. It runs nothing itself and moves only by a person or the server                                                                                                                                                 |
+| `chat_session_key`      | `TEXT`                                | The one-to-one chat it was handed off from, by session key: its card shows there and its result goes back there. A request's main task from that chat carries it too, and shows no card. Null for a task from anywhere else                                                                            |
 | `waiting_on`            | `TEXT`                                | JSON: what a waiting task waits for, a `kind` (`person`, `question`, `approval`, `task`, `subtasks`, `failure`, `verification`, `budget`, `breaker`, `recovery`, `no_result`, `out_of_room`, `provider` or `retry`) and what it points at. Null when it waits on nothing or a bare move gave no reason |
 | `assignee_person_id`    | `TEXT`                                | The person it is assigned to: a sign-in proxy's subject, or `local` for the built-in person. Never set together with `assignee_agent_id`: triggers refuse the row. There is no people table                                                                                                            |
 | `assignee_person`       | `TEXT`                                | JSON `{ id, name, role }` of that person                                                                                                                                                                                                                                                               |
 | `requested_by`          | `TEXT`                                | JSON `{ id, name, role }` of the person who asked for it, where a hand-back goes. Written when a task is created through the board's API. Null for a task an agent or the engine made                                                                                                                  |
 
-Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_assignee_person` (`assignee_person_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
+Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_assignee_person` (`assignee_person_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique), `idx_tasks_chat_session` (`chat_session_key`, `updated_at`).
 
 The `(parent_task_id, dropped, created_at)` index serves the Tasks MCP creation caps, which count live children per parent and new root tasks per 5 minutes.
 
@@ -915,6 +916,8 @@ Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
 
 The team chat engine's `[Task Update]` items, one row per result waiting to reach whoever handed the work off. A row is written when the engine queues it and settled when the recipient's run that carried it finishes, when a Stop drops it, or when it is given up. An unsettled row whose run never finished is sent again, by the running engine or, after a restart, by the chat's next engine. Settled rows are deleted after 7 days; unsettled rows are deleted after 30 days, or as soon as their team is gone.
 
+A row with `chat_session_key` set belongs to that one-to-one chat: work handed off from Boo Zero's chat answers there. No team or room reads such a row. The chat sends it itself, under the same rules, and `team_id` stays the team the work was done in, or is empty for a note about a hand-off that reached no team.
+
 | Column               | Type                           | Notes                                                                                  |
 | -------------------- | ------------------------------ | -------------------------------------------------------------------------------------- |
 | `id`                 | `TEXT`, PK                     |                                                                                        |
@@ -928,8 +931,9 @@ The team chat engine's `[Task Update]` items, one row per result waiting to reac
 | `settled_at`         | `INTEGER`                      | Null while pending                                                                     |
 | `settled_how`        | `TEXT`                         | `delivered`, `stopped` (its room was archived) or `gave_up`                            |
 | `held_at`            | `INTEGER`                      | Set when a person's Stop held it: it starts no run, and rides the recipient's next one |
+| `chat_session_key`   | `TEXT`                         | The one-to-one chat it goes to. Null for a team or room                                |
 
-Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
+Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`), `idx_report_up_outbox_chat` (`chat_session_key`, `settled_at`).
 
 ### task_wakes
 

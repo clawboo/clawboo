@@ -8,6 +8,7 @@
 import {
   chatMessages,
   latestChatMessageId,
+  listChatHandOffTasks,
   listChatMessagesSince,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -15,12 +16,13 @@ import type { PersonRef } from '@clawboo/protocol'
 import type { Request, Response } from 'express'
 
 import {
-  agentChatSessionKey,
-  driveAgentChat,
-  isServerChatAgent,
-  stopAgentChat,
-} from '../lib/agentChat/driveAgentChat'
-import { personOf } from '../lib/auth'
+  chatHandOffFrames,
+  chatHandsOff,
+  runChatTurn,
+  stopChatTurn,
+} from '../lib/agentChat/chatHandOffs'
+import { agentChatSessionKey, isServerChatAgent } from '../lib/agentChat/driveAgentChat'
+import { actingPerson, actsAsPerson, personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
@@ -70,7 +72,7 @@ function persistUserEntry(
   }
 }
 
-// POST /api/agents/:agentId/chat  { message, displayText?, entryId? }
+// POST /api/agents/:agentId/chat  { message, displayText?, entryId?, teamId? }
 export function agentChatIngestPOST(req: Request, res: Response): void {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
@@ -78,7 +80,7 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     return
   }
   const body = req.body as
-    { message?: unknown; displayText?: unknown; entryId?: unknown } | undefined
+    { message?: unknown; displayText?: unknown; entryId?: unknown; teamId?: unknown } | undefined
   const message = typeof body?.message === 'string' ? body.message.trim() : ''
   if (!message) {
     res.status(400).json({ error: 'message required' })
@@ -102,7 +104,19 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Detached (the 202 returns now): the reply streams via the SSE + is persisted
     // server-side. Not aborted on client disconnect (a slow reply survives).
-    void driveAgentChat({ db, agentId, message, mcpBaseUrl })
+    void runChatTurn({
+      db,
+      agentId,
+      message,
+      mcpBaseUrl,
+      // The team the person named with @Team, which Boo Zero's chat hands work to.
+      namedTeamId: typeof body?.teamId === 'string' ? body.teamId : null,
+      words: displayText,
+      // The message's own id: what it hands out goes under one main task per team, across
+      // a retry of this request too.
+      messageId: entryId,
+      requestedBy: actsAsPerson(req) ? actingPerson(req) : null,
+    })
     res.status(202).json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -117,7 +131,7 @@ export async function agentChatStopPOST(req: Request, res: Response): Promise<vo
     return
   }
   try {
-    await stopAgentChat(agentId)
+    await stopChatTurn(getDb(), agentId)
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -128,6 +142,11 @@ export async function agentChatStopPOST(req: Request, res: Response): Promise<vo
 // (`agent:<id>:native`, or `agent:<id>:<runtime>` for Claude Code / Codex / Hermes).
 // A pure reader (mirrors teamChatStream): Tier 1 = committed rows past an `id`
 // cursor, Tier 2 = the in-memory delta bus for live tokens (no `id:`, ephemeral).
+// `board` frames (no `id:`) carry the cards of the tasks handed off from this chat:
+// all of them on connect, then each one that changes, read from the rows, so a card
+// a restart or a dropped stream missed is right again on reconnect. A `handOffs` frame
+// says whether this chat acts on a hand-off, on connect and when that changes: the
+// server is the one that knows, and the browser's own idea of who Boo Zero is can differ.
 export function agentChatStreamGET(req: Request, res: Response): void {
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
@@ -170,6 +189,31 @@ export function agentChatStreamGET(req: Request, res: Response): void {
 
   let closed = false
 
+  // The newest change sent so far. Read from that same millisecond onward, and the
+  // frame compared with what was sent, so two writes in one millisecond are not missed.
+  let cardsSince = 0
+  const cardsSent = new Map<string, string>()
+  const writeCards = (): void => {
+    const changed = listChatHandOffTasks(db, sessionKey, { changedSince: cardsSince })
+    for (const frame of chatHandOffFrames(db, changed)) {
+      const data = JSON.stringify(frame)
+      const id = frame['id'] as string
+      if (cardsSent.get(id) === data) continue
+      cardsSent.set(id, data)
+      res.write('event: board\n')
+      res.write(`data: ${data}\n\n`)
+    }
+    for (const t of changed) if (t.updatedAt > cardsSince) cardsSince = t.updatedAt
+  }
+  let handsOff: boolean | null = null
+  const writeHandOffs = (): void => {
+    const on = chatHandsOff(db, agentId)
+    if (on === handsOff) return
+    handsOff = on
+    res.write('event: handOffs\n')
+    res.write(`data: ${JSON.stringify({ on })}\n\n`)
+  }
+
   const poll = (): void => {
     if (closed) return
     try {
@@ -183,6 +227,8 @@ export function agentChatStreamGET(req: Request, res: Response): void {
         res.write(`id: ${r.id}\n`)
         res.write(`data: ${r.data}\n\n`)
       }
+      writeHandOffs()
+      writeCards()
     } catch {
       /* transient read error — keep the stream alive; retry next tick */
     }

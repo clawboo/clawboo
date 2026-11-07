@@ -34,6 +34,8 @@ export interface SendNativeAgentParams {
   message: string
   /** The original user text shown in the transcript. */
   displayText: string
+  /** The team the person named with @Team at the start of the message. */
+  teamId?: string | null
 }
 
 function makeUserEntry(sessionKey: string, text: string, entryId: string): TranscriptEntry {
@@ -61,6 +63,7 @@ export async function sendNativeAgentMessage({
   sessionKey,
   message,
   displayText,
+  teamId,
 }: SendNativeAgentParams): Promise<void> {
   const trimmed = message.trim()
   if (!trimmed) return
@@ -74,7 +77,12 @@ export async function sendNativeAgentMessage({
     const res = await apiFetch(`/api/agents/${encodeURIComponent(agentId)}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: trimmed, displayText: shownText, entryId }),
+      body: JSON.stringify({
+        message: trimmed,
+        displayText: shownText,
+        entryId,
+        ...(teamId ? { teamId } : {}),
+      }),
     })
     if (!res.ok) throw new Error(`ingest ${res.status}`)
   } catch (err) {

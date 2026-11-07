@@ -46,11 +46,16 @@ import {
   createNudgeQueue,
   DeliveryRefusedError,
   type BoardOrchestrator,
+  type ChatHandOff,
+  type ChatHandOffBatch,
+  type ChatHandOffBatchOutcome,
+  type ChatHandOffOutcome,
   type DispatchOutcome,
   type KnownAgent,
   type TurnOrigin,
 } from '@clawboo/team-orchestration'
 import { resolveDelegationApproval } from '../../api/delegationApproval'
+import { createChatReportUps } from '../agentChat/chatReportUpOutbox'
 import { getRegistry } from '../agentSource/registry'
 import { getDb } from '../db'
 import { engineHeld } from '../engineHold'
@@ -62,6 +67,7 @@ import { publishChatDelta } from './chatDeltaBus'
 import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
+import { writeRequestNote } from './requestNote'
 import { createReportUpOutbox } from './reportUpOutbox'
 import { budgetGateRefusal, createTaskWakeOutbox } from './taskWakes'
 import { isRiskyDelegation } from './riskyDelegation'
@@ -165,6 +171,12 @@ export interface TeamOrchestrator {
    *  outbox. A person's queued message stays queued, held by the queue's own read of
    *  the pause, and starts on resume. */
   pauseRuns(covers: (run: PausedRunQuery) => boolean, notes: PauseStopNotes): Promise<string[]>
+  /** Start work handed off from a one-to-one chat. See the engine's `handOffFromChat`. */
+  handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome>
+  /** Two or more from one reply: a team that asks first asks here too. */
+  handOffBatchFromChat(input: ChatHandOffBatch): Promise<ChatHandOffBatchOutcome>
+  /** A chat's turn about this request ended well. See the engine's `closeRequestFromChat`. */
+  closeRequestFromChat(mainTaskId: string, agentId: string, summary: string): Promise<void>
   /** A person moved this task's card (already written). Stops the run working
    *  on it and tells its delegator. See the engine's `personMovedTask`. */
   personMovedTask(
@@ -459,6 +471,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // failed in the queue) stays pending, and this engine's sweep or the room's
     // next engine sends it again.
     reportUps: createReportUpOutbox(db, teamId, roomId),
+    // A result of work handed off from a one-to-one chat goes back to that chat.
+    chatReportUps: createChatReportUps(db, teamId),
     // The saved wakes on this room's tasks (see ./taskWakes).
     taskWakes: createTaskWakeOutbox(db, teamId, roomId),
     // A task whose last run a budget refused waits on the budget gate, not on a try.
@@ -677,6 +691,21 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     pauseRuns(covers, notes): Promise<string[]> {
       return stopPausedRunsOf({ engine, abortMap, queuedRuns, teamId }, covers, notes)
     },
+    async handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome> {
+      touch()
+      await ready
+      return engine.handOffFromChat(input)
+    },
+    async handOffBatchFromChat(input: ChatHandOffBatch): Promise<ChatHandOffBatchOutcome> {
+      touch()
+      await ready
+      return engine.handOffBatchFromChat(input)
+    },
+    async closeRequestFromChat(mainTaskId, agentId, summary): Promise<void> {
+      touch()
+      await ready
+      await engine.closeRequestFromChat(mainTaskId, agentId, summary)
+    },
     async personMovedTask(taskId, to, opts): Promise<void> {
       touch()
       await ready
@@ -689,14 +718,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       // The lead's answer lands in the chat, which has to say what it answers.
       const task = went ? getTask(db, taskId) : null
       if (task?.assigneeAgentId)
-        persistTeamChatEntry(db, {
-          teamId,
-          roomId,
-          agentId: task.assigneeAgentId,
-          text: `A person commented on ${task.identifier ?? `“${task.title}”`}: ${words}`,
-          role: 'system',
-          kind: 'meta',
-        })
+        writeRequestNote(
+          db,
+          task,
+          { teamId, roomId, agentId: task.assigneeAgentId },
+          `A person commented on ${task.identifier ?? `“${task.title}”`}: ${words}`,
+        )
       return went
     },
     signalAgent(agentId: string, text: string): void {

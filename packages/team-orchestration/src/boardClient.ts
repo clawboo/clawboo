@@ -14,6 +14,7 @@ import type {
   HandOffLink,
   ResultClaim,
   SubtaskView,
+  LocalPersonRef,
   TaskStatus,
   TaskWakeReason,
   WaitingOn,
@@ -30,6 +31,11 @@ export interface CreateTaskInput {
   assigneeRuntime?: string
   parentTaskId?: string
   sourceDelegationId?: string
+  /** The one-to-one chat it was handed off from: its card shows there, and its
+   *  result goes back there. */
+  chatSessionKey?: string
+  /** The person who asked for it. */
+  requestedBy?: LocalPersonRef
 }
 
 export interface BoardTask {
@@ -217,6 +223,8 @@ export interface MainTaskInput {
   requestedBy?: { id: string; name: string | null; role: string | null } | null
   /** One per message, so every hand-off of its turn finds the same main task. */
   key: string
+  /** The one-to-one chat the message came from: what reports on the request goes there. */
+  chatSessionKey?: string
 }
 
 /** Where a person's request stands, read from the board. */
@@ -284,6 +292,9 @@ export interface ProposePlanInput {
   /** The person's message this answers, when no task holds it yet: its main task lands
    *  with the card holding the plan, and the card and the accepted steps file under it. */
   mainTask?: MainTaskInput
+  /** The one-to-one chat it came from: its card shows there, and the answer and the
+   *  accepted steps' results go back there. */
+  chatSessionKey?: string
 }
 
 export type PlanProposal =
@@ -358,6 +369,7 @@ export interface EngineBoardClient extends BoardClient {
     agentId: string
     taskId: string | null
     parentTaskId: string | null
+    chatSessionKey?: string
   }): Promise<void>
   /** A Stop closes the plans waiting in this team. Best-effort. */
   closeWaitingPlans?(teamId: string): Promise<void>

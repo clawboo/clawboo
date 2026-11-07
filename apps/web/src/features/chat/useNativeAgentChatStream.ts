@@ -14,6 +14,7 @@ import {
   applyDeltaFrame,
   type EventSourceFactory,
 } from '@/features/group-chat/useTeamChatStream'
+import { applyChatHandOffFrame, applyChatHandsOffFrame } from '@/stores/chatHandOffs'
 import { apiUrl } from '@clawboo/control-client'
 
 export interface UseNativeAgentChatStreamParams {
@@ -66,17 +67,29 @@ export function useNativeAgentChatStream({
       if (update && update.agentId === agentId) onTurnLiveRef.current?.(update.status === 'running')
       onActivityRef.current?.()
     }
+    // The cards of work this chat handed off. A card moving is no turn of this agent's,
+    // so unlike the frames above it says nothing about the composer.
+    const onBoard = (e: MessageEvent): void => {
+      applyChatHandOffFrame(agentId, e.data as string)
+    }
+    const onHandOffs = (e: MessageEvent): void => {
+      applyChatHandsOffFrame(agentId, e.data as string)
+    }
     const onOpen = (): void => onTurnLiveRef.current?.(false)
     es.addEventListener('open', onOpen)
     es.addEventListener('message', onCommitted)
     es.addEventListener('delta', onDelta as EventListener)
     es.addEventListener('status', onStatus as EventListener)
+    es.addEventListener('board', onBoard as EventListener)
+    es.addEventListener('handOffs', onHandOffs as EventListener)
 
     return () => {
       es.removeEventListener('open', onOpen)
       es.removeEventListener('message', onCommitted)
       es.removeEventListener('delta', onDelta as EventListener)
       es.removeEventListener('status', onStatus as EventListener)
+      es.removeEventListener('board', onBoard as EventListener)
+      es.removeEventListener('handOffs', onHandOffs as EventListener)
       es.close()
       onTurnLiveRef.current?.(false)
     }

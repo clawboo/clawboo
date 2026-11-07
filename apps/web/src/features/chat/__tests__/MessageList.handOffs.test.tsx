@@ -1,13 +1,13 @@
 // A one-to-one chat never shows a hand-off that did not happen.
 //
-// Nothing in a 1:1 chat acts on a `<delegate>` tag: there is no board and no team
+// Nothing in most 1:1 chats acts on a `<delegate>` tag: there is no board and no team
 // engine there. Boo Zero's 1:1 chat was taught the tag anyway, and the reply drew
 // a "Delegated to @X" card for each one while it streamed, for work that never
-// started. The 1:1 list now shows such a block as a plain note that it was not
-// handed off, while the reply streams and after it commits. The group chat,
-// where a tag does start a task, keeps its card.
+// started. Such a chat now shows the block as a plain note that it was not handed
+// off, while the reply streams and after it commits. A chat where a tag does start a
+// task (a team's chat, a server-run Boo Zero's own) keeps its card.
 
-import type { ReactElement } from 'react'
+import type { ComponentProps, ReactElement } from 'react'
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { TranscriptEntry } from '@clawboo/protocol'
@@ -55,7 +55,11 @@ function assistantTurn(text: string): RenderBlock {
   }
 }
 
-function renderList(blocks: RenderBlock[], streamingText: string | null) {
+function renderList(
+  blocks: RenderBlock[],
+  streamingText: string | null,
+  extra: Partial<Pick<ComponentProps<typeof MessageList>, 'handOffs' | 'cards'>> = {},
+) {
   return renderUi(
     <MessageList
       blocks={blocks}
@@ -64,6 +68,7 @@ function renderList(blocks: RenderBlock[], streamingText: string | null) {
       agentName="Boo Zero"
       isRunning={streamingText !== null}
       sessionKey="agent:bz:main"
+      {...extra}
     />,
   )
 }
@@ -75,7 +80,7 @@ function expectNotHandedOff(): void {
   expect(note).toHaveTextContent('Not handed off')
   expect(note).toHaveTextContent('@Research Boo')
   expect(note).toHaveTextContent('find the numbers')
-  expect(note).toHaveTextContent('Hand-offs work only in a team’s chat')
+  expect(note).toHaveTextContent('This chat cannot hand off work')
 }
 
 describe('a 1:1 chat with a <delegate> block in the reply', () => {
@@ -113,5 +118,84 @@ describe('the group chat, where a <delegate> tag starts a task', () => {
     expect(screen.queryByTestId('delegation-card')).toBeNull()
     expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
     expect(screen.getByText(/On it\./)).toBeInTheDocument()
+  })
+})
+
+describe('a 1:1 chat that acts on its hand-offs (a server-run Boo Zero)', () => {
+  it('shows no note: a committed turn reads as prose, and the work shows as its card', () => {
+    renderList([assistantTurn(TAGGED)], null, {
+      handOffs: 'chat-card',
+      cards: [{ id: 't1', at: 1_700_000_000_001, node: <div data-testid="a-card">a card</div> }],
+    })
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.queryByText(/cannot hand off/)).toBeNull()
+    expect(screen.getByText(/On it\./)).toBeInTheDocument()
+    expect(screen.queryByText(/find the numbers/)).toBeNull()
+    expect(screen.getByTestId('a-card')).toBeInTheDocument()
+  })
+
+  it('shows the "Delegated to" card while the reply streams', () => {
+    renderList([], TAGGED, { handOffs: 'chat-card' })
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByTestId('delegation-card')).toBeInTheDocument()
+  })
+
+  it('draws no card for a tag in code while the reply streams: nothing starts from it', () => {
+    renderList([], '```\n<delegate to="@Research Boo">find it</delegate>\n```', {
+      handOffs: 'chat-card',
+    })
+    expect(screen.queryByTestId('delegation-card')).toBeNull()
+    expect(screen.getByText(/delegate to=/)).toBeInTheDocument()
+  })
+
+  it('keeps a tag in code in the committed turn, and takes out only a real one', () => {
+    const text =
+      'Like so:\n\n```\n<delegate to="@A Boo">the example</delegate>\n```\n\n' +
+      '<delegate to="@B Boo">the real one</delegate>'
+    renderList([assistantTurn(text)], null, { handOffs: 'chat-card' })
+    expect(screen.getByText(/the example/)).toBeInTheDocument()
+    expect(screen.queryByText(/the real one/)).toBeNull()
+  })
+
+  it("a team's chat still strips every tag: its engine read them all", () => {
+    const text = '```\n<delegate to="@A Boo">the example</delegate>\n```'
+    renderUi(
+      <AssistantTurnCard
+        block={assistantTurn(text) as never}
+        agentId="bz"
+        agentName="Boo Zero"
+        streaming={false}
+        handOffs="card"
+      />,
+    )
+    expect(screen.queryByText(/the example/)).toBeNull()
+  })
+
+  it('places a card by when it was made, among the messages', () => {
+    const later = {
+      ...assistantTurn('The later reply.'),
+      anchorEntryId: 'a2',
+      timestampMs: 1_700_000_000_500,
+    }
+    renderList([assistantTurn('The first reply.'), later], null, {
+      handOffs: 'chat-card',
+      cards: [
+        { id: 'between', at: 1_700_000_000_100, node: <div>between card</div> },
+        { id: 'end', at: 1_700_000_000_900, node: <div>end card</div> },
+      ],
+    })
+    const order = screen.getByTestId('chat-message-list').textContent ?? ''
+    expect(order.indexOf('The first reply.')).toBeLessThan(order.indexOf('between card'))
+    expect(order.indexOf('between card')).toBeLessThan(order.indexOf('The later reply.'))
+    expect(order.indexOf('The later reply.')).toBeLessThan(order.indexOf('end card'))
+  })
+
+  it('is not the empty state when all it has is a card', () => {
+    renderList([], null, {
+      handOffs: 'chat-card',
+      cards: [{ id: 't1', at: 1, node: <div data-testid="a-card">a card</div> }],
+    })
+    expect(screen.getByTestId('a-card')).toBeInTheDocument()
+    expect(screen.queryByText(/Say hi to/)).toBeNull()
   })
 })

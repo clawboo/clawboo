@@ -58,6 +58,7 @@ import {
   type ProviderFailure,
   type ResultClaim,
   type SubtaskView,
+  type LocalPersonRef,
   type TaskAttention,
   type TaskRunReason,
   type TaskWakeSettlement,
@@ -262,6 +263,18 @@ function chosenWaitOutcome(raw: unknown): 'asked' | 'waiting' | 'blocked' | null
 }
 
 type FailReason = Extract<TaskUpdateOutcome, 'error' | 'aborted' | 'max_turns' | 'timeout'>
+
+/** A hand-off from a one-to-one chat, as it goes through `spawn`, which fills in what
+ *  became of it. */
+interface ChatSpawn {
+  sessionKey: string
+  requestedBy?: LocalPersonRef
+  /** A refusal went out as a report-up. */
+  told: boolean
+  /** A task exists for it, whatever then became of its run. */
+  taskId: string | null
+  dropped: ChatHandOffDropped | null
+}
 
 /** What a rejected delivery tells `failForSession`: a budget refusal is filed as one. */
 const refusedErrorOpts = (err: unknown): { budgetRefused?: 'paused' | 'held' } =>
@@ -627,7 +640,87 @@ export interface ReportUp {
   /** The closed task the recipient was running when it delegated this work:
    *  marks a follow-up. */
   forTaskId?: string
+  /** A refused hand-off from a one-to-one chat, which has no task to say where it
+   *  came from: the chat it goes back to. */
+  chatSessionKey?: string
 }
+
+/**
+ * Where results of work handed off from a one-to-one chat go. Such a chat is no
+ * session of this engine's, so it keeps these in a scope of its own and sends them
+ * itself: the engine hands them over here and is done with them. Synchronous and
+ * best-effort, like {@link ReportUpOutbox}: it must not throw.
+ */
+export interface ChatReportUps {
+  /** Keep this report-up for the chat its task was handed off from. True when it
+   *  did. False when it is not such a report-up, or could not be kept, and the engine
+   *  sends it as it sends any other. `held`: it came back after a person's Stop, so
+   *  it wakes no one. */
+  take(item: ReportUp, opts: { held: boolean }): boolean
+  /** What this team has kept for a chat and not yet settled, held ones too. No team
+   *  reader sends these, but a request is not all in while a report about it is still
+   *  on its way to the chat. Empty when unread. */
+  waiting?(): ReportUp[]
+}
+
+/**
+ * What became of a hand-off from a one-to-one chat. A chat has nothing else to show
+ * for one, so every ending says so:
+ *  • a task id: its card shows, whether its run started now or waits;
+ *  • `told`: no task, and the reason is on its way to the chat as a report-up;
+ *  • `why`: no task, and nothing said so, because in a team's chat the engine stays
+ *    quiet about a refusal it has already made. The caller tells the person.
+ */
+export type ChatHandOffOutcome =
+  | { taskId: string }
+  | { taskId: null; told: true }
+  | { taskId: null; told: false; why: ChatHandOffDropped }
+
+export type ChatHandOffDropped =
+  /** This work has failed too often to hand out again. */
+  | 'failed_before'
+  /** A person's Stop landed while it was starting. */
+  | 'stopped'
+  /** The same words found open work, and the chat was told so once already. */
+  | 'already_open'
+  /** A refusal this engine already made for these words. */
+  | 'refused_before'
+
+/** A hand-off from a one-to-one chat. See {@link BoardOrchestrator.handOffFromChat}. */
+export interface ChatHandOff {
+  /** Who handed it off: the chat's agent, and who it reports to. */
+  fromAgentId: string
+  targetAgentId: string
+  targetAgentName: string
+  task: string
+  /** The chat turn it comes from. Holds no colon (see the delegation id codec). */
+  turnId: string
+  chatSessionKey: string
+  /** The person whose message this answers, when one did. */
+  requestedBy?: LocalPersonRef
+  /** That message, when this comes from a person's own turn: what it hands out goes
+   *  under one main task, one per message per team, whichever hand-off makes it. */
+  request?: { messageId: string; words: string }
+  /** The request this goes on with: a turn reading results on it. */
+  parentTaskId?: string
+}
+
+/** Two or more hand-offs from one reply of a one-to-one chat to one team. */
+export interface ChatHandOffBatch extends Omit<
+  ChatHandOff,
+  'targetAgentId' | 'targetAgentName' | 'task'
+> {
+  steps: Array<{ targetAgentId: string; targetAgentName: string; task: string }>
+}
+
+/**
+ * What became of a batch:
+ *  • `asked`: it waits for a person's answer, and nothing started;
+ *  • `not_asked`: this team does not ask, so it goes out as hand-offs;
+ *  • `told`: refused whole, and the reason is on its way to the chat as a report-up;
+ *  • a reason: refused whole, and nothing said so. The caller tells the person.
+ */
+export type ChatHandOffBatchOutcome = 'asked' | 'not_asked' | 'told' | ChatHandOffDropped
 
 /** A person's words on a request, as the report-up that takes them to its lead. */
 export function personCommentReport(
@@ -902,6 +995,9 @@ export interface BoardOrchestratorDeps {
    * report-ups live in memory only and a restart can lose them.
    */
   reportUps?: ReportUpOutbox
+  /** Takes report-ups for work handed off from a one-to-one chat (see
+   *  {@link ChatReportUps}). Omitted ⇒ every report-up stays in this engine. */
+  chatReportUps?: ChatReportUps
   /**
    * Check a task's work before it counts as done (see {@link WorkCheck}). While
    * the check runs the agent's session stays bound to the task, so no other task
@@ -1002,6 +1098,26 @@ export interface BoardOrchestrator {
    * lead as a `[Task Update]`.
    */
   dispatchTask(taskId: string): Promise<DispatchOutcome>
+  /**
+   * Start work handed off from a one-to-one chat, through the same start as a lead's
+   * hand-off in this team's chat, so the same fences apply (the failure breaker, the
+   * caps, approval of a risky hand-off). What differs is where it answers: the task
+   * remembers the chat, and its result, or the reason it did not start, goes there
+   * (see {@link ChatReportUps}). Resolves to what became of it.
+   */
+  handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome>
+  /**
+   * Two or more hand-offs from one reply of a one-to-one chat. A team that asks first
+   * asks here too: they wait on a card as a batch from the team's own chat does, and the
+   * answer and the results go back to the chat (see {@link ChatHandOffBatchOutcome}).
+   */
+  handOffBatchFromChat(input: ChatHandOffBatch): Promise<ChatHandOffBatchOutcome>
+  /**
+   * A turn of a one-to-one chat about this request ended well. It is the same as a
+   * lead's turn about a request in the team's chat: if that was the last of it, the
+   * reply was its summary, it is already in the chat, and it goes on the card too.
+   */
+  closeRequestFromChat(mainTaskId: string, agentId: string, summary: string): Promise<void>
   /**
    * A PERSON moved this task's card on the board, already written. Their move
    * is the final word on the run that was working on it:
@@ -1397,15 +1513,22 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   /** The words for a hand-off that found its task already on the board. */
-  function duplicateNote(task: BoardTask, delegatorAgentId: string | null): string {
+  function duplicateNote(
+    task: BoardTask,
+    delegatorAgentId: string | null,
+    /** The hand-off came from this one-to-one chat. */
+    chatSessionKey?: string,
+  ): string {
     const name = task.identifier ?? `"${(task.title ?? '').slice(0, 60)}"`
     const owner = targetForTask(task) ?? (task.assigneeAgentId as string | null | undefined) ?? null
     const reportsTo = sdidReflectTo(sdidOf(task))
     const result = isHumanAssignment(sdidOf(task))
       ? 'Its result goes to the person, on its card.'
-      : reportsTo === delegatorAgentId
-        ? 'Its result will reach you when it ends.'
-        : `Its result goes to ${nameOf(reportsTo ?? deps.leaderAgentId())}.`
+      : chatSessionKey && task['chatSessionKey'] !== chatSessionKey
+        ? "It was not handed off from this chat, so its result goes to the team's chat, not here."
+        : reportsTo === delegatorAgentId
+          ? 'Its result will reach you when it ends.'
+          : `Its result goes to ${nameOf(reportsTo ?? deps.leaderAgentId())}.`
     return `An open task with these words is already on the board: ${name}${owner ? `, with ${nameOf(owner)}` : ''}. The board did not make a second one. ${result}`
   }
 
@@ -1632,9 +1755,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    * under. It needs a delivery id, since that is what says two events are one turn.
    */
   function requestInTurn(
-    run: RunStamp,
+    run: Pick<RunStamp, 'request' | 'deliveryId'>,
     turn: string,
     leadAgentId: string | null,
+    /** The message came from this one-to-one chat. */
+    chatSessionKey?: string,
   ): RequestInTurn | null {
     const words = run.request?.words.trim()
     if (!run.request || !words || !run.deliveryId || !leadAgentId) return null
@@ -1645,6 +1770,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       leadAgentId,
       requestedBy: run.request.requestedBy ?? null,
       key: `main:${deps.teamId}:${run.deliveryId}`,
+      ...(chatSessionKey ? { chatSessionKey } : {}),
     }
     return { input, turn, request: run.request }
   }
@@ -1696,6 +1822,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       (item.taskId !== undefined && ids.has(item.taskId)) ||
       (item.forTaskId !== undefined && ids.has(item.forTaskId))
     if (reflectQueue.some(about)) return true
+    // Kept for the one-to-one chat the request came from: no reader here sends it, and
+    // the chat's reply to it is what closes the request.
+    if (deps.chatReportUps?.waiting?.().some(about)) return true
     if (!deps.reportUps) return false
     return (
       deps.reportUps.pending().some((r) => about(r.item)) ||
@@ -1755,18 +1884,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  its summary: it is already in chat, and it goes on the card too. */
   async function closeRequestAfterTurn(
     mainId: string,
-    sessionKey: string,
+    agentId: string | null,
     summary: string,
-    run: RunStamp,
   ): Promise<void> {
-    if (run.stopGen !== deps.stopGen()) return
     const state = await deps.board.mainTaskState(mainId)
     if (!state || !requestWorkAllIn(state)) return
     // What the person would read: no hand-off tag, and a control token is no summary at
     // all, which chat drops the same way.
     const words = reportOf(stripPlanBlocks(stripDelegationBlocks(summary))).trim()
     if (words && !shouldDropAssistantTurn(words)) {
-      const agentId = deps.agentIdForSession(sessionKey)
       await deps.board.addComment(mainId, words, 'agent', agentId ?? undefined)
     } else {
       await deps.board.addComment(mainId, 'The team lead closed this with no summary.', 'system')
@@ -1844,11 +1970,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     request: RequestInTurn | null,
     /** The board found this work already open, so no task is made and the id is null. */
     onFoundOpen?: () => void,
+    /** It comes from a one-to-one chat: that chat hears the result and any refusal,
+     *  and this says what became of it. */
+    chat?: ChatSpawn,
   ): Promise<string | null> {
     const startGen = deps.stopGen()
     // Tell the delegator (not silently drop) whenever a delegation can't start —
     // otherwise it waits forever for an answer that will never come.
-    const dropReflect = (summary: string, outcome: TaskUpdateOutcome = 'error'): void =>
+    const dropReflect = (summary: string, outcome: TaskUpdateOutcome = 'error'): void => {
+      if (chat) chat.told = true
       enqueueReflection({
         toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
         by: signal.targetAgentName,
@@ -1856,7 +1986,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         summary,
         outcome,
         ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+        ...(chat ? { chatSessionKey: chat.sessionKey } : {}),
       })
+    }
 
     const targetSk = deps.sessionKeyForAgent(signal.targetAgentId)
     if (!targetSk) {
@@ -1892,6 +2024,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         dropReflect(
           `${signal.targetAgentName} has failed "${signal.task.slice(0, 80)}" ${MAX_DELEGATION_FAILURES} times — handle it directly, reassign it, or tell the user it can't be done. Do not keep re-delegating it.`,
         )
+      } else if (chat) {
+        chat.dropped = 'failed_before'
       }
       return null
     }
@@ -1927,7 +2061,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       }
       return null
     }
-    if (deps.stopGen() !== startGen) return null
+    if (deps.stopGen() !== startGen) {
+      if (chat) chat.dropped = 'stopped'
+      return null
+    }
 
     // Approval plumbing: a risky delegation surfaces on the
     // LEADER's approval queue; we don't create or deliver the child until it's
@@ -1955,7 +2092,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           return null
         }
       }
-      if (deps.stopGen() !== startGen) return null
+      if (deps.stopGen() !== startGen) {
+        if (chat) chat.dropped = 'stopped'
+        return null
+      }
     }
 
     // Concurrency: an agent has ONE session, so it works delegations serially. If
@@ -1986,6 +2126,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           reflectTo: delegatorAgentId,
         }),
         ...handOffIdentity(['deleg', runId, signal.targetAgentId], signal.task),
+        ...(chat
+          ? {
+              chatSessionKey: chat.sessionKey,
+              ...(chat.requestedBy ? { requestedBy: chat.requestedBy } : {}),
+            }
+          : {}),
       })
       if (!created.ok) {
         if (created.reason === 'error') {
@@ -2018,11 +2164,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           created.deduplicated === 'title' &&
           firstDuplicateNote(delegatorAgentId, created.task.id)
         )
-          dropReflect(duplicateNote(created.task, delegatorAgentId), 'already_open')
+          dropReflect(
+            duplicateNote(created.task, delegatorAgentId, chat?.sessionKey),
+            'already_open',
+          )
+        else if (chat && created.deduplicated === 'title') chat.dropped = 'already_open'
+        // The same hand-off from this same turn: its card answers for this one too.
+        else if (chat) chat.taskId = created.task.id
         return null
       }
       task = created.task
       noteRequestFiled(created, request)
+      if (chat) chat.taskId = task.id
       taskTitle.set(task.id, title)
       if (delegatorAgentId) taskReflectTo.set(task.id, delegatorAgentId)
       emit({
@@ -2132,6 +2285,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     /** A person's message this plan answers: the card holding it files under its main
      *  task, made in the card's own write, and so do its steps once they are accepted. */
     request: RequestInTurn | null,
+    /** The one-to-one chat it comes from. */
+    chatSessionKey?: string,
   ): Promise<boolean> {
     if (!deps.board.proposePlan) return false
     // A Stop since the plan's checks began: it closed what waited, so nothing may land after.
@@ -2159,6 +2314,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       turnId: runId,
       ...(parallel ? { parallel: true } : {}),
       ...(request ? { mainTask: request.input } : {}),
+      ...(chatSessionKey ? { chatSessionKey } : {}),
     })
     switch (proposal.status) {
       case 'off':
@@ -2179,7 +2335,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         }
         // Said in the chat, where it reaches the person and starts no run: a run told its
         // plan was dropped could bring that one back and drop this one.
-        const toSk = proposal.replaced ? deps.sessionKeyForAgent(agentId) : null
+        const toSk = proposal.replaced && !chatSessionKey ? deps.sessionKeyForAgent(agentId) : null
         if (proposal.replaced && toSk)
           deps.narrate?.(
             toSk,
@@ -2235,19 +2391,27 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     /** A batch of hand-offs on a team that asks first: it is only ever asked about. False
      *  back means nobody was asked, and the batch goes out as hand-offs after all. */
     batch = false,
+    /** A batch from a one-to-one chat: that chat hears any refusal, and this says what
+     *  became of it. Only a batch comes this way, so no step is made here for one. */
+    chat?: ChatSpawn,
   ): Promise<boolean> {
     const startGen = deps.stopGen()
     /** Refuse the whole plan, before any step exists: a plan cut short is worse than
      *  none, since its later steps may rely on the ones left out. */
     const refusePlan = async (summary: string): Promise<void> => {
-      if (!firstRefusal('plan', delegatorAgentId, steps[0]?.targetAgentId ?? '', summary)) return
+      if (!firstRefusal('plan', delegatorAgentId, steps[0]?.targetAgentId ?? '', summary)) {
+        if (chat) chat.dropped = 'refused_before'
+        return
+      }
       if (sourceTaskId) await deps.board.addComment(sourceTaskId, summary, 'system')
+      if (chat) chat.told = true
       enqueueReflection({
         toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
         by: steps[0]?.targetAgentName ?? 'plan',
         summary,
         outcome: 'not_started',
         ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+        ...(chat ? { chatSessionKey: chat.sessionKey } : {}),
       })
     }
     if (steps.length > MAX_PLAN_STEPS) {
@@ -2293,14 +2457,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             `Spawn depth limit (${MAX_SPAWN_DEPTH}) reached — not starting a ${steps.length}-step plan.`,
             'system',
           )
+        if (chat) chat.told = true
         enqueueReflection({
           toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
           by: steps[0]?.targetAgentName ?? 'plan',
           summary: `Plan not started — max delegation depth (${MAX_SPAWN_DEPTH}) reached. Handle the work directly or report it back.`,
           outcome: 'error',
           ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+          ...(chat ? { chatSessionKey: chat.sessionKey } : {}),
         })
-      }
+      } else if (chat) chat.dropped = 'refused_before'
       return true
     }
 
@@ -2314,6 +2480,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       startGen,
       batch,
       request,
+      chat?.sessionKey,
     )
     if (asked) return true
     if (batch) return false
@@ -2817,6 +2984,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // Failures must reach the recipient even with an empty summary; successes
     // need substance (the empty-success placeholder is applied by the caller).
     if (!item.summary.trim() && (item.outcome == null || item.outcome === 'done')) return
+    // Work handed off from a one-to-one chat answers there, not in a team session.
+    if (deps.chatReportUps?.take(item, { held: false })) return
     // Written BEFORE it waits on the batch window, so from here on a restart
     // cannot lose it: the next engine for the room reads it back in `resume()`.
     const outboxId = deps.reportUps?.record(item) ?? null
@@ -2829,6 +2998,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  not queued: it is kept for the recipient's next run (see holdWorkForNextRun). */
   function holdReflection(item: ReportUp): void {
     if (!item.summary.trim() && (item.outcome == null || item.outcome === 'done')) return
+    if (deps.chatReportUps?.take(item, { held: true })) return
     deps.reportUps?.record(item, { held: true })
   }
 
@@ -3359,9 +3529,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           // whoever under it handed the work out.
           const inRequest =
             scopedMain !== undefined && t.id !== scopedMain && mainAbove(t.id)?.id === scopedMain
+          // A task handed off from a one-to-one chat answers there, even when the
+          // recipient here is that chat's agent.
           const reportsHere = scopedMain
             ? inRequest
-            : sdidReflectTo(sdid) === toAgentId && (!g.forTaskId || parent === g.forTaskId)
+            : !t['chatSessionKey'] &&
+              sdidReflectTo(sdid) === toAgentId &&
+              (!g.forTaskId || parent === g.forTaskId)
           // Work still running under a task this batch reports as finished: the
           // recipient is hearing a partial result, and the rest arrives later as
           // a follow-up.
@@ -5339,8 +5513,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
     await handleEvent(sessionKey, event, run)
     // A turn about a person's request ended well: it may have been the last of it.
-    if (run?.mainTaskId && event.kind === 'done' && event.reason === 'success')
-      await closeRequestAfterTurn(run.mainTaskId, sessionKey, event.summary ?? '', run)
+    if (
+      run?.mainTaskId &&
+      event.kind === 'done' &&
+      event.reason === 'success' &&
+      run.stopGen === deps.stopGen()
+    )
+      await closeRequestAfterTurn(
+        run.mainTaskId,
+        deps.agentIdForSession(sessionKey),
+        event.summary ?? '',
+      )
     // The turn is over, and so is its hand-off count.
     if (terminal) handOffsByTurn.delete(`${sessionKey}:${turnIdOf(event, run)}`)
     if (terminal) mainOfTurn.delete(`${sessionKey}:${turnIdOf(event, run)}`)
@@ -5822,6 +6005,98 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     return stopped
   }
 
+  /** What a hand-off from a one-to-one chat files under: the request a turn reading its
+   *  results goes on with, else the main task its message has, once a hand-off made one.
+   *  Until then the message is what makes it, in the same write as the hand-off, and its
+   *  key finds the one task again from any engine: one per message, per team. */
+  function chatRequestOf(input: Omit<ChatHandOff, 'targetAgentId' | 'targetAgentName' | 'task'>): {
+    source: string | null
+    request: RequestInTurn | null
+  } {
+    const message = input.request
+    const turn = message ? `chat:${input.chatSessionKey}:${message.messageId}` : null
+    const source = input.parentTaskId ?? (turn ? mainOfTurn.get(turn)?.id : null) ?? null
+    const request =
+      source === null && message && turn
+        ? requestInTurn(
+            {
+              deliveryId: message.messageId,
+              request: { words: message.words, requestedBy: input.requestedBy ?? null },
+            },
+            turn,
+            input.fromAgentId,
+            input.chatSessionKey,
+          )
+        : null
+    return { source, request }
+  }
+
+  const chatSpawnOf = (input: Pick<ChatHandOff, 'chatSessionKey' | 'requestedBy'>): ChatSpawn => ({
+    sessionKey: input.chatSessionKey,
+    ...(input.requestedBy ? { requestedBy: input.requestedBy } : {}),
+    told: false,
+    taskId: null,
+    dropped: null,
+  })
+
+  async function handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome> {
+    const chat = chatSpawnOf(input)
+    const { source, request } = chatRequestOf(input)
+    const started = await whileHandingOff(source, () =>
+      spawn(
+        {
+          targetAgentId: input.targetAgentId,
+          targetAgentName: input.targetAgentName,
+          task: input.task,
+        },
+        source,
+        input.fromAgentId,
+        input.turnId,
+        false,
+        request,
+        undefined,
+        chat,
+      ),
+    )
+    const taskId = started ?? chat.taskId
+    if (taskId) return { taskId }
+    if (chat.told) return { taskId: null, told: true }
+    return { taskId: null, told: false, why: chat.dropped ?? 'refused_before' }
+  }
+
+  /** See the interface. The same ask as a batch of tags in the team's chat. */
+  async function handOffBatchFromChat(input: ChatHandOffBatch): Promise<ChatHandOffBatchOutcome> {
+    const asksFirst = await deps.board.planApprovalOn?.(deps.teamId)
+    const { source, request } = chatRequestOf(input)
+    if (asksFirst !== true) {
+      if (asksFirst === false)
+        await deps.board.startingWithoutAsking?.({
+          teamId: deps.teamId,
+          agentId: input.fromAgentId,
+          taskId: null,
+          parentTaskId: source,
+          chatSessionKey: input.chatSessionKey,
+        })
+      return 'not_asked'
+    }
+    const chat = chatSpawnOf(input)
+    const settled = await whileHandingOff(source, () =>
+      startPlan(input.steps, source, input.fromAgentId, input.turnId, false, request, true, chat),
+    )
+    if (!settled) return 'not_asked'
+    if (chat.told) return 'told'
+    return chat.dropped ?? 'asked'
+  }
+
+  /** See the interface. */
+  async function closeRequestFromChat(
+    mainTaskId: string,
+    agentId: string,
+    summary: string,
+  ): Promise<void> {
+    await closeRequestAfterTurn(mainTaskId, agentId, summary)
+  }
+
   /** See the interface. Durable-Stop writer — runs alongside the host's aborts. */
   async function markStopped(): Promise<void> {
     lastStopAt = now()
@@ -5899,6 +6174,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     pauseRuns,
     detachTask,
     dispatchTask,
+    handOffFromChat,
+    handOffBatchFromChat,
+    closeRequestFromChat,
     personMovedTask,
     personCommentedOnMainTask,
     onRunNotStarted: (run) => closeReportUpRun(run, false),

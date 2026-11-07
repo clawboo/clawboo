@@ -8,6 +8,7 @@
 import { cleanup, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { useChatHandOffStore } from '@/stores/chatHandOffs'
 import { useFleetStore } from '@/stores/fleet'
 
 import { useNativeAgentChatStream } from '../useNativeAgentChatStream'
@@ -86,5 +87,84 @@ describe('useNativeAgentChatStream: the turn state', () => {
     hook.unmount()
     expect(es().closed).toBe(true)
     expect(live).toEqual([false])
+  })
+})
+
+describe('useNativeAgentChatStream: the cards of its hand-offs', () => {
+  it('puts a board frame in the store, under this agent, with its team', () => {
+    useChatHandOffStore.setState({ tasksByAgent: new Map() })
+    const { es } = mount()
+    es().emit(
+      'board',
+      JSON.stringify({
+        id: 't1',
+        title: 'fix the parser',
+        status: 'in_progress',
+        teamId: 'team-1',
+        createdAt: 5,
+        updatedAt: 6,
+      }),
+    )
+    const task = useChatHandOffStore.getState().tasksByAgent.get('cc-1')?.get('t1')
+    expect(task?.status).toBe('in_progress')
+    expect(task?.teamId).toBe('team-1')
+  })
+
+  it('does not take a card moving for a turn of this agent', () => {
+    const activity: number[] = []
+    const sources: FakeEventSource[] = []
+    renderHook(() =>
+      useNativeAgentChatStream({
+        agentId: 'cc-1',
+        enabled: true,
+        onActivity: () => activity.push(1),
+        eventSourceFactory: (url) => {
+          const es = new FakeEventSource(url)
+          sources.push(es)
+          return es as unknown as EventSource
+        },
+      }),
+    )
+    sources[0]!.emit('board', JSON.stringify({ id: 't1', status: 'done', updatedAt: 9 }))
+    expect(activity).toEqual([])
+  })
+
+  it('a stale frame does not move a card back', () => {
+    useChatHandOffStore.setState({ tasksByAgent: new Map() })
+    const { es } = mount()
+    es().emit('board', JSON.stringify({ id: 't1', status: 'done', updatedAt: 9 }))
+    es().emit('board', JSON.stringify({ id: 't1', status: 'in_progress', updatedAt: 5 }))
+    expect(useChatHandOffStore.getState().tasksByAgent.get('cc-1')?.get('t1')?.status).toBe('done')
+  })
+})
+
+describe('useNativeAgentChatStream: whether this chat hands off', () => {
+  it("takes the server's word, per agent, and it can change", () => {
+    useChatHandOffStore.setState({ handsOffByAgent: new Map() })
+    const { es } = mount()
+    expect(useChatHandOffStore.getState().handsOffByAgent.get('cc-1')).toBeUndefined()
+    es().emit('handOffs', JSON.stringify({ on: true }))
+    expect(useChatHandOffStore.getState().handsOffByAgent.get('cc-1')).toBe(true)
+    es().emit('handOffs', JSON.stringify({ on: false }))
+    expect(useChatHandOffStore.getState().handsOffByAgent.get('cc-1')).toBe(false)
+  })
+
+  it('is no turn of the agent, for the composer', () => {
+    const activity: number[] = []
+    const sources: FakeEventSource[] = []
+    renderHook(() =>
+      useNativeAgentChatStream({
+        agentId: 'cc-1',
+        enabled: true,
+        onActivity: () => activity.push(1),
+        eventSourceFactory: (url) => {
+          const es = new FakeEventSource(url)
+          sources.push(es)
+          return es as unknown as EventSource
+        },
+      }),
+    )
+    sources[0]!.emit('handOffs', JSON.stringify({ on: true }))
+    expect(activity).toEqual([])
   })
 })

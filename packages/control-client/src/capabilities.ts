@@ -36,6 +36,10 @@ export const ENGINE_FEATURES = [
   // Chat: rooms inside a team, and 1:1 chats the engine runs itself.
   'chat.rooms',
   'chat.direct',
+  // Boo Zero's one-to-one chat hands work to a team on a runtime the server runs.
+  // Part of that chat's turn and its stream's `board` frames, so it has no route of
+  // its own.
+  'chat.handOffs',
   // Board: the check on finished worktree work, a team-chat check waiting for the
   // team folder (`checkHeldSince` on a task), a comment reaching a live run,
   // readable task ids, team labels, and the agent waking when something happens on

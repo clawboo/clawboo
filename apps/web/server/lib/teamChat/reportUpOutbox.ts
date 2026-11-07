@@ -23,7 +23,7 @@ const log = createLogger('report-up-outbox')
 const optionalString = (v: unknown): boolean => v === undefined || typeof v === 'string'
 
 /** A stored payload read back as the engine's item, or null when it is not one. */
-function parseReportUp(payload: string): ReportUp | null {
+export function parseReportUp(payload: string): ReportUp | null {
   let v: unknown
   try {
     v = JSON.parse(payload)
@@ -34,7 +34,7 @@ function parseReportUp(payload: string): ReportUp | null {
   const o = v as Record<string, unknown>
   if (o['toAgentId'] !== null && typeof o['toAgentId'] !== 'string') return null
   if (typeof o['by'] !== 'string' || typeof o['summary'] !== 'string') return null
-  for (const key of ['title', 'outcome', 'taskId', 'forTaskId'])
+  for (const key of ['title', 'outcome', 'taskId', 'forTaskId', 'chatSessionKey'])
     if (!optionalString(o[key])) return null
   return o as unknown as ReportUp
 }

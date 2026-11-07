@@ -64,6 +64,8 @@ interface FakeRow {
   createdAt?: number
   isMainTask?: boolean
   completedAt?: number
+  chatSessionKey?: string | null
+  requestedBy?: unknown
 }
 
 // The fake rejects an illegal transition exactly as the real repo's updateStatus
@@ -232,6 +234,7 @@ export class FakeBoard implements CascadeBoard {
       assigneeAgentId: t.assigneeAgentId,
       ...(t.createdAt !== undefined ? { createdAt: t.createdAt } : {}),
       ...(t.isMainTask ? { isMainTask: 1 } : {}),
+      ...(t.chatSessionKey ? { chatSessionKey: t.chatSessionKey } : {}),
       ...(this.waits.has(t.id) ? { waitingOn: JSON.stringify(this.waits.get(t.id)) } : {}),
     }
   }
@@ -247,6 +250,8 @@ export class FakeBoard implements CascadeBoard {
       description: input.description ?? '',
       sourceDelegationId: input.sourceDelegationId ?? null,
       assigneeAgentId: null,
+      chatSessionKey: input.chatSessionKey ?? null,
+      requestedBy: input.requestedBy ?? null,
     }
     this.tasks.set(id, row)
     const bt = this.toBoardTask(row)
@@ -351,6 +356,8 @@ export class FakeBoard implements CascadeBoard {
         sourceDelegationId: null,
         assigneeAgentId: input.mainTask.leadAgentId,
         isMainTask: true,
+        chatSessionKey: input.mainTask.chatSessionKey ?? null,
+        requestedBy: input.mainTask.requestedBy ?? undefined,
       }
       this.tasks.set(main.id, main)
       this.keys.set(input.mainTask.key, main.id)
@@ -534,6 +541,7 @@ export class FakeBoard implements CascadeBoard {
             sourceDelegationId: null,
             assigneeAgentId: input.mainTask.leadAgentId,
             isMainTask: true,
+            chatSessionKey: input.mainTask.chatSessionKey ?? null,
           }
           this.tasks.set(main.id, main)
           this.keys.set(input.mainTask.key, main.id)
@@ -552,6 +560,7 @@ export class FakeBoard implements CascadeBoard {
         description: 'hold',
         sourceDelegationId: encodePlanHolder(input.agentId, id),
         assigneeAgentId: input.agentId,
+        chatSessionKey: input.chatSessionKey ?? null,
       }
       this.tasks.set(id, task)
       this.planCards.set(cardKey, id)

@@ -7,11 +7,12 @@
 // other agent is NOT a Gateway agent, so that path errored ("Agent <id> no longer
 // exists in configuration") or, with no Gateway connected, offered no box at all.
 // This is the server equivalent: a stripped-down sibling of teamChat/serverDeliver
-// that runs ONE conversational turn (no board, no orchestrator, no delegation),
-// streams the reply's tokens to the per-session chatDeltaBus, and commits the
-// reply under the agent's 1:1 key (see directChatSessionKey). The native driver
-// commits its own reply (persistNativeChatEntry); for the other runtimes this
-// drain commits it. OpenClaw agents keep the Gateway 1:1 path.
+// that runs ONE conversational turn (no board, no orchestrator), streams the reply's
+// tokens to the per-session chatDeltaBus, and commits the reply under the agent's 1:1
+// key (see directChatSessionKey). The native driver commits its own reply
+// (persistNativeChatEntry); for the other runtimes this drain commits it. OpenClaw
+// agents keep the Gateway 1:1 path. Hand-offs from Boo Zero's chat are not this file's
+// business: chatHandOffs wraps a turn and reads what it replied.
 
 import { mkdir } from 'node:fs/promises'
 
@@ -47,7 +48,7 @@ import {
   TURN_TOO_LARGE_TEXT,
 } from '../runFailureText'
 import { pauseRefusalText, pauseStopNote } from '../pauseBus'
-import { withRunSlot, PERSON_TURN } from '../runSlots'
+import { RunQueueAbortedError, withRunSlot, PERSON_TURN } from '../runSlots'
 import { adapterFactoryFor, type RuntimeAdapterFactory } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -219,6 +220,24 @@ export interface DriveAgentChatParams {
    *  factory. It is handed the run context the real factory would get. Production
    *  omits it → the real path runs. */
   makeAdapter?: (agentId: string, ctx: RuntimeRunContext) => RuntimeAdapter | null
+  /** More context for this turn. Read right before the run starts, with the agent's
+   *  lock held, so what arrived while the turn waited is in it. */
+  turnExtras?: () => string | null
+  /** Told how the turn ended, once it has given back its slot and its lock. */
+  onTurnEnded?: (ending: ChatTurnEnding) => void | Promise<void>
+}
+
+/** How a 1:1 turn ended. `reply` is the text it produced, for a turn that ended
+ *  before it finished too. */
+export interface ChatTurnEnding {
+  /** `finished`: a run that ended well. `stopped`: a person's Stop. `refused`: a budget
+   *  refused it before it started. `failed`: anything else, a turn that never started
+   *  included. */
+  how: 'finished' | 'stopped' | 'refused' | 'failed'
+  reply: string
+  /** It did not finish, and a pause covers the agent: what it carried goes again on the
+   *  resume, and this try does not count. */
+  paused?: boolean
 }
 
 /**
@@ -235,6 +254,31 @@ export interface DriveAgentChatParams {
  * is taken. Best-effort: never throws.
  */
 export async function driveAgentChat(params: DriveAgentChatParams): Promise<void> {
+  const ending: ChatTurnEnding = { how: 'failed', reply: '' }
+  try {
+    await driveTurn(params, ending)
+  } finally {
+    // However the turn ended, with its slot and its lock given back.
+    try {
+      if (ending.how !== 'finished' && pausedNow(params.db, params.agentId)) ending.paused = true
+    } catch (err) {
+      log.error({ err, agentId: params.agentId }, 'could not read whether a 1:1 turn is paused')
+    }
+    try {
+      await params.onTurnEnded?.(ending)
+    } catch (err) {
+      log.error({ err, agentId: params.agentId }, 'a 1:1 turn ending could not be handled')
+    }
+  }
+}
+
+/** Does a pause cover this agent's chat right now? */
+function pausedNow(db: ClawbooDb, agentId: string): boolean {
+  const row = db.select({ teamId: agents.teamId }).from(agents).where(eq(agents.id, agentId)).get()
+  return pauseFor(db, { agentId, teamId: row?.teamId ?? null }) !== null
+}
+
+async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): Promise<void> {
   const { db, agentId, message, mcpBaseUrl } = params
 
   const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
@@ -290,6 +334,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     const pausedWaiting = pauseFor(db, pauseSubject)
     if (pausedWaiting) {
       persist(pauseRefusalText(pausedWaiting), true)
+      ending.how = 'refused'
       return
     }
     // The budget gate, as in team chat and the task runner: a paused hard cap on
@@ -302,6 +347,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     const gate: RunBudgetGate = reserveRunBudget(db, { agentId }, { kind: 'chat', ref: sessionKey })
     if (gate.blocked) {
       persist(budgetRefusalText(gate.scope, gate.reason), true)
+      ending.how = 'refused'
       return
     }
     const turnHold = gate.hold
@@ -360,13 +406,16 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     // Hermes read no agent file, so their persona rides every turn, as it does in
     // team chat (see personaBlock); native and OpenClaw carry their own.
     const recall = priorSessionId ? null : await buildMemoryRecall(db, agentId)
-    const context = [buildPersonaBlock(db, agentId, runtime), recall].filter(Boolean).join('\n\n')
+    const context = [buildPersonaBlock(db, agentId, runtime), recall, params.turnExtras?.()]
+      .filter(Boolean)
+      .join('\n\n')
 
     // The final gate, right before the model call: a cap that paused while the turn
     // got ready (its folder, its memory) refuses it now, before anything is spent.
     const finalGate = turnHold.recheck()
     if (finalGate.blocked) {
       persist(budgetRefusalText(finalGate.scope, finalGate.reason), true)
+      ending.how = 'refused'
       return
     }
 
@@ -374,7 +423,8 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     try {
       // No childToolBlocklist / delegate tool: a 1:1 run is a conversation, not a
       // delegation. The native driver omits the `delegate` tool for a non-team
-      // session key by construction (see nativeDriver.ts).
+      // session key by construction (see nativeDriver.ts). A hand-off from Boo Zero's
+      // chat is a tag in its reply, the same on every runtime (see chatHandOffs).
       run = await adapter.start(
         { taskId: null, teamId: null },
         { agentId, sessionKey, message, ...(context ? { context } : {}) },
@@ -496,6 +546,8 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       // Stream / observer error: fall through to the cleanup below.
     }
     if (abortMap.get(agentId)?.run === run) abortMap.delete(agentId)
+    ending.how = succeeded ? 'finished' : userStopped ? 'stopped' : 'failed'
+    ending.reply = replyText || acc
 
     // A context overflow first settles what happens to the session, since the turn's
     // one notice says so. Any ending but success: a run that reported an overflow and
@@ -656,6 +708,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   const paused = pauseFor(db, pauseSubject)
   if (paused) {
     persist(pauseRefusalText(paused), true)
+    ending.how = 'refused'
     return
   }
   // A run slot first (see runSlots), then the agent's lock. A Stop while the turn
@@ -694,6 +747,7 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
     },
   )
     .catch((err: unknown) => {
+      if (err instanceof RunQueueAbortedError) ending.how = 'stopped'
       // An ACQUIRE timeout means `runJob` never ran at all: no 'running' status, no
       // delta, no persisted row. Swallowing it would be a silent non-response with
       // nothing on screen to explain it. Every other rejection stays swallowed:

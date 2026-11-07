@@ -409,6 +409,10 @@ export const tasks = sqliteTable(
     // A person's request from the chat: the main task the helpers' work is filed
     // under (see board/repository.ts). It holds no run of its own and nothing fires it.
     isMainTask: integer('is_main_task').notNull().default(0),
+    // The one-to-one chat it was handed off from (its session key): the task shows
+    // as a card there, and its result goes back there through report_up_outbox.
+    // NULL for a task from anywhere else.
+    chatSessionKey: text('chat_session_key'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
@@ -416,6 +420,7 @@ export const tasks = sqliteTable(
     index('idx_tasks_team_room').on(t.teamId, t.roomId),
     index('idx_tasks_assignee').on(t.assigneeAgentId),
     index('idx_tasks_parent').on(t.parentTaskId),
+    index('idx_tasks_chat_session').on(t.chatSessionKey, t.updatedAt),
     // Serves BOTH guarded-create counts, which run while the write lock is held:
     // the per-parent child count (`parent_task_id = ? AND dropped = 0`, an index
     // prefix) and the root-rate count (`parent_task_id IS NULL AND dropped = 0 AND
@@ -1393,11 +1398,12 @@ export const agentInbox = sqliteTable(
 
 export type DbAgentInboxRow = typeof agentInbox.$inferSelect
 
-// report_up_outbox: the team chat's durable `[Task Update]` outbox. A row is
-// one result the engine queued for whoever handed the work off; it stays
-// pending (settled_at NULL) until the recipient's run that carried it ends, a
-// Stop drops it, or it is given up. The room's next engine replays the pending
-// rows after a restart. See src/reportUps.ts.
+// report_up_outbox: the durable `[Task Update]` outbox. A row is one result the
+// engine queued for whoever handed the work off; it stays pending (settled_at
+// NULL) until the recipient's run that carried it ends, a Stop drops it, or it is
+// given up. The room's next engine replays the pending rows after a restart; a row
+// with chat_session_key set belongs to that one-to-one chat instead, which sends it
+// itself. See src/reportUps.ts.
 export const reportUpOutbox = sqliteTable(
   'report_up_outbox',
   {
@@ -1419,8 +1425,15 @@ export const reportUpOutbox = sqliteTable(
     /** Set when a person's Stop held it: it starts no run, and it rides the
      *  recipient's next run instead. */
     heldAt: integer('held_at'),
+    /** Set when the result goes to a one-to-one chat: the chat's session key. Such a
+     *  row is that chat's: no team or room reads it. `team_id` stays the team the
+     *  work was done in, so a row whose team is gone is reaped like any other. */
+    chatSessionKey: text('chat_session_key'),
   },
-  (t) => [index('idx_report_up_outbox_pending').on(t.teamId, t.roomId, t.settledAt)],
+  (t) => [
+    index('idx_report_up_outbox_pending').on(t.teamId, t.roomId, t.settledAt),
+    index('idx_report_up_outbox_chat').on(t.chatSessionKey, t.settledAt),
+  ],
 )
 
 export type DbReportUpOutboxRow = typeof reportUpOutbox.$inferSelect

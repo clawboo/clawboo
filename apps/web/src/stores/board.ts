@@ -35,6 +35,8 @@ export interface BoardTaskView {
   pause?: BoardChange['pause']
   /** The chat room the task belongs to; null (or absent) = the team's own group chat. */
   roomId?: string | null
+  /** The team it is on, where a reader spans teams (a one-to-one chat's cards). */
+  teamId?: string | null
   /** What it waits on (the JSON reason), as the server last said for this status. */
   waitingOn?: string | null
   /** For a wait on other work, what its card names. */
@@ -64,7 +66,10 @@ export type BoardChangeFrame = BoardChange & {
   planHolder?: boolean
 }
 
-function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame): BoardTaskView {
+export function mergeTask(
+  existing: BoardTaskView | undefined,
+  change: BoardChangeFrame,
+): BoardTaskView {
   const incomingUpdatedAt = change.updatedAt ?? existing?.updatedAt ?? Date.now()
   // A strictly-OLDER change must not regress a field: a reconnect `load()` snapshot can
   // predate a live board frame received during the connect gap, and copying its stale

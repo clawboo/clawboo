@@ -133,6 +133,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'runtime.hermes': runtimes.has('hermes'),
     'chat.rooms': true,
     'chat.direct': true,
+    // Inside a 1:1 turn and that chat's stream, so it has no route of its own.
+    'chat.handOffs': true,
     // Enforced inside the board's status change, so it has no route of its own
     // and no switch: a task whose stored verdict fails cannot reach done
     // without a person's override. A task with no verdict can still be moved.

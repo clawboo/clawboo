@@ -8,6 +8,9 @@ import {
   stripPlanBlocks,
   resolveSessionsSendTarget,
   detectDelegationIntent,
+  findActionableHandOffs,
+  looksLikeBrokenHandOff,
+  stripActionableHandOffs,
 } from '../delegationTags'
 
 const agents = [
@@ -433,5 +436,124 @@ describe('tag scanning holds up on hostile and mangled input', () => {
     expect(stripDelegationBlocks(delegates)).toBe(delegates.trim())
     expect(findPlanBlocks(plans)).toHaveLength(0)
     expect(performance.now() - started).toBeLessThan(1000)
+  })
+})
+
+// ─── What a reply means, and what it only shows ──────────────────────────────
+
+describe('findActionableHandOffs: a tag starts work only where a reader sees a tag', () => {
+  const tag = '<delegate to="@Growth/Coder">fix the parser</delegate>'
+  const planTag = '<plan><step to="@Growth/Coder">one</step></plan>'
+
+  it('takes a tag in plain text', () => {
+    const found = findActionableHandOffs(`On it. ${tag}`)
+    expect(found.delegates.map((b) => b.task)).toEqual(['fix the parser'])
+    expect(found.shownDelegates).toEqual([])
+  })
+
+  it.each([
+    ['a fenced block', '```xml\n' + tag + '\n```'],
+    ['a tilde fence', '~~~\n' + tag + '\n~~~'],
+    ['a fence never closed', 'Draft:\n```\n' + tag],
+    ['inline code', 'Write `' + tag + '` to hand it off.'],
+    ['a double-backtick span', 'Write ``' + tag + '`` to hand it off.'],
+    ['a block quote', 'They said:\n> ' + tag],
+    ['an indented block', 'Like so:\n\n    ' + tag],
+    ['quotation marks', 'He wrote "' + tag + '" last time.'],
+    ['curly quotation marks', 'He wrote “' + tag + '” last time.'],
+  ])('shows, and does not take, a tag in %s', (_name, text) => {
+    const found = findActionableHandOffs(text)
+    expect(found.delegates).toEqual([])
+    expect(found.shownDelegates).toHaveLength(1)
+  })
+
+  it('does not take a plan in code either', () => {
+    const found = findActionableHandOffs('```\n' + planTag + '\n```')
+    expect(found.plans).toEqual([])
+    expect(found.shownPlans).toHaveLength(1)
+  })
+
+  it('takes a real tag beside a quoted one', () => {
+    const found = findActionableHandOffs('```\n' + tag + '\n```\nAnd now:\n' + tag)
+    expect(found.delegates).toHaveLength(1)
+    expect(found.shownDelegates).toHaveLength(1)
+  })
+
+  it('keeps the whole brief of a real tag that has code or a quote inside it', () => {
+    const body = 'Fix this:\n```\nconst x = 1\n```\n> and this quote\nthanks'
+    const found = findActionableHandOffs(`<delegate to="@Growth/Coder">${body}</delegate>`)
+    expect(found.delegates).toHaveLength(1)
+    expect(found.delegates[0]!.task).toBe(body)
+  })
+
+  it('a lone backtick or a fence-like word hides nothing', () => {
+    expect(findActionableHandOffs('it costs 5` and ' + tag).delegates).toHaveLength(1)
+    expect(findActionableHandOffs('use `x` first, then ' + tag).delegates).toHaveLength(1)
+    expect(findActionableHandOffs('a list:\n- item\n' + tag).delegates).toHaveLength(1)
+  })
+
+  it('stays linear on a run of unmatched backticks', () => {
+    const text = Array.from({ length: 4000 }, (_, i) => '`'.repeat((i % 7) + 1) + ' x').join(' ')
+    const started = Date.now()
+    findActionableHandOffs(text + tag)
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
+  describe('stripActionableHandOffs', () => {
+    it('takes out what started, and leaves what is only shown', () => {
+      const shown = 'Draft:\n```\n' + tag + '\n```'
+      expect(stripActionableHandOffs(`On it. ${tag}\n${shown}`)).toBe(`On it. \n${shown}`)
+    })
+    it('takes out a plan outside code, which the chat answers for', () => {
+      expect(stripActionableHandOffs(`Plan: ${planTag}`)).toBe('Plan:')
+    })
+    it('leaves text with no tag as it is', () => {
+      expect(stripActionableHandOffs('  plain words ')).toBe('  plain words ')
+    })
+  })
+
+  describe('looksLikeBrokenHandOff', () => {
+    it.each([
+      ['an opener with no closer', '<delegate to="@Growth/Coder">fix the parser'],
+      ['a closer with no opener', 'fix the parser</delegate>'],
+      ['a dropped bracket', 'delegate to="@Coder" fix it'],
+      ['a step outside a plan', '<step to="@Coder">fix it'],
+    ])('reads %s as one', (_name, text) => {
+      expect(looksLikeBrokenHandOff(text)).toBe(true)
+    })
+    it.each([
+      ['a mention of a plan', 'A <plan> needs that team’s own chat.'],
+      ['a bare mention', 'I can write a <delegate> for that.'],
+      ['the word in prose', 'I will delegate to Coder later.'],
+      ['a tag in code', 'Use `<delegate to="@Coder">` like that'],
+    ])('does not read %s as one', (_name, text) => {
+      expect(looksLikeBrokenHandOff(text)).toBe(false)
+    })
+  })
+})
+
+describe('a name with an apostrophe in a tag', () => {
+  it.each([
+    ['straight', "Founder's Office/Coder"],
+    ['curly', 'Founder’s Office/Coder'],
+  ])('reads a %s one in a double-quoted value', (_name, target) => {
+    const blocks = findDelegationBlocks(`<delegate to="@${target}">fix it</delegate>`)
+    expect(blocks.map((b) => b.targetName)).toEqual([`@${target}`])
+    expect(blocks[0]!.task).toBe('fix it')
+  })
+
+  it('reads one in a plan step too', () => {
+    const [plan] = findPlanBlocks(`<plan><step to="@Founder's Office/Coder">one</step></plan>`)
+    expect(plan!.steps.map((s) => s.targetName)).toEqual(["@Founder's Office/Coder"])
+  })
+
+  it('still takes a single-quoted or curly-quoted value', () => {
+    expect(findDelegationBlocks(`<delegate to='@Coder'>a</delegate>`)[0]!.targetName).toBe('@Coder')
+    expect(findDelegationBlocks(`<delegate to=“@Coder”>a</delegate>`)[0]!.targetName).toBe('@Coder')
+  })
+
+  it('does not run one value into the next attribute', () => {
+    const text = 'the to="x" part, then <delegate to="@Coder">a</delegate>'
+    expect(findDelegationBlocks(text).map((b) => b.targetName)).toEqual(['@Coder'])
   })
 })

@@ -79,6 +79,24 @@ describe('buildBooZeroRulesBlock', () => {
     expect(out).toMatch(/never spawn sub-agents/i)
   })
 
+  it("in a 1:1 chat the server runs, says it can hand off and points at the turn's block", () => {
+    const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero', handOffs: true })
+    expect(out).not.toMatch(/hand-offs are off/i)
+    expect(out).toMatch(/You can hand work to a team from here/)
+    expect(out).toContain('[Hand-offs from this chat]')
+    // The server's block teaches the syntax, since the server is what acts on it.
+    expect(out).not.toContain('<delegate to=')
+    expect(out).toMatch(/overrides the delegation instructions/)
+    expect(out).toContain('You are Boo Zero.')
+    expect(out).toMatch(/never spawn sub-agents/i)
+  })
+
+  it('an OpenClaw Boo Zero stays off: the server never sees that reply', () => {
+    const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero', handOffs: false })
+    expect(out).toMatch(/hand-offs are off here/i)
+    expect(out).toMatch(/that team.s chat/i)
+  })
+
   it('in a team chat, still teaches the routing syntax', () => {
     const out = buildBooZeroRulesBlock({ displayName: 'Boo Zero', teamName: 'Demo Team' })
     expect(out).toContain('<delegate to="@AgentName">')

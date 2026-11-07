@@ -1,5 +1,6 @@
-// report_up_outbox accessors: the team chat's durable `[Task Update]` outbox.
-// See the schema comment for the model. The payload is the engine's item as
+// report_up_outbox accessors: the durable `[Task Update]` outbox, for team chats and
+// for one-to-one chats, which each keep to their own rows. See the schema comment
+// for the model. The payload is the engine's item as
 // opaque JSON; this layer only stores, lists and settles it, so the database
 // package never depends on the orchestration engine.
 
@@ -10,6 +11,10 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle
 import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
 import { reportUpOutbox, type DbReportUpOutboxRow } from './schema'
+
+/** `team_id` of a one-to-one chat's row about a hand-off that reached no team, which
+ *  the column requires and no team has. It waits for the chat's next turn. */
+export const NO_TEAM_REPORT_UP = ''
 
 /** How a report-up was closed. Mirrors the engine's `ReportUpSettlement`. */
 export type ReportUpSettledHow = 'delivered' | 'stopped' | 'gave_up'
@@ -25,6 +30,8 @@ export interface RecordReportUpInput {
   /** It came back after a person's Stop: it starts no run, and rides the
    *  recipient's next one. */
   held?: boolean
+  /** It goes to this one-to-one chat instead of a team or room session. */
+  chatSessionKey?: string | null
 }
 
 /** Store one report-up as the engine queues it. Returns its id. */
@@ -45,6 +52,7 @@ export function recordReportUp(db: ClawbooDb, input: RecordReportUpInput): strin
         settledAt: null,
         settledHow: null,
         heldAt: input.held ? Date.now() : null,
+        chatSessionKey: input.chatSessionKey ?? null,
       })
       .run(),
   )
@@ -66,6 +74,7 @@ export function listPendingReportUps(
         and(
           eq(reportUpOutbox.teamId, teamId),
           roomId === null ? isNull(reportUpOutbox.roomId) : eq(reportUpOutbox.roomId, roomId),
+          isNull(reportUpOutbox.chatSessionKey),
           isNull(reportUpOutbox.settledAt),
           isNull(reportUpOutbox.heldAt),
         ),
@@ -90,6 +99,7 @@ export function listHeldReportUps(
       and(
         eq(reportUpOutbox.teamId, teamId),
         roomId === null ? isNull(reportUpOutbox.roomId) : eq(reportUpOutbox.roomId, roomId),
+        isNull(reportUpOutbox.chatSessionKey),
         isNull(reportUpOutbox.settledAt),
         isNotNull(reportUpOutbox.heldAt),
       ),
@@ -151,13 +161,20 @@ export function listRoomsWithPendingReportUps(
   return db
     .selectDistinct({ teamId: reportUpOutbox.teamId, roomId: reportUpOutbox.roomId })
     .from(reportUpOutbox)
-    .where(and(isNull(reportUpOutbox.settledAt), isNull(reportUpOutbox.heldAt)))
+    .where(
+      and(
+        isNull(reportUpOutbox.chatSessionKey),
+        isNull(reportUpOutbox.settledAt),
+        isNull(reportUpOutbox.heldAt),
+      ),
+    )
     .all() as Array<{ teamId: string; roomId: string | null }>
 }
 
 /** The newest report-up to this agent about any of these tasks, settled or not: what
- *  the agent looking after a request last heard about it. A row with no recipient is
- *  the room's lead's. Null when there is none. */
+ *  the agent looking after a request last heard about it, in a team session or in the
+ *  one-to-one chat the request came from. A row with no recipient is the room's lead's.
+ *  Null when there is none. */
 export function latestReportUpForTasks(
   db: ClawbooDb,
   taskIds: readonly string[],
@@ -187,6 +204,76 @@ export function latestReportUpForTasks(
   )
 }
 
+/** Unsettled report-ups for one one-to-one chat that a Stop did not hold, oldest
+ *  first: the ones to send. */
+export function listPendingChatReportUps(db: ClawbooDb, sessionKey: string): DbReportUpOutboxRow[] {
+  return db
+    .select()
+    .from(reportUpOutbox)
+    .where(
+      and(
+        eq(reportUpOutbox.chatSessionKey, sessionKey),
+        isNull(reportUpOutbox.settledAt),
+        isNull(reportUpOutbox.heldAt),
+      ),
+    )
+    .orderBy(asc(reportUpOutbox.createdAt), sql`rowid`)
+    .all() as DbReportUpOutboxRow[]
+}
+
+/** Unsettled report-ups for one one-to-one chat that wait for its next run, oldest
+ *  first. */
+export function listHeldChatReportUps(db: ClawbooDb, sessionKey: string): DbReportUpOutboxRow[] {
+  return db
+    .select()
+    .from(reportUpOutbox)
+    .where(
+      and(
+        eq(reportUpOutbox.chatSessionKey, sessionKey),
+        isNull(reportUpOutbox.settledAt),
+        isNotNull(reportUpOutbox.heldAt),
+      ),
+    )
+    .orderBy(asc(reportUpOutbox.createdAt), sql`rowid`)
+    .all() as DbReportUpOutboxRow[]
+}
+
+/** Unsettled rows this team has kept for one-to-one chats, held ones too. No team reader
+ *  sends these, but a request filed under one of them is not all in until they settle. */
+export function listUnsettledChatReportUpsOfTeam(
+  db: ClawbooDb,
+  teamId: string,
+): DbReportUpOutboxRow[] {
+  return db
+    .select()
+    .from(reportUpOutbox)
+    .where(
+      and(
+        eq(reportUpOutbox.teamId, teamId),
+        isNotNull(reportUpOutbox.chatSessionKey),
+        isNull(reportUpOutbox.settledAt),
+      ),
+    )
+    .orderBy(asc(reportUpOutbox.createdAt), sql`rowid`)
+    .all() as DbReportUpOutboxRow[]
+}
+
+/** One-to-one chats holding report-ups to send: the boot-resume scan. */
+export function listChatsWithPendingReportUps(db: ClawbooDb): string[] {
+  const rows = db
+    .selectDistinct({ chatSessionKey: reportUpOutbox.chatSessionKey })
+    .from(reportUpOutbox)
+    .where(
+      and(
+        isNotNull(reportUpOutbox.chatSessionKey),
+        isNull(reportUpOutbox.settledAt),
+        isNull(reportUpOutbox.heldAt),
+      ),
+    )
+    .all() as Array<{ chatSessionKey: string }>
+  return rows.map((r) => r.chatSessionKey)
+}
+
 /** A settled row is kept this long, for debugging, then deleted. */
 export const REPORT_UP_SETTLED_RETENTION_MS = 7 * 24 * 60 * 60_000
 /** A pending row older than this is deleted unsent, one a Stop held for a recipient
@@ -203,7 +290,7 @@ export function reapReportUps(db: ClawbooDb, at = Date.now()): number {
   const pendingCutoff = at - REPORT_UP_PENDING_MAX_AGE_MS
   const result = withWriteRetry(() =>
     db.run(
-      sql`DELETE FROM report_up_outbox WHERE (settled_at IS NOT NULL AND settled_at < ${settledCutoff}) OR (settled_at IS NULL AND (created_at < ${pendingCutoff} OR team_id NOT IN (SELECT id FROM teams)))`,
+      sql`DELETE FROM report_up_outbox WHERE (settled_at IS NOT NULL AND settled_at < ${settledCutoff}) OR (settled_at IS NULL AND (created_at < ${pendingCutoff} OR (team_id <> ${NO_TEAM_REPORT_UP} AND team_id NOT IN (SELECT id FROM teams))))`,
     ),
   )
   return Number((result as { changes?: number }).changes ?? 0)
