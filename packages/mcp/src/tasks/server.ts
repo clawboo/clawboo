@@ -116,6 +116,11 @@ function statusWriteResult(r: UpdateStatusResult, verb: string): McpToolResult {
       'This task is waiting for a person to answer a question, and the answer starts it again. Leave it as it is and do not retry this call. To raise something about it, use add_comment.',
       true,
     )
+  if (r.reason === 'main_task')
+    return textResult(
+      "This task is a person's request, and it runs nothing by itself. It closes on its own once the work under it is in and the team lead has answered. Leave its status as it is and do not retry this call. To raise something about it, use add_comment.",
+      true,
+    )
   return textResult(`${verb} failed: ${r.reason}`, true)
 }
 
@@ -181,6 +186,13 @@ function createDenial(result: GuardedCreateResult, parentTaskId?: string): McpTo
   if (result.reason === 'child_cap') {
     return textResult(
       `subtask rejected: parent ${parentTaskId} already has ${result.count} children (max ${result.max}). Finished and cancelled children still count, and only a person cancelling one frees a place. Attach the new task elsewhere, or tell the person.`,
+      true,
+      result.reason,
+    )
+  }
+  if (result.reason === 'main_closed') {
+    return textResult(
+      `subtask rejected: ${parentTaskId} is part of a person's request that has closed. Do not add work to it.`,
       true,
       result.reason,
     )
@@ -856,6 +868,8 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
         const before = getTask(db, str(args['taskId']))
+        if (before?.isMainTask === 1)
+          return statusWriteResult({ ok: false, reason: 'main_task' }, 'release')
         releaseTask(db, str(args['taskId']))
         if (before?.status === 'in_progress')
           recordWrite('status_changed', getTask(db, before.id), { to: 'todo', reason: 'released' })

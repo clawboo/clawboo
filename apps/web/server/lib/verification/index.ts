@@ -12,6 +12,7 @@ import {
   addComment,
   appendAudit,
   getTask,
+  handedDownFromWork,
   getTaskVerification,
   setTaskVerification,
   type ClawbooDb,
@@ -173,6 +174,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
     const riskFlag =
       input.riskFlag ??
       isRiskyDelegation({ task: `${task?.title ?? ''}\n${task?.description ?? ''}` })
+    const handedDown = handedDownFromWork(db, task)
     try {
       const head =
         input.reviewSha ?? (await commitWorktreeWork(input.repoPath, input.worktree)).head
@@ -180,7 +182,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
         repoPath: input.repoPath,
         reviewSha: head,
         diffStat: input.diffStat,
-        hasParent: Boolean(task?.parentTaskId),
+        hasParent: handedDown,
         makeReviewerAdapter: input.makeReviewerAdapter,
         reviewerModel: input.reviewerModel,
         mcpBaseUrl: input.mcpBaseUrl,
@@ -194,7 +196,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
       // and a review the diff called for that could not run is recorded as such.
       critic = shouldRunCritic({
         diffStat: input.diffStat,
-        hasParent: Boolean(task?.parentTaskId),
+        hasParent: handedDown,
         riskFlag,
       })
         ? criticErrored({

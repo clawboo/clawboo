@@ -37,6 +37,7 @@ import type { RoutineOccurrences } from '@/lib/schedulesClient'
 
 import { NEEDS_YOU_COLUMN } from '../boardStatus'
 import { StatusGlyph, glyphKindOf } from '../StatusGlyph'
+import { MainTaskSubtasks } from '../MainTaskSubtasks'
 import { DraggableCard, type CardStamp } from '../TaskCard'
 import {
   agoLabel,
@@ -804,6 +805,7 @@ function Cell({
             unseen={states.unseenIds.has(t.id)}
             onSeen={() => states.onSeen(t.id)}
           />
+          <MainTaskSubtasks task={t} />
         </Fragment>
       ))}
       {landing && landingIndex === shownTasks.length ? (

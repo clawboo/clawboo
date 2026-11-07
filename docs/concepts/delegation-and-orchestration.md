@@ -60,7 +60,7 @@ The teammate runs the task on whichever runtime it uses, with its own tools.
 </Step>
 <Step title="The result comes back">
 
-The teammate's final reply is added to the card, the card moves to Done, and the result goes to whoever handed it off. The lead then writes you one short summary.
+The teammate's final reply is added to the card, the card moves to Done, and the result goes to whoever handed it off. The lead then writes you one short summary. Everything handed out for your message sits under one main task on the board, which closes after that summary: see [Your request is one main task](/concepts/the-board#your-request-is-one-main-task).
 
 </Step>
 </Steps>

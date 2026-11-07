@@ -29,7 +29,14 @@ import {
 } from '@/features/board/boardStatus'
 import { useBoardPerson } from '@/features/board/useBoardPerson'
 import { ReplyReceipt } from '@/features/board/ReplyReceipt'
+import { replyHint } from '@/features/board/TaskReplyBox'
 import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
+import {
+  buildRequestNesting,
+  isMainTask,
+  progressLabel,
+  requestLabel,
+} from '@/features/board/mainTasks'
 import { formatRunCost, runCostOf } from '@/features/board/taskCost'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
@@ -50,6 +57,7 @@ import {
   TASK_SECTIONS,
   groupTeamTasks,
   shortWhen,
+  taskRowsOf,
   tasksInRoom,
   type TaskSectionId,
 } from './teamTasks'
@@ -92,15 +100,33 @@ function subtitleOf(
 
 // ─── List ────────────────────────────────────────────────────────────────────
 
-function TaskRow({ task, onOpen }: { task: BoardTaskView; onOpen: () => void }) {
+function TaskRow({
+  task,
+  onOpen,
+  nested = false,
+  request = null,
+  progress = null,
+}: {
+  task: BoardTaskView
+  onOpen: () => void
+  /** Drawn under its request's row. */
+  nested?: boolean
+  /** The request it belongs to, named when the row is out on its own. */
+  request?: BoardTaskView | null
+  /** How far its work has got, when it is a person's request. */
+  progress?: string | null
+}) {
   const assigneeName = useAgentName(task.assigneeAgentId)
   const me = useBoardPerson(task.assigneePersonId != null)
   return (
     <button
       type="button"
       onClick={onOpen}
-      data-testid="team-task-row"
-      className="flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors duration-150 hover:bg-foreground/[0.04]"
+      data-testid={nested ? 'team-task-subtask' : 'team-task-row'}
+      className={[
+        'flex w-full cursor-pointer items-center gap-3 rounded-lg py-2 pr-2.5 text-left transition-colors duration-150 hover:bg-foreground/[0.04]',
+        nested ? 'ml-3 w-[calc(100%-0.75rem)] border-l border-border pl-3' : 'pl-2.5',
+      ].join(' ')}
     >
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate text-[13px] font-medium text-foreground">
@@ -112,7 +138,8 @@ function TaskRow({ task, onOpen }: { task: BoardTaskView; onOpen: () => void }) 
               {task.identifier} ·{' '}
             </span>
           ) : null}
-          {subtitleOf(task, assigneeName, me)}
+          {request && !nested ? `${requestLabel(request)} · ` : ''}
+          {progress ?? subtitleOf(task, assigneeName, me)}
         </span>
       </span>
       {task.assigneeAgentId && <AgentBooAvatar agentId={task.assigneeAgentId} size={20} />}
@@ -174,6 +201,7 @@ function TaskSections({
   after?: ReactNode
 }) {
   const groups = useMemo(() => groupTeamTasks(tasks), [tasks])
+  const nesting = useMemo(() => buildRequestNesting(tasks), [tasks])
   const { exec, tool, resolveTool } = approvals
 
   const [open, setOpen] = useState<Record<TaskSectionId, boolean>>(
@@ -194,9 +222,11 @@ function TaskSections({
       {nothing && <p className="px-2.5 py-1.5 text-[12px] text-muted-foreground">{emptyHelper}</p>}
       {!nothing &&
         TASK_SECTIONS.map((section) => {
-          const rows = groups[section.id]
+          const rows = taskRowsOf(groups[section.id], section.id, nesting)
           const isNeedsYou = section.id === 'needs_you'
-          const count = rows.length + (isNeedsYou ? exec.length + tool.length : 0)
+          // A section counts what it stands for, not the rows nested under its requests.
+          const count =
+            rows.filter((r) => !r.nested).length + (isNeedsYou ? exec.length + tool.length : 0)
           // Needs you always shows, so "nothing waits on you" is said, not implied.
           if (count === 0 && !isNeedsYou) return null
           const isOpen = open[section.id]
@@ -227,8 +257,19 @@ function TaskSections({
                         <ToolApprovalCard approval={a} onResolve={resolveTool} compact />
                       </div>
                     ))}
-                  {rows.map((t) => (
-                    <TaskRow key={t.id} task={t} onOpen={() => onOpen(t.id)} />
+                  {rows.map(({ task: t, nested, request }) => (
+                    <TaskRow
+                      key={t.id}
+                      task={t}
+                      nested={nested}
+                      request={request}
+                      progress={
+                        isMainTask(t) && !isNeedsYou && nesting.progressOf(t.id).total > 0
+                          ? progressLabel(nesting.progressOf(t.id))
+                          : null
+                      }
+                      onOpen={() => onOpen(t.id)}
+                    />
                   ))}
                 </div>
               )}
@@ -330,12 +371,14 @@ function midRunDelivery(
 }
 
 /** What sending does for this task, in the person's words. */
-function composerHint(
+export function composerHint(
   task: BoardTaskView,
   name: string | null,
   delivery: MidRunDelivery | undefined,
   hasAgent: boolean,
 ): string {
+  // A person's request has no run to steer: its lead reads the words as an update.
+  if (isMainTask(task)) return replyHint(task.status, name, false, true)
   if (task.status === 'done' || task.status === 'cancelled')
     return 'This task is finished. Reopen it, or send your comment as a follow-up task.'
   if (!hasAgent) return 'No agent is on this task yet. Your comment is saved on it.'
@@ -497,7 +540,12 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
                 return r ? (
                   <ReplyReceipt
                     delivery={r.delivery}
-                    task={{ id: task.id, title: task.title, teamId: row?.teamId ?? null }}
+                    task={{
+                      id: task.id,
+                      title: task.title,
+                      teamId: row?.teamId ?? null,
+                      isMainTask: task.isMainTask,
+                    }}
                     body={r.body}
                   />
                 ) : null

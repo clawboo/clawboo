@@ -36,11 +36,13 @@ import {
   isEngineRun,
   isPlanHolder,
   normalizeTaskTitle,
+  oneLine,
   PAUSED_RUN_CLASS,
   PROVIDER_RETRY_WAITS_MS,
   providerFailureOf,
   providerRetriesUsed,
   replyIsEmpty,
+  requestWaitsOn,
   stoppedByPause,
   stretchStartedAt,
   strongerWakeReason,
@@ -82,6 +84,9 @@ import type {
   ExecutionSummary,
   HandOffInput,
   HandOffResult,
+  MainTaskInput,
+  MainTaskState,
+  TaskDetail,
 } from './boardClient'
 import { isClawbooControlToken, isOpenclawControlToken } from './controlTokens'
 import { BUDGET_HELD_CODE, BUDGET_REFUSED_CODE, DeliveryRefusedError } from './deliveryRefused'
@@ -92,14 +97,23 @@ import {
   type TaskUpdateOutcome,
 } from './taskUpdate'
 
+import { shouldDropAssistantTurn } from './controlTokens'
 import {
   parseStructuredDelegations,
   findPlanBlocks,
   resolveSessionsSendTarget,
   detectDelegationIntent,
+  stripDelegationBlocks,
+  stripPlanBlocks,
   type SessionsSendParams,
 } from './delegationTags'
-import { ASSIGNMENT_TURN, SYSTEM_TURN, type RunStamp, type TurnOrigin } from './turnOrigin'
+import {
+  ASSIGNMENT_TURN,
+  SYSTEM_TURN,
+  type RunStamp,
+  type TurnOrigin,
+  type TurnRequest,
+} from './turnOrigin'
 
 /**
  * A source task at this ancestor-depth (or deeper) may not spawn children —
@@ -221,6 +235,20 @@ export const WORK_CHECK_HOLD_LIMIT_MS = 15 * 60_000
 /** Age after which a dedupe / recently-terminated entry is reaped (bounds memory
  *  on a long-lived team-chat orchestrator; comfortably past any run window). */
 const PROCESSED_TTL_MS = 2 * DELEGATION_IDLE_TIMEOUT_MS
+
+/** What a request's lead reads when its work closed with nothing left to report: a
+ *  sub-task closed on a path that reports to no one, or the reports were given up. */
+const REQUEST_ALL_IN =
+  "Everything filed under this request has closed. Say what came of it: the results are on its sub-tasks' cards."
+
+/** The note on a request whose lead read the last of its work in a turn that was about
+ *  something else, or whose close was cut short by a restart. */
+const REQUEST_READ_IN_CHAT =
+  'The team lead read the last of this work in its latest turn. Its reply is in the chat.'
+
+/** The note on a request whose lead could not write its summary, and what to do. */
+const REQUEST_NO_SUMMARY =
+  'Its work has closed, but the team lead could not write the summary. Mark it done or cancelled, or comment to ask again.'
 
 /** Why a delegated child failed — the comment + reflection prefix. */
 /** How a wait the agent chose for its own task is reported, or null for any other
@@ -430,6 +458,8 @@ export interface BoardChange {
   /** When its check began waiting for the team folder (null: it no longer is). Set
    *  by the host, which knows (see {@link PreparedWorkCheck}). */
   checkHeldSince?: number | null
+  /** It is a person's main task: their request, with the helpers' work filed under it. */
+  isMainTask?: boolean
 }
 
 /**
@@ -599,10 +629,26 @@ export interface ReportUp {
   forTaskId?: string
 }
 
+/** A person's words on a request, as the report-up that takes them to its lead. */
+export function personCommentReport(
+  request: { id: string; title?: string | null; leadAgentId?: string | null },
+  words: string,
+): ReportUp {
+  return {
+    toAgentId: request.leadAgentId ?? null,
+    by: 'A person',
+    ...(request.title ? { title: request.title } : {}),
+    summary: words,
+    outcome: 'person_comment',
+    taskId: request.id,
+  }
+}
+
 /**
  * How a durable report-up was closed:
  *  • `delivered` a run that carried it finished;
- *  • `stopped`   its room was archived, so no run of the recipient's will come;
+ *  • `stopped`   its room was archived, so no run of the recipient's will come, or a
+ *                person closed the request it was about, so nothing waits on it;
  *  • `gave_up`   it could not be delivered, and the recipient's chat was told.
  * A person's Stop closes nothing: see `holdWorkForNextRun`.
  */
@@ -633,6 +679,12 @@ export interface ReportUpOutbox {
   hold(ids: string[]): boolean
   /** Report-ups for this engine's room that a Stop held, oldest first. */
   held(): Array<{ id: string; item: ReportUp }>
+  /** The newest one to this agent about any of these tasks, settled or not, when the
+   *  host can say. */
+  latestFor?(
+    taskIds: readonly string[],
+    recipientAgentId: string | null,
+  ): { at: number; settled: ReportUpSettlement | null } | null
 }
 
 /**
@@ -981,6 +1033,12 @@ export interface BoardOrchestrator {
     note: string,
   ): Promise<string[]>
   /**
+   * A person commented on a request's main task: their words go to the agent looking
+   * after it, durably, as an update about that request. What it hands out is filed
+   * under it. False when the request is closed, so nothing went.
+   */
+  personCommentedOnMainTask(taskId: string, words: string): Promise<boolean>
+  /**
    * A delivery the host had accepted (its `deliver` resolved, with the message
    * queued behind the recipient's run) never started a run. The report-ups it
    * carried (`run.reportUpIds`) go back to pending, and the next sweep sends them
@@ -1004,6 +1062,14 @@ export interface BoardOrchestrator {
   checksInFlight(): number
   /** Drop all in-memory tracking + timers (team switch / teardown). */
   reset(): void
+}
+
+/** A person's message whose turn is handing out work with no task to file it under yet. */
+interface RequestInTurn {
+  input: MainTaskInput
+  /** `${session}:${turn}`. */
+  turn: string
+  request: TurnRequest
 }
 
 /** A round on a task that opens a new execution with no claim: the same agent goes
@@ -1040,6 +1106,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const openToolCall = new Set<string>() // sessions currently inside a tool call (longer idle allowance)
   const recentlyTerminated = new Map<string, number>() // child session → terminal ts (late-replay guard)
   const handOffsByTurn = new Map<string, { count: number; at: number; foundOpen?: boolean }>() // `${session}:${run}` → hand-offs this turn, across its events, and whether one found its work already open (age-reaped)
+  const mainOfTurn = new Map<string, { id: string; at: number }>() // `${session}:${run}` → the main task this turn's hand-offs go under (age-reaped)
+  const askedLeads = new Map<string, number>() // main task → when its lead was asked for a summary, for a host with no outbox
+  const handOffsUnderWay = new Map<string, number>() // task a hand-off is being made under → how many, while they are decided
+  let lastStopAt: number | null = null // when a person last pressed Stop here
   const humanTasks = new Set<string>() // task ids a PERSON assigned: they report to the card, not an agent
   const waitingOnTurn = new Set<string>() // sessions with work deferred behind a non-task turn (pump on its terminal)
   const takingSession = new Set<string>() // sessions a start has taken while its claim is out (see sessionTakesTask)
@@ -1164,10 +1234,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     return checkDepthCap({ depth: await depthOf(sourceTaskId), max: MAX_SPAWN_DEPTH }).ok
   }
 
+  /** How deep a task sits. A person's main task is not a level: it holds the request
+   *  and runs nothing, so helpers keep every hand-off they had without it. */
   async function depthOf(taskId: string | null): Promise<number> {
     if (!taskId) return 0
     const detail = await deps.board.getTask(taskId)
-    return detail ? detail.ancestors.length : 0
+    return detail ? detail.ancestors.filter((a) => !a.isMainTask).length : 0
   }
 
   // ── sourceDelegationId codec ────────────────────────────────────────────────
@@ -1197,11 +1269,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   /** The task `recipient` was running when it delegated `task`: the parent, when the
    *  durable row says the result reports to `recipient`. A mismatch means the
    *  recipient is only the leader fallback. While that task is open the result waits
-   *  for its next run, the team lead's too (see flushReflection). */
-  const followUpScope = (task: BoardTask, recipient: string | null): string | undefined => {
+   *  for its next run, the team lead's too (see flushReflection). A person's main task
+   *  has no next run: what is filed straight under it goes to its lead as an update
+   *  about the request, so it is never a follow-up on the main task. */
+  const followUpScope = (detail: TaskDetail, recipient: string | null): string | undefined => {
     if (!recipient) return undefined
+    const { task } = detail
     const parent = typeof task.parentTaskId === 'string' ? task.parentTaskId : ''
-    return parent && sdidReflectTo(sdidOf(task)) === recipient ? parent : undefined
+    if (!parent || sdidReflectTo(sdidOf(task)) !== recipient) return undefined
+    return detail.ancestors.some((a) => a.id === parent && a.isMainTask) ? undefined : parent
   }
 
   /** {@link followUpScope} by task id. */
@@ -1211,7 +1287,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   ): Promise<string | undefined> {
     if (!recipient) return undefined
     const d = await deps.board.getTask(taskId)
-    return d ? followUpScope(d.task, recipient) : undefined
+    return d ? followUpScope(d, recipient) : undefined
   }
 
   /** The brief an agent receives for a task. An engine delegation stores the whole
@@ -1315,6 +1391,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const mins = Math.round((refused.windowMs ?? 0) / 60_000)
       return `${count} top-level tasks were made in the last ${mins} minutes, the most allowed (${refused.max}), so the hand-off to ${targetName} did not start. Hand out less at once, or tell the person.`
     }
+    if (refused.reason === 'main_closed')
+      return `This request has closed, so the hand-off to ${targetName} did not start. Do not hand out more work for it.`
     return `The hand-off to ${targetName} was refused (max delegation depth ${MAX_SPAWN_DEPTH} reached, or its parent task is gone). Handle it directly or report it back.`
   }
 
@@ -1546,6 +1624,212 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     })
   }
 
+  // ── a person's request: the main task ───────────────────────────────────────
+  /**
+   * What a turn from a person's message hands out goes under one main task, made from
+   * their words with the first hand-off (see `createHandOff`), so a plain answer makes
+   * nothing. `turn` keys what the turn remembers: the task its next hand-off files
+   * under. It needs a delivery id, since that is what says two events are one turn.
+   */
+  function requestInTurn(
+    run: RunStamp,
+    turn: string,
+    leadAgentId: string | null,
+  ): RequestInTurn | null {
+    const words = run.request?.words.trim()
+    if (!run.request || !words || !run.deliveryId || !leadAgentId) return null
+    const title = words.split('\n')[0]!.slice(0, HAND_OFF_TITLE_CHARS).trim() || words
+    const input: MainTaskInput = {
+      title,
+      description: words,
+      leadAgentId,
+      requestedBy: run.request.requestedBy ?? null,
+      key: `main:${deps.teamId}:${run.deliveryId}`,
+    }
+    return { input, turn, request: run.request }
+  }
+
+  /** A hand-off was filed: remember the main task for the turn's next one, and announce
+   *  it if this create made it. The id of the task it went under, or null: a hand-off
+   *  that found open work made nothing for the request. */
+  function noteRequestFiled(created: HandOffResult, request: RequestInTurn | null): string | null {
+    if (!request || !created.ok || created.deduplicated) return null
+    const mainId = created.mainTask?.id ?? created.task.parentTaskId ?? null
+    if (!mainId) return null
+    mainOfTurn.set(request.turn, { id: mainId, at: now() })
+    if (created.mainTask) announceMainTask(created.mainTask, request)
+    return mainId
+  }
+
+  /** A card holding a plan made this turn's main task: the same remembering, and the
+   *  same announcement. */
+  function rememberRequestMain(main: BoardTask, request: RequestInTurn | null): void {
+    if (!request) return
+    mainOfTurn.set(request.turn, { id: main.id, at: now() })
+    announceMainTask(main, request)
+  }
+
+  function announceMainTask(main: BoardTask, request: RequestInTurn): void {
+    const routine = request.request.routineName
+    if (routine)
+      void deps.board
+        .addComment(main.id, `From the routine “${oneLine(routine, 120)}”.`, 'system')
+        .catch(() => undefined)
+    emit({
+      id: main.id,
+      identifier: main.identifier ?? null,
+      title: main.title ?? '',
+      status: main.status,
+      assigneeAgentId: main.assigneeAgentId ?? null,
+      parentTaskId: null,
+      isMainTask: true,
+      createdAt: main.createdAt,
+      updatedAt: main.updatedAt,
+    })
+  }
+
+  /** Is a report about this request still to reach its lead: waiting in the batch,
+   *  or in the outbox, a Stop's held ones included? */
+  function reportsOnTheWay(state: MainTaskState): boolean {
+    const ids = new Set([state.id, ...state.subtaskIds])
+    const about = (item: ReportUp): boolean =>
+      (item.taskId !== undefined && ids.has(item.taskId)) ||
+      (item.forTaskId !== undefined && ids.has(item.forTaskId))
+    if (reflectQueue.some(about)) return true
+    if (!deps.reportUps) return false
+    return (
+      deps.reportUps.pending().some((r) => about(r.item)) ||
+      deps.reportUps.held().some((r) => about(r.item))
+    )
+  }
+
+  /** Is a hand-off being made under this request right now? It can wait a long time on
+   *  a person's approval, and its work is not on the board until it is decided. */
+  function handOffUnderWay(state: MainTaskState): boolean {
+    return [state.id, ...state.subtaskIds].some((id) => handOffsUnderWay.has(id))
+  }
+
+  /** Hold what a hand-off is made under open until it has been decided. */
+  async function whileHandingOff<T>(
+    sourceTaskId: string | null,
+    make: () => Promise<T>,
+  ): Promise<T> {
+    if (!sourceTaskId) return make()
+    handOffsUnderWay.set(sourceTaskId, (handOffsUnderWay.get(sourceTaskId) ?? 0) + 1)
+    try {
+      return await make()
+    } finally {
+      const left = (handOffsUnderWay.get(sourceTaskId) ?? 1) - 1
+      if (left > 0) handOffsUnderWay.set(sourceTaskId, left)
+      else handOffsUnderWay.delete(sourceTaskId)
+    }
+  }
+
+  /** Is this request's work all in? What it waits on is the barrier's reading of its
+   *  tree (`openSubtasks`, from `requestWaitsOn`), so there is one rule for what a task
+   *  handing out work waits on. Counted from the board and the durable report-ups, not
+   *  from what this engine remembers, so a restart between two sub-tasks neither closes
+   *  it early nor loses it. */
+  function requestWorkAllIn(state: MainTaskState): boolean {
+    return (
+      state.open && state.openSubtasks === 0 && !reportsOnTheWay(state) && !handOffUnderWay(state)
+    )
+  }
+
+  /** Who a report about a request goes to: the agent looking after it, or the room's
+   *  lead when that agent has left the room. */
+  const leadOfRequest = (leadAgentId: string | null | undefined): string | null =>
+    leadAgentId && deps.known().some((a) => a.id === leadAgentId)
+      ? leadAgentId
+      : deps.leaderAgentId()
+
+  /** Close a request. Done if any of its work got done; with none done, there is
+   *  nothing to call done, and it says so. */
+  async function closeRequest(state: MainTaskState): Promise<void> {
+    const to = state.doneSubtasks > 0 ? 'done' : 'cancelled'
+    if (await deps.board.closeMainTask(state.id, to))
+      emit({ id: state.id, status: to, updatedAt: now() })
+  }
+
+  /** A turn about this request ended well. If that was the last of it, the reply was
+   *  its summary: it is already in chat, and it goes on the card too. */
+  async function closeRequestAfterTurn(
+    mainId: string,
+    sessionKey: string,
+    summary: string,
+    run: RunStamp,
+  ): Promise<void> {
+    if (run.stopGen !== deps.stopGen()) return
+    const state = await deps.board.mainTaskState(mainId)
+    if (!state || !requestWorkAllIn(state)) return
+    // What the person would read: no hand-off tag, and a control token is no summary at
+    // all, which chat drops the same way.
+    const words = reportOf(stripPlanBlocks(stripDelegationBlocks(summary))).trim()
+    if (words && !shouldDropAssistantTurn(words)) {
+      const agentId = deps.agentIdForSession(sessionKey)
+      await deps.board.addComment(mainId, words, 'agent', agentId ?? undefined)
+    } else {
+      await deps.board.addComment(mainId, 'The team lead closed this with no summary.', 'system')
+    }
+    await closeRequest(state)
+  }
+
+  /**
+   * The way out for a request nothing else will move: all its work has closed and no
+   * report is coming. What its lead last heard about any of it decides. If a run of the
+   * lead's read that after the last of the work closed (a restart landed between the
+   * summary and the close, or the lead's next run after a Stop read what the Stop held),
+   * the request closes. If the lead could not be told, it goes to a person. If the lead
+   * has not been told (a sub-task closed on a path that reports to no one), it is asked
+   * once, durably, and its reply closes it as any summary does. Run by every sweep and
+   * every `resume()`. A Stop starts nothing, so an ask after one waits for the lead's
+   * next run.
+   */
+  async function settleIdleRequests(): Promise<void> {
+    const open = await deps.board.openMainTasks(deps.teamId).catch(() => [])
+    for (const state of open) {
+      if (state.status !== 'in_progress' || !requestWorkAllIn(state)) continue
+      const closedAt = state.lastClosedAt ?? 0
+      const lead = leadOfRequest(state.leadAgentId)
+      const last = deps.reportUps?.latestFor?.([state.id, ...state.subtaskIds], lead) ?? null
+      if (last && last.at >= closedAt && last.settled !== null) {
+        if (last.settled === 'delivered') {
+          await deps.board.addComment(state.id, REQUEST_READ_IN_CHAT, 'system')
+          await closeRequest(state)
+        } else if (await deps.board.parkMainTask(state.id, REQUEST_NO_SUMMARY)) {
+          await deps.board.addComment(state.id, REQUEST_NO_SUMMARY, 'system')
+          emit({ id: state.id, status: 'blocked', updatedAt: now() })
+        }
+        continue
+      }
+      if (!deps.reportUps && (askedLeads.get(state.id) ?? -1) >= closedAt) continue
+      askedLeads.set(state.id, now())
+      reportUp(
+        {
+          toAgentId: lead,
+          by: 'Clawboo',
+          title: state.title,
+          summary: REQUEST_ALL_IN,
+          outcome: 'all_in',
+          taskId: state.id,
+        },
+        lastStopAt !== null && closedAt <= lastStopAt,
+      )
+    }
+  }
+
+  /** See the interface. */
+  async function personCommentedOnMainTask(taskId: string, words: string): Promise<boolean> {
+    const state = await deps.board.mainTaskState(taskId)
+    if (!state?.open) return false
+    if (state.status === 'blocked' && (await deps.board.resumeMainTask(taskId)))
+      emit({ id: taskId, status: 'in_progress', updatedAt: now() })
+    enqueueReflection(
+      personCommentReport({ ...state, leadAgentId: leadOfRequest(state.leadAgentId) }, words),
+    )
+    return true
+  }
+
   /** Create + claim + open-execution + deliver a single immediate delegation.
    *  `delegatorAgentId` is who tried to delegate (the reduce-point recipient for
    *  this child's result, and the one told if the delegation can't be started). */
@@ -1556,6 +1840,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     runId: string,
     /** `sourceTaskId` is the task the sender's run is on, not one it follows up on. */
     ownTask: boolean,
+    /** A person's message this hand-off answers, when no task holds it yet. */
+    request: RequestInTurn | null,
     /** The board found this work already open, so no task is made and the id is null. */
     onFoundOpen?: () => void,
   ): Promise<string | null> {
@@ -1691,6 +1977,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         teamId: deps.teamId,
         assigneeRuntime: 'openclaw',
         ...(sourceTaskId ? { parentTaskId: sourceTaskId } : {}),
+        ...(request ? { mainTask: request.input } : {}),
         // `:agent:` on EVERY delegation (deferred or not) — the target must be
         // recoverable from the durable row so a sweep/orphan release is
         // re-fireable. Stop-vs-refire is the pump policy's job (exec ledger).
@@ -1735,6 +2022,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         return null
       }
       task = created.task
+      noteRequestFiled(created, request)
       taskTitle.set(task.id, title)
       if (delegatorAgentId) taskReflectTo.set(task.id, delegatorAgentId)
       emit({
@@ -1742,7 +2030,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         identifier: task.identifier ?? null,
         title,
         status: task.status ?? 'todo',
-        parentTaskId: sourceTaskId,
+        parentTaskId: task.parentTaskId ?? sourceTaskId,
         createdAt: task.createdAt,
         updatedAt: task.updatedAt,
       })
@@ -1841,6 +2129,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     refusePlan: (summary: string) => Promise<void>,
     startGen: number,
     parallel: boolean,
+    /** A person's message this plan answers: the card holding it files under its main
+     *  task, made in the card's own write, and so do its steps once they are accepted. */
+    request: RequestInTurn | null,
   ): Promise<boolean> {
     if (!deps.board.proposePlan) return false
     // A Stop since the plan's checks began: it closed what waited, so nothing may land after.
@@ -1867,11 +2158,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       parentTaskId: sourceTaskId,
       turnId: runId,
       ...(parallel ? { parallel: true } : {}),
+      ...(request ? { mainTask: request.input } : {}),
     })
     switch (proposal.status) {
       case 'off':
         return false
       case 'proposed': {
+        if (proposal.mainTask) rememberRequestMain(proposal.mainTask, request)
         if (proposal.holder) {
           const { task } = proposal
           emit({
@@ -1879,6 +2172,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             identifier: task.identifier ?? null,
             ...(task.title ? { title: task.title } : {}),
             status: 'blocked',
+            ...(typeof task.parentTaskId === 'string' ? { parentTaskId: task.parentTaskId } : {}),
             ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
             ...(task.updatedAt !== undefined ? { updatedAt: task.updatedAt } : {}),
           })
@@ -1936,6 +2230,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     delegatorAgentId: string | null,
     runId: string,
     ownTask: boolean,
+    /** A person's message this plan answers, when no task holds it yet. */
+    request: RequestInTurn | null,
     /** A batch of hand-offs on a team that asks first: it is only ever asked about. False
      *  back means nobody was asked, and the batch goes out as hand-offs after all. */
     batch = false,
@@ -1968,7 +2264,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         return true
       }
     }
-    const capacity = await deps.board.handOffRoom(deps.teamId, sourceTaskId)
+    const capacity = await deps.board.handOffRoom(
+      deps.teamId,
+      sourceTaskId,
+      request ? { newRequest: true } : undefined,
+    )
     if (capacity && steps.length > capacity.room) {
       deps.onCapHit?.({ kind: capacity.reason, sourceTaskId, max: capacity.max })
       await refusePlan(
@@ -2013,12 +2313,16 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       refusePlan,
       startGen,
       batch,
+      request,
     )
     if (asked) return true
     if (batch) return false
 
     let prevTaskId: string | null = null
     let index = 0
+    // The first step of a person's message makes its main task; the rest go under it.
+    let parentOfSteps = sourceTaskId
+    let stepRequest = request
     for (const step of steps) {
       const stepIndex = index
       index += 1
@@ -2040,7 +2344,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         description: step.task,
         teamId: deps.teamId,
         assigneeRuntime: 'openclaw',
-        ...(sourceTaskId ? { parentTaskId: sourceTaskId } : {}),
+        ...(parentOfSteps ? { parentTaskId: parentOfSteps } : {}),
+        ...(stepRequest ? { mainTask: stepRequest.input } : {}),
         // Encode the intended target AND the delegator so a ready step survives a
         // refresh (the durable ready-pump decodes the target; `resume` decodes the
         // delegator so a mid-chain reduce-point isn't lost).
@@ -2061,6 +2366,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         continue
       }
       const task = created.task
+      const filedUnder = noteRequestFiled(created, stepRequest)
+      if (filedUnder) {
+        parentOfSteps = filedUnder
+        stepRequest = null
+      }
       // A step that found its task already there keeps that task's own target and
       // delegator, and only holds its place in the chain.
       if (created.deduplicated) {
@@ -2082,7 +2392,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           identifier: task.identifier ?? null,
           title,
           status: task.status ?? 'todo',
-          parentTaskId: sourceTaskId,
+          parentTaskId: task.parentTaskId ?? sourceTaskId,
           createdAt: task.createdAt,
           updatedAt: task.updatedAt,
         })
@@ -2108,6 +2418,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     runId: string,
     ownTask: boolean,
     sessionKey: string,
+    /** A person's message this batch answers, when no task holds it yet. */
+    request: RequestInTurn | null,
   ): Promise<boolean> {
     const planId = `${deps.teamId}:${runId}:plan`
     if (processed.has(planId)) return true
@@ -2121,6 +2433,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       delegatorAgentId,
       runId,
       ownTask,
+      request,
       true,
     )
     if (!settled) {
@@ -2129,7 +2442,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return false
     }
     if (batch.length > room)
-      await noteFanoutCap(batch.length - room, sourceTaskId, delegatorAgentId)
+      await noteFanoutCap(
+        batch.length - room,
+        sourceTaskId ?? (request ? (mainOfTurn.get(request.turn)?.id ?? null) : null),
+        delegatorAgentId,
+      )
     return true
   }
 
@@ -2865,7 +3182,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
   /** Which of these items' tasks (`forTaskId`) are still open, so the item waits for
    *  that task's next run. A task it could not read, or did not ask about, counts as
-   *  open: nothing may start a follow-up early, and the next pass reads it again. */
+   *  open: nothing may start a follow-up early, and the next pass reads it again. A
+   *  person's main task counts as closed here: no run of its own will ever take it, so
+   *  a note about it goes to its lead now, or the request would wait on it for good. */
   async function openTasksAmong(
     items: ReadonlyArray<{ forTaskId?: string }>,
   ): Promise<(taskId: string) => boolean> {
@@ -2873,7 +3192,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const ids = new Set(items.flatMap((i) => (i.forTaskId ? [i.forTaskId] : [])))
     for (const id of ids) {
       const task = (await deps.board.getTask(id).catch(() => null))?.task
-      if (task && (task.status === 'done' || task.status === 'cancelled' || task['dropped']))
+      if (
+        task &&
+        (task.isMainTask ||
+          task.status === 'done' ||
+          task.status === 'cancelled' ||
+          task['dropped'])
+      )
         closed.add(id)
     }
     return (taskId) => !closed.has(taskId)
@@ -2926,10 +3251,41 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // is never handed a follow-up. A recipient that can't be resolved yet
     // (leader not identified / no session) is re-queued + re-armed, never lost.
     const leaderId = deps.leaderAgentId()
-    const groups = new Map<string, { toSk: string; forTaskId?: string; items: typeof items }>()
+    const groups = new Map<
+      string,
+      { toSk: string; forTaskId?: string; mainTask?: BoardTask; items: typeof items }
+    >()
     const unresolved: typeof items = []
+    // Before the read below, so a Stop that lands during it still stops the delivery.
+    const startGen = deps.stopGen()
+    // Which person's request each result belongs to, read from the board: each request
+    // gets its own update, whose reply is about that request alone.
+    const board = await deps.board.listTasks(deps.teamId).catch(() => [])
+    const taskById = new Map(board.map((t) => [t.id, t]))
+    const mainAbove = (id: string | undefined): BoardTask | null => {
+      const seen = new Set<string>()
+      for (let at = id ? taskById.get(id) : undefined; at && !seen.has(at.id);) {
+        if (at.isMainTask) return at
+        seen.add(at.id)
+        at = typeof at.parentTaskId === 'string' ? taskById.get(at.parentTaskId) : undefined
+      }
+      return null
+    }
+    const closedMainRows: string[] = []
     for (const item of items) {
-      const toId = item.toAgentId ?? leaderId
+      const main = mainAbove(item.taskId ?? item.forTaskId)
+      // The person closed the request: no one is waiting on this, and nothing it could
+      // lead to would be taken. A run started for it would only spend.
+      if (main && (main.status === 'done' || main.status === 'cancelled')) {
+        if (item.outboxId) closedMainRows.push(item.outboxId)
+        continue
+      }
+      const wanted = item.toAgentId ?? leaderId
+      // Whoever it was meant for has left the room, and the request has someone else.
+      const toId =
+        main && wanted && !deps.known().some((a) => a.id === wanted)
+          ? leadOfRequest(main.assigneeAgentId)
+          : wanted
       const toSk = toId ? deps.sessionKeyForAgent(toId) : null
       if (!toId || !toSk) {
         unresolved.push(item)
@@ -2940,17 +3296,29 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         reportUpsInHand.delete(item.outboxId)
         continue
       }
-      const forTaskId = item.forTaskId && toId !== leaderId ? item.forTaskId : undefined
-      const key = `${toSk}\u0000${forTaskId ?? ''}`
-      const g = groups.get(key) ?? { toSk, ...(forTaskId ? { forTaskId } : {}), items: [] }
+      const forTaskId =
+        item.forTaskId && toId !== leaderId && item.forTaskId !== main?.id
+          ? item.forTaskId
+          : undefined
+      // A follow-up stays one, however far up its chain a request sits. Only the agent
+      // looking after a request speaks for it.
+      const mainTask =
+        main && !forTaskId && (toId === leaderId || toId === main.assigneeAgentId) ? main : null
+      const key = `${toSk}\u0000${forTaskId ?? ''}\u0000${mainTask?.id ?? ''}`
+      const g = groups.get(key) ?? {
+        toSk,
+        ...(forTaskId ? { forTaskId } : {}),
+        ...(mainTask ? { mainTask } : {}),
+        items: [],
+      }
       g.items.push(item)
       groups.set(key, g)
     }
+    settleReportUps(closedMainRows, 'stopped')
     if (unresolved.length > 0) {
       reflectQueue.unshift(...unresolved)
       armReflectTimer()
     }
-    const startGen = deps.stopGen()
     for (const g of groups.values()) {
       const { toSk, items: group } = g
       // A Stop mid-flush suppresses the remaining groups' narration AND delivery —
@@ -2982,17 +3350,39 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         const batchIds = new Set(group.flatMap((i) => (i.taskId ? [i.taskId] : [])))
         const listed = await deps.board.listTasks(deps.teamId).catch(() => [])
         boardAnswered = [...batchIds].every((id) => listed.some((t) => t.id === id))
+        const scopedMain = g.mainTask?.id
         for (const t of listed) {
           const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
           const parent =
             typeof t.parentTaskId === 'string' && t.parentTaskId ? t.parentTaskId : null
-          const reportsHere =
-            sdidReflectTo(sdid) === toAgentId && (!g.forTaskId || parent === g.forTaskId)
+          // An update about a request answers for that request's work and no other's,
+          // whoever under it handed the work out.
+          const inRequest =
+            scopedMain !== undefined && t.id !== scopedMain && mainAbove(t.id)?.id === scopedMain
+          const reportsHere = scopedMain
+            ? inRequest
+            : sdidReflectTo(sdid) === toAgentId && (!g.forTaskId || parent === g.forTaskId)
           // Work still running under a task this batch reports as finished: the
           // recipient is hearing a partial result, and the rest arrives later as
           // a follow-up.
           const underBatch = parent !== null && batchIds.has(parent)
           if (!reportsHere && !underBatch) continue
+          // An agent's note to itself holds no request, so it is not something to wait for.
+          if (
+            inRequest &&
+            !requestWaitsOn({
+              id: t.id,
+              status: t.status,
+              waitingOn: t['waitingOn'],
+              sourceDelegationId: sdid,
+              assigneeAgentId: t.assigneeAgentId ?? null,
+              assigneePersonId:
+                typeof t['assigneePersonId'] === 'string' ? t['assigneePersonId'] : null,
+              requestedBy: t['requestedBy'],
+              execs: null,
+            })
+          )
+            continue
           const named = (): OutstandingDelegation => ({
             by: nameOf(sdidAgent(sdid)),
             ...(typeof t.title === 'string' ? { title: t.title } : {}),
@@ -3050,6 +3440,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         ...(handedOff && toAgentId && boardAnswered && !foundOpen
           ? { allIn: { needPerson, notStarted } }
           : {}),
+        ...(g.mainTask
+          ? {
+              request: {
+                ...(typeof g.mainTask.title === 'string' ? { title: g.mainTask.title } : {}),
+                identifier: g.mainTask.identifier ?? null,
+                closes:
+                  boardAnswered &&
+                  outstanding.length === 0 &&
+                  needPerson.length === 0 &&
+                  notStarted.length === 0,
+              },
+            }
+          : {}),
       })
       // Visible narration (board→chat) + context delivery to the recipient. The
       // narration is the user-facing signal even if the delivery itself fails.
@@ -3059,11 +3462,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         // The run that carries the update settles its outbox rows when it ends.
         const reportUpIds = outboxIdsOf(group)
         const origin: TurnOrigin =
-          g.forTaskId || reportUpIds.length > 0
+          g.forTaskId || g.mainTask || reportUpIds.length > 0
             ? {
                 kind: 'system',
                 ...(g.forTaskId ? { forTaskId: g.forTaskId } : {}),
                 ...(reportUpIds.length > 0 ? { reportUpIds } : {}),
+                ...(g.mainTask ? { mainTaskId: g.mainTask.id } : {}),
               }
             : SYSTEM_TURN
         try {
@@ -4676,7 +5080,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const sdid = sdidOf(d.task)
     const human = isHumanAssignment(sdid)
     const to = human ? null : (sdidReflectTo(sdid) ?? deps.leaderAgentId())
-    const scope = followUpScope(d.task, to)
+    const scope = followUpScope(d, to)
     const agentId = deps.agentIdForSession(sessionKey)
     const by = nameOf(agentId)
     if (!('reason' in result)) {
@@ -4742,6 +5146,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
     for (const [k, turn] of handOffsByTurn)
       if (turn.at <= tnow - PROCESSED_TTL_MS) handOffsByTurn.delete(k)
+    for (const [k, turn] of mainOfTurn) if (turn.at <= tnow - PROCESSED_TTL_MS) mainOfTurn.delete(k)
     for (const [s, ts] of recentlyTerminated)
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
     // Settlements whose write failed are written now; report-ups whose run ended
@@ -4752,6 +5157,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     for (const sk of [...pendingFix.keys()]) await sendPendingFix(sk)
     // A check waiting for the board to take its task out of review.
     for (const sk of [...pendingPark.keys()]) await retryPark(sk)
+    await settleIdleRequests()
     const stale: string[] = []
     for (const [sk, ts] of lastActivityAt) {
       // Queued for a run slot: the run has not started, so its idle window starts
@@ -4857,7 +5263,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const sdid = sdidOf(t)
     if (isHumanAssignment(sdid)) return
     const to = sdidReflectTo(sdid) ?? deps.leaderAgentId()
-    const scope = followUpScope(t, to)
+    const scope = await followUpScopeOf(t.id, to)
     enqueueReflection({
       toAgentId: to,
       by: nameOf(sdidAgent(sdid)),
@@ -4914,6 +5320,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         }
       }
     }
+    await settleIdleRequests()
     await pumpReady()
   }
 
@@ -4931,8 +5338,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (run?.execId) deps.taskWakes?.settleCarriedBy?.(run.execId)
     }
     await handleEvent(sessionKey, event, run)
+    // A turn about a person's request ended well: it may have been the last of it.
+    if (run?.mainTaskId && event.kind === 'done' && event.reason === 'success')
+      await closeRequestAfterTurn(run.mainTaskId, sessionKey, event.summary ?? '', run)
     // The turn is over, and so is its hand-off count.
     if (terminal) handOffsByTurn.delete(`${sessionKey}:${turnIdOf(event, run)}`)
+    if (terminal) mainOfTurn.delete(`${sessionKey}:${turnIdOf(event, run)}`)
     // The turn a fix round was waiting on has ended.
     if (terminal) deferPendingFix(sessionKey)
     // A NON-task turn (a user turn, a reflection) just ended on a session that had
@@ -4964,7 +5375,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // Capture BEFORE completion deletes the mapping, so a done that both
     // completes a child AND sub-delegates parents the grandchild correctly.
     const mapped = reportFor !== null || underCheck ? null : (sessionToTask.get(sessionKey) ?? null)
-    const sourceTaskId = mapped ?? reportFor
+    // What this turn's hand-offs file under. An update about a person's request names
+    // it, and a person's own message has its main task once its first hand-off made it.
+    const sourceTaskId =
+      mapped ??
+      reportFor ??
+      run?.mainTaskId ??
+      mainOfTurn.get(`${sessionKey}:${turnIdOf(event, run)}`)?.id ??
+      null
 
     // Any observed event = the delegate is alive; refresh the idle watchdog so a
     // slow-but-working agent (streaming deltas / tool calls) is never swept.
@@ -5087,11 +5505,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // The agent that emitted these delegations is the reduce-point recipient for
     // their results (and the one told if a delegation can't be started).
     const delegatorAgentId = sourceAgentId || deps.leaderAgentId()
+    const turnKey = `${sessionKey}:${runId}`
+    // A person's message has no task to file under until its first hand-off makes one.
+    const sourceOf = (): string | null => sourceTaskId ?? mainOfTurn.get(turnKey)?.id ?? null
+    const requestOf = (source: string | null): RequestInTurn | null =>
+      source === null && run ? requestInTurn(run, turnKey, delegatorAgentId) : null
 
     const maxFanout = deps.caps?.maxFanout
     // Per TURN, not per event: each hand-off tool call is its own event, so a count
     // kept per event never reached the cap for a runtime that hands off by tool.
-    const turnKey = `${sessionKey}:${runId}`
     const handOffsThisTurn = (): number => handOffsByTurn.get(turnKey)?.count ?? 0
     const addHandOff = (by: number): void => {
       const seen = handOffsByTurn.get(turnKey)
@@ -5108,15 +5530,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // Tags that arrive as a batch wait for a person on a team that asks first.
     const isBatch = event.kind === 'done' && signals.parallel.length >= 2
     const asksFirst = isBatch ? await deps.board.planApprovalOn?.(deps.teamId) : undefined
+    const batchSource = sourceOf()
     const batchAsked =
       asksFirst === true &&
-      (await askAboutBatch(
-        signals.parallel,
-        sourceTaskId,
-        delegatorAgentId,
-        runId,
-        ownTask,
-        sessionKey,
+      (await whileHandingOff(batchSource, () =>
+        askAboutBatch(
+          signals.parallel,
+          batchSource,
+          delegatorAgentId,
+          runId,
+          ownTask,
+          sessionKey,
+          requestOf(batchSource),
+        ),
       ))
     if (asksFirst === false && delegatorAgentId)
       await deps.board.startingWithoutAsking?.({
@@ -5144,16 +5570,22 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       processed.set(key, now())
       // Counted before the wait, so an event that overlaps this one sees it.
       addHandOff(1)
-      const id = await spawn(sig, sourceTaskId, delegatorAgentId, runId, ownTask, foundItOpen)
+      const source = sourceOf()
+      const id = await whileHandingOff(source, () =>
+        spawn(sig, source, delegatorAgentId, runId, ownTask, requestOf(source), foundItOpen),
+      )
       if (!id) addHandOff(-1)
     }
-    if (cappedThisTurn > 0) await noteFanoutCap(cappedThisTurn, sourceTaskId, delegatorAgentId)
+    if (cappedThisTurn > 0) await noteFanoutCap(cappedThisTurn, sourceOf(), delegatorAgentId)
 
     if (signals.plan.length > 0) {
       const planId = `${deps.teamId}:${runId}:plan`
       if (!processed.has(planId)) {
         processed.set(planId, now())
-        await startPlan(signals.plan, sourceTaskId, delegatorAgentId, runId, ownTask)
+        const source = sourceOf()
+        await whileHandingOff(source, () =>
+          startPlan(signals.plan, source, delegatorAgentId, runId, ownTask, requestOf(source)),
+        )
       }
     }
 
@@ -5392,6 +5824,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
   /** See the interface. Durable-Stop writer — runs alongside the host's aborts. */
   async function markStopped(): Promise<void> {
+    lastStopAt = now()
     // Pending deferred fires would start NEW runs after the Stop — kill them
     // first (they were scheduled pre-Stop, so their gen check would pass).
     for (const t of deferredFires) clearTimeout(t)
@@ -5452,6 +5885,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // the fire policy (and the server scan) read them as user-stopped.
     const ready = await deps.board.getReadyTasks(deps.teamId)
     for (const task of ready) await tombstoneStopped(task)
+    // What this Stop itself closed (a card holding a plan) closed before the Stop, for a
+    // request asking its lead afterwards: that ask starts nothing either.
+    lastStopAt = now()
   }
 
   return {
@@ -5464,6 +5900,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     detachTask,
     dispatchTask,
     personMovedTask,
+    personCommentedOnMainTask,
     onRunNotStarted: (run) => closeReportUpRun(run, false),
     takeHeldReportUps,
     checksInFlight: () => checking.size,
@@ -5503,6 +5940,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       openToolCall.clear()
       recentlyTerminated.clear()
       handOffsByTurn.clear()
+      mainOfTurn.clear()
+      askedLeads.clear()
+      handOffsUnderWay.clear()
       humanTasks.clear()
       forceFire.clear()
       pendingStart.clear()

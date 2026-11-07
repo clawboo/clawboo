@@ -17,12 +17,14 @@ import {
   cancelDependents,
   claimTask,
   clearDelegationFailure,
+  closeMainTask,
   closeWaitingHolderWhenOff,
   closeWaitingPlans,
   completeExecutionProcess,
   createCappedRootTask,
   createCappedSubtask,
   createExecutionProcess,
+  createHandOffUnderRequest,
   createTask,
   deriveCreateKey,
   getAncestors,
@@ -34,7 +36,11 @@ import {
   getTask,
   linkDep,
   listDirectDependentIds,
+  listOpenMainTasks,
   listTasks,
+  mainTaskState,
+  parkMainTask,
+  resumeMainTask,
   setTaskWaitingOn,
   markDelegationFailureNotified,
   noteDelegationFailure,
@@ -47,6 +53,7 @@ import {
   updateStatus,
   wakeCommentIds,
   type ClawbooDb,
+  type DbTask,
   type TaskStatus,
 } from '@clawboo/db'
 import { delegationTargetOf, type TaskWakeReason } from '@clawboo/board-core'
@@ -112,7 +119,7 @@ export function createServerBoardClient(
     // Tasks tools answer to apply here too. The key is a derived one: if it ever meets
     // a blocked task or an old one, this is a new hand-off, not a replay.
     async createHandOff(input: HandOffInput): Promise<HandOffResult> {
-      const { handOffKey, turnId, parentTaskId, ...fields } = input
+      const { handOffKey, turnId, parentTaskId, mainTask, ...fields } = input
       try {
         const row = {
           ...(scoped ? { ...fields, roomId } : fields),
@@ -121,9 +128,12 @@ export function createServerBoardClient(
           titleMatchExceptTurn: turnId ?? null,
           createKey: handOffKey ? deriveCreateKey(handOffKey.scope, handOffKey.text) : null,
         }
-        const result = parentTaskId
-          ? createCappedSubtask(db, parentTaskId, row)
-          : createCappedRootTask(db, row, { teamId: fields.teamId ?? null })
+        const result =
+          mainTask && !parentTaskId
+            ? createHandOffUnderRequest(db, mainTask, row)
+            : parentTaskId
+              ? createCappedSubtask(db, parentTaskId, row)
+              : createCappedRootTask(db, row, { teamId: fields.teamId ?? null })
         if (!result.ok) {
           return {
             ok: false,
@@ -137,23 +147,86 @@ export function createServerBoardClient(
         if (task.deduplicated) {
           return { ok: true, task: task as BoardTask, deduplicated: task.deduplicatedBy ?? 'key' }
         }
-        emitEvent(db, {
-          kind: 'task_created',
-          taskId: task.id,
-          teamId: task.teamId,
-          data: { title: task.title, status: task.status, parentTaskId: task.parentTaskId },
-        })
-        return { ok: true, task: task as BoardTask }
+        const madeMain = (result as { mainTask?: DbTask }).mainTask
+        for (const made of madeMain ? [madeMain, task] : [task])
+          emitEvent(db, {
+            kind: 'task_created',
+            taskId: made.id,
+            teamId: made.teamId,
+            data: { title: made.title, status: made.status, parentTaskId: made.parentTaskId },
+          })
+        return {
+          ok: true,
+          task: task as BoardTask,
+          ...(madeMain ? { mainTask: madeMain as BoardTask } : {}),
+        }
       } catch {
         return { ok: false, reason: 'error' }
       }
     },
 
-    async handOffRoom(teamId, parentTaskId) {
+    async handOffRoom(teamId, parentTaskId, opts) {
       try {
-        return handOffCapacity(db, parentTaskId, teamId)
+        return handOffCapacity(db, parentTaskId, teamId, opts)
       } catch {
         return null
+      }
+    },
+
+    async mainTaskState(taskId) {
+      try {
+        return mainTaskState(db, taskId)
+      } catch {
+        return null
+      }
+    },
+
+    async openMainTasks(teamId) {
+      try {
+        return listOpenMainTasks(db, scoped ? { teamId, roomId } : { teamId })
+      } catch {
+        return []
+      }
+    },
+
+    async closeMainTask(taskId, to) {
+      try {
+        const closed = closeMainTask(db, taskId, to)
+        if (closed)
+          emitEvent(db, {
+            kind: 'status_changed',
+            taskId,
+            teamId: getTask(db, taskId)?.teamId ?? null,
+            data: { to, reason: 'request_closed' },
+          })
+        return closed
+      } catch {
+        return false
+      }
+    },
+
+    async parkMainTask(taskId, need) {
+      try {
+        const parked = parkMainTask(db, taskId, need)
+        // It now needs a person: what browser alerts follow.
+        if (parked)
+          emitEvent(db, {
+            kind: 'status_changed',
+            taskId,
+            teamId: getTask(db, taskId)?.teamId ?? null,
+            data: { to: 'blocked', reason: 'no_summary' },
+          })
+        return parked
+      } catch {
+        return false
+      }
+    },
+
+    async resumeMainTask(taskId) {
+      try {
+        return resumeMainTask(db, taskId)
+      } catch {
+        return false
       }
     },
 
@@ -217,6 +290,17 @@ export function createServerBoardClient(
         if (result.status === 'off') return { status: 'off' }
         if (result.status === 'refused') return { status: 'refused', reason: result.reason }
         if (result.status !== 'proposed') return result
+        if (result.mainTask)
+          emitEvent(db, {
+            kind: 'task_created',
+            taskId: result.mainTask.id,
+            teamId: result.mainTask.teamId,
+            data: {
+              title: result.mainTask.title,
+              status: result.mainTask.status,
+              parentTaskId: null,
+            },
+          })
         if (result.holderCreated)
           emitEvent(db, {
             kind: 'task_created',
@@ -233,6 +317,7 @@ export function createServerBoardClient(
           status: 'proposed',
           task: result.task as BoardTask,
           holder: result.task.id !== input.taskId,
+          ...(result.mainTask ? { mainTask: result.mainTask as BoardTask } : {}),
           ...(result.replaced ? { replaced: { title: result.replaced.title } } : {}),
         }
       } catch {
@@ -390,7 +475,10 @@ export function createServerBoardClient(
         return {
           task: task as BoardTask,
           comments: getComments(db, taskId),
-          ancestors: getAncestors(db, taskId).map((a) => ({ id: a.id })),
+          ancestors: getAncestors(db, taskId).map((a) => ({
+            id: a.id,
+            ...(a.is_main_task === 1 ? { isMainTask: true } : {}),
+          })),
         }
       } catch {
         return null

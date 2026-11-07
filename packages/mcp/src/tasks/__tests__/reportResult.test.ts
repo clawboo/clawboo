@@ -5,6 +5,7 @@ import {
   claimTask,
   completeExecutionProcess,
   createDb,
+  createHandOffUnderRequest,
   createTask,
   getTask,
   listExecutions,
@@ -37,6 +38,23 @@ const teamRun = (taskId: string, agentId = 'coder'): TasksServerOptions => ({
 const connect = (opts?: TasksServerOptions) => connectInMemory(createTasksServer(db, opts))
 
 describe('report_result', () => {
+  it('a request’s main task has no run, so its lead’s claim is refused and closes nothing', async () => {
+    const made = createHandOffUnderRequest(
+      db,
+      { title: 'Ship it', description: 'Ship it', leadAgentId: 'lead', key: 'main:A:d1' },
+      { title: 'A part', teamId: 'A', sourceDelegationId: 'd1:deleg:agent:coder:reflectTo:lead' },
+    )
+    if (!made.ok) throw new Error(made.reason)
+    const mainId = made.task.parentTaskId as string
+    const res = await callText(await connect(teamRun(mainId, 'lead')), 'report_result', {
+      outcome: 'done',
+      summary: 'All of it is finished.',
+    })
+    expect(res.isError).toBe(true)
+    expect(getTask(db, mainId)?.status).toBe('in_progress')
+    expect(listExecutions(db, mainId)).toEqual([])
+  })
+
   it('stores the claim on the run, and moves no card', async () => {
     const { id, execId } = running('coder')
     const res = await callText(await connect(teamRun(id)), 'report_result', {

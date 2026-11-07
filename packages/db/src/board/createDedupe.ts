@@ -67,6 +67,10 @@ export interface CreateIdentity {
   titleMatchNeedsOwner?: boolean
   /** Tasks from this turn do not stand in: it means each of them (see `HandOffInput`). */
   titleMatchExceptTurn?: string | null
+  /** A lead's hand-off: its team's other top-level work and what is filed under any
+   *  person's request count as "the same parent", since every request has its own
+   *  main task and a repeat across them is still a repeat. */
+  titleMatchAnyRequest?: boolean
 }
 
 /**
@@ -88,6 +92,11 @@ export function rememberCreateKey(
   tx.insert(taskCreateKeys)
     .values({ key: key.key, taskId, derived: key.derived ? 1 : 0, createdAt: now })
     .run()
+}
+
+/** The task a create key answers with, or null when it answers with nothing. */
+export function taskOfCreateKey(tx: BoardTx, key: TaskCreateKey, now: number): DbTask | null {
+  return byKey(tx, key, now)
 }
 
 function byKey(tx: BoardTx, key: TaskCreateKey, now: number): DbTask | null {
@@ -130,9 +139,19 @@ function bySameTitle(tx: BoardTx, input: CreateIdentity, now: number): DbTask | 
     .from(tasks)
     .where(
       and(
-        input.parentTaskId
-          ? eq(tasks.parentTaskId, input.parentTaskId)
-          : isNull(tasks.parentTaskId),
+        input.titleMatchAnyRequest
+          ? or(
+              isNull(tasks.parentTaskId),
+              inArray(
+                tasks.parentTaskId,
+                tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.isMainTask, 1)),
+              ),
+            )
+          : input.parentTaskId
+            ? eq(tasks.parentTaskId, input.parentTaskId)
+            : isNull(tasks.parentTaskId),
+        // A main task never runs, so it cannot stand in for work.
+        eq(tasks.isMainTask, 0),
         eq(tasks.dropped, 0),
         gt(tasks.createdAt, now - SAME_TASK_WINDOW_MS),
         input.teamId ? eq(tasks.teamId, input.teamId) : isNull(tasks.teamId),

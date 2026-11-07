@@ -28,6 +28,9 @@ import {
   commentBody,
   completeExecutionBody,
   cancelDependents,
+  closeMainTaskByPerson,
+  isTerminal,
+  mainTaskState,
   completeExecutionProcess,
   createExecutionBody,
   createExecutionProcess,
@@ -69,6 +72,7 @@ import {
   type TaskLabel,
   type TaskRunCost,
   type TaskStatus,
+  type UpdateStatusResult,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { agentHandoffSchema } from '@clawboo/worktrees'
@@ -85,6 +89,7 @@ import { taskRunSteering } from '../lib/runSteers'
 import { runnerTargetOf } from '../lib/runnerRoute'
 import { startTask } from '../lib/startBoardTask'
 import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
+import { getTaskOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
@@ -181,6 +186,7 @@ export function boardGetGET(req: Request, res: Response): void {
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
+      ...(task.isMainTask === 1 ? { subtasks: subtasksForDetail(db, taskId) } : {}),
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -195,6 +201,17 @@ function withPause<T extends DbTask>(
 ): Array<T & { pause: PauseView | null }> {
   const views = pauseViews(db)
   return rows.map((t) => ({ ...t, pause: pauseViewOfTask(db, t, views) }))
+}
+
+/** What a request's drawer lists: everything filed under its main task, oldest first,
+ *  with what a row needs to say how it stands. */
+function subtasksForDetail(db: ClawbooDb, taskId: string): DbTask[] {
+  const ids = mainTaskState(db, taskId)?.subtaskIds ?? []
+  const rows = ids
+    .map((id) => getTask(db, id))
+    .filter((t): t is DbTask => t !== null)
+    .sort((a, b) => a.createdAt - b.createdAt)
+  return withRunCost(db, withAttention(db, rows))
 }
 
 /** The oldest saved wake still waiting on a task, for the drawer's line saying why:
@@ -484,6 +501,11 @@ export function boardRetryPOST(req: Request, res: Response): void {
       res.status(404).json({ ok: false, error: 'task not found' })
       return
     }
+    // A person's main task never runs by itself: its sub-tasks are what retry.
+    if (task.isMainTask === 1) {
+      res.status(409).json({ ok: false, error: 'main_task' })
+      return
+    }
     const retryable =
       task.status === 'todo' ||
       task.status === 'blocked' ||
@@ -713,28 +735,55 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
 
     let priorStatus: string | null = null
     let cancelledDependents: Array<{ id: string; title: string }> = []
+    // A person closing their request closes the work under it, first, so no pump can
+    // start any of it after the request is gone.
+    const closedWithRequest: Array<{ task: DbTask; from: string }> = []
     if (status) {
       // The verification gate is intrinsic to `updateStatus`; `humanOverride`
       // (a human shipping despite a non-promotable verdict) is the only bypass —
       // record it in the audit log so the override is never silent.
-      priorStatus = getTask(db, taskId)?.status ?? null
-      const result = runOwnWrite(db, ownWriterOf(req), taskId, () =>
-        updateStatus(db, taskId, status, {
-          ...(byPerson ? { actor: 'person' as const } : { unlessPersonMoved: true }),
-          // A person's own move to Blocked: theirs to decide, so it reads back as that.
-          ...(byPerson && status === 'blocked'
-            ? {
-                waitingOn: {
-                  kind: 'person' as const,
-                  need: 'A person moved it here.',
-                  by: 'person' as const,
-                },
-              }
-            : {}),
-          ...(humanOverride ? { humanOverride: true } : {}),
-          ...(completedAt !== undefined ? { completedAt } : {}),
-        }),
-      )
+      const before = getTask(db, taskId)
+      priorStatus = before?.status ?? null
+      const writer = ownWriterOf(req)
+      let result: UpdateStatusResult
+      if (
+        byPerson &&
+        before?.isMainTask === 1 &&
+        (status === 'done' || status === 'cancelled') &&
+        !isTerminal(before.status as TaskStatus)
+      ) {
+        // The request and the work under it close in one write, or neither does.
+        const open = mainTaskState(db, taskId)?.subtaskIds ?? []
+        const was = new Map(open.map((id) => [id, getTask(db, id)?.status ?? 'todo']))
+        const closing = runOwnWrite(db, writer, taskId, () =>
+          closeMainTaskByPerson(db, taskId, status, {
+            ...(completedAt !== undefined ? { completedAt } : {}),
+            ...(humanOverride ? { humanOverride: true } : {}),
+            asOwnWrite: (id, write) => runOwnWrite(db, writer, id, write),
+          }),
+        )
+        result = closing.result
+        for (const t of closing.cancelled)
+          closedWithRequest.push({ task: t, from: was.get(t.id) ?? t.status })
+      } else {
+        result = runOwnWrite(db, writer, taskId, () =>
+          updateStatus(db, taskId, status, {
+            ...(byPerson ? { actor: 'person' as const } : { unlessPersonMoved: true }),
+            // A person's own move to Blocked: theirs to decide, so it reads back as that.
+            ...(byPerson && status === 'blocked'
+              ? {
+                  waitingOn: {
+                    kind: 'person' as const,
+                    need: 'A person moved it here.',
+                    by: 'person' as const,
+                  },
+                }
+              : {}),
+            ...(humanOverride ? { humanOverride: true } : {}),
+            ...(completedAt !== undefined ? { completedAt } : {}),
+          }),
+        )
+      }
       if (!result.ok) {
         res
           .status(
@@ -799,11 +848,30 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
           cancelledDependents,
         })
       }
+      for (const { task: closed, from } of closedWithRequest) {
+        emitEvent(db, {
+          kind: 'status_changed',
+          taskId: closed.id,
+          teamId: closed.teamId,
+          data: { to: 'cancelled', reason: 'request_closed', by: 'person', ...actorField(req) },
+        })
+        noteHumanMove(db, {
+          taskId: closed.id,
+          teamId: closed.teamId,
+          from,
+          to: 'cancelled',
+          withItsRequest: true,
+        })
+      }
+      cancelledDependents = [
+        ...cancelledDependents,
+        ...closedWithRequest.map(({ task: t }) => ({ id: t.id, title: t.title })),
+      ]
     }
     res.json({
       ok: true,
       task,
-      ...(status === 'cancelled' ? { cancelledDependents } : {}),
+      ...(status === 'cancelled' || closedWithRequest.length > 0 ? { cancelledDependents } : {}),
       // Told so the dashboard can say so, if this was a person it could not recognise.
       ...(status && !byPerson ? { byPerson: false } : {}),
     })
@@ -878,6 +946,13 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
               held: engineHeld,
               // Restarting it for the reply is part of the person's own write.
               asOwnWrite: (write) => runOwnWrite(db, ownWriter, taskId, write),
+              commentOnRequest: (t, words) =>
+                t.teamId
+                  ? getTaskOrchestrator(t.teamId, t.id, {
+                      mcpBaseUrl,
+                      db,
+                    }).personCommentedOnMainTask(t.id, words)
+                  : Promise.resolve(false),
             },
           )
         } catch (err) {
@@ -921,6 +996,11 @@ export function boardExecutionCreatePOST(req: Request, res: Response): void {
     const task = getTask(db, taskId)
     if (!task) {
       res.status(404).json({ error: 'task not found' })
+      return
+    }
+    // A person's main task runs nothing, so it holds no run to count or fail.
+    if (task.isMainTask === 1) {
+      res.status(409).json({ ok: false, error: 'main_task' })
       return
     }
     // A new run ends a person's hold on the card (see updateStatus), so without a

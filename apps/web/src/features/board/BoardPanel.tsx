@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
   DndContext,
@@ -53,6 +53,13 @@ import { TaskDetailDrawer, type DrawerPosition } from './TaskDetailDrawer'
 import { NeedsYouItems, NeedsYouLane, useNeedsYou } from './NeedsYouColumn'
 import { NewTaskDialog } from './NewTaskDialog'
 import { useBoardPerson } from './useBoardPerson'
+import {
+  buildRequestNesting,
+  isMainTask,
+  RequestNestingContext,
+  tasksOnTheirOwn,
+  type RequestNestingValue,
+} from './mainTasks'
 import { CardPropertiesContext, TaskCard, taskOwnerOf } from './TaskCard'
 import { StatusGlyph, glyphKindOf } from './StatusGlyph'
 import {
@@ -373,6 +380,26 @@ function attrValue(v: string): string {
   return v.replace(/["\\]/g, '\\$&')
 }
 
+/** What the cards deep in the grid read: which properties they show, and the nesting of
+ *  each person's request. */
+function BoardCardContexts({
+  cardProps,
+  requestNesting,
+  children,
+}: {
+  cardProps: CardProperties
+  requestNesting: RequestNestingValue
+  children: ReactNode
+}) {
+  return (
+    <CardPropertiesContext.Provider value={cardProps}>
+      <RequestNestingContext.Provider value={requestNesting}>
+        {children}
+      </RequestNestingContext.Provider>
+    </CardPropertiesContext.Provider>
+  )
+}
+
 export function BoardPanel() {
   const phone = usePhoneLayout()
   const teams = useTeamStore((s) => s.teams)
@@ -504,6 +531,8 @@ export function BoardPanel() {
   const [lastTouchedId, setLastTouchedId] = useState<string | null>(null)
   // A card "Open on board" asked for, and how many board reads have missed it.
   const [revealId, setRevealId] = useState<string | null>(null)
+  // The request held open because something asked to see a sub-task under it.
+  const [unfoldedRequest, setUnfoldedRequest] = useState<string | null>(null)
   const revealMissesRef = useRef(0)
   const revealFlashRef = useRef(false)
   // Bring a card into view, flashing it and giving it focus; or, when its drawer
@@ -942,14 +971,18 @@ export function BoardPanel() {
     [activeId, effectiveTasks],
   )
 
+  // A person's request shows as one card, with the helpers' work nested under it.
+  const nesting = useMemo(() => buildRequestNesting(effectiveTasks), [effectiveTasks])
+  const drawnTasks = useMemo(() => tasksOnTheirOwn(shownTasks, nesting), [shownTasks, nesting])
+
   // Every task lands in exactly one column: Needs you when nothing will move it
   // on its own, else the column for its status (off-list statuses go to Other).
   const byColumn = useMemo(() => {
     const map: Record<string, BoardTask[]> = { [NEEDS_YOU_COLUMN]: [] }
     for (const col of COLUMNS) map[col.id] = []
-    for (const t of shownTasks) (map[drawnColumnOf(t)] ??= []).push(t)
+    for (const t of drawnTasks) (map[drawnColumnOf(t)] ??= []).push(t)
     return map
-  }, [shownTasks])
+  }, [drawnTasks])
 
   // Approvals and stuck tasks, gathered once for whichever layout is showing.
   const needsYou = useNeedsYou(teamFilter, byColumn[NEEDS_YOU_COLUMN] ?? [])
@@ -962,8 +995,8 @@ export function BoardPanel() {
 
   // ── Calendar projections ──
   const datedTasks = useMemo(
-    () => shownTasks.filter((t) => drawnColumnOf(t) !== NEEDS_YOU_COLUMN),
-    [shownTasks],
+    () => drawnTasks.filter((t) => drawnColumnOf(t) !== NEEDS_YOU_COLUMN),
+    [drawnTasks],
   )
   // The All view is the calendar with a single row, every task newest first.
   const buckets = useMemo(
@@ -1333,7 +1366,12 @@ export function BoardPanel() {
   // Needs-you cards are moved with their own actions (Retry, Assign, Dismiss), not
   // by dragging: a stopped task is already `todo`, so a drop could not express
   // "run it again".
-  const cardDisabled = useCallback((task: BoardTask) => statusOptions(task.status).length <= 1, [])
+  // A person's request moves by itself. It finishes from its drawer, which says what
+  // that does to its sub-tasks.
+  const cardDisabled = useCallback(
+    (task: BoardTask) => statusOptions(task.status).length <= 1 || isMainTask(task),
+    [],
+  )
 
   // Where the card being dragged would land: its own row; today's row for a move
   // that finishes it (the default when a day is asked for); or today's Needs you
@@ -1703,19 +1741,31 @@ export function BoardPanel() {
     setRevealId(null)
     const flash = revealFlashRef.current
     revealFlashRef.current = false
-    const col = drawnColumnOf(task)
+    // A sub-task nested under its request is shown there, wherever its own day and
+    // status would have put a card: open the request, and go to where that sits.
+    const main = nesting.mainOf(task)
+    const underRequest =
+      main !== null &&
+      drawnTasks.some((t) => t.id === main.id) &&
+      !drawnTasks.some((t) => t.id === task.id)
+    const place = underRequest ? main : task
+    if (underRequest) {
+      setUnfoldedRequest(main.id)
+      setLastTouchedId(main.id)
+    }
+    const col = drawnColumnOf(place)
     if (col === 'cancelled' && !prefs.cancelledOpen) updatePrefs({ cancelledOpen: true })
     // Needs you lives in today's row, and its card may sit behind "+N more".
     const needsYouCard = col === NEEDS_YOU_COLUMN
-    if (needsYouCard) setNeedsYouShow(task.id)
+    if (needsYouCard) setNeedsYouShow(place.id)
     const shown = rangeRef.current
     if (shown) {
       const at = Date.now()
-      const day = needsYouCard ? at : taskAnchor(task, at)
+      const day = needsYouCard ? at : taskAnchor(place, at)
       const inEarlier =
         !needsYouCard &&
         day < shown.start &&
-        !isFinishedStatus(task.status) &&
+        !isFinishedStatus(place.status) &&
         shown.end > startOfDay(at)
       if (inEarlier) {
         if (!earlierOpen) setEarlierOpen(true)
@@ -1736,6 +1786,15 @@ export function BoardPanel() {
       acknowledgeSeen([taskId])
     },
     [acknowledgeSeen],
+  )
+  const requestNesting = useMemo(
+    () => ({
+      nesting,
+      onOpen: openTask,
+      unfoldedId: unfoldedRequest,
+      onFolded: () => setUnfoldedRequest(null),
+    }),
+    [nesting, openTask, unfoldedRequest],
   )
 
   // ── Routines opened from the calendar ──
@@ -1993,7 +2052,7 @@ export function BoardPanel() {
   )
 
   return (
-    <CardPropertiesContext.Provider value={cardProps}>
+    <BoardCardContexts cardProps={cardProps} requestNesting={requestNesting}>
       <div ref={rootRef} className="board-ink-focus flex h-full flex-col">
         {/* The board's own header, a thin bar: the title and its team, what changed
           while the person was away (only when something did), and New task. */}
@@ -2459,6 +2518,6 @@ export function BoardPanel() {
           onCreated={handleCreated}
         />
       </div>
-    </CardPropertiesContext.Provider>
+    </BoardCardContexts>
   )
 }

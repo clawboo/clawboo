@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { encodeHumanAssignment, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import {
+  attentionForTask,
   createTask,
   getComments,
   getTask,
@@ -16,6 +17,7 @@ import {
   listPauses,
   listTasks,
   placePause,
+  startRefusedByTask,
   taskTreeRootId,
   teams,
   type ClawbooDb,
@@ -23,7 +25,10 @@ import {
 import { HUMAN_TURN, type BoardChange } from '@clawboo/team-orchestration'
 import { eq, sql } from 'drizzle-orm'
 
+import type { RuntimeEvent } from '@clawboo/executor'
+
 import { getDb, resetDb } from '../../db'
+import { pauseCovers } from '../../pauseRuns'
 import { homeDispatchMutex } from '../../executorRunner'
 import { PausedDeliveryError } from '../../pauseBus'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
@@ -41,6 +46,7 @@ import {
 } from './pauseHarness'
 import { subscribeBoardChange } from '../boardChangeBus'
 import { publishBoardChangeWithAttention } from '../publishBoardChange'
+import { createReportUpOutbox } from '../reportUpOutbox'
 import { stopPausedRunsOf } from '../teamOrchestrator'
 import { settle } from './settleCascade'
 
@@ -321,6 +327,161 @@ describe('pausing an agent in team chat', () => {
     await h.engine.resume()
     await settle(() => worker.running, 'the task to start on resume')
     expect(getTask(db, task!.id)?.status).toBe('in_progress')
+  })
+
+  describe('a person’s request, whose main task is the top of its tree', () => {
+    const asked = (words: string) =>
+      ({
+        kind: 'human',
+        request: { words, requestedBy: { id: 'p1', name: 'Pat', role: null } },
+      }) as const
+    const handOff = (to: string, task: string): RuntimeEvent =>
+      ({
+        kind: 'tool-call',
+        name: 'delegate',
+        input: { assignee: to, task },
+        partial: false,
+        runId: 'r',
+        sessionId: null,
+        ts: 1,
+        seq: 1,
+      }) as RuntimeEvent
+    /** The lead's message turn has handed `work` to the worker, and that run is going. */
+    const started = async (h: ReturnType<typeof wire>) => {
+      void h.deliver(skFor(LEAD), LEAD, 'Build it', asked('Build it'))
+      await settle(() => lead.running, 'the lead’s turn')
+      await h.engine.onEvent(skFor(LEAD), handOff('Worker', 'write the form'), {
+        reportForTaskId: null,
+        stopGen: 0,
+        deliveryId: 'd1',
+        request: { words: 'Build it', requestedBy: { id: 'p1', name: 'Pat', role: null } },
+      })
+      lead.complete()
+      await settle(() => worker.running, 'the worker to start')
+      const main = listTasks(db, { teamId: TEAM }).find((t) => t.isMainTask === 1)!
+      const child = listTasks(db, { teamId: TEAM }).find((t) => t.parentTaskId === main.id)!
+      return { mainId: main.id, childId: child.id }
+    }
+
+    it('the main task is the tree’s root, so a pause on any part of it covers it all', async () => {
+      const h = wire(db, adapters)
+      const { mainId, childId } = await started(h)
+      expect(taskTreeRootId(db, childId)).toBe(mainId)
+      placePause(db, { kind: 'task_tree', id: taskTreeRootId(db, childId) })
+      const refused = startRefusedByTask(db, getTask(db, childId)!)
+      expect(refused).toMatchObject({ kind: 'task_tree', id: mainId })
+      expect(startRefusedByTask(db, getTask(db, mainId)!)).toMatchObject({ kind: 'task_tree' })
+      expect(listPauses(db).map((p) => p.id)).toEqual([mainId])
+    })
+
+    it('stops its sub-task, closes nothing, and on resume it runs and the request closes', async () => {
+      const outbox = createReportUpOutbox(db, TEAM, null)
+      const h = wire(db, adapters, { reportUps: outbox })
+      const { mainId, childId } = await started(h)
+      const { pause } = placePause(db, { kind: 'task_tree', id: mainId })
+      await h.pauseRuns(pauseCovers(db, pause), NOTE)
+      await settle(() => !worker.running, 'the sub-task’s run to end')
+      expect(getTask(db, childId)!.status).toBe('todo')
+      expect(listExecutions(db, childId).at(-1)).toMatchObject({ errorClass: PAUSED_RUN_CLASS })
+
+      // Round the pump and the sweep, more than once: nothing starts, and nobody is told.
+      for (let i = 0; i < 2; i++) {
+        await h.engine.resume()
+        await h.engine.sweepStaleSessions()
+      }
+      await settle(() => true, 'a pass')
+      expect(worker.started).toBe(1)
+      expect(lead.started).toBe(1)
+      expect(getTask(db, mainId)!.status).toBe('in_progress')
+      expect(attentionForTask(db, childId)).toBeNull()
+
+      liftPause(db, 'task_tree', mainId)
+      await h.engine.resume()
+      await settle(() => worker.running, 'the sub-task to start again')
+      worker.complete()
+      await settle(() => lead.running, 'the lead’s update')
+      expect(lead.started).toBe(2)
+      lead.complete()
+      await settle(() => getTask(db, mainId)!.status === 'done', 'the request to close')
+    })
+
+    it('holds what came back while paused, and closes after the resume', async () => {
+      const outbox = createReportUpOutbox(db, TEAM, null)
+      const h = wire(db, adapters, { reportUps: outbox })
+      const { mainId, childId } = await started(h)
+      placePause(db, { kind: 'task_tree', id: mainId })
+      // The run was ending anyway: its result is in, and it has nowhere to go yet.
+      worker.complete()
+      await settle(() => getTask(db, childId)!.status === 'done', 'the sub-task to finish')
+      for (let i = 0; i < 2; i++) {
+        await h.engine.sweepStaleSessions()
+        await settle(() => true, 'a pass')
+      }
+      expect(lead.started).toBe(1)
+      expect(getTask(db, mainId)!.status).toBe('in_progress')
+      expect(outbox.pending().length).toBeGreaterThan(0)
+
+      liftPause(db, 'task_tree', mainId)
+      await h.engine.sweepStaleSessions()
+      await settle(() => lead.running, 'the lead’s update after the resume')
+      lead.complete()
+      await settle(() => getTask(db, mainId)!.status === 'done', 'the request to close')
+    })
+
+    it('takes its lead’s update out of the run queue, and it goes out on resume', async () => {
+      setRunSlotsForTests(createRunSlots(1))
+      const outbox = createReportUpOutbox(db, TEAM, null)
+      const h = wire(db, adapters, { reportUps: outbox })
+      const { mainId, childId } = await started(h)
+      // Another run is next in line, so the update waits behind it.
+      void h.deliver(skFor(OTHER), OTHER, 'Something else', HUMAN_TURN)
+      await settle(() => h.queuedRuns.has(skFor(OTHER)), 'the other run to queue')
+      worker.complete()
+      await settle(() => getTask(db, childId)!.status === 'done', 'the sub-task to finish')
+      await settle(() => h.queuedRuns.has(skFor(LEAD)), 'the update to queue')
+
+      const { pause } = placePause(db, { kind: 'task_tree', id: mainId })
+      await h.pauseRuns(pauseCovers(db, pause), NOTE)
+      expect(h.queuedRuns.has(skFor(LEAD))).toBe(false)
+      other.complete()
+      await settle(() => !other.running, 'the other run to end')
+      await h.engine.sweepStaleSessions()
+      await settle(() => true, 'a pass')
+      expect(lead.started).toBe(1)
+      expect(getTask(db, mainId)!.status).toBe('in_progress')
+
+      liftPause(db, 'task_tree', mainId)
+      await h.engine.sweepStaleSessions()
+      await settle(() => lead.running, 'the update after the resume')
+      lead.complete()
+      await settle(() => getTask(db, mainId)!.status === 'done', 'the request to close')
+    })
+
+    it('stops its lead’s update about the request, which goes out again on resume', async () => {
+      const outbox = createReportUpOutbox(db, TEAM, null)
+      const h = wire(db, adapters, { reportUps: outbox })
+      const { mainId, childId } = await started(h)
+      worker.complete()
+      await settle(() => getTask(db, childId)!.status === 'done', 'the sub-task to finish')
+      await settle(() => lead.running, 'the lead’s update')
+      expect(lead.started).toBe(2)
+
+      const { pause } = placePause(db, { kind: 'task_tree', id: mainId })
+      await h.pauseRuns(pauseCovers(db, pause), NOTE)
+      await settle(() => !lead.running, 'the update to stop')
+      expect(lead.aborts).toBeGreaterThan(0)
+      expect(getTask(db, mainId)!.status).toBe('in_progress')
+      await h.engine.sweepStaleSessions()
+      await settle(() => true, 'a pass')
+      expect(lead.started).toBe(2)
+
+      liftPause(db, 'task_tree', mainId)
+      await h.engine.sweepStaleSessions()
+      await settle(() => lead.running, 'the update to go out again')
+      expect(lead.started).toBe(3)
+      lead.complete()
+      await settle(() => getTask(db, mainId)!.status === 'done', 'the request to close')
+    })
   })
 
   it('marks a queued follow-up it takes out as stopped by a pause, so its next send is no try', async () => {

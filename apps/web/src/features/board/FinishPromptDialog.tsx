@@ -174,6 +174,10 @@ function FinishPanel({
     notes.push(`${request.runningAgent} is still working on it. This stops that run.`)
   if (overriding)
     notes.push('Its check didn’t pass. Completing it anyway is recorded in the audit log.')
+  if (request.openSubtasks)
+    notes.push(
+      `Its ${request.openSubtasks === 1 ? 'open sub-task is' : `${request.openSubtasks} open sub-tasks are`} cancelled too, and any run on them stops.`,
+    )
 
   const options: Array<{ id: Option; label: string; aside: string }> = [
     { id: 'today', label: 'Today', aside: shortDate(today) },

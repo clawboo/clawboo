@@ -254,7 +254,8 @@ const SCHEMA_DDL = `
       delegated_by_agent_id TEXT,
       person_cancelled_at  INTEGER,
       check_held_since     INTEGER,
-      run_execution_id     TEXT
+      run_execution_id     TEXT,
+      is_main_task         INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);

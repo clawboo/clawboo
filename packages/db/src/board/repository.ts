@@ -14,10 +14,12 @@ import {
   delegatorOf,
   isTerminal,
   isEngineRun,
+  isPlanHolder,
   ledgerAllowsAutoFire,
   LOCAL_PERSON,
   parseWaitingOn,
   personMoveAllowed,
+  requestWaitsOn,
   strongerWakeReason,
   subtasksStillOut,
   subtaskStanding,
@@ -66,6 +68,7 @@ import { startRefusedBy, startRefusedByTask } from './pauses'
 import {
   delegationFailures,
   executionProcesses,
+  reportUpOutbox,
   taskComments,
   taskCreateKeys,
   taskDeps,
@@ -83,11 +86,12 @@ import { expirePendingQuestionsTx } from './questionExpiry'
 import {
   existingTaskForCreate,
   rememberCreateKey,
+  taskOfCreateKey,
   type CreatedTask,
   type TaskCreateKey,
 } from './createDedupe'
 import { allocateTaskIdentifier } from './identifiers'
-import { ancestorRowsSchema, type AncestorRow } from './schemas'
+import { ancestorRowsSchema, subtreeRowsSchema, type AncestorRow, type SubtreeRow } from './schemas'
 
 export { SAME_TASK_WINDOW_MS } from './createDedupe'
 export type { CreatedTask, DedupedBy, TaskCreateKey } from './createDedupe'
@@ -132,7 +136,15 @@ export interface CreateTaskInput {
   titleMatchExceptTurn?: string | null
   /** The agent handing it out through the Tasks tools (the cycle guard reads it). */
   delegatedByAgentId?: string | null
+  /** It is a person's main task, with this agent looking after it. Only
+   *  `createHandOffUnderRequest` passes it. */
+  mainTaskLead?: string | null
+  /** See `CreateIdentity.titleMatchAnyRequest`. */
+  titleMatchAnyRequest?: boolean
 }
+
+/** What an open main task says it waits for. */
+const MAIN_TASK_WAIT: WaitingOn = { kind: 'subtasks' }
 
 /**
  * The row a create builds. Shared by `createTask` (plain write) and
@@ -145,13 +157,13 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     id: randomUUID(),
     title: input.title,
     description: input.description ?? null,
-    status: input.status ?? 'todo',
+    status: input.mainTaskLead ? 'in_progress' : (input.status ?? 'todo'),
     // Every create path builds its row here, so this is the one clamp: no
     // writer, an agent's create_task included, can jump the queue with a
     // large number.
     priority: clampTaskPriority(input.priority ?? 0),
     teamId: input.teamId ?? null,
-    assigneeAgentId: null,
+    assigneeAgentId: input.mainTaskLead ?? null,
     assigneeRuntime: input.assigneeRuntime ?? null,
     parentTaskId: input.parentTaskId ?? null,
     sourceDelegationId: input.sourceDelegationId ?? null,
@@ -169,7 +181,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     roomId: input.roomId ?? null,
     personMovedAt: null,
     runnerInputs: null,
-    waitingOn: waitingOnJson(input.waitingOn),
+    waitingOn: input.mainTaskLead ? waitingOnJson(MAIN_TASK_WAIT) : waitingOnJson(input.waitingOn),
     assigneePersonId: input.assigneePerson?.id ?? null,
     assigneePerson: personJson(input.assigneePerson),
     requestedBy: personJson(input.requestedBy),
@@ -178,6 +190,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     personCancelledAt: null,
     checkHeldSince: null,
     runExecutionId: null,
+    isMainTask: input.mainTaskLead ? 1 : 0,
   }
 }
 
@@ -192,10 +205,17 @@ export function insertTask(tx: BoardTx, input: CreateTaskInput): DbTask {
 }
 
 export function createTask(db: ClawbooDb, input: CreateTaskInput): CreatedTask {
-  const row = immediateWrite(
-    db,
-    (tx): CreatedTask => existingTaskForCreate(tx, input, Date.now()) ?? insertTask(tx, input),
-  )
+  const mainsReopened: Array<{ taskId: string; teamId: string | null }> = []
+  const row = immediateWrite(db, (tx): CreatedTask => {
+    const existing = existingTaskForCreate(tx, input, Date.now())
+    if (existing) return existing
+    const made = insertTask(tx, input)
+    // New work under a request that has closed opens it again, or the work would run
+    // hidden inside a card that says Done.
+    const reopened = reopenClosedMainAboveTx(tx, made, made.createdAt)
+    if (reopened) mainsReopened.push(reopened)
+    return made
+  })
   if (!row.deduplicated)
     emitBoardLifecycle({
       kind: 'task_created',
@@ -204,6 +224,8 @@ export function createTask(db: ClawbooDb, input: CreateTaskInput): CreatedTask {
       status: row.status,
       sourceDelegationId: row.sourceDelegationId ?? null,
     })
+  for (const main of mainsReopened)
+    emitBoardLifecycle({ kind: 'status_changed', ...main, status: 'in_progress' })
   return row
 }
 
@@ -236,7 +258,9 @@ export {
   DEFAULT_ROOT_CREATE_WINDOW_MS,
 } from '@clawboo/governance'
 
-export type CreateGuardReason = 'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap'
+export type CreateGuardReason =
+  /** `main_closed`: the person's request it would be filed under has been closed. */
+  'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap' | 'main_closed'
 
 export interface SubtaskCaps {
   /** Max LIVE (non-dropped) children one parent may have. Default DEFAULT_MAX_CHILDREN. */
@@ -315,6 +339,85 @@ function countRecentRoots(tx: ClawbooDb | BoardTx, since: number, teamId?: strin
 }
 
 /**
+ * The caps and the insert of a subtask, inside the caller's transaction. Depth: walk
+ * the parent chain with a HARD step bound rather than reusing `getAncestors`: that
+ * helper takes a ClawbooDb, not a tx, so it would read OUTSIDE this transaction.
+ * Bounding the walk also keeps a corrupt `parent_task_id` cycle from spinning while
+ * this write lock is held. The observed depth is deliberately not reported: the walk
+ * clamps, so the number could be a lie. A person's main task is not a level: it holds
+ * the request and runs nothing, so it costs helpers no hand-offs.
+ */
+function createSubtaskTx(
+  tx: BoardTx,
+  parent: DbTask,
+  input: Omit<CreateTaskInput, 'parentTaskId'>,
+  caps: SubtaskCaps,
+): GuardedCreateResult {
+  const maxChildren = caps.maxChildren ?? DEFAULT_MAX_CHILDREN
+  const maxDepth = caps.maxDepth ?? DEFAULT_MAX_DEPTH
+  const resolved = {
+    ...input,
+    parentTaskId: parent.id,
+    teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
+    roomId: input.roomId ?? parent.roomId ?? null,
+    // A hand-off under a person's request: every request has its own main task, and
+    // the same work asked for under another one is still a repeat.
+    ...(parent.isMainTask === 1 && input.titleMatchNeedsOwner
+      ? { titleMatchAnyRequest: true }
+      : {}),
+  }
+  // Before the caps: a repeat makes no row, so a cap has nothing to refuse, and a
+  // retry must get the task it made rather than a refusal.
+  const existing = existingTaskForCreate(tx, resolved, Date.now())
+  if (existing) return { ok: true, task: existing }
+
+  // A request that has closed takes no more work, at any depth under it: nothing looks
+  // after it, and the work would run hidden inside a card that says it is finished.
+  const closedMain = (row: Pick<DbTask, 'isMainTask' | 'status' | 'dropped'>): boolean =>
+    row.isMainTask === 1 && (isTerminal(row.status as TaskStatus) || row.dropped === 1)
+  if (closedMain(parent)) return { ok: false, reason: 'main_closed' }
+
+  let parentDepth = 0
+  let cursor: string | null = parent.parentTaskId
+  for (let steps = 0; cursor !== null && parentDepth < maxDepth && steps <= maxDepth + 1; steps++) {
+    const row:
+      | {
+          parentTaskId: string | null
+          isMainTask: number
+          status: string
+          dropped: number
+        }
+      | undefined = tx
+      .select({
+        parentTaskId: tasks.parentTaskId,
+        isMainTask: tasks.isMainTask,
+        status: tasks.status,
+        dropped: tasks.dropped,
+      })
+      .from(tasks)
+      .where(eq(tasks.id, cursor))
+      .get()
+    if (row && closedMain(row)) return { ok: false, reason: 'main_closed' }
+    if (row?.isMainTask !== 1) parentDepth += 1
+    cursor = row?.parentTaskId ?? null
+  }
+
+  const siblingCount = countChildSlots(tx, parent.id)
+  if (!checkFanoutCap({ siblingCount, max: maxChildren }).ok) {
+    return { ok: false, reason: 'child_cap', count: siblingCount, max: maxChildren }
+  }
+
+  // `depth >= max` ⇒ the new child would be `depth + 1`, one level too deep. The
+  // same rule the team-chat delegation loop applies to a source task before it
+  // spawns, so nothing an existing path already creates gets tighter.
+  if (!checkDepthCap({ depth: parentDepth, max: maxDepth }).ok) {
+    return { ok: false, reason: 'depth_cap', max: maxDepth }
+  }
+
+  return { ok: true, task: insertTask(tx, resolved) }
+}
+
+/**
  * Create a subtask with the per-parent child-count + nesting-depth caps ENFORCED,
  * inside ONE `BEGIN IMMEDIATE` transaction. The Tasks MCP ships as a stdio bin —
  * one OS process per attached runtime, all on the shared DB file — so a
@@ -332,9 +435,6 @@ export function createCappedSubtask(
   input: Omit<CreateTaskInput, 'parentTaskId'>,
   caps: SubtaskCaps = {},
 ): GuardedCreateResult {
-  const maxChildren = caps.maxChildren ?? DEFAULT_MAX_CHILDREN
-  const maxDepth = caps.maxDepth ?? DEFAULT_MAX_DEPTH
-
   // The callback's return type is annotated because the result is now bound to a
   // local (for the post-commit emit below) rather than returned directly, so it no
   // longer inherits this function's return type as its contextual type — without
@@ -345,49 +445,7 @@ export function createCappedSubtask(
     // A missing parent would otherwise reach the insert and trip
     // `PRAGMA foreign_keys = ON` — an exception, not data. Refuse it as data.
     if (!parent) return { ok: false, reason: 'parent_not_found' }
-
-    const resolved = {
-      ...input,
-      parentTaskId,
-      teamId: input.teamId ?? parent.teamId ?? null, // inherit, like createSubtask
-      roomId: input.roomId ?? parent.roomId ?? null,
-    }
-    // Before the caps: a repeat makes no row, so a cap has nothing to refuse, and a
-    // retry must get the task it made rather than a refusal.
-    const existing = existingTaskForCreate(tx, resolved, Date.now())
-    if (existing) return { ok: true, task: existing }
-
-    const siblingCount = countChildSlots(tx, parentTaskId)
-    if (!checkFanoutCap({ siblingCount, max: maxChildren }).ok) {
-      return { ok: false, reason: 'child_cap', count: siblingCount, max: maxChildren }
-    }
-
-    // Depth: walk the parent chain with a HARD step bound rather than reusing
-    // `getAncestors` — that helper takes a ClawbooDb, not a tx, so it would read
-    // OUTSIDE this transaction. Bounding the walk also keeps a corrupt
-    // `parent_task_id` cycle from spinning while this write lock is held: at most
-    // `maxDepth` primary-key lookups, no matter what the data says. The observed
-    // depth is deliberately not reported — the walk clamps, so the number could
-    // be a lie.
-    let parentDepth = 0
-    let cursor: string | null = parent.parentTaskId
-    while (cursor !== null && parentDepth < maxDepth) {
-      parentDepth += 1
-      const row = tx
-        .select({ parentTaskId: tasks.parentTaskId })
-        .from(tasks)
-        .where(eq(tasks.id, cursor))
-        .get()
-      cursor = row?.parentTaskId ?? null
-    }
-    // `depth >= max` ⇒ the new child would be `depth + 1`, one level too deep. The
-    // same rule the team-chat delegation loop applies to a source task before it
-    // spawns, so nothing an existing path already creates gets tighter.
-    if (!checkDepthCap({ depth: parentDepth, max: maxDepth }).ok) {
-      return { ok: false, reason: 'depth_cap', max: maxDepth }
-    }
-
-    return { ok: true, task: insertTask(tx, resolved) }
+    return createSubtaskTx(tx, parent, input, caps)
   })
   // Post-commit, exactly as `createTask` does. The guarded creates insert INSIDE
   // their own transaction rather than delegating to `createTask`, so they have to
@@ -454,6 +512,338 @@ export function createCappedRootTask(
   return result
 }
 
+// ─── A person's request: the main task ───────────────────────────────────────
+// When a lead first hands out work for a person's chat message, that message becomes
+// one main task, made in the same write as the hand-off, so a plain answer creates
+// nothing and a refused hand-off leaves no empty card. It holds the person's words,
+// names the person, and is assigned to the agent looking after it. Everything handed
+// out for that message is filed under it. It sits In progress (`in_progress`, with an
+// assignee and no run) until the lead's summary, which is why no pump, claim, sweep or
+// retry ever touches it: they all read `todo`, or a running execution. Only
+// `closeMainTask`, `parkMainTask` and a person move it (`updateStatus`).
+
+export interface MainTaskRequest {
+  title: string
+  description: string
+  leadAgentId: string
+  /** Who asked. Null: a routine, and a hand-back then goes to the local person. */
+  requestedBy?: PersonRecord | null
+  /** One per message: every hand-off of its turn finds the same main task. */
+  key: string
+}
+
+export type HandOffUnderRequestResult =
+  | { ok: true; task: CreatedTask; /** Made by this call. */ mainTask?: DbTask }
+  | Extract<GuardedCreateResult, { ok: false }>
+
+/** The main task of a person's message, as a new root under the root rate cap. Its
+ *  caller's write holds whatever is filed under it, so there is never an empty card. */
+export function insertMainTaskTx(
+  tx: BoardTx,
+  request: MainTaskRequest,
+  scope: { teamId?: string | null; roomId?: string | null },
+  caps: RootCreateCaps,
+  now: number,
+): { ok: true; mainTask: DbTask } | Extract<GuardedCreateResult, { ok: false }> {
+  const max = caps.maxRootCreates ?? DEFAULT_MAX_ROOT_CREATES
+  const windowMs = caps.windowMs ?? DEFAULT_ROOT_CREATE_WINDOW_MS
+  const recent = countRecentRoots(tx, now - windowMs, scope.teamId ?? null)
+  if (!checkFanoutCap({ siblingCount: recent, max }).ok)
+    return { ok: false, reason: 'root_rate_cap', count: recent, max, windowMs }
+  return {
+    ok: true,
+    mainTask: insertTask(tx, {
+      title: request.title,
+      description: request.description,
+      teamId: scope.teamId ?? null,
+      roomId: scope.roomId ?? null,
+      requestedBy: request.requestedBy ?? null,
+      mainTaskLead: request.leadAgentId,
+      createKey: { key: request.key },
+    }),
+  }
+}
+
+/** File a hand-off under the main task of a person's message, making that task if
+ *  this is the first. A repeat of open work makes neither. */
+export function createHandOffUnderRequest(
+  db: ClawbooDb,
+  request: MainTaskRequest,
+  input: Omit<CreateTaskInput, 'parentTaskId'>,
+  caps: SubtaskCaps & RootCreateCaps = {},
+): HandOffUnderRequestResult {
+  const result = immediateWrite(db, (tx): HandOffUnderRequestResult => {
+    const now = Date.now()
+    const key = { key: request.key }
+    const held = taskOfCreateKey(tx, key, now)
+    if (held) return createSubtaskTx(tx, held, input, caps)
+    const first = { ...input, parentTaskId: null, titleMatchAnyRequest: true }
+    const existing = existingTaskForCreate(tx, first, now)
+    if (existing) return { ok: true, task: existing }
+    const made = insertMainTaskTx(tx, request, input, caps, now)
+    if (!made.ok) return made
+    const { mainTask } = made
+    const task = insertTask(tx, {
+      ...input,
+      parentTaskId: mainTask.id,
+      teamId: mainTask.teamId,
+      roomId: mainTask.roomId,
+    })
+    return { ok: true, task, mainTask }
+  })
+  if (result.ok) {
+    for (const made of result.mainTask ? [result.mainTask] : [])
+      emitBoardLifecycle({
+        kind: 'task_created',
+        taskId: made.id,
+        teamId: made.teamId ?? null,
+        status: made.status,
+        sourceDelegationId: null,
+      })
+    if (!result.task.deduplicated)
+      emitBoardLifecycle({
+        kind: 'task_created',
+        taskId: result.task.id,
+        teamId: result.task.teamId ?? null,
+        status: result.task.status,
+        sourceDelegationId: result.task.sourceDelegationId ?? null,
+      })
+  }
+  return result
+}
+
+/** The ids and statuses of everything filed under a task, at any depth. `UNION`, as
+ *  in `getAncestors`, so a corrupt cycle ends the walk. */
+function subtreeOf(db: ClawbooDb, taskId: string): SubtreeRow[] {
+  return subtreeRowsSchema.parse(
+    db.all(
+      sql`
+        WITH RECURSIVE below(id) AS (
+          SELECT id FROM tasks WHERE parent_task_id = ${taskId} AND dropped = 0
+          UNION
+          SELECT t.id FROM tasks t JOIN below b ON t.parent_task_id = b.id WHERE t.dropped = 0
+        )
+        SELECT id, status, completed_at, source_delegation_id FROM tasks
+        WHERE id IN (SELECT id FROM below) AND id != ${taskId}
+      `,
+    ),
+  )
+}
+
+/** Where a request stands, read from the board. */
+export interface MainTaskState {
+  id: string
+  title: string
+  identifier: string | null
+  status: string
+  /** The agent looking after it: who its reports go to. */
+  leadAgentId: string | null
+  /** Not Done or Cancelled, and not removed. */
+  open: boolean
+  subtaskIds: string[]
+  /** What it still waits on, at any depth (`requestWaitsOn`). */
+  openSubtasks: number
+  /** Work that got done. A card that only held a plan is not work. */
+  doneSubtasks: number
+  cancelledSubtasks: number
+  /** When its last sub-task closed; null while none has. */
+  lastClosedAt: number | null
+}
+
+/** The open tasks in a request's tree, as the barrier reads them, each against the main
+ *  task: what a request waits on is decided there (see `requestWaitsOn`). */
+function openTreeViews(db: ClawbooDb, mainId: string, below: readonly SubtreeRow[]): SubtaskView[] {
+  return below
+    .filter((t) => !isTerminal(t.status as TaskStatus))
+    .flatMap((t) => {
+      const row = getTask(db, t.id)
+      return row ? [subtaskViewOf(db, row, mainId)] : []
+    })
+}
+
+function mainTaskStateOf(db: ClawbooDb, row: DbTask): MainTaskState {
+  const below = subtreeOf(db, row.id)
+  const closedAt = below.map((t) => t.completed_at).filter((t): t is number => t !== null)
+  return {
+    id: row.id,
+    title: row.title,
+    identifier: row.identifier,
+    status: row.status,
+    leadAgentId: row.assigneeAgentId,
+    open: !row.dropped && !isTerminal(row.status as TaskStatus),
+    subtaskIds: below.map((t) => t.id),
+    openSubtasks: openTreeViews(db, row.id, below).filter(requestWaitsOn).length,
+    // A card that only held a plan did none of the work.
+    doneSubtasks: below.filter((t) => t.status === 'done' && !isPlanHolder(t.source_delegation_id))
+      .length,
+    cancelledSubtasks: below.filter((t) => t.status === 'cancelled').length,
+    lastClosedAt: closedAt.length > 0 ? Math.max(...closedAt) : null,
+  }
+}
+
+/** Where a main task stands; null for a task that is not one. */
+export function mainTaskState(db: ClawbooDb, taskId: string): MainTaskState | null {
+  const row = getTask(db, taskId)
+  return row?.isMainTask === 1 ? mainTaskStateOf(db, row) : null
+}
+
+/** A room's open main tasks, oldest first. */
+export function listOpenMainTasks(
+  db: ClawbooDb,
+  filter: { teamId: string; roomId?: RoomFilter },
+): MainTaskState[] {
+  const room = roomCondition(filter.roomId)
+  const rows = db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.isMainTask, 1),
+        eq(tasks.dropped, 0),
+        eq(tasks.teamId, filter.teamId),
+        inArray(tasks.status, ['in_progress', 'blocked']),
+        ...(room ? [room] : []),
+      ),
+    )
+    .orderBy(tasks.createdAt)
+    .all() as DbTask[]
+  return rows.map((row) => mainTaskStateOf(db, row))
+}
+
+/** The main task a task is filed under, itself if it is one, or null. */
+export function mainTaskOfTask(db: ClawbooDb, taskId: string): DbTask | null {
+  const row = getTask(db, taskId)
+  if (!row) return null
+  if (row.isMainTask === 1) return row
+  const main = getAncestors(db, taskId).find((a) => a.is_main_task === 1)
+  return main ? getTask(db, main.id) : null
+}
+
+/** The server closes a request: after its lead's summary. A person's move goes through
+ *  `updateStatus`. False when it is not an open main task. */
+export function closeMainTask(db: ClawbooDb, taskId: string, to: 'done' | 'cancelled'): boolean {
+  const row = getTask(db, taskId)
+  if (row?.isMainTask !== 1 || row.dropped || isTerminal(row.status as TaskStatus)) return false
+  return updateStatus(db, taskId, to, { mainTaskLifecycle: true }).ok
+}
+
+/** A request whose summary never came waits on a person, saying why. It is the one
+ *  way a main task reaches Needs you by itself. */
+export function parkMainTask(db: ClawbooDb, taskId: string, need: string): boolean {
+  const row = getTask(db, taskId)
+  if (row?.isMainTask !== 1 || row.dropped || isTerminal(row.status as TaskStatus)) return false
+  return updateStatus(db, taskId, 'blocked', {
+    mainTaskLifecycle: true,
+    waitingOn: { kind: 'person', need },
+  }).ok
+}
+
+/** Was this task handed down from other work, as opposed to filed straight under a
+ *  person's request? A review counts that: a lead's hand-off under a main task gets
+ *  the review it would have had as a top-level task. */
+export function handedDownFromWork(
+  db: ClawbooDb,
+  task: Pick<DbTask, 'parentTaskId'> | null | undefined,
+): boolean {
+  if (!task?.parentTaskId) return false
+  return getTask(db, task.parentTaskId)?.isMainTask !== 1
+}
+
+/** Back to waiting: a parked request a person has said more on. */
+export function resumeMainTask(db: ClawbooDb, taskId: string): boolean {
+  const row = getTask(db, taskId)
+  if (row?.isMainTask !== 1 || row.dropped || row.status !== 'blocked') return false
+  return updateStatus(db, taskId, 'in_progress', {
+    mainTaskLifecycle: true,
+    waitingOn: MAIN_TASK_WAIT,
+  }).ok
+}
+
+/** A person closed a request with work still open: that work ends with it. Cancels
+ *  every open task under it, at any depth. The caller stops their runs. `asOwnWrite`
+ *  runs each write as part of the person's own, so it does not come back as news. */
+export function closeOpenSubtasksOfMain(
+  db: ClawbooDb,
+  taskId: string,
+  opts: {
+    byPerson?: boolean
+    asOwnWrite?: (taskId: string, write: () => UpdateStatusResult) => UpdateStatusResult
+  } = {},
+): DbTask[] {
+  const cancelled: DbTask[] = []
+  const inScope = opts.asOwnWrite ?? ((_id, write) => write())
+  for (const t of subtreeOf(db, taskId)) {
+    if (isTerminal(t.status as TaskStatus)) continue
+    const r = inScope(t.id, () =>
+      updateStatus(db, t.id, 'cancelled', opts.byPerson ? { byPersonCascade: true } : {}),
+    )
+    if (r.ok && r.task) cancelled.push(r.task)
+  }
+  return cancelled
+}
+
+/**
+ * A person closes a request: the main task moves, and every open task under it is
+ * cancelled, in one write. The main task goes first, so a move the board refuses (a
+ * finish day it cannot take) leaves all its work as it was. The caller stops the runs.
+ */
+export function closeMainTaskByPerson(
+  db: ClawbooDb,
+  taskId: string,
+  to: 'done' | 'cancelled',
+  opts: {
+    completedAt?: number
+    humanOverride?: boolean
+    asOwnWrite?: (taskId: string, write: () => UpdateStatusResult) => UpdateStatusResult
+  } = {},
+): { result: UpdateStatusResult; cancelled: DbTask[] } {
+  return immediateWrite(db, () => {
+    const result = updateStatus(db, taskId, to, {
+      actor: 'person',
+      ...(opts.completedAt !== undefined ? { completedAt: opts.completedAt } : {}),
+      ...(opts.humanOverride ? { humanOverride: true } : {}),
+    })
+    if (!result.ok) return { result, cancelled: [] }
+    return {
+      result,
+      cancelled: closeOpenSubtasksOfMain(db, taskId, {
+        byPerson: true,
+        ...(opts.asOwnWrite ? { asOwnWrite: opts.asOwnWrite } : {}),
+      }),
+    }
+  })
+}
+
+/**
+ * Rooms holding a request with nothing left open and no report on its way, so its
+ * lead is next to act and may have no engine loaded. Only `in_progress`: a parked one
+ * waits on a person. The dispatch pump builds these rooms' engines.
+ */
+export function listRoomsWithIdleMainTasks(
+  db: ClawbooDb,
+): Array<{ teamId: string; roomId: string | null }> {
+  const rows = db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.isMainTask, 1), eq(tasks.status, 'in_progress'), eq(tasks.dropped, 0)))
+    .all() as DbTask[]
+  const rooms = new Map<string, { teamId: string; roomId: string | null }>()
+  for (const r of rows) {
+    if (!r.teamId) continue
+    const state = mainTaskStateOf(db, r)
+    if (state.openSubtasks > 0) continue
+    const ids = [r.id, ...state.subtaskIds]
+    const waiting = db
+      .select({ id: reportUpOutbox.id })
+      .from(reportUpOutbox)
+      .where(and(isNull(reportUpOutbox.settledAt), inArray(reportUpOutbox.taskId, ids)))
+      .get()
+    if (waiting) continue
+    rooms.set(`${r.teamId}\u0000${r.roomId ?? ''}`, { teamId: r.teamId, roomId: r.roomId })
+  }
+  return [...rooms.values()]
+}
+
 export interface HandOffCapacity {
   /** How many more tasks fit right now. */
   room: number
@@ -471,9 +861,14 @@ export function handOffCapacity(
   db: ClawbooDb,
   parentTaskId: string | null,
   teamId?: string | null,
+  /** The tasks go under a main task this create would make: one root, and the rest
+   *  hold slots under it. */
+  opts: { newRequest?: boolean } = {},
 ): HandOffCapacity | null {
   if (parentTaskId === null) {
     const recent = countRecentRoots(db, Date.now() - DEFAULT_ROOT_CREATE_WINDOW_MS, teamId)
+    if (opts.newRequest && recent < DEFAULT_MAX_ROOT_CREATES)
+      return { room: DEFAULT_MAX_CHILDREN, max: DEFAULT_MAX_CHILDREN, reason: 'child_cap' }
     return {
       room: Math.max(0, DEFAULT_MAX_ROOT_CREATES - recent),
       max: DEFAULT_MAX_ROOT_CREATES,
@@ -701,6 +1096,8 @@ export function claimTask(
           isNull(tasks.assigneeAgentId),
           // A person's task is theirs: every claim, on every path, comes through here.
           isNull(tasks.assigneePersonId),
+          // A main task holds a request and never runs by itself.
+          eq(tasks.isMainTask, 0),
           eq(tasks.dropped, 0),
         ),
       )
@@ -966,7 +1363,12 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
       })
       // A person working their own task In progress has not left it to the queue.
       .where(
-        and(eq(tasks.id, taskId), eq(tasks.status, 'in_progress'), isNull(tasks.assigneePersonId)),
+        and(
+          eq(tasks.id, taskId),
+          eq(tasks.status, 'in_progress'),
+          isNull(tasks.assigneePersonId),
+          eq(tasks.isMainTask, 0),
+        ),
       )
       .returning({ teamId: tasks.teamId })
       .all(),
@@ -991,6 +1393,8 @@ export type UpdateStatusReason =
   | 'person_assigned'
   | 'awaiting_answer'
   | 'blocker_cancelled'
+  /** A person's main task moves by itself or by a person, never by anyone else. */
+  | 'main_task'
 export interface UpdateStatusResult {
   ok: boolean
   task?: DbTask
@@ -1040,6 +1444,9 @@ export interface UpdateStatusOptions {
    *  frees the task's slot under its parent as their own cancel does, without being
    *  a move of this card (see `personCancelledAt`). */
   byPersonCascade?: boolean
+  /** The server moving a main task through its life (`closeMainTask`, `parkMainTask`,
+   *  `resumeMainTask`). No other writer but a person may move one. */
+  mainTaskLifecycle?: boolean
 }
 
 /** When the task's latest run started (its newest execution's start, claim or
@@ -1162,6 +1569,7 @@ export function updateStatus(
   // transition.
   const waitersReleased: BoardLifecycleEvent[] = []
   const dependentsWoken: Array<{ taskId: string; teamId: string | null }> = []
+  const mainsReopened: Array<{ taskId: string; teamId: string | null }> = []
   const result = immediateWrite(db, (tx): UpdateStatusResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
@@ -1172,13 +1580,27 @@ export function updateStatus(
       if (personMovedSinceLastRun(tx, row)) return { ok: false, reason: 'person_moved', task: row }
     }
     const from = row.status as TaskStatus
-    const personMove =
+    // A main task: a person finishes it from wherever it is, or reopens it to where it
+    // waits, and only the server moves it otherwise. Everyone else leaves it alone.
+    const isMain = row.isMainTask === 1
+    const personOnMain =
+      isMain &&
       opts.actor === 'person' &&
-      personMoveAllowed(from, to, {
-        ...(opts.reopen === true ? { reopen: true } : {}),
-        personAssigned: row.assigneePersonId != null,
-      })
-    if (!canTransition(from, to) && !personMove) return { ok: false, reason: 'illegal_transition' }
+      (opts.reopen === true
+        ? isTerminal(from) && to === 'in_progress'
+        : !isTerminal(from) && isTerminal(to))
+    const lifecycleOnMain = isMain && opts.mainTaskLifecycle === true
+    if (isMain && from !== to && !personOnMain && !lifecycleOnMain)
+      return { ok: false, reason: 'main_task', task: row }
+    const personMove =
+      personOnMain ||
+      (opts.actor === 'person' &&
+        personMoveAllowed(from, to, {
+          ...(opts.reopen === true ? { reopen: true } : {}),
+          personAssigned: row.assigneePersonId != null,
+        }))
+    if (!canTransition(from, to) && !personMove && !lifecycleOnMain)
+      return { ok: false, reason: 'illegal_transition' }
     // Reopen is that one move: a task that is not finished has nothing to reopen.
     if (opts.reopen === true && !personMove) return { ok: false, reason: 'illegal_transition' }
     // Back in To do it would look queued, and nothing would ever start it.
@@ -1244,7 +1666,11 @@ export function updateStatus(
     // A dependency moving to done, on any path: its wakes commit with it.
     if (to === 'done' && from !== 'done')
       dependentsWoken.push(...recordDependencyWakesTx(tx, taskId, now))
-    if (reopening) freshStartForReopenedTx(tx, row)
+    if (reopening) {
+      freshStartForReopenedTx(tx, row)
+      const mainReopened = reopenClosedMainAboveTx(tx, row, now)
+      if (mainReopened) mainsReopened.push(mainReopened)
+    }
     const updated = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
     // A question lasts only while the task waits on it: any move ends it, and so does
     // any other reason written over it. Else it stays open with nothing waiting on it,
@@ -1269,7 +1695,44 @@ export function updateStatus(
   noteWaitersReleased(db, waitersReleased)
   for (const woken of dependentsWoken)
     emitBoardLifecycle({ kind: 'task_wake_recorded', ...woken, reason: 'dependency_done' })
+  for (const main of mainsReopened)
+    emitBoardLifecycle({ kind: 'status_changed', ...main, status: 'in_progress' })
   return result
+}
+
+/**
+ * A person reopened a task under a request that had closed: the request is open again,
+ * so the task's report has someone to go to and its lead writes a new summary. Null
+ * when there is no main task above it, or that one is still open.
+ */
+function reopenClosedMainAboveTx(
+  tx: BoardTx,
+  row: DbTask,
+  now: number,
+): { taskId: string; teamId: string | null } | null {
+  const seen = new Set<string>([row.id])
+  let parentId = row.parentTaskId
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId)
+    const above = tx.select().from(tasks).where(eq(tasks.id, parentId)).get() as DbTask | undefined
+    if (!above) return null
+    if (above.isMainTask === 1) {
+      if (!isTerminal(above.status as TaskStatus)) return null
+      tx.update(tasks)
+        .set({
+          status: 'in_progress',
+          completedAt: null,
+          personCancelledAt: null,
+          waitingOn: waitingOnJson(MAIN_TASK_WAIT),
+          updatedAt: now,
+        })
+        .where(eq(tasks.id, above.id))
+        .run()
+      return { taskId: above.id, teamId: above.teamId ?? null }
+    }
+    parentId = above.parentTaskId
+  }
+  return null
 }
 
 /** Publish what a closing task freed, post-commit. The event log is what browser
@@ -1504,7 +1967,12 @@ export function releaseOneSubtaskWait(db: ClawbooDb, taskId: string): BoardLifec
  *  included. A ledger is read only where it decides anything: a sub-task in To do. */
 export function subtaskViewsOf(tx: ClawbooDb | BoardTx, taskId: string): SubtaskView[] {
   const rows = tx.select().from(tasks).where(eq(tasks.parentTaskId, taskId)).all() as DbTask[]
-  return rows.map((t) => ({
+  return rows.map((t) => subtaskViewOf(tx, t, taskId))
+}
+
+/** One task as the barrier reads it, against the task waiting on it. */
+function subtaskViewOf(tx: ClawbooDb | BoardTx, t: DbTask, waiterId: string): SubtaskView {
+  return {
     id: t.id,
     title: t.title,
     status: t.status,
@@ -1513,7 +1981,8 @@ export function subtaskViewsOf(tx: ClawbooDb | BoardTx, taskId: string): Subtask
     sourceDelegationId: t.sourceDelegationId,
     assigneeAgentId: t.assigneeAgentId,
     assigneePersonId: t.assigneePersonId,
-    waitsOnThisTask: waitReaches(tx, [t.id], taskId),
+    waitsOnThisTask: waitReaches(tx, [t.id], waiterId),
+    requestedBy: t.requestedBy,
     execs:
       t.status === 'todo'
         ? (tx
@@ -1523,7 +1992,7 @@ export function subtaskViewsOf(tx: ClawbooDb | BoardTx, taskId: string): Subtask
             .orderBy(executionProcesses.createdAt)
             .all() as DbExecutionProcess[])
         : [],
-  }))
+  }
 }
 
 /** Say why a task that stayed Blocked is still here, when a person's action could not
@@ -1538,28 +2007,36 @@ export function noteBlockedReason(db: ClawbooDb, taskId: string, waitingOn: Wait
   )
 }
 
+/** One the card of the task waiting on it sends a person to, so one Needs you shows:
+ *  nothing there points at the Backlog. */
+const needsPersonFromWaiter = (v: SubtaskView): boolean =>
+  v.status !== 'backlog' && ['with_person', 'stopped', 'not_coming'].includes(subtaskStanding(v))
+
 /** What a task waiting on other work waits on, for its card to name: the task's
  *  title, or how many of its sub-tasks are open and how many of those need a person.
  *  Undefined for any other wait. */
 export function waitingOnDetailOf(
   db: ClawbooDb,
-  task: Pick<DbTask, 'id' | 'waitingOn'>,
+  task: Pick<DbTask, 'id' | 'waitingOn'> & { isMainTask?: number },
 ): { taskTitle?: string; openSubtasks?: number; needPerson?: number } | undefined {
   const w = parseWaitingOn(task.waitingOn)
   if (w?.kind === 'task') return { taskTitle: getTask(db, w.taskId)?.title ?? '' }
   if (w?.kind !== 'subtasks') return undefined
+  // A person's request waits on its whole tree, not only what is directly under it.
+  if (task.isMainTask === 1) {
+    const held = openTreeViews(db, task.id, subtreeOf(db, task.id)).filter(requestWaitsOn)
+    // What holds the request and will not move by itself: Needs you shows each of these.
+    const needPerson = held.filter(
+      (v) => v.status !== 'backlog' && subtaskStanding(v) !== 'coming',
+    ).length
+    return { openSubtasks: held.length, ...(needPerson > 0 ? { needPerson } : {}) }
+  }
   const views = subtaskViewsOf(db, task.id)
   const t = tallySubtasks(views)
   // Open, as the wait counts them: what is coming, and what needs someone to act.
   const open =
     t.coming + t.withPerson + t.stopped + t.notComing + (w.handedOut ? 0 : t.notHandedOut)
-  // The ones the card sends a person to, so the ones Needs you shows: nothing there
-  // points at the Backlog.
-  const needPerson = views.filter(
-    (v) =>
-      v.status !== 'backlog' &&
-      ['with_person', 'stopped', 'not_coming'].includes(subtaskStanding(v)),
-  ).length
+  const needPerson = views.filter(needsPersonFromWaiter).length
   return { openSubtasks: open, ...(needPerson > 0 ? { needPerson } : {}) }
 }
 
@@ -1660,7 +2137,7 @@ export function assignTaskDelegation(
     if (!row) return { ok: false, reason: 'not_found' }
     const from = row.status as TaskStatus
     const assignable = ASSIGNABLE_STATUSES.has(from) || isStrandedInProgress(tx, row)
-    if (row.dropped || !assignable || !canTransition(from, 'todo')) {
+    if (row.dropped || row.isMainTask === 1 || !assignable || !canTransition(from, 'todo')) {
       return { ok: false, reason: 'not_assignable' }
     }
     hadPerson = row.assigneePersonId != null
@@ -1729,7 +2206,8 @@ export function assignTaskToPerson(
     if (!row) return { ok: false, reason: 'not_found' }
     const from = row.status as TaskStatus
     const assignable = ASSIGNABLE_STATUSES.has(from) || isStrandedInProgress(tx, row)
-    if (row.dropped || !assignable) return { ok: false, reason: 'not_assignable' }
+    if (row.dropped || row.isMainTask === 1 || !assignable)
+      return { ok: false, reason: 'not_assignable' }
     const now = Date.now()
     tx.update(tasks)
       .set({
@@ -1820,7 +2298,8 @@ export function handBackTask(
   const result = immediateWrite(db, (tx): HandBackResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
-    if (row.assigneeAgentId !== input.agentId) return { ok: false, reason: 'not_yours', task: row }
+    if (row.assigneeAgentId !== input.agentId || row.isMainTask === 1)
+      return { ok: false, reason: 'not_yours', task: row }
     if (firedByRoutine(row)) return { ok: false, reason: 'routine', task: row }
     if (personMovedSinceLastRun(tx, row)) return { ok: false, reason: 'person_moved', task: row }
     const from = row.status as TaskStatus
@@ -1913,6 +2392,13 @@ export function countOpenSubtasks(db: ClawbooDb, taskId: string): number {
 /** A person reopens a finished task: Done or Cancelled back to To do. Only the
  *  person-only Reopen route calls this, and the finish time is cleared. */
 export function reopenTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
+  // A main task never runs, so it goes back to where it waits, not to the queue.
+  if (getTask(db, taskId)?.isMainTask === 1)
+    return updateStatus(db, taskId, 'in_progress', {
+      actor: 'person',
+      reopen: true,
+      waitingOn: MAIN_TASK_WAIT,
+    })
   return updateStatus(db, taskId, 'todo', { actor: 'person', reopen: true })
 }
 
@@ -2106,6 +2592,8 @@ export function getReadyTasks(
     eq(tasks.dropped, 0),
     // A person's task is never an agent's next job, so no pump starts it.
     isNull(tasks.assigneePersonId),
+    // A main task holds a request and never runs by itself.
+    eq(tasks.isMainTask, 0),
     sql`NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks dt ON dt.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dt.status != 'done')`,
   ]
   if (filter.teamId) conds.push(eq(tasks.teamId, filter.teamId))
@@ -2156,10 +2644,16 @@ export function getAncestors(db: ClawbooDb, taskId: string): AncestorRow[] {
         UNION
         SELECT t.parent_task_id FROM tasks t JOIN ancestors a ON t.id = a.id WHERE t.parent_task_id IS NOT NULL
       )
-      SELECT id, parent_task_id, title, status FROM tasks WHERE id IN (SELECT id FROM ancestors)
+      SELECT id, parent_task_id, title, status, is_main_task FROM tasks WHERE id IN (SELECT id FROM ancestors)
     `,
   )
   return ancestorRowsSchema.parse(rows)
+}
+
+/** How deep a task sits for the depth caps: its ancestors, less a person's main task,
+ *  which is not a level. Every depth cap reads this, so helpers lose no hand-offs. */
+export function spawnDepth(ancestors: ReadonlyArray<{ is_main_task?: number }>): number {
+  return ancestors.filter((a) => a.is_main_task !== 1).length
 }
 
 // ─── Comments ────────────────────────────────────────────────────────────────

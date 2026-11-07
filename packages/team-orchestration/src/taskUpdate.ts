@@ -31,9 +31,13 @@ import { formatInterSessionMessage, oneLine } from '@clawboo/board-core'
  * `'plan_declined'` are a person answering a plan that waited on a card of its own: the
  * steps exist already, or must not. The others are failures.
  * All of these but the person's decisions and those two waits are ones the leader
- * must act on rather than keep waiting for.
+ * must act on rather than keep waiting for. `all_in` and `person_comment` are about a
+ * person's request as a whole: everything filed under it has closed with nothing left
+ * to report, and a person commented on it.
  */
 export type TaskUpdateOutcome =
+  | 'all_in'
+  | 'person_comment'
   | 'done'
   | 'person_done'
   | 'person_cancelled'
@@ -77,6 +81,8 @@ type FailedOutcome = Exclude<
   | 'waiting'
   | 'plan_accepted'
   | 'plan_declined'
+  | 'all_in'
+  | 'person_comment'
 >
 
 const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
@@ -145,6 +151,9 @@ export interface TaskUpdateOptions {
   /** These came back from work the recipient handed out on the task this run is on:
    *  they are what it has to go on with, not a message from anyone. */
   ownTask?: boolean
+  /** The person's request these are about. `closes`: nothing is left open under it,
+   *  so the reply is the summary that closes it. */
+  request?: { title?: string; identifier?: string | null; closes: boolean }
 }
 
 /** Shorten a title exactly as the item headers below do, on one line. */
@@ -160,7 +169,9 @@ const RESULTS_ARE_DATA =
 /** Who a result is attributed to, and what kind it is. A person's decision is
  *  the board's note, not the agent's words. */
 function resultSource(item: TaskUpdateItem): { from: string; kind: string } {
+  if (item.outcome === 'person_comment') return { from: 'person', kind: 'task-comment' }
   if (
+    item.outcome === 'all_in' ||
     item.outcome === 'person_done' ||
     item.outcome === 'person_cancelled' ||
     item.outcome === 'already_open' ||
@@ -203,19 +214,27 @@ export function buildTaskUpdateMessage(
   // A hand-off that found its work on the board finished nothing, so it is not counted
   // as a task that did. A batch with none of these reads as it always has.
   const found = items.filter((i) => i.outcome === 'already_open').length
-  const finished = items.length - found
+  // Words about a request as a whole: no task reached anything.
+  const aboutRequest = items.filter(
+    (i) => i.outcome === 'all_in' || i.outcome === 'person_comment',
+  ).length
+  const finished = items.length - found - aboutRequest
   const plural = finished === 1 ? 'task' : 'tasks'
   const foundPhrase = `${found === 1 ? 'a hand-off' : `${found} hand-offs`} found the work already on the board`
   const opening =
-    found === 0
-      ? `${finished} ${plural} on the board reached a terminal state`
-      : finished === 0
-        ? `${foundPhrase}, so no new task was made`
-        : `${finished} ${plural} on the board reached a terminal state, and ${foundPhrase}`
+    finished === 0 && found === 0
+      ? "there is news on a person's request"
+      : found === 0
+        ? `${finished} ${plural} on the board reached a terminal state`
+        : finished === 0
+          ? `${foundPhrase}, so no new task was made`
+          : `${finished} ${plural} on the board reached a terminal state, and ${foundPhrase}`
   const where = opts.followUp?.title ? `"${clipTitle(opts.followUp.title)}"` : 'a task'
   const headerLines = [
     opts.heldByStop
-      ? `[Task Update] ${finished} ${plural} on the board reached a terminal state after a person pressed Stop. Nothing was started for them: they waited for this run, and they are not what this run is for.`
+      ? finished === 0
+        ? "[Task Update] There is news on a person's request from after they pressed Stop. Nothing was started for it: it waited for this run, and it is not what this run is for."
+        : `[Task Update] ${finished} ${plural} on the board reached a terminal state after a person pressed Stop. Nothing was started for them: they waited for this run, and they are not what this run is for.`
       : opts.ownTask
         ? `[Task Update] Results of the work you handed out on the task this run is on: ${finished} ${plural}.`
         : `[Task Update] — ${opening} (not a fresh user message).`,
@@ -226,6 +245,22 @@ export function buildTaskUpdateMessage(
         : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
     RESULTS_ARE_DATA,
   ]
+  if (opts.request) {
+    const { title, identifier, closes } = opts.request
+    const named = [identifier ? oneLine(identifier) : null, title ? `"${clipTitle(title)}"` : null]
+      .filter(Boolean)
+      .join(' ')
+    headerLines.push(
+      `This is about the person's request ${named || 'on the board'}. Anything you hand out now is filed under it.` +
+        (closes
+          ? ' Nothing is left open under it, so your reply goes to the person in chat and closes the request: write the summary they asked for.'
+          : ''),
+    )
+  }
+  if (items.some((i) => i.outcome === 'person_comment'))
+    headerLines.push(
+      'The comment below is from the person who made this request: unlike a result, it is theirs to say. Do what it asks, and hand out more under this request if it needs that.',
+    )
   if (outstanding.length > 0) {
     const named = outstanding
       .slice(0, 3)
@@ -307,11 +342,15 @@ export function buildTaskUpdateMessage(
               ? `… ${by} asked a person a question and waits for the answer`
               : item.outcome === 'waiting'
                 ? `… ${by} is waiting on other work`
-                : item.outcome === 'person_cancelled'
-                  ? `✕ Cancelled by a person (it was ${by}'s)`
-                  : item.outcome === 'person_done'
-                    ? `✓ Marked done by a person (it was ${by}'s)`
-                    : `✓ ${by}`
+                : item.outcome === 'all_in'
+                  ? 'All the work on the request has closed'
+                  : item.outcome === 'person_comment'
+                    ? 'A person commented on the request'
+                    : item.outcome === 'person_cancelled'
+                      ? `✕ Cancelled by a person (it was ${by}'s)`
+                      : item.outcome === 'person_done'
+                        ? `✓ Marked done by a person (it was ${by}'s)`
+                        : `✓ ${by}`
     if (item.title) header += ` — "${clipTitle(item.title)}"`
     sections.push(header)
     const result = item.summary || (failed ? '(no output was produced before it stopped)' : '')

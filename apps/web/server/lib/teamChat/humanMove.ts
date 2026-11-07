@@ -47,6 +47,9 @@ export interface HumanMove {
   to: string
   /** Plan steps cancelled with the task, which the delegator hears about too. */
   cancelledDependents?: Array<{ id: string; title?: string | null }>
+  /** It closed because a person closed the request it is filed under: its run stops,
+   *  and no one is told, since no one is waiting. */
+  withItsRequest?: boolean
 }
 
 export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
@@ -70,7 +73,7 @@ export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
       .catch((err: unknown) => log.error({ err, taskId, teamId }, 'person-move handling failed'))
     return
   }
-  if (to !== 'done' && to !== 'cancelled') return
+  if ((to !== 'done' && to !== 'cancelled') || move.withItsRequest) return
   try {
     const task = getTask(db, taskId)
     const sdid = (task?.sourceDelegationId as string | null) ?? ''

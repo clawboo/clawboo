@@ -9,7 +9,18 @@ import { Button } from '@/features/shared/Button'
 import { useToastStore } from '@/stores/toast'
 
 /** What sending a reply does, for a task in `status`. */
-export function replyHint(status: string, agentName: string | null, paused = false): string {
+export function replyHint(
+  status: string,
+  agentName: string | null,
+  paused = false,
+  request = false,
+): string {
+  if (request)
+    return status === 'done' || status === 'cancelled'
+      ? 'This request is finished. Reopen it to say more.'
+      : paused
+        ? `This is paused. ${agentName ?? 'The team lead'} reads this after the resume, and can add work to this request.`
+        : `${agentName ?? 'The team lead'} reads this, and can add work to this request.`
   if (status === 'done' || status === 'cancelled')
     return 'This task is finished. Reopen it, or send your reply as a follow-up task.'
   if (!agentName) return 'No agent has this task. Your reply is saved on it.'
@@ -25,6 +36,7 @@ export function TaskReplyBox({
   status,
   agentName,
   paused = false,
+  request,
   onSent,
 }: {
   taskId: string
@@ -33,6 +45,8 @@ export function TaskReplyBox({
   paused?: boolean
   /** The agent the task belongs to, by name; null when nobody has it. */
   agentName: string | null
+  /** It is a person's main task: the words go to the agent looking after it. */
+  request?: boolean
   onSent: (sent: { commentId: string | null; delivery: ReplyDelivery | null; body: string }) => void
 }) {
   const [draft, setDraft] = useState('')
@@ -79,7 +93,7 @@ export function TaskReplyBox({
         />
         <div className="flex items-center gap-2 px-2 pb-2">
           <span className="min-w-0 flex-1 px-1 text-xs text-muted-foreground">
-            {replyHint(status, agentName, paused)}
+            {replyHint(status, agentName, paused, request)}
           </span>
           <Button type="submit" size="sm" variant="primary" disabled={!draft.trim() || sending}>
             Send

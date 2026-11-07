@@ -55,6 +55,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | 1:1 chats                                           | `chat.direct`                                                                      | Supported                      | Planned     | Planned       |
 | Board, with checks on finished work                 | `board.verification`, `board.checkHold`, `board.reportResult`, `board.parentWaits` | Supported                      | Planned     | Planned       |
 | A person's inbox, with read state on the server     | `board.inbox`                                                                      | Supported                      | Planned     | Planned       |
+| A person's request as one main task                 | `board.mainTasks`                                                                  | Supported                      | Planned     | Planned       |
 | Comments that reach a running task                  | `board.steering`                                                                   | Supported                      | Planned     | Planned       |
 | Readable task ids                                   | `board.readableIds`                                                                |
 | Team labels on tasks                                | `board.labels`                                                                     |

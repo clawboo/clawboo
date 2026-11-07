@@ -24,10 +24,21 @@
 
 import type { TaskWakeReason } from '@clawboo/board-core'
 
+/** The person's message a turn answers: what the turn's first hand-off makes a main
+ *  task from (see `createHandOff`). A plain answer leaves it unused. */
+export interface TurnRequest {
+  /** Their words, whole. */
+  words: string
+  /** Who asked: the verified person, the built-in one, or null for a routine. */
+  requestedBy?: { id: string; name: string | null; role: string | null } | null
+  /** The routine that posted it, when one did. */
+  routineName?: string
+}
+
 /** The reason a turn is being delivered. */
 export type TurnOrigin =
   /** A human typed into team chat — the leader, or a specialist they @mentioned. */
-  | { kind: 'human' }
+  | { kind: 'human'; request?: TurnRequest }
   /** A peer delegated this task. `fromAgentId` is the delegator (the reduce point
    *  its result reports to), or null when the engine could not attribute one. */
   | { kind: 'delegation'; fromAgentId: string | null }
@@ -60,12 +71,16 @@ export type TurnOrigin =
    *
    *  `reportUpIds`, present only when set, names the durable report-ups this
    *  update carries. The host copies them onto the run's stamp, and the engine
-   *  settles them when that run ends. */
-  | { kind: 'system'; forTaskId?: string; reportUpIds?: string[] }
+   *  settles them when that run ends.
+   *
+   *  `mainTaskId`, present only when set, says which person's request this update
+   *  is about: what the recipient hands out goes under it, and when all its work is
+   *  in, the reply is the summary that closes it. Never with `forTaskId`. */
+  | { kind: 'system'; forTaskId?: string; reportUpIds?: string[]; mainTaskId?: string }
   /** A routine the person scheduled posted this into team chat on their behalf.
    *  It carries their words, so it frames like a human turn, but nobody is
    *  necessarily watching when it runs. */
-  | { kind: 'schedule'; routineName: string }
+  | { kind: 'schedule'; routineName: string; request?: TurnRequest }
 
 /** Convenience singletons: these variants carry no payload. */
 export const HUMAN_TURN: TurnOrigin = { kind: 'human' }
@@ -185,6 +200,10 @@ export interface RunStamp {
   wakeIds?: string[]
   /** A pause stopped this run. It is no failure, and what it carried comes back. */
   stoppedByPause?: boolean
+  /** A person's or a routine's message: `TurnOrigin.request`. */
+  request?: TurnRequest
+  /** An update about one request: `TurnOrigin.mainTaskId`. */
+  mainTaskId?: string
 }
 
 /**

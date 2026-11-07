@@ -60,6 +60,8 @@ export interface SubtaskView {
   /** It needs the task it is under to finish first: a wait, a dependency, or a chain
    *  of them leads back there. */
   waitsOnThisTask?: boolean
+  /** The person who filed it, when one did. */
+  requestedBy?: unknown
 }
 
 /** What one sub-task means to the task waiting on it. */
@@ -153,6 +155,23 @@ export function subtasksStillOut(t: SubtaskTally): boolean {
 export function subtaskWaitOver(t: SubtaskTally, opts: { handedOutOnly?: boolean } = {}): boolean {
   if (subtasksStillOut(t) || t.stopped > 0) return false
   return opts.handedOutOnly === true || t.notHandedOut === 0
+}
+
+/**
+ * Does a person's request still wait on this task, filed anywhere under its main task?
+ * The barrier's own reading of what a task handing out work waits on, kept open for
+ * what did not finish: its lead has heard, and a person retries it or cancels it. What
+ * needs the request closed first holds nothing, nor does an agent's note to itself.
+ * Two things read as not handed out and still hold a request. A card holding a plan:
+ * its steps are the work, and until a person answers there are none yet. And a task a
+ * person filed under it and has yet to give to anyone: that is more of their request.
+ */
+export function requestWaitsOn(task: SubtaskView): boolean {
+  if (task.status === 'done' || task.status === 'cancelled' || task.dropped) return false
+  if (isPlanHolder(task.sourceDelegationId)) return true
+  const standing = subtaskStanding(task)
+  if (standing === 'not_handed_out') return !!task.requestedBy
+  return standing !== 'waits_on_this'
 }
 
 /** Sub-tasks that ended without getting done. A cancelled one was somebody's decision. */

@@ -32,10 +32,11 @@ import {
   teams,
   type ClawbooDb,
 } from '@clawboo/db'
-import { delegationTargetOf, isLocked, type TaskStatus } from '@clawboo/board-core'
+import { delegationTargetOf, isLocked, isTerminal, type TaskStatus } from '@clawboo/board-core'
 import { and, eq, inArray, like, ne, or } from 'drizzle-orm'
 
 import { nativeTeamSessionSettingKey } from './teamChat/nativeTeamSession'
+import { roomLeadId } from './teamChat/roomRoster'
 
 export type MoveAgentResult =
   | {
@@ -107,10 +108,11 @@ export function moveAgentToTeam(
     // A locked task reports to the team it started in, the board's own reading
     // of "owned": in progress, or in review, which a failed check can send back
     // to in progress with the same assignee. Wait for it to finish.
+    // A person's request it looks after is not one: nothing is running it.
     const holdsLocked = tx
       .select({ status: tasks.status })
       .from(tasks)
-      .where(and(eq(tasks.assigneeAgentId, agentId), eq(tasks.dropped, 0)))
+      .where(and(eq(tasks.assigneeAgentId, agentId), eq(tasks.dropped, 0), eq(tasks.isMainTask, 0)))
       .all()
       .some((t) => isLocked(t.status as TaskStatus))
     if (holdsLocked) return { ok: false, status: 409, error: 'agent_busy' }
@@ -134,6 +136,7 @@ export function moveAgentToTeam(
           and(
             eq(tasks.teamId, fromTeamId),
             eq(tasks.dropped, 0),
+            eq(tasks.isMainTask, 0),
             inArray(tasks.status, OPEN_STATUSES),
           ),
         )
@@ -213,6 +216,25 @@ export function moveAgentToTeam(
         : 0
 
     tx.update(agents).set({ teamId: toTeamId, updatedAt: now }).where(eq(agents.id, agentId)).run()
+
+    // A person's request it looked after stays on the old board, as the work under it
+    // does, and the lead of that chat looks after it now. Read after the move above, so
+    // the lead is never this agent.
+    const led = tx
+      .select({ id: tasks.id, teamId: tasks.teamId, roomId: tasks.roomId, status: tasks.status })
+      .from(tasks)
+      .where(and(eq(tasks.assigneeAgentId, agentId), eq(tasks.isMainTask, 1), eq(tasks.dropped, 0)))
+      .all()
+      .filter((t) => !isTerminal(t.status as TaskStatus))
+    for (const t of led) {
+      tx.update(tasks)
+        .set({
+          assigneeAgentId: t.teamId ? roomLeadId(db, t.teamId, t.roomId) : null,
+          updatedAt: now,
+        })
+        .where(eq(tasks.id, t.id))
+        .run()
+    }
 
     return { ok: true, fromTeamId, toTeamId, tasksHandedBack, routinesMoved, routinesPaused }
   })

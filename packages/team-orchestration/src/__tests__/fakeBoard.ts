@@ -10,10 +10,12 @@ import {
   delegatorOf,
   encodePlanHolder,
   HAND_OFF_TITLE_CHARS,
+  isPlanHolder,
   isTaskStatus,
   ledgerWillAutoFire,
   normalizeTaskTitle,
   parseResultClaim,
+  requestWaitsOn,
   strongerWakeReason,
   subtaskWaitOver,
   tallySubtasks,
@@ -42,6 +44,7 @@ import type {
   HandOffCapacity,
   HandOffInput,
   HandOffResult,
+  MainTaskState,
   PlanProposal,
   ProposePlanInput,
   TaskDetail,
@@ -59,6 +62,8 @@ interface FakeRow {
   sourceDelegationId: string | null
   assigneeAgentId: string | null
   createdAt?: number
+  isMainTask?: boolean
+  completedAt?: number
 }
 
 // The fake rejects an illegal transition exactly as the real repo's updateStatus
@@ -226,6 +231,7 @@ export class FakeBoard implements CascadeBoard {
       sourceDelegationId: t.sourceDelegationId,
       assigneeAgentId: t.assigneeAgentId,
       ...(t.createdAt !== undefined ? { createdAt: t.createdAt } : {}),
+      ...(t.isMainTask ? { isMainTask: 1 } : {}),
       ...(this.waits.has(t.id) ? { waitingOn: JSON.stringify(this.waits.get(t.id)) } : {}),
     }
   }
@@ -273,8 +279,16 @@ export class FakeBoard implements CascadeBoard {
   }
   private openTitleMatch(input: HandOffInput): FakeRow | undefined {
     const parent = input.parentTaskId ?? null
+    // Under a person's request, or about to be: every request has its own main task,
+    // and the same work asked for under another one is still a repeat.
+    const anyRequest =
+      input.mainTask !== undefined || (parent !== null && this.tasks.get(parent)?.isMainTask)
     for (const t of this.tasks.values()) {
-      if (t.parentTaskId !== parent || !this.sameAsk(t, input)) continue
+      if (t.isMainTask) continue
+      const parentMatches = anyRequest
+        ? t.parentTaskId === null || this.tasks.get(t.parentTaskId)?.isMainTask === true
+        : t.parentTaskId === parent
+      if (!parentMatches || !this.sameAsk(t, input)) continue
       if (input.turnId && t.sourceDelegationId?.startsWith(`${input.turnId}:`)) continue
       if (
         !['todo', 'in_progress', 'in_review'].includes(t.status) &&
@@ -308,6 +322,50 @@ export class FakeBoard implements CascadeBoard {
       return { ok: true, task: this.toBoardTask(replayed), deduplicated: 'key' }
     }
     const open = this.openTitleMatch(input)
+    const heldMain = input.mainTask ? this.tasks.get(this.keys.get(input.mainTask.key) ?? '') : null
+    // A request that has closed takes no more work, at any depth under it.
+    for (
+      let at = this.tasks.get(input.parentTaskId ?? heldMain?.id ?? '');
+      at && !open;
+      at = at.parentTaskId ? this.tasks.get(at.parentTaskId) : undefined
+    )
+      if (at.isMainTask && (at.status === 'done' || at.status === 'cancelled'))
+        return { ok: false, reason: 'main_closed' }
+    if (!open && input.mainTask && !heldMain) {
+      const count = this.rootCount()
+      if (count >= DEFAULT_MAX_ROOT_CREATES) {
+        return {
+          ok: false,
+          reason: 'root_rate_cap',
+          count,
+          max: DEFAULT_MAX_ROOT_CREATES,
+          windowMs: DEFAULT_ROOT_CREATE_WINDOW_MS,
+        }
+      }
+      const main: FakeRow = {
+        id: `task-${++this.taskN}`,
+        status: 'in_progress',
+        parentTaskId: null,
+        title: input.mainTask.title,
+        description: input.mainTask.description,
+        sourceDelegationId: null,
+        assigneeAgentId: input.mainTask.leadAgentId,
+        isMainTask: true,
+      }
+      this.tasks.set(main.id, main)
+      this.keys.set(input.mainTask.key, main.id)
+      const { mainTask: _main, handOffKey: _key, turnId: _turn, ...fields } = input
+      const child = await this.createTask({ ...fields, parentTaskId: main.id })
+      if (!child) return { ok: false, reason: 'error' }
+      if (key) this.keys.set(key, child.id)
+      return { ok: true, task: child, mainTask: this.toBoardTask(main) }
+    }
+    if (!open && heldMain)
+      return this.createHandOff({
+        ...input,
+        mainTask: undefined,
+        parentTaskId: heldMain.id,
+      } as HandOffInput)
     if (open) {
       if (key) this.keys.set(key, open.id)
       return { ok: true, task: this.toBoardTask(open), deduplicated: 'title' }
@@ -372,7 +430,10 @@ export class FakeBoard implements CascadeBoard {
     this.waits.delete(q.taskId)
     const task = this.tasks.get(q.taskId)
     // A card that only held the plan closes with its answer. It never runs.
-    if (task && q.holder) task.status = answer.accepted ? 'done' : 'cancelled'
+    if (task && q.holder) {
+      task.status = answer.accepted ? 'done' : 'cancelled'
+      task.completedAt = Date.now()
+    }
     if (!answer.accepted) {
       if (task && q.holder) this.releaseParent(task.parentTaskId)
       return { ok: true, created: 0 }
@@ -452,12 +513,41 @@ export class FakeBoard implements CascadeBoard {
         }
     }
     let task = homeId ? this.tasks.get(homeId) : undefined
+    // A person's message with no task yet: the card and its main task land together, and a
+    // plan that takes the place of a waiting one stays where that one is.
+    let parentTaskId = input.parentTaskId
+    let mainTask: BoardTask | undefined
+    if (input.mainTask && !parentTaskId && !onOwnTask) {
+      if (task) parentTaskId = task.parentTaskId
+      else {
+        const held = this.tasks.get(this.keys.get(input.mainTask.key) ?? '')
+        if (held) parentTaskId = held.id
+        else {
+          if (this.rootCount() >= DEFAULT_MAX_ROOT_CREATES)
+            return { status: 'refused', reason: 'root_rate_cap' }
+          const main: FakeRow = {
+            id: `task-${++this.taskN}`,
+            status: 'in_progress',
+            parentTaskId: null,
+            title: input.mainTask.title,
+            description: input.mainTask.description,
+            sourceDelegationId: null,
+            assigneeAgentId: input.mainTask.leadAgentId,
+            isMainTask: true,
+          }
+          this.tasks.set(main.id, main)
+          this.keys.set(input.mainTask.key, main.id)
+          parentTaskId = main.id
+          mainTask = this.toBoardTask(main)
+        }
+      }
+    }
     if (!task) {
       const id = `task-${++this.taskN}`
       task = {
         id,
         status: 'blocked',
-        parentTaskId: input.parentTaskId,
+        parentTaskId,
         title: '',
         description: 'hold',
         sourceDelegationId: encodePlanHolder(input.agentId, id),
@@ -473,7 +563,7 @@ export class FakeBoard implements CascadeBoard {
       taskId: task.id,
       agentId: input.agentId,
       steps: input.steps,
-      parentTaskId: onOwnTask ? own!.id : input.parentTaskId,
+      parentTaskId: onOwnTask ? own!.id : parentTaskId,
       holder: !onOwnTask,
       parallel: input.parallel === true,
       status: 'pending',
@@ -483,6 +573,7 @@ export class FakeBoard implements CascadeBoard {
       task: this.toBoardTask(task),
       holder: !onOwnTask,
       ...(replaced ? { replaced } : {}),
+      ...(mainTask ? { mainTask } : {}),
     }
   }
   async startingWithoutAsking(input: { agentId: string }): Promise<void> {
@@ -491,7 +582,10 @@ export class FakeBoard implements CascadeBoard {
       q.status = 'closed'
       this.waits.delete(q.taskId)
       const task = this.tasks.get(q.taskId)
-      if (task) task.status = 'cancelled'
+      if (task) {
+        task.status = 'cancelled'
+        task.completedAt = Date.now()
+      }
     }
   }
   async closeWaitingPlans(): Promise<void> {
@@ -502,15 +596,24 @@ export class FakeBoard implements CascadeBoard {
       if (!task) continue
       this.waits.delete(task.id)
       task.status = q.holder ? 'cancelled' : 'todo'
-      if (q.holder) continue
+      if (q.holder) {
+        task.completedAt = Date.now()
+        continue
+      }
       task.assigneeAgentId = null
       const ref = await this.createExecution(task.id)
       if (ref) await this.completeExecution(ref.id, { status: 'cancelled', byPerson: true })
     }
   }
 
-  async handOffRoom(_teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null> {
+  async handOffRoom(
+    _teamId: string,
+    parentTaskId: string | null,
+    opts?: { newRequest?: boolean },
+  ): Promise<HandOffCapacity | null> {
     if (parentTaskId === null) {
+      if (opts?.newRequest && this.rootCount() < DEFAULT_MAX_ROOT_CREATES)
+        return { room: DEFAULT_MAX_CHILDREN, max: DEFAULT_MAX_CHILDREN, reason: 'child_cap' }
       return {
         room: Math.max(0, DEFAULT_MAX_ROOT_CREATES - this.rootCount()),
         max: DEFAULT_MAX_ROOT_CREATES,
@@ -540,6 +643,75 @@ export class FakeBoard implements CascadeBoard {
       cursor = row.parentTaskId
     }
     return chain
+  }
+  private stateOf(row: FakeRow): MainTaskState {
+    const below: FakeRow[] = []
+    const walk = (id: string): void => {
+      for (const t of this.tasks.values())
+        if (t.parentTaskId === id) {
+          below.push(t)
+          walk(t.id)
+        }
+    }
+    walk(row.id)
+    const closed = (t: FakeRow): boolean => t.status === 'done' || t.status === 'cancelled'
+    const times = below.flatMap((t) => (t.completedAt !== undefined ? [t.completedAt] : []))
+    const viewOf = (t: FakeRow): SubtaskView => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      waitingOn: this.waits.get(t.id) ?? null,
+      sourceDelegationId: t.sourceDelegationId,
+      assigneeAgentId: t.assigneeAgentId,
+      waitsOnThisTask: this.waitReaches(t.id, row.id),
+      execs: this.ledger(t.id),
+    })
+    return {
+      id: row.id,
+      title: row.title,
+      identifier: null,
+      status: row.status,
+      leadAgentId: row.assigneeAgentId,
+      open: !closed(row),
+      subtaskIds: below.map((t) => t.id),
+      openSubtasks: below.filter((t) => requestWaitsOn(viewOf(t))).length,
+      doneSubtasks: below.filter((t) => t.status === 'done' && !isPlanHolder(t.sourceDelegationId))
+        .length,
+      cancelledSubtasks: below.filter((t) => t.status === 'cancelled').length,
+      lastClosedAt: times.length > 0 ? Math.max(...times) : null,
+    }
+  }
+  async mainTaskState(taskId: string): Promise<MainTaskState | null> {
+    const row = this.tasks.get(taskId)
+    return row?.isMainTask ? this.stateOf(row) : null
+  }
+  async openMainTasks(): Promise<MainTaskState[]> {
+    return [...this.tasks.values()]
+      .filter((t) => t.isMainTask && t.status !== 'done' && t.status !== 'cancelled')
+      .map((t) => this.stateOf(t))
+  }
+  async closeMainTask(taskId: string, to: 'done' | 'cancelled'): Promise<boolean> {
+    const row = this.tasks.get(taskId)
+    if (!row?.isMainTask || row.status === 'done' || row.status === 'cancelled') return false
+    row.status = to
+    row.completedAt = Date.now()
+    this.statusUpdates.push({ taskId, status: to })
+    return true
+  }
+  async parkMainTask(taskId: string, need: string): Promise<boolean> {
+    const row = this.tasks.get(taskId)
+    if (!row?.isMainTask || row.status === 'done' || row.status === 'cancelled') return false
+    row.status = 'blocked'
+    this.waits.set(taskId, { kind: 'person', need })
+    this.statusUpdates.push({ taskId, status: 'blocked' })
+    return true
+  }
+  async resumeMainTask(taskId: string): Promise<boolean> {
+    const row = this.tasks.get(taskId)
+    if (!row?.isMainTask || row.status !== 'blocked') return false
+    row.status = 'in_progress'
+    this.waits.delete(taskId)
+    return true
   }
   private failureKey(teamId: string, target: string, task: string): string {
     return `${teamId}|${target}|${task}`
@@ -577,7 +749,8 @@ export class FakeBoard implements CascadeBoard {
     this.claims.push(taskId)
     if (this.forceClaimConflict) return { ok: false, reason: 'conflict' }
     const t = this.tasks.get(taskId)
-    if (!t || t.status !== 'todo' || t.assigneeAgentId) return { ok: false, reason: 'conflict' }
+    if (!t || t.status !== 'todo' || t.assigneeAgentId || t.isMainTask)
+      return { ok: false, reason: 'conflict' }
     t.status = 'in_progress'
     t.assigneeAgentId = assigneeAgentId ?? 'someone'
     this.waits.delete(taskId)
@@ -599,6 +772,9 @@ export class FakeBoard implements CascadeBoard {
     const t = this.tasks.get(taskId)
     if (!t) return false
     if (!canTx(t.status, status)) return false // 409 — illegal transition
+    if (t.isMainTask && t.status !== status) return false
+    if ((status === 'done' || status === 'cancelled') && t.status !== status)
+      t.completedAt = Date.now()
     this.statusUpdates.push({ taskId, status })
     if (opts?.waitingOn) this.waits.set(taskId, opts.waitingOn)
     else if (t.status !== status) this.waits.delete(taskId)
@@ -623,10 +799,10 @@ export class FakeBoard implements CascadeBoard {
   async getTask(taskId: string): Promise<TaskDetail | null> {
     const t = this.tasks.get(taskId)
     if (!t) return null
-    const ancestors: { id: string }[] = []
+    const ancestors: { id: string; isMainTask?: boolean }[] = []
     let cur = t.parentTaskId
     while (cur) {
-      ancestors.push({ id: cur })
+      ancestors.push({ id: cur, ...(this.tasks.get(cur)?.isMainTask ? { isMainTask: true } : {}) })
       cur = this.tasks.get(cur)?.parentTaskId ?? null
     }
     return {
@@ -683,7 +859,7 @@ export class FakeBoard implements CascadeBoard {
   async getReadyTasks(): Promise<BoardTask[]> {
     const out: BoardTask[] = []
     for (const t of this.tasks.values()) {
-      if (t.status !== 'todo') continue
+      if (t.status !== 'todo' || t.isMainTask) continue
       const blockers = this.depMap.get(t.id) ?? []
       if (blockers.every((d) => this.tasks.get(d)?.status === 'done')) out.push(this.toBoardTask(t))
     }

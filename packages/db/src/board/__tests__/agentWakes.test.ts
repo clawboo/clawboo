@@ -39,6 +39,7 @@ import {
   claimTask,
   completeExecutionProcess,
   createExecutionProcess,
+  createHandOffUnderRequest,
   createSubtask,
   createTask,
   getTask,
@@ -688,5 +689,68 @@ describe('one ask, however many jobs are waiting on it', () => {
     expect(decideAgentWakes(db, root.id, 'no', LOCAL_PERSON).ok).toBe(true)
     expect(listWaitingTaskWakes(db, { taskId: a })).toEqual([])
     expect(listWaitingTaskWakes(db, { taskId: b })).toHaveLength(1)
+  })
+})
+
+describe('work under a person’s request', () => {
+  const REQUEST = {
+    title: 'Ship it',
+    description: 'Ship it',
+    leadAgentId: 'lead',
+    key: 'main:T:d1',
+  }
+  const under = (request = REQUEST, title = 'Their part'): { mainId: string; id: string } => {
+    const r = createHandOffUnderRequest(db, request, {
+      title,
+      teamId: 'T',
+      sourceDelegationId: BOUND,
+    })
+    if (!r.ok) throw new Error(r.reason)
+    return { mainId: r.task.parentTaskId as string, id: r.task.id }
+  }
+  /** Agent b's sub-task, parked on what it says it needs. */
+  const parkedUnder = (request = REQUEST, title = 'Their part'): string => {
+    const { id } = under(request, title)
+    claimTask(db, id, 'b')
+    updateStatus(db, id, 'blocked', { waitingOn: { kind: 'person', need: 'A key', by: 'agent' } })
+    return id
+  }
+
+  it('is one job: the request’s main task', () => {
+    const one = under()
+    const two = under(REQUEST, 'Another part')
+    expect(jobTaskIdOf(db, one.id)).toBe(one.mainId)
+    expect(jobTaskIdOf(db, two.id)).toBe(one.mainId)
+    expect(jobTaskIdOf(db, one.mainId)).toBe(one.mainId)
+  })
+
+  it('a person’s yes on one sub-task answers for the whole request', () => {
+    const one = parkedUnder()
+    const two = parkedUnder(REQUEST, 'Another part')
+    expect(agentWakeVerdictFor(db, two, A_TO_B)).toBe('ask')
+    expect(asking(one)).toBe(true)
+    expect(decideAgentWakes(db, one, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(agentWakeVerdictFor(db, two, A_TO_B)).toBe('allowed')
+  })
+
+  it('two requests are two jobs, and a back-and-forth is still per pair per team', () => {
+    const one = parkedUnder()
+    const two = parkedUnder({ ...REQUEST, key: 'main:T:d2' }, 'The other request’s part')
+    expect(jobTaskIdOf(db, one)).not.toBe(jobTaskIdOf(db, two))
+    allowTeam()
+    for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+      noteAgentWakeStarted(db, i % 2 === 0 ? one : two, i % 2 === 0 ? A_TO_B : B_TO_A)
+    expect(agentWakeVerdictFor(db, two, A_TO_B)).toBe('back_and_forth')
+  })
+
+  it('a teammate’s comment on the main task wakes nothing, open or parked', () => {
+    const { mainId } = under()
+    expect(saveAgentCommentWake(db, mainId, comment(mainId))).toEqual({ state: 'none' })
+    updateStatus(db, mainId, 'blocked', {
+      mainTaskLifecycle: true,
+      waitingOn: { kind: 'person', need: 'Say what you want.', by: 'agent' },
+    })
+    expect(saveAgentCommentWake(db, mainId, comment(mainId))).toEqual({ state: 'none' })
+    expect(listWaitingTaskWakes(db, { taskId: mainId, includeHeld: true })).toEqual([])
   })
 })

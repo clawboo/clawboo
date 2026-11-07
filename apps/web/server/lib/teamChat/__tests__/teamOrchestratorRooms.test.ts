@@ -116,7 +116,7 @@ describe('team chat rooms in the orchestrator', () => {
         sessionKey: `agent:bea:team:T:room:${roomId}`,
         agentId: 'bea',
         task: 'Sketch the onboarding flow.',
-        origin: { kind: 'human' },
+        origin: expect.objectContaining({ kind: 'human' }),
       },
     ])
     expect(deliverRooms).toEqual([roomId])

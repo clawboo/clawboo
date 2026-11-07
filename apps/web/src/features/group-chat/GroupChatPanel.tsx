@@ -45,7 +45,9 @@ import {
   type MessageComposerHandle,
 } from '@/features/chat/chatComponents'
 import { AgentChips } from './AgentChips'
+import { buildRequestNesting, isMainTask } from '@/features/board/mainTasks'
 import { BoardTaskCard } from './BoardTaskCard'
+import { RequestCard } from './RequestCard'
 import { stripDelegationBlocks, stripPlanBlocks } from './delegationTags'
 import { blockKey, blockTimestamp, describeBlock } from './announceBlock'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -548,6 +550,10 @@ export function GroupChatPanel({
         : [],
     [boardTasksMap, roomId, clearedAt],
   )
+  const boardNesting = useMemo(
+    () => buildRequestNesting(boardTasksMap ? [...boardTasksMap.values()] : []),
+    [boardTasksMap],
+  )
   type RenderItem =
     | {
         kind: 'block'
@@ -586,8 +592,12 @@ export function GroupChatPanel({
       })
     }
     // Board task cards (flag-on) interleave by createdAt — the durable,
-    // refresh-surviving record of each delegation + its live status.
+    // refresh-surviving record of each delegation + its live status. A person's request
+    // is one card there, with its work inside it.
+    const listed = new Set(boardTaskList.map((t) => t.id))
     for (const task of boardTaskList) {
+      const main = boardNesting.mainOf(task)
+      if (main && listed.has(main.id)) continue
       items.push({ kind: 'board-task', task, ts: task.createdAt, tieKey: 1 })
     }
     items.sort((a, b) => {
@@ -595,7 +605,7 @@ export function GroupChatPanel({
       return a.tieKey - b.tieKey
     })
     return items
-  }, [topLevelBlocks, activeStreams, boardTaskList])
+  }, [topLevelBlocks, activeStreams, boardTaskList, boardNesting])
 
   // ── Bounded render window ─────────────────────────────────────────────────
   // `resetKey: teamId` is load-bearing — `TeamSpaceSplit` renders this panel
@@ -927,7 +937,18 @@ export function GroupChatPanel({
                 if (item.kind === 'board-task') {
                   return (
                     <div key={`board-task-${item.task.id}`} className={idx === 0 ? '' : 'mt-3'}>
-                      <BoardTaskCard task={item.task} teamId={teamId} />
+                      {isMainTask(item.task) ? (
+                        <RequestCard
+                          task={item.task}
+                          subtasks={boardNesting
+                            .subtasksOf(item.task.id)
+                            .filter((t) => t.status !== 'cancelled')}
+                          progress={boardNesting.progressOf(item.task.id)}
+                          teamId={teamId}
+                        />
+                      ) : (
+                        <BoardTaskCard task={item.task} teamId={teamId} />
+                      )}
                     </div>
                   )
                 }

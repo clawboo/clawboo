@@ -17,6 +17,8 @@ export interface FinishPromptRequest {
   createdAt: number | null
   /** The agent whose run the move stops, when one is working on it. */
   runningAgent: string | null
+  /** A person's request with this many sub-tasks still open, which end with it. */
+  openSubtasks?: number
   /** Its check did not pass, so marking it done is an audited override. */
   failedCheck: boolean
   /** The clock the choices are worked out from. */

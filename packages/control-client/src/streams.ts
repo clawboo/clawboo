@@ -106,6 +106,9 @@ export const boardChangeFrameSchema = z.object({
   assigneePerson: z.string().nullable().optional(),
   /** When the task's check began waiting for the team folder; null when it stopped. */
   checkHeldSince: z.number().nullable().optional(),
+  isMainTask: z.boolean().optional(),
+  /** A card that only holds a plan. */
+  planHolder: z.boolean().optional(),
 })
 export type BoardChangeFrame = z.infer<typeof boardChangeFrameSchema>
 

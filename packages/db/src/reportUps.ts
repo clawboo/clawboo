@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
@@ -153,6 +153,38 @@ export function listRoomsWithPendingReportUps(
     .from(reportUpOutbox)
     .where(and(isNull(reportUpOutbox.settledAt), isNull(reportUpOutbox.heldAt)))
     .all() as Array<{ teamId: string; roomId: string | null }>
+}
+
+/** The newest report-up to this agent about any of these tasks, settled or not: what
+ *  the agent looking after a request last heard about it. A row with no recipient is
+ *  the room's lead's. Null when there is none. */
+export function latestReportUpForTasks(
+  db: ClawbooDb,
+  taskIds: readonly string[],
+  recipientAgentId: string | null,
+): DbReportUpOutboxRow | null {
+  if (taskIds.length === 0) return null
+  return (
+    (db
+      .select()
+      .from(reportUpOutbox)
+      .where(
+        and(
+          inArray(reportUpOutbox.taskId, [...taskIds]),
+          ...(recipientAgentId
+            ? [
+                or(
+                  isNull(reportUpOutbox.recipientAgentId),
+                  eq(reportUpOutbox.recipientAgentId, recipientAgentId),
+                ),
+              ]
+            : []),
+        ),
+      )
+      .orderBy(desc(reportUpOutbox.createdAt), sql`rowid DESC`)
+      .limit(1)
+      .get() as DbReportUpOutboxRow | undefined) ?? null
+  )
 }
 
 /** A settled row is kept this long, for debugging, then deleted. */

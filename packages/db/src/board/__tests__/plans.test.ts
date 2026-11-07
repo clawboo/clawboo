@@ -35,12 +35,16 @@ import {
 import { answerQuestion, listTaskQuestions } from '../questions'
 import {
   claimTask,
+  closeMainTaskByPerson,
+  createCappedSubtask,
+  createHandOffUnderRequest,
   createTask,
   getDependencies,
   getReadyTasks,
   getTask,
   listExecutions,
   listTasks,
+  mainTaskState,
   releaseOneSubtaskWait,
   subtaskViewsOf,
   updateStatus,
@@ -1018,5 +1022,134 @@ describe('what a task waiting on its sub-tasks reads a plan’s card as', () => 
     expect(
       listTasks(db, { teamId: 'T' }).filter((t) => t.parentTaskId === parent && t.id !== card),
     ).toHaveLength(3)
+  })
+})
+
+describe('a plan from a person’s message, with no task yet', () => {
+  beforeEach(() => on())
+  const REQUEST = {
+    title: 'Ship the login page',
+    description: 'Ship the login page\nwith a reset link',
+    leadAgentId: 'lead',
+    requestedBy: { id: 'p1', name: 'Pat', role: null },
+    key: 'main:T:d1',
+  }
+
+  it('makes the main task with the card, in one write, naming the person', () => {
+    const r = propose({ mainTask: REQUEST })
+    if (r.status !== 'proposed') throw new Error(r.status)
+    expect(r.mainTask?.isMainTask).toBe(1)
+    expect(r.task.parentTaskId).toBe(r.mainTask!.id)
+    expect(JSON.parse(r.mainTask!.requestedBy!)).toEqual(REQUEST.requestedBy)
+    expect(mainTaskState(db, r.mainTask!.id)).toMatchObject({
+      leadAgentId: 'lead',
+      status: 'in_progress',
+      openSubtasks: 1,
+    })
+    expect(parseQuestionPayload(r.question.payload)?.plan?.parentTaskId).toBe(r.mainTask!.id)
+  })
+
+  it('a repeat finds the card and makes no second main task', () => {
+    const first = propose({ mainTask: REQUEST })
+    if (first.status !== 'proposed') throw new Error(first.status)
+    const again = propose({ mainTask: { ...REQUEST, key: 'main:T:d2' }, turnId: 'turn-2' })
+    expect(again.status).toBe('waiting')
+    expect(listTasks(db, { teamId: 'T' })).toHaveLength(2)
+  })
+
+  it('a plan with nothing to ask makes no empty card', () => {
+    expect(propose({ mainTask: REQUEST, steps: [] }).status).toBe('refused')
+    expect(listTasks(db, { teamId: 'T' })).toEqual([])
+  })
+
+  it('switch off writes nothing, and the hand-offs make the main task', () => {
+    setSetting(db, planApprovalSettingKey('T'), JSON.stringify({ on: false }))
+    expect(propose({ mainTask: REQUEST }).status).toBe('off')
+    expect(listTasks(db, { teamId: 'T' })).toEqual([])
+  })
+
+  it('finds a main task an earlier hand-off of the turn made', () => {
+    const r = createHandOffUnderRequest(db, REQUEST, {
+      title: 'first part',
+      teamId: 'T',
+      sourceDelegationId: BOUND,
+    })
+    if (!r.ok) throw new Error(r.reason)
+    const proposed = propose({ mainTask: REQUEST })
+    if (proposed.status !== 'proposed') throw new Error(proposed.status)
+    expect(proposed.mainTask).toBeUndefined()
+    expect(proposed.task.parentTaskId).toBe(r.mainTask!.id)
+  })
+
+  it('accepted steps land under the main task, and the card counts as no work done', () => {
+    const r = propose({ mainTask: REQUEST })
+    if (r.status !== 'proposed') throw new Error(r.status)
+    const mainId = r.mainTask!.id
+    expect(accept(r.question.id).ok).toBe(true)
+    expect(stepsOf().map((t) => t.parentTaskId)).toEqual([mainId, mainId, mainId])
+    expect(getTask(db, r.task.id)?.status).toBe('done')
+    expect(mainTaskState(db, mainId)).toMatchObject({ openSubtasks: 3, doneSubtasks: 0 })
+  })
+
+  it('a person closing the request closes its plan, and a late answer makes nothing', () => {
+    const r = propose({ mainTask: REQUEST })
+    if (r.status !== 'proposed') throw new Error(r.status)
+    closeMainTaskByPerson(db, r.mainTask!.id, 'cancelled')
+    expect(getTask(db, r.task.id)?.status).toBe('cancelled')
+    expect(accept(r.question.id).ok).toBe(false)
+    expect(stepsOf()).toEqual([])
+  })
+
+  it('a replay after a person closed the request makes nothing', () => {
+    const r = createHandOffUnderRequest(db, REQUEST, {
+      title: 'first part',
+      teamId: 'T',
+      sourceDelegationId: BOUND,
+    })
+    if (!r.ok) throw new Error(r.reason)
+    closeMainTaskByPerson(db, r.mainTask!.id, 'cancelled')
+    expect(propose({ mainTask: REQUEST })).toMatchObject({
+      status: 'refused',
+      reason: 'main_closed',
+    })
+  })
+
+  it('holds the root rate cap, and leaves no card', () => {
+    for (let i = 0; i < 30; i++) createTask(db, { title: `root ${i}`, teamId: 'T' })
+    const before = listTasks(db, { teamId: 'T' }).length
+    expect(propose({ mainTask: REQUEST })).toMatchObject({
+      status: 'refused',
+      reason: 'root_rate_cap',
+    })
+    expect(listTasks(db, { teamId: 'T' })).toHaveLength(before)
+  })
+
+  it('the depth cap on a plan skips the main task, as the others do', () => {
+    const made = createHandOffUnderRequest(db, REQUEST, {
+      title: 'level one',
+      teamId: 'T',
+      sourceDelegationId: BOUND,
+    })
+    if (!made.ok) throw new Error(made.reason)
+    // main > level one > level two: level two has one level above it that counts.
+    const two = createCappedSubtask(db, made.task.id, {
+      title: 'level two',
+      sourceDelegationId: 'r:deleg:agent:a3:reflectTo:a2',
+    })
+    if (!two.ok) throw new Error(two.reason)
+    const three = propose({ agentId: 'a3', parentTaskId: two.task.id, turnId: 'turn-3' })
+    if (three.status !== 'proposed') throw new Error(three.status)
+    expect(three.task.parentTaskId).toBe(two.task.id)
+    expect(accept(three.question.id).ok).toBe(true)
+    // One deeper is the limit: the same cap as with no main task above it.
+    const deepest = stepsOf().find((t) => t.parentTaskId === two.task.id)!
+    expect(
+      propose({
+        agentId: 'a3',
+        parentTaskId: deepest.id,
+        turnId: 'turn-4',
+        steps: [{ title: 'One level too far', agentId: 'a4', agentName: 'Design Boo' }],
+      }),
+    ).toMatchObject({ status: 'refused', reason: 'too_deep' })
   })
 })

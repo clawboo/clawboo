@@ -8,8 +8,10 @@ import path from 'node:path'
 
 import {
   agents,
+  createHandOffUnderRequest,
   getScheduledRun,
   getSetting,
+  parkMainTask,
   registerScheduledRun,
   roomMembers,
   rooms,
@@ -204,6 +206,40 @@ describe('moveAgentToTeam', () => {
     })
     expect(db.select().from(agents).where(eq(agents.id, 'a')).get()?.teamId).toBe('old')
     expect(taskRow('todo-a')?.sourceDelegationId).toBe('deleg:1:agent:a')
+  })
+
+  describe('with a person’s request it looks after', () => {
+    const request = (): { mainId: string; subId: string } => {
+      const made = createHandOffUnderRequest(
+        getDb(),
+        { title: 'Ask', description: 'Ask', leadAgentId: 'a', key: 'main:old:d1' },
+        {
+          title: 'one',
+          teamId: 'old',
+          sourceDelegationId: 'd1:deleg:agent:ab:reflectTo:a',
+        },
+      )
+      if (!made.ok) throw new Error(made.reason)
+      return { mainId: made.task.parentTaskId as string, subId: made.task.id }
+    }
+
+    it('moves anyway, since nothing is running, and the team’s lead takes the request', () => {
+      const { mainId, subId } = request()
+      const moved = moveAgentToTeam(getDb(), { agentId: 'a', toTeamId: 'new', booZeroId: null })
+      expect(moved).toMatchObject({ ok: true })
+      expect(taskRow(mainId)?.status).toBe('in_progress')
+      expect(taskRow(mainId)?.assigneeAgentId).toBe('lead')
+      // Its work is someone else's, and stays as it was.
+      expect(taskRow(subId)?.sourceDelegationId).toBe('d1:deleg:agent:ab:reflectTo:a')
+    })
+
+    it('a parked one keeps a lead too, so a person’s comment still has someone to reach', () => {
+      const { mainId } = request()
+      parkMainTask(getDb(), mainId, 'Needs a person.')
+      moveAgentToTeam(getDb(), { agentId: 'a', toTeamId: 'new', booZeroId: null })
+      expect(taskRow(mainId)?.status).toBe('blocked')
+      expect(taskRow(mainId)?.assigneeAgentId).toBe('lead')
+    })
   })
 
   it('refuses a missing or archived team, the same team and an unknown agent', () => {

@@ -21,6 +21,7 @@ import {
   createBoardOrchestrator,
   createNudgeQueue,
   type BoardOrchestrator,
+  type ReportUpOutbox,
 } from '@clawboo/team-orchestration'
 import { expect } from 'vitest'
 
@@ -160,7 +161,11 @@ export async function openSandbox(): Promise<{ db: ClawbooDb; close: () => Promi
 }
 
 /** The engine and deliver pair, as buildInstance wires them. */
-export function wire(db: ClawbooDb, adapters: Map<string, HeldAdapter>) {
+export function wire(
+  db: ClawbooDb,
+  adapters: Map<string, HeldAdapter>,
+  opts: { reportUps?: ReportUpOutbox } = {},
+) {
   const abortMap = new Map<string, RunEntry>()
   const queuedRuns = new Map<string, QueuedRun>()
   const nudge = createNudgeQueue()
@@ -177,6 +182,12 @@ export function wire(db: ClawbooDb, adapters: Map<string, HeldAdapter>) {
     onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
     onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
     onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
+    ...(opts.reportUps
+      ? {
+          takeHeldReportUps: (sk: string, taskId?: string) =>
+            engineRef.current!.takeHeldReportUps(sk, taskId),
+        }
+      : {}),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     execForSession: (sk) => engineRef.current!.execForSession(sk),
     stopGen: () => stopGen,
@@ -209,6 +220,7 @@ export function wire(db: ClawbooDb, adapters: Map<string, HeldAdapter>) {
       else queuedRuns.get(sk)?.cancel()
     },
     caps: { maxFanout: 8 },
+    ...(opts.reportUps ? { reportUps: opts.reportUps } : {}),
     runHeldBy: ({ agentId, taskId }) => {
       const refusal = startRefusedBy(db, { agentId, teamId: TEAM, taskId })
       return refusal ? pauseTaskStopNote(refusal) : null

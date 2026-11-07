@@ -18,7 +18,12 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { BRAKE_MAX_WAIT_MS, encodeHumanAssignment, type ResultClaim } from '@clawboo/board-core'
+import {
+  BRAKE_MAX_WAIT_MS,
+  encodeHumanAssignment,
+  isPlanHolder,
+  type ResultClaim,
+} from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import {
@@ -5247,6 +5252,1088 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusOf(parent)).toBe('todo')
       await orchestrator.resume()
       expect(deliveredTo(delivered, 'a2')).toEqual([])
+    })
+  })
+
+  // ─── A person's request: the main task ─────────────────────────────────────
+  describe("createBoardOrchestrator: a person's request is one main task", () => {
+    const PERSON = { id: 'p1', name: 'Pat', role: null }
+    const asked = (deliveryId: string, words = 'Build the login page'): RunStamp => ({
+      reportForTaskId: null,
+      stopGen: 0,
+      deliveryId,
+      request: { words, requestedBy: PERSON },
+    })
+    /** The stamp the host puts on an update it delivers. */
+    const updateRun = (d: Delivered, deliveryId: string): RunStamp => ({
+      reportForTaskId: null,
+      stopGen: 0,
+      deliveryId,
+      ...(d.origin.kind === 'system' && d.origin.mainTaskId
+        ? { mainTaskId: d.origin.mainTaskId }
+        : {}),
+    })
+    const parentOf = async (board: CascadeBoard, taskId: string): Promise<string> => {
+      const d = await board.getTask(taskId)
+      return d?.task.parentTaskId as string
+    }
+    const lastUpdate = (delivered: Delivered[]): Delivered => reflections(delivered).at(-1)!
+
+    it('a plain answer creates no task', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', 'Sure, it is 4.'), asked('d1'))
+      expect(board.taskCount()).toBe(0)
+      expect(delivered).toEqual([])
+    })
+
+    it('makes one main task from the first hand-off, and files the turn under it', async () => {
+      const { board, delivered, changes, orchestrator } = makeHarness()
+      const run = asked('d1', 'Build the login page\nwith a reset link')
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r1', 'delegate', { assignee: 'Bug Boo', task: 'write the form' }),
+        run,
+      )
+      expect(board.taskCount()).toBe(2)
+      const [first] = idsOf(board)
+      const mainId = await parentOf(board, first!)
+      const state = (await board.mainTaskState(mainId))!
+      expect(state).toMatchObject({
+        title: 'Build the login page',
+        status: 'in_progress',
+        leadAgentId: 'leader',
+        open: true,
+        openSubtasks: 1,
+      })
+      const detail = await board.getTask(mainId)
+      expect(detail?.task.description).toBe('Build the login page\nwith a reset link')
+      expect(detail?.ancestors).toEqual([])
+      // Announced, so a chat and a board can show it.
+      expect(changes.find((c) => c.id === mainId)).toMatchObject({
+        isMainTask: true,
+        status: 'in_progress',
+      })
+
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Design Boo">style it</delegate>'),
+        run,
+      )
+      expect(board.taskCount()).toBe(3)
+      const [, second] = idsOf(board)
+      expect(await parentOf(board, second!)).toBe(mainId)
+      expect(deliveredTo(delivered, 'a2')).toEqual(['write the form'])
+      expect(deliveredTo(delivered, 'a3')).toEqual(['style it'])
+    })
+
+    it('files every step of a plan under it, in order', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<plan><step to="@Bug Boo">one</step><step to="@Design Boo">two</step></plan>',
+        ),
+        asked('d1'),
+      )
+      const [one, two] = idsOf(board)
+      const mainId = await parentOf(board, one!)
+      expect(await parentOf(board, two!)).toBe(mainId)
+      expect(board.depsOf(two!)).toEqual([one])
+      expect((await board.mainTaskState(mainId))?.openSubtasks).toBe(2)
+    })
+
+    it('a hand-off that finds its work open makes no main task', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">write the form</delegate>'),
+        asked('d1'),
+      )
+      expect(board.taskCount()).toBe(2)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Bug Boo">write the form</delegate>'),
+        asked('d2', 'Are you on the form?'),
+      )
+      expect(board.taskCount()).toBe(2)
+    })
+
+    it('a second message in the chat makes its own main task', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">one</delegate>'),
+        asked('d1'),
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Design Boo">two</delegate>'),
+        asked('d2', 'Clean the logs'),
+      )
+      const [one, two] = idsOf(board)
+      expect(await parentOf(board, one!)).not.toBe(await parentOf(board, two!))
+    })
+
+    it('leaves helpers every level of hand-offs they had', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">b</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a3'), doneEvent('r3', '<delegate to="@Test Boo">c</delegate>'))
+      // The main task and three levels below it, as with no main task at all.
+      expect(board.taskCount()).toBe(4)
+      const [, , deepest] = idsOf(board)
+      await orchestrator.onEvent(sk('a4'), doneEvent('r4', '<delegate to="@Boo Zero">d</delegate>'))
+      expect(board.taskCount()).toBe(4)
+      expect(board.comments.some((c) => c.taskId === deepest && /depth limit/i.test(c.body))).toBe(
+        true,
+      )
+    })
+
+    it('holds the refusal latch at the limit under a request: said once, and the task still ends', async () => {
+      const outbox = new MemoryReportUps()
+      const { board, delivered, orchestrator } = makeHarness({ reportUps: outbox })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">b</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a3'), doneEvent('r3', '<delegate to="@Test Boo">c</delegate>'))
+      const deepest = idsOf(board)[2]!
+      const count = board.taskCount()
+      const again = '<delegate to="@Boo Zero">one level too far</delegate>'
+      await orchestrator.onEvent(sk('a4'), doneEvent('r4', `Not done. ${again}`))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      // It hears the refusal on its next run, once, and repeating it says nothing new.
+      const turns = delivered.filter((d) => d.agentId === 'a4' && (d.context ?? '').length > 0)
+      expect(turns).toHaveLength(1)
+      await orchestrator.onEvent(sk('a4'), doneEvent('r5', `Still. ${again}`), {
+        reportForTaskId: null,
+        stopGen: 0,
+        deliveryId: 'r5',
+        reportUpIds: turns[0]!.reportUpIds ?? [],
+      })
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(
+        delivered.filter((d) => d.agentId === 'a4' && (d.context ?? '').length > 0),
+      ).toHaveLength(1)
+      expect(board.statusOf(deepest)).toBe('done')
+      expect(board.taskCount()).toBe(count)
+    })
+
+    it('never fires a main task: no pump, resume, sweep or dispatch', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await orchestrator.resume()
+      await orchestrator.sweepStaleSessions()
+      expect(await orchestrator.dispatchTask(mainId)).toBe('not_ready')
+      expect(board.claims).not.toContain(mainId)
+      expect(await board.listExecutions(mainId)).toEqual([])
+      expect(delivered.map((d) => d.task)).not.toContain('Build the login page')
+      expect((await board.getReadyTasks('t1')).map((t) => t.id)).not.toContain(mainId)
+      // And no idle clock fails it: it has no run to go silent.
+      await vi.advanceTimersByTimeAsync(2 * DELEGATION_IDLE_TIMEOUT_MS)
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(mainId)).toBe('in_progress')
+    })
+
+    it("is done only after the last sub-task and the lead's summary", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>',
+        ),
+        asked('d1'),
+      )
+      const [a] = idsOf(board)
+      const mainId = await parentOf(board, a!)
+
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const first = lastUpdate(delivered)
+      expect(first.origin).toMatchObject({ kind: 'system', mainTaskId: mainId })
+      expect(first.task).toContain('Build the login page')
+      expect(first.task).not.toMatch(/closes the request/)
+      await orchestrator.onEvent(sk('leader'), doneEvent('ru1', 'A is in.'), updateRun(first, 'u1'))
+      expect(board.statusOf(mainId)).toBe('in_progress')
+
+      await orchestrator.onEvent(sk('a3'), doneEvent('rb', 'B is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const last = lastUpdate(delivered)
+      expect(last.task).toMatch(/closes the request/)
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru2', 'Here is the login page.'),
+        updateRun(last, 'u2'),
+      )
+      expect(board.statusOf(mainId)).toBe('done')
+      expect(
+        board.comments.some((c) => c.taskId === mainId && c.body === 'Here is the login page.'),
+      ).toBe(true)
+    })
+
+    it('stays open when the summary turn hands out more, filed under it', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru1', 'One more thing. <delegate to="@Design Boo">polish</delegate>'),
+        updateRun(lastUpdate(delivered), 'u1'),
+      )
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      expect(await parentOf(board, idsOf(board)[1]!)).toBe(mainId)
+    })
+
+    it('keeps each request to its own update, and an unfinished one stays open', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">one</delegate>'),
+        asked('d1'),
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Design Boo">two</delegate>'),
+        asked('d2', 'Clean the logs'),
+      )
+      const [one, two] = idsOf(board)
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'one is done'))
+      await orchestrator.onEvent(sk('a3'), doneEvent('rb', 'two is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const updates = reflections(delivered)
+      expect(updates).toHaveLength(2)
+      const mains = updates.map((u) => (u.origin as { mainTaskId?: string }).mainTaskId)
+      expect(new Set(mains)).toEqual(
+        new Set([await parentOf(board, one!), await parentOf(board, two!)]),
+      )
+    })
+
+    it('counts a sub-task still open under a finished one', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const [childId] = idsOf(board)
+      const mainId = await parentOf(board, childId!)
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('ra', 'A so far <delegate to="@Design Boo">deeper</delegate>'),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      // The sub-task waits for what it handed out, so its lead has nothing to read yet.
+      expect(board.statusOf(childId!)).toBe('blocked')
+      expect(reflections(delivered)).toHaveLength(0)
+      // A person finishes it by hand, with the work under it still going: its report
+      // reaches the lead, and the update says what is still out.
+      await board.updateStatus(childId!, 'in_progress')
+      await board.updateStatus(childId!, 'done')
+      expect((await board.mainTaskState(mainId))?.openSubtasks).toBe(1)
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(mainId)).toBe('in_progress')
+    })
+
+    it('waits for a sub-task that handed out work, and closes on the one summary after it', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const [childId] = idsOf(board)
+      const mainId = await parentOf(board, childId!)
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('ra', 'A so far <delegate to="@Design Boo">deeper</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a3'), doneEvent('rb', 'Deeper is done.'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.sweepStaleSessions()
+      // The grandchild reports to the sub-task, not to the lead: the sub-task's own
+      // follow-up is what the lead hears.
+      expect(reflections(delivered)).toHaveLength(0)
+      expect(deliveredTo(delivered, 'a2').length).toBeGreaterThan(0)
+      await orchestrator.onEvent(sk('a2'), doneEvent('rc', 'A is done.'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(board.statusOf(childId!)).toBe('done')
+      const updates = reflections(delivered)
+      expect(updates).toHaveLength(1)
+      expect((updates[0]!.origin as { mainTaskId?: string }).mainTaskId).toBe(mainId)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', 'All done.'),
+        updateRun(updates[0]!, 'u1'),
+      )
+      expect(board.statusOf(mainId)).toBe('done')
+    })
+
+    it('makes a routine run its own main task, with no person named', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">sweep logs</delegate>'),
+        {
+          reportForTaskId: null,
+          stopGen: 0,
+          deliveryId: 'd1',
+          request: { words: 'Sweep the logs', routineName: 'Nightly' },
+        },
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      expect((await board.mainTaskState(mainId))?.title).toBe('Sweep the logs')
+      expect(board.comments.some((c) => c.taskId === mainId && /Nightly/.test(c.body))).toBe(true)
+    })
+
+    it('makes no main task for a hand-off with no message behind it', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        { reportForTaskId: null, stopGen: 0, deliveryId: 'd1' },
+      )
+      expect(board.taskCount()).toBe(1)
+      expect((await board.getTask(idsOf(board)[0]!))?.task.parentTaskId).toBeNull()
+    })
+
+    it('a person closing the request ends its reports, and refuses more work under it', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await board.closeMainTask(mainId, 'cancelled')
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('rx', '<delegate to="@Design Boo">more</delegate>'),
+        { reportForTaskId: null, stopGen: 0, deliveryId: 'd9', mainTaskId: mainId },
+      )
+      expect(deliveredTo(delivered, 'a3')).toEqual([])
+    })
+
+    it('a Stop leaves the request open, and starts no summary', async () => {
+      let gen = 0
+      const { board, delivered, orchestrator } = makeHarness({ stopGen: () => gen })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      gen += 1
+      await orchestrator.markStopped()
+      await orchestrator.onEvent(sk('a2'), failedDoneEvent('ra', 'aborted', ''))
+      await orchestrator.resume()
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      expect(reflections(delivered)).toEqual([])
+    })
+
+    it('asks the lead once when its work closed with nothing left to report', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const [a] = idsOf(board)
+      const mainId = await parentOf(board, a!)
+      // Closed outside the engine: an MCP write in another process reports to no one.
+      await orchestrator.detachTask(a!)
+      await board.updateStatus(a!, 'done')
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const updates = reflections(delivered)
+      expect(updates).toHaveLength(1)
+      expect(updates[0]!.task).toMatch(/closes the request/)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', 'It is done.'),
+        updateRun(updates[0]!, 'u1'),
+      )
+      expect(board.statusOf(mainId)).toBe('done')
+    })
+
+    it("a person's comment reaches the lead, and what it hands out is filed under it", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'Add a logo too')).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const update = lastUpdate(delivered)
+      expect(update.agentId).toBe('leader')
+      expect(update.task).toContain('Add a logo too')
+      expect(update.origin).toMatchObject({ kind: 'system', mainTaskId: mainId })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', '<delegate to="@Design Boo">add a logo</delegate>'),
+        updateRun(update, 'u1'),
+      )
+      expect(await parentOf(board, idsOf(board)[1]!)).toBe(mainId)
+      expect(board.statusOf(mainId)).toBe('in_progress')
+    })
+
+    it('a comment on a closed request goes nowhere', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await board.closeMainTask(mainId, 'cancelled')
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'hello')).toBe(false)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+    })
+
+    it('a control token is not a summary: nothing goes on the card but a note', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', '__skipped__'),
+        updateRun(lastUpdate(delivered), 'u1'),
+      )
+      expect(board.statusOf(mainId)).toBe('done')
+      const onCard = board.comments.filter((c) => c.taskId === mainId).map((c) => c.body)
+      expect(onCard.some((b) => b.includes('__skipped__'))).toBe(false)
+      expect(onCard.some((b) => /no summary/.test(b))).toBe(true)
+    })
+
+    it('keeps a hand-off tag out of the summary on the card', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<delegate to="@Design Boo">other work</delegate>'),
+        asked('d2', 'Other work'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      // A hand-off in its closing turn finds the other request's open work. The lead is
+      // told once, and repeating it in the next turn is silent.
+      const repeat = '<delegate to="@Design Boo">other work</delegate>'
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', `Not yet. ${repeat}`),
+        updateRun(lastUpdate(delivered), 'u1'),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru2', `All done. ${repeat}`),
+        updateRun(lastUpdate(delivered), 'u2'),
+      )
+      expect(board.statusOf(mainId)).toBe('done')
+      expect(board.comments.filter((c) => c.taskId === mainId).map((c) => c.body)).toContain(
+        'All done.',
+      )
+    })
+
+    const held = (): {
+      resolve: (r: DelegationResolution) => void
+      opts: Pick<HarnessOpts, 'isRiskyDelegation' | 'requestDelegationApproval'>
+    } => {
+      let resolve: (r: DelegationResolution) => void = () => undefined
+      const answer = new Promise<DelegationResolution>((r) => {
+        resolve = r
+      })
+      return {
+        resolve: (r) => resolve(r),
+        opts: {
+          isRiskyDelegation: (s) => s.task.startsWith('risky'),
+          requestDelegationApproval: () => answer,
+        },
+      }
+    }
+
+    it('a hand-off waiting on a person’s approval holds the request open', async () => {
+      const approval = held()
+      const { board, delivered, orchestrator } = makeHarness(approval.opts)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const update = lastUpdate(delivered)
+      const closing = orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('ru', 'One more. <delegate to="@Design Boo">risky step</delegate>'),
+        updateRun(update, 'u1'),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      expect(reflections(delivered)).toEqual([update])
+      approval.resolve('allow_once')
+      await closing
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      const made = idsOf(board).at(-1)!
+      expect(await parentOf(board, made)).toBe(mainId)
+      expect(deliveredTo(delivered, 'a3')).toEqual(['risky step'])
+    })
+
+    it('a sub-task’s own hand-off holds it too, and starts nothing once it closed', async () => {
+      const approval = held()
+      const { board, delivered, orchestrator } = makeHarness(approval.opts)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const [a] = idsOf(board)
+      const mainId = await parentOf(board, a!)
+      const before = board.taskCount()
+      const ending = orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('ra', 'Mine is done. <delegate to="@Design Boo">risky step</delegate>'),
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(mainId)).toBe('in_progress')
+      // A person closes the request while the approval waits.
+      await board.closeMainTask(mainId, 'cancelled')
+      approval.resolve('allow_once')
+      await ending
+      expect(board.taskCount()).toBe(before)
+      expect(deliveredTo(delivered, 'a3')).toEqual([])
+      expect(board.comments.some((c) => /The person closed/.test(c.body))).toBe(false)
+    })
+
+    it('holds the depth and child caps under the main task for a plan', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const steps = Array.from(
+        { length: MAX_PLAN_STEPS },
+        (_, i) => `<step to="@Bug Boo">s${i}</step>`,
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', `<plan>${steps.join('')}</plan>`),
+        asked('d1'),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      // Either the whole plan fits under one main task, or none of it starts.
+      const made = idsOf(board)
+      if (made.length > 0) {
+        const mainId = await parentOf(board, made[0]!)
+        expect((await board.mainTaskState(mainId))?.subtaskIds).toHaveLength(made.length)
+      } else {
+        expect(reflections(delivered).some((r) => /Plan not started/.test(r.task))).toBe(true)
+      }
+    })
+
+    // ─── Where a request meets the rest of the board ──────────────────────────
+    describe('and a team that asks before a plan starts', () => {
+      const PLAN =
+        '<plan><step to="@Bug Boo">run the tests</step><step to="@Design Boo">fix what fails</step></plan>'
+      const asking = (opts?: HarnessOpts) => {
+        const h = makeHarness(opts)
+        h.board.setPlanApproval(true)
+        return h
+      }
+      const stepsOf = async (board: CascadeBoard, mainId: string): Promise<BoardTask[]> =>
+        (await board.listTasks('t1')).filter(
+          (t) => t.parentTaskId === mainId && !isPlanHolder(t.sourceDelegationId as string),
+        )
+
+      it('files the card under the main task, made with it, and names the person', async () => {
+        const { board, changes, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        expect(await board.mainTaskState(mainId)).toMatchObject({
+          title: 'Build the login page',
+          leadAgentId: 'leader',
+          status: 'in_progress',
+          openSubtasks: 1,
+        })
+        expect(board.taskCount()).toBe(2)
+        expect(delivered).toEqual([])
+        expect(changes.find((c) => c.id === mainId)).toMatchObject({ isMainTask: true })
+        expect(changes.find((c) => c.id === taskId)).toMatchObject({ parentTaskId: mainId })
+      })
+
+      it('makes nothing when the plan is refused before anyone is asked', async () => {
+        const { board, orchestrator } = asking()
+        const steps = Array.from(
+          { length: MAX_PLAN_STEPS + 1 },
+          (_, i) => `<step to="@Bug Boo">step ${i}</step>`,
+        )
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', `<plan>${steps.join('')}</plan>`),
+          asked('d1'),
+        )
+        expect(board.taskCount()).toBe(0)
+      })
+
+      it('finds the same card for the same steps, with no second main task', async () => {
+        const { board, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        await orchestrator.onEvent(sk('leader'), doneEvent('r2', PLAN), asked('d2'))
+        expect(board.waitingPlans()).toHaveLength(1)
+        expect(board.taskCount()).toBe(2)
+      })
+
+      it('a changed plan from a later message stays where the waiting one is', async () => {
+        const { board, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r2', '<plan><step to="@Bug Boo">only this</step></plan>'),
+          asked('d2', 'Actually just this'),
+        )
+        const waiting = board.waitingPlans()
+        expect(waiting.map((w) => w.taskId)).toEqual([taskId])
+        expect(board.taskCount()).toBe(2)
+        expect(board.answerPlan(waiting[0]!.questionId, { accepted: true }).created).toBe(1)
+        expect((await stepsOf(board, mainId)).map((t) => t.title)).toEqual(['only this'])
+      })
+
+      it('an open card holds the request: nothing closes it, and its lead is not asked', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const mainId = await parentOf(board, board.waitingPlans()[0]!.taskId)
+        await orchestrator.resume()
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        expect(reflections(delivered)).toEqual([])
+        // A lead's turn about the request ending is no summary while it waits.
+        await orchestrator.onEvent(sk('leader'), doneEvent('r2', 'Waiting.'), {
+          reportForTaskId: null,
+          stopGen: 0,
+          deliveryId: 'u1',
+          mainTaskId: mainId,
+        })
+        expect(board.statusOf(mainId)).toBe('in_progress')
+      })
+
+      it('accepted, the steps nest under the main task, and it closes on the summary after them', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { questionId, taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        expect(board.answerPlan(questionId, { accepted: true }).created).toBe(2)
+        const steps = await stepsOf(board, mainId)
+        expect(steps.map((t) => t.title)).toEqual(['run the tests', 'fix what fails'])
+        // The card is closed, and the steps took its place.
+        expect(board.statusOf(taskId)).toBe('done')
+        expect((await board.mainTaskState(mainId))?.openSubtasks).toBe(2)
+
+        await orchestrator.resume()
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'tests ran'))
+        await orchestrator.onEvent(sk('a3'), doneEvent('r3', 'fixed'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        const update = lastUpdate(delivered)
+        expect((update.origin as { mainTaskId?: string }).mainTaskId).toBe(mainId)
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'It works.'),
+          updateRun(update, 'u'),
+        )
+        expect(board.statusOf(mainId)).toBe('done')
+      })
+
+      it('turned down, it closes as Cancelled: a card that held a plan is no work done', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { questionId, taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        board.answerPlan(questionId, { accepted: false, note: 'Too much' })
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        const update = lastUpdate(delivered)
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'Understood.'),
+          updateRun(update, 'u'),
+        )
+        expect(board.statusOf(mainId)).toBe('cancelled')
+      })
+
+      it('accepted and then all cancelled, it does not read as Done on the card alone', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { questionId, taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        board.answerPlan(questionId, { accepted: true })
+        for (const step of await stepsOf(board, mainId))
+          await board.updateStatus(step.id, 'cancelled')
+        expect(await board.mainTaskState(mainId)).toMatchObject({
+          openSubtasks: 0,
+          doneSubtasks: 0,
+        })
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'Nothing came of it.'),
+          updateRun(lastUpdate(delivered), 'u'),
+        )
+        expect(board.statusOf(mainId)).toBe('cancelled')
+      })
+
+      it('a batch of tags waits on a card under the main task, and starts together', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(
+            'r1',
+            '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate>',
+          ),
+          asked('d1'),
+        )
+        expect(delivered).toEqual([])
+        const { questionId, taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        expect((await board.mainTaskState(mainId))?.title).toBe('Build the login page')
+        expect(board.answerPlan(questionId, { accepted: true }).created).toBe(2)
+        expect((await stepsOf(board, mainId)).map((t) => t.title)).toEqual(['a', 'b'])
+        await orchestrator.resume()
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+        expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+      })
+
+      it('a Stop closes the card and starts no lead run, however long its close took', async () => {
+        const outbox = new MemoryReportUps()
+        const { board, delivered, orchestrator } = asking({ reportUps: outbox })
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN), asked('d1'))
+        const { taskId } = board.waitingPlans()[0]!
+        const mainId = await parentOf(board, taskId)
+        // The card closes after the Stop began, as a slow write would.
+        const close = board.closeWaitingPlans!.bind(board)
+        board.closeWaitingPlans = async (teamId) => {
+          await vi.advanceTimersByTimeAsync(50)
+          await close(teamId)
+        }
+        await orchestrator.markStopped()
+        expect(board.statusOf(taskId)).toBe('cancelled')
+        await vi.advanceTimersByTimeAsync(50)
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered)).toEqual([])
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        expect(outbox.held().map((r) => r.item.outcome)).toEqual(['all_in'])
+      })
+    })
+
+    describe('and work that waits for what it handed out', () => {
+      it('a note about the request itself does not wait for a run it will never have', async () => {
+        const outbox = new MemoryReportUps()
+        const { board, delivered, orchestrator } = makeHarness({
+          reportUps: outbox,
+          sessionKeyForAgent: (id) => (id === 'a3' ? null : sk(id)),
+        })
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(board, idsOf(board)[0]!)
+        await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done.'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const first = lastUpdate(delivered)
+        // The lead's update turn tries for someone it cannot reach. The note is about the
+        // request, and only its lead can hear it.
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'One more. <delegate to="@Design Boo">more</delegate>'),
+          {
+            ...updateRun(first, 'u1'),
+            reportUpIds: (first.origin as { reportUpIds?: string[] }).reportUpIds ?? [],
+          },
+        )
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const note = lastUpdate(delivered)
+        expect(note.task).toMatch(/Could not reach Design Boo/)
+        expect((note.origin as { mainTaskId?: string }).mainTaskId).toBe(mainId)
+        expect((note.origin as { forTaskId?: string }).forTaskId).toBeUndefined()
+        await orchestrator.onEvent(sk('leader'), doneEvent('ru2', 'All done.'), {
+          ...updateRun(note, 'u2'),
+          reportUpIds: (note.origin as { reportUpIds?: string[] }).reportUpIds ?? [],
+        })
+        expect(board.statusOf(mainId)).toBe('done')
+      })
+
+      it('a lead that keeps asking for what is refused gets the same few turns', async () => {
+        const { board, delivered, orchestrator } = makeHarness({
+          sessionKeyForAgent: (id) => (id === 'a3' ? null : sk(id)),
+        })
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(board, idsOf(board)[0]!)
+        // The sub-task is still running, so no reply of the lead's closes the request.
+        for (let i = 0; i < 6; i++) {
+          await orchestrator.onEvent(
+            sk('leader'),
+            doneEvent(`u${i}`, `<delegate to="@Design Boo">more ${i}</delegate>`),
+            { reportForTaskId: null, stopGen: 0, deliveryId: `u${i}`, mainTaskId: mainId },
+          )
+          await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        }
+        expect(reflections(delivered).length).toBeLessThanOrEqual(MAX_REFUSAL_TURNS)
+        expect(board.statusOf(mainId)).toBe('in_progress')
+      })
+
+      it('the lead does not wait on a sub-task’s report: it is an update, not a follow-up', async () => {
+        const outbox = new MemoryReportUps()
+        const { board, delivered, orchestrator } = makeHarness({ reportUps: outbox })
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(board, idsOf(board)[0]!)
+        await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done.'))
+        // Written with nothing to wait for: a main task has no next run to take it.
+        const [row] = outbox.unsettledFor('leader')
+        expect(row?.taskId).toBe(idsOf(board)[0])
+        expect(row?.forTaskId).toBeUndefined()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const origin = lastUpdate(delivered).origin as { mainTaskId?: string; forTaskId?: string }
+        expect(origin.mainTaskId).toBe(mainId)
+        expect(origin.forTaskId).toBeUndefined()
+      })
+
+      it('a restart after the last sub-task closed still gets one closing turn', async () => {
+        const outbox = new MemoryReportUps()
+        const first = makeHarness({ reportUps: outbox })
+        await first.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(first.board, idsOf(first.board)[0]!)
+        await first.orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done.'))
+        first.orchestrator.reset()
+        const next = makeHarness({ board: first.board, reportUps: outbox })
+        await next.orchestrator.resume()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        await next.orchestrator.resume()
+        await next.orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const updates = reflections(next.delivered)
+        expect(updates).toHaveLength(1)
+        await next.orchestrator.onEvent(sk('leader'), doneEvent('ru', 'Done.'), {
+          ...updateRun(updates[0]!, 'u'),
+          reportUpIds: (updates[0]!.origin as { reportUpIds?: string[] }).reportUpIds ?? [],
+        })
+        expect(first.board.statusOf(mainId)).toBe('done')
+      })
+
+      it('a lead’s run is no run of the request: nothing is claimed or opened on it', async () => {
+        const { board, delivered, orchestrator } = makeHarness()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(board, idsOf(board)[0]!)
+        await orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done.'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'Done.'),
+          updateRun(lastUpdate(delivered), 'u'),
+        )
+        expect(board.statusOf(mainId)).toBe('done')
+        expect(await ledgerOf(board, mainId)).toEqual([])
+        expect(board.claims).not.toContain(mainId)
+      })
+    })
+
+    describe('and how a run ends', () => {
+      const oneSubTaskIn = async (opts?: HarnessOpts) => {
+        const h = makeHarness(opts)
+        await h.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const mainId = await parentOf(h.board, idsOf(h.board)[0]!)
+        await h.orchestrator.onEvent(sk('a2'), doneEvent('ra', 'A is done.'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        return { ...h, mainId, update: lastUpdate(h.delivered) }
+      }
+
+      it('a silent closing turn closes it with a note, and gets no extra turn', async () => {
+        const { board, delivered, orchestrator, mainId, update } = await oneSubTaskIn()
+        const count = delivered.length
+        await orchestrator.onEvent(sk('leader'), doneEvent('ru', ''), updateRun(update, 'u'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(board.statusOf(mainId)).toBe('done')
+        expect(board.comments.some((c) => c.taskId === mainId && /no summary/.test(c.body))).toBe(
+          true,
+        )
+        expect(delivered).toHaveLength(count)
+        expect(await ledgerOf(board, mainId)).toEqual([])
+      })
+
+      it('a control token reads as no summary too', async () => {
+        const { board, orchestrator, mainId, update } = await oneSubTaskIn()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('ru', 'NO_REPLY'),
+          updateRun(update, 'u'),
+        )
+        expect(board.statusOf(mainId)).toBe('done')
+        expect(board.comments.some((c) => c.taskId === mainId && c.body === 'NO_REPLY')).toBe(false)
+      })
+
+      it('a lead turn that fails closes nothing, and its report goes out again', async () => {
+        const outbox = new MemoryReportUps()
+        const { board, delivered, orchestrator, mainId, update } = await oneSubTaskIn({
+          reportUps: outbox,
+        })
+        const carried = (update.origin as { reportUpIds?: string[] }).reportUpIds ?? []
+        expect(carried.length).toBeGreaterThan(0)
+        await orchestrator.onEvent(sk('leader'), failedDoneEvent('ru', 'error', 'boom'), {
+          ...updateRun(update, 'u'),
+          reportUpIds: carried,
+        })
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        const count = reflections(delivered).length
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered).length).toBe(count + 1)
+      })
+
+      it('a lead turn that runs out of room or hits a limit gets no continuation or retry', async () => {
+        for (const ending of [
+          failedDoneEvent('ru', 'max_turns', 'ran out'),
+          {
+            kind: 'error',
+            fatal: true,
+            code: 'rate_limit',
+            message: '429',
+            runId: 'ru',
+            sessionId: null,
+            ts: 1,
+            seq: 1,
+          } as RuntimeEvent,
+        ]) {
+          const { board, delivered, orchestrator, mainId, update } = await oneSubTaskIn()
+          const count = delivered.length
+          await orchestrator.onEvent(sk('leader'), ending, updateRun(update, 'u'))
+          await vi.advanceTimersByTimeAsync(BRAKE_MAX_WAIT_MS)
+          expect(board.statusOf(mainId)).toBe('in_progress')
+          expect(await ledgerOf(board, mainId)).toEqual([])
+          expect(delivered.slice(count).filter((d) => !d.task.startsWith('[Task Update]'))).toEqual(
+            [],
+          )
+        }
+      })
+
+      it('an empty reply under a request still gets its one extra turn, then waits for a person', async () => {
+        const { board, delivered, orchestrator } = makeHarness()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+          asked('d1'),
+        )
+        const childId = idsOf(board)[0]!
+        const mainId = await parentOf(board, childId)
+        await orchestrator.onEvent(sk('a2'), doneEvent('ra', ''))
+        expect(board.statusOf(childId)).toBe('in_progress')
+        await vi.advanceTimersByTimeAsync(1)
+        expect(deliveredTo(delivered, 'a2').length).toBe(2)
+        await orchestrator.onEvent(sk('a2'), doneEvent('rb', ''))
+        expect(board.statusOf(childId)).toBe('blocked')
+        await vi.advanceTimersByTimeAsync(1)
+        expect(deliveredTo(delivered, 'a2').length).toBe(2)
+        // The request waits with it, and none of this happened on the main task.
+        expect(board.statusOf(mainId)).toBe('in_progress')
+        expect((await board.mainTaskState(mainId))?.openSubtasks).toBe(1)
+        expect(await ledgerOf(board, mainId)).toEqual([])
+      })
+    })
+
+    it('holds a person’s words for the lead under a pause, and they go out on resume', async () => {
+      let paused = true
+      const outbox = new MemoryReportUps()
+      const { board, delivered, orchestrator } = makeHarness({
+        reportUps: outbox,
+        runHeldBy: ({ taskId }) => (paused && taskId ? 'paused' : null),
+      })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'Add a logo')).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered)).toEqual([])
+      expect(outbox.pending().map((r) => r.item.summary)).toContain('Add a logo')
+      paused = false
+      await orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(lastUpdate(delivered).task).toContain('Add a logo')
     })
   })
 

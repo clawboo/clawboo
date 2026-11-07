@@ -60,7 +60,12 @@ import {
   type DbTaskQuestion,
 } from '../schema'
 import { immediateWrite, type BoardTx } from './contention'
-import { deriveCreateKey, existingTaskForCreate, SAME_TASK_WINDOW_MS } from './createDedupe'
+import {
+  deriveCreateKey,
+  existingTaskForCreate,
+  SAME_TASK_WINDOW_MS,
+  taskOfCreateKey,
+} from './createDedupe'
 import { emitBoardLifecycle } from './events'
 import { expirePendingQuestionsTx } from './questionExpiry'
 import {
@@ -69,11 +74,13 @@ import {
   countChildSlots,
   createExecutionProcess,
   firedByRoutine,
+  insertMainTaskTx,
   insertTask,
   linkDep,
   personMovedSinceLastRun,
   TaskDependencyCycleError,
   updateStatus,
+  type MainTaskRequest,
 } from './repository'
 
 // ─── The switch ──────────────────────────────────────────────────────────────
@@ -259,6 +266,9 @@ export interface ProposePlanInput {
   /** The run proposing it, when it has one: a lead's chat turn does not. Its words go on
    *  the thread under this run once the plan is answered. */
   executionId?: string | null
+  /** The person's message this answers, when no task holds it yet: its main task lands
+   *  with the card, and the card and the accepted steps file under it. */
+  mainTask?: MainTaskRequest
 }
 
 export type ProposeRefusal =
@@ -273,6 +283,8 @@ export type ProposeRefusal =
   | 'person_moved'
   | 'routine'
   | 'illegal_transition'
+  | 'root_rate_cap'
+  | 'main_closed'
 
 export type ProposePlanResult =
   /** This team's plans start at once. Nothing was written. */
@@ -284,6 +296,8 @@ export type ProposePlanResult =
       revision: number
       /** The plan got a card of its own just now. */
       holderCreated: boolean
+      /** The person's message got its main task just now. */
+      mainTask?: DbTask
       /** The plan that was waiting, which this one took the place of. */
       replaced?: { title: string; revision: number }
     }
@@ -436,6 +450,8 @@ export function waitingPlanTitle(
   return waitingHolderTx(db, input, roomId)?.title ?? null
 }
 
+/** How deep a parent sits for the depth cap, as `createSubtaskTx` counts it: its
+ *  ancestors, less a person's main task, which is not a level. */
 function parentDepthTx(tx: BoardTx, parentTaskId: string): number {
   let depth = 0
   let cursor: string | null =
@@ -444,11 +460,18 @@ function parentDepthTx(tx: BoardTx, parentTaskId: string): number {
       .from(tasks)
       .where(eq(tasks.id, parentTaskId))
       .get()?.parentTaskId ?? null
-  while (cursor !== null && depth < DEFAULT_MAX_DEPTH) {
-    depth += 1
-    cursor =
-      tx.select({ parentTaskId: tasks.parentTaskId }).from(tasks).where(eq(tasks.id, cursor)).get()
-        ?.parentTaskId ?? null
+  for (
+    let steps = 0;
+    cursor !== null && depth < DEFAULT_MAX_DEPTH && steps <= DEFAULT_MAX_DEPTH + 1;
+    steps++
+  ) {
+    const row: { parentTaskId: string | null; isMainTask: number } | undefined = tx
+      .select({ parentTaskId: tasks.parentTaskId, isMainTask: tasks.isMainTask })
+      .from(tasks)
+      .where(eq(tasks.id, cursor))
+      .get()
+    if (row?.isMainTask !== 1) depth += 1
+    cursor = row?.parentTaskId ?? null
   }
   return depth
 }
@@ -514,7 +537,7 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
     // A card that only holds a plan runs only if a person moved it back. Its plan is still
     // a holder's: the steps do not go under it, and an answer closes it.
     const ownIsHolder = onOwnTask && isPlanHolder(own!.sourceDelegationId)
-    const parentTaskId = !onOwnTask ? input.parentTaskId : ownIsHolder ? own!.parentTaskId : own!.id
+    let parentTaskId = !onOwnTask ? input.parentTaskId : ownIsHolder ? own!.parentTaskId : own!.id
     const parent =
       !onOwnTask && parentTaskId
         ? (tx.select().from(tasks).where(eq(tasks.id, parentTaskId)).get() as DbTask | undefined)
@@ -566,11 +589,29 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
         }
     }
 
+    // A person's message with no task yet: the card and its main task land in this one
+    // write, so a plan that goes nowhere leaves no empty card. A plan taking the place of
+    // one already waiting stays where that one is, under its main task.
+    const request = !onOwnTask && !parentTaskId ? input.mainTask : undefined
+    const heldMain = request && !home ? taskOfCreateKey(tx, { key: request.key }, now) : null
+    if (heldMain && (heldMain.dropped === 1 || isTerminal(heldMain.status as TaskStatus)))
+      return { status: 'refused', reason: 'main_closed', task: heldMain }
+    if (request && home) parentTaskId = home.parentTaskId
+    else if (heldMain) parentTaskId = heldMain.id
+
     if (
       parentTaskId &&
       !checkDepthCap({ depth: parentDepthTx(tx, parentTaskId), max: DEFAULT_MAX_DEPTH }).ok
     )
       return { status: 'refused', reason: 'too_deep', ...(own ? { task: own } : {}) }
+
+    let mainTask: DbTask | undefined
+    if (request && !home && !heldMain) {
+      const made = insertMainTaskTx(tx, request, { teamId: input.teamId, roomId }, {}, now)
+      if (!made.ok) return { status: 'refused', reason: 'root_rate_cap' }
+      mainTask = made.mainTask
+      parentTaskId = mainTask.id
+    }
 
     const holderCreated = !home
     const task =
@@ -580,7 +621,7 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
         description: HOLDER_BRIEF,
         teamId: input.teamId,
         roomId,
-        parentTaskId: input.parentTaskId,
+        parentTaskId,
         assigneeRuntime: 'openclaw',
         status: 'blocked',
         // An answer closes it, and the agent that proposed the plan hears that in its
@@ -680,12 +721,21 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
       question,
       revision: revision.revision,
       holderCreated,
+      ...(mainTask ? { mainTask } : {}),
       ...(replacing ? { replaced: { title: task.title, revision: replacedRevision } } : {}),
     }
   })
 
   if (result.status === 'proposed') {
-    const { task, question, holderCreated } = result
+    const { task, question, holderCreated, mainTask } = result
+    if (mainTask)
+      emitBoardLifecycle({
+        kind: 'task_created',
+        taskId: mainTask.id,
+        teamId: mainTask.teamId ?? null,
+        status: mainTask.status,
+        sourceDelegationId: null,
+      })
     if (holderCreated)
       emitBoardLifecycle({
         kind: 'task_created',

@@ -723,6 +723,7 @@ The answer is built from the running process alone: no database read, no network
     "board.readableIds": true,
     "board.labels": true,
     "board.inbox": true,
+    "board.mainTasks": true,
     "board.wakes": true,
     "board.agentWakes": true,
     "board.planDocuments": true,
@@ -773,6 +774,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                                                                              |
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                                                                              |
 | `board.inbox`                                                               | Always. Read state per task on the server (`/api/board/inbox`, `POST /api/board/:taskId/read`). The event stream says when to read it.                                                                                                                                                                            |
+| `board.mainTasks`                                                           | Always. A lead's hand-offs for a person's chat message are filed under one main task, a row with `isMainTask: 1`. See [A person's main task](/reference/rest-api/board#a-persons-main-task).                                                                                                                      |
 | `board.wakes`                                                               | Always. A person's comment and a dependency moving to done save a wake that starts the task's agent, one per agent and task, within seconds.                                                                                                                                                                      |
 | `board.agentWakes`                                                          | Always. An agent's comment can wake a teammate once a person has allowed it on the job: `POST /api/board/agent-wakes/:jobTaskId`, `/api/team-agent-wakes/:teamId`.                                                                                                                                                |
 | `board.planDocuments`                                                       | Always. A task's plan as a document, in revisions: `GET /api/board/:taskId/plan`, and `write_plan` for an agent's run.                                                                                                                                                                                            |
