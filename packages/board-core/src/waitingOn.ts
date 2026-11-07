@@ -29,11 +29,20 @@ export type WaitingOn =
       personId?: string | null
       /** Who put the task in this state: an agent's hand-back or a person. */
       by?: 'agent' | 'person'
+      /** What the person must do is see its unfinished sub-tasks through: their closing
+       *  brings it back by itself, as the card says. */
+      untilSubtasks?: true
     }
   | { kind: 'question'; questionId: string }
   | { kind: 'approval'; approvalId?: string | null }
   | { kind: 'task'; taskId: string }
-  | { kind: 'subtasks' }
+  | {
+      kind: 'subtasks'
+      /** The engine parked it because the run ended with work still out, as opposed
+       *  to an agent choosing to wait on all its sub-tasks. It waits only on work that
+       *  was handed to someone. */
+      handedOut?: true
+    }
   | { kind: 'failure' }
   | { kind: 'verification'; state: VerificationWait }
   | { kind: 'budget' }
@@ -78,6 +87,7 @@ export function parseWaitingOn(raw: unknown): WaitingOn | null {
         need,
         ...(personId ? { personId } : {}),
         ...(by ? { by } : {}),
+        ...(d['untilSubtasks'] === true ? { untilSubtasks: true as const } : {}),
       }
     }
     case 'question': {
@@ -99,6 +109,7 @@ export function parseWaitingOn(raw: unknown): WaitingOn | null {
         : null
     }
     case 'subtasks':
+      return d['handedOut'] === true ? { kind: 'subtasks', handedOut: true } : { kind: 'subtasks' }
     case 'failure':
     case 'budget':
     case 'breaker':

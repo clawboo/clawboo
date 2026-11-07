@@ -25,7 +25,12 @@ export function readPendingWake(value: unknown): PendingWake | null {
   }
 }
 
-export function pendingWakeText(wake: PendingWake, name: string): string {
+export function pendingWakeText(
+  wake: PendingWake,
+  name: string,
+  /** The task waits on another task or its sub-tasks, which starts it by itself. */
+  opts: { onOtherWork?: boolean } = {},
+): string {
   const what = wake.comments > 1 ? `${wake.comments} comments` : 'this'
   if (wake.held) return `Held by a Stop: ${name} reads ${what} on the task's next run`
   switch (wake.skipReason) {
@@ -60,7 +65,9 @@ export function pendingWakeText(wake: PendingWake, name: string): string {
     case 'billing':
       return `Waiting on the provider's billing. Fix it, then retry`
     case 'blocked':
-      return `Waiting on you: Retry starts ${name} on it`
+      return opts.onOtherWork
+        ? `${name} reads ${what} when the work it waits on has closed`
+        : `Waiting on you: Retry starts ${name} on it`
     case 'person_assigned':
       return `This task is with a person. ${name} reads ${what} when it is given back`
     case 'question':

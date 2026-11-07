@@ -95,7 +95,11 @@ export const boardChangeFrameSchema = z.object({
   // for a wait on other work, and the person it is assigned to.
   waitingOn: z.string().nullable().optional(),
   waitingOnDetail: z
-    .object({ taskTitle: z.string().optional(), openSubtasks: z.number().optional() })
+    .object({
+      taskTitle: z.string().optional(),
+      openSubtasks: z.number().optional(),
+      needPerson: z.number().optional(),
+    })
     .nullable()
     .optional(),
   assigneePersonId: z.string().nullable().optional(),

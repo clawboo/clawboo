@@ -717,6 +717,8 @@ The answer is built from the running process alone: no database read, no network
     "chat.direct": true,
     "board.verification": true,
     "board.checkHold": true,
+    "board.reportResult": true,
+    "board.parentWaits": true,
     "board.steering": true,
     "board.readableIds": true,
     "board.labels": true,
@@ -763,6 +765,8 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.personAssignees`                                                     | Always. A task can be assigned to a person: `POST /api/board/:taskId/assign-person`.                                                                                                                                                                                                                              |
 | `board.questions`                                                           | Always. An agent can ask a person, and a person can answer: `GET /api/board/:taskId/questions`, `POST /api/board/questions/:questionId/answer`.                                                                                                                                                                   |
 | `board.checkHold`                                                           | Always. A team-chat work check waits while another run of the team is working in the team folder, and its task carries `checkHeldSince` meanwhile.                                                                                                                                                                |
+| `board.reportResult`                                                        | Always. An agent on a team chat run can say how its task went with `report_result`, which moves nothing: the server decides Done.                                                                                                                                                                                 |
+| `board.parentWaits`                                                         | Always. A team chat task whose run ends with work it handed out still going waits for it, and gets one follow-up turn.                                                                                                                                                                                            |
 | `board.steering`                                                            | Always. A comment on a running task reaches the run, and `POST /api/board/:taskId/comments` answers with how it was delivered.                                                                                                                                                                                    |
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                                                                              |
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                                                                              |

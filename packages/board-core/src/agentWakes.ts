@@ -6,7 +6,7 @@
 // team for a back-and-forth (`agent_wake_chains`). Import-free apart from the waiting
 // reason, like the state machine.
 
-import type { WaitingOn } from './waitingOn'
+import { waitsOnOtherWork, type WaitingOn } from './waitingOn'
 
 /** Agent-to-agent wakes a job may start in an hour before it pauses and says so. */
 export const MAX_AGENT_WAKES_PER_HOUR = 12
@@ -124,5 +124,13 @@ export function afterAgentWakeChain(
  * comment does not lift.
  */
 export function teammateMayEndWait(waiting: WaitingOn | null | undefined): boolean {
-  return waiting?.kind === 'person' && waiting.by === 'agent'
+  return waiting?.kind === 'person' && waiting.by === 'agent' && !waiting.untilSubtasks
+}
+
+/** Does this wait end when other work does, so a comment on the task wakes nobody? A
+ *  task kept from Done until its sub-tasks come through reads `person`, because a person
+ *  has to see them through, and it is the same to a teammate: that is not what its agent
+ *  said it needs, and another turn cannot change it. */
+export function waitEndsWithOtherWork(waiting: WaitingOn | null | undefined): boolean {
+  return waitsOnOtherWork(waiting) || (waiting?.kind === 'person' && !!waiting.untilSubtasks)
 }

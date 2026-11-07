@@ -12,7 +12,15 @@ import {
   isTaskStatus,
   ledgerAllowsAutoFire,
   normalizeTaskTitle,
+  parseResultClaim,
+  subtaskWaitOver,
+  tallySubtasks,
+  unfinishedNeed,
+  unfinishedSubtasks,
+  waitsOnOtherWork,
   type HandOffLink,
+  type ResultClaim,
+  type SubtaskView,
   type WaitingOn,
 } from '@clawboo/board-core'
 import {
@@ -23,6 +31,7 @@ import {
 
 import type {
   BoardTask,
+  ClaimedWake,
   ClaimResult,
   CompleteExecutionOutcome,
   CreateTaskInput,
@@ -81,6 +90,94 @@ export class FakeBoard implements CascadeBoard {
     let n = 0
     for (const id of this.execs.keys()) if (!this.seededExecs.has(id)) n += 1
     return n
+  }
+
+  /** Wakes the board saved for a task, handed to the next claim. */
+  private savedWakes = new Map<string, ClaimedWake[]>()
+  private wakeN = 0
+  /** Claims by execution, as `report_result` stores them. */
+  private claimsByExec = new Map<string, ResultClaim>()
+
+  seedResultClaim(taskId: string, claim: ResultClaim): void {
+    const open = [...this.execs].filter(([, tid]) => tid === taskId).at(-1)?.[0]
+    if (open) this.claimsByExec.set(open, claim)
+  }
+  async resultClaim(execId: string): Promise<ResultClaim | null> {
+    return parseResultClaim(this.claimsByExec.get(execId))
+  }
+
+  private viewsOf(parentId: string): SubtaskView[] {
+    return [...this.tasks.values()]
+      .filter((t) => t.parentTaskId === parentId)
+      .map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        waitingOn: this.waits.get(t.id) ?? null,
+        sourceDelegationId: t.sourceDelegationId,
+        assigneeAgentId: t.assigneeAgentId,
+        waitsOnThisTask: this.waitReaches(t.id, parentId),
+        execs: this.ledger(t.id),
+      }))
+  }
+  /** The real board's `waitReaches`: does this task need `to` to finish first? */
+  private waitReaches(from: string, to: string): boolean {
+    const seen = new Set<string>()
+    const queue = [from]
+    while (queue.length > 0) {
+      const at = queue.pop()!
+      if (at === to) return true
+      if (seen.has(at)) continue
+      seen.add(at)
+      const row = this.tasks.get(at)
+      if (!row || row.status === 'done' || row.status === 'cancelled') continue
+      const wait = this.waits.get(at)
+      if (wait?.kind === 'task') queue.push(wait.taskId)
+      if (wait?.kind === 'subtasks')
+        for (const t of this.tasks.values()) if (t.parentTaskId === at) queue.push(t.id)
+      queue.push(...(this.depMap.get(at) ?? []))
+    }
+    return false
+  }
+  async subtasksOf(taskId: string): Promise<SubtaskView[] | null> {
+    return this.viewsOf(taskId)
+  }
+  /** The real board's `releaseParentWaitTx`, in the same write as what caused it. */
+  private releaseParent(parentId: string | null): void {
+    const parent = parentId ? this.tasks.get(parentId) : undefined
+    if (!parent || parent.status !== 'blocked') return
+    const wait = this.waits.get(parent.id)
+    const views = this.viewsOf(parent.id)
+    const tally = tallySubtasks(views)
+    if (wait?.kind === 'person' && wait.untilSubtasks) {
+      if (!subtaskWaitOver(tally, { handedOutOnly: true }) || unfinishedSubtasks(tally) > 0) {
+        if (unfinishedSubtasks(tally) > 0)
+          this.waits.set(parent.id, { ...wait, need: unfinishedNeed(views) })
+        return
+      }
+    } else {
+      if (wait?.kind !== 'subtasks') return
+      if (!subtaskWaitOver(tally, { handedOutOnly: wait.handedOut === true })) return
+    }
+    if (this.ledger(parent.id).some((r) => r.status === 'running')) return
+    if (!delegationTargetOf(parent.sourceDelegationId)) {
+      this.waits.set(parent.id, { kind: 'person', need: 'Decide what happens next.' })
+      return
+    }
+    parent.status = 'todo'
+    parent.assigneeAgentId = null
+    this.waits.delete(parent.id)
+    this.savedWakes.set(parent.id, [
+      { id: `wake-${++this.wakeN}`, reason: 'subtasks_closed', commentIds: [] },
+    ])
+  }
+  async releaseSubtaskWait(taskId: string): Promise<void> {
+    this.releaseParent(taskId)
+  }
+  /** Tasks the task runner runs, for a scenario that needs one. */
+  readonly runnerTasks = new Set<string>()
+  async runsOnTaskRunner(taskId: string): Promise<boolean> {
+    return this.runnerTasks.has(taskId)
   }
 
   /** What each task waits on, as `updateStatus` said. */
@@ -149,19 +246,26 @@ export class FakeBoard implements CascadeBoard {
     for (const t of this.tasks.values()) {
       if (t.parentTaskId !== parent || !this.sameAsk(t, input)) continue
       if (input.turnId && t.sourceDelegationId?.startsWith(`${input.turnId}:`)) continue
-      if (!['todo', 'in_progress', 'in_review'].includes(t.status)) continue
+      if (
+        !['todo', 'in_progress', 'in_review'].includes(t.status) &&
+        !(t.status === 'blocked' && waitsOnOtherWork(this.waits.get(t.id)))
+      )
+        continue
       if (!t.assigneeAgentId && !delegationTargetOf(t.sourceDelegationId)) continue
       if (t.status === 'todo' && !ledgerAllowsAutoFire(this.ledger(t.id))) continue
       return t
     }
     return undefined
   }
-  private ledger(taskId: string): Array<{ status: string }> {
-    const out: Array<{ status: string }> = []
+  private ledger(taskId: string): Array<{ status: string; errorClass?: string | null }> {
+    const out: Array<{ status: string; errorClass?: string | null }> = []
     for (const [execId, tid] of this.execs) {
       if (tid !== taskId) continue
       const done = this.completed.find((c) => c.execId === execId)
-      out.push({ status: done ? done.outcome.status : 'running' })
+      out.push({
+        status: done ? done.outcome.status : 'running',
+        ...(done?.outcome.errorClass ? { errorClass: done.outcome.errorClass } : {}),
+      })
     }
     return out
   }
@@ -266,7 +370,9 @@ export class FakeBoard implements CascadeBoard {
     if (!t || t.status !== 'todo' || t.assigneeAgentId) return { ok: false, reason: 'conflict' }
     t.status = 'in_progress'
     t.assigneeAgentId = assigneeAgentId ?? 'someone'
-    return { ok: true, task: this.toBoardTask(t) }
+    const wakes = this.savedWakes.get(taskId)
+    this.savedWakes.delete(taskId)
+    return { ok: true, task: this.toBoardTask(t), ...(wakes ? { wakes } : {}) }
   }
   async updateStatus(
     taskId: string,
@@ -281,6 +387,17 @@ export class FakeBoard implements CascadeBoard {
     else if (t.status !== status) this.waits.delete(taskId)
     t.status = status
     if (status === 'todo') t.assigneeAgentId = null // released → re-claimable
+    if (['done', 'cancelled', 'blocked', 'backlog'].includes(status))
+      this.releaseParent(t.parentTaskId)
+    // The real board's wait on one task: its finishing sends the waiter back to the queue.
+    if (status === 'done')
+      for (const [id, w] of this.waits) {
+        const waiter = this.tasks.get(id)
+        if (w.kind !== 'task' || w.taskId !== taskId || waiter?.status !== 'blocked') continue
+        waiter.status = 'todo'
+        waiter.assigneeAgentId = null
+        this.waits.delete(id)
+      }
     return true
   }
   async addComment(taskId: string, body: string): Promise<void> {
@@ -369,6 +486,7 @@ export class FakeBoard implements CascadeBoard {
           t.status = 'cancelled'
           this.statusUpdates.push({ taskId: t.id, status: 'cancelled' })
           out.push({ id: t.id, title: t.title })
+          this.releaseParent(t.parentTaskId)
           visit(depId)
         }
       }

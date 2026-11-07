@@ -708,6 +708,9 @@ export const executionProcesses = sqliteTable(
     // budget refusal) and for a row from before this column. The no-progress brake
     // counts these, so they outlive a restart.
     madeProgress: integer('made_progress'),
+    /** What the run's agent said about its task (`report_result`), as JSON. Evidence:
+     *  `decideDone` in @clawboo/board-core reads it, and it moves nothing itself. */
+    resultClaim: text('result_claim'),
     recoveryTombstone: integer('recovery_tombstone').notNull().default(0),
     tenantId: text('tenant_id'),
     createdAt: integer('created_at').notNull(),

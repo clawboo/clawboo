@@ -77,6 +77,20 @@ describe('the board reads waiting_on', () => {
         waitingOnDetail: { openSubtasks: 1 },
       }),
     ).toBe('Waiting on 1 sub-task')
+    expect(
+      waitingWorkLabel({
+        status: 'blocked',
+        waitingOn: { kind: 'subtasks', handedOut: true },
+        waitingOnDetail: { openSubtasks: 3, needPerson: 1 },
+      }),
+    ).toBe('Waiting on 3 sub-tasks, 1 needs you')
+    expect(
+      waitingWorkLabel({
+        status: 'blocked',
+        waitingOn: { kind: 'subtasks', handedOut: true },
+        waitingOnDetail: { openSubtasks: 2, needPerson: 2 },
+      }),
+    ).toBe('Waiting on 2 sub-tasks, 2 need you')
     expect(waitingWorkLabel({ status: 'todo', waitingOn: '{"kind":"subtasks"}' })).toBeNull()
     expect(waitingWorkLabel({ status: 'blocked', waitingOn: JSON.stringify(QUESTION) })).toBeNull()
   })

@@ -23,7 +23,7 @@ import {
   isTerminal,
   parseWaitingOn,
   teammateMayEndWait,
-  waitsOnOtherWork,
+  waitEndsWithOtherWork,
   type AgentWakeCard,
   type AgentWakeCardKind,
   type AgentWakeChoice,
@@ -193,7 +193,7 @@ export function saveAgentCommentWake(
       }
       // A person's task is their turn, and a card in Backlog was parked on purpose.
       if (task.assigneePersonId || task.status === 'backlog') return null
-      if (waitsOnOtherWork(parseWaitingOn(task.waitingOn))) return null
+      if (waitEndsWithOtherWork(parseWaitingOn(task.waitingOn))) return null
       const denied = gateOfJob(tx, jobTaskIdOf(tx, taskId))?.decision === 'deny'
       if (!commentMayWake(comment, { agentWakes: !denied }))
         return { result: { state: 'declined', agentId }, teamId }

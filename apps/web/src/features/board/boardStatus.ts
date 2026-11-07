@@ -370,7 +370,7 @@ export function otherAssigneeName(
 /**
  * What a card says for a task waiting on other work, or null when it is not. The
  * server attaches `waitingOnDetail` to a row: the title of the task it waits on, or
- * how many of its sub-tasks are open.
+ * how many of its sub-tasks are open and how many of those need a person.
  */
 export function waitingWorkLabel(task: {
   status: string
@@ -380,7 +380,11 @@ export function waitingWorkLabel(task: {
   if (task.status !== 'blocked') return null
   const w = parseWaitingOn(task.waitingOn)
   if (!w || !waitsOnOtherWork(w)) return null
-  const detail = (task.waitingOnDetail ?? {}) as { taskTitle?: unknown; openSubtasks?: unknown }
+  const detail = (task.waitingOnDetail ?? {}) as {
+    taskTitle?: unknown
+    openSubtasks?: unknown
+    needPerson?: unknown
+  }
   if (w.kind === 'task') {
     return typeof detail.taskTitle === 'string' && detail.taskTitle
       ? `Waiting on “${detail.taskTitle}”`
@@ -388,7 +392,10 @@ export function waitingWorkLabel(task: {
   }
   const n = typeof detail.openSubtasks === 'number' ? detail.openSubtasks : 0
   if (n <= 0) return 'Waiting on its sub-tasks'
-  return `Waiting on ${n} sub-${n === 1 ? 'task' : 'tasks'}`
+  const waiting = `Waiting on ${n} sub-${n === 1 ? 'task' : 'tasks'}`
+  // A person can act on those: each is in Needs you, with its own way forward.
+  const need = typeof detail.needPerson === 'number' ? detail.needPerson : 0
+  return need > 0 ? `${waiting}, ${need} ${need === 1 ? 'needs' : 'need'} you` : waiting
 }
 
 // ─── Board columns ──────────────────────────────────────────────────────────

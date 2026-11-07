@@ -10,7 +10,14 @@
 // @clawboo/board-core carries no server/db graph, so this host-agnostic interface
 // package stays browser-safe while using the SAME union @clawboo/db enforces — a
 // host binding over the direct-DB client type-checks by identity, not by luck.
-import type { HandOffLink, TaskStatus, TaskWakeReason, WaitingOn } from '@clawboo/board-core'
+import type {
+  HandOffLink,
+  ResultClaim,
+  SubtaskView,
+  TaskStatus,
+  TaskWakeReason,
+  WaitingOn,
+} from '@clawboo/board-core'
 
 export type { HandOffLink, TaskStatus, WaitingOn }
 
@@ -224,4 +231,14 @@ export interface EngineBoardClient extends BoardClient {
     taskKey: string,
   ): Promise<void>
   clearDelegationFailure(teamId: string, targetAgentId: string, taskKey: string): Promise<void>
+  /** A task's sub-tasks, as `subtaskStanding` reads them. Null when unread. */
+  subtasksOf(taskId: string): Promise<SubtaskView[] | null>
+  /** What the agent of this run said about its task (`report_result`). Null for none. */
+  resultClaim(execId: string): Promise<ResultClaim | null>
+  /** End this task's wait on its sub-tasks if nothing more is coming from them: it goes
+   *  back to the queue with a saved wake, or to a person. Nothing happens otherwise. */
+  releaseSubtaskWait(taskId: string): Promise<void>
+  /** Does the task runner run this task, rather than team chat? A room's Stop leaves it
+   *  alone. True when unread, for the same reason. */
+  runsOnTaskRunner(taskId: string): Promise<boolean>
 }

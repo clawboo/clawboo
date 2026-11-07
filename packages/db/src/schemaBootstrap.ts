@@ -464,6 +464,7 @@ const SCHEMA_DDL = `
       error              TEXT,
       error_class        TEXT,
       made_progress      INTEGER,
+      result_claim       TEXT,
       recovery_tombstone INTEGER NOT NULL DEFAULT 0,
       tenant_id          TEXT,
       created_at         INTEGER NOT NULL

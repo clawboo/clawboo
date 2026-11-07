@@ -228,7 +228,10 @@ export interface ServerDeliverDeps {
   onRunNotStarted?: (run: RunStamp) => void
   /** The engine's `takeHeldReportUps`: what a person's Stop held for this agent's
    *  next run, as text for the context a run starts with. */
-  takeHeldReportUps?: (sessionKey: string) => { ids: string[]; text: string } | null
+  takeHeldReportUps?: (
+    sessionKey: string,
+    taskId?: string,
+  ) => { ids: string[]; text: string } | null
   /** The engine's `taskForSession`, used to attribute a delegated run's mission
    *  spend, as framing's second witness, and by the start gate to check that a
    *  task run's session still holds its task. */
@@ -1338,9 +1341,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 log.error({ err, taskId: runTaskId }, 'ticket block could not be built')
               }
             }
-            // Report-ups a person's Stop held for this agent's next run: this one.
+            // Report-ups a person's Stop held for this agent's next run, which is this
+            // one, and what came back from the work this task handed out.
             const held = isTeamSessionKey(targetSessionKey)
-              ? (deps.takeHeldReportUps?.(targetSessionKey) ?? null)
+              ? (deps.takeHeldReportUps?.(targetSessionKey, runTaskId ?? undefined) ?? null)
               : null
             if (held) {
               heldReportUpIds = held.ids

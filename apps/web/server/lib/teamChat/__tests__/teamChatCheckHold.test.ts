@@ -183,7 +183,7 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
       onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
       onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
       onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
-      takeHeldReportUps: (sk) => engineRef.current!.takeHeldReportUps(sk),
+      takeHeldReportUps: (sk, taskId) => engineRef.current!.takeHeldReportUps(sk, taskId),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
       execForSession: (sk) => engineRef.current!.execForSession(sk),
       stopGen: () => gen,

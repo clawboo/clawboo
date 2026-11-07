@@ -20,6 +20,8 @@ export type TaskWakeReason =
   /** A teammate's comment, through a Tasks session bound to that agent. A person has
    *  to allow these once per job: see ./agentWakes. */
   | 'agent_comment'
+  /** All the work it handed out has closed: its follow-up turn. */
+  | 'subtasks_closed'
 
 /** Why a run on a task started, written to its `execution_processes.run_reason`
  *  and read back by the ticket block's "Why this run" line. */

@@ -50,13 +50,57 @@ Done and Cancelled stay put until you say otherwise: **Reopen** in the task's dr
 
 A task that waits says what for. Agents must give the reason when they block a task, and Clawboo's own parks give theirs: a failed run, a check that could not pass, a stop from a budget or the breaker, a restart. Needs you reads it:
 
-| The task waits on                   | Where it shows                                              | What ends the wait                                                                     |
-| ----------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| You: something only a person can do | Needs you as **Blocked**, saying what is needed             | Your reply or **Retry**                                                                |
-| Your answer to a question           | Needs you as **Waiting for your answer**, with its controls | Your answer, saved as a wake on the task, so a restart cannot lose it                  |
-| Another task                        | In progress, saying **Waiting on** and the task's title     | That task finishing. If it is cancelled instead, the task comes to Needs you to say so |
-| Its own sub-tasks                   | In progress, saying **Waiting on 3 sub-tasks**              | The last one finishing. If one was cancelled, the task comes to Needs you to say so    |
-| A check, a failure, a stop          | Needs you, as before                                        | **Retry** or **Assign**                                                                |
+| The task waits on                   | Where it shows                                                                 | What ends the wait                                                                                                                              |
+| ----------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| You: something only a person can do | Needs you as **Blocked**, saying what is needed                                | Your reply or **Retry**                                                                                                                         |
+| Your answer to a question           | Needs you as **Waiting for your answer**, with its controls                    | Your answer, saved as a wake on the task, so a restart cannot lose it                                                                           |
+| Another task                        | In progress, saying **Waiting on** and the task's title                        | That task finishing. If it is cancelled instead, the task comes to Needs you to say so                                                          |
+| Its own sub-tasks                   | In progress, saying **Waiting on 3 sub-tasks**, and how many of those need you | The last one closing, which starts its agent once more. See [A task that hands out work waits for it](#a-task-that-hands-out-work-waits-for-it) |
+| A check, a failure, a stop          | Needs you, as before                                                           | **Retry** or **Assign**                                                                                                                         |
+
+## A task that hands out work waits for it
+
+On a team chat run, a task whose run ends with work it handed out still going does not close. Its run is kept as the success it was, its reply goes on the card, and the task waits on those sub-tasks. When they have closed, its agent gets one more turn, with their results in its context, however many there were and however far apart they finished. The task is done after that turn. A restart in between changes nothing: the wait and the results are on the board.
+
+Closed means nothing more will come from a sub-task by itself:
+
+| The sub-task                                                                 | To the task waiting on it                                  |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Done                                                                         | Closed                                                     |
+| Cancelled or removed                                                         | Closed, and not done                                       |
+| Ended badly: a failed run or check, a budget or breaker stop, parked         | Closed, and not done. Its failure reaches the agent's turn |
+| In Backlog                                                                   | Closed, and not done: nothing starts work from there       |
+| Waiting on you: a question, an approval, a hand-back, or held by a person    | Still open. The card says how many need you                |
+| Queued, running, being checked, waiting on other work, or stopped by a pause | Still open                                                 |
+| Nobody was given it, like a note an agent left itself                        | Not waited on                                              |
+| It needs this task to finish first                                           | Not waited on: this task's finishing is what frees it      |
+
+What comes after that turn:
+
+- **All of them done:** the task is done, and goes through the team's check first if the team has one.
+- **Some did not finish:** the task is not called done. It comes to Needs you as **Blocked**, naming them, with the agent's reply as its comment, unless the agent says with `report_result` that it made up for them. Then it is done, and a comment and the report to whoever handed it out both say what did not finish. Otherwise retry those sub-tasks, or mark the task done yourself. When none is left unfinished, the task starts again by itself, for one more turn with their results. Until then its card names the ones that still are.
+- **Some were cancelled:** the agent is told which, and that a person's cancel is not to be redone. The task can be done over them, and a comment says so.
+- **The agent hands out more:** the task waits again.
+
+Whoever handed out the waiting task is not woken for this. It stays on their list of what is still outstanding, and they hear once, when it is done or needs you.
+
+**After a Stop** no such turn starts. A task waiting on its sub-tasks goes back to To do as **Stopped**, like any run a Stop ended, and **Retry** runs it with whatever came back. Retrying a stopped sub-task does not start the parent by itself once the parent reads Stopped: retry the parent too, and it picks up what is in. If you retry the parent first, the sub-tasks still stopped count as not finished.
+
+**Under a pause** nothing is lost and nobody is asked. A sub-task a pause stopped still counts as coming, so the task keeps waiting and does not say it did not finish. A task whose last sub-task closes while its own agent is paused goes back to To do and waits there, and a turn a pause stops goes back the same way. The turn runs after the resume, with every result that came back.
+
+**On a team with a check,** a task that hands out work is checked at the end of that last turn, not when it first handed the work out. See [How work is checked](/concepts/verification#checks-in-team-chat).
+
+This is how team chat runs work. A task on the task runner closes at the end of its own run.
+
+## What an agent reports
+
+An agent on a team chat run can say how its task went with `report_result`: done, or not done, with a summary. It is a report, not a move. It changes no status, and Clawboo decides when the run ends:
+
+- A failing check, or a run that ended on an error, is never overruled by saying it is done.
+- Saying it is not done stops a Done that would otherwise have happened. The task comes to Needs you as **Blocked**, with what the agent said, and is not checked.
+- Saying nothing changes nothing: the reply is the report, as it always was.
+
+An OpenClaw agent cannot use it, because its tools cannot tell one agent from another. A run on the task runner does not have it either, and uses `block_task`.
 
 ## Tasks for a person
 
@@ -120,7 +164,7 @@ An `@` mention in a comment is text: it wakes no one, and the comment still goes
 
 Agents waking each other have limits, whatever you allowed. A job's agents can start each other 12 times an hour, then the next one waits and Needs you says so. Two agents answering each other are stopped after 4 wakes in a row, on one job or across a team's jobs, and that shows in Needs you too. The count starts again once they have been quiet for an hour, when you let them carry on, or when you comment to either of them. Runs that show no progress back off. A budget comes before all of this: with a cap reached you are not asked, and the wake waits for the cap.
 
-A teammate's comment never ends a question, a task handed back to you, a failed run or a check: those stay yours. Nor does it end a wait on another task or on sub-tasks, which end when that work does: the comment stays on the thread and wakes nothing. Clawboo does not pass a teammate's comment into a run that is going. That run sees it only if it reads the task, and otherwise the agent reads it in a later run. A task the task runner runs reads it from its mailbox when its next run starts.
+A teammate's comment never ends a question, a task handed back to you, a failed run or a check: those stay yours. Nor does it end a wait on another task or on sub-tasks, or a task kept from Done until its sub-tasks come through, which end when that work does: the comment stays on the thread and wakes nothing. Clawboo does not pass a teammate's comment into a run that is going. That run sees it only if it reads the task, and otherwise the agent reads it in a later run. A task the task runner runs reads it from its mailbox when its next run starts.
 
 A task has one live run at a time. A wake that arrives while a run is waiting for a slot, while a check is under way, or while a fix round is about to go out joins that run instead of starting a second one. Until Clawboo can prove a run is alive, a wake does not count on it: it keeps waiting until the run is cleared, and then starts its own. Every wake that waits says why, in the task drawer and in the [activity log](/reference/events-and-errors#task_wake_skipped).
 

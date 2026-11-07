@@ -13,6 +13,7 @@ import { tasks } from '../../schema'
 import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
 import {
   SAME_TASK_WINDOW_MS,
+  claimTask,
   completeExecutionProcess,
   createCappedRootTask,
   createCappedSubtask,
@@ -145,6 +146,20 @@ describe('idempotency keys', () => {
 
 describe('same-title dedupe', () => {
   const asAgent = { agentCreated: true }
+
+  it('counts a task waiting on other work as open, and no other Blocked task', () => {
+    const asAgent = { title: 'Ship it', teamId: 't', agentCreated: true } as const
+    const first = createTask(db, { ...asAgent, status: 'todo' })
+    claimTask(db, first.id, 'a')
+    updateStatus(db, first.id, 'blocked', { waitingOn: { kind: 'subtasks', handedOut: true } })
+    expect(createTask(db, asAgent)).toMatchObject({
+      id: first.id,
+      deduplicated: true,
+      deduplicatedBy: 'title',
+    })
+    updateStatus(db, first.id, 'blocked', { waitingOn: { kind: 'failure' } })
+    expect(createTask(db, asAgent).id).not.toBe(first.id)
+  })
 
   it('returns an open task with the same words instead of a new one', () => {
     const t = createTask(db, { title: 'Write the tests', teamId: 't', ...asAgent })

@@ -6,8 +6,8 @@
 // decide whether a `todo` task will ever run on its own, the needs-you
 // classification built on them, how a task's run costs add up, the named
 // priority levels, what may wake a task's agent, how text clawboo did not write is
-// framed as data, what a readable task id looks like, and when a hand-off would go
-// in a circle.
+// framed as data, what a readable task id looks like, when a hand-off would go in a
+// circle, what a task waiting on its sub-tasks counts as closed, and who decides Done.
 //
 // Zero dependencies, no `node:*`, no I/O — safe to bundle into the Vite SPA.
 
@@ -24,3 +24,5 @@ export * from './priority'
 export * from './untrustedText'
 export * from './taskIdentifier'
 export * from './handOffCycle'
+export * from './doneDecision'
+export * from './subtaskBarrier'

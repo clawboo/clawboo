@@ -54,6 +54,7 @@ import {
   readAgentWakeGate,
   placePause,
   reconcileOrphans,
+  listPendingReportUps,
   reconcileStaleInProgress,
   recordTaskWake,
   runOwnWrite,
@@ -194,6 +195,7 @@ function bootProcess(
     onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
     onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
     onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
+    takeHeldReportUps: (sk, taskId) => engineRef.current!.takeHeldReportUps(sk, taskId),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     execForSession: (sk) => engineRef.current!.execForSession(sk),
     stopGen: () => 0,
@@ -1244,7 +1246,7 @@ describe('saved wakes, end to end', () => {
         onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
         onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
         onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
-        takeHeldReportUps: (sk) => engineRef.current!.takeHeldReportUps(sk),
+        takeHeldReportUps: (sk, taskId) => engineRef.current!.takeHeldReportUps(sk, taskId),
         taskForSession: (sk) => engineRef.current!.taskForSession(sk),
         execForSession: (sk) => engineRef.current!.execForSession(sk),
         stopGen: () => gen.value,
@@ -1440,7 +1442,7 @@ describe('saved wakes, end to end', () => {
         abortMap: new Map(),
         onEvent: (sk, ev, run) => engine.onEvent(sk, ev, run),
         onSessionClosed: (sk, run) => engine.onSessionClosed(sk, run),
-        takeHeldReportUps: (sk) => engine.takeHeldReportUps(sk),
+        takeHeldReportUps: (sk, taskId) => engine.takeHeldReportUps(sk, taskId),
         taskForSession: (sk) => engine.taskForSession(sk),
         execForSession: (sk) => engine.execForSession(sk),
         stopGen: () => 0,
@@ -1491,34 +1493,37 @@ describe('saved wakes, end to end', () => {
         const task = newTask()
         updateStatus(db, task.id, 'blocked')
         adapters.set(OTHER, new ScriptedAdapter([[done('docs written')], [done('written again')]]))
-        script([handOff, fatal('provider said no')], [handOff, done('finished it')])
+        script(
+          [handOff, fatal('provider said no')],
+          [handOff, done('finished it')],
+          [done('all of it is in')],
+        )
         await reply(task.id, 'please finish this')
         await settle(() => handedOff()[0]?.status === 'done', 'the first hand-off')
         await settle(() => allWakes()[0]?.replays === 1, 'the failed run to give the wake back')
         pumpTaskWakes(db, pumpDeps())
         await settle(() => handedOff().length === 2, 'the replay to hand it off again')
-        await settle(() => getTask(db, task.id)?.status === 'done', 'the replay')
-        expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered'])
+        // It handed work out, so it is done after the turn it gets when that work is in.
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the follow-up')
+        expect(allWakes().map((w) => w.settledHow)).toEqual(['delivered', 'delivered'])
       })
 
       it('finds work still open and says so, instead of swallowing it as a replay', async () => {
         const task = newTask()
         updateStatus(db, task.id, 'blocked')
         adapters.set(OTHER, new ScriptedAdapter([['hang']]))
-        script(
-          [handOff, fatal('provider said no')],
-          [handOff, done('finished it')],
-          [done('noted')],
-        )
+        script([handOff, fatal('provider said no')], [handOff, done('finished it')])
         await reply(task.id, 'please finish this')
         await settle(() => handedOff()[0]?.status === 'in_progress', 'the first hand-off')
         await settle(() => allWakes()[0]?.replays === 1, 'the failed run to give the wake back')
         pumpTaskWakes(db, pumpDeps())
-        await settle(() => getTask(db, task.id)?.status === 'done', 'the replay')
-        await settle(
-          () => started().some((o) => o.message.includes('Already on the board')),
-          'the note that the work is open',
-        )
+        // That work is its own sub-task, still going, so the task waits for it, and the
+        // note that it was found waits with the results for the task's next run.
+        await settle(() => getTask(db, task.id)?.status === 'blocked', 'the replay to end')
+        expect(parseWaitingOn(getTask(db, task.id)?.waitingOn)?.kind).toBe('subtasks')
+        expect(
+          listPendingReportUps(db, TEAM, null).some((r) => /"already_open"/.test(r.payload)),
+        ).toBe(true)
         expect(handedOff()).toHaveLength(1)
       })
     })

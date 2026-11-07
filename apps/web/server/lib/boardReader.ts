@@ -6,6 +6,7 @@
 
 import type { Request } from 'express'
 
+import { parseWaitingOn } from '@clawboo/board-core'
 import {
   getTask,
   listTasks,
@@ -63,6 +64,9 @@ export async function stopAsOwnWrite(
   const running = RUNNING_STATUSES.flatMap((status) =>
     listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status }).map((t) => t.id),
   )
+  // A task waiting on its sub-tasks has no run, and a Stop ends that wait the same way.
+  for (const t of listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status: 'blocked' }))
+    if (parseWaitingOn(t.waitingOn)?.kind === 'subtasks') running.push(t.id)
   await stop()
   markReleasedTasksRead(db, reader, running)
 }

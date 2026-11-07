@@ -20,7 +20,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { delegationTargetOf } from '@clawboo/board-core'
+import { delegationTargetOf, parseWaitingOn, waitsOnOtherWork } from '@clawboo/board-core'
 import type { DebtNote } from '@clawboo/governance'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -1204,7 +1204,9 @@ export function TaskDetailDrawer({
                       className="mb-2 text-xs text-muted-foreground"
                       data-testid="task-pending-wake"
                     >
-                      {pendingWakeText(wake, ownerId ? (ownerName ?? ownerId) : 'The agent')}
+                      {pendingWakeText(wake, ownerId ? (ownerName ?? ownerId) : 'The agent', {
+                        onOtherWork: waitsOnOtherWork(parseWaitingOn(task['waitingOn'])),
+                      })}
                     </p>
                   ) : null
                 })()}

@@ -167,6 +167,43 @@ describe('a bound session records its agent and its run', () => {
     })
   })
 
+  it('on report_result, in the log: who said it and on which run, and none of its words', async () => {
+    const task = createTask(db, { title: 'reported', teamId: TEAM, status: 'todo' })
+    const execId = claimTask(db, task.id, 'coder', 'codex', { run: { executorType: 'openclaw' } })
+      .execution!.id
+    const client = await connectInMemory(
+      createTasksServer(db, {
+        boundScope: { teamId: TEAM, agentId: 'coder', taskId: task.id, executionId: execId },
+        teamRun: true,
+      }),
+    )
+    const res = await callText(client, 'report_result', {
+      outcome: 'not_done',
+      summary: 'The words stay on the run.',
+    })
+    expect(res.isError).toBe(false)
+    const [report] = events('status_changed')
+    expect(report?.taskId).toBe(task.id)
+    expect(report?.data).toMatchObject({
+      to: 'in_progress',
+      reason: 'result_reported',
+      outcome: 'not_done',
+      actor: { kind: 'agent', agentId: 'coder', execId },
+    })
+    expect(JSON.stringify(report?.data)).not.toContain('The words stay')
+  })
+
+  it('on a report the board refused: nothing is recorded', async () => {
+    const task = createTask(db, { title: 'theirs', teamId: TEAM, status: 'todo' })
+    claimTask(db, task.id, 'someone-else')
+    const res = await callText(await teamRunClient(task.id), 'report_result', {
+      outcome: 'done',
+      summary: 'Not mine.',
+    })
+    expect(res.isError).toBe(true)
+    expect(events('status_changed')).toEqual([])
+  })
+
   it('records the run the URL named, whatever execution row the task has', async () => {
     const task = createTask(db, { title: 't', teamId: TEAM })
     createExecutionProcess(db, { taskId: task.id, executorType: 'codex' })

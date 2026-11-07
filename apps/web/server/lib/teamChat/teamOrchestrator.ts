@@ -281,7 +281,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // whose runs have all finished — the case the idle TTL exists to reclaim.
     onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
     onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
-    takeHeldReportUps: (sk) => engineRef.current!.takeHeldReportUps(sk),
+    takeHeldReportUps: (sk, taskId) => engineRef.current!.takeHeldReportUps(sk, taskId),
     taskForSession: (sk) => engineRef.current!.taskForSession(sk),
     execForSession: (sk) => engineRef.current!.execForSession(sk),
     // The start gate reads it: a delivery made before a Stop or a dispose never

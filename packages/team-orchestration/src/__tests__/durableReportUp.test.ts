@@ -488,13 +488,15 @@ describe('durable report-up', () => {
   it('a replay goes to the same recipient, as the same follow-up', async () => {
     const board = new FakeBoard()
     const outbox = new MemoryOutbox()
+    // A task someone already closed: one still open would take this at its next run.
+    const parent = (await board.createTask({ title: 'parent', status: 'done', teamId: 't1' }))!
     outbox.record({
       toAgentId: 'a2',
       by: 'Design Boo',
       title: 'mock the settings page',
       summary: 'mockups in design/settings.fig',
       taskId: 'sub-1',
-      forTaskId: 'parent-1',
+      forTaskId: parent.id,
     })
 
     const engine = boot(board, outbox)
@@ -504,7 +506,7 @@ describe('durable report-up', () => {
     expect(engine.updates()).toHaveLength(1)
     const update = engine.updates()[0]!
     expect(update.agentId).toBe('a2')
-    expect(update.origin).toMatchObject({ kind: 'system', forTaskId: 'parent-1' })
+    expect(update.origin).toMatchObject({ kind: 'system', forTaskId: parent.id })
     expect(update.task).toContain('mockups in design/settings.fig')
   })
   it('a lead run killed by a graceful shutdown leaves its update pending for the next process', async () => {

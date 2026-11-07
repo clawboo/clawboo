@@ -22,7 +22,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { describe } from 'vitest'
+import type { ResultClaim } from '@clawboo/board-core'
+import { describe, expect } from 'vitest'
 
 import {
   claimTask,
@@ -32,6 +33,7 @@ import {
   createTask,
   getTask,
   listTasks,
+  recordResultClaim,
   updateStatus,
   type ClawbooDb,
   type TaskStatus,
@@ -45,6 +47,7 @@ import {
 import type {
   BoardTask,
   ClaimResult,
+  ClaimRun,
   CompleteExecutionOutcome,
   CreateTaskInput,
   EngineBoardClient,
@@ -54,6 +57,7 @@ import type {
   HandOffLink,
   HandOffResult,
   TaskDetail,
+  WaitingOn,
 } from '@clawboo/team-orchestration'
 
 import { createServerBoardClient } from '../serverBoardClient'
@@ -143,14 +147,21 @@ class RealCascadeBoard implements CascadeBoard {
     taskId: string,
     assigneeAgentId: string,
     assigneeRuntime?: string,
+    run?: ClaimRun,
   ): Promise<ClaimResult> {
     this.onClaim?.()
     this.claims.push(taskId)
     if (this.forceClaimConflict) return { ok: false, reason: 'conflict' }
-    return this.real.claim(taskId, assigneeAgentId, assigneeRuntime)
+    const claim = await this.real.claim(taskId, assigneeAgentId, assigneeRuntime, run)
+    if (claim.ok && claim.execution) this.execCount += 1
+    return claim
   }
-  async updateStatus(taskId: string, status: string): Promise<boolean> {
-    const ok = await this.real.updateStatus(taskId, status)
+  async updateStatus(
+    taskId: string,
+    status: string,
+    opts?: { waitingOn?: WaitingOn },
+  ): Promise<boolean> {
+    const ok = await this.real.updateStatus(taskId, status, opts)
     if (ok) this.statusUpdates.push({ taskId, status })
     return ok
   }
@@ -210,6 +221,22 @@ class RealCascadeBoard implements CascadeBoard {
   }
   allStatuses(): string[] {
     return this.ownTasks().map((t) => t.status)
+  }
+  subtasksOf(taskId: string) {
+    return this.real.subtasksOf(taskId)
+  }
+  resultClaim(execId: string) {
+    return this.real.resultClaim(execId)
+  }
+  releaseSubtaskWait(taskId: string) {
+    return this.real.releaseSubtaskWait(taskId)
+  }
+  runsOnTaskRunner(taskId: string) {
+    return this.real.runsOnTaskRunner(taskId)
+  }
+  seedResultClaim(taskId: string, claim: ResultClaim): void {
+    const agent = getTask(this.db, taskId)?.assigneeAgentId ?? ''
+    expect(recordResultClaim(this.db, taskId, agent, claim)).toEqual({ ok: true })
   }
   forceRelease(taskId: string): void {
     // Simulate an EXTERNAL release (the server stale-sweep): route through the repo

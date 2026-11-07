@@ -37,6 +37,9 @@ import {
   markDelegationFailureNotified,
   noteDelegationFailure,
   readDelegationFailure,
+  readResultClaim,
+  releaseOneSubtaskWait,
+  subtaskViewsOf,
   updateStatus,
   wakeCommentIds,
   type ClawbooDb,
@@ -450,6 +453,35 @@ export function createServerBoardClient(
       }
     },
 
+    async subtasksOf(taskId) {
+      try {
+        return subtaskViewsOf(db, taskId)
+      } catch {
+        return null
+      }
+    },
+    async resultClaim(execId) {
+      try {
+        return readResultClaim(db, execId)
+      } catch {
+        return null
+      }
+    },
+    async releaseSubtaskWait(taskId) {
+      try {
+        releaseOneSubtaskWait(db, taskId)
+      } catch {
+        // The pump's pass reads it again.
+      }
+    },
+    async runsOnTaskRunner(taskId) {
+      try {
+        const task = getTask(db, taskId)
+        return task ? runsOnTaskRunner(db, task) : false
+      } catch {
+        return true
+      }
+    },
     async directDependents(taskId): Promise<string[]> {
       try {
         return listDirectDependentIds(db, taskId)

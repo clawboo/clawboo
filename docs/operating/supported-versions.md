@@ -46,31 +46,31 @@ Every surface talks to the same server, so a feature the server has can reach ev
 
 **Supported** means released on that surface. **Beta** means released, with behavior that may still change. **Planned** means not released on that surface yet.
 
-| Feature                                             | Flag                                                                        | npm install                    | Desktop app | Phone web app |
-| --------------------------------------------------- | --------------------------------------------------------------------------- | ------------------------------ | ----------- | ------------- |
-| Clawboo Native agents                               | `runtime.clawboo-native`                                                    | Supported                      | Planned     | Planned       |
-| Claude Code, Codex and Hermes agents                | `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                    | Supported                      | Planned     | Planned       |
-| OpenClaw agents                                     | `runtime.openclaw`                                                          | Supported                      | Planned     | Planned       |
-| Team chat and chat rooms                            | `chat.rooms`                                                                | Supported                      | Planned     | Planned       |
-| 1:1 chats                                           | `chat.direct`                                                               | Supported                      | Planned     | Planned       |
-| Board, with checks on finished work                 | `board.verification`, `board.checkHold`                                     | Supported                      | Planned     | Planned       |
-| A person's inbox, with read state on the server     | `board.inbox`                                                               | Supported                      | Planned     | Planned       |
-| Comments that reach a running task                  | `board.steering`                                                            | Supported                      | Planned     | Planned       |
-| Readable task ids                                   | `board.readableIds`                                                         |
-| Team labels on tasks                                | `board.labels`                                                              |
-| Agents that wake on what happens to their task      | `board.wakes`                                                               | Supported                      | Planned     | Planned       |
-| Agents waking each other, once you allow it         | `board.agentWakes`                                                          | Supported                      |
-| Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                  | Supported                      | Planned     | Planned       |
-| The person check on person writes                   | `board.personCheck`                                                         | Supported                      | Planned     | Planned       |
-| Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                       | Supported                      | Planned     | Planned       |
-| Agent browser screenshots                           | `agent.screenshots`                                                         | Supported                      | Planned     | Planned       |
-| Shell commands for Clawboo Native agents            | `agent.nativeShell`                                                         | Supported                      | Planned     | Planned       |
-| Routines                                            | `routines`                                                                  | Supported                      | Planned     | Planned       |
-| Shared memory and similarity search                 | `memory`, `memory.embeddings`                                               | Supported                      | Planned     | Planned       |
-| Connectors, custom connectors and brokered apps     | `connectors`, `connectors.custom`, `connectors.broker`                      | Supported                      | Planned     | Planned       |
-| Live streams that resume after a dropped connection | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume` | Supported                      | Planned     | Planned       |
-| Update from inside the app                          | `system.selfUpdate`                                                         | Supported for a global install | Planned     | Planned       |
-| Names from a sign-in proxy's identity tokens        | `auth.proxyIdentity`                                                        | Supported, off by default      | Planned     | Planned       |
+| Feature                                             | Flag                                                                               | npm install                    | Desktop app | Phone web app |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------ | ----------- | ------------- |
+| Clawboo Native agents                               | `runtime.clawboo-native`                                                           | Supported                      | Planned     | Planned       |
+| Claude Code, Codex and Hermes agents                | `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                           | Supported                      | Planned     | Planned       |
+| OpenClaw agents                                     | `runtime.openclaw`                                                                 | Supported                      | Planned     | Planned       |
+| Team chat and chat rooms                            | `chat.rooms`                                                                       | Supported                      | Planned     | Planned       |
+| 1:1 chats                                           | `chat.direct`                                                                      | Supported                      | Planned     | Planned       |
+| Board, with checks on finished work                 | `board.verification`, `board.checkHold`, `board.reportResult`, `board.parentWaits` | Supported                      | Planned     | Planned       |
+| A person's inbox, with read state on the server     | `board.inbox`                                                                      | Supported                      | Planned     | Planned       |
+| Comments that reach a running task                  | `board.steering`                                                                   | Supported                      | Planned     | Planned       |
+| Readable task ids                                   | `board.readableIds`                                                                |
+| Team labels on tasks                                | `board.labels`                                                                     |
+| Agents that wake on what happens to their task      | `board.wakes`                                                                      | Supported                      | Planned     | Planned       |
+| Agents waking each other, once you allow it         | `board.agentWakes`                                                                 | Supported                      |
+| Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                         | Supported                      | Planned     | Planned       |
+| The person check on person writes                   | `board.personCheck`                                                                | Supported                      | Planned     | Planned       |
+| Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                              | Supported                      | Planned     | Planned       |
+| Agent browser screenshots                           | `agent.screenshots`                                                                | Supported                      | Planned     | Planned       |
+| Shell commands for Clawboo Native agents            | `agent.nativeShell`                                                                | Supported                      | Planned     | Planned       |
+| Routines                                            | `routines`                                                                         | Supported                      | Planned     | Planned       |
+| Shared memory and similarity search                 | `memory`, `memory.embeddings`                                                      | Supported                      | Planned     | Planned       |
+| Connectors, custom connectors and brokered apps     | `connectors`, `connectors.custom`, `connectors.broker`                             | Supported                      | Planned     | Planned       |
+| Live streams that resume after a dropped connection | `stream.teamChat.resume`, `stream.agentChat.resume`, `stream.events.resume`        | Supported                      | Planned     | Planned       |
+| Update from inside the app                          | `system.selfUpdate`                                                                | Supported for a global install | Planned     | Planned       |
+| Names from a sign-in proxy's identity tokens        | `auth.proxyIdentity`                                                               | Supported, off by default      | Planned     | Planned       |
 
 A flag being on means the server has the feature. It does not mean the surface you use shows it yet.
 

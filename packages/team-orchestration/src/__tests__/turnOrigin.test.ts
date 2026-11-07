@@ -227,4 +227,29 @@ describe('isChatVisible', () => {
     expect(visible({ kind: 'delegation', fromAgentId: LEADER }, WORKER)).toBe(false)
     expect(visible(ASSIGNMENT_TURN, WORKER)).toBe(false)
   })
+
+  it('a task run stays off the chat, except the team lead’s follow-up on its own task', () => {
+    const wake: Extract<TurnOrigin, { kind: 'wake' }> = {
+      kind: 'wake',
+      reason: 'subtasks_closed',
+      wakeIds: [],
+      fromAgentId: null,
+    }
+    expect(visible(wake, WORKER)).toBe(false)
+    expect(visible({ ...wake, inChat: true }, LEADER)).toBe(true)
+  })
+
+  it('and that follow-up is framed as the lead talking to the user, not a worker', () => {
+    const origin: TurnOrigin = {
+      kind: 'wake',
+      reason: 'subtasks_closed',
+      wakeIds: [],
+      fromAgentId: null,
+      inChat: true,
+    }
+    const framing = frame(origin, LEADER, true)
+    expect(framing).toMatchObject({ isWorker: false, isLeader: true, isUserFacing: true })
+    // Worth nothing on anyone else: only the lead's reply goes to the chat.
+    expect(frame(origin, WORKER, true).isUserFacing).toBe(false)
+  })
 })

@@ -170,6 +170,17 @@ describe('teammateMayEndWait', () => {
   it('not a wait on other work: the board moves that on when the work ends', () => {
     expect(teammateMayEndWait({ kind: 'task', taskId: 't' })).toBe(false)
     expect(teammateMayEndWait({ kind: 'subtasks' })).toBe(false)
+    expect(teammateMayEndWait({ kind: 'subtasks', handedOut: true })).toBe(false)
+    // Its agent did not ask for this: the engine wrote it, and the sub-tasks coming
+    // through is what ends it.
+    expect(
+      teammateMayEndWait({
+        kind: 'person',
+        need: 'Part a did not finish.',
+        by: 'agent',
+        untilSubtasks: true,
+      }),
+    ).toBe(false)
   })
 
   it('not a person’s turn, or a stop the system made', () => {
