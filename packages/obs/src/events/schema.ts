@@ -27,6 +27,8 @@ export const ORCHESTRATION_EVENT_KINDS = [
   'cost',
   'approval_requested',
   'approval_resolved',
+  'pause_placed',
+  'pause_lifted',
   'error',
   'span_start',
   'span_end',
@@ -35,6 +37,7 @@ export const ORCHESTRATION_EVENT_KINDS = [
   'routine_dispatched',
   'routine_completed',
   'routine_error',
+  'routine_paused',
   'team_chat_post',
   'speaker_selected',
   'turn_bound_hit',
@@ -338,6 +341,23 @@ export interface TurnBoundHitData {
   turnsTaken: number
 }
 
+/** A pause stopped a routine's fire. It is no failure, and the routine runs again on
+ *  resume. A fire a pause held back before it started writes nothing: it never began. */
+export interface RoutinePausedData {
+  scheduledRunId: string
+  taskId?: string | null
+  message: string
+}
+
+/** A person paused an agent, a team or a task tree, or resumed one. Nothing else
+ *  writes these: agents cannot pause. */
+export interface PauseEventData {
+  scope: 'agent' | 'team' | 'task_tree'
+  id: string
+  reason?: string | null
+  person?: { id: string; name: string | null; role: string | null }
+}
+
 export interface KindToData {
   task_created: TaskCreatedData
   task_claimed: TaskClaimedData
@@ -351,6 +371,8 @@ export interface KindToData {
   cost: CostData
   approval_requested: ApprovalRequestedData
   approval_resolved: ApprovalResolvedData
+  pause_placed: PauseEventData
+  pause_lifted: PauseEventData
   error: ErrorEventData
   span_start: SpanStartData
   span_end: SpanEndData
@@ -359,6 +381,7 @@ export interface KindToData {
   routine_dispatched: RoutineDispatchedData
   routine_completed: RoutineCompletedData
   routine_error: RoutineErrorData
+  routine_paused: RoutinePausedData
   team_chat_post: TeamChatPostData
   speaker_selected: SpeakerSelectedData
   turn_bound_hit: TurnBoundHitData

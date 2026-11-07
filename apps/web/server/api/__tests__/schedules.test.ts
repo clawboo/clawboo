@@ -7,16 +7,26 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { agents, appendEvent, createTask, listScheduledRuns, setSetting, teams } from '@clawboo/db'
+import {
+  agents,
+  appendEvent,
+  createTask,
+  listScheduledRuns,
+  setSetting,
+  teams,
+  liftPause,
+  placePause,
+} from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDb, resetDb } from '../../lib/db'
+import { getDb, getDbPath, resetDb } from '../../lib/db'
 import { resetScheduleMultiplexer } from '../../lib/scheduleSource/registry'
 import {
   schedulesCreatePOST,
   schedulesDELETE,
   schedulesListGET,
+  schedulesOccurrencesGET,
   schedulesRunPOST,
   schedulesRunsGET,
   schedulesUpdatePATCH,
@@ -60,6 +70,7 @@ describe('schedules REST (gateway disconnected)', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     resetScheduleMultiplexer()
     const db = getDb()
+    expect(getDbPath().startsWith(home)).toBe(true)
     const now = Date.now()
     db.insert(agents)
       .values({
@@ -234,6 +245,86 @@ describe('schedules REST (gateway disconnected)', () => {
     const unknownSource = mockRes()
     await schedulesDELETE(req({ params: { id: 'mystery:1' } }), unknownSource.res)
     expect(unknownSource.status()).toBe(404)
+  })
+
+  it('refuses "Run now" while a pause covers the routine, in words a person reads', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY } }), create.res)
+    const id = (create.body() as { schedule: { id: string } }).schedule.id
+    const row = listScheduledRuns(getDb())[0]!
+    placePause(getDb(), { kind: 'agent', id: row.agentId })
+
+    const refused = mockRes()
+    await schedulesRunPOST(req({ params: { id } }), refused.res)
+    expect(refused.status()).toBe(409)
+    expect((refused.body() as { error: string }).error).toContain('This agent is paused')
+    expect(listScheduledRuns(getDb())[0]?.status).toBe('idle')
+
+    liftPause(getDb(), 'agent', row.agentId)
+    const run = mockRes()
+    await schedulesRunPOST(req({ params: { id } }), run.res)
+    expect(run.status()).toBe(202)
+  })
+
+  it('says on the list that a pause holds a routine, and draws it no upcoming runs', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(req({ body: { ...CREATE_BODY } }), create.res)
+    const id = (create.body() as { schedule: { id: string } }).schedule.id
+    const row = listScheduledRuns(getDb())[0]!
+    const listed = async (): Promise<{ id: string; heldBy?: unknown }> => {
+      const list = mockRes()
+      await schedulesListGET(req({}), list.res)
+      return (list.body() as { schedules: Array<{ id: string; heldBy?: unknown }> }).schedules.find(
+        (s) => s.id === id,
+      )!
+    }
+    const upcoming = async (): Promise<unknown[]> => {
+      const res = mockRes()
+      await schedulesOccurrencesGET(
+        req({ query: { bounds: `${Date.now()},${Date.now() + 10 * 86_400_000}` } }),
+        res.res,
+      )
+      return (res.body() as { routines: unknown[] }).routines
+    }
+
+    expect((await listed()).heldBy ?? null).toBeNull()
+    expect((await upcoming()).length).toBeGreaterThan(0)
+
+    placePause(getDb(), { kind: 'agent', id: row.agentId })
+    expect((await listed()).heldBy).toMatchObject({ kind: 'agent', id: row.agentId, name: 'A1' })
+    expect(await upcoming()).toEqual([])
+  })
+
+  it('refuses "Run now" on a team routine whose lead is paused, and shows it on hold', async () => {
+    const create = mockRes()
+    await schedulesCreatePOST(
+      req({
+        body: {
+          source: 'clawboo-routine',
+          domain: 'team-task',
+          target: 'team',
+          teamId: 't1',
+          cronSpec: '0 9 * * 1-5',
+          label: 'Standup',
+          taskTemplate: { description: 'Post the standup.' },
+        },
+      }),
+      create.res,
+    )
+    const id = (create.body() as { schedule: { id: string } }).schedule.id
+    placePause(getDb(), { kind: 'agent', id: 'lead' })
+
+    const refused = mockRes()
+    await schedulesRunPOST(req({ params: { id } }), refused.res)
+    expect(refused.status()).toBe(409)
+    expect((refused.body() as { error: string }).error).toContain('This agent is paused')
+    expect(listScheduledRuns(getDb())[0]?.status).toBe('idle')
+
+    const list = mockRes()
+    await schedulesListGET(req(), list.res)
+    expect(
+      (list.body() as { schedules: Array<{ heldBy?: unknown }> }).schedules[0]?.heldBy,
+    ).toMatchObject({ kind: 'agent', id: 'lead', name: 'Lead' })
   })
 
   it('pause / resume / run round-trip through PATCH + POST :id/run', async () => {

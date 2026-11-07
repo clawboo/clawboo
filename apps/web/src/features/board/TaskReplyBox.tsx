@@ -9,10 +9,11 @@ import { Button } from '@/features/shared/Button'
 import { useToastStore } from '@/stores/toast'
 
 /** What sending a reply does, for a task in `status`. */
-export function replyHint(status: string, agentName: string | null): string {
+export function replyHint(status: string, agentName: string | null, paused = false): string {
   if (status === 'done' || status === 'cancelled')
     return 'This task is finished. Reopen it, or send your reply as a follow-up task.'
   if (!agentName) return 'No agent has this task. Your reply is saved on it.'
+  if (paused) return `This is paused. ${agentName} starts on your reply after the resume.`
   if (status === 'in_progress') return `${agentName} gets this in the current run.`
   if (status === 'blocked' || status === 'todo') return `Sending starts ${agentName} on this again.`
   if (status === 'in_review') return `${agentName} reads this after the check.`
@@ -23,10 +24,13 @@ export function TaskReplyBox({
   taskId,
   status,
   agentName,
+  paused = false,
   onSent,
 }: {
   taskId: string
   status: string
+  /** A pause covers the task, so a reply waits for the resume. */
+  paused?: boolean
   /** The agent the task belongs to, by name; null when nobody has it. */
   agentName: string | null
   onSent: (sent: { commentId: string | null; delivery: ReplyDelivery | null; body: string }) => void
@@ -75,7 +79,7 @@ export function TaskReplyBox({
         />
         <div className="flex items-center gap-2 px-2 pb-2">
           <span className="min-w-0 flex-1 px-1 text-xs text-muted-foreground">
-            {replyHint(status, agentName)}
+            {replyHint(status, agentName, paused)}
           </span>
           <Button type="submit" size="sm" variant="primary" disabled={!draft.trim() || sending}>
             Send

@@ -83,6 +83,7 @@ import {
   timeZoneLabel,
   toggleBlocker,
   untilLabel,
+  routineHeldWords,
   type RoutineDirectoryAgent,
   type RoutineDirectoryTeam,
   type RoutineFormValues,
@@ -649,7 +650,13 @@ function RunsList({
                 </div>
               ) : null}
               {run.error ? (
-                <div className="mt-0.5 break-words text-[11.5px] text-destructive">{run.error}</div>
+                <div
+                  className={`mt-0.5 break-words text-[11.5px] ${
+                    run.status === 'paused' ? 'text-foreground/55' : 'text-destructive'
+                  }`}
+                >
+                  {run.error}
+                </div>
               ) : null}
             </div>
             {run.task ? (
@@ -763,11 +770,13 @@ function RoutineDetails({
           <span>{humanCron(record.cronSpec)}</span>
           {routine && !isOnceSpec(record.cronSpec) ? <RoutineZoneNote /> : null}
           <span className="text-foreground/50">
-            {record.nextRunAt != null
-              ? ` · next ${untilLabel(record.nextRunAt)} (${formatWhen(record.nextRunAt)})`
-              : record.status === 'paused'
-                ? ' · paused'
-                : ' · not scheduled'}
+            {routineHeldWords(record)
+              ? ` · ${routineHeldWords(record)}`
+              : record.nextRunAt != null
+                ? ` · next ${untilLabel(record.nextRunAt)} (${formatWhen(record.nextRunAt)})`
+                : record.status === 'paused'
+                  ? ' · paused'
+                  : ' · not scheduled'}
           </span>
         </DetailRow>
 

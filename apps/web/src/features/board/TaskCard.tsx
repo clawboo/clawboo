@@ -23,12 +23,14 @@ import {
   GripVertical,
   UserRound,
   X,
+  Pause,
 } from 'lucide-react'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
 import { runtimeLabel } from '@/features/runtimes/RuntimeBrand'
 import type { BoardTask } from '@/lib/boardClient'
 import { useFleetStore } from '@/stores/fleet'
+import { pausedByWords, pauseSubjectWords, type PauseView } from '@/stores/pauses'
 
 import type { CardProperties } from './BoardToolbar'
 
@@ -279,6 +281,7 @@ function ChipMeta({
   const subtask = !!task['parentTaskId']
   const shows = useContext(CardPropertiesContext)
   const costShown = shows.cost && cost.usd !== null
+  const paused = (task['pause'] as PauseView | null | undefined) ?? null
   const person = assigneePersonOf(task)
   const me = useBoardPerson(person !== null)
   const personName = isMyTask(task, me) ? 'you' : (person?.name ?? 'a person')
@@ -315,6 +318,14 @@ function ChipMeta({
         </span>
       ) : null}
       <PriorityMark priority={task['priority']} />
+      {paused ? (
+        <IconMark
+          label={`${pauseSubjectWords(paused)}. ${pausedByWords(paused)}.`}
+          className="text-muted-foreground"
+        >
+          <Pause size={12} strokeWidth={2} aria-hidden />
+        </IconMark>
+      ) : null}
       {mark ??
         (costShown && cost.usd !== null ? (
           <CostLabel

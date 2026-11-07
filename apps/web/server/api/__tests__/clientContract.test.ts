@@ -102,6 +102,7 @@ const PINNED_FEATURES = [
   'stream.events.resume',
   'system.selfUpdate',
   'system.hold',
+  'board.pause',
   'auth.proxyIdentity',
 ]
 
@@ -157,6 +158,9 @@ const PINNED_ROUTES = [
   'GET /api/system/hold',
   'POST /api/system/hold',
   'DELETE /api/system/hold/:owner',
+  'GET /api/pauses',
+  'POST /api/pauses',
+  'DELETE /api/pauses/:kind/:id',
   'GET /api/system/operator-settings',
   'PUT /api/system/operator-settings/:key',
   'GET /api/teams',

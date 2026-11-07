@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRightLeft, MessageSquare, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowRightLeft, MessageSquare, Trash2, Pause, Play, type LucideIcon } from 'lucide-react'
 
 import { useMenuKeyboard } from '@/features/shared/useMenuKeyboard'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -14,13 +14,16 @@ interface GraphContextMenuProps {
   onChat: () => void
   /** Absent hides the row (Boo Zero leads every team and joins none). */
   onMove?: () => void
+  /** Whether the agent itself is paused, and how to pause or resume it. */
+  isPaused?: boolean
+  onTogglePause?: () => void
   onDelete: () => void
 }
 
 interface MenuItemConfig {
   label: string
   icon: LucideIcon
-  action: 'chat' | 'move' | 'delete'
+  action: 'chat' | 'pause' | 'move' | 'delete'
 }
 
 // Emoji glyphs replaced with Lucide icons to
@@ -40,6 +43,7 @@ interface MenuItemConfig {
 // canvas has nothing there to light up. Open agent is what marks it.
 const ALL_ITEMS: MenuItemConfig[] = [
   { label: 'Open agent', icon: MessageSquare, action: 'chat' },
+  { label: 'Pause', icon: Pause, action: 'pause' },
   { label: 'Move to team', icon: ArrowRightLeft, action: 'move' },
   { label: 'Delete', icon: Trash2, action: 'delete' },
 ]
@@ -51,10 +55,14 @@ export function GraphContextMenu({
   onClose,
   onChat,
   onMove,
+  isPaused = false,
+  onTogglePause,
   onDelete,
 }: GraphContextMenuProps) {
   const ref = useRef<HTMLDivElement>(null)
-  const items = onMove ? ALL_ITEMS : ALL_ITEMS.filter((i) => i.action !== 'move')
+  const items = ALL_ITEMS.filter(
+    (i) => (i.action !== 'move' || onMove) && (i.action !== 'pause' || onTogglePause),
+  ).map((i) => (i.action === 'pause' && isPaused ? { ...i, label: 'Resume', icon: Play } : i))
   const { itemProps, menuKeyDown } = useMenuKeyboard(items.length, onClose)
 
   // Escape and outside-press are arbitrated by the shared layer stack: only the
@@ -75,6 +83,7 @@ export function GraphContextMenu({
 
   const handlers: Record<MenuItemConfig['action'], () => void> = {
     chat: onChat,
+    pause: () => onTogglePause?.(),
     move: () => onMove?.(),
     delete: onDelete,
   }

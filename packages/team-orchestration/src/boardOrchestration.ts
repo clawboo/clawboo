@@ -28,6 +28,7 @@ import {
   parseWaitingOn,
   delegationFailureKey,
   normalizeTaskTitle,
+  PAUSED_RUN_CLASS,
   strongerWakeReason,
   type HandOffLink,
   type TaskAttention,
@@ -295,6 +296,16 @@ export interface ExtractedSignals {
  * `done`) the reflection batcher. Carries whatever fields the orchestrator knows
  * at the call-site; the store merges by id (last-write-wins on `updatedAt`).
  */
+/** What a host says of the pause covering a task (see BoardChange). */
+export interface BoardChangePause {
+  kind: string
+  id: string
+  name: string
+  reason: string | null
+  pausedBy: { id: string; name: string | null; role: string | null } | null
+  pausedAt: number
+}
+
 /** A hand-off a cap refused. `max` is the ceiling, when it is not the fan-out cap. */
 export interface CapHit {
   kind: 'fanout' | 'plan_length' | 'child_cap' | 'root_rate_cap'
@@ -318,6 +329,8 @@ export interface BoardChange {
    *  engine, which cannot see the execution ledger's verdicts; a host that can
    *  read the board attaches it when a change moves a task's status. */
   attention?: TaskAttention | null
+  /** The pause covering the task (null: none). A host attaches it the same way. */
+  pause?: BoardChangePause | null
   /** When its check began waiting for the team folder (null: it no longer is). Set
    *  by the host, which knows (see {@link PreparedWorkCheck}). */
   checkHeldSince?: number | null
@@ -599,6 +612,12 @@ export interface WorkCheck {
 }
 
 export interface BoardOrchestratorDeps {
+  /**
+   * What holds a run of this agent on this task back right now, in words for the
+   * task's trail, or null when it may start: a pause, which only the host can read.
+   * Absent: nothing does.
+   */
+  runHeldBy?: (run: { agentId: string; taskId: string | null }) => string | null
   teamId: string
   board: EngineBoardClient
   /** Current participant roster (read fresh each event so adds/removes flow through). */
@@ -840,6 +859,18 @@ export interface BoardOrchestrator {
     opts?: { cancelledDependents?: Array<{ id: string; title?: string | null }> },
   ): Promise<void>
   /**
+   * A pause covers these runs, so they stop within seconds. Not a person's Stop,
+   * which is a decision about the task: each run covered is aborted, closed as
+   * stopped by a pause (`PAUSED_RUN_CLASS`), and its task goes back to To do with
+   * its binding, to fire again when nothing refuses its claim. Nobody is told but
+   * the task's own trail. A task whose run is over and whose work check is under
+   * way is left to its check. Resolves with the tasks it stopped.
+   */
+  pauseRuns(
+    covers: (run: { agentId: string; taskId: string }) => boolean,
+    note: string,
+  ): Promise<string[]>
+  /**
    * A delivery the host had accepted (its `deliver` resolved, with the message
    * queued behind the recipient's run) never started a run. The report-ups it
    * carried (`run.reportUpIds`) go back to pending, and the next sweep sends them
@@ -918,6 +949,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   // has not ended. `resume()` replays only the pending rows outside it, so a row
   // is sent again only by the next engine for the room, never twice by this one.
   const reportUpsInHand = new Set<string>()
+  // Outbox ids a pause stopped on their way: their next send is not counted as a try.
+  const returnedByPause = new Set<string>()
   // Session -> the task whose finished work is being checked (see WorkCheck),
   // and which check: a person's move ends the check's say over the task, and a
   // later check of the same task (after a Retry) is another one. The session
@@ -1263,12 +1296,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  the report of a run that ended well before its work could be checked: this is
    *  the only copy, so it goes on the task and on the closed run, and it waits for
    *  whoever handed the task off (a Stop starts nothing; see holdWorkForNextRun).
-   *  `byPerson`: a person's Stop is why, which is what holds the run's wakes. */
+   *  `byPerson`: a person's Stop is why, which is what holds the run's wakes.
+   *  `pausedBy`: a pause is why, in these words. The run comes back by itself, so its
+   *  report stays on the task and nobody is told: the delegator hears when it ends. */
   async function releaseClaimed(
     taskId: string,
     sessionKey: string,
     finished?: string,
     byPerson = true,
+    pausedBy?: string,
   ): Promise<void> {
     const report = finished ? reportOf(finished) : ''
     const agentId = report ? deps.agentIdForSession(sessionKey) : null
@@ -1283,10 +1319,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         status: 'cancelled',
         byPerson,
         ...(report ? { summary: report } : {}),
+        ...(pausedBy ? { error: pausedBy, errorClass: PAUSED_RUN_CLASS } : {}),
       })
     }
     if (report) await deps.board.addComment(taskId, report, 'agent', agentId ?? undefined)
-    if (report && !human) {
+    if (report && !human && !pausedBy) {
       const to = reflectTargetFor(taskId)
       const scope = await followUpScopeOf(taskId, to)
       holdReflection({
@@ -1301,8 +1338,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
     taskReflectTo.delete(taskId)
     taskTitle.delete(taskId)
+    if (pausedBy) {
+      // Its agent blocked it, asked a question, or moved it In review for a person:
+      // that waits on someone, pause or no pause, so the card and its reason stay. Any
+      // other In review takes two moves to To do.
+      const task = (await deps.board.getTask(taskId))?.task
+      if (task?.status === 'blocked' || (task?.status === 'in_review' && task['waitingOn'] != null))
+        return
+      if (task?.status === 'in_review') await deps.board.updateStatus(taskId, 'in_progress')
+    }
     await deps.board.updateStatus(taskId, 'todo')
     emit({ id: taskId, status: 'todo', assigneeAgentId: null, updatedAt: now() })
+    if (pausedBy) await deps.board.addComment(taskId, pausedBy, 'system')
   }
 
   /** Release whatever task a session is running (no-op if untracked). */
@@ -2061,6 +2108,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       if (queued.length > 0) armReflectTimer()
     } else {
       for (const item of queued) if (!item.outboxId) holdReflection(item)
+      // What a pause kept back has not gone out either, and it must not go out on resume
+      // as if nobody had pressed Stop since.
+      for (const r of deps.reportUps.pending()) {
+        if (reportUpHeld(r.item)) reportUpsInHand.add(r.id)
+      }
       holdReportUpRows([...reportUpsInHand])
     }
     deps.taskWakes?.holdAll()
@@ -2128,6 +2180,18 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const routable = (item: ReportUp): boolean => sessionOfRecipient(item) !== null
 
   /**
+   * A pause covers this report-up: its recipient, or the tree of the task it is about.
+   * It stays pending in the outbox and uncounted, the way one with no route does, and
+   * goes out after the resume. Nothing waits on it: delivered now, it would hold its
+   * recipient's session for the whole pause, and the batch behind it too.
+   */
+  const reportUpHeld = (item: ReportUp): boolean => {
+    const agentId = item.toAgentId ?? deps.leaderAgentId()
+    if (!agentId || !deps.runHeldBy) return false
+    return deps.runHeldBy({ agentId, taskId: item.taskId ?? item.forTaskId ?? null }) !== null
+  }
+
+  /**
    * The run that carried these report-ups is over. Only a run that finished
    * heard them. One that a Stop cut short holds them for the recipient's next run.
    * Any other ending (a crash, a kill at shutdown, a provider error, a run that
@@ -2140,7 +2204,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (!run?.reportUpIds?.length) return
     if (finished) settleReportUps(run.reportUpIds, 'delivered')
     else if (run.stopGen !== deps.stopGen()) holdReportUpRows(run.reportUpIds)
-    else for (const id of run.reportUpIds) reportUpsInHand.delete(id)
+    else {
+      for (const id of run.reportUpIds) {
+        reportUpsInHand.delete(id)
+        if (run.stoppedByPause) returnedByPause.add(id)
+      }
+    }
   }
 
   /** See the interface. */
@@ -2201,10 +2270,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // pending and uncounted: a later sweep sends it once it can.
     const rows = deps.reportUps
       .pending()
-      .filter((r) => !reportUpsInHand.has(r.id) && routable(r.item))
+      .filter((r) => !reportUpsInHand.has(r.id) && routable(r.item) && !reportUpHeld(r.item))
     if (rows.length === 0) return
-    const replay = rows.filter((r) => r.replays < MAX_REPORT_UP_REPLAYS)
-    const exhausted = rows.filter((r) => r.replays >= MAX_REPORT_UP_REPLAYS)
+    // A pause stopped these on their way, so this send is not a try they failed.
+    for (const r of rows.filter((row) => returnedByPause.delete(row.id))) {
+      reportUpsInHand.add(r.id)
+      reflectQueue.push({ ...r.item, outboxId: r.id })
+      armReflectTimer()
+    }
+    const counted = rows.filter((r) => !reportUpsInHand.has(r.id))
+    const replay = counted.filter((r) => r.replays < MAX_REPORT_UP_REPLAYS)
+    const exhausted = counted.filter((r) => r.replays >= MAX_REPORT_UP_REPLAYS)
     // A count that could not be written is not spent: the next sweep tries again.
     if (replay.length > 0 && deps.reportUps.markReplayed(replay.map((r) => r.id))) {
       for (const r of replay) {
@@ -2251,6 +2327,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const toSk = toId ? deps.sessionKeyForAgent(toId) : null
       if (!toId || !toSk) {
         unresolved.push(item)
+        continue
+      }
+      // Only one the outbox holds can wait: the sweep sends it after the resume.
+      if (item.outboxId && reportUpHeld(item)) {
+        reportUpsInHand.delete(item.outboxId)
         continue
       }
       const forTaskId = item.forTaskId && toId !== leaderId ? item.forTaskId : undefined
@@ -2474,6 +2555,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         await releaseHeldCheck(sessionKey, held)
         return
       }
+      // A pause that came after the run ended, so nothing reached this wait.
+      const agentId = deps.agentIdForSession(sessionKey)
+      const pausedBy = agentId ? deps.runHeldBy?.({ agentId, taskId }) : null
+      if (pausedBy) {
+        await releaseHeldCheck(sessionKey, held, pausedBy)
+        return
+      }
       await runWorkCheck(sessionKey, taskId, summary, check, checkId)
     } finally {
       giveBack()
@@ -2485,10 +2573,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  unchecked either. The task goes back to To do as stopped, with its report kept,
    *  and a Retry checks it from where it first began. From In review that takes two
    *  moves. If the first fails the task stays short of Done and under check, and the
-   *  sweep hands it to a person (see retryPark). */
+   *  sweep hands it to a person (see retryPark). A pause (`pausedBy`, its words) ends
+   *  the wait the same way, except that the task then starts again by itself on resume. */
   async function releaseHeldCheck(
     sessionKey: string,
     held: { taskId: string; check: number; summary: string },
+    pausedBy?: string,
   ): Promise<void> {
     const { taskId, check, summary } = held
     const stillOurs = (): boolean =>
@@ -2503,7 +2593,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         pendingPark.set(sessionKey, {
           taskId,
           summary,
-          reason: 'A Stop ended the wait for this check, so its work was not checked.',
+          reason: `A ${pausedBy ? 'pause' : 'Stop'} ended the wait for this check, so its work was not checked.`,
           checkId: check,
           comment: true,
         })
@@ -2519,7 +2609,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       return
     }
     if (checking.get(sessionKey)?.check === check) checking.delete(sessionKey)
-    await releaseClaimed(taskId, sessionKey, summary)
+    await releaseClaimed(taskId, sessionKey, summary, !pausedBy, pausedBy)
   }
 
   /** A task's work is being checked (see WorkCheck): act on what the check found. */
@@ -2785,6 +2875,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   async function startRound(sessionKey: string, round: PendingRound): Promise<void> {
     const { taskId, summary, lead, reason, wakeIds = [] } = round
     const agentId = deps.agentIdForSession(sessionKey)
+    // A pause covers it: no round starts. The task waits in To do with what the check
+    // found, and fires again on resume like any run a pause stopped, rather than
+    // holding its agent's session for the whole pause. A person's comment keeps its
+    // saved wake, and its report is on the card already (see offerCommentTurn).
+    const heldBy = agentId ? (deps.runHeldBy?.({ agentId, taskId }) ?? null) : null
+    if (heldBy) {
+      const fix = reason === 'fix_round'
+      if (fix) await deps.board.addComment(taskId, lead, 'system')
+      await releaseClaimed(taskId, sessionKey, fix ? summary : undefined, false, heldBy)
+      return
+    }
     let detail: Awaited<ReturnType<EngineBoardClient['getTask']>>
     let exec: ExecutionRef | null
     const prevExec = taskToExec.get(taskId)
@@ -3323,8 +3424,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     run: RunStamp,
   ): Promise<void> {
     const stopped = run.stopGen !== deps.stopGen()
-    // A follow-up cut short by the user's Stop is a pause, not a failure.
-    if ('reason' in result && stopped) return
+    // A follow-up cut short by the user's Stop is a pause, not a failure. So is one
+    // a pause stopped: nobody is told, and the report-ups it carried come back.
+    if ('reason' in result && (stopped || run.stoppedByPause === true)) return
     const d = await deps.board.getTask(forTaskId)
     if (!d) return
     const title = typeof d.task.title === 'string' ? d.task.title : undefined
@@ -3947,6 +4049,51 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     return busy ? 'queued' : 'not_ready'
   }
 
+  /** See the interface. */
+  async function pauseRuns(
+    covers: (run: { agentId: string; taskId: string }) => boolean,
+    note: string,
+  ): Promise<string[]> {
+    const stopped: string[] = []
+    for (const [sessionKey, taskId] of [...sessionToTask]) {
+      const agentId = deps.agentIdForSession(sessionKey)
+      if (!agentId || !covers({ agentId, taskId })) continue
+      // A run attached after a restart has no id in hand: read it, as Stop does.
+      const attached = taskToExec.has(taskId)
+        ? undefined
+        : (await deps.board.listExecutions(taskId))?.at(-1)
+      // That read, or an earlier task's writes, may have let this run end and the
+      // session take other work. From here to the release nothing awaits.
+      if (sessionToTask.get(sessionKey) !== taskId) continue
+      if (attached?.status === 'running') taskToExec.set(taskId, attached.id)
+      const held = heldChecks.get(sessionKey)
+      if (held?.taskId === taskId) {
+        // Its check has not started, and does not now. Whoever ends a wait owns what
+        // happens next, and a Stop ends it the same way.
+        endHold(sessionKey)
+        await releaseHeldCheck(sessionKey, held, note)
+        stopped.push(taskId)
+        continue
+      }
+      let finished: string | undefined
+      if (isChecking(sessionKey)) {
+        // The run is over, and its check goes on. A fix round the check already
+        // asked for never starts; one it asks for later waits at the run queue.
+        const round = pendingFix.get(sessionKey)
+        if (!round) continue
+        pendingFix.delete(sessionKey)
+        checking.delete(sessionKey)
+        if (round.reason === 'fix_round') finished = round.summary
+      } else {
+        deps.abortSession?.(sessionKey)
+        if (pendingStart.get(sessionKey) === taskId) pendingStart.delete(sessionKey)
+      }
+      await releaseClaimed(taskId, sessionKey, finished, false, note)
+      stopped.push(taskId)
+    }
+    return stopped
+  }
+
   /** See the interface. Durable-Stop writer — runs alongside the host's aborts. */
   async function markStopped(): Promise<void> {
     // Pending deferred fires would start NEW runs after the Stop — kill them
@@ -4008,6 +4155,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     onSessionClosed,
     resume,
     markStopped,
+    pauseRuns,
     detachTask,
     dispatchTask,
     personMovedTask,

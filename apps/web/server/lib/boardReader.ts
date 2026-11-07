@@ -13,6 +13,7 @@ import {
   markTaskRead,
   taskReadStates,
   type ClawbooDb,
+  type DbTask,
   type TaskActivity,
   type TaskReadState,
 } from '@clawboo/db'
@@ -65,15 +66,31 @@ export async function stopAsOwnWrite(
     listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status }).map((t) => t.id),
   )
   await stop()
+  markReleasedTasksRead(db, reader, running)
+}
+
+/** The tasks a person's pause would release, by the same reading as Stop: what is
+ *  running now, of what it covers. */
+export function runningTasksCovered(db: ClawbooDb, covers: (task: DbTask) => boolean): string[] {
+  return RUNNING_STATUSES.flatMap((status) =>
+    listTasks(db, { status })
+      .filter(covers)
+      .map((t) => t.id),
+  )
+}
+
+/** Mark read each of these that a person's own act released: back in To do, with that
+ *  move as its newest change. Anything else that happened to it stays news. */
+export function markReleasedTasksRead(db: ClawbooDb, reader: string, ids: readonly string[]): void {
   try {
     const states = taskReadStates(db, reader)
-    for (const id of running) {
+    for (const id of ids) {
       const activity = states.get(id)?.activity
       if (activity?.kind !== 'status' || getTask(db, id)?.status !== RELEASED_TO) continue
       markTaskRead(db, reader, id, activity.seq)
     }
   } catch (err) {
-    // The Stop itself is done. At worst the person sees these as unread.
+    // What stopped them is done. At worst the person sees these as unread.
     log.warn({ err }, 'marking the stopped tasks read failed')
   }
 }

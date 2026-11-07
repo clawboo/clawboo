@@ -31,6 +31,7 @@ import {
   listRoomsWithPendingReportUps,
   reapReportUps,
   settleReportUps,
+  startRefusedBy,
   type ClawbooDb,
 } from '@clawboo/db'
 import { createSuspendDetector, steeringOf } from '@clawboo/executor'
@@ -51,6 +52,7 @@ import {
 import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
 import { getDb } from '../db'
+import { PausedDeliveryError, pauseRefusalText, pauseTaskStopNote } from '../pauseBus'
 import { publishAgentStatus } from './agentStatusBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
 import { auditCapHit } from './capHitAudit'
@@ -62,7 +64,12 @@ import { createReportUpOutbox } from './reportUpOutbox'
 import { createTaskWakeOutbox } from './taskWakes'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
-import { createServerDeliver, type QueuedRun, type RunEntry } from './serverDeliver'
+import {
+  createServerDeliver,
+  stopRunForPause,
+  type QueuedRun,
+  type RunEntry,
+} from './serverDeliver'
 import { createTeamWorkCheck } from './teamWorkCheck'
 import { roomIdForTask, roomLeadId, roomMembers } from './roomRoster'
 
@@ -107,9 +114,18 @@ export interface EnqueueUserMessageInput {
  *  was queued behind a run already in flight on that session. */
 export type EnqueueUserMessageResult =
   | { ok: true; targetAgentId: string }
-  /** `transient`: the OpenClaw operator was still down after a reconnect, which
-   *  may pass by itself (a routine keeps its schedule through it). */
-  | { ok: false; error: string; transient?: true }
+  /** `transient`: the OpenClaw operator was still down after a reconnect, which may
+   *  pass by itself (a routine keeps its schedule through it). `paused`: a pause
+   *  covers the target, so nothing happened, and a routine's fire runs on resume. */
+  | { ok: false; error: string; transient?: true; paused?: true }
+
+/** A run, as a pause asks about it. */
+export interface PausedRunQuery {
+  agentId: string
+  teamId: string
+  /** The task it runs, or null for a turn with none. */
+  taskId: string | null
+}
 
 export interface TeamOrchestrator {
   readonly teamId: string
@@ -141,6 +157,12 @@ export interface TeamOrchestrator {
   /** A person asked for this task to run now (created for an agent from the
    *  board, retried, or just assigned). See the engine's `dispatchTask`. */
   dispatchTask(taskId: string): Promise<DispatchOutcome>
+  /** A pause covers these runs: stop them, within seconds. A task run goes through
+   *  the engine's `pauseRuns`. A live turn with no task (a lead's reply) is aborted
+   *  with the note in the chat. A queued task update or follow-up goes back to the
+   *  outbox. A person's queued message stays queued, held by the queue's own read of
+   *  the pause, and starts on resume. */
+  pauseRuns(covers: (run: PausedRunQuery) => boolean, notes: PauseStopNotes): Promise<string[]>
   /** A person moved this task's card (already written). Stops the run working
    *  on it and tells its delegator. See the engine's `personMovedTask`. */
   personMovedTask(
@@ -313,6 +335,16 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
 
   const engine = createBoardOrchestrator({
     teamId,
+    runHeldBy: ({ agentId, taskId }) => {
+      try {
+        const refusal = startRefusedBy(db, { agentId, teamId, taskId })
+        return refusal ? pauseTaskStopNote(refusal) : null
+      } catch (err) {
+        // The run queue reads the pause again before anything starts.
+        log.error({ err, teamId }, 'could not read whether a run is paused')
+        return null
+      }
+    },
     // The cadence of the idle-watchdog interval below, so a sleep between two
     // sweeps is not mistaken for every delegate going silent.
     sweepIntervalMs: SWEEP_INTERVAL_MS,
@@ -472,24 +504,19 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       await ready
       const stimulus = input.stimulus
       const roster = knownAgents(db, teamId, roomId)
+      // A routine's message to a paused target posts nothing: it would say "paused"
+      // in the chat on every fire, about something the ticker holds back anyway.
+      if (input.routine) {
+        const agentId = teamMessageTarget(db, teamId, roomId, stimulus, input.targetAgentId)
+        const refused = startRefusedBy(db, { agentId, teamId })
+        if (refused) return { ok: false, error: pauseRefusalText(refused), paused: true }
+      }
       if (roster.length === 0)
         return {
           ok: false,
           error: roomId ? 'The room has no active members.' : 'The team has no active members.',
         }
-      // Target priority: explicit targetAgentId > @mention > leader > first member.
-      // For an OpenClaw team the leader IS Boo Zero (the universal reduce-point,
-      // injected into the roster by `knownAgents`); a native team routes to its own
-      // leader.
-      const explicit =
-        input.targetAgentId && roster.some((a) => a.id === input.targetAgentId)
-          ? input.targetAgentId
-          : null
-      const targetId =
-        explicit ??
-        mentionTarget(stimulus, roster) ??
-        resolveLeaderId(db, teamId, roomId) ??
-        roster[0]!.id
+      const targetId = teamMessageTarget(db, teamId, roomId, stimulus, input.targetAgentId)!
       const origin: TurnOrigin = input.routine
         ? { kind: 'schedule', routineName: input.routine.name }
         : HUMAN_TURN
@@ -527,9 +554,10 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err))
       // The reason handed back to the caller (a routine records it as its error).
       // A holder rather than a `let`: it is written from inside the catch closures.
-      const delivery: { failure: string | null; operatorDown: boolean } = {
+      const delivery: { failure: string | null; operatorDown: boolean; paused: boolean } = {
         failure: null,
         operatorDown: false,
+        paused: false,
       }
       const persistDeliverFailure = (operatorStillDown: boolean, err: unknown): void => {
         delivery.operatorDown = operatorStillDown
@@ -548,10 +576,11 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         })
       }
       await deliver(sk, targetId, stimulus, origin).catch(async (err: unknown) => {
-        // A refusal (a paused hard-cap budget) has already put its reason in the
-        // chat. Nothing is down, so no retry and no "could not reach" notice.
+        // A refusal (a paused hard-cap budget, a pause) has already put its reason in
+        // the chat. Nothing is down, so no retry and no "could not reach" notice.
         if (err instanceof DeliveryRefusedError) {
           delivery.failure = err.message
+          delivery.paused = err instanceof PausedDeliveryError
           return
         }
         log.error({ err, teamId, targetId }, 'team-orchestrator user-turn delivery failed')
@@ -576,6 +605,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
         persistDeliverFailure(false, err)
       })
       if (!delivery.failure) return { ok: true, targetAgentId: targetId }
+      if (delivery.paused) return { ok: false, error: delivery.failure, paused: true }
       return delivery.operatorDown
         ? { ok: false, error: delivery.failure, transient: true }
         : { ok: false, error: delivery.failure }
@@ -620,6 +650,9 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       touch()
       await ready // the Boo-Zero bootstrap and the first resume come first
       return engine.dispatchTask(taskId)
+    },
+    pauseRuns(covers, notes): Promise<string[]> {
+      return stopPausedRunsOf({ engine, abortMap, queuedRuns, teamId }, covers, notes)
     },
     async personMovedTask(taskId, to, opts): Promise<void> {
       touch()
@@ -735,6 +768,31 @@ export function getTeamOrchestrator(
 /** True when a team chat room has a live orchestrator (introspection / tests). */
 export function hasTeamOrchestrator(teamId: string, roomId: string | null = null): boolean {
   return instances.has(orchestratorKey(teamId, roomId))
+}
+
+/**
+ * Who a message to a team chat reaches, or null for a room with nobody in it. Target
+ * priority: explicit targetAgentId > @mention > leader > first member. For an OpenClaw
+ * team the leader IS Boo Zero (the universal reduce-point, injected into the roster by
+ * `knownAgents`); a native team routes to its own leader.
+ */
+export function teamMessageTarget(
+  db: ClawbooDb,
+  teamId: string,
+  roomId: string | null,
+  stimulus: string,
+  targetAgentId?: string | null,
+): string | null {
+  const roster = knownAgents(db, teamId, roomId)
+  if (roster.length === 0) return null
+  const explicit =
+    targetAgentId && roster.some((a) => a.id === targetAgentId) ? targetAgentId : null
+  return (
+    explicit ??
+    mentionTarget(stimulus, roster) ??
+    resolveLeaderId(db, teamId, roomId) ??
+    roster[0]!.id
+  )
 }
 
 /** True when a resident engine has work going on this session, so nothing else may
@@ -864,6 +922,68 @@ export function isActiveTeamRoom(teamId: string, roomId: string | null): boolean
   } catch {
     return false
   }
+}
+
+/** What a stopped run says: a task run comes back by itself, a turn with no task does not. */
+export interface PauseStopNotes {
+  task: string
+  turn: string
+}
+
+/** One engine's part of a pause (see `TeamOrchestrator.pauseRuns`). */
+export async function stopPausedRunsOf(
+  host: {
+    engine: Pick<BoardOrchestrator, 'pauseRuns' | 'taskForSession'>
+    abortMap: Map<string, RunEntry>
+    queuedRuns: Map<string, QueuedRun>
+    teamId: string
+  },
+  covers: (run: PausedRunQuery) => boolean,
+  notes: PauseStopNotes,
+): Promise<string[]> {
+  const { engine, abortMap, queuedRuns, teamId } = host
+  // Turns with no task, read first: stopping a task run below leaves its session
+  // live and unmapped until its terminal, and it must not read as one of these. A
+  // follow-up counts under the task it reports on.
+  const liveTurns = [...abortMap].filter(([sk, e]) => {
+    const agentId = agentIdFromSessionKey(sk)
+    return (
+      agentId !== null &&
+      engine.taskForSession(sk) === null &&
+      covers({ agentId, teamId, taskId: e.stamp?.reportForTaskId ?? null })
+    )
+  })
+  for (const [sk, q] of [...queuedRuns]) {
+    const agentId = agentIdFromSessionKey(sk)
+    if (q.report && agentId && covers({ agentId, teamId, taskId: q.report.taskId })) {
+      q.report.stamp.stoppedByPause = true
+      q.cancel()
+    }
+  }
+  const stopped = await engine.pauseRuns(
+    ({ agentId, taskId }) => covers({ agentId, teamId, taskId }),
+    notes.task,
+  )
+  for (const [, e] of liveTurns) stopRunForPause(e, notes.turn)
+  return stopped
+}
+
+/** Every resident team engine stops the runs a pause covers. An engine that is not
+ *  loaded has no runs. Resolves with the tasks stopped; one engine's failure is
+ *  logged and the others still stop. */
+export async function stopPausedTeamRuns(
+  covers: (run: PausedRunQuery) => boolean,
+  notes: PauseStopNotes,
+): Promise<string[]> {
+  const stopped = await Promise.all(
+    [...instances.values()].map((inst) =>
+      inst.orchestrator.pauseRuns(covers, notes).catch((err: unknown): string[] => {
+        log.error({ err, teamId: inst.orchestrator.teamId }, 'stopping paused runs failed')
+        return []
+      }),
+    ),
+  )
+  return stopped.flat()
 }
 
 /** Test/shutdown helper: dispose + drop all live orchestrators. */

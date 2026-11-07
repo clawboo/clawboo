@@ -14,6 +14,7 @@ import {
   ledgerAllowsAutoFire,
   ledgerWillAutoFire,
   MAX_AUTO_FIRES,
+  PAUSED_RUN_CLASS,
   runMadeProgress,
   trailingFailedRuns,
   trailingNoProgressRuns,
@@ -252,6 +253,7 @@ const base: WakeDecisionInput = {
   execs: [],
   runProvenAlive: false,
   held: false,
+  paused: false,
   refusal: null,
   budgetRefused: false,
   now: AT,
@@ -411,5 +413,67 @@ describe('what the pump does with a saved wake', () => {
         }
       }
     }
+  })
+})
+
+describe('a saved wake under a pause', () => {
+  const paused: LedgerRun = { status: 'cancelled', errorClass: PAUSED_RUN_CLASS, completedAt: AT }
+
+  it("waits, and names why, even for a person's comment", () => {
+    expect(wakeDecision({ ...base, paused: true })).toEqual({ do: 'wait', skip: 'paused' })
+    expect(wakeDecision({ ...base, paused: true, status: 'blocked' })).toEqual({
+      do: 'wait',
+      skip: 'paused',
+    })
+  })
+
+  it('still closes with a task that closed', () => {
+    expect(wakeDecision({ ...base, paused: true, status: 'done' })).toEqual({
+      do: 'settle',
+      how: 'finished',
+    })
+  })
+
+  it('fires once the pause is gone, whatever its run a pause stopped says', () => {
+    expect(wakeDecision({ ...base, reason: 'dependency_done', execs: [paused] })).toEqual({
+      do: 'fire',
+      force: false,
+      moveToTodo: false,
+    })
+  })
+
+  it('names an archived team as its own wait, with its own way out', () => {
+    expect(wakeDecision({ ...base, refusal: 'team_archived' })).toEqual({
+      do: 'wait',
+      skip: 'team_archived',
+    })
+  })
+})
+
+describe('the brake and a run a pause stopped', () => {
+  const noProgress = (completedAt: number): LedgerRun => ({
+    status: 'failed',
+    madeProgress: 0,
+    completedAt,
+  })
+  const paused = (completedAt: number): LedgerRun => ({
+    status: 'cancelled',
+    errorClass: PAUSED_RUN_CLASS,
+    completedAt,
+  })
+
+  it('neither counts it nor lets it end the streak', () => {
+    expect(trailingNoProgressRuns([noProgress(1), paused(2), paused(3)])).toBe(1)
+    expect(trailingNoProgressRuns([noProgress(1), paused(2), noProgress(3)])).toBe(2)
+  })
+
+  it('counts the wait from the last real ending, not from the pause', () => {
+    const ledger = [noProgress(1_000), noProgress(2_000), paused(9_000_000)]
+    expect(brakeUntil(ledger)).toBe(2_000 + BRAKE_FIRST_WAIT_MS)
+  })
+
+  it('never holds a run a pause stopped back: that run was going', () => {
+    const ledger = [noProgress(1_000), noProgress(2_000), paused(3_000)]
+    expect(autoFireRefusal(ledger, 4_000)).toBeNull()
   })
 })

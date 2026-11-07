@@ -747,3 +747,171 @@ describe('durable report-up', () => {
     expect(outbox.settledAs()).toEqual(['gave_up'])
   })
 })
+
+describe('a report-up a pause holds back', () => {
+  const NOTE = 'Stopped: this agent is paused.'
+
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => {
+    vi.clearAllTimers()
+    vi.useRealTimers()
+  })
+
+  function pausedHarness(paused: Set<string>) {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const delivered: Delivered[] = []
+    const engine = createBoardOrchestrator({
+      teamId: 't1',
+      board,
+      known: () => KNOWN,
+      leaderAgentId: () => 'leader',
+      sessionKeyForAgent: sk,
+      agentIdForSession,
+      deliver: async (sessionKey, agentId, task, origin) => {
+        delivered.push({ sessionKey, agentId, task, origin })
+      },
+      stopGen: () => 0,
+      reportUps: outbox,
+      runHeldBy: ({ agentId, taskId }) =>
+        paused.has(agentId) || (taskId !== null && paused.has(taskId)) ? NOTE : null,
+    })
+    return {
+      engine,
+      board,
+      outbox,
+      updates: () => delivered.filter((d) => d.task.startsWith('[Task Update]')),
+    }
+  }
+
+  /** A worker finished a task the leader handed it: one report-up, on its way. */
+  async function finished(h: ReturnType<typeof pausedHarness>): Promise<string> {
+    await h.engine.onEvent(
+      sk('leader'),
+      {
+        kind: 'done',
+        reason: 'success',
+        summary: '<delegate to="@Bug Boo">fix it</delegate>',
+        runId: 'r1',
+        sessionId: null,
+        ts: 1,
+        seq: 1,
+      },
+      { reportForTaskId: null, stopGen: 0 },
+    )
+    const id = h.board.created.at(-1)!.id
+    await h.engine.onEvent(
+      sk('a2'),
+      {
+        kind: 'done',
+        reason: 'success',
+        summary: 'fixed',
+        runId: 'r2',
+        sessionId: null,
+        ts: 1,
+        seq: 1,
+      },
+      { reportForTaskId: null, stopGen: 0 },
+    )
+    return id
+  }
+
+  it('does not deliver to a paused recipient, so nothing waits on it, and keeps the row pending', async () => {
+    const paused = new Set(['leader'])
+    const h = pausedHarness(paused)
+    await finished(h)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+
+    expect(h.updates()).toHaveLength(0)
+    expect(h.outbox.pending()).toHaveLength(1)
+    expect(h.outbox.pending()[0]?.replays).toBe(0)
+  })
+
+  it('does not count or send it on the sweep while the pause lasts, and sends it after', async () => {
+    const paused = new Set(['leader'])
+    const h = pausedHarness(paused)
+    await finished(h)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    h.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates()).toHaveLength(0)
+    expect(h.outbox.pending()[0]?.replays).toBe(0)
+
+    paused.clear()
+    h.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates()).toHaveLength(1)
+  })
+
+  it('counts no try for one a pause stopped on its way, and sends it after the resume', async () => {
+    const paused = new Set<string>()
+    const h = pausedHarness(paused)
+    await finished(h)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    const sent = h.updates()[0]!
+    const reportUpIds = sent.origin.kind === 'system' ? sent.origin.reportUpIds! : []
+    expect(reportUpIds).toHaveLength(1)
+
+    // Its run is aborted by the pause.
+    paused.add('leader')
+    await h.engine.onEvent(
+      sk('leader'),
+      {
+        kind: 'done',
+        reason: 'aborted',
+        summary: '',
+        runId: 'r3',
+        sessionId: null,
+        ts: 1,
+        seq: 1,
+      },
+      { reportForTaskId: null, stopGen: 0, reportUpIds, stoppedByPause: true },
+    )
+    h.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates()).toHaveLength(1)
+
+    paused.clear()
+    h.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates()).toHaveLength(2)
+    expect(h.outbox.pending()[0]?.replays).toBe(0)
+  })
+
+  it('a Stop during the pause holds what the pause kept back: the resume does not send it', async () => {
+    const paused = new Set(['leader'])
+    const h = pausedHarness(paused)
+    await finished(h)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.outbox.pending()).toHaveLength(1)
+
+    await h.engine.markStopped()
+    paused.clear()
+    h.engine.sweepStaleSessions()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+
+    expect(h.updates()).toHaveLength(0)
+    expect(h.outbox.pending()).toHaveLength(0)
+    expect(h.outbox.held()).toHaveLength(1)
+  })
+
+  it('holds one about a task in a paused tree, whoever it is for', async () => {
+    const paused = new Set<string>()
+    const h = pausedHarness(paused)
+    const id = await finished(h)
+    paused.add(id)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates()).toHaveLength(0)
+    expect(h.outbox.pending()).toHaveLength(1)
+  })
+
+  it('a paused recipient does not hold up the update for a recipient that is free', async () => {
+    const h = pausedHarness(new Set(['a3']))
+    h.outbox.record({ toAgentId: 'a3', by: 'Bug Boo', summary: 'for the paused one' })
+    h.outbox.record({ toAgentId: 'leader', by: 'Bug Boo', summary: 'for the free one' })
+    await h.engine.resume()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 10)
+    expect(h.updates().map((u) => u.agentId)).toEqual(['leader'])
+    expect(h.outbox.pending().find((p) => p.item.toAgentId === 'a3')?.replays).toBe(0)
+  })
+})

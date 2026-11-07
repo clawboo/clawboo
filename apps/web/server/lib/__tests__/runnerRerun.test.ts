@@ -3,18 +3,23 @@
 
 import { encodeHumanAssignment } from '@clawboo/board-core'
 import {
+  assignTaskToPerson,
   agents,
+  attentionForTask,
   completeExecutionProcess,
   createDb,
   createExecutionProcess,
   createTask,
   getComments,
   getTask,
+  liftPause,
   listEvents,
   listWaitingTaskWakes,
   recordTaskWake,
+  placePause,
   setTaskRunnerInputs,
   tasks,
+  LOCAL_PERSON,
   type ClawbooDb,
   type DbTask,
 } from '@clawboo/db'
@@ -258,6 +263,95 @@ describe('the handoff pause', () => {
     })
     await vi.waitFor(() => expect(runs).toHaveLength(1))
     expect(runs[0]!['keepForResume']).toBeUndefined()
+  })
+})
+
+describe('pumpRunnerReruns: a run a pause stopped', () => {
+  /** A task run directly through the runner: no agent is bound to it. */
+  function directRun(): string {
+    const t = createTask(db, { title: 'direct', teamId: null })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'coder',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    return t.id
+  }
+  const closed = (taskId: string, errorClass?: string): void => {
+    const exec = createExecutionProcess(db, { taskId, executorType: 'claude-code' })
+    completeExecutionProcess(db, exec.id, {
+      status: 'cancelled',
+      ...(errorClass ? { errorClass } : {}),
+    })
+  }
+
+  it('starts again on resume though no agent is bound, and not before', async () => {
+    const id = directRun()
+    closed(id, 'Paused')
+    placePause(db, { kind: 'agent', id: 'coder' })
+    pumpRunnerReruns(db, null)
+    await vi.waitFor(() => expect(runs).toHaveLength(0))
+
+    liftPause(db, 'agent', 'coder')
+    pumpRunnerReruns(db, null)
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    expect(runs[0]).toMatchObject({ taskId: id, assigneeAgentId: 'coder' })
+  })
+
+  it('starts a bound task again on resume too', async () => {
+    const t = createTask(db, {
+      title: 'bound',
+      teamId: 'T',
+      sourceDelegationId: encodeHumanAssignment('coder', 'n1'),
+    })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'coder',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    closed(t.id, 'Paused')
+    placePause(db, { kind: 'team', id: 'T' })
+    pumpRunnerReruns(db, null)
+    await new Promise((r) => setImmediate(r))
+    expect(runs).toHaveLength(0)
+    liftPause(db, 'team', 'T')
+    pumpRunnerReruns(db, null)
+    await vi.waitFor(() => expect(runs).toHaveLength(1))
+    expect(runs[0]).toMatchObject({ taskId: t.id, assigneeAgentId: 'coder' })
+  })
+
+  it('does not start a task a person took on, whatever a pause stopped on it', async () => {
+    const t = createTask(db, { title: 'theirs now', teamId: 'T' })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'coder',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    closed(t.id, 'Paused')
+    expect(assignTaskToPerson(db, t.id, LOCAL_PERSON).ok).toBe(true)
+    pumpRunnerReruns(db, null)
+    await new Promise((r) => setImmediate(r))
+    expect(runs).toHaveLength(0)
+  })
+
+  it('leaves an unbound task a person stopped alone: only a pause restores it', async () => {
+    const id = directRun()
+    closed(id)
+    pumpRunnerReruns(db, null)
+    await new Promise((r) => setImmediate(r))
+    expect(runs).toHaveLength(0)
+  })
+
+  it('needs no person while it waits: it does not read as having no agent', () => {
+    const id = directRun()
+    closed(id, 'Paused')
+    expect(attentionForTask(db, id)).toBeNull()
   })
 })
 

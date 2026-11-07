@@ -65,6 +65,12 @@ function QuestionControls({
     setBusy(false)
     if (result.ok) {
       // Saved is not delivered: the agent may not have been started.
+      if (result.delivery?.status === 'queued' && result.delivery.reason === 'paused') {
+        addToast({
+          type: 'info',
+          message: 'Your answer is saved. The agent gets it after the resume.',
+        })
+      }
       if (result.delivery?.status === 'not-delivered') {
         addToast({
           type: 'info',

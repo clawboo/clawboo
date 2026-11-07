@@ -51,6 +51,8 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
     case 'span_start':
     case 'span_end':
     case 'dep_linked':
+    case 'pause_placed':
+    case 'pause_lifted':
       return null // pure trace internals — kept out of the activity view
     case 'tool_call':
       return {

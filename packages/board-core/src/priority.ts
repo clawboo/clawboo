@@ -57,3 +57,32 @@ export function taskPriorityOf(value: number | null | undefined): TaskPriority {
   if (v === TASK_PRIORITY_VALUE.normal) return 'normal'
   return 'low'
 }
+
+/**
+ * How long a task waits in To do to read one level higher in the ready list, so
+ * low-priority work gets through a steady stream of newer work: Normal reads as High
+ * after one step and Low after two.
+ */
+export const READY_AGING_STEP_MS = 4 * 60 * 60_000
+
+/**
+ * The highest level waiting can reach. One below Urgent, because a person's Urgent
+ * has to mean something: otherwise every overnight Normal task would tie a fresh
+ * Urgent and win on age.
+ */
+export const READY_AGING_CEILING = TASK_PRIORITY_VALUE.high
+
+/**
+ * The level a task reads as after waiting since it was created: its stored level,
+ * clamped, plus a level per `READY_AGING_STEP_MS`, up to `READY_AGING_CEILING`. A task
+ * stored above that keeps its level. Counted from creation, so an edit moves nothing.
+ * `getReadyTasks` applies the same rule in SQL.
+ */
+export function agedTaskPriority(
+  task: { priority: number; createdAt: number },
+  now: number,
+): number {
+  const stored = clampTaskPriority(task.priority)
+  const steps = Math.max(0, Math.floor((now - task.createdAt) / READY_AGING_STEP_MS))
+  return Math.max(stored, Math.min(READY_AGING_CEILING, stored + steps))
+}

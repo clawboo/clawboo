@@ -30,6 +30,7 @@ import type {
 
 import { getDb, resetDb } from '../db'
 import { runTaskOnRuntime } from '../executorRunner'
+import { stopPausedTaskRuns } from '../runStops'
 import type { RuntimeRunContext } from '../runtimes'
 import { getTaskWorkspace } from '../worktrees'
 
@@ -394,6 +395,36 @@ describe('executor runner — native session resume across dispatches', () => {
     const ws = await getTaskWorkspace(taskId)
     expect(ws.ok).toBe(true)
     expect(ws.ok && ws.resume?.nativeSessionId).toBeNull()
+  })
+
+  it('a pause stopping a resumed run keeps the session id, and warns of no failed resume', async () => {
+    const taskId = newTask()
+    await pauseRun(taskId, new SeamAdapter('hermes', HERMES_SHAPED, ['success'], 'hsess-kept'))
+
+    class StoppedInStart extends SeamAdapter {
+      override async start(t: TaskHandle, opts: StartOpts): Promise<RunHandle> {
+        stopPausedTaskRuns(() => true, 'Stopped: this agent is paused.')
+        return super.start(t, opts)
+      }
+    }
+    const stopped = new StoppedInStart('hermes', HERMES_SHAPED, ['aborted' as Reason], null)
+    const result = await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: recordingFactory(stopped).makeAdapter,
+      taskId,
+      assigneeAgentId: 'hermes-1',
+      repoPath: repo,
+      kind: 'code',
+      disableMemoryAutoInject: true,
+    })
+    expect(result).toMatchObject({ ok: true, stoppedByPause: true, status: 'todo' })
+    expect(stopped.startResumes[0]).toBe('hsess-kept')
+
+    const ws = await getTaskWorkspace(taskId)
+    expect(ws.ok && ws.resume?.nativeSessionId).toBe('hsess-kept')
+    expect(ws.ok && (ws.resume?.warnings ?? []).join(' ')).not.toContain(
+      'native session resume failed',
+    )
   })
 
   it('a FAILED resume attempt clears the persisted id (no stale-id retry loop) but keeps the prose handoff', async () => {

@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gt, inArray, isNotNull, lte } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { scheduledRuns, settings, tasks, type DbScheduledRun, type DbTask } from '../schema'
@@ -126,12 +126,32 @@ export function listScheduledRuns(
     .all() as DbScheduledRun[]
 }
 
+/**
+ * A row whose agent or team may start work: not paused (see board/pauses), and not
+ * on an archived team. The team is the row's own or its agent's. A row this leaves
+ * out stays as it is in the ledger and fires once the pause lifts. The three reads
+ * the ticker arms and claims from all carry it: a due row counted by one and not
+ * by the others would arm the ticker at a delay of 0, forever.
+ */
+const MAY_START = sql`NOT EXISTS (
+  SELECT 1 FROM pauses p
+  WHERE (p.scope_kind = 'agent' AND p.scope_id = scheduled_runs.agent_id)
+     OR (p.scope_kind = 'team' AND p.scope_id IN (
+          scheduled_runs.team_id,
+          (SELECT a.team_id FROM agents a WHERE a.id = scheduled_runs.agent_id)))
+) AND NOT EXISTS (
+  SELECT 1 FROM teams t
+  WHERE t.is_archived = 1 AND t.id IN (
+    scheduled_runs.team_id,
+    (SELECT a.team_id FROM agents a WHERE a.id = scheduled_runs.agent_id))
+)`
+
 /** MIN(next_run_at) over auto-fireable rows — the ticker's arm key. */
 export function minNextRunAt(db: ClawbooDb): number | null {
   const row = db
     .select({ nextRunAt: scheduledRuns.nextRunAt })
     .from(scheduledRuns)
-    .where(and(eq(scheduledRuns.status, 'idle'), isNotNull(scheduledRuns.nextRunAt)))
+    .where(and(eq(scheduledRuns.status, 'idle'), isNotNull(scheduledRuns.nextRunAt), MAY_START))
     .orderBy(asc(scheduledRuns.nextRunAt))
     .limit(1)
     .get() as { nextRunAt: number | null } | undefined
@@ -153,6 +173,7 @@ export function queueDueRuns(db: ClawbooDb, now: number): DbScheduledRun[] {
             eq(scheduledRuns.status, 'idle'),
             isNotNull(scheduledRuns.nextRunAt),
             lte(scheduledRuns.nextRunAt, now),
+            MAY_START,
           ),
         )
         .returning()
@@ -164,7 +185,7 @@ export function listQueuedRuns(db: ClawbooDb): DbScheduledRun[] {
   return db
     .select()
     .from(scheduledRuns)
-    .where(eq(scheduledRuns.status, 'queued'))
+    .where(and(eq(scheduledRuns.status, 'queued'), MAY_START))
     .orderBy(asc(scheduledRuns.nextRunAt))
     .all() as DbScheduledRun[]
 }
@@ -300,6 +321,24 @@ export function recordRunOutcome(
       .where(and(eq(scheduledRuns.id, id), eq(scheduledRuns.status, 'running')))
       .run()
     return survives ? 'idle' : 'error'
+  })
+}
+
+/**
+ * A pause stopped this fire, or refused it: it did not happen. The row goes back to
+ * waiting exactly as it was, with no last run, no failure and the same next run, so a
+ * one-time routine is not spent. It stays out of the ticker's claims until nothing
+ * holds it. False when the row has moved on.
+ */
+export function requeuePausedFire(db: ClawbooDb, id: string, now = Date.now()): boolean {
+  return withWriteRetry(() => {
+    const rows = db
+      .update(scheduledRuns)
+      .set({ status: 'queued', updatedAt: now })
+      .where(and(eq(scheduledRuns.id, id), eq(scheduledRuns.status, 'running')))
+      .returning({ id: scheduledRuns.id })
+      .all()
+    return rows.length > 0
   })
 }
 

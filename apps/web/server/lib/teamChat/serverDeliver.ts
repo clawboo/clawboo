@@ -21,6 +21,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 
+import { agedTaskPriority } from '@clawboo/board-core'
 import {
   agents,
   getAncestors,
@@ -37,6 +38,7 @@ import {
   adoptTaskWakes,
   startTaskHeartbeat,
   updateTaskFields,
+  startRefusedBy,
   type BudgetRefusalReason,
   type BudgetScope,
   type ClawbooDb,
@@ -84,7 +86,8 @@ import {
   teamOverflowNotClearedText,
   teamOverflowText,
 } from '../runFailureText'
-import { runSlots, type RunSlot } from '../runSlots'
+import { PausedDeliveryError, pauseRefusalText, pauseStopNote } from '../pauseBus'
+import { runSlots, PERSON_TURN, type RunSlot, type RunRank } from '../runSlots'
 import { registerRunSteer } from '../runSteers'
 import { emitEvent } from '../obs'
 import { openclawAgentModel } from '../openclawAgentModel'
@@ -165,6 +168,19 @@ export interface RunEntry {
    * abort, before asking; left null for a user Stop.
    */
   serverAbortReason?: string | null
+  /** The delivery's stamp, which reaches the engine with each of the run's events. */
+  stamp?: RunStamp
+  /** A pause stopped this run: what the chat says. Not a failure, so not one of the
+   *  reasons above, which read as a run that failed. */
+  pauseNote?: string | null
+}
+
+/** Stop this run for a pause. The engine reads it as a stop from the stamp, and the
+ *  chat gets the note as it stands. */
+export function stopRunForPause(entry: RunEntry, note: string): void {
+  entry.pauseNote = note
+  if (entry.stamp) entry.stamp.stoppedByPause = true
+  void entry.adapter.abort(entry.run).catch(() => undefined)
 }
 
 /** A delivery waiting in the process's run queue (see runSlots), keyed by sessionKey
@@ -172,6 +188,10 @@ export interface RunEntry {
 export interface QueuedRun {
   /** Take it out of the queue (Stop, teardown). It never starts. */
   cancel(): void
+  /** It is a task update or a follow-up, about this task when it names one. A pause
+   *  takes it out of the queue, since it would hold its agent's session for the whole
+   *  pause. Its report-ups go back to the outbox and wait there. */
+  report?: { taskId: string | null; stamp: RunStamp }
 }
 
 /** How often a queued delivery re-marks its session busy, well inside the nudge
@@ -739,7 +759,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // the only case reported is the one nobody chose: the server killed the
           // run. Without this those kills are indistinguishable from a Stop, since
           // every runtime reports both as `done: 'aborted'`.
-          if (chatVisible && !doneText.trim()) {
+          const pauseNote = abortMap.get(sessionKey)?.pauseNote
+          if (pauseNote) {
+            if (chatVisible) deps.persistMeta?.(sessionKey, pauseNote)
+          } else if (chatVisible && !doneText.trim()) {
             const killed = takeServerAbortReason()
             if (killed) deps.persistMeta?.(sessionKey, runFailureText(killed, obs.runtime))
           }
@@ -932,6 +955,18 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const ticketHash = briefTask ? ticketHashOf(briefTask) : null
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
+    // Who the run is for, as a pause reads it, and its place in the run queue. The
+    // task a follow-up reports on counts as its task for both. A person's message
+    // goes first, because they are watching. Everything else ranks by its task's
+    // priority, and a routine or a task update with no task reads as Normal.
+    const queueTaskId = runTaskId ?? reportForTaskId
+    const pauseSubject = { agentId: targetAgentId, teamId, taskId: queueTaskId }
+    const queueTask =
+      queueTaskId === null ? null : queueTaskId === runTaskId ? briefTask : getTask(db, queueTaskId)
+    const queueRank: RunRank =
+      origin.kind === 'human'
+        ? PERSON_TURN
+        : { priority: queueTask ? agedTaskPriority(queueTask, Date.now()) : 0 }
     // The durable report-ups a `[Task Update]` carries ride the stamp, so the
     // engine settles them when THIS run ends, not whichever run ends next.
     const reportUpIds = origin.kind === 'system' ? origin.reportUpIds : undefined
@@ -1454,6 +1489,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             else if (!runStarted) void endQueued(err)
           }
           const settleRefused = (why: 'stopped' | 'released'): void => {
+            // It never started, so whatever it carried goes back to the outbox.
+            if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
             if (settledEarly) {
               void endQueued(why)
               return
@@ -1475,6 +1512,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (before) {
               settleRefused(before)
               return
+            }
+            // A pause placed while this waited for its slot or its agent's lock: no stop
+            // could reach it, since it was in neither the queue nor the run map. Nothing
+            // has started yet. A task run needs no check here: the engine let go of its
+            // task, so the gate above refused it.
+            const pausedBefore = runTaskId === null ? startRefusedBy(db, pauseSubject) : null
+            if (pausedBefore) {
+              if (origin.kind === 'human' || origin.kind === 'schedule') {
+                const text = pauseRefusalText(pausedBefore)
+                if (chatVisible) deps.persistMeta?.(targetSessionKey, text)
+                settleFailed(new PausedDeliveryError(text))
+                return
+              }
+              if (stamp.reportUpIds) {
+                settleRefused('released')
+                return
+              }
             }
             // The budget gate, as in the task runner: a paused hard cap on the agent,
             // the mission its task belongs to or the team refuses the run before it
@@ -1613,7 +1667,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               }
               return
             }
-            abortMap.set(targetSessionKey, { adapter, run })
+            const entry: RunEntry = { adapter, run, stamp }
+            abortMap.set(targetSessionKey, entry)
+            // A turn with no task reads the pause itself, now that it is in the map. One
+            // placed while it was starting saw nothing to stop, and one placed from here
+            // on finds it there. A task run is the engine's, which released it above.
+            const pausedInStart = runTaskId === null ? startRefusedBy(db, pauseSubject) : null
+            if (pausedInStart) stopRunForPause(entry, pauseStopNote(pausedInStart))
             runStarted = true
             leaveQueue()
             budgetNoticeShown.delete(targetAgentId)
@@ -1698,6 +1758,19 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // sibling run), adapter start, and every silent stretch of the drain.
           // Beat = this process owns the delivery; the interval dies with the
           // process, which is exactly what the minutes-scale stale sweep reads.
+          // A person's or a routine's message to a paused agent or team is refused
+          // here, with the reason in the chat, rather than left waiting unseen for a
+          // resume. Everything else (a fix round, a follow-up, a task update) waits
+          // in the queue, whose grant reads the pause, and starts on resume.
+          if (origin.kind === 'human' || origin.kind === 'schedule') {
+            const paused = startRefusedBy(db, pauseSubject)
+            if (paused) {
+              const text = pauseRefusalText(paused)
+              if (chatVisible) deps.persistMeta?.(targetSessionKey, text)
+              failStart(new PausedDeliveryError(text))
+              return
+            }
+          }
           // Task runs only (a leader/user turn has no task row), and it matches this
           // run's own execution, so an older run cannot keep a newer one looking alive.
           const stopBeat =
@@ -1737,24 +1810,35 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           }
           // The slot comes BEFORE the agent's lock (see runSlots), so a delivery
           // waiting for one holds nothing a running agent needs.
-          const slot = runSlots().tryAcquire(slotKey)
+          const queuePaused = (): boolean => startRefusedBy(db, pauseSubject) !== null
+          const slot = runSlots().tryAcquire(slotKey, queuePaused)
           if (slot) {
             runWithSlot(slot)
             return
           }
-          if (runTaskId !== null) {
+          // So does anything else a pause holds back: the engine awaits a task update
+          // too, and it must not wait out a pause. It starts on resume all the same.
+          if (runTaskId !== null || queuePaused()) {
             settledEarly = true
             started()
           }
           const cancel = new AbortController()
-          queuedEntry = { cancel: () => cancel.abort() }
+          queuedEntry = {
+            cancel: () => cancel.abort(),
+            ...(origin.kind === 'system' ? { report: { taskId: queueTaskId, stamp } } : {}),
+          }
           queuedRuns.set(targetSessionKey, queuedEntry)
           keepBusy = setInterval(() => {
             if (stopGen() === deliveredGen) nudge.markBusy(targetSessionKey)
           }, QUEUED_KEEPALIVE_MS)
           keepBusy.unref?.()
           runSlots()
-            .acquire({ key: slotKey, signal: cancel.signal })
+            .acquire({
+              key: slotKey,
+              signal: cancel.signal,
+              rank: queueRank,
+              paused: queuePaused,
+            })
             .then(
               (granted) => runWithSlot(granted),
               () => {

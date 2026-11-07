@@ -1,7 +1,7 @@
 ---
 title: 'Events and errors reference'
 sidebarTitle: 'Events and errors'
-description: 'The 25 orchestration event kinds and their data, the classes Clawboo sorts failures into, the codes in the log, and where each one appears.'
+description: 'The 32 orchestration event kinds and their data, the classes Clawboo sorts failures into, the codes in the log, and where each one appears.'
 keywords:
   [
     'event log',
@@ -23,7 +23,7 @@ These are the orchestration events defined in `@clawboo/obs`. The OpenClaw Gatew
 
 ## Event kinds
 
-There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
+There are 32 kinds. New kinds are only ever added, so older logs keep parsing.
 
 | Kind                                          | Group      | Records                                                        | Written by                                                                         | Activity badge     |
 | --------------------------------------------- | ---------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------ |
@@ -40,6 +40,8 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`session_rotated`](#session_rotated)         | Runs       | A run moved to a fresh session                                 | Task runner                                                                        | session rotated    |
 | [`approval_requested`](#approval_requested)   | Approvals  | An approval card opened                                        | Tool broker, Clawboo Native commands, risky hand-offs, OpenClaw command mirror     | approval           |
 | [`approval_resolved`](#approval_resolved)     | Approvals  | An approval card was answered or expired                       | Approval routes, the same writers as `approval_requested`, and the approval reaper | approval           |
+| [`pause_placed`](#pause-events)               | Board      | A person paused an agent, a team or a task tree                | The pause routes                                                                   | (hidden)           |
+| [`pause_lifted`](#pause-events)               | Board      | A person resumed it                                            | The pause routes                                                                   | (hidden)           |
 | [`error`](#error)                             | Errors     | A failure, sorted into an [error class](#error-classes)        | Task runner, team engine                                                           | error              |
 | [`span_start`](#span_start)                   | Traces     | A task-runner run span opened                                  | Task runner                                                                        | (hidden)           |
 | [`span_end`](#span_end)                       | Traces     | A run span closed                                              | Task runner                                                                        | (hidden)           |
@@ -47,6 +49,7 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`routine_dispatched`](#routine_dispatched)   | Routines   | A routine's work was handed to its target                      | Routines engine                                                                    | routine dispatched |
 | [`routine_completed`](#routine_completed)     | Routines   | A routine fire succeeded and the routine re-armed              | Routines engine                                                                    | routine completed  |
 | [`routine_error`](#routine_error)             | Routines   | A routine fire failed                                          | Routines engine                                                                    | routine error      |
+| [`routine_paused`](#routine_paused)           | Routines   | A pause stopped a routine fire, which runs again on resume     | Routines engine                                                                    | routine paused     |
 | [`team_chat_post`](#team_chat_post)           | Peer room  | An agent posted through the TeamChat MCP server                | TeamChat MCP over HTTP                                                             | team chat post     |
 | [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                                                  | speaker selected   |
 | [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                                                  | turn bound hit     |
@@ -120,7 +123,7 @@ Every event has the same envelope, whatever its kind:
   id: string // a UUID
   seq?: number // assigned by SQLite when the row is written
   ts: number // when the event happened, epoch milliseconds
-  kind: OrchestrationEventKind // one of the 25 kinds
+  kind: OrchestrationEventKind // one of the 32 kinds
   teamId?: string | null
   taskId?: string | null
   agentId?: string | null
@@ -299,6 +302,10 @@ A task-runner run reached its turn limit or filled its context, and continued in
 }
 ```
 
+## Pause events
+
+`pause_placed` and `pause_lifted` carry `{ scope, id, reason?, person? }`, where `scope` is `agent`, `team` or `task_tree`. The envelope names the agent, the team or the root task. A second pause of something already paused writes nothing. The dashboard reads these to keep what it shows as paused up to date. A task a pause holds back raises no Needs you alert, since a person placed the pause.
+
 ## Approval events
 
 Every approval card is a row in the `tool_call_approvals` table, shown under **Needs you** on the Board (see [Approvals](/using/approvals)). Each row writes one `approval_requested` when it is created and one `approval_resolved` when it settles. The events name the call but never carry its arguments, its reason or the command text: those stay on the row, because nothing prunes the event log and every **Activity** feed reads it.
@@ -434,6 +441,16 @@ The fire succeeded and the routine re-armed.
 ```
 
 `status` is `idle`. `nextRunAt` is the next fire time, or `null` when nothing is left to fire (a spent one-time routine).
+
+### routine_paused
+
+A pause stopped this fire or refused it after the ticker claimed it. It is no failure and no run: the routine's last run, failure streak and next run are unchanged, and it runs again on resume. A fire a pause held back before it was claimed writes nothing.
+
+| Field            | Type             | Notes                                 |
+| ---------------- | ---------------- | ------------------------------------- |
+| `scheduledRunId` | `string`         | The routine                           |
+| `taskId`         | `string \| null` | The card the fire made, now set aside |
+| `message`        | `string`         | Why it stopped                        |
 
 ### routine_error
 
@@ -587,6 +604,8 @@ A saved wake did not start a run. One event each time the reason changes, howeve
 | Reason                     | What ends it                                                |
 | -------------------------- | ----------------------------------------------------------- |
 | `held`                     | The engine hold lifting                                     |
+| `paused`                   | A person resuming the pause that covers it                  |
+| `team_archived`            | A person bringing the team back                             |
 | `budget`                   | A person raising the hard cap                               |
 | `braked`                   | The wait running out, or a person's comment                 |
 | `agent_busy`               | The agent's other work ending                               |

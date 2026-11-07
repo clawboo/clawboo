@@ -24,6 +24,7 @@ import {
   queueDueRuns,
   reconcileScheduledRuns,
   recordRunOutcome,
+  requeuePausedFire,
   type ClawbooDb,
   type DbScheduledRun,
 } from '@clawboo/db'
@@ -32,8 +33,9 @@ import { isOnceSpec, nextOccurrence } from '@clawboo/scheduler'
 import { getDb } from '../db'
 import { engineHold } from '../engineHold'
 import { emitEvent } from '../obs'
+import { onPauseLifted } from '../pauseBus'
 import { routineTimeZone } from './timeZone'
-import { dispatchRoutine, type RoutineDispatchOutcome } from './wakeBridge'
+import { dispatchRoutine, routineStartRefusal, type RoutineDispatchOutcome } from './wakeBridge'
 
 const MAX_ARM_DELAY_MS = 60_000
 
@@ -75,6 +77,10 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     deps.dispatch ??
     ((run: DbScheduledRun) => dispatchRoutine(run, { db, mcpBaseUrl: deps.mcpBaseUrl ?? null }))
   const held = deps.held ?? ((): boolean => engineHold().isHeld())
+  // A queued row a pause holds back stays queued, and counts for neither the claim
+  // nor the timer: it would spin the timer at a delay of 0. The pause's lift rescans.
+  const claimableRuns = (): DbScheduledRun[] =>
+    listQueuedRuns(db).filter((r) => routineStartRefusal(db, r) === null)
 
   let timer: ReturnType<typeof setTimeout> | null = null
   let running = false
@@ -91,7 +97,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
     // whole rescan interval. Held, nothing is due: the hold's lift rescans.
     const delay = held()
       ? MAX_ARM_DELAY_MS
-      : listQueuedRuns(db).length > 0
+      : claimableRuns().length > 0
         ? 0
         : next == null
           ? MAX_ARM_DELAY_MS
@@ -116,6 +122,26 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
       outcome = { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
     const completedAt = now()
+    // A pause stopped or refused it: it did not happen. Not a run, not a failure, and
+    // a one-time routine is not spent. It waits for the resume.
+    if (outcome.paused) {
+      if (requeuePausedFire(db, claimed.id, completedAt)) {
+        emitEvent(db, {
+          kind: 'routine_paused',
+          agentId: claimed.agentId || null,
+          teamId: claimed.teamId,
+          taskId: outcome.taskId ?? null,
+          tenantId: claimed.tenantId,
+          data: {
+            scheduledRunId: claimed.id,
+            taskId: outcome.taskId ?? null,
+            message: outcome.error ?? 'A pause stopped it.',
+          },
+        })
+      }
+      arm()
+      return
+    }
     let nextAt: number | null = null
     // A failure that may pass keeps the schedule, so it needs the next time too.
     // Not for a one-time routine: "Run now" can fire one before its time, and
@@ -212,7 +238,7 @@ export function createRoutinesTicker(deps: RoutinesTickerDeps): RoutinesTicker {
       queueDueRuns(db, nowMs)
       // Claim phase (sequential — preserves the atomic-claim race semantics +
       // ordered `routine_fired` logs). A lost claim = another ticker won → drop.
-      for (const queued of listQueuedRuns(db)) {
+      for (const queued of claimableRuns()) {
         const claimed = claimScheduledRun(db, queued.id, nowMs)
         if (!claimed) continue
         emitEvent(db, {
@@ -298,9 +324,11 @@ export function startRoutinesTicker(opts: { log: TickerLog; mcpBaseUrl: string |
   ticker.start()
   void ticker.tick()
   const stopFollowingHold = engineHold().onResume(() => ticker.requestRescan())
+  const stopFollowingPauses = onPauseLifted(() => ticker.requestRescan())
 
   const stop = (): void => {
     stopFollowingHold()
+    stopFollowingPauses()
     ticker.stop()
     singleton = null
   }

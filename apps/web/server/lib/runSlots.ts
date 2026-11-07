@@ -3,9 +3,18 @@
 // Every run start (a board task, a team chat turn, a one-to-one chat turn, a
 // peer-exchange turn, an OpenClaw Routine run) takes one of these slots before
 // its adapter starts and gives it back when the run ends, however it ends. A run
-// that finds every slot taken waits in a first-come queue; waiting is never a
-// failure, and only its caller's own cancellation (a Stop, a disconnect, a person
-// moving the card) takes it out of the queue.
+// that finds every slot taken waits in a queue; waiting is never a failure, and
+// only its caller's own cancellation (a Stop, a disconnect, a person moving the
+// card) takes it out of the queue.
+//
+// THE ORDER. A person waiting on a turn (a chat message, a peer exchange) goes
+// first, because they are watching. Everything else is background work ranked by
+// its priority (a task's own; a routine or a task update reads as Normal), one
+// level higher per `RUN_QUEUE_AGING_MS` it has waited, oldest first within a level.
+// So an urgent task, already claimed, does not wait behind every run queued before
+// it, a low-priority run cannot wait forever, and no waiter starves: while both
+// kinds wait, one slot in every `PERSON_TURNS_BEFORE_WORK + 1` goes to background
+// work, so a person is never behind it for more than one extra run.
 //
 // LOCK ORDER (load-bearing): a run takes its slot FIRST and its agent's lock
 // (`homeDispatchMutex`, `connectedAgentMutex`, the one-to-one chat lock) second.
@@ -25,15 +34,34 @@
 // every run start waits in the same queue, in the same order, and nothing else
 // changes for it. Runs holding a slot are untouched. When the hold lifts, the
 // queue hands out free slots as if they had just been released.
+//
+// A PAUSED RUN (see lib/pauseBus and @clawboo/db's pauses) is skipped the same way a
+// run whose agent is busy is: it keeps its place, takes no slot and blocks nobody
+// behind it. Each request carries its own check, so the queue reads the pause when
+// it is about to grant, not when the run asked. When a pause lifts, `resume` runs.
 
 import { createLogger } from '@clawboo/logger'
 
 import { engineHold } from './engineHold'
+import { onPauseLifted } from './pauseBus'
 
 const log = createLogger('run-slots')
 
 /** Agent runs allowed at once when `CLAWBOO_MAX_CONCURRENT_RUNS` is unset. */
 export const DEFAULT_MAX_CONCURRENT_RUNS = 8
+
+/**
+ * How long background work waits in the queue to read one priority level higher.
+ * Queue waits are minutes where the ready list's are hours, so this is its own,
+ * shorter step: a Normal run overtakes a fresh Urgent one after two of these.
+ */
+export const RUN_QUEUE_AGING_MS = 15 * 60_000
+
+/** A person's turns served in a row before one slot goes to waiting background work. */
+export const PERSON_TURNS_BEFORE_WORK = 3
+
+/** How long the queue waits to look again after a pause it could not read. */
+const UNREADABLE_PAUSE_RETRY_MS = 5_000
 
 /** `acquire` rejects with this when its signal aborts while the run is still queued. */
 export class RunQueueAbortedError extends Error {
@@ -57,20 +85,37 @@ export interface RunSlotStats {
   queued: number
 }
 
+/** A run's place in the queue. See THE ORDER above. */
+export interface RunRank {
+  /** A person is waiting on this turn. */
+  person?: boolean
+  /** Background work's priority level; Normal (0) when absent. */
+  priority?: number
+}
+
+/** The rank of a turn a person is waiting on. */
+export const PERSON_TURN: RunRank = { person: true }
+
 export interface RunSlotRequest {
   /** The agent lock the run takes once it has its slot; null or absent for a run
    *  that takes none. Two runs with one key never hold slots at the same time. */
   key?: string | null
   /** Aborting it takes a queued run out of the queue. */
   signal?: AbortSignal | null
+  /** Its place in the queue. Normal-priority background work when absent. */
+  rank?: RunRank | null
+  /** True while a pause covers this run: it waits, whatever is free. A throw reads
+   *  as paused, and the queue looks again shortly. Never paused when absent. */
+  paused?: (() => boolean) | null
 }
 
 export interface RunSlots {
   readonly size: number
-  /** A slot now, or null when every slot is taken or a run with `key` holds one. */
-  tryAcquire(key?: string | null): RunSlot | null
+  /** A slot now, or null when every slot is taken, a run with `key` holds one or
+   *  `paused` says a pause covers this run. */
+  tryAcquire(key?: string | null, paused?: (() => boolean) | null): RunSlot | null
   /**
-   * A slot as soon as one is free for this run, oldest waiter first. Rejects with
+   * A slot as soon as one is free for this run, in the queue's order. Rejects with
    * {@link RunQueueAbortedError} if `signal` aborts before the slot is granted,
    * including a signal that had already aborted, even when a slot is free. A slot
    * granted just as the signal fires still resolves: the caller owns it and must
@@ -78,35 +123,66 @@ export interface RunSlots {
    */
   acquire(request?: RunSlotRequest): Promise<RunSlot>
   stats(): RunSlotStats
-  /** Hand free slots to waiting runs. The engine hold calls it when it lifts. */
+  /** Hand free slots to waiting runs. The engine hold and a lifted pause call it. */
   resume(): void
 }
 
 export interface RunSlotsOptions {
   /** True while the engine is held: no slot is granted, free or not. Never held by default. */
   held?: () => boolean
+  /** The clock a waiter ages by. Defaults to `Date.now`, read at call time. */
+  now?: () => number
 }
 
 interface Waiter {
   key: string | null
+  person: boolean
+  priority: number
+  /** When it joined the queue. */
+  at: number
+  paused: (() => boolean) | null
   grant: (slot: RunSlot) => void
 }
 
-/** A first-come counting semaphore of `size` run slots, at most one per key. */
+/** A counting semaphore of `size` run slots, at most one per key, in the queue's order. */
 export function createRunSlots(size: number, options: RunSlotsOptions = {}): RunSlots {
   if (!Number.isInteger(size) || size < 1) {
     throw new RangeError(`run slots: size must be a whole number of at least 1, got ${size}`)
   }
   const engineHeld = options.held ?? ((): boolean => false)
+  const now = options.now ?? ((): number => Date.now())
   let running = 0
   /** Keys a slot holder has now. */
   const heldKeys = new Set<string>()
   // Invariant: while a slot is free and the engine is not held, every waiter's
-  // key is held, so a run that can start right now never jumps one that could
-  // have started before it.
+  // key is held or a pause covers it, so a run that can start right now never
+  // jumps one that could have started before it.
   const waiters: Waiter[] = []
+  /** A person's turns granted in a row past waiting background work. */
+  let personStreak = 0
+  let unreadableRetry: ReturnType<typeof setTimeout> | null = null
 
   const keyFree = (key: string | null): boolean => key === null || !heldKeys.has(key)
+
+  /** A pause that cannot be read counts as a pause: a person asked for it, and a
+   *  failed read must not start what they stopped. Nothing else would wake the
+   *  queue for this, so it looks again by itself. */
+  const pausedNow = (paused: (() => boolean) | null | undefined): boolean => {
+    if (!paused) return false
+    try {
+      return paused()
+    } catch (err) {
+      log.error({ err }, 'could not read whether a run is paused; it waits')
+      if (!unreadableRetry) {
+        unreadableRetry = setTimeout(() => {
+          unreadableRetry = null
+          grantWaiting()
+        }, UNREADABLE_PAUSE_RETRY_MS)
+        unreadableRetry.unref?.()
+      }
+      return true
+    }
+  }
 
   const take = (key: string | null): RunSlot => {
     running++
@@ -123,23 +199,58 @@ export function createRunSlots(size: number, options: RunSlotsOptions = {}): Run
     }
   }
 
-  /** Give free slots to the oldest waiters whose key no slot holder has. */
+  /** The next waiter to serve, among those whose key is free and that no pause
+   *  covers. `waiters` is oldest first, so a tie goes to the older one. */
+  const nextWaiter = (): Waiter | null => {
+    const at = now()
+    let person: Waiter | null = null
+    let work: Waiter | null = null
+    let workRank = -Infinity
+    for (const w of waiters) {
+      if (!keyFree(w.key) || (w.person && person)) continue
+      if (!w.person) {
+        const rank = w.priority + Math.floor((at - w.at) / RUN_QUEUE_AGING_MS)
+        if (rank <= workRank) continue
+        if (pausedNow(w.paused)) continue
+        work = w
+        workRank = rank
+      } else if (!pausedNow(w.paused)) {
+        person = w
+      }
+    }
+    if (person && work && personStreak >= PERSON_TURNS_BEFORE_WORK) {
+      personStreak = 0
+      return work
+    }
+    if (person) {
+      if (work) personStreak++
+      return person
+    }
+    personStreak = 0
+    return work
+  }
+
+  /** Give free slots to waiting runs, in the queue's order. */
   const grantWaiting = (): void => {
     if (engineHeld()) return
     while (running < size) {
-      const at = waiters.findIndex((w) => keyFree(w.key))
-      if (at === -1) return
-      const [next] = waiters.splice(at, 1)
-      next!.grant(take(next!.key))
+      const next = nextWaiter()
+      if (!next) return
+      waiters.splice(waiters.indexOf(next), 1)
+      next.grant(take(next.key))
     }
   }
 
-  const tryAcquire = (key: string | null = null): RunSlot | null => {
+  const tryAcquire = (
+    key: string | null = null,
+    paused?: (() => boolean) | null,
+  ): RunSlot | null => {
     if (engineHeld()) return null
     // A hold can lapse between two reads with runs still queued behind it: they
     // go first, which restores the invariant.
     grantWaiting()
-    return running < size && keyFree(key) ? take(key) : null
+    if (running >= size || !keyFree(key) || pausedNow(paused)) return null
+    return take(key)
   }
 
   return {
@@ -150,11 +261,16 @@ export function createRunSlots(size: number, options: RunSlotsOptions = {}): Run
       const signal = request?.signal ?? null
       // Before a free slot is taken: a run cancelled before it asked never starts.
       if (signal?.aborted) return Promise.reject(new RunQueueAbortedError())
-      const now = tryAcquire(key)
-      if (now) return Promise.resolve(now)
+      const paused = request?.paused ?? null
+      const free = tryAcquire(key, paused)
+      if (free) return Promise.resolve(free)
       return new Promise<RunSlot>((resolve, reject) => {
         const waiter: Waiter = {
           key,
+          person: request?.rank?.person === true,
+          priority: request?.rank?.priority ?? 0,
+          at: now(),
+          paused,
           grant: (slot) => {
             signal?.removeEventListener('abort', onAbort)
             resolve(slot)
@@ -169,11 +285,21 @@ export function createRunSlots(size: number, options: RunSlotsOptions = {}): Run
         signal?.addEventListener('abort', onAbort, { once: true })
         waiters.push(waiter)
         const isHeld = engineHeld()
+        const isPaused = pausedNow(paused)
         log.info(
-          { running, queued: waiters.length, size, agentBusy: !keyFree(key), engineHeld: isHeld },
+          {
+            running,
+            queued: waiters.length,
+            size,
+            agentBusy: !keyFree(key),
+            engineHeld: isHeld,
+            paused: isPaused,
+          },
           isHeld
             ? 'the run waits: the engine is held and starts no new run'
-            : 'the run waits for a free run slot',
+            : isPaused
+              ? 'the run waits: a pause covers it'
+              : 'the run waits for a free run slot',
         )
       })
     },
@@ -202,10 +328,12 @@ export function maxConcurrentRunsFromEnv(
 
 let shared: RunSlots | null = null
 let stopFollowingHold: (() => void) | null = null
+let stopFollowingPauses: (() => void) | null = null
 
 /**
  * The process's run slots, sized from the environment on first use. They follow
- * the engine hold: held, they grant nothing; when it lifts, the queue resumes.
+ * the engine hold: held, they grant nothing; when it lifts, the queue resumes. A
+ * lifted pause resumes the queue the same way.
  */
 export function runSlots(): RunSlots {
   if (!shared) {
@@ -213,6 +341,7 @@ export function runSlots(): RunSlots {
       held: () => engineHold().isHeld(),
     })
     stopFollowingHold = engineHold().onResume(() => slots.resume())
+    stopFollowingPauses = onPauseLifted(() => slots.resume())
     shared = slots
   }
   return shared
@@ -222,6 +351,8 @@ export function runSlots(): RunSlots {
 export function setRunSlotsForTests(slots: RunSlots | null): void {
   stopFollowingHold?.()
   stopFollowingHold = null
+  stopFollowingPauses?.()
+  stopFollowingPauses = null
   shared = slots
 }
 

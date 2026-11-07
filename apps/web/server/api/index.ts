@@ -40,6 +40,7 @@ import {
 import { selfVersionGET, selfUpdatePOST } from './systemUpdate'
 import { operatorSettingsGET, operatorSettingsPUT } from './operatorSettings'
 import { systemCapabilitiesGET } from './systemCapabilities'
+import { pausesDELETE, pausesGET, pausesPOST } from './pauses'
 import { systemHoldDELETE, systemHoldGET, systemHoldPOST } from './systemHold'
 import {
   teamsGET,
@@ -321,6 +322,9 @@ router.get('/api/system/self-version', selfVersionGET)
 router.get('/api/system/capabilities', systemCapabilitiesGET)
 router.post('/api/system/self-update', sensitiveLimiter, selfUpdatePOST)
 // Drain and hold: stop starting new agent runs before a stop or an update.
+router.get('/api/pauses', pausesGET)
+router.post('/api/pauses', pausesPOST)
+router.delete('/api/pauses/:kind/:id', pausesDELETE)
 router.get('/api/system/hold', systemHoldGET)
 router.post('/api/system/hold', systemHoldPOST)
 router.delete('/api/system/hold/:owner', systemHoldDELETE)

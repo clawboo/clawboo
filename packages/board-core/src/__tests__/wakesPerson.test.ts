@@ -14,6 +14,7 @@ const base: WakeDecisionInput = {
   execs: [],
   runProvenAlive: false,
   held: false,
+  paused: false,
   refusal: null,
   budgetRefused: false,
   now: 1_000,

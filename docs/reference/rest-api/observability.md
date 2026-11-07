@@ -76,7 +76,7 @@ Returns events from the log that match the query, ordered by `seq`, a number tha
 }
 ```
 
-`OrchestrationEventKind` is one of 25 kinds: `task_created`, `task_claimed`, `status_changed`, `comment_added`, `dep_linked`, `execution_started`, `execution_completed`, `tool_call`, `tool_result`, `cost`, `approval_requested`, `approval_resolved`, `error`, `span_start`, `span_end`, `session_rotated`, `routine_fired`, `routine_dispatched`, `routine_completed`, `routine_error`, `team_chat_post`, `speaker_selected`, `turn_bound_hit`, `grant_decision`, `connector_health`. See [Events and errors](/reference/events-and-errors) for each kind's `data`.
+`OrchestrationEventKind` is one of 32 kinds: `task_created`, `task_claimed`, `status_changed`, `comment_added`, `dep_linked`, `execution_started`, `execution_completed`, `tool_call`, `tool_result`, `cost`, `approval_requested`, `approval_resolved`, `pause_placed`, `pause_lifted`, `error`, `span_start`, `span_end`, `session_rotated`, `routine_fired`, `routine_dispatched`, `routine_completed`, `routine_error`, `routine_paused`, `team_chat_post`, `speaker_selected`, `turn_bound_hit`, `grant_decision`, `connector_health`, `task_wake_recorded`, `task_wake_skipped`, `task_wake_given_up`, `task_braked`. See [Events and errors](/reference/events-and-errors) for each kind's `data`.
 
 **`500 Internal Server Error`**: any read failure:
 

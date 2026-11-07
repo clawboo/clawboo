@@ -5,7 +5,9 @@
 //   • delivered, when the run ended well;
 //   • held, on a person's Stop: it starts nothing, and it rides the task's next run;
 //   • back to waiting, counted, on any other end, for the pump to send again;
-//   • back to waiting, uncounted, when a hard budget cap refused or killed the run.
+//   • back to waiting, uncounted, when a hard budget cap refused or killed the run,
+//     or a pause stopped it: nothing went wrong with the run, and the pump sends the
+//     wake on resume.
 // Each write is one BEGIN IMMEDIATE transaction, because other processes (the MCP
 // stdio bins) write the same database file.
 
@@ -14,17 +16,19 @@ import { randomUUID } from 'node:crypto'
 import {
   budgetRefusalOf,
   delegationTargetOf,
+  stoppedByPause,
   strongerWakeReason,
   wakeFromPerson,
   type TaskWakeReason,
   type TaskWakeSettlement,
   type WakeSkipReason,
 } from '@clawboo/board-core'
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, getTableColumns, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
 import { immediateWrite, withWriteRetry, type BoardTx } from './board/contention'
 import { emitBoardLifecycle } from './board/events'
+import { readyOrder } from './board/readyOrder'
 import { taskComments, taskDeps, tasks, taskWakes, type DbTask, type DbTaskWake } from './schema'
 
 /** A row that waits for a run: not settled, and no run is carrying it. */
@@ -156,15 +160,17 @@ export function recordDependencyWakesTx(
   return woken
 }
 
-/** Rows that wait for a run, oldest first. A row a Stop held starts nothing, so it
- *  is left out unless asked for. */
+/** Rows that wait for a run, in the order their tasks wait in the ready list (see
+ *  ./board/readyOrder), then oldest first. A row a Stop held starts nothing, so it is
+ *  left out unless asked for. */
 export function listWaitingTaskWakes(
   db: ClawbooDb,
   opts: { includeHeld?: boolean; taskId?: string } = {},
 ): DbTaskWake[] {
   return db
-    .select()
+    .select(getTableColumns(taskWakes))
     .from(taskWakes)
+    .leftJoin(tasks, eq(tasks.id, taskWakes.taskId))
     .where(
       and(
         isWaiting,
@@ -172,7 +178,7 @@ export function listWaitingTaskWakes(
         ...(opts.taskId ? [eq(taskWakes.taskId, opts.taskId)] : []),
       ),
     )
-    .orderBy(asc(taskWakes.createdAt), sql`rowid`)
+    .orderBy(...readyOrder(Date.now()), asc(taskWakes.createdAt), sql`task_wakes.rowid`)
     .all() as DbTaskWake[]
 }
 
@@ -311,6 +317,9 @@ export function settleWakesOfClosedRunTx(
         .set({ settledAt: now, settledHow: 'delivered', updatedAt: now })
         .where(eq(taskWakes.id, row.id))
         .run()
+    } else if (stoppedByPause({ status: outcome.status, errorClass: outcome.errorClass })) {
+      // A pause is about when work may run, not this task: it goes out on resume.
+      returnToWaitingTx(tx, row, { replays: row.replays, heldAt: row.heldAt }, now)
     } else if (outcome.byPerson) {
       // A person's Stop or move: it starts nothing, and rides the next run.
       returnToWaitingTx(tx, row, { replays: row.replays, heldAt: now }, now)

@@ -9,7 +9,10 @@ import {
   isHumanAssignment,
   ledgerAllowsAutoFire,
   trailingFailedRuns,
+  PAUSED_RUN_CLASS,
+  stoppedByPause,
 } from '../dispatch'
+import { agedTaskPriority, MAX_TASK_PRIORITY, READY_AGING_STEP_MS } from '../priority'
 
 const runs = (...statuses: string[]) => statuses.map((status) => ({ status }))
 
@@ -126,5 +129,52 @@ describe('the assignment marker', () => {
 
   it('an agent named like the marker is not mistaken for one', () => {
     expect(isHumanAssignment('run-1:deleg:agent:origin-human:reflectTo:leader')).toBe(false)
+  })
+})
+
+describe('a run a pause stopped', () => {
+  const paused = { status: 'cancelled', errorClass: PAUSED_RUN_CLASS }
+
+  it('is told apart from a person stopping the run', () => {
+    expect(stoppedByPause(paused)).toBe(true)
+    expect(stoppedByPause({ status: 'cancelled' })).toBe(false)
+    expect(stoppedByPause({ status: 'failed', errorClass: PAUSED_RUN_CLASS })).toBe(false)
+  })
+
+  it("leaves the task free to fire again on resume, where a person's Stop does not", () => {
+    expect(ledgerAllowsAutoFire([paused])).toBe(true)
+    expect(ledgerAllowsAutoFire([{ status: 'cancelled' }])).toBe(false)
+  })
+
+  it('restores a run a person asked for, even after they had stopped or parked the task', () => {
+    expect(ledgerAllowsAutoFire([{ status: 'cancelled' }, paused])).toBe(true)
+    const parked = Array.from({ length: MAX_AUTO_FIRES }, () => ({ status: 'failed' }))
+    expect(ledgerAllowsAutoFire([...parked, paused])).toBe(true)
+  })
+
+  it('is no outcome: it neither counts in a failure streak nor resets one', () => {
+    const failed = { status: 'failed' }
+    expect(trailingFailedRuns([failed, paused, failed])).toBe(2)
+    expect(trailingFailedRuns([failed, paused])).toBe(1)
+    expect(ledgerAllowsAutoFire([failed, failed, paused, failed])).toBe(false)
+  })
+})
+
+describe('agedTaskPriority', () => {
+  const NOW = 1_800_000_000_000
+
+  it('adds a level for each step waited, up to High: only a stored Urgent reads as Urgent', () => {
+    expect(agedTaskPriority({ priority: -1, createdAt: NOW }, NOW)).toBe(-1)
+    expect(agedTaskPriority({ priority: -1, createdAt: NOW - READY_AGING_STEP_MS }, NOW)).toBe(0)
+    const old = NOW - 100 * READY_AGING_STEP_MS
+    expect(agedTaskPriority({ priority: -1, createdAt: old }, NOW)).toBe(1)
+    expect(agedTaskPriority({ priority: 0, createdAt: old }, NOW)).toBe(1)
+    expect(agedTaskPriority({ priority: 1, createdAt: old }, NOW)).toBe(1)
+    expect(agedTaskPriority({ priority: 2, createdAt: old }, NOW)).toBe(MAX_TASK_PRIORITY)
+  })
+
+  it('reads a stored value outside the levels, and a future time, safely', () => {
+    expect(agedTaskPriority({ priority: 100, createdAt: NOW }, NOW)).toBe(MAX_TASK_PRIORITY)
+    expect(agedTaskPriority({ priority: 0, createdAt: NOW + READY_AGING_STEP_MS }, NOW)).toBe(0)
   })
 })

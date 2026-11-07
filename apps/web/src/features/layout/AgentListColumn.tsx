@@ -17,6 +17,7 @@ import {
   Search,
   ShoppingCart,
   Trash2,
+  Pause,
   type LucideIcon,
 } from 'lucide-react'
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -42,6 +43,7 @@ import { OpenOnAnotherDeviceButton } from '@/features/access/OpenOnAnotherDevice
 import { getActivityVerb } from '@/lib/agentActivityVerb'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { useChatStore } from '@/stores/chat'
+import { pausedByWords, pauseOfAgent, pauseSubjectWords, usePauseStore } from '@/stores/pauses'
 import { useRoomStore, useTeamRooms, type Room } from '@/stores/rooms'
 import { RoomDialog } from '@/features/group-chat/RoomDialog'
 import { RoomActionsMenu } from '@/features/group-chat/RoomActionsMenu'
@@ -171,6 +173,7 @@ function AgentRow({
     transcripts,
     streamingTexts: sk ? new Map([[sk, streamingText ?? '']]) : null,
   })
+  const pause = usePauseStore((s) => pauseOfAgent(s.pauses, agent.id, agent.teamId))
   return (
     <motion.div
       layout
@@ -195,8 +198,20 @@ function AgentRow({
             <span className="truncate">{agent.name}</span>
           </p>
           <div className="mt-1 flex items-center gap-2">
-            <StatusBadge status={agent.status} label={verb} />
-            {agent.status !== 'running' &&
+            {pause ? (
+              <span
+                title={`${pauseSubjectWords(pause)}. ${pausedByWords(pause)}.`}
+                data-testid={`fleet-agent-paused-${agent.id}`}
+                className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+              >
+                <Pause size={9} strokeWidth={2.5} aria-hidden />
+                Paused
+              </span>
+            ) : (
+              <StatusBadge status={agent.status} label={verb} />
+            )}
+            {!pause &&
+              agent.status !== 'running' &&
               verb !== 'Just done' &&
               formatLastSeen(agent.lastSeenAt) && (
                 <span className="text-[9px] tabular-nums text-muted-foreground">

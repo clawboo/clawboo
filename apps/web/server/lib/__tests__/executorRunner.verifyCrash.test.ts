@@ -27,6 +27,7 @@ import {
   listUndeliveredInbox,
   listWaitingTaskWakes,
   ORPHANED_REVIEW_NOTE,
+  placePause,
   reconcileStaleInProgress,
   recordTaskWake,
   resetBoardLifecycleListeners,
@@ -87,6 +88,7 @@ vi.mock('../verification', async (importOriginal) => {
 
 const { getDb, getDbPath, resetDb } = await import('../db')
 const { runTaskOnRuntime } = await import('../executorRunner')
+const { stopPausedTaskRuns } = await import('../runStops')
 const { reapOrphanedRuns, sweepStaleRuns } = await import('../staleTaskSweep')
 const { registerBoardLifecycleSubscribers, resetBoardLifecycleRegistration } =
   await import('../teamChat/boardLifecycleSubscribers')
@@ -356,6 +358,30 @@ describe('task runner: a crash while the work is being checked', () => {
       const row = listWaitingTaskWakes(getDb(), { taskId }).find((w) => w.id === wake.id)
       expect(row?.replays).toBe(1)
       expect(row?.heldAt).toBeNull()
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a pause during the check leaves the run its verdict: its work is over, and it is not closed as stopped',
+    async () => {
+      const hold = holdCheck()
+      const { taskId, result } = start()
+      await hold.reached
+
+      placePause(getDb(), { kind: 'agent', id: 'coder' })
+      expect(stopPausedTaskRuns(() => true, 'Stopped: this agent is paused.')).toEqual([taskId])
+      // Still this run's: `runStillOpen` reads the open row, and nothing closed it.
+      expect(listExecutions(getDb(), taskId).at(-1)?.status).toBe('running')
+
+      hold.release()
+      await expect(result).resolves.toMatchObject({ ok: true, doneReason: 'success' })
+      expect(listExecutions(getDb(), taskId).at(-1)).toMatchObject({
+        status: 'succeeded',
+        errorClass: null,
+      })
+      expect(getTaskVerification(getDb(), taskId)).not.toBeNull()
+      expect(getTask(getDb(), taskId)?.status).not.toBe('todo')
     },
     WORKTREE_TIMEOUT_MS,
   )

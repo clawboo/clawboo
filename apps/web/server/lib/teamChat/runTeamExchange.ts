@@ -24,6 +24,8 @@ import {
   agents,
   resolveRoomForTeam,
   teams,
+  pauseFor,
+  startRefusedBy,
   type ClawbooDb,
   type DbAgent,
   type DbTeam,
@@ -37,7 +39,8 @@ import { budgetPreflight } from '../budgetPreflight'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import { emitEvent } from '../obs'
-import { RunQueueAbortedError, withRunSlot } from '../runSlots'
+import { pauseRefusalText } from '../pauseBus'
+import { RunQueueAbortedError, withRunSlot, PERSON_TURN } from '../runSlots'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { adapterFactoryFor } from '../runtimes'
 import { getDescriptor, isRuntimeId } from '../runtimes/descriptor'
@@ -165,6 +168,27 @@ function defaultAdapterFactoryFor(
   return null
 }
 
+/** The exchanges running now, so a pause can end the ones it covers. */
+interface LiveExchange {
+  teamId: string
+  agentIds: string[]
+  stop: () => void
+}
+const liveExchanges = new Set<LiveExchange>()
+
+/**
+ * A pause covers a team or an agent speaking in these exchanges: end them. Its abort
+ * reaches a turn running or waiting for a slot, so none goes on holding the room
+ * for a resume that may be days away. The next exchange skips a paused speaker.
+ */
+export function stopPausedExchanges(
+  covers: (run: { agentId: string; teamId: string }) => boolean,
+): void {
+  for (const live of liveExchanges) {
+    if (live.agentIds.some((agentId) => covers({ agentId, teamId: live.teamId }))) live.stop()
+  }
+}
+
 /**
  * Run a bounded team-chat exchange. PRECONDITION: the caller MUST hold the room lock
  * (`tryAcquireRoom`/`releaseRoom` from `./roomLock`) for this team's room. Today the
@@ -175,6 +199,12 @@ function defaultAdapterFactoryFor(
 export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTeamExchangeResult> {
   const { db, teamId } = deps
   const log = deps.log ?? defaultLog
+  // The caller's own cancel, or a pause (see `stopPausedExchanges`).
+  const stop = new AbortController()
+  const onCallerAbort = (): void => stop.abort()
+  if (deps.signal?.aborted) stop.abort()
+  else deps.signal?.addEventListener('abort', onCallerAbort, { once: true })
+  const signal = stop.signal
 
   const team =
     (db.select().from(teams).where(eq(teams.id, teamId)).get() as DbTeam | undefined) ?? null
@@ -210,6 +240,10 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
   const leaderId = participants.find((p) => p.isLeader)?.agentId ?? null
   const teamPre = budgetPreflight(db, { teamId })
   if (teamPre.blocked) return { ok: false, error: `budget_paused:${teamPre.scope}` }
+  // A paused or archived team starts no exchange. A paused agent only loses its
+  // own turns (see `dispatch`).
+  const refused = startRefusedBy(db, { teamId })
+  if (refused) return { ok: false, error: pauseRefusalText(refused) }
   const speakerIds = new Set<string>([
     ...(deps.firstSpeakers ?? []),
     ...(leaderId ? [leaderId] : []),
@@ -277,7 +311,7 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
           mcpBaseUrl: deps.mcpBaseUrl ?? null,
           ...(homeDir ? { homeDir } : {}),
           ...(cwd ? { cwd } : {}),
-          ...(deps.signal ? { signal: deps.signal } : {}),
+          signal,
           ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
         },
         turnIndex,
@@ -321,6 +355,10 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
     const r = resolved.get(participant.agentId)
     // An unresolved runtime runs nothing, so its turn does not wait for a slot.
     if (!r) return Promise.resolve({ obligations: [] })
+    // Nor does a paused speaker: it contributes nothing, and waiting for its resume
+    // would hold the room.
+    const speaker = { agentId: participant.agentId, teamId }
+    if (pauseFor(db, speaker)) return Promise.resolve({ obligations: [] })
     // The lock dispatchTurn takes, so two turns of one agent never hold two slots.
     const row = agentRowById.get(participant.agentId)
     const key =
@@ -331,7 +369,9 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
           : null
     return withRunSlot(() => dispatchTurn(participant, turnIndex), {
       key,
-      signal: deps.signal,
+      signal,
+      rank: PERSON_TURN,
+      paused: () => pauseFor(db, speaker) !== null,
     }).catch((err: unknown): ChatTurnOutcome => {
       if (err instanceof RunQueueAbortedError) return { obligations: [] }
       throw err
@@ -364,15 +404,25 @@ export async function runTeamExchange(deps: RunTeamExchangeDeps): Promise<RunTea
       }),
   }
 
-  const result = await runExchange({
-    roomId,
-    participants,
-    ...(deps.firstSpeakers ? { firstSpeakers: deps.firstSpeakers } : {}),
-    dispatch,
-    emit,
-    ...(clampedMaxTurns != null ? { maxExchangeTurns: clampedMaxTurns } : {}),
-    ...(deps.signal ? { signal: deps.signal } : {}),
-  })
-
-  return { ok: true, roomId, result }
+  const live: LiveExchange = {
+    teamId,
+    agentIds: participants.map((p) => p.agentId),
+    stop: () => stop.abort(),
+  }
+  liveExchanges.add(live)
+  try {
+    const result = await runExchange({
+      roomId,
+      participants,
+      ...(deps.firstSpeakers ? { firstSpeakers: deps.firstSpeakers } : {}),
+      dispatch,
+      emit,
+      ...(clampedMaxTurns != null ? { maxExchangeTurns: clampedMaxTurns } : {}),
+      signal,
+    })
+    return { ok: true, roomId, result }
+  } finally {
+    liveExchanges.delete(live)
+    deps.signal?.removeEventListener('abort', onCallerAbort)
+  }
 }

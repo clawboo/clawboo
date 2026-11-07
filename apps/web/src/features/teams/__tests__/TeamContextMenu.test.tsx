@@ -18,7 +18,9 @@ function renderMenu(overrides: Partial<Parameters<typeof TeamContextMenu>[0]> = 
     y: 40,
     teamName: 'Research Lab',
     isArchived: false,
+    isPaused: false,
     onClose: vi.fn(),
+    onTogglePause: vi.fn(),
     onArchive: vi.fn(),
     onRefreshProtocol: vi.fn(),
     onDelete: vi.fn(),
@@ -33,6 +35,7 @@ describe('TeamContextMenu', () => {
     renderMenu()
     expect(screen.getByRole('menu', { name: 'Actions for Research Lab' })).toBeInTheDocument()
     expect(screen.getAllByRole('menuitem').map((i) => i.textContent)).toEqual([
+      'Pause team',
       'Archive',
       'Refresh Protocol',
       'Delete team only',
@@ -48,7 +51,7 @@ describe('TeamContextMenu', () => {
   it('focuses the first item and navigates with the arrow keys', async () => {
     const user = userEvent.setup()
     renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Archive' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Pause team' })).toHaveFocus())
 
     await user.keyboard('{ArrowUp}')
     expect(screen.getByRole('menuitem', { name: 'Delete with agents' })).toHaveFocus()
@@ -57,9 +60,9 @@ describe('TeamContextMenu', () => {
   it('activates the focused item with Enter', async () => {
     const user = userEvent.setup()
     const { props } = renderMenu()
-    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Archive' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('menuitem', { name: 'Pause team' })).toHaveFocus())
 
-    await user.keyboard('{ArrowDown}{Enter}')
+    await user.keyboard('{ArrowDown}{ArrowDown}{Enter}')
     expect(props.onRefreshProtocol).toHaveBeenCalledTimes(1)
   })
 

@@ -11,10 +11,11 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { encodeHumanAssignment } from '@clawboo/board-core'
+import { encodeHumanAssignment, parseWaitingOn, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import {
   addComment,
   agents,
+  attentionForTask,
   answerQuestion,
   askQuestion,
   claimTask,
@@ -33,13 +34,16 @@ import {
   listTasks,
   listUnsettledTaskWakes,
   listWaitingTaskWakes,
+  liftPause,
   LOCAL_PERSON,
   LOCAL_READER,
   markTaskRead,
+  placePause,
   reconcileOrphans,
   reconcileStaleInProgress,
   recordTaskWake,
   reopenTask,
+  startRefusedBy,
   taskReadStates,
   tasks,
   taskWakes,
@@ -68,10 +72,11 @@ import {
   type WorkCheck,
   type WorkCheckResult,
 } from '@clawboo/team-orchestration'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 import { getDb, getDbPath, resetDb } from '../../db'
 import { stopAsOwnWrite } from '../../boardReader'
+import { pauseTaskStopNote } from '../../pauseBus'
 import { createReportUpOutbox } from '../reportUpOutbox'
 import { deliverPersonReply, type ReplyDeps } from '../personReply'
 import { savePersonWake, startPersonWake } from '../personWake'
@@ -195,6 +200,10 @@ function bootProcess(
     isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
     reportUps: createReportUpOutbox(db, TEAM, null),
     taskWakes: createTaskWakeOutbox(db, TEAM, null),
+    runHeldBy: ({ agentId, taskId }) => {
+      const refusal = startRefusedBy(db, { agentId, teamId: TEAM, taskId })
+      return refusal ? pauseTaskStopNote(refusal) : null
+    },
   })
   engineRef.current = engine
   return { engine, abortMap }
@@ -323,6 +332,235 @@ describe('saved wakes, end to end', () => {
     worker = new ScriptedAdapter(runs)
     adapters.set(WORKER, worker)
   }
+
+  describe('under a pause', () => {
+    const NOTE = 'Stopped: this agent is paused. The task starts again on resume.'
+    const pause = (): void => {
+      placePause(db, { kind: 'agent', id: WORKER })
+    }
+    const resume = (): void => {
+      liftPause(db, 'agent', WORKER)
+    }
+    const stoppedByPause = (): Step[] => [
+      () => {
+        pause()
+        void proc.engine.pauseRuns(() => true, NOTE)
+      },
+      'advance',
+      { kind: 'done', reason: 'aborted', summary: '' } as RuntimeEvent,
+    ]
+    const closedBy = (taskId: string, status: 'cancelled' | 'failed', byPerson = false): void => {
+      const exec = createExecutionProcess(db, { taskId, executorType: 'openclaw' })
+      completeExecutionProcess(db, exec.id, { status, byPerson })
+    }
+    /** Pump as the server does on a resume: the wake pass, and the engine's own. */
+    const pumpTwice = async (): Promise<void> => {
+      pumpTaskWakes(db, pumpDeps())
+      pumpTaskWakes(db, pumpDeps())
+      void proc.engine.resume()
+      await vi.advanceTimersByTimeAsync(STEER_BATCH_MS + 100)
+    }
+
+    it('a comment during a pause fires on resume, exactly once', async () => {
+      const task = newTask()
+      pause()
+
+      expect(await reply(task.id, 'when you are back')).toEqual({
+        status: 'queued',
+        agentId: WORKER,
+        reason: 'paused',
+      })
+      await pumpTwice()
+      expect(started()).toEqual([])
+      const [row] = listWaitingTaskWakes(db)
+      expect(row).toMatchObject({ replays: 0, skipReason: 'paused' })
+      expect(skips()).toEqual(['paused'])
+
+      resume()
+      script([done('back on it')])
+      await pumpTwice()
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+      await vi.advanceTimersByTimeAsync(STEER_BATCH_MS + 100)
+
+      expect(started()).toHaveLength(1)
+      expect(started()[0]!.context).toContain('when you are back')
+      expect(listExecutions(db, task.id)).toHaveLength(1)
+      expect(allWakes()[0]).toMatchObject({ settledHow: 'delivered' })
+    })
+
+    it.each([
+      ['Blocked', (id: string) => void updateStatus(db, id, 'blocked')],
+      ['a person stopped it', (id: string) => closedBy(id, 'cancelled', true)],
+      [
+        'it was parked',
+        (id: string) => {
+          for (let i = 0; i < 3; i++) closedBy(id, 'failed')
+        },
+      ],
+    ])('a reply when %s saves a wake, moves nothing, and starts it on resume', async (_n, set) => {
+      const task = newTask()
+      set(task.id)
+      const statusBefore = getTask(db, task.id)!.status
+      pause()
+
+      expect(await reply(task.id, 'try it this way')).toMatchObject({ reason: 'paused' })
+      await pumpTwice()
+      expect(getTask(db, task.id)?.status).toBe(statusBefore)
+      expect(started()).toEqual([])
+      expect(listWaitingTaskWakes(db)).toHaveLength(1)
+
+      resume()
+      script([done('did it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+      expect(started()).toHaveLength(1)
+      expect(started()[0]!.context).toContain('try it this way')
+    })
+
+    it('a wake its run carried goes back to waiting: not counted, and not held as a Stop', async () => {
+      const task = newTask()
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'person_comment',
+      })
+      script(stoppedByPause(), [done('back on it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(
+        () => listExecutions(db, task.id).at(-1)?.errorClass === PAUSED_RUN_CLASS,
+        'the pause to close the run',
+      )
+      await settle(() => getTask(db, task.id)?.status === 'todo', 'the task to go back')
+      const [row] = listWaitingTaskWakes(db)
+      expect(row).toMatchObject({ replays: 0, heldAt: null, carriedExecId: null })
+
+      await pumpTwice()
+      expect(started()).toHaveLength(1)
+      expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'paused', replays: 0 })
+
+      resume()
+      await pumpTwice()
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+      expect(started()).toHaveLength(2)
+      expect(listExecutions(db, task.id).map((e) => e.status)).toEqual(['cancelled', 'succeeded'])
+    })
+
+    it('counts for neither the brake nor the replays, however many pauses it sits through', async () => {
+      const task = newTask()
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'dependency_done',
+      })
+      script(stoppedByPause(), stoppedByPause(), stoppedByPause(), [done('back on it')])
+      for (let round = 1; round <= 3; round++) {
+        pumpTaskWakes(db, pumpDeps())
+        await settle(
+          () =>
+            listExecutions(db, task.id).filter((e) => e.errorClass === PAUSED_RUN_CLASS).length ===
+            round,
+          'the pause to close the run',
+        )
+        await settle(() => getTask(db, task.id)?.status === 'todo', 'the task to go back')
+        pumpTaskWakes(db, pumpDeps())
+        expect(listWaitingTaskWakes(db)[0]).toMatchObject({ replays: 0, skipReason: 'paused' })
+        resume()
+      }
+      await pumpTwice()
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the last resume')
+      expect(skips()).not.toContain('braked')
+      expect(listEvents(db, { kinds: ['task_wake_given_up'] })).toEqual([])
+      expect(db.all(sql`SELECT * FROM delegation_failures`)).toEqual([])
+    })
+
+    it('a resume after a restart still fires', async () => {
+      const task = newTask()
+      pause()
+      await reply(task.id, 'when you are back')
+      pumpTaskWakes(db, pumpDeps())
+
+      // The server restarts with the pause on: the row and the wake are all that is left.
+      proc = bootProcess(db, adapters)
+      await proc.engine.resume()
+      pumpTaskWakes(db, pumpDeps())
+      expect(started()).toEqual([])
+      expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'paused', replays: 0 })
+
+      resume()
+      script([done('back on it')])
+      await pumpTwice()
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+      expect(started()).toHaveLength(1)
+      expect(started()[0]!.context).toContain('when you are back')
+    })
+
+    it('a comment that came as the run ended well gets its turn after the resume, short of Done', async () => {
+      const task = newTask()
+      script(
+        [
+          () => {
+            personComment(task.id, 'one more thing')
+            recordTaskWake(db, {
+              teamId: TEAM,
+              agentId: WORKER,
+              taskId: task.id,
+              reason: 'person_comment',
+            })
+            pause()
+          },
+          done('all done'),
+        ],
+        [done('did the one more thing')],
+      )
+      void proc.engine.dispatchTask(task.id)
+      await settle(() => getTask(db, task.id)?.status === 'todo', 'the round to be set aside')
+      expect(listExecutions(db, task.id).at(-1)?.errorClass).toBe(PAUSED_RUN_CLASS)
+      expect(getComments(db, task.id).map((c) => c.body)).toContain('all done')
+      expect(listWaitingTaskWakes(db)[0]).toMatchObject({ replays: 0, heldAt: null })
+      expect(started()).toHaveLength(1)
+
+      resume()
+      await pumpTwice()
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the turn after the resume')
+      expect(started()).toHaveLength(2)
+      expect(started()[1]!.context).toContain('one more thing')
+    })
+
+    it('an archived team says so, and its wake goes out when the team comes back', async () => {
+      const task = newTask()
+      db.update(teams).set({ isArchived: 1 }).where(eq(teams.id, TEAM)).run()
+
+      expect(await reply(task.id, 'for later')).toMatchObject({ reason: 'next-run' })
+      pumpTaskWakes(db, pumpDeps())
+      expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'team_archived' })
+      expect(started()).toEqual([])
+
+      db.update(teams).set({ isArchived: 0 }).where(eq(teams.id, TEAM)).run()
+      script([done('did it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => getTask(db, task.id)?.status === 'done', 'the run once it is back')
+      expect(started()).toHaveLength(1)
+    })
+
+    it('starts tasks in the ready list order, not the order their wakes came in', () => {
+      const low = newTask({ title: 'low', priority: -1 })
+      const normal = newTask({ title: 'normal', priority: 0 })
+      const urgent = newTask({ title: 'urgent', priority: 2 })
+      for (const task of [low, normal, urgent]) {
+        recordTaskWake(db, {
+          teamId: TEAM,
+          agentId: WORKER,
+          taskId: task.id,
+          reason: 'person_comment',
+        })
+      }
+      const order: string[] = []
+      pumpTaskWakes(db, pumpDeps({ startForPerson: (task) => order.push(task.title) }))
+      expect(order).toEqual(['urgent', 'normal', 'low'])
+    })
+  })
 
   describe('one live run per task', () => {
     it('parallel wakes make one row and start one run', async () => {
@@ -1337,6 +1575,166 @@ describe('saved wakes, end to end', () => {
       if (!saved.saved) throw new Error('no wake saved')
       return saved.agentId
     }
+
+    describe('during a pause', () => {
+      const pause = (): void => {
+        placePause(db, { kind: 'agent', id: WORKER })
+      }
+      const resume = (): void => {
+        liftPause(db, 'agent', WORKER)
+      }
+      const NOTE = 'Stopped: this agent is paused. The task starts again on resume.'
+
+      it('an answer saves its wake, says so, and goes out on resume, once', async () => {
+        const { task, questionId } = asking()
+        pause()
+        const agentId = answer(questionId)
+
+        expect(startPersonWake(db, task.id, agentId, pumpDeps())).toEqual({
+          status: 'queued',
+          agentId: WORKER,
+          reason: 'paused',
+        })
+        pumpTaskWakes(db, pumpDeps())
+        expect(getTask(db, task.id)?.status).toBe('blocked')
+        expect(started()).toEqual([])
+        expect(listWaitingTaskWakes(db)[0]).toMatchObject({
+          reason: 'question_answered',
+          skipReason: 'paused',
+          replays: 0,
+        })
+
+        resume()
+        script([done('did it another way')])
+        pumpTaskWakes(db, pumpDeps())
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+        expect(started()).toHaveLength(1)
+        expect(started()[0]!.context).toContain('Why this run: a person answered your question')
+      })
+
+      it('a Reopen saves its wake, says so, and starts on resume, past a Stop', async () => {
+        const task = newTask()
+        const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+        completeExecutionProcess(db, c.execution!.id, { status: 'cancelled', byPerson: true })
+        updateStatus(db, task.id, 'cancelled', { actor: 'person' })
+        pause()
+
+        expect(reopenTask(db, task.id).ok).toBe(true)
+        const note = personComment(task.id, 'Use the new logo this time')
+        const saved = savePersonWake(db, getTask(db, task.id)!, 'reopened', {
+          id: note.id,
+          body: 'Use the new logo this time',
+        })
+        if (!saved.saved) throw new Error('no wake saved')
+        expect(startPersonWake(db, task.id, saved.agentId, pumpDeps())).toMatchObject({
+          status: 'queued',
+          reason: 'paused',
+        })
+        expect(getTask(db, task.id)?.status).toBe('todo')
+        expect(started()).toEqual([])
+
+        resume()
+        script([done('used it')])
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+        expect(started()).toHaveLength(1)
+        expect(started()[0]!.context).toContain('Use the new logo this time')
+      })
+
+      it('a reply to a hand-back gives the turn back, and the agent starts on resume', async () => {
+        const task = newTask()
+        const c = claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+        expect(handBackTask(db, task.id, { agentId: WORKER, need: 'Log in' }).ok).toBe(true)
+        completeExecutionProcess(db, c.execution!.id, { status: 'succeeded' })
+        pause()
+
+        expect(await reply(task.id, 'Logged in, carry on')).toMatchObject({ reason: 'paused' })
+        expect(getTask(db, task.id)?.status).toBe('blocked')
+        expect(started()).toEqual([])
+
+        resume()
+        script([done('carried on')])
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the resume')
+        expect(started()[0]!.context).toContain('Logged in, carry on')
+      })
+
+      it('a resume never fires a person’s task, whatever wake waits on it', async () => {
+        const task = newTask()
+        claimTask(db, task.id, WORKER)
+        expect(handBackTask(db, task.id, { agentId: WORKER, need: 'Log in' }).ok).toBe(true)
+        recordTaskWake(db, {
+          teamId: TEAM,
+          agentId: WORKER,
+          taskId: task.id,
+          reason: 'person_comment',
+          commentIds: ['earlier'],
+        })
+        pause()
+        pumpTaskWakes(db, pumpDeps())
+
+        resume()
+        pumpTaskWakes(db, pumpDeps())
+        void proc.engine.resume()
+        await vi.advanceTimersByTimeAsync(STEER_BATCH_MS + 100)
+
+        expect(skips()).toEqual(['paused', 'person_assigned'])
+        expect(started()).toEqual([])
+        expect(getTask(db, task.id)).toMatchObject({ status: 'blocked' })
+        expect(getTask(db, task.id)?.assigneePersonId).not.toBeNull()
+      })
+
+      it('a run it stops keeps the question its agent asked: no failure, no note, no restart', async () => {
+        const task = newTask()
+        let questionId = ''
+        script(
+          [
+            () => {
+              const asked = askQuestion(db, {
+                taskId: task.id,
+                agentId: WORKER,
+                kind: 'confirm',
+                payload: { prompt: 'Deploy?' },
+              })
+              if (!asked.ok) throw new Error(`ask refused: ${asked.reason}`)
+              questionId = asked.question.id
+              pause()
+              void proc.engine.pauseRuns(() => true, NOTE)
+            },
+            'advance',
+            { kind: 'done', reason: 'aborted', summary: '' } as RuntimeEvent,
+          ],
+          [done('did it another way')],
+        )
+        void proc.engine.dispatchTask(task.id)
+        await settle(
+          () => listExecutions(db, task.id).at(-1)?.errorClass === PAUSED_RUN_CLASS,
+          'the pause to close the run',
+        )
+        await vi.advanceTimersByTimeAsync(STEER_BATCH_MS + 100)
+
+        const row = getTask(db, task.id)!
+        expect(row.status).toBe('blocked')
+        expect(parseWaitingOn(row.waitingOn)).toMatchObject({ kind: 'question', questionId })
+        expect(listTaskQuestions(db, task.id).map((q) => q.status)).toEqual(['pending'])
+        expect(attentionForTask(db, task.id)).toMatchObject({ reason: 'question' })
+        expect(getComments(db, task.id).map((c) => c.body)).not.toContain(NOTE)
+
+        // The resume starts nothing: the question is still theirs to answer.
+        resume()
+        pumpTaskWakes(db, pumpDeps())
+        void proc.engine.resume()
+        await vi.advanceTimersByTimeAsync(STEER_BATCH_MS + 100)
+        expect(started()).toHaveLength(1)
+        expect(getTask(db, task.id)?.status).toBe('blocked')
+
+        answer(questionId)
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the run after the answer')
+        expect(started()).toHaveLength(2)
+      })
+    })
 
     it('an answer wakes through a saved wake, and a restart loses nothing', async () => {
       const { task, questionId } = asking()

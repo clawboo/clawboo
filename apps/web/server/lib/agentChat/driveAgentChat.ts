@@ -15,7 +15,7 @@
 
 import { mkdir } from 'node:fs/promises'
 
-import { agents, getSetting, recordSpend, setSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, getSetting, recordSpend, setSetting, pauseFor, type ClawbooDb } from '@clawboo/db'
 import {
   DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
@@ -45,7 +45,8 @@ import {
   SESSION_NOT_DROPPED_TEXT,
   TURN_TOO_LARGE_TEXT,
 } from '../runFailureText'
-import { withRunSlot } from '../runSlots'
+import { pauseRefusalText, pauseStopNote } from '../pauseBus'
+import { withRunSlot, PERSON_TURN } from '../runSlots'
 import { adapterFactoryFor, type RuntimeAdapterFactory } from '../runtimes'
 import { getDescriptor, isOrchestratableRuntimeId, isRuntimeId } from '../runtimes/descriptor'
 import { runtimeIdentityHomePath } from '../runtimes/identityHome'
@@ -172,6 +173,32 @@ export function agentChatSessionKey(db: ClawbooDb, agentId: string): string {
 
 /** Abort the in-flight conversational turn for an agent (the Stop button), and
  *  cancel any of its turns still waiting for a run slot. */
+/**
+ * A pause covers these 1:1 chats: stop each turn running or waiting for a slot, as a
+ * Stop does, and say why in the chat. A person's turn does not wait unseen for a
+ * resume, so nothing of it is kept to start later.
+ */
+export async function stopPausedAgentChats(
+  db: ClawbooDb,
+  covers: (run: { agentId: string; teamId: string | null }) => boolean,
+  note: string,
+): Promise<void> {
+  const live = new Set<string>([...abortMap.keys(), ...queuedTurns.keys()])
+  await Promise.all(
+    [...live].map(async (agentId) => {
+      const row = db.select().from(agents).where(eq(agents.id, agentId)).get() as
+        { runtime?: string | null; teamId?: string | null } | undefined
+      if (!covers({ agentId, teamId: row?.teamId ?? null })) return
+      void stopAgentChat(agentId)
+      persistNativeChatEntry(db, agentId, note, {
+        sessionKey: directChatSessionKey(agentId, row?.runtime ?? null),
+        kind: 'meta',
+        role: 'system',
+      })
+    }),
+  )
+}
+
 export async function stopAgentChat(agentId: string): Promise<void> {
   for (const queued of queuedTurns.get(agentId) ?? []) queued.abort()
   const entry = abortMap.get(agentId)
@@ -257,6 +284,13 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // `runHeld` below).
   let hold: RunBudgetHold | null = null
   const runJob = async (): Promise<void> => {
+    // A pause placed while this waited for its slot or the agent's lock: no stop could
+    // reach it, since it had left the queue and was not in the run map yet.
+    const pausedWaiting = pauseFor(db, pauseSubject)
+    if (pausedWaiting) {
+      persist(pauseRefusalText(pausedWaiting), true)
+      return
+    }
     // The budget gate, as in team chat and the task runner: a paused hard cap on
     // the agent refuses the turn before it starts, and so does one whose remaining
     // room runs already going have set aside. Otherwise the turn holds its estimate
@@ -350,6 +384,13 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       return
     }
     abortMap.set(agentId, { adapter, run })
+    // It reads the pause itself, now that it is in the map: one placed while it was
+    // starting saw nothing to stop, and one placed from here on finds it there.
+    const pausedInStart = pauseFor(db, pauseSubject)
+    if (pausedInStart) {
+      persist(pauseStopNote(pausedInStart), true)
+      void stopAgentChat(agentId)
+    }
     // Left-pane liveness + the composer's busy state: the SSE stream forwards this
     // as an ephemeral `status` event (nothing else reports run-state for a 1:1 turn).
     publishAgentStatus(sessionKey, { agentId, status: 'running' })
@@ -591,6 +632,16 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
   // for the same (runtime, agent) can't overlap its session state; any other
   // runtime takes a per-agent chat lock, which keeps the resume pointer honest.
   const lockKey = homeDir ?? `direct-chat:${agentId}`
+  // A paused agent, or an agent on a paused team, takes no turn. Refused here with
+  // the reason in the chat, rather than left waiting unseen for a resume. An agent
+  // whose team was only archived stays reachable: that is `pauseFor`, not the
+  // wider `startRefusedBy` a background start reads.
+  const pauseSubject = { agentId, teamId: row?.teamId ?? null }
+  const paused = pauseFor(db, pauseSubject)
+  if (paused) {
+    persist(pauseRefusalText(paused), true)
+    return
+  }
   // A run slot first (see runSlots), then the agent's lock. A Stop while the turn
   // waits for its slot takes it out of the queue, and it never starts.
   const queue = new AbortController()
@@ -619,7 +670,12 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
       leaveQueue()
       return homeDispatchMutex.run(lockKey, runHeld, { acquireTimeoutMs: HOME_MUTEX_ACQUIRE_MS })
     },
-    { key: lockKey, signal: queue.signal },
+    {
+      key: lockKey,
+      signal: queue.signal,
+      rank: PERSON_TURN,
+      paused: () => pauseFor(db, pauseSubject) !== null,
+    },
   )
     .catch((err: unknown) => {
       // An ACQUIRE timeout means `runJob` never ran at all: no 'running' status, no

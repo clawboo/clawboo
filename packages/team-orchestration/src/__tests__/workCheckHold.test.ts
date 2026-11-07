@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ledgerAllowsAutoFire, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import {
@@ -14,11 +15,13 @@ import {
   WORK_CHECK_HOLD_LIMIT_MS,
   type KnownAgent,
   type PreparedWorkCheck,
+  type ReportUp,
   type WorkCheck,
   type WorkCheckResult,
 } from '../boardOrchestration'
 import { FakeBoard } from './fakeBoard'
 
+const PAUSE_NOTE = 'Stopped: this agent is paused. The task starts again on resume.'
 const KNOWN: KnownAgent[] = [
   { id: 'leader', name: 'Boo Zero' },
   { id: 'a2', name: 'Bug Boo' },
@@ -41,7 +44,14 @@ interface HeldCheck {
 }
 
 function makeHarness(
-  opts: { holdRejects?: boolean; prepareWaitsOn?: Promise<void>; busy?: boolean } = {},
+  opts: {
+    holdRejects?: boolean
+    prepareWaitsOn?: Promise<void>
+    busy?: boolean
+    heldBy?: () => string | null
+    /** Keep report-ups in an outbox, so what is held for a next run can be read. */
+    durable?: boolean
+  } = {},
 ) {
   let clock = 1_000_000
   let gen = 0
@@ -50,6 +60,7 @@ function makeHarness(
   const held: HeldCheck[] = []
   const ran: string[] = []
   const answers: Array<(r: WorkCheckResult) => void> = []
+  const heldReports: ReportUp[] = []
   const workCheck: WorkCheck = {
     begin: async () => undefined,
     async prepare(taskId) {
@@ -88,6 +99,22 @@ function makeHarness(
     now: () => clock,
     isSessionBusy: () => opts.busy === true,
     workCheck,
+    ...(opts.heldBy ? { runHeldBy: opts.heldBy } : {}),
+    ...(opts.durable
+      ? {
+          reportUps: {
+            record: (item: ReportUp, o?: { held?: boolean }) => {
+              if (o?.held) heldReports.push(item)
+              return `row-${heldReports.length}`
+            },
+            pending: () => [],
+            held: () => [],
+            markReplayed: () => true,
+            settle: () => true,
+            hold: () => true,
+          },
+        }
+      : {}),
   })
   return {
     board,
@@ -96,6 +123,7 @@ function makeHarness(
     held,
     ran,
     answers,
+    heldReports,
     updates: () => delivered.filter((d) => d.task.startsWith('[Task Update]')),
     toWorker: () => delivered.filter((d) => d.agentId === 'a2'),
     advance: (ms: number) => {
@@ -270,6 +298,67 @@ describe('a work check on hold', () => {
     expect(h.board.completed.map((c) => c.outcome.status)).toEqual(['cancelled'])
     expect(h.updates()).toHaveLength(0)
     expect(h.engine.checksInFlight()).toBe(0)
+  })
+
+  it('a pause ends the wait as a Stop does, and the task comes back by itself on resume', async () => {
+    const h = makeHarness()
+    const id = await heldTask(h)
+
+    const stopped = await h.engine.pauseRuns(() => true, PAUSE_NOTE)
+    await settle()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+
+    expect(stopped).toEqual([id])
+    expect(h.held[0]!.signal.aborted).toBe(true)
+    expect(h.held[0]!.gaveBack()).toBe(1)
+    expect(h.ran).toEqual([])
+    expect(statusOf(h.board, id)).toBe('todo')
+    const outcome = h.board.completed.at(-1)!.outcome
+    expect(outcome).toMatchObject({
+      status: 'cancelled',
+      byPerson: false,
+      errorClass: PAUSED_RUN_CLASS,
+      error: PAUSE_NOTE,
+      summary: 'fixed',
+    })
+    expect(ledgerAllowsAutoFire([{ status: outcome.status, errorClass: outcome.errorClass }])).toBe(
+      true,
+    )
+    const comments = h.board.comments.filter((c) => c.taskId === id).map((c) => c.body)
+    expect(comments).toEqual(expect.arrayContaining(['fixed', PAUSE_NOTE]))
+    // The work is coming back, so its delegator hears when it ends.
+    expect(h.updates()).toHaveLength(0)
+    expect(h.engine.checksInFlight()).toBe(0)
+  })
+
+  it('a Stop holds the report for the delegator; a pause does not, since the work comes back', async () => {
+    const stopped = makeHarness({ durable: true })
+    await heldTask(stopped)
+    stopped.stop()
+    await stopped.engine.markStopped()
+    await settle()
+    expect(stopped.heldReports.map((r) => r.summary)).toEqual(['fixed'])
+
+    const paused = makeHarness({ durable: true })
+    await heldTask(paused)
+    await paused.engine.pauseRuns(() => true, PAUSE_NOTE)
+    await settle()
+    expect(paused.heldReports).toEqual([])
+  })
+
+  it('a pause that nothing brought to the wait starts no check either, once the wait ends', async () => {
+    let paused: string | null = null
+    const h = makeHarness({ heldBy: () => paused })
+    const id = await heldTask(h)
+
+    paused = PAUSE_NOTE
+    h.held[0]!.clear()
+    await settle()
+
+    expect(h.ran).toEqual([])
+    expect(statusOf(h.board, id)).toBe('todo')
+    expect(h.board.completed.at(-1)?.outcome).toMatchObject({ errorClass: PAUSED_RUN_CLASS })
+    expect(h.held[0]!.gaveBack()).toBe(1)
   })
 
   it("a Stop keeps the finished run's report: on the task and on its closed run", async () => {

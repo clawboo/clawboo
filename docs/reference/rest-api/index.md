@@ -187,13 +187,13 @@ Something that stops or restarts a server (a stop script, an updater, a process 
 
 ## Route index
 
-The router registers 217 routes: 99 `GET`, 84 `POST`, 16 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
+The router registers 220 routes: 100 `GET`, 85 `POST`, 17 `DELETE`, 9 `PATCH`, 9 `PUT`. Each belongs to one page:
 
 | Page                                                 | Routes | What it covers                                                                                                                                                                     |
 | ---------------------------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [Agents](/reference/rest-api/agents)                 | 22     | `/api/agents*`: list, create, sync, delete, move, model, agent files, sessions, workspaces, browser screenshots, the native shell switch, 1:1 agent chats                          |
 | [Teams](/reference/rest-api/teams)                   | 30     | `/api/teams*` (members, rooms, onboarding, activity summary, team chat, task id letters, labels), `/api/team-rules/:teamId`, `/api/team-verify-command/:teamId`, `/api/team-chat*` |
-| [Board](/reference/rest-api/board)                   | 28     | `/api/board*`: tasks, claim, status changes, comments, labels, read state, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview                 |
+| [Board](/reference/rest-api/board)                   | 31     | `/api/board*`: tasks, claim, status changes, comments, labels, read state, retry, assign, run ledger, dependencies, worktrees, the workspace file view and preview                 |
 | [Memory](/reference/rest-api/memory)                 | 9      | `/api/memory*`: search, save, browse, graph, feedback, outcomes, embedding status, reindex, model install                                                                          |
 | [Capabilities](/reference/rest-api/capabilities)     | 2      | `/api/capabilities*`: the merged skills, tools and connectors inventory, and its actions                                                                                           |
 | [Connectors](/reference/rest-api/connectors)         | 21     | `/api/connectors*` (including Composio and custom connectors), `/api/grants*`                                                                                                      |

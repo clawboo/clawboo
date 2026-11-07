@@ -48,6 +48,7 @@ function makeHarness(
     checkThrows?: boolean
     /** Preparing the check itself fails. */
     prepareRejects?: boolean
+    runHeldBy?: (run: { agentId: string; taskId: string | null }) => string | null
   } = {},
 ) {
   let clock = 1_000_000
@@ -78,6 +79,7 @@ function makeHarness(
   }
   const engine = createBoardOrchestrator({
     teamId: 't1',
+    ...(opts.runHeldBy ? { runHeldBy: opts.runHeldBy } : {}),
     board,
     known: () => KNOWN,
     leaderAgentId: () => 'leader',
@@ -377,6 +379,57 @@ describe('team-chat work check', () => {
     expect(h.toWorker()).toHaveLength(1)
     expect(statusOf(h.board, id)).toBe('todo')
     expect(h.updates()).toHaveLength(0)
+  })
+
+  it('a pause leaves a check under way alone: the run is over and nothing starts', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    expect(h.checks).toHaveLength(1)
+    expect(await h.engine.pauseRuns(() => true, 'paused')).toEqual([])
+    expect(statusOf(h.board, id)).toBe('in_review')
+    expect(h.aborted).toEqual([])
+  })
+
+  it('a pause drops a fix round still waiting for its turn, and the task waits in To do', async () => {
+    const h = makeHarness()
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    h.occupied.add(sk('a2'))
+    await h.board.updateStatus(id, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+    expect(h.toWorker()).toHaveLength(1)
+
+    expect(await h.engine.pauseRuns(() => true, 'paused')).toEqual([id])
+    expect(statusOf(h.board, id)).toBe('todo')
+    // The other turn ends: no fix round goes out.
+    h.occupied.delete(sk('a2'))
+    await h.engine.onEvent(sk('a2'), doneEvent('chat-1', 'sure, happy to help'))
+    await settle()
+    expect(h.toWorker()).toHaveLength(1)
+  })
+
+  it('a fix round the check asks for during a pause does not start: the task waits in To do, with the note', async () => {
+    const held = new Set<string>()
+    const h = makeHarness({ runHeldBy: ({ agentId }) => (held.has(agentId) ? 'paused' : null) })
+    const id = await delegate(h)
+    await h.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    held.add('a2')
+    await h.board.updateStatus(id, 'in_progress')
+    h.checks[0]!.resolve({ verdict: 'retry', fixNote: 'What: tests failed.' })
+    await settle()
+
+    expect(h.toWorker()).toHaveLength(1)
+    expect(statusOf(h.board, id)).toBe('todo')
+    expect(h.board.comments.some((c) => c.body.includes('What: tests failed.'))).toBe(true)
+    expect((await h.board.listExecutions(id)).at(-1)).toMatchObject({
+      status: 'cancelled',
+      errorClass: 'Paused',
+    })
   })
 
   it("a fix round waits for the agent's other turn to end, and that turn's reply is not the fix", async () => {

@@ -57,6 +57,10 @@ export function strongerWakeReason<R extends string>(a: R, b: R): R {
 export type WakeSkipReason =
   /** The engine is held (stop, update): ends when the hold lifts. */
   | 'held'
+  /** A pause covers its agent, team or task tree: ends when a person resumes it. */
+  | 'paused'
+  /** Its team is archived: ends when a person brings the team back. */
+  | 'team_archived'
   /** A hard budget cap would refuse the run: ends when a person raises it. */
   | 'budget'
   /** The no-progress brake: ends when its wait runs out, or at a person's comment. */
@@ -101,6 +105,8 @@ export type WakeSkipReason =
 /** Every skip reason, for a reader that must name each one. */
 export const WAKE_SKIP_REASONS: readonly WakeSkipReason[] = [
   'held',
+  'paused',
+  'team_archived',
   'budget',
   'braked',
   'agent_busy',
@@ -145,8 +151,10 @@ export interface WakeDecisionInput {
   runProvenAlive: boolean
   /** The engine is held. */
   held: boolean
-  /** Why no team chat engine can run it, or null. */
-  refusal: 'room_archived' | 'no_team' | null
+  /** A pause covers it. Read like the hold, so a person's comment cannot waive it. */
+  paused: boolean
+  /** Why nothing can run it, or null. */
+  refusal: 'room_archived' | 'no_team' | 'team_archived' | null
   /** A hard budget cap would refuse a run now. */
   budgetRefused: boolean
   /** A person holds the task. No wake starts it: it is their turn. */
@@ -181,6 +189,7 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
     return { do: 'settle', how: 'finished' }
   if (input.replays >= MAX_TASK_WAKE_REPLAYS) return { do: 'settle', how: 'gave_up' }
   if (input.held) return wait('held')
+  if (input.paused) return wait('paused')
   if (input.refusal) return wait(input.refusal)
   if (!input.hasAgent) return wait('no_agent')
   if (input.personAssigned) return wait('person_assigned')

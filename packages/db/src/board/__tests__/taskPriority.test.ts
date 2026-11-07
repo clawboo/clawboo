@@ -60,8 +60,11 @@ describe('the ready queue', () => {
     db.update(tasks).set({ priority: 100, updatedAt: 1 }).where(eq(tasks.id, legacy.id)).run()
     db.update(tasks).set({ updatedAt: 2 }).where(eq(tasks.id, urgent.id)).run()
 
-    const order = getReadyTasks(db, { teamId: 'T' }).map((t) => t.title)
-    // `legacy` reads as urgent, not as above urgent, so the newer urgent task
+    db.update(tasks).set({ createdAt: 1 }).where(eq(tasks.id, urgent.id)).run()
+    db.update(tasks).set({ createdAt: 2 }).where(eq(tasks.id, legacy.id)).run()
+
+    const order = getReadyTasks(db, { teamId: 'T', now: 2 }).map((t) => t.title)
+    // `legacy` reads as urgent, not as above urgent, so the older urgent task
     // comes first within the level.
     expect(order).toEqual(['urgent', 'legacy', 'normal'])
     expect(normal.priority).toBe(0)

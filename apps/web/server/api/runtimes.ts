@@ -1025,7 +1025,7 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
       ...(Object.keys(apiKeyEnv).length > 0 ? { apiKeyEnv } : {}),
     })
     const status = !result.ok
-      ? result.reason === 'conflict'
+      ? result.reason === 'conflict' || result.reason === 'paused'
         ? 409
         : result.reason === 'not_found'
           ? 404

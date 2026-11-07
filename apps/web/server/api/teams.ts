@@ -28,6 +28,8 @@ import {
 } from '../lib/teamChat/nativeTeamSession'
 import { resolveTeamSessionKeys } from './teamChatStream'
 import { chatClearedAt, chatClearedSettingKey } from '../lib/teamChat/chatCleared'
+import { notifyPauseLifted } from '../lib/pauseBus'
+import { stopPausedRuns } from '../lib/pauseRuns'
 import { getTenantId } from '../lib/tenant'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { teamVerifyCommandSettingKey } from '../lib/verification/teamVerifyCommand'
@@ -226,6 +228,15 @@ export function teamsPATCH(req: Request, res: Response): void {
     if (body.leaderAgentId !== undefined) patch['leaderAgentId'] = body.leaderAgentId
 
     db.update(teams).set(patch).where(eq(teams.id, teamId)).run()
+
+    // An archived team's agents do no more work, and nothing wakes them: its board
+    // keeps its tasks. Its runs stop the way a pause stops them, and its work starts
+    // again the way a resume starts it, if it comes back.
+    if (body.isArchived !== undefined && !!body.isArchived !== !!existing.isArchived) {
+      if (body.isArchived) {
+        void stopPausedRuns(db, { kind: 'archived_team', id: teamId }, ownWriterOf(req))
+      } else notifyPauseLifted()
+    }
 
     const updated = db
       .select({

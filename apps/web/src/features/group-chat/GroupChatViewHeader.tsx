@@ -19,6 +19,8 @@ import { countOf } from '@/features/graph/capabilityVocabulary'
 import { countGraphSkills } from '@/features/graph/types'
 import type { Team } from '@/stores/team'
 import { useFleetStore } from '@/stores/fleet'
+import { pauseOfTeam, usePauseStore } from '@/stores/pauses'
+import { PauseToggle } from '@/features/pause/PausedNotice'
 import type { Room } from '@/stores/rooms'
 import { DEFAULT_ROOM_NAME } from '@/lib/roomsClient'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
@@ -109,6 +111,7 @@ export function GroupChatViewHeader({
   // editors that used to live in the System panel. Local-state because
   // it doesn't outlive the team-chat view.
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const teamPause = usePauseStore((st) => (team ? pauseOfTeam(st.pauses, team.id) : null))
   const [roomEditOpen, setRoomEditOpen] = useState(false)
   // A room's members that are still on the team (the room's chat has exactly
   // these). A joined string, so a fleet status patch does not re-render this.
@@ -206,6 +209,14 @@ export function GroupChatViewHeader({
             non-team-scoped view, so there's nothing to configure). */}
         {/* In a room the header also carries the room's name and members, so
             the team-wide settings shrink to their icon there. */}
+        {team && (
+          <PauseToggle
+            target={{ kind: 'team', id: team.id }}
+            name={team.name}
+            ownPause={teamPause}
+            compact
+          />
+        )}
         {team && (room || isGeneral) && (
           <IconButton
             variant="secondary"

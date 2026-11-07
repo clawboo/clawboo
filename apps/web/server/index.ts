@@ -17,6 +17,7 @@ import {
 import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
+  isTeamArchived,
   listAgentsWithUndeliveredInbox,
   moveArchivedRoomTasks,
   reapOrphanInbox,
@@ -55,6 +56,7 @@ import {
 } from './lib/teamChat/teamOrchestrator'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { engineHeld, engineHold } from './lib/engineHold'
+import { onPauseLifted } from './lib/pauseBus'
 import { isRunnerRerunWaiting, pumpRunnerReruns } from './lib/runnerRerun'
 import { runnerTargetOf } from './lib/runnerRoute'
 import { startTask } from './lib/startBoardTask'
@@ -745,7 +747,8 @@ async function main() {
   //
   // A held engine (see engineHold) skips the pass: claiming tasks it cannot start
   // would only leave them `in_progress` across the stop it is waiting for. When
-  // the hold lifts, a pass runs at once.
+  // the hold lifts, a pass runs at once, and so it does when a pause lifts. Paused
+  // work needs no check here: the scans leave it out, and the claim refuses it.
   safeStart('board-dispatch-pump', () => {
     const pumpMs = positiveIntEnv('CLAWBOO_DISPATCH_PUMP_MS', 60_000)
     const mcpBase = `http://127.0.0.1:${port}`
@@ -832,7 +835,8 @@ async function main() {
         // room's engine hands those tasks to a person.
         for (const r of roomsWithUnheldChecks(db)) wake.set(orchestratorKey(r.teamId, r.roomId), r)
         for (const { teamId, roomId } of wake.values()) {
-          if (!isActiveTeamRoom(teamId, roomId)) continue
+          // Nothing wakes an archived team, whatever it left behind.
+          if (!isActiveTeamRoom(teamId, roomId) || isTeamArchived(db, teamId)) continue
           getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
             .pump()
             .catch((err: unknown) =>
@@ -847,6 +851,7 @@ async function main() {
     setTimeout(pump, 10_000).unref()
     setInterval(pump, pumpMs).unref()
     engineHold().onResume(pump)
+    onPauseLifted(pump)
   })
 
   // ── Agent registry (AgentSource) ────────────────────────────────────────────

@@ -22,6 +22,7 @@ import {
   tasks,
   teams,
   updateStatus,
+  placePause,
   type ClawbooDb,
 } from '@clawboo/db'
 import type {
@@ -229,6 +230,22 @@ describe('team chat work check', () => {
     await writeFile(path.join(folder, 'b.txt'), 'b\n')
     expect(await runCheck(wc, id)).toEqual({ verdict: 'pass' })
     expect(getTaskVerification(db, id)?.attempts).toHaveLength(2)
+  })
+
+  it('starts no reviewer once a pause covers the task, and records that the review did not run', async () => {
+    setCommand('true')
+    const wc = check()
+    const id = startTask()
+    await wc.begin(id, AGENT)
+    for (let i = 0; i < 6; i++)
+      await writeFile(path.join(folder, `f${i}.ts`), `export const v = ${i}\n`)
+    placePause(db, { kind: 'agent', id: AGENT })
+
+    await runCheck(wc, id)
+    expect(reviewer.started).toHaveLength(0)
+    const critic = getTaskVerification(db, id)?.attempts[0]?.critic
+    expect(critic?.outcome).toBe('errored')
+    expect(critic?.findings[0]?.body).toContain('paused')
   })
 
   it('has a reviewer read a large change, on a checkout made from the history', async () => {

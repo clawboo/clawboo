@@ -13,7 +13,7 @@
 // degradation when frames stop flowing.
 
 import { OpenClawAdapter, type OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
-import { BUDGET_REFUSED_CLASS } from '@clawboo/board-core'
+import { agedTaskPriority, BUDGET_REFUSED_CLASS, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import {
   addComment,
   appendAudit,
@@ -24,6 +24,8 @@ import {
   releaseTask,
   startTaskHeartbeat,
   updateStatus,
+  getTask,
+  startRefusedBy,
   type BudgetScope,
   type ClawbooDb,
   type DbExecutionProcess,
@@ -133,8 +135,16 @@ export async function dispatchConnectedSubstrate(
   // One of the process's run slots first, then the agent's lock (see runSlots). A
   // person who moves the card while the fire waits for its slot ends the wait, and
   // their move is the outcome, so the fire did not fail.
+  const rankTask = getTask(input.db, input.taskId)
+  const pauseSubject = {
+    agentId: input.run.agentId,
+    teamId: input.run.teamId ?? rankTask?.teamId ?? null,
+    taskId: input.taskId,
+  }
   const queue = new AbortController()
-  const queuedStop = registerRunStop(input.taskId, () => queue.abort())
+  const queuedStop = registerRunStop(input.taskId, () => queue.abort(), input.run.agentId, {
+    waiting: true,
+  })
   try {
     return await withRunSlot(
       () => {
@@ -143,7 +153,12 @@ export async function dispatchConnectedSubstrate(
           dispatchConnectedSubstrateInner(input, gatewayAgentId),
         )
       },
-      { key: connectedAgentKey(input.agentRow), signal: queue.signal },
+      {
+        key: connectedAgentKey(input.agentRow),
+        signal: queue.signal,
+        rank: { priority: rankTask ? agedTaskPriority(rankTask, Date.now()) : 0 },
+        paused: () => startRefusedBy(input.db, pauseSubject) !== null,
+      },
     )
   } catch (err) {
     if (err instanceof RunQueueAbortedError) return { ok: true, taskId: input.taskId }
@@ -230,7 +245,7 @@ async function claimAndDrainRoutineRun(
   const stopped = new Promise<'stopped'>((resolve) => {
     wakeOnStop = () => resolve('stopped')
   })
-  const stop = registerRunStop(taskId, () => wakeOnStop())
+  const stop = registerRunStop(taskId, () => wakeOnStop(), run.agentId)
   try {
     return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, exec, stop, stopped, hold)
   } catch (err) {
@@ -524,8 +539,16 @@ async function drainClaimedRoutineRun(
   if (stop.note !== null) {
     await adapter.abort(runHandle).catch(() => undefined)
     noteCapReached(settleSpend(terminal?.summary || outputText))
+    // A pause stopped it: the ledger says so, and it fires again on resume. Any other
+    // stop is a person moving the card.
+    const closedBy = stop.byPause ? { errorClass: PAUSED_RUN_CLASS } : { byPerson: true }
     settleExec(
-      { status: 'cancelled', error: stop.note, byPerson: true, ...ledgerCost() },
+      {
+        status: 'cancelled',
+        error: stop.note,
+        ...closedBy,
+        ...ledgerCost(),
+      },
       { status: 'cancelled', error: stop.note },
     )
     if (terminal?.reason === 'success' && terminal.summary)
@@ -538,6 +561,8 @@ async function drainClaimedRoutineRun(
       )
     addComment(db, taskId, stop.note, 'system')
     releaseTask(db, taskId)
+    // A pause's stop is not the fire's outcome: it runs again on resume.
+    if (stop.byPause) return { ok: false, taskId, error: stop.note, paused: true }
     return { ok: true, taskId }
   }
 

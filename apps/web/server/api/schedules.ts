@@ -16,6 +16,7 @@ import {
   ROUTINE_FIRES_MAX_LIMIT,
   teams,
   type ClawbooDb,
+  type StartRefusal,
   type RoutineFire,
 } from '@clawboo/db'
 import {
@@ -41,7 +42,9 @@ import { eq } from 'drizzle-orm'
 
 import { isDashboardRequest } from '../lib/dashboardRequest'
 import { getDb } from '../lib/db'
+import { pauseTargetName } from '../lib/pauseViews'
 import { getRoutinesTicker } from '../lib/routines/ticker'
+import { routineStartRefusal } from '../lib/routines/wakeBridge'
 import {
   readSchedulerTimeZone,
   routineTimeZone,
@@ -121,7 +124,31 @@ function withName(record: ScheduleRecord | null): ScheduleRecord | null {
 // GET /api/schedules: the merged view (degradation is data, always 200)
 export async function schedulesListGET(_req: Request, res: Response): Promise<void> {
   const merged = await getScheduleMultiplexer().read()
-  res.json({ schedules: withNames(merged.records), sources: merged.sources })
+  res.json({ schedules: withHeldBy(withNames(merged.records)), sources: merged.sources })
+}
+
+/** What holds a routine's next fire back: its own row read as the ticker reads it. */
+function heldByPause(db: ClawbooDb, rec: ScheduleRecord): StartRefusal | null {
+  if (rec.source !== 'clawboo-routine') return null
+  const row = getScheduledRun(db, rec.sourceScheduleId)
+  return row ? routineStartRefusal(db, row) : null
+}
+
+/** Each routine with what holds it back, so the view can say so rather than show a
+ *  next run that has passed. A read that fails shows it as it is. */
+function withHeldBy(records: ScheduleRecord[]): ScheduleRecord[] {
+  try {
+    const db = getDb()
+    return records.map((rec) => {
+      const refusal = heldByPause(db, rec)
+      if (!refusal) return rec
+      const kind = refusal.kind === 'archived_team' ? 'team' : refusal.kind
+      const name = pauseTargetName(db, kind, refusal.id) ?? refusal.id
+      return { ...rec, heldBy: { kind: refusal.kind, id: refusal.id, name } }
+    })
+  } catch {
+    return records
+  }
 }
 
 // GET /api/schedules/occurrences?bounds=<ms>,<ms>,...&teamId=<id>
@@ -172,6 +199,8 @@ function willFire(rec: ScheduleRecord): boolean {
  * refusal parks the routine; so a routine like that has no runs to show.
  */
 function canReachTarget(db: ClawbooDb, rec: ScheduleRecord): boolean {
+  // Held by a pause: it fires once on resume, whatever the calendar would have drawn.
+  if (heldByPause(db, rec)) return false
   if (rec.target === 'team') {
     if (!rec.teamId) return false
     const team = db

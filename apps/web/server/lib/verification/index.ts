@@ -72,6 +72,9 @@ export interface VerifyTaskInput {
   riskFlag?: boolean
   /** Told what the reviewer's run cost, so the caller can charge it. */
   onReviewerSpend?: (spend: ReviewerSpend) => void
+  /** True while a pause covers the task: the reviewer does not start, and the verdict
+   *  records that the review did not run. */
+  reviewPaused?: () => boolean
   /** The commit holding the work, for a checkout that is not a task worktree
    *  (a team folder, whose history clawboo commits itself). Absent, the worktree's
    *  work is committed here first. */
@@ -184,6 +187,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
         riskFlag,
         reviewRootDir: input.reviewRootDir,
         onSpend: input.onReviewerSpend,
+        ...(input.reviewPaused ? { paused: input.reviewPaused } : {}),
       })
     } catch (err) {
       // A critic failure must never block (or crash) the deterministic verdict,

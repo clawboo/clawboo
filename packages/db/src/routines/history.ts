@@ -16,6 +16,7 @@ const ROUTINE_EVENT_KINDS = [
   'routine_dispatched',
   'routine_completed',
   'routine_error',
+  'routine_paused',
 ] as const
 
 /**
@@ -23,7 +24,7 @@ const ROUTINE_EVENT_KINDS = [
  * - `interrupted`: fired, and the next fire began without an outcome for this one
  *   (the server restarted mid-dispatch). What that run did is unknown.
  */
-export type RoutineFireStatus = 'running' | 'succeeded' | 'failed' | 'interrupted'
+export type RoutineFireStatus = 'running' | 'succeeded' | 'failed' | 'interrupted' | 'paused'
 
 export interface RoutineFire {
   firedAt: number
@@ -108,6 +109,12 @@ export function listRoutineFires(
     } else if (row.kind === 'routine_completed') {
       open.status = 'succeeded'
       open.finishedAt = row.ts
+      open.taskId = taskId ?? open.taskId
+    } else if (row.kind === 'routine_paused') {
+      // A pause stopped it. It did not fail, and the routine runs again on resume.
+      open.status = 'paused'
+      open.finishedAt = row.ts
+      open.error = str(data['message'])
       open.taskId = taskId ?? open.taskId
     } else if (row.kind === 'routine_error') {
       open.status = 'failed'

@@ -234,7 +234,7 @@ describe('GET /api/schedules/occurrences', () => {
   it('leaves out routines whose fire could not reach their team or agent', async () => {
     const live = await create({ agentId: 'ada', teamId: 't1', cronSpec: '0 9 * * *' })
     const gusRoutine = await create({ agentId: 'gus', teamId: 't2', cronSpec: '0 9 * * *' })
-    await create({ target: 'team', teamId: 't2', cronSpec: '0 9 * * *' })
+    const teamRoutine = await create({ target: 'team', teamId: 't2', cronSpec: '0 9 * * *' })
     const db = getDb()
     const bounds = weekBounds().join(',')
     const ids = async () => (await occurrences({ bounds })).body.routines.map((x) => x.schedule.id)
@@ -243,11 +243,15 @@ describe('GET /api/schedules/occurrences', () => {
     db.update(agents).set({ archivedAt: Date.now() }).where(eq(agents.id, 'gus')).run()
     expect(await ids()).toEqual([live])
 
-    // Gus back but t2 archived: his routine returns, the team routine stays out.
+    // Gus back: his routine returns, and so does the team routine he can lead.
     db.update(agents).set({ archivedAt: null }).where(eq(agents.id, 'gus')).run()
+    resetOccurrenceCache()
+    expect((await ids()).sort()).toEqual([live, gusRoutine, teamRoutine].sort())
+
+    // t2 archived: nothing of t2's fires, so neither of them is drawn.
     db.update(teams).set({ isArchived: 1 }).where(eq(teams.id, 't2')).run()
     resetOccurrenceCache()
-    expect((await ids()).sort()).toEqual([live, gusRoutine].sort())
+    expect(await ids()).toEqual([live])
   })
 
   it('works routines out in the scheduler time zone, not the process zone', async () => {

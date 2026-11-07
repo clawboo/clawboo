@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { motion } from 'framer-motion'
-import { Archive, RotateCw, Trash2, Upload, type LucideIcon } from 'lucide-react'
+import { Archive, RotateCw, Trash2, Upload, Pause, Play, type LucideIcon } from 'lucide-react'
 
 import { useMenuKeyboard, type MenuItemProps } from '@/features/shared/useMenuKeyboard'
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
@@ -10,7 +10,9 @@ interface TeamContextMenuProps {
   y: number
   teamName: string
   isArchived: boolean
+  isPaused: boolean
   onClose: () => void
+  onTogglePause: () => void
   onArchive: () => void
   onRefreshProtocol: () => void
   onDelete: () => void
@@ -46,14 +48,16 @@ function MenuItem({ icon: Icon, label, onClick, destructive, item }: MenuEntryPr
   )
 }
 
-const ITEM_COUNT = 4
+const ITEM_COUNT = 5
 
 export function TeamContextMenu({
   x,
   y,
   teamName,
   isArchived,
+  isPaused,
   onClose,
+  onTogglePause,
   onArchive,
   onRefreshProtocol,
   onDelete,
@@ -101,16 +105,22 @@ export function TeamContextMenu({
 
       <div role="none" className="py-0.5">
         <MenuItem
+          icon={isPaused ? Play : Pause}
+          label={isPaused ? 'Resume team' : 'Pause team'}
+          onClick={onTogglePause}
+          item={itemProps(0)}
+        />
+        <MenuItem
           icon={isArchived ? Upload : Archive}
           label={isArchived ? 'Unarchive' : 'Archive'}
           onClick={onArchive}
-          item={itemProps(0)}
+          item={itemProps(1)}
         />
         <MenuItem
           icon={RotateCw}
           label="Refresh Protocol"
           onClick={onRefreshProtocol}
-          item={itemProps(1)}
+          item={itemProps(2)}
         />
         <div role="none" className="my-1 mx-3.5 border-t border-border" />
         <MenuItem
@@ -118,14 +128,14 @@ export function TeamContextMenu({
           label="Delete team only"
           onClick={onDelete}
           destructive
-          item={itemProps(2)}
+          item={itemProps(3)}
         />
         <MenuItem
           icon={Trash2}
           label="Delete with agents"
           onClick={onDeleteWithAgents}
           destructive
-          item={itemProps(3)}
+          item={itemProps(4)}
         />
       </div>
     </motion.div>

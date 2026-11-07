@@ -350,7 +350,9 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
         need:
           delivery.status === 'not-delivered'
             ? 'Your answer is saved on this task, but it could not start the agent. Retry it, or give it to an agent.'
-            : 'Your answer is saved on this task. Its agent gets it as soon as the task can start.',
+            : delivery.status === 'queued' && delivery.reason === 'paused'
+              ? 'Your answer is saved on this task. Its agent gets it after the resume.'
+              : 'Your answer is saved on this task. Its agent gets it as soon as the task can start.',
       })
     }
     res.json({

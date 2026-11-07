@@ -90,17 +90,33 @@ export function isFinishedRun(status: string): boolean {
 }
 
 /**
+ * The class a run's ledger row carries when a pause stopped it (`status`
+ * `cancelled`). What sets it apart from a person pressing Stop: that is a decision
+ * about the task, this one is about when work may run, so the task comes back by
+ * itself on resume. This row is also all the state a resume needs: a paused task
+ * stays in its status, and the one a pause released (In progress to To do) says so
+ * here, durably, with no status snapshot to keep.
+ */
+export const PAUSED_RUN_CLASS = 'Paused'
+
+/** Did a pause stop this run? */
+export function stoppedByPause(run: LedgerRun | undefined): boolean {
+  return run?.status === 'cancelled' && run.errorClass === PAUSED_RUN_CLASS
+}
+
+/**
  * How many runs at the END of the ledger ended without success and without a
  * user Stop (`failed`, `timed_out`, an orphan reaped as failed). A success or a
  * Stop in between resets the count, so a task that failed twice long ago is not
  * penalised forever. A run that never finished is skipped rather than counted:
- * it is no outcome, and counting it parked a task one run early.
+ * it is no outcome, and counting it parked a task one run early. A run a pause
+ * stopped is no outcome either.
  */
 export function trailingFailedRuns(execs: readonly LedgerRun[]): number {
   let trailing = 0
   for (let i = execs.length - 1; i >= 0; i--) {
     const s = execs[i]!.status
-    if (!isFinishedRun(s)) continue
+    if (!isFinishedRun(s) || stoppedByPause(execs[i])) continue
     if (s === 'succeeded' || s === 'cancelled') break
     trailing += 1
   }
@@ -155,16 +171,16 @@ export function runMadeProgress(run: {
 
 /**
  * How many runs at the end of the ledger made no visible progress. Progress or a
- * person's Stop ends the streak. A run still going, a hard budget refusal and an
- * account refusal neither count nor end it. A run closed before the ledger
- * recorded a verdict reads from its outcome.
+ * person's Stop ends the streak. A run still going, a hard budget refusal, an
+ * account refusal and a run a pause stopped neither count nor end it. A run closed
+ * before the ledger recorded a verdict reads from its outcome.
  */
 export function trailingNoProgressRuns(execs: readonly LedgerRun[]): number {
   let trailing = 0
   for (let i = execs.length - 1; i >= 0; i--) {
     const run = execs[i]!
     if (!isFinishedRun(run.status)) continue
-    if (budgetRefusalOf(run) || accountFailureOf(run)) continue
+    if (budgetRefusalOf(run) || accountFailureOf(run) || stoppedByPause(run)) continue
     if (run.status === 'cancelled') break
     const verdict = run.madeProgress
     const progress =
@@ -188,6 +204,7 @@ export function brakeUntil(execs: readonly LedgerRun[]): number | null {
   for (let i = execs.length - 1; i >= 0 && lastEnd === null; i--) {
     const run = execs[i]!
     if (!isFinishedRun(run.status) || budgetRefusalOf(run) || accountFailureOf(run)) continue
+    if (stoppedByPause(run)) continue
     lastEnd = run.completedAt ?? null
     break
   }
@@ -205,6 +222,8 @@ export type AutoFireRefusal =
  * it refuses, or null when the task may fire:
  *   • empty ledger → never delivered (fresh, deferred, assigned) → fire;
  *   • last run `running` → someone owns it → leave it;
+ *   • last run stopped by a pause → it was going, so it goes again on resume,
+ *     whatever came before it (it may be a run a person asked for);
  *   • last run refused or killed by a hard budget cap → it would be refused again
  *     until a person raises the cap;
  *   • last run `cancelled` → the user STOPPED it → never auto-refire (a person
@@ -222,6 +241,7 @@ export function autoFireRefusal(
 ): AutoFireRefusal | null {
   if (execs.length === 0) return null
   const lastRun = execs[execs.length - 1]!
+  if (stoppedByPause(lastRun)) return null
   if (lastRun.status === 'running') return 'running'
   if (budgetRefusalOf(lastRun)) return 'budget'
   if (lastRun.status === 'cancelled') return 'stopped'

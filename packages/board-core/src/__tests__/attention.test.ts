@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { taskAttention } from '../attention'
-import { MAX_AUTO_FIRES, encodeHumanAssignment } from '../dispatch'
+import { MAX_AUTO_FIRES, encodeHumanAssignment, PAUSED_RUN_CLASS } from '../dispatch'
 
 const runs = (...statuses: string[]) => statuses.map((status) => ({ status }))
 const BOUND = 'run-1:deleg:agent:a2:reflectTo:leader'
@@ -233,5 +233,31 @@ describe('taskAttention: in progress with nothing working on it', () => {
 
   it('never applies to a task under verification', () => {
     expect(taskAttention({ status: 'in_review', execs: [] })).toBeNull()
+  })
+})
+
+describe('taskAttention: a run a pause stopped', () => {
+  it('needs no person: the task is waiting for the resume, not for a decision', () => {
+    expect(
+      taskAttention({
+        status: 'todo',
+        sourceDelegationId: BOUND,
+        execs: [{ status: 'cancelled', errorClass: PAUSED_RUN_CLASS }],
+      }),
+    ).toBeNull()
+  })
+
+  it('needs no person on a task with no agent bound when the task runner can run it again', () => {
+    const execs = [{ status: 'cancelled', errorClass: PAUSED_RUN_CLASS }]
+    expect(taskAttention({ status: 'todo', execs, runnerBound: true })).toBeNull()
+    // Nothing would start that one, so it says it has no agent, as any other does.
+    expect(taskAttention({ status: 'todo', execs })?.reason).toBe('unassigned')
+  })
+
+  it('still names a run a person stopped', () => {
+    expect(
+      taskAttention({ status: 'todo', sourceDelegationId: BOUND, execs: runs('cancelled') })
+        ?.reason,
+    ).toBe('stopped')
   })
 })

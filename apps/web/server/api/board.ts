@@ -54,7 +54,9 @@ import {
   getWorkspaceForTask,
   isStrandedInProgress,
   labelsForTasks,
+  pauseSubjectOfTask,
   setTaskLabels,
+  startRefusedBy,
   taskLabelsBody,
   type ClawbooDb,
   pendingQuestionsForTasks,
@@ -85,6 +87,7 @@ import { requestTaskDispatch } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
+import { pauseViewOfTask, pauseViews, type PauseView } from '../lib/pauseViews'
 import { engineRefusal } from '../lib/teamChat/roomRoster'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 import {
@@ -123,16 +126,22 @@ export function boardListGET(req: Request, res: Response): void {
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
     res.json({
-      tasks: withOpenQuestion(
+      tasks: withPause(
         db,
-        withReadState(
+        withOpenQuestion(
           db,
-          req,
-          withLabels(
+          withReadState(
             db,
-            withRunningSince(
+            req,
+            withLabels(
               db,
-              withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+              withRunningSince(
+                db,
+                withRunCost(
+                  db,
+                  withAttention(db, listTasks(db, { teamId, status, includeDropped })),
+                ),
+              ),
             ),
           ),
         ),
@@ -159,6 +168,7 @@ export function boardGetGET(req: Request, res: Response): void {
       task: {
         ...withReadState(db, req, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
+        pause: pauseViewOfTask(db, task),
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
         runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
@@ -174,6 +184,16 @@ export function boardGetGET(req: Request, res: Response): void {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+}
+
+/** Each task with the pause covering it. Reads no more than the pauses when none is
+ *  placed, the usual case. */
+function withPause<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<T & { pause: PauseView | null }> {
+  const views = pauseViews(db)
+  return rows.map((t) => ({ ...t, pause: pauseViewOfTask(db, t, views) }))
 }
 
 /** The oldest saved wake still waiting on a task, for the drawer's line saying why:
@@ -478,6 +498,12 @@ export function boardRetryPOST(req: Request, res: Response): void {
     const refusal = rerun ? null : engineRefusal(db, task)
     if (refusal) {
       res.status(409).json({ ok: false, error: refusal })
+      return
+    }
+    // A pause covers it: resuming is what starts it. Nothing is written, so the
+    // card stays as it is and says who paused it.
+    if (startRefusedBy(db, { ...pauseSubjectOfTask(task), agentId })) {
+      res.status(409).json({ ok: false, error: 'paused' })
       return
     }
     // A handed-back task's turn goes back to its agent: one assignee, never both.

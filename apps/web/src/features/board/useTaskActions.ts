@@ -66,6 +66,7 @@ const RETRY_REFUSED: Record<string, string> = {
   not_retryable: 'This task is already running or finished.',
   no_team: 'This task has no team, so no agent can run it.',
   room_archived: ROOM_ARCHIVED,
+  paused: 'This task is paused. Resume it first, and it starts by itself.',
 }
 
 const REOPEN_REFUSED: Record<string, string> = {
@@ -302,6 +303,7 @@ export function useTaskActions(): TaskActions {
       const res = await reopenTask(taskId, comment, opts)
       if (res.ok) {
         const missed = res.delivery?.status === 'not-delivered' ? res.delivery.reason : null
+        const paused = res.delivery?.status === 'queued' && res.delivery.reason === 'paused'
         addToast(
           missed
             ? {
@@ -310,7 +312,12 @@ export function useTaskActions(): TaskActions {
                   comment ? 'your note did not reach an agent' : 'it could not start'
                 }: ${notDeliveredWhy(missed)}`,
               }
-            : { type: 'success', message: 'Reopened. The task is back in To do.' },
+            : paused
+              ? {
+                  type: 'info',
+                  message: 'Reopened. It’s back in To do, and starts after the resume.',
+                }
+              : { type: 'success', message: 'Reopened. The task is back in To do.' },
         )
         return true
       }

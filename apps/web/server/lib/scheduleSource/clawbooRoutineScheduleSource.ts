@@ -46,7 +46,9 @@ import {
 } from '@clawboo/scheduler'
 import { eq, inArray } from 'drizzle-orm'
 
+import { pauseRefusalText } from '../pauseBus'
 import { getRoutinesTicker } from '../routines/ticker'
+import { routineStartRefusal } from '../routines/wakeBridge'
 import { routineTimeZone } from '../routines/timeZone'
 
 export interface ClawbooRoutineScheduleSourceDeps {
@@ -117,6 +119,14 @@ function resolveTarget(
     )
   }
   return { target: 'agent', agentId: input.agentId, teamId: agentTeamId }
+}
+
+/** "Run now" on a routine a pause covers. A refused move, in words a person reads. */
+class RoutinePausedError extends IllegalScheduleTransitionError {
+  constructor(status: string, text: string) {
+    super(status, 'queued')
+    this.message = text
+  }
 }
 
 export class ClawbooRoutineScheduleSource implements ScheduleSource {
@@ -326,6 +336,10 @@ export class ClawbooRoutineScheduleSource implements ScheduleSource {
           const raw = this.rawId(action.id)
           const existing = getScheduledRun(db, raw)
           if (!existing) throw new UnknownScheduleError(action.id)
+          // A queued fire would sit unclaimed until the resume, and "Run now" said it
+          // ran. Say so now instead, as a conflict like any other refused move.
+          const paused = routineStartRefusal(db, existing)
+          if (paused) throw new RoutinePausedError(existing.status, pauseRefusalText(paused))
           if (!queueRunNow(db, raw)) {
             throw new IllegalScheduleTransitionError(existing.status, 'queued')
           }

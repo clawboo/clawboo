@@ -23,6 +23,7 @@ import {
   resolveRoomForTeam,
   setBudgetLimit,
   teams,
+  placePause,
   type ClawbooDb,
 } from '@clawboo/db'
 import {
@@ -39,7 +40,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import type { RuntimeRunContext } from '../../runtimes/types'
-import { normalizeSingleLeader, runTeamExchange } from '../runTeamExchange'
+import { normalizeSingleLeader, runTeamExchange, stopPausedExchanges } from '../runTeamExchange'
 import type { ChatParticipant } from '../selectNextSpeaker'
 
 let db: ClawbooDb
@@ -493,6 +494,79 @@ describe('runTeamExchange (the production trigger)', () => {
     const bound = listEvents(db, { kinds: ['turn_bound_hit'] })
     const data = JSON.parse(bound[0]!.data!) as { maxExchangeTurns: number }
     expect(data.maxExchangeTurns).toBe(5 * 2) // DEFAULT_MAX_EXCHANGE_TURNS × participants, not 9999
+  })
+
+  describe('under a pause', () => {
+    it('refuses the whole exchange for a paused or archived team', async () => {
+      seedTeam('tmp', [{ id: 'a', runtime: 'clawboo-native' }], 'a')
+      placePause(db, { kind: 'team', id: 'tmp' })
+      const res = await runTeamExchange({
+        db,
+        teamId: 'tmp',
+        makeAdapterFor: (p) => fixedAdapter(p.runtime, 'native', 'x'),
+      })
+      expect(res.ok).toBe(false)
+      expect(res.error).toContain('This team is paused')
+      expect(readRoom(db, { roomId: resolveRoomForTeam('tmp') })).toHaveLength(0)
+    })
+
+    it('skips a paused speaker, at once, and the others still speak', async () => {
+      seedTeam(
+        'tmq',
+        [
+          { id: 'lead', runtime: 'clawboo-native' },
+          { id: 'quiet', runtime: 'clawboo-native' },
+        ],
+        'lead',
+      )
+      placePause(db, { kind: 'agent', id: 'quiet' })
+      const spoke: string[] = []
+      const res = await runTeamExchange({
+        db,
+        teamId: 'tmq',
+        firstSpeakers: ['quiet', 'lead'],
+        maxExchangeTurns: 2,
+        makeAdapterFor: (p) => (ctx) => {
+          const adapter = fixedAdapter(p.runtime, 'native', 'x')(ctx)
+          return {
+            ...adapter,
+            start: (task, opts) => {
+              spoke.push(p.agentId)
+              return adapter.start(task, opts)
+            },
+          }
+        },
+      })
+      expect(res.ok).toBe(true)
+      expect(spoke).toContain('lead')
+      expect(spoke).not.toContain('quiet')
+    })
+
+    it('ends an exchange a pause lands on, with its turn waiting for a slot, and frees the room', async () => {
+      seedTeam('tmr', [{ id: 'lead', runtime: 'clawboo-native' }], 'lead')
+      const full = createRunSlots(1)
+      setRunSlotsForTests(full)
+      const holder = full.tryAcquire()!
+      try {
+        const going = runTeamExchange({
+          db,
+          teamId: 'tmr',
+          makeAdapterFor: (p) => fixedAdapter(p.runtime, 'native', 'x'),
+        })
+        await new Promise((r) => setTimeout(r, 20))
+        expect(full.stats().queued).toBe(1)
+        stopPausedExchanges(({ agentId }) => agentId === 'nobody')
+        await new Promise((r) => setTimeout(r, 5))
+        expect(full.stats().queued).toBe(1)
+        stopPausedExchanges(({ agentId }) => agentId === 'lead')
+        const res = await going
+        expect(res.ok).toBe(true)
+        expect(full.stats().queued).toBe(0)
+      } finally {
+        holder.release()
+        setRunSlotsForTests(null)
+      }
+    })
   })
 
   it('refuses a firstSpeaker that is not a team member (no silent ignore)', async () => {

@@ -25,6 +25,7 @@ import {
   registerScheduledRun,
   setSetting,
   teams,
+  placePause,
   type ClawbooDb,
   type DbScheduledRun,
 } from '@clawboo/db'
@@ -292,6 +293,46 @@ describe('dispatchRoutine', () => {
     })
     expect(refused.ok).toBe(false)
     expect(refused.transient).not.toBe(true)
+  })
+
+  it('a team routine whose lead is paused posts nothing and reads as paused, not as run', async () => {
+    seedTeam('team-oc')
+    seedAgent('lead-x', 'clawboo-native')
+    db.update(agents).set({ teamId: 'team-oc' }).where(eq(agents.id, 'lead-x')).run()
+    db.update(teams).set({ leaderAgentId: 'lead-x' }).where(eq(teams.id, 'team-oc')).run()
+    placePause(db, { kind: 'agent', id: 'lead-x' })
+    let posted = 0
+    const outcome = await dispatchRoutine(seedTeamRoutine('team-oc'), {
+      db,
+      mcpBaseUrl: null,
+      enqueueTeamMessage: async () => {
+        posted++
+        return { ok: true, targetAgentId: 'lead-x' }
+      },
+    })
+    expect(outcome).toMatchObject({ ok: false, paused: true })
+    expect(outcome.transient).not.toBe(true)
+    expect(posted).toBe(0)
+  })
+
+  it('an agent routine a pause landed on makes no task, and reads as paused, not as failed', async () => {
+    seedAgent('agent-p', 'clawboo-native')
+    const run = seedRoutine('agent-p')
+    placePause(db, { kind: 'agent', id: 'agent-p' })
+    let ran = false
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async () => {
+        ran = true
+        return SUCCESS
+      },
+    })
+    expect(outcome).toMatchObject({ ok: false, paused: true })
+    expect(outcome.transient).not.toBe(true)
+    expect(outcome.error).toContain('This agent is paused')
+    expect(ran).toBe(false)
+    expect(listTasks(db)).toEqual([])
   })
 
   it('HUMAN participant: throws the typed NotImplementedError (the humans-in-the-graph seam)', async () => {

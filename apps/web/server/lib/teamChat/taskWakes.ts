@@ -30,6 +30,7 @@ import {
   readTaskRunnerInputs,
   reapTaskWakes,
   settleTaskWakes,
+  startRefusedByTask,
   TASK_HEARTBEAT_MS,
   taskDependenciesDone,
   updateStatus,
@@ -260,6 +261,7 @@ function pumpOne(
     delegationTargetOf(task.sourceDelegationId) ??
     readTaskRunnerInputs(task)?.assigneeAgentId ??
     null
+  const startRefusal = startRefusedByTask(db, task)
   const input: WakeDecisionInput = {
     reason: row.reason,
     replays: row.replays,
@@ -273,7 +275,15 @@ function pumpOne(
       execs.some((e) => e.id === task.runExecutionId && e.status === 'running') &&
       now - task.updatedAt < RUN_PROVEN_ALIVE_MS,
     held,
-    refusal: runner ? null : task.teamId ? engineRefusal(db, task) : 'no_team',
+    paused: startRefusal !== null && startRefusal.kind !== 'archived_team',
+    refusal:
+      startRefusal?.kind === 'archived_team'
+        ? 'team_archived'
+        : runner
+          ? null
+          : task.teamId
+            ? engineRefusal(db, task)
+            : 'no_team',
     budgetRefused: false,
     personAssigned: task.assigneePersonId !== null,
     waitingOnQuestion: parseWaitingOn(task.waitingOn)?.kind === 'question',

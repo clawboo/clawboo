@@ -54,6 +54,9 @@ export interface ScheduleRecord {
    */
   cronSpec: string
   nextRunAt: number | null
+  /** What holds this routine's next fire back, when a pause or an archived team does.
+   *  Set by the server's list route, not by a source. */
+  heldBy?: { kind: string; id: string; name: string } | null
   lastRunAt?: number
   lastError?: string
   status: ScheduleStatus
