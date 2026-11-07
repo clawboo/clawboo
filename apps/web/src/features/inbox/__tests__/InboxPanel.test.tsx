@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { server } from '@/__vitest__/mswServer'
 import { useAlertSignal } from '@/features/alerts/alertSignal'
+import { resetBoardPerson } from '@/features/board/useBoardPerson'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useApprovalsStore } from '@/stores/approvals'
 import { useFleetStore } from '@/stores/fleet'
@@ -45,6 +46,7 @@ beforeEach(() => {
   allReads = []
   boardReads = 0
   resetInboxStore()
+  resetBoardPerson()
   useAlertSignal.setState({ seq: 0, inbox: 0, inboxEvent: 0, boardActivity: 0, boardReads: 0 })
   useApprovalsStore.setState({ pendingApprovals: new Map() })
   useFleetStore.setState({ agents: [] })
@@ -59,6 +61,9 @@ beforeEach(() => {
       return HttpResponse.json({ tasks: rows })
     }),
     http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+    http.get('/api/access/identity', () =>
+      HttpResponse.json({ you: { id: 'local', name: 'You', role: null } }),
+    ),
     http.get('/api/board/:taskId', ({ params }) => {
       const task = rows.find((t) => t.id === params['taskId'])
       return task
@@ -95,16 +100,66 @@ const listed = (): string[] =>
   screen.queryAllByTestId('inbox-row').map((el) => el.getAttribute('data-task-id') ?? '')
 
 describe('InboxPanel', () => {
-  it('offers Needs you, Unread and All, each with what it holds', async () => {
+  it('offers Needs you, Unread, Mine and All, each with what it holds', async () => {
     rows = [
       row('stuck', { status: 'blocked', attention: { reason: 'failed', failedRuns: 1 } }),
       row('new', { unread: true, activity: { seq: 5, kind: 'comment', at: Date.now() } }),
       row('old'),
+      row('yours', { assigneePersonId: 'local' }),
     ]
     mount()
     await waitFor(() => expect(tab(/Needs you/)).toHaveTextContent('1'), T)
     expect(tab(/Unread/)).toHaveTextContent('1')
-    expect(tab(/All/)).toHaveTextContent('3')
+    expect(tab(/Mine/)).toHaveTextContent('1')
+    expect(tab(/All/)).toHaveTextContent('4')
+    expect(screen.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual([
+      'Needs you',
+      'Unread',
+      'Mine',
+      'All',
+    ])
+  })
+
+  it('Mine lists what is assigned to you, the same tasks as the Board filter', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'p-priya', name: 'Priya', role: null } }),
+      ),
+    )
+    rows = [
+      row('hers', { assigneePersonId: 'p-priya', activity: { seq: 3, kind: 'status', at: 3 } }),
+      row('anyones', { assigneePersonId: 'local', activity: { seq: 9, kind: 'status', at: 9 } }),
+      row('theirs', { assigneePersonId: 'p-sam', activity: { seq: 7, kind: 'status', at: 7 } }),
+      row('agents', { activity: { seq: 8, kind: 'status', at: 8 } }),
+    ]
+    mount()
+    await waitFor(() => expect(tab(/Mine/)).toHaveTextContent('2'), T)
+    await userEvent.click(tab(/Mine/))
+    await waitFor(() => expect(listed()).toEqual(['anyones', 'hers']), T)
+  })
+
+  it('Mine says so when nothing is assigned to you', async () => {
+    rows = [row('agents')]
+    mount()
+    await waitFor(() => expect(tab(/All/)).toHaveTextContent('1'), T)
+    await userEvent.click(tab(/Mine/))
+    await waitFor(() => expect(screen.getByText('Nothing assigned to you')).toBeInTheDocument(), T)
+  })
+
+  it('Mine has no Mark all read: that would clear tasks it does not show', async () => {
+    rows = [
+      row('new', { unread: true, activity: { seq: 8, kind: 'comment', at: 1 } }),
+      row('yours', { assigneePersonId: 'local' }),
+    ]
+    mount()
+    await waitFor(() => expect(tab(/Unread/)).toHaveTextContent('1'), T)
+    await waitFor(
+      () => expect(screen.getByRole('button', { name: 'Mark all read' })).toBeInTheDocument(),
+      T,
+    )
+    await userEvent.click(tab(/Mine/))
+    await waitFor(() => expect(listed()).toEqual(['yours']), T)
+    expect(screen.queryByRole('button', { name: 'Mark all read' })).toBeNull()
   })
 
   it('opens on Needs you when something waits, on Unread when nothing does', async () => {

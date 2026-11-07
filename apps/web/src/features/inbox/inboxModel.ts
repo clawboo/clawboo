@@ -7,9 +7,8 @@ import type { TaskActivity } from '@clawboo/db'
 import type { BoardTask } from '@/lib/boardClient'
 import { statusLabel } from '@/features/board/boardStatus'
 
-/** The tabs, in order. Room for `mine` once every install has a person: it needs
- *  one to say whose tasks are whose. */
-export type InboxTab = 'needs-you' | 'unread' | 'all'
+/** The tabs, in order. */
+export type InboxTab = 'needs-you' | 'unread' | 'mine' | 'all'
 
 export type { TaskActivity }
 

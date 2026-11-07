@@ -485,6 +485,25 @@ describe('hermes driver (preserved runtime)', () => {
 
   // ── quiet-mode parser ───────────────────────────────────────────────────────
 
+  it('parseHermesLine keeps the startup banner out of the reply', () => {
+    const state: Parameters<typeof parseHermesLine>[1] = { lastText: '', sawResult: false }
+    const banner =
+      '  ⚠ tirith security scanner enabled but not available \u2014 command scanning will use pattern matching only'
+    expect(parseHermesLine(banner, state)).toEqual([])
+    expect(parseHermesLine('\u26A0\uFE0F tirith security scanner enabled', state)).toEqual([])
+    expect(state.lastText).toBe('')
+    expect(parseHermesLine('The parser now handles quotes.', state)).toEqual([
+      { type: 'message', text: 'The parser now handles quotes.\n' },
+    ])
+    // Once the reply has started it is the model's own words, even the same ones.
+    expect(parseHermesLine(banner, state)).toEqual([{ type: 'message', text: `${banner}\n` }])
+    // So is a warning of its own, at the very start of a reply.
+    const own: Parameters<typeof parseHermesLine>[1] = { lastText: '', sawResult: false }
+    expect(parseHermesLine('⚠ This will delete the branch.', own)).toEqual([
+      { type: 'message', text: '⚠ This will delete the branch.\n' },
+    ])
+  })
+
   it('parseHermesLine captures the plain session-info line in its variants (first wins)', () => {
     const state = freshState()
     expect(parseHermesLine('session_id: abc123', state)).toEqual([

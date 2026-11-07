@@ -34,6 +34,43 @@ describe('error taxonomy', () => {
     expect(isHarnessBug('ProviderError')).toBe(false)
   })
 
+  it('reads "too many tokens" as an overflow only when it names the prompt or a refused request', () => {
+    // With no status and no word for what it counts, it is as likely a rate limit,
+    // which clears up by itself. A retry of a real overflow is refused for free.
+    expect(classifyError(null, 'too many tokens')).toBe('RateLimited')
+    expect(classifyError(null, 'Too many tokens, please wait before trying again.')).toBe(
+      'RateLimited',
+    )
+    expect(
+      classifyError(null, 'Tokens per minute limit exceeded - too many tokens processed.'),
+    ).toBe('RateLimited')
+    expect(classifyError(null, 'too many tokens (TPM)')).toBe('RateLimited')
+    // Its own verdict, the thing it counted, or a refusal's status settle it.
+    expect(classifyError('context_overflow', 'too many tokens')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many tokens in the request')).toBe('ContextOverflow')
+    expect(classifyError(null, 'Prompt has too many tokens')).toBe('ContextOverflow')
+    expect(
+      classifyError(
+        null,
+        'too many tokens: total number of tokens in the prompt cannot exceed 4081 - received 5000',
+      ),
+    ).toBe('ContextOverflow')
+    expect(classifyError(null, 'HTTP 400: too many tokens')).toBe('ContextOverflow')
+    // Naming what it counted settles it, wherever the name sits.
+    expect(classifyError(null, 'Too many input tokens')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many prompt tokens')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many tokens for this model')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many tokens per minute')).toBe('RateLimited')
+    // A rate's own words decide first, whatever else it names.
+    expect(classifyError(null, 'too many input tokens per minute')).toBe('RateLimited')
+    expect(classifyError(null, 'Too many tokens in the request, please wait before retrying')).toBe(
+      'RateLimited',
+    )
+    expect(classifyError(null, '429 too many tokens')).toBe('RateLimited')
+    // Whichever way it goes, it never reads as a harness bug.
+    expect(isHarnessBug(classifyError(null, 'too many tokens'))).toBe(false)
+  })
+
   it('classifies context overflow as its own class (not a harness bug), before InvalidArgs', () => {
     // the typed code the native harness now emits + its clean message
     expect(

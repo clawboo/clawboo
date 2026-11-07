@@ -13,6 +13,7 @@ import {
   delegationFailureKey,
   delegatorOf,
   isTerminal,
+  isEngineRun,
   ledgerAllowsAutoFire,
   LOCAL_PERSON,
   parseWaitingOn,
@@ -50,6 +51,7 @@ import {
   settleWakesOfClosedRunTx,
 } from '../taskWakes'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
+import { activitySeqOf, readersBehindWakes, readLaterOwnChange } from './readState'
 import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import { startRefusedBy, startRefusedByTask } from './pauses'
@@ -579,6 +581,8 @@ export interface ClaimResult {
 /** The run a claim opens, written with the claim. */
 export interface ClaimRun {
   executorType: string
+  /** The team engine is the one opening it. See `CreateExecInput.engineRun`. */
+  engineRun?: boolean
   /** Why it runs. A saved wake it takes names the reason instead. */
   runReason?: string | null
   workspaceId?: string | null
@@ -591,6 +595,7 @@ function buildExecutionRow(input: CreateExecInput, id: string, now: number): DbE
     taskId: input.taskId,
     workspaceId: input.workspaceId ?? null,
     executorType: input.executorType,
+    engineRun: input.engineRun ? 1 : 0,
     status: 'running',
     claimedAt: now,
     startedAt: now,
@@ -668,6 +673,7 @@ export function claimTask(
       if (live) return { ok: false, reason: 'conflict' }
     }
     const execId = run ? randomUUID() : null
+    const activityBefore = run ? activitySeqOf(db, taskId) : 0
     const claimed = tx
       .update(tasks)
       .set({
@@ -709,6 +715,7 @@ export function claimTask(
       {
         taskId,
         executorType: run.executorType,
+        engineRun: run.engineRun ?? false,
         workspaceId: run.workspaceId ?? null,
         runReason: strongest?.reason ?? run.runReason ?? null,
       },
@@ -716,6 +723,8 @@ export function claimTask(
       now,
     )
     tx.insert(executionProcesses).values(execution).run()
+    // A person's comment is why this run starts, so the card moving is not news to them.
+    readLaterOwnChange(db, readersBehindWakes(db, wakes), taskId, activityBefore)
     return { ok: true, task: claimed[0], execution, wakes }
   })
   if (result.ok && result.task)
@@ -793,7 +802,7 @@ export function listTeamsWithFireableDelegations(db: ClawbooDb): string[] {
 
 /**
  * Rooms holding a task In review whose last run is still open under the team
- * engine (executor type `openclaw`): a team-chat work check under way, or one a
+ * engine (`isEngineRun`): a team-chat work check under way, or one a
  * restart cut short. The dispatch pump builds such a room's engine when none is
  * loaded, and the engine's `resume()` hands the interrupted ones to a person. A
  * task-runner task in review has a runner execution and is not listed.
@@ -810,7 +819,7 @@ export function listRoomsWithEngineTasksInReview(
   for (const r of rows) {
     if (!r.teamId) continue
     const last = listExecutions(db, r.id).at(-1)
-    if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
+    if (!last || last.status !== 'running' || !isEngineRun(last)) continue
     rooms.set(`${r.teamId}\u0000${r.roomId ?? ''}`, { teamId: r.teamId, roomId: r.roomId })
   }
   return [...rooms.values()]
@@ -2183,6 +2192,9 @@ export function setTaskWorkspaceRefs(
 export interface CreateExecInput {
   taskId: string
   executorType: string
+  /** The team engine is the one opening it. Only its own board client says so: a
+   *  request cannot, whatever `executorType` it names. */
+  engineRun?: boolean
   workspaceId?: string | null
   runReason?: string | null
   beforeCommit?: string | null
@@ -2318,6 +2330,7 @@ export function completeExecutionProcess(
     execId,
     status: outcome.status,
     executorType: row.executorType,
+    engineRun: row.engineRun,
   })
   return row
 }
@@ -2489,7 +2502,7 @@ export function reconcileOrphans(
         t?.status === 'in_review' &&
         t.teamId &&
         !t.dropped &&
-        ex.executorType === 'openclaw' &&
+        isEngineRun(ex) &&
         latestExecutionId(tx, t.id) === ex.id
       )
         return false

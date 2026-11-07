@@ -46,7 +46,12 @@ import type { BoardTask, CompleteExecutionOutcome, EngineBoardClient } from './b
 // synchronous (the fake reads its Map; the real wrapper reads the DB / recorded
 // calls); control methods simulate external actors (a stale-sweep release, a
 // pre-seeded resumable task) portably across both boards.
-export type SeedExecState = 'none' | 'running-openclaw' | 'running-executor'
+export type SeedExecState =
+  | 'none'
+  | 'running-openclaw'
+  | 'running-old-openclaw'
+  | 'running-executor'
+  | 'running-reported-openclaw'
 
 export interface CascadeBoard extends EngineBoardClient {
   /** Tasks created via `createTask`, in call order (source of dynamic ids). */
@@ -92,8 +97,12 @@ export interface CascadeBoard extends EngineBoardClient {
      *   - `running-executor`: a live run owned by the EXECUTOR runner, whose
      *     events the engine never sees — attaching would fail a healthy
      *     heartbeat-governed run at 8 minutes.
-     * Both must be SKIPPED. Before this option existed both fakes hardcoded a
+     *   - `running-reported-openclaw`: a live run labelled `openclaw` by someone who is
+     *     not the engine. The executions route takes any name.
+     * All must be SKIPPED. Before this option existed both fakes hardcoded a
      * running `openclaw` exec, so deleting either guard failed nothing.
+     *   - `running-old-openclaw`: an engine run from before the engine marker, which
+     *     has only its label. Attached, like `running-openclaw`.
      */
     exec?: SeedExecState
   }): string
@@ -1700,6 +1709,37 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.sweepStaleSessions()
       expect(board.statusOf(t)).toBe('in_progress')
       expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume skips a run someone else labelled openclaw: the marker says whose it is', async () => {
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'reported run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-reported-openclaw',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume attaches an engine run from before the marker, by its label', async () => {
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'old engine run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-old-openclaw',
+      })
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('blocked')
     })
 
     it('resume DOES attach an engine-owned run (the guards are not just "skip everything")', async () => {

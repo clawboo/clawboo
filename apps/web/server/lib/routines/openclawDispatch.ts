@@ -57,11 +57,9 @@ const DEFAULT_WATCHDOG_MS = 10 * 60_000 // 10 min
 const WATCHDOG_TICK_MS = 30_000
 
 /**
- * The executor type this dispatcher records on its execution rows. On the board
- * ledger `'openclaw'` means a run the team orchestrator started itself: the
- * engine's resume() attaches its idle watchdog to such a row, and the lifecycle
- * bus leaves its completion for the engine to report. A routine run is neither,
- * so it records its own type and the engine leaves it alone.
+ * The executor type this dispatcher records on its execution rows. A routine run is
+ * not the team engine's (`isEngineRun`), and on a row from before the engine marker
+ * `'openclaw'` would read as if it were, so it records its own type.
  */
 export const ROUTINE_OPENCLAW_EXECUTOR = 'openclaw-routine'
 

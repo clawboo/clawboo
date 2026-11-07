@@ -201,7 +201,13 @@ export function createServerBoardClient(
       try {
         // The run opens with the claim, in one write: the execution, its stamp on the
         // task and the saved wakes it takes.
-        const result = claimTask(db, taskId, assigneeAgentId, assigneeRuntime, run ? { run } : {})
+        const result = claimTask(
+          db,
+          taskId,
+          assigneeAgentId,
+          assigneeRuntime,
+          run ? { run: { ...run, engineRun: true } } : {},
+        )
         // A person's task is someone else's, as far as the engine goes: it leaves
         // it alone and moves on, as it does when another engine wins the claim.
         if (result.reason === 'person_assigned') return { ok: false, reason: 'conflict' }
@@ -332,6 +338,7 @@ export function createServerBoardClient(
         const execution = createExecutionProcess(db, {
           taskId,
           executorType,
+          engineRun: true,
           runReason: opts?.runReason ?? null,
         })
         const task = getTask(db, taskId)
@@ -423,6 +430,7 @@ export function createServerBoardClient(
           id: e.id,
           status: e.status,
           executorType: e.executorType,
+          engineRun: e.engineRun,
           errorClass: e.errorClass,
           completedAt: e.completedAt,
           madeProgress: e.madeProgress,

@@ -34,8 +34,10 @@ import {
   noteAgentWakeStarted,
   noteTaskWakeSkip,
   openAgentWakeCard,
+  readersBehindWakes,
   readTaskRunnerInputs,
   reapTaskWakes,
+  runLaterOwnWrite,
   settleTaskWakes,
   startRefusedByTask,
   TASK_HEARTBEAT_MS,
@@ -369,8 +371,14 @@ function pumpOne(
       )
       return true
     }
-    // One write, so a wake that went is always counted against the job's brakes.
-    if (!(deps.asOwnWrite ? deps.asOwnWrite(move) : immediateWrite(db, move))) return decision
+    // One write, so a wake that went is always counted against the job's brakes. Only a
+    // wake a person is behind reads as their own move: a teammate's restart is news.
+    const moved = deps.asOwnWrite
+      ? deps.asOwnWrite(move)
+      : wakeFromPerson(row.reason)
+        ? runLaterOwnWrite(db, readersBehindWakes(db, [row]), task.id, move)
+        : immediateWrite(db, move)
+    if (!moved) return decision
     emitEvent(db, {
       kind: 'status_changed',
       taskId: task.id,

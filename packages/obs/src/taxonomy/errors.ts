@@ -49,7 +49,7 @@ const RULES: Rule[] = [
   },
   {
     cls: 'RateLimited',
-    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota|usage[\s_-]?limit)\b/i,
+    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota|usage[\s_-]?limit|per[\s_-]?min(?:ute)?|tpm|wait before)\b/i,
   },
   {
     cls: 'UserAborted',
@@ -65,8 +65,12 @@ const RULES: Rule[] = [
   // harness bug: it's an expected (if now-rare, post-compaction) recoverable condition.
   {
     cls: 'ContextOverflow',
-    test: /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|too many tokens/i,
+    test: /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|too many (?:prompt|input|request|message|context)s? tokens|\b(?:400|413|422|prompt|input|request|messages?|context)\b[^\n]*too many (?:\w+ )?tokens|too many (?:\w+ )?tokens\b[^\n]*\b(?:prompt|input|request|messages?|context|model)\b/i,
   },
+  // The same words with nothing to say which limit. A tokens-per-minute limit uses them
+  // too, so this reads as the one that clears up by itself: retrying a real overflow is
+  // refused at no cost, and a rate limit filed as an overflow would never be retried.
+  { cls: 'RateLimited', test: /too many (?:\w+ )?tokens/i },
   {
     cls: 'InvalidArgs',
     test: /\b(400|422|invalid[\s_-]?(?:argument|param|input|request)|bad request|validation|unprocessable|missing required|schema|malformed|model[\s_-]?not[\s_-]?found|(?:content|cyber|usage)[\s_-]?policy)\b/i,

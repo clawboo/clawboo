@@ -9,7 +9,6 @@ import {
   packInboxRows,
   reapOrphanInbox,
   renderInboxDigest,
-  splitInboxByAddressing,
 } from '../../inbox'
 import { agentInbox, agents } from '../../schema'
 import { onBoardLifecycle, resetBoardLifecycleListeners, type BoardLifecycleEvent } from '../events'
@@ -68,6 +67,7 @@ describe('board lifecycle bus', () => {
       execId: ex.id,
       status: 'succeeded',
       executorType: 'codex',
+      engineRun: 0,
     })
     // A second completion of the same (now terminal) exec must NOT re-publish.
     completeExecutionProcess(db, ex.id, { status: 'failed' })
@@ -181,7 +181,7 @@ describe('agent inbox (durable mailbox)', () => {
       body: 'X done',
     })
     enqueueInbox(db, { agentId: 'lead', teamId: 'T', kind: 'alert', body: 'Y parked' })
-    enqueueInbox(db, { agentId: 'other', kind: 'signal', body: 'not yours' })
+    enqueueInbox(db, { agentId: 'other', kind: 'alert', body: 'not yours' })
 
     const pending = listUndeliveredInbox(db, 'lead', { teamId: 'T' })
     expect(pending.map((r) => r.body)).toEqual(['X done', 'Y parked'])
@@ -200,8 +200,7 @@ describe('agent inbox (durable mailbox)', () => {
     // The exactly-once contract lives on this return value. A caller must mark
     // ONLY `includedIds`; a row truncated out of the budget was not delivered and
     // has to ride the next digest, so returning every id silently drops notices.
-    for (const n of [1, 2, 3])
-      enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: `msg${n}` })
+    for (const n of [1, 2, 3]) enqueueInbox(db, { agentId: 'lead', kind: 'alert', body: `msg${n}` })
     const rows = listUndeliveredInbox(db, 'lead')
     expect(rows).toHaveLength(3)
 
@@ -215,33 +214,6 @@ describe('agent inbox (durable mailbox)', () => {
     // Marking only the included row leaves the rest pending for the next pass.
     markInboxDelivered(db, tight.includedIds, 'digest')
     expect(listUndeliveredInbox(db, 'lead').map((r) => r.body)).toEqual(['msg2', 'msg3'])
-  })
-
-  it('splitInboxByAddressing: a signal is ambient, everything else is a request', () => {
-    // `kind` carried this distinction since the mailbox shipped and nothing read
-    // it, so a task result the agent had to synthesize and a peer's passing FYI
-    // arrived in the same undifferentiated bullet list.
-    enqueueInbox(db, { agentId: 'lead', kind: 'task_update', body: 'a finished' })
-    enqueueInbox(db, { agentId: 'lead', kind: 'alert', body: 'delivery failed' })
-    enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: 'starting on the schema' })
-    const { addressed, ambient } = splitInboxByAddressing(listUndeliveredInbox(db, 'lead'))
-    expect(addressed.map((r) => r.body)).toEqual(['a finished', 'delivery failed'])
-    expect(ambient.map((r) => r.body)).toEqual(['starting on the schema'])
-  })
-
-  it('packInboxRows: usedChars is what a second section has left to spend', () => {
-    // The envelope renders two sections from ONE budget. If `usedChars` did not
-    // report the real spend, the second section would get a fresh ceiling and the
-    // mailbox's 4000-char bound would quietly become 8000.
-    for (const n of [1, 2, 3])
-      enqueueInbox(db, { agentId: 'lead', kind: 'signal', body: `msg${n}` })
-    const rows = listUndeliveredInbox(db, 'lead')
-    const twoLines = ('- msg1'.length + 1) * 2
-    const first = packInboxRows(rows, twoLines)
-    expect(first.bodies).toEqual(['- msg1', '- msg2'])
-    expect(first.usedChars).toBe(twoLines)
-    // Nothing left: the third row is not rendered and so is not marked.
-    expect(packInboxRows(rows.slice(2), twoLines - first.usedChars).includedIds).toEqual([])
   })
 
   it('packInboxRows: a row cannot carry an inter-session header of its own', () => {
@@ -278,7 +250,7 @@ describe('agent inbox (durable mailbox)', () => {
     db.insert(agents)
       .values({ id: 'alive', name: 'Alive', gatewayId: 'g', createdAt: now, updatedAt: now })
       .run()
-    enqueueInbox(db, { agentId: 'alive', kind: 'signal', body: 'fresh, keep me' })
+    enqueueInbox(db, { agentId: 'alive', kind: 'alert', body: 'fresh, keep me' })
     enqueueInbox(db, { agentId: 'ghost-agent', kind: 'alert', body: 'recipient is gone' })
     // A live agent's row that is simply OLD is stale mail nobody will ever read.
     db.insert(agentInbox)
@@ -286,7 +258,7 @@ describe('agent inbox (durable mailbox)', () => {
         id: 'old-row',
         agentId: 'alive',
         teamId: null,
-        kind: 'signal',
+        kind: 'alert',
         body: 'ancient',
         taskId: null,
         createdAt: now - 31 * 24 * 60 * 60_000,

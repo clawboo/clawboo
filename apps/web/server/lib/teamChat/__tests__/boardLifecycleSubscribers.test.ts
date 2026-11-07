@@ -21,6 +21,7 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  executionProcesses,
   listUndeliveredInbox,
   releaseTask,
   updateStatus,
@@ -393,6 +394,38 @@ describe('board lifecycle subscribers', () => {
     expect(mail[0]!.body).toContain('failed')
   })
 
+  it('reports a finished run someone else labelled openclaw: only the marker makes it the engine’s', () => {
+    const db = getDb()
+    const t = createTask(db, {
+      title: 'reported',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    claimTask(db, t.id, 'a2')
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    completeExecutionProcess(db, ex.id, { status: 'succeeded' })
+
+    expect(listUndeliveredInbox(db, 'leader', { teamId: TEAM })).toHaveLength(1)
+  })
+
+  it('SKIPS an engine run from before the marker: its label says whose it is', () => {
+    const db = getDb()
+    const t = createTask(db, {
+      title: 'old engine step',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    claimTask(db, t.id, 'a2')
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    db.update(executionProcesses)
+      .set({ engineRun: null })
+      .where(eq(executionProcesses.id, ex.id))
+      .run()
+    completeExecutionProcess(db, ex.id, { status: 'succeeded' })
+
+    expect(listUndeliveredInbox(db, 'leader', { teamId: TEAM })).toHaveLength(0)
+  })
+
   it('SKIPS an engine-owned (openclaw) terminal — the engine reflects those itself', () => {
     // Without this skip every cascade step is written twice: once as the
     // engine's `[Task Update]` reflection and again as a digest line.
@@ -403,7 +436,11 @@ describe('board lifecycle subscribers', () => {
       sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
     })
     claimTask(db, t.id, 'a2')
-    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    const ex = createExecutionProcess(db, {
+      taskId: t.id,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
     completeExecutionProcess(db, ex.id, { status: 'succeeded' })
 
     expect(listUndeliveredInbox(db, 'leader', { teamId: TEAM })).toHaveLength(0)

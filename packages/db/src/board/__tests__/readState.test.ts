@@ -7,13 +7,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { TASK_STATUSES, type TaskStatus } from '@clawboo/board-core'
+import { LOCAL_PERSON, TASK_STATUSES, type TaskStatus } from '@clawboo/board-core'
 import { eq, sql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createDb, openDb, type ClawbooDb } from '../../db'
+import type { PersonRecord } from '../../person'
 import { ensureSchema } from '../../schemaBootstrap'
+import { recordTaskWake } from '../../taskWakes'
 import { attentionForTasks, taskIdsNeedingPerson } from '../attention'
+import { liftPause, placePause } from '../pauses'
 import {
   addComment,
   claimTask,
@@ -30,6 +33,7 @@ import {
   markAllTasksRead,
   markTaskRead,
   readerLastRead,
+  readerOfPerson,
   runOwnWrite,
   taskReadStates,
   unreadTasks,
@@ -60,6 +64,136 @@ function readTask(title = 'Write the post', reader: string = LOCAL_READER): stri
   markTaskRead(db, reader, task.id, seqOf(task.id))
   return task.id
 }
+
+describe('a run a person’s wake starts', () => {
+  const claim = (taskId: string) =>
+    claimTask(db, taskId, 'a1', 'codex', { run: { executorType: 'codex' } })
+
+  /** A person's comment on a task, as the comment route writes it, and its wake. */
+  const comment = (taskId: string, reader: string, person: PersonRecord | null = null): void => {
+    const written = runOwnWrite(db, reader, taskId, () =>
+      addComment(db, taskId, 'try the other file', 'user', null, { kind: 'person', person }),
+    )
+    recordTaskWake(db, {
+      teamId: 'T',
+      agentId: 'a1',
+      taskId,
+      reason: 'person_comment',
+      commentIds: [written.id],
+    })
+  }
+
+  it('reads as theirs when its claim takes the wake, and what follows is news', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    expect(claim(id).ok).toBe(true)
+    expect(stateOf(id)).toMatchObject({ unread: false, activity: { kind: 'status' } })
+
+    addComment(db, id, 'found it', 'agent', 'a1', { kind: 'agent' })
+    expect(unreadIds()).toEqual([id])
+  })
+
+  it('leaves unread what they had not read', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    addComment(db, id, 'found it', 'agent', 'a1', { kind: 'agent' })
+    claim(id)
+    expect(unreadIds()).toEqual([id])
+  })
+
+  it('reads as theirs for the person the comment names, and as news for anyone else', () => {
+    const reader = readerOfPerson({ id: 'p-priya' })
+    const other = readerOfPerson({ id: 'p-sam' })
+    const id = readTask('Write the post', reader)
+    unreadIds(other) // caught up from here on
+    comment(id, reader, { id: 'p-priya', name: 'Priya', role: null })
+    claim(id)
+    expect(unreadIds(reader)).toEqual([])
+    expect(unreadIds(other)).toEqual([id])
+  })
+
+  it('is news when the claim takes no wake, or one no person is behind', () => {
+    const bare = readTask()
+    claim(bare)
+    expect(unreadIds()).toEqual([bare])
+
+    const fromWork = readTask('Next step')
+    recordTaskWake(db, { teamId: 'T', agentId: 'a1', taskId: fromWork, reason: 'dependency_done' })
+    claim(fromWork)
+    expect(unreadIds()).toContain(fromWork)
+  })
+
+  it('is news for a claim that opens no run, which takes no wake', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    claimTask(db, id, 'a1')
+    expect(unreadIds()).toEqual([id])
+  })
+
+  it('reads as theirs when the comment names the built-in person, as an answer does', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER, { ...LOCAL_PERSON })
+    expect(claim(id).ok).toBe(true)
+    expect(unreadIds()).toEqual([])
+    expect(readerOfPerson({ ...LOCAL_PERSON })).toBe(LOCAL_READER)
+    expect(
+      db
+        .select()
+        .from(taskReaders)
+        .all()
+        .map((r) => r.readerId),
+    ).toEqual([LOCAL_READER])
+  })
+
+  it('a claim a pause refuses marks nothing, and the one after the resume reads as theirs', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    placePause(db, { kind: 'agent', id: 'a1' })
+    addComment(db, id, 'found it', 'agent', 'a2', { kind: 'agent' })
+    expect(claim(id)).toMatchObject({ ok: false, reason: 'paused' })
+    expect(unreadIds()).toEqual([id])
+
+    markTaskRead(db, LOCAL_READER, id, seqOf(id))
+    liftPause(db, 'agent', 'a1')
+    expect(claim(id).ok).toBe(true)
+    expect(unreadIds()).toEqual([])
+  })
+
+  it('a resume’s claim with no person’s wake is news', () => {
+    const id = readTask()
+    placePause(db, { kind: 'agent', id: 'a1' })
+    expect(claim(id)).toMatchObject({ ok: false, reason: 'paused' })
+    expect(unreadIds()).toEqual([])
+    liftPause(db, 'agent', 'a1')
+    expect(claim(id).ok).toBe(true)
+    expect(unreadIds()).toEqual([id])
+  })
+
+  it('reads the same whoever claims it: the wake says whose it is, not the claimer', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    const claimed = claimTask(db, id, 'a1', 'claude-code', {
+      run: { executorType: 'openclaw', engineRun: true },
+    })
+    expect(claimed.execution).toMatchObject({ engineRun: 1 })
+    expect(unreadIds()).toEqual([])
+  })
+
+  it('a teammate’s wake taken with a person’s leaves what the teammate said unread', () => {
+    const id = readTask()
+    comment(id, LOCAL_READER)
+    const said = addComment(db, id, 'here is the key', 'agent', 'a2', { kind: 'agent' })
+    recordTaskWake(db, {
+      teamId: 'T',
+      agentId: 'a1',
+      taskId: id,
+      reason: 'agent_comment',
+      commentIds: [said.id],
+    })
+    expect(claim(id).ok).toBe(true)
+    expect(unreadIds()).toEqual([id])
+  })
+})
 
 describe('what counts as a change', () => {
   it('a new task from someone else is unread', () => {

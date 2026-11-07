@@ -597,9 +597,12 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       // The last attempt failed too: a person decides, as on the task runner. The
       // starting point stays, so a person's Retry is measured from it.
       updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'verification', state: 'failed' } })
+      // An attempt that passed counts against the limit, as a comment's turn after a pass
+      // does, but it is not a failure.
+      const failures = verdict.attempts.filter((a) => a.status !== 'pass').length
       note(
         taskId,
-        `Verification failed ${verdict.attempts.length} times and the fix loop is exhausted, so the task waits for a person. See the verification comments above for what failed.`,
+        `Verification failed ${failures === 1 ? 'once' : `${failures} times`} and the fix loop is exhausted, so the task waits for a person. See the verification comments above for what failed.`,
       )
       return { verdict: 'failed', reason }
     }

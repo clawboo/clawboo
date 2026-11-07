@@ -206,6 +206,14 @@ process.exitCode = ${code}
     expect(error).toMatchObject({ kind: 'error', code: 'context_overflow', fatal: true })
   })
 
+  it('a quiet reply does not carry the startup banner', async () => {
+    const banner = CAPTURED_STDOUT.split('\n')[0]
+    const result = await resultOf(`${banner}\nThe parser is fixed.\n`, '\nsession_id: s4\n', 0)
+    expect(result.summary).toBe('The parser is fixed.')
+    // Nor does a run that printed the banner and nothing else claim it as its reply.
+    expect((await resultOf(`${banner}\n`, '\nsession_id: s5\n', 0)).summary).toBe('')
+  })
+
   it('a successful run that happens to mention the words is untouched', async () => {
     const result = await resultOf(`${GIVE_UP}\n`, '\nsession_id: s3\n', 0)
     expect(result.ok).toBe(true)

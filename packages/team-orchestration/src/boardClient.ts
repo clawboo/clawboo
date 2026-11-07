@@ -78,13 +78,16 @@ export interface ExecutionRef {
 
 /** One ledger row of a task's run history — the durable input to the ready-pump's
  *  fire policy (a `cancelled` last run = user Stop = never auto-refire) and to
- *  resume()'s ownership check (`executorType` tells the engine whether a running
+ *  resume()'s ownership check (`isEngineRun` tells the engine whether a running
  *  exec is its OWN fire — watchdog-attachable — or an executor-runner run whose
  *  events it will never see and must not falsely time out). */
 export interface ExecutionSummary {
   id: string
   status: string
   executorType?: string
+  /** The row's engine marker. A host that gives neither this nor `executorType` has
+   *  only the engine's own runs to report. */
+  engineRun?: number | boolean | null
   /** The class a failed run was filed under (the runtime error taxonomy). */
   errorClass?: string | null
   /** When it ended, and whether it made visible progress: the no-progress brake

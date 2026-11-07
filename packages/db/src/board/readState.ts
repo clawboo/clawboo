@@ -16,15 +16,32 @@
 // The "since you last looked" line on the Board is a separate, per-browser view of
 // what MOVED (useSeenBoard); this is the one record of what was READ.
 
-import { and, asc, desc, eq, gt, isNull, max, or, sql } from 'drizzle-orm'
+import { isLocalPerson, wakeFromPerson } from '@clawboo/board-core'
+import { and, asc, desc, eq, gt, inArray, isNull, max, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import { taskActivity, taskReaders, taskReads, tasks } from '../schema'
+import { parsePersonJson } from '../person'
+import {
+  taskActivity,
+  taskComments,
+  taskReaders,
+  taskReads,
+  tasks,
+  type DbTaskWake,
+} from '../schema'
+import { wakeCommentIds } from '../taskWakes'
 import { immediateWrite, withWriteRetry } from './contention'
 
 /** The one built-in reader on an install with no sign-in. A local person would
  *  replace it (see readerOf in the server's boardReader.ts). */
 export const LOCAL_READER = 'local'
+
+/** Whose read state belongs to this person: a verified person's own, else the built-in
+ *  reader's. A comment can name the built-in person (an answer or a Reopen does), and
+ *  that person is the built-in reader. */
+export function readerOfPerson(person: { id: string } | null): string {
+  return person && !isLocalPerson(person.id) ? `person:${person.id}` : LOCAL_READER
+}
 
 export type TaskActivityKind = 'created' | 'status' | 'edited' | 'comment'
 
@@ -63,7 +80,8 @@ export function readerLastRead(db: ClawbooDb, readerId: string): number {
   )
 }
 
-function activitySeqOf(db: ClawbooDb, taskId: string): number {
+/** The position of the task's newest change, 0 when it has none on record. */
+export function activitySeqOf(db: ClawbooDb, taskId: string): number {
   return (
     db
       .select({ seq: taskActivity.seq })
@@ -279,6 +297,64 @@ export function markAllTasksRead(
       return
     }
     noteReaderRead(db, readerId, Math.max(baseline, mark))
+  })
+}
+
+/** Whose read state a person's wakes belong to: whoever wrote the comments they carry.
+ *  One with no comment, such as a Reopen with no note, names no one, and the built-in
+ *  reader stands in. A wake no person is behind belongs to nobody. */
+export function readersBehindWakes(db: ClawbooDb, wakes: readonly DbTaskWake[]): string[] {
+  const fromPeople = wakes.filter((w) => wakeFromPerson(w.reason))
+  if (fromPeople.length === 0) return []
+  const ids = fromPeople.flatMap((w) => wakeCommentIds(w))
+  const written =
+    ids.length === 0
+      ? []
+      : db
+          .select({ person: taskComments.person })
+          .from(taskComments)
+          .where(and(inArray(taskComments.id, ids), eq(taskComments.authorType, 'user')))
+          .all()
+  if (written.length === 0) return [LOCAL_READER]
+  return [...new Set(written.map((c) => readerOfPerson(parsePersonJson(c.person))))]
+}
+
+/**
+ * A change just made for these readers some time after they asked for it: the pump moving
+ * a card for a person's comment once a hold lifts, or the claim of the run that comment
+ * starts. It is their doing, so it does not come back to them as news. But they are not
+ * looking at the task now, so unlike `runOwnWrite` it reads nothing for them: a reader
+ * with something unread before the change (`before`, an `activitySeqOf`) still has it.
+ * Call it in the change's own transaction, for the reason `runOwnWrite` gives.
+ */
+export function readLaterOwnChange(
+  db: ClawbooDb,
+  readerIds: readonly string[],
+  taskId: string,
+  before: number,
+): void {
+  const after = activitySeqOf(db, taskId)
+  if (after <= before) return
+  for (const readerId of readerIds) {
+    const baseline = readerBaseline(db, readerId)
+    if (before > Math.max(baseline, readSeqOf(db, readerId, taskId))) continue
+    writeRead(db, readerId, taskId, after)
+    noteReaderRead(db, readerId, baseline)
+  }
+}
+
+/** Run a write made for these readers some time after they asked: see `readLaterOwnChange`. */
+export function runLaterOwnWrite<T>(
+  db: ClawbooDb,
+  readerIds: readonly string[],
+  taskId: string,
+  write: () => T,
+): T {
+  return immediateWrite(db, () => {
+    const before = activitySeqOf(db, taskId)
+    const result = write()
+    readLaterOwnChange(db, readerIds, taskId, before)
+    return result
   })
 }
 

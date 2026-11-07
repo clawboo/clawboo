@@ -67,6 +67,23 @@ describe('gatewayRunFailureText — a context-overflow label', () => {
     }
   })
 
+  it('does not read a rate limit as an overflow, whatever words it uses', () => {
+    // apps/web/server/lib/__tests__/runFailureText.test.ts pins the same reading.
+    for (const raw of [
+      'Tokens per minute limit exceeded - too many tokens processed.',
+      '429 too many tokens',
+      'Rate limit: too many tokens',
+      'Too many tokens, please wait before trying again.',
+      'HTTP 429: too many tokens',
+    ]) {
+      expect(gatewayRunFailureText(raw)).toBe(`The run failed: ${raw}`)
+    }
+    // Without those words the same phrase still names the context window.
+    expect(gatewayRunFailureText('too many tokens in the request')).toMatch(
+      /context-window setting/i,
+    )
+  })
+
   it('leaves an unrelated failure verbatim, so real errors still reach the user', () => {
     expect(gatewayRunFailureText('ECONNREFUSED 127.0.0.1:18789')).toBe(
       'The run failed: ECONNREFUSED 127.0.0.1:18789',

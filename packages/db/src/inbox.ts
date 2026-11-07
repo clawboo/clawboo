@@ -11,7 +11,8 @@ import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
 import { agentInbox, type DbAgentInboxRow } from './schema'
 
-export type InboxKind = 'task_update' | 'alert' | 'signal'
+export type InboxKind = 'task_update' | 'alert'
+/** `signal` is a run's own live channel: a steer that landed. */
 export type InboxChannel = 'digest' | 'mcp' | 'signal'
 
 export interface EnqueueInboxInput {
@@ -108,16 +109,11 @@ export const INBOX_BUDGET_CHARS = 4_000
  * was rendered, and a caller must mark delivered only those — a row truncated out
  * of the budget was not delivered, and silently marking it would break the
  * mailbox's whole promise.
- *
- * Separate from `renderInboxDigest` because a caller that renders rows in more
- * than one section (the turn envelope splits them by addressing) has to spend ONE
- * budget across both and union the ids. Re-implementing the loop per section is
- * how the two halves would drift apart and start over-marking.
  */
 export function packInboxRows(
   rows: DbAgentInboxRow[],
   budgetChars: number,
-): { bodies: string[]; includedIds: string[]; usedChars: number } {
+): { bodies: string[]; includedIds: string[] } {
   const bodies: string[] = []
   const includedIds: string[] = []
   let used = 0
@@ -133,27 +129,7 @@ export function packInboxRows(
     includedIds.push(r.id)
     used += line.length + 1
   }
-  return { bodies, includedIds, usedChars: used }
-}
-
-/**
- * Split rows by whether they are DIRECTED at this agent or merely ambient.
- *
- * `kind` has carried this distinction since the mailbox shipped; nothing read it.
- * A `task_update` is a result the agent must synthesize and an `alert` is a
- * coordination failure it has to act on — both are requests. A `signal` is a peer
- * saying something in passing: useful, but it is evidence, not an instruction.
- * Flattening the two into one bullet list is what made "stop, I already fixed
- * that" read as ignorable.
- */
-export function splitInboxByAddressing(rows: DbAgentInboxRow[]): {
-  addressed: DbAgentInboxRow[]
-  ambient: DbAgentInboxRow[]
-} {
-  const addressed: DbAgentInboxRow[] = []
-  const ambient: DbAgentInboxRow[] = []
-  for (const r of rows) (r.kind === 'signal' ? ambient : addressed).push(r)
-  return { addressed, ambient }
+  return { bodies, includedIds }
 }
 
 /**
