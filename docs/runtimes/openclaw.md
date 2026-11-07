@@ -203,7 +203,7 @@ Clawboo keeps two connections to the Gateway. Both use a device identity that yo
 - records activity and token use from OpenClaw sessions, including ones Clawboo didn't start, such as a channel message or one of an agent's own cron jobs;
 - registers its MCP servers in the Gateway's configuration, and passes your comments into running tasks.
 
-**The browser's connection** goes through the Clawboo server, which adds the saved Gateway token, so the server never sends that token to the browser. It carries your 1:1 chats with an OpenClaw agent and streams replies as they arrive. The Clawboo server never sees those replies, so an OpenClaw Boo Zero cannot hand work to a team from its own chat. Ask in the team's chat instead, where the server runs it. See [Boo Zero](/using/boo-zero#give-a-team-work-from-this-chat).
+**The browser's connection** goes through the Clawboo server, which adds the saved Gateway token, so the server never sends that token to the browser. It carries your 1:1 chats with an OpenClaw agent and streams replies as they arrive. The Clawboo server forwards those replies without reading them, so an OpenClaw Boo Zero cannot hand work to a team from its own chat. Ask in the team's chat instead, where the server runs it. See [Boo Zero](/using/boo-zero#give-a-team-work-from-this-chat).
 
 **When the Gateway is down**, your OpenClaw agents still show (from Clawboo's last copy) but can't run. You can't create an OpenClaw agent or edit its files: **Create Boo** makes a Clawboo Native agent instead, and says so. Deleting an OpenClaw agent is remembered and sent to the Gateway when it reconnects. If you also have agents on other runtimes, the dashboard loads as usual with a banner, "OpenClaw Gateway is offline", and a **Reconnect** button.
 

@@ -201,13 +201,24 @@ function probeError(err: unknown): string {
  * same fact, emitted as a round-trip ISO string so parsing does not depend on
  * the machine's locale.
  */
-export function processStartTimes(pids: readonly number[]): StartTimes {
+export function processStartTimes(
+  pids: readonly number[],
+  read: (safe: readonly number[]) => StartTimes = readStartTimes,
+): StartTimes {
   // The pids reach a command line below, and the only validation a record
   // carries is `typeof pid === 'number'`. A float, or a value large enough to
   // format as `1e+21`, would arrive as a malformed argument.
   const safe = pids.filter((p) => Number.isInteger(p) && p > 0)
   if (safe.length === 0) return { ok: true, times: new Map() }
+  // Once more if it could not answer. A PowerShell start on a machine still busy (a
+  // reboot, a crash, a virus scan) can outlast the timeout, and the try before warms
+  // the next: seen as over 30 s, then 23 s, then 0.3 s. A host with no tool fails at
+  // once both times.
+  const first = read(safe)
+  return first.ok ? first : read(safe)
+}
 
+function readStartTimes(safe: readonly number[]): StartTimes {
   const times = new Map<number, number>()
   try {
     if (process.platform === 'win32') {
@@ -264,7 +275,8 @@ export function processStartTimes(pids: readonly number[]): StartTimes {
 }
 
 /** Generous, because this is one call at boot on a possibly loaded machine, and
- *  a probe that times out is worse than a probe that takes a moment. */
+ *  a probe that times out is worse than a probe that takes a moment. Tried twice
+ *  (see `processStartTimes`), so a boot can wait for twice this. */
 const WINDOWS_PROBE_TIMEOUT_MS = 30_000
 
 /** Whether ANY process holds this pid. Signal 0 checks existence without sending. */

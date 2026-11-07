@@ -57,12 +57,12 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | A person's inbox, with read state on the server     | `board.inbox`                                                                      | Supported                      | Planned     | Planned       |
 | A person's request as one main task                 | `board.mainTasks`                                                                  | Supported                      | Planned     | Planned       |
 | Comments that reach a running task                  | `board.steering`                                                                   | Supported                      | Planned     | Planned       |
-| Readable task ids                                   | `board.readableIds`                                                                |
-| Team labels on tasks                                | `board.labels`                                                                     |
+| Readable task ids                                   | `board.readableIds`                                                                | Supported                      | Planned     | Planned       |
+| Team labels on tasks                                | `board.labels`                                                                     | Supported                      | Planned     | Planned       |
 | Agents that wake on what happens to their task      | `board.wakes`                                                                      | Supported                      | Planned     | Planned       |
-| Agents waking each other, once you allow it         | `board.agentWakes`                                                                 | Supported                      |
-| A job waits for a person at its limit of runs       | `board.jobLimit`                                                                   | Supported                      |
-| Plans, and asking before one starts                 | `board.planDocuments`, `board.planApproval`                                        | Supported                      |
+| Agents waking each other, once you allow it         | `board.agentWakes`                                                                 | Supported                      | Planned     | Planned       |
+| A job waits for a person at its limit of runs       | `board.jobLimit`                                                                   | Supported                      | Planned     | Planned       |
+| Plans, and asking before one starts                 | `board.planDocuments`, `board.planApproval`                                        | Supported                      | Planned     | Planned       |
 | Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                         | Supported                      | Planned     | Planned       |
 | The person check on person writes                   | `board.personCheck`                                                                | Supported                      | Planned     | Planned       |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                              | Supported                      | Planned     | Planned       |

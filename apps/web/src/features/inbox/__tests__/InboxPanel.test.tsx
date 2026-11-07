@@ -57,9 +57,10 @@ beforeEach(() => {
     selectedTeamId: null,
   })
   server.use(
-    http.get('/api/board', () => {
+    http.get('/api/board', ({ request }) => {
       boardReads += 1
-      return HttpResponse.json({ tasks: rows })
+      const teamId = new URL(request.url).searchParams.get('teamId')
+      return HttpResponse.json({ tasks: teamId ? rows.filter((r) => r.teamId === teamId) : rows })
     }),
     http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
     http.get('/api/access/identity', () =>
@@ -384,14 +385,89 @@ describe('InboxPanel', () => {
 
   it('a team filter limits the list and the marking', async () => {
     useTeamStore.setState({ selectedTeamId: null })
-    rows = [row('a', { unread: true, activity: { seq: 8, kind: 'comment', at: Date.now() } })]
+    rows = [
+      row('other', {
+        teamId: 'team-b',
+        unread: true,
+        activity: { seq: 9, kind: 'comment', at: Date.now() },
+      }),
+      row('a', { unread: true, activity: { seq: 8, kind: 'comment', at: Date.now() - 1000 } }),
+    ]
     mount()
-    await waitFor(() => expect(listed()).toEqual(['a']), T)
+    await waitFor(() => expect(listed()).toEqual(['other', 'a']), T)
     await userEvent.click(screen.getByLabelText('Filter by team'))
     await userEvent.click(await screen.findByRole('option', { name: /Research/ }))
     await waitFor(() => expect(listed()).toEqual(['a']), T)
     await userEvent.click(screen.getByRole('button', { name: 'Mark all read' }))
     await waitFor(() => expect(allReads).toEqual([{ through: 8, teamId: 'team-a' }]), T)
+  })
+
+  it('offers no Mark all read until the chosen team’s rows have loaded', async () => {
+    useTeamStore.setState({ selectedTeamId: null })
+    rows = [row('a', { unread: true, activity: { seq: 8, kind: 'comment', at: Date.now() } })]
+    let answerTeam = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      answerTeam = resolve
+    })
+    server.use(
+      http.get('/api/board', async ({ request }) => {
+        if (new URL(request.url).searchParams.get('teamId')) {
+          await held
+          return new HttpResponse(null, { status: 500 })
+        }
+        return HttpResponse.json({ tasks: rows })
+      }),
+    )
+    mount()
+    await screen.findByRole('button', { name: 'Mark all read' }, T)
+    await userEvent.click(screen.getByLabelText('Filter by team'))
+    await userEvent.click(await screen.findByRole('option', { name: /Research/ }))
+    // Still the last team's rows: their newest change says nothing about this team.
+    expect(screen.queryByRole('button', { name: 'Mark all read' })).not.toBeInTheDocument()
+    answerTeam()
+    await screen.findByTestId('inbox-fetch-error', {}, T)
+    expect(screen.queryByRole('button', { name: 'Mark all read' })).not.toBeInTheDocument()
+    expect(allReads).toEqual([])
+  })
+
+  it('from Needs you, the drawer steps through Needs you and not every task', async () => {
+    rows = [
+      row('stuck', {
+        status: 'blocked',
+        attention: { reason: 'failed', failedRuns: 1 },
+        activity: { seq: 9, kind: 'status', at: Date.now() },
+      }),
+      // Next in change order, and it would be marked read by stepping onto it.
+      row('other', {
+        unread: true,
+        activity: { seq: 3, kind: 'comment', at: Date.now() - 1000 },
+      }),
+    ]
+    mount()
+    await userEvent.click(await screen.findByRole('button', { name: /Open “Task stuck”/ }, T))
+    expect(await screen.findByTestId('task-position', {}, T)).toHaveTextContent('1 of 1')
+    expect(screen.getByRole('button', { name: 'Next task' })).toBeDisabled()
+    expect(reads).toEqual([])
+  })
+
+  it('on Unread, the drawer can step back to a task it just marked read', async () => {
+    const at = Date.now()
+    rows = [
+      row('a', { unread: true, activity: { seq: 9, kind: 'comment', at } }),
+      row('b', { unread: true, activity: { seq: 8, kind: 'comment', at: at - 1000 } }),
+    ]
+    mount()
+    await waitFor(() => expect(listed()).toEqual(['a', 'b']), T)
+    await userEvent.click(screen.getAllByTestId('inbox-row')[0]!)
+    await waitFor(() => expect(reads.map((r) => r.taskId)).toEqual(['a']), T)
+    await userEvent.click(screen.getByRole('button', { name: 'Next task' }))
+    await waitFor(() => expect(reads.map((r) => r.taskId)).toEqual(['a', 'b']), T)
+    expect(screen.getByTestId('task-position')).toHaveTextContent('2 of 2')
+    const previous = screen.getByRole('button', { name: 'Previous task' })
+    expect(previous).toBeEnabled()
+    await userEvent.click(previous)
+    await screen.findAllByText('Task a', {}, T)
+    expect(screen.getByTestId('task-position')).toHaveTextContent('1 of 2')
   })
 
   it('says so when nothing is unread', async () => {

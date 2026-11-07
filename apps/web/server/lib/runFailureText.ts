@@ -13,7 +13,7 @@ import { classifyError, isAccountError, isTransientError } from '@clawboo/obs'
 
 import { getDescriptor, isRuntimeId } from './runtimes/descriptor'
 import { OLLAMA_FALLBACK_MODEL, ollamaPullCommand } from './runtimes/native/ollamaModels'
-import { isContextOverflowMessage } from './runtimes/native/providers/types'
+import { readsAsContextOverflow } from './runtimes/native/providers/types'
 
 /**
  * A run whose stream died without ever reaching a terminal (a dropped connection,
@@ -154,7 +154,7 @@ export function runFailureText(
   // Clawboo runs itself gets a plain sentence: the drains that drop its session say so
   // instead of this (see SESSION_DROPPED_TEXT), and this covers an overflow they could
   // not confirm.
-  if (isContextOverflowMessage(errorMessage ?? '')) {
+  if (readsAsContextOverflow(errorMessage ?? '')) {
     if (runtime && isRuntimeId(runtime)) {
       return "This run outgrew the model's context window and stopped before it finished."
     }

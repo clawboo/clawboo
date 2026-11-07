@@ -290,8 +290,18 @@ export interface HermesRunState {
 }
 
 /** The security scanner's startup warning, printed before the reply. Only this one, and
- *  only before the reply starts: any other line is the model's own words. */
-const HERMES_TIRITH_BANNER_RE = /^\s*⚠\uFE0F?\s*tirith\b/iu
+ *  only before the reply starts: any other line, even one that warns about tirith, is the
+ *  model's own words. */
+const HERMES_TIRITH_BANNER_RE = /^\s*⚠\uFE0F?\s*tirith security scanner enabled\b/iu
+
+/** Everything a run printed on stdout from its first line that is not its startup warning. */
+export function withoutStartupBanner(stdout: string): string {
+  const lines = stdout.split('\n')
+  const start = lines.findIndex(
+    (l) => l.trim() && !HERMES_TIRITH_BANNER_RE.test(l) && !HERMES_SESSION_LINE.test(l),
+  )
+  return start === -1 ? '' : lines.slice(start).join('\n')
+}
 
 /** Recognized JSON frame → native events; null when the JSON is not a frame
  *  (a JSON-shaped response line then passes through as plain text). */
@@ -594,13 +604,7 @@ export function createHermesDriver(
       const aborted = signal === 'SIGTERM' || signal === 'SIGKILL'
       const ok = code === 0
       const summary =
-        stripSessionInfo(state.lastText) ||
-        stripSessionInfo(
-          stdout
-            .split('\n')
-            .filter((l) => !HERMES_TIRITH_BANNER_RE.test(l))
-            .join('\n'),
-        )
+        stripSessionInfo(state.lastText) || stripSessionInfo(withoutStartupBanner(stdout))
       return [
         {
           type: 'result',

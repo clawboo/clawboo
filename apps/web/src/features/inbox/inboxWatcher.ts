@@ -4,11 +4,15 @@
 // browser alerts do, so a quiet board still comes right.
 //
 // Reads run one at a time. A wake while one is out runs once more after it, because
-// the read on the wire may have left before the change it was woken for.
+// the read on the wire may have left before the change it was woken for. So a read
+// that never answers has a deadline: left to hang, it would hold off every read after it.
 
 export interface InboxWatcherDeps {
-  /** Read the inbox and hold what it said. Resolves false when the read failed. */
-  read(): Promise<boolean>
+  /** Read the inbox and hold what it said. Resolves false when the read failed.
+   *  `signal` aborts when the read runs past `deadlineMs`. */
+  read(signal: AbortSignal): Promise<boolean>
+  /** How long a read gets before it counts as failed, and is aborted. */
+  deadlineMs: number
   /** How long after the first event of a burst the read waits for the rest. */
   batchMs: number
   /** When a read fails, read again after these waits, then wait for the next event. */
@@ -32,6 +36,7 @@ export function createInboxWatcher(deps: InboxWatcherDeps): InboxWatcher {
   let queued = false
 
   const onRead = (ok: boolean): void => {
+    if (stopped) return
     if (ok) {
       if (retry !== null) clearTimeout(retry)
       retry = null
@@ -47,6 +52,28 @@ export function createInboxWatcher(deps: InboxWatcherDeps): InboxWatcher {
     }, wait)
   }
 
+  // Ends the read on the wire: past its deadline, or because the watcher stopped.
+  let endRead: (() => void) | null = null
+  const readOnce = (): Promise<boolean> =>
+    new Promise((resolve) => {
+      const abort = new AbortController()
+      const settle = (ok: boolean): void => {
+        clearTimeout(deadline)
+        if (endRead === giveUp) endRead = null
+        resolve(ok)
+      }
+      const giveUp = (): void => {
+        abort.abort()
+        settle(false)
+      }
+      endRead = giveUp
+      const deadline = setTimeout(giveUp, deps.deadlineMs)
+      deps
+        .read(abort.signal)
+        .catch(() => false)
+        .then(settle)
+    })
+
   const run = (): Promise<void> => {
     if (stopped) return Promise.resolve()
     if (running) {
@@ -58,7 +85,7 @@ export function createInboxWatcher(deps: InboxWatcherDeps): InboxWatcher {
         let again = true
         while (again && !stopped) {
           queued = false
-          const ok = await deps.read().catch(() => false)
+          const ok = await readOnce()
           onRead(ok)
           again = queued
         }
@@ -89,6 +116,7 @@ export function createInboxWatcher(deps: InboxWatcherDeps): InboxWatcher {
       batch = null
       retry = null
       queued = false
+      endRead?.()
     },
   }
 }

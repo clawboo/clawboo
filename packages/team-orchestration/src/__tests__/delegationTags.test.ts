@@ -445,6 +445,63 @@ describe('findActionableHandOffs: a tag starts work only where a reader sees a t
   const tag = '<delegate to="@Growth/Coder">fix the parser</delegate>'
   const planTag = '<plan><step to="@Growth/Coder">one</step></plan>'
 
+  it('an opener shown with no close does not take the real tag’s closer', () => {
+    const found = findActionableHandOffs(
+      `The syntax starts \`<delegate to="@Name">\`, like this: ${tag}`,
+    )
+    expect(found.delegates.map((b) => b.task)).toEqual(['fix the parser'])
+    expect(found.shownDelegates).toEqual([])
+    expect(
+      looksLikeBrokenHandOff(`The syntax starts \`<delegate to="@Name">\`, like this: ${tag}`),
+    ).toBe(false)
+    // A whole tag shown first stays shown, and the real one still counts.
+    const both = findActionableHandOffs(`\`${tag}\` is the form. ${tag}`)
+    expect(both.delegates).toHaveLength(1)
+    expect(both.shownDelegates).toHaveLength(1)
+    // Code in a real brief is left in it, opener and all.
+    const brief = findActionableHandOffs(
+      '<delegate to="@Growth/Coder">explain `<delegate to="@X">` to them</delegate>',
+    )
+    expect(brief.delegates.map((b) => b.task)).toEqual(['explain `<delegate to="@X">` to them'])
+  })
+
+  it('a line straight after a quote’s words is still the quote', () => {
+    for (const reply of [
+      `> Here is what I would send:\n${tag}`,
+      `> Here is what I would send:\nand then\n${tag}`,
+    ]) {
+      const found = findActionableHandOffs(reply)
+      expect(found.delegates).toEqual([])
+      expect(found.shownDelegates).toHaveLength(1)
+    }
+    // A blank line, or anything that ends a paragraph, ends it.
+    for (const reply of [`> Your words.\n\n${tag}`, `> Your words.\n- ${tag}`, `>\n${tag}`]) {
+      expect(findActionableHandOffs(reply).delegates, reply).toHaveLength(1)
+    }
+  })
+
+  it('a tag partway through a quoted sentence is quoted', () => {
+    for (const reply of [
+      `She wrote: "please run ${tag} today" last week.`,
+      `She wrote: “please run ${tag} today” last week.`,
+      `She wrote: ‘please run ${tag} today’ last week.`,
+    ]) {
+      const found = findActionableHandOffs(reply)
+      expect(found.delegates, reply).toEqual([])
+      expect(found.shownDelegates, reply).toHaveLength(1)
+    }
+    // A quote that closed first, or quotes in the brief, are nothing of the kind.
+    for (const reply of [
+      `You said "soon". ${tag}`,
+      `"Soon" it is: ${tag} and the "numbers" next.`,
+      '<delegate to="@Growth/Coder">say "hi" to them</delegate>',
+      `${tag} ${tag}`,
+      `It's Growth's. ${tag} It's done.`,
+    ]) {
+      expect(findActionableHandOffs(reply).shownDelegates, reply).toEqual([])
+    }
+  })
+
   it('takes a tag in plain text', () => {
     const found = findActionableHandOffs(`On it. ${tag}`)
     expect(found.delegates.map((b) => b.task)).toEqual(['fix the parser'])

@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { resetInboxStore } from '@/features/inbox/inboxStore'
+import { resetInboxStore, useInboxStore } from '@/features/inbox/inboxStore'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
@@ -1318,7 +1318,7 @@ describe('BoardPanel and the read state on the server', () => {
           ],
         }),
       ),
-      http.post('/api/board/inbox/read', () =>
+      http.post('/api/board/t1/read', () =>
         HttpResponse.json({ error: 'person_only' }, { status: 403 }),
       ),
     )
@@ -1337,7 +1337,7 @@ describe('BoardPanel and the read state on the server', () => {
     expect(screen.queryByTestId('board-since')).not.toBeInTheDocument()
   })
 
-  it('Mark seen tells the server too, through what the board showed', async () => {
+  it('Mark seen tells the server too, each card through what the board showed', async () => {
     resetInboxStore()
     const marked: unknown[] = []
     window.localStorage.setItem(
@@ -1364,9 +1364,9 @@ describe('BoardPanel and the read state on the server', () => {
           ],
         }),
       ),
-      http.post('/api/board/inbox/read', async ({ request }) => {
-        marked.push(await request.json())
-        return HttpResponse.json({ ok: true })
+      http.post('/api/board/:taskId/read', async ({ params, request }) => {
+        marked.push({ id: params['taskId'], ...((await request.json()) as object) })
+        return HttpResponse.json({ ok: true, unread: false })
       }),
     )
     render(
@@ -1376,6 +1376,58 @@ describe('BoardPanel and the read state on the server', () => {
     )
     const since = await screen.findByTestId('board-since')
     await userEvent.click(within(since).getByRole('button', { name: 'Mark seen' }))
-    await waitFor(() => expect(marked).toEqual([{ through: 9 }]))
+    await waitFor(() => expect(marked).toEqual([{ id: 't1', through: 9 }]))
+  })
+
+  it('Mark seen leaves unread in the Inbox what the board is not showing', async () => {
+    resetInboxStore()
+    const marked: unknown[] = []
+    const day = 86_400_000
+    const now = Date.now()
+    window.localStorage.setItem(
+      'clawboo.board.seen.all',
+      JSON.stringify({
+        v: 1,
+        at: now - 3_600_000,
+        watching: false,
+        columns: { shown: 'todo', past: 'todo', folded: 'todo' },
+        pending: null,
+      }),
+    )
+    const unread = (seq: number) => ({ unread: true, activity: { seq, kind: 'status', at: 1 } })
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            { id: 'shown', title: 'On screen', status: 'done', ...unread(9) },
+            // Finished two months ago: outside the week on screen.
+            {
+              id: 'past',
+              title: 'Off the range',
+              status: 'done',
+              createdAt: now - 61 * day,
+              completedAt: now - 60 * day,
+              ...unread(8),
+            },
+            // In the Cancelled column, folded by default.
+            { id: 'folded', title: 'In the rail', status: 'cancelled', ...unread(7) },
+          ],
+        }),
+      ),
+      http.post('/api/board/:taskId/read', async ({ params, request }) => {
+        marked.push({ id: params['taskId'], ...((await request.json()) as object) })
+        return HttpResponse.json({ ok: true, unread: false })
+      }),
+    )
+    render(
+      <ThemeProvider>
+        <BoardPanel />
+      </ThemeProvider>,
+    )
+    const since = await screen.findByTestId('board-since')
+    await userEvent.click(within(since).getByRole('button', { name: 'Mark seen' }))
+    await waitFor(() => expect(marked).toEqual([{ id: 'shown', through: 9 }]))
+    // The whole board's mark would have taken the other two with it.
+    expect(useInboxStore.getState().allMark).toBe(0)
   })
 })

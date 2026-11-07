@@ -49,7 +49,7 @@ const RULES: Rule[] = [
   },
   {
     cls: 'RateLimited',
-    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota|usage[\s_-]?limit|per[\s_-]?min(?:ute)?|tpm|wait before)\b/i,
+    test: /\b(429|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|quota|usage[\s_-]?limit|per[\s_-]?(?:min(?:ute)?|hour|day)|this (?:minute|hour|day)|tp[mhd]|wait before)\b/i,
   },
   {
     cls: 'UserAborted',
@@ -109,7 +109,7 @@ const BILLING_WORDS =
   /\b(billing[\s_-]?error|account[\s_-]?on[\s_-]?hold|verification[\s_-]?required|credit balance|insufficient[\s_-]?(?:quota|credits?|funds|balance)|payment[\s_-]?required)\b/i
 
 /** A message that opens with the status 429, which any number after it does not change. */
-const OPENS_WITH_429 = /^\s*(?:(?:http|status|error(?: code)?:?)\s*)?429\b/i
+const OPENS_WITH_429 = /^\s*(?:(?:http|status|error(?: code)?):?\s*)?429\b/i
 
 /**
  * Classify a runtime/tool failure from its (often null) error `code` plus its

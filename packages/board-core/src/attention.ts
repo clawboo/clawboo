@@ -102,6 +102,8 @@ export interface TaskAttention {
   handedBack?: boolean
   /** For `agent_wakes`: the card and what it is about. */
   agentWakes?: AgentWakeCard
+  /** For `agent_wakes`: the task also failed its check, which stands whatever the answer. */
+  checkFailed?: boolean
   /** For `job_limit`: the job and how far it has gone. */
   jobLimit?: JobLimitCard
 }
@@ -208,7 +210,12 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
   // Only for a wait a teammate's comment could end, so a card left over from before can
   // never stand in front of a failure and the Retry it comes with.
   if (input.status === 'blocked' && input.agentWakes && teammateMayEndWait(waiting))
-    return { reason: 'agent_wakes', failedRuns, agentWakes: input.agentWakes }
+    return {
+      reason: 'agent_wakes',
+      failedRuns,
+      agentWakes: input.agentWakes,
+      ...(input.verificationBlocked ? { checkFailed: true } : {}),
+    }
   // A check that could not be parked: In progress or In review to the board, but
   // nothing is coming for it until a person looks or the move lands.
   if (open && waiting?.kind === 'verification' && waiting.state === 'park_pending')

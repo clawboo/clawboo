@@ -21,7 +21,8 @@
 //   boot matches AND the process holding its pid is shown to have started before
 //   our record (within `CHILD_START_TIME_SLACK_MS`). A runtime reap is a
 //   whole-tree kill of an agent, so a pid that cannot be shown to still be ours
-//   is left alone and counted.
+//   is left alone and counted, and its file stays, so a later start that can check
+//   reaps it. Dropped, that agent would run on with nothing left that knows of it.
 //
 // BEST EFFORT BY DESIGN: a read-only state directory or a corrupt file degrades
 // to "we cannot reap old runs", never to "the server will not start".
@@ -257,7 +258,8 @@ export interface RuntimeReapReport {
    *  process that started after our record. */
   expired: number
   /** Alive but NOT signalled, because this host could not report when the
-   *  process holding the pid started. Counted so the log shows the gap. */
+   *  process holding the pid started. Counted so the log shows the gap, and
+   *  their file stays for the next start. */
   unverified: number
   /** Files left alone because the engine that wrote them is still running. */
   liveEngines: number
@@ -363,6 +365,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       report.liveEngines += 1
       continue
     }
+    let leftUnverified = false
     for (const child of record.children) {
       if (!trusted(child)) {
         report.expired += 1
@@ -378,6 +381,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       if (!isAlive(child.pid)) continue
       if (!probe.ok) {
         report.unverified += 1
+        leftUnverified = true
         continue
       }
       // A recycled pid started AFTER we recorded the original; ours started just
@@ -394,7 +398,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
         /* best effort: one stubborn child must not stop the rest */
       }
     }
-    removeRecord(file)
+    if (!leftUnverified) removeRecord(file)
   }
   return report
 }

@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { currentBootIdentity, type BootIdentity } from '../../processIdentity'
 import {
@@ -45,6 +45,9 @@ function withoutPs<T>(run: () => T): T {
     rmSync(empty, { recursive: true, force: true })
   }
 }
+
+// A real probe on Windows is a PowerShell start, tried twice, each up to 30 s when busy.
+vi.setConfig({ testTimeout: 120_000 })
 
 describe('connector pid file', () => {
   let home: string

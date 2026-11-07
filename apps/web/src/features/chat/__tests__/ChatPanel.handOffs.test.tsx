@@ -1,8 +1,8 @@
 // Boo Zero's own chat. On a runtime the server runs, its hand-offs are real: an @Team
 // goes to the server with the message, the work shows as the team chat's card, and the
-// reply carries no "not handed off" note. On OpenClaw the reply goes from the browser
-// straight to the Gateway, so the server never sees it: no team work starts, the rules
-// say hand-offs are off, and a tag in the reply shows as the note.
+// reply carries no "not handed off" note. On OpenClaw the chat runs in the Gateway, and
+// the server only forwards its replies, unread: no team work starts, the rules say
+// hand-offs are off, and a tag in the reply shows as the note.
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
@@ -282,6 +282,18 @@ describe('when the browser and the server disagree about who Boo Zero is', () =>
     await waitFor(() => expect(posted).toHaveLength(1))
     expect(posted[0]!['message']).toMatch(/hand-offs are off here/i)
     expect(posted[0]!['message']).not.toContain('Hand-offs from this chat')
+  })
+
+  it('the server says so and the browser does not: an @Team still names the team', async () => {
+    seed('codex', key, null, true)
+    useBooZeroStore.setState({ booZeroAgentId: 'someone-else' })
+    renderPanel()
+    const input = screen.getByTestId('chat-composer-input')
+    fireEvent.change(input, { target: { value: '@Growth fix the parser' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(posted).toHaveLength(1))
+    expect(posted[0]!['teamId']).toBe('team-1')
   })
 
   it('the server says so and the browser does not: the work shows, with no false note', () => {

@@ -197,6 +197,34 @@ describe('InboxBridge', () => {
     })
   })
 
+  it('a bridge that has gone does not apply the answer it was waiting for', async () => {
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    server.use(
+      http.get('/api/board/inbox', async () => {
+        reads += 1
+        await held
+        return HttpResponse.json({
+          unread: [{ id: 'stale', seq: 1 }],
+          through: 1,
+          needsYou: [],
+          approvals: [],
+        })
+      }),
+    )
+    const view = render(<InboxBridge />)
+    await landed(1)
+    view.unmount()
+    release()
+    await act(async () => {
+      for (let i = 0; i < 5; i += 1) await new Promise<void>((r) => setImmediate(r))
+    })
+    expect(useInboxStore.getState().revision).toBe(0)
+    expect(useInboxStore.getState().unread).toEqual({})
+  })
+
   it('stops when unmounted', async () => {
     const view = render(<InboxBridge />)
     await landed(1)

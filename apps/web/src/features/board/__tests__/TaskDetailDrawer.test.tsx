@@ -1851,6 +1851,45 @@ describe('TaskDetailDrawer: replying', () => {
   })
 })
 
+describe('TaskDetailDrawer: a teammate’s comment on someone else’s task', () => {
+  it('stays in Comments, under its own name, and the report stays the worker’s', async () => {
+    useFleetStore.setState({
+      agents: [
+        { id: 'worker', name: 'Coder' },
+        { id: 'mate', name: 'Reviewer' },
+      ] as never,
+    })
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Wire it',
+            status: 'blocked',
+            assigneeAgentId: 'worker',
+          },
+          comments: [
+            { id: 'c1', body: 'Here is the key.', authorType: 'agent', authorAgentId: 'mate' },
+            { id: 'c2', body: 'What I found.', authorType: 'agent', authorAgentId: 'worker' },
+          ],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const report = await screen.findByTestId('task-report')
+    expect(within(report).getByText('What I found.')).toBeInTheDocument()
+    expect(within(report).queryByText('Here is the key.')).toBeNull()
+    const others = screen.getByTestId('task-comments-section')
+    expect(within(others).getByText('Here is the key.')).toBeInTheDocument()
+    expect(within(others).getByText(/Reviewer/)).toBeInTheDocument()
+    expect(within(others).queryByText('What I found.')).toBeNull()
+  })
+})
+
 describe('TaskDetailDrawer: opening a task reads it', () => {
   const reads: Array<{ through: number }> = []
 
@@ -1881,6 +1920,43 @@ describe('TaskDetailDrawer: opening a task reads it', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
     await waitFor(() => expect(reads).toEqual([{ through: 12 }]))
     expect(useInboxStore.getState().marks).toEqual({ t1: 12 })
+  })
+
+  it('a reload still out when the drawer closes marks nothing', async () => {
+    // The reply brings an agent's comment back with it, and the drawer has gone by the
+    // time it lands, so nobody saw that comment.
+    serve({ unread: false, activity: { seq: 12, kind: 'comment', at: 1 } })
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let reloads = 0
+    server.use(
+      http.post('/api/board/t1/comments', () => HttpResponse.json({ ok: true })),
+      http.get('/api/board/t1', async () => {
+        reloads += 1
+        if (reloads > 1) await held
+        return HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Wire it',
+            status: 'todo',
+            unread: reloads > 1,
+            activity: { seq: reloads > 1 ? 13 : 12, kind: 'comment', at: 1 },
+          },
+          comments: [],
+          ancestors: [],
+        })
+      }),
+    )
+    const view = render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const box = await screen.findByRole('textbox', { name: 'Reply' })
+    await userEvent.type(box, 'Go on.{Enter}')
+    await waitFor(() => expect(reloads).toBe(2))
+    view.unmount()
+    release()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reads).toEqual([])
   })
 
   it('writes nothing for a task with nothing new', async () => {

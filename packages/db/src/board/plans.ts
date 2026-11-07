@@ -68,7 +68,7 @@ import {
   taskOfCreateKey,
 } from './createDedupe'
 import { emitBoardLifecycle } from './events'
-import { expirePendingQuestionsTx } from './questionExpiry'
+import { commentMarkTx, expirePendingQuestionsTx } from './questionExpiry'
 import {
   addComment,
   completeExecutionProcess,
@@ -365,12 +365,17 @@ function waitingHolderTx(
   return null
 }
 
-/** A plan on a card of its own that this agent had answered lately in this room, with
- *  these steps as it proposed them or as the person left them. A later turn saying the
+/** A plan on a card of its own that this agent had answered lately in this room and this
+ *  chat, with these steps as it proposed them or as the person left them. A later turn saying the
  *  same thing is a repeat: it must not bring a new card, or a second run of finished work. */
 function answeredHolderPlanTx(
   tx: BoardTx,
-  input: { teamId: string; agentId: string; steps: readonly SuggestedTask[] },
+  input: {
+    teamId: string
+    agentId: string
+    chatSessionKey?: string | null
+    steps: readonly SuggestedTask[]
+  },
   roomId: string | null,
   now: number,
 ): { taskId: string; accepted: boolean } | null {
@@ -398,7 +403,10 @@ function answeredHolderPlanTx(
     )
       continue
     const task = tx.select().from(tasks).where(eq(tasks.id, row.taskId)).get() as DbTask | undefined
-    if ((task?.roomId ?? null) === roomId)
+    if (
+      (task?.roomId ?? null) === roomId &&
+      (task?.chatSessionKey ?? null) === (input.chatSessionKey ?? null)
+    )
       return { taskId: row.taskId, accepted: answer.accepted === true }
   }
   return null
@@ -698,6 +706,7 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
       status: 'pending',
       idempotencyKey: null,
       executionId: input.executionId ?? null,
+      commentMark: commentMarkTx(tx, task.id),
       answer: null,
       answeredBy: null,
       closeReason: null,

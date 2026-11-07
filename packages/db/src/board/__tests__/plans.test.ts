@@ -34,6 +34,7 @@ import {
 } from '../plans'
 import { answerQuestion, listTaskQuestions } from '../questions'
 import {
+  addComment,
   claimTask,
   closeMainTaskByPerson,
   createCappedSubtask,
@@ -94,6 +95,17 @@ const propose = (over: Partial<ProposePlanInput> = {}, d: ClawbooDb = db) =>
 
 const accept = (id: string, extra: Record<string, unknown> = {}, d: ClawbooDb = db) =>
   answerQuestion(d, id, { accepted: true, ...extra }, person)
+
+describe('a plan’s question', () => {
+  it('marks where the task’s comments stood, as any question does', () => {
+    on()
+    const id = claimed()
+    addComment(db, id, 'Words', 'user', null)
+    const result = propose({ taskId: id, agentId: 'a2' })
+    if (result.status !== 'proposed') throw new Error(result.status)
+    expect(result.question.commentMark).toBeGreaterThan(0)
+  })
+})
 
 const stepsOf = (d: ClawbooDb = db) =>
   listTasks(d, { teamId: 'T' }).filter((t) => t.sourceDelegationId?.includes(':plan:'))
@@ -235,6 +247,23 @@ describe('proposing a plan', () => {
     expect(listTasks(db, { teamId: 'T' })).toHaveLength(1)
     // Nothing reads as ready: the pump has no step to fire.
     expect(getReadyTasks(db, { teamId: 'T' })).toEqual([])
+  })
+
+  it('a chat’s plan is not taken for a repeat of one answered in the team’s chat', () => {
+    const CHAT = 'agent:bz:codex'
+    const first = propose()
+    if (first.status !== 'proposed') throw new Error('not proposed')
+    answerQuestion(db, first.question.id, { accepted: false }, person)
+
+    const fromChat = propose({ chatSessionKey: CHAT, turnId: 'turn-2' })
+    expect(fromChat.status).toBe('proposed')
+    if (fromChat.status !== 'proposed') throw new Error('not proposed')
+    expect(fromChat.task.id).not.toBe(first.task.id)
+    expect(fromChat.task.chatSessionKey).toBe(CHAT)
+
+    // The same chat saying it again is a repeat.
+    answerQuestion(db, fromChat.question.id, { accepted: false }, person)
+    expect(propose({ chatSessionKey: CHAT, turnId: 'turn-3' }).status).toBe('already_declined')
   })
 
   it('announces the wait in the event log, without the plan’s words', () => {

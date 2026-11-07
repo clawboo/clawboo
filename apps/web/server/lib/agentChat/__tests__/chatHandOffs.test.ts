@@ -49,6 +49,7 @@ import {
   setBudgetLimit,
   setSetting,
   settleReportUps,
+  tasks,
   teams,
   updateStatus,
   type ClawbooDb,
@@ -1106,6 +1107,46 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
     })
   })
 
+  describe('a tag it could not read', () => {
+    it('beside one it could, the first starts and the chat says the other did not', async () => {
+      workers.set(CODER, new ScriptedAdapter(['hang']))
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth/Coder">fix the parser</delegate> and <delegate to="@Growth/Sam">check it',
+          ),
+        ],
+      ])
+
+      await turn('both, on Growth')
+
+      expect(listTasks(db).map((t) => t.title)).toEqual(['fix the parser'])
+      expect(notes()).toEqual(['A hand-off in this reply could not be read, so it did not start.'])
+      expect(heardNext().join()).toMatch(/could not be read/)
+    })
+
+    it('says nothing when everything in the reply could be read', async () => {
+      workers.set(CODER, new ScriptedAdapter(['hang']))
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+
+      await turn('fix it, on Growth')
+
+      expect(notes()).toEqual([])
+    })
+  })
+
+  describe('a team name with more spaces in it than the tag', () => {
+    it('still finds the teammate after the slash', () => {
+      db.update(teams).set({ name: 'Growth       Ops' }).where(eq(teams.id, OTHER)).run()
+
+      expect(resolveHandOffTarget(db, 'Growth Ops/Writer', null, BZ)).toMatchObject({
+        ok: true,
+        agentId: WRITER,
+        team: { id: OTHER },
+      })
+    })
+  })
+
   describe('a tag it only shows', () => {
     const TAG = '<delegate to="@Growth/Coder">fix the parser</delegate>'
 
@@ -1706,6 +1747,211 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
     })
   })
 
+  describe('while a reply’s hand-offs are being decided', () => {
+    const TWO =
+      '<delegate to="@Growth/Coder">fix the parser</delegate> <delegate to="@Growth/Sam">check the numbers</delegate>'
+
+    it('a Stop ends the rest of them, and leaves what has started alone', async () => {
+      boo = new ScriptedAdapter([[done(TWO)]])
+      const asked: string[] = []
+
+      await runChatTurn({
+        db,
+        agentId: BZ,
+        message: 'both, on Growth',
+        ...opts(),
+        routeFor: () => ({
+          handOffFromChat: async (input) => {
+            asked.push(input.task)
+            await stopChatTurn(db, BZ)
+            return { taskId: 'started' }
+          },
+        }),
+      })
+
+      expect(asked).toEqual(['fix the parser'])
+      expect(notes()).toEqual([])
+      expect(heardNext().join()).toMatch(/A Stop came before the rest/)
+    })
+
+    it('a Stop from before the reply does not end them', async () => {
+      await stopChatTurn(db, BZ)
+      boo = new ScriptedAdapter([[done(TWO)]])
+      const asked: string[] = []
+
+      await runChatTurn({
+        db,
+        agentId: BZ,
+        // A message the person check turned away lifts no hold, so this one is still on.
+        message: 'both, on Growth',
+        ...opts(),
+        readingResultsFrom: [TEAM],
+        messageId: 'm1',
+        routeFor: () => ({
+          handOffFromChat: async (input) => {
+            asked.push(input.task)
+            return { taskId: 'started' }
+          },
+        }),
+      })
+
+      expect(asked).toEqual(['fix the parser', 'check the numbers'])
+    })
+
+    it('the results it read stay unsettled, so a sweep cannot close the request first', async () => {
+      const row = recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: null,
+        payload: JSON.stringify({ toAgentId: BZ, by: 'Coder', summary: 'the numbers are off' }),
+        chatSessionKey: CHAT,
+      })
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the numbers</delegate>')]])
+      let whileDeciding: string | null | undefined
+
+      await flushChatReportUps(db, CHAT, {
+        ...opts(),
+        routeFor: () => ({
+          handOffFromChat: async () => {
+            whileDeciding = settledHow(row)
+            return { taskId: 'started' }
+          },
+        }),
+      })
+
+      expect(whileDeciding).toBeNull()
+      expect(settledHow(row)).toBe('delivered')
+    })
+
+    it('a hand-off that throws still settles what the turn read', async () => {
+      const row = recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: null,
+        payload: JSON.stringify({ toAgentId: BZ, by: 'Coder', summary: 'the numbers are off' }),
+        chatSessionKey: CHAT,
+      })
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the numbers</delegate>')]])
+
+      await flushChatReportUps(db, CHAT, {
+        ...opts(),
+        routeFor: () => {
+          throw new Error('no route')
+        },
+      })
+
+      expect(settledHow(row)).toBe('delivered')
+    })
+  })
+
+  describe('what it found already on the board', () => {
+    it('says a task from another chat reports there, not to the team’s chat', async () => {
+      createTask(db, {
+        title: 'fix the parser',
+        teamId: TEAM,
+        status: 'todo',
+        chatSessionKey: 'agent:someone:codex',
+        sourceDelegationId: 'r1:deleg:agent:coder:reflectTo:someone',
+      })
+      workers.set(CODER, new ScriptedAdapter(['hang']))
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+
+      await turn('fix it, on Growth')
+
+      expect(notes().join()).toMatch(/already on the board/)
+      expect(notes().join()).toMatch(/handed off from another chat/)
+      expect(notes().join()).not.toMatch(/the team's chat/)
+    })
+  })
+
+  describe('a chat with a long history', () => {
+    it('still counts its old open work when a result comes in', async () => {
+      createTask(db, {
+        title: 'the old open one',
+        teamId: TEAM,
+        status: 'todo',
+        chatSessionKey: CHAT,
+      })
+      for (let i = 0; i < 201; i += 1) {
+        const finished = createTask(db, {
+          title: `finished ${i}`,
+          teamId: TEAM,
+          chatSessionKey: CHAT,
+        })
+        db.update(tasks).set({ status: 'done' }).where(eq(tasks.id, finished.id)).run()
+      }
+      const task = createTask(db, { title: 'the result', teamId: TEAM, chatSessionKey: CHAT })
+      recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: task.id,
+        payload: JSON.stringify({ toAgentId: BZ, by: 'Coder', taskId: task.id, summary: 'done' }),
+        chatSessionKey: CHAT,
+      })
+      boo = new ScriptedAdapter([[done('read it')]])
+
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts[0]!.message).toContain('the old open one')
+    })
+  })
+
+  describe('several long results in one update', () => {
+    it('all go in one turn, each cut to its share', async () => {
+      const long = (c: string): string => c.repeat(20_000)
+      const ids = ['a', 'b', 'c', 'd'].map((c) => {
+        const task = createTask(db, { title: `work ${c}`, teamId: TEAM, chatSessionKey: CHAT })
+        return recordReportUp(db, {
+          teamId: TEAM,
+          roomId: null,
+          recipientAgentId: BZ,
+          taskId: task.id,
+          payload: JSON.stringify({
+            toAgentId: BZ,
+            by: 'Coder',
+            taskId: task.id,
+            summary: long(c),
+          }),
+          chatSessionKey: CHAT,
+        })
+      })
+      boo = new ScriptedAdapter([[done('read them')]])
+
+      await flushChatReportUps(db, CHAT, opts())
+
+      const sent = boo.starts[0]!.message
+      expect(sent.length).toBeLessThan(45_000)
+      for (const c of ['a', 'b', 'c', 'd']) expect(sent).toContain(c.repeat(9_000))
+      expect(sent).toContain('(cut: the whole result is on the task')
+      for (const id of ids) expect(settledHow(id)).toBe('delivered')
+    })
+
+    it('leaves one result whole', async () => {
+      const task = createTask(db, { title: 'work', teamId: TEAM, chatSessionKey: CHAT })
+      recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: task.id,
+        payload: JSON.stringify({
+          toAgentId: BZ,
+          by: 'Coder',
+          taskId: task.id,
+          summary: 'x'.repeat(20_000),
+        }),
+        chatSessionKey: CHAT,
+      })
+      boo = new ScriptedAdapter([[done('read it')]])
+
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts[0]!.message).toContain('x'.repeat(20_000))
+    })
+  })
+
   describe('after a person presses Stop', () => {
     async function handOffRunning(): Promise<ScriptedAdapter> {
       boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
@@ -2265,6 +2511,32 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
   })
 
   describe('a pause', () => {
+    it('keeps a result held since a Stop out of a person’s message until it lifts', async () => {
+      const task = createTask(db, { title: 'work', teamId: TEAM, chatSessionKey: CHAT })
+      const row = recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: task.id,
+        payload: JSON.stringify({ toAgentId: BZ, by: 'Coder', taskId: task.id, summary: 'kept' }),
+        chatSessionKey: CHAT,
+        held: true,
+      })
+      placePause(db, { kind: 'team', id: TEAM })
+      boo = new ScriptedAdapter([[done('hello')], [done('read it')]])
+
+      await turn('something else')
+
+      expect(boo.starts[0]!.context ?? '').not.toContain('kept')
+      expect(settledHow(row)).toBeNull()
+
+      liftPause(db, 'team', TEAM)
+      await turn('and now')
+
+      expect(boo.starts[1]!.context).toContain('kept')
+      expect(settledHow(row)).toBe('delivered')
+    })
+
     it('on the team: nothing starts, the chat says why, and Boo Zero hears it', async () => {
       placePause(db, { kind: 'team', id: TEAM })
       boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])

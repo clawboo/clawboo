@@ -28,8 +28,13 @@ export const useChatHandOffStore = create<ChatHandOffState>((set) => ({
       const byAgent = new Map(state.tasksByAgent)
       const tasks = new Map(byAgent.get(agentId) ?? [])
       const existing = tasks.get(frame.id)
+      const merged = mergeTask(existing, frame)
       tasks.set(frame.id, {
-        ...mergeTask(existing, frame),
+        ...merged,
+        // This stream sends the whole row, so a null means the task has no agent now: a
+        // hand-off back in To do. `mergeTask` keeps the last one, for sparser frames. An
+        // older frame it turned away changes nothing.
+        ...(merged !== existing && frame.assigneeAgentId === null ? { assigneeAgentId: null } : {}),
         teamId: frame.teamId ?? existing?.teamId ?? null,
       })
       byAgent.set(agentId, tasks)

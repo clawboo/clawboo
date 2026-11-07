@@ -35,7 +35,7 @@ import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { AlertsOptIn } from '@/features/alerts/AlertsOptIn'
 import { useInboxStore } from '@/features/inbox/inboxStore'
-import { activityOf, newestSeq } from '@/features/inbox/inboxModel'
+import { activityOf, isUnread } from '@/features/inbox/inboxModel'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
@@ -1889,30 +1889,28 @@ export function BoardPanel() {
   // the date title (or Find, in All) rather than falling to the page.
   const markEverythingSeen = useCallback(() => {
     markAllSeen()
-    // Says the same to the Inbox, for what this view shows.
-    const shown = tasksRef.current
-    const through = newestSeq(shown)
-    if (through > 0) {
-      void useInboxStore
-        .getState()
-        .markAllRead(
-          teamFilter === 'all'
-            ? { through }
-            : {
-                through,
-                teamId: teamFilter,
-                shown: shown.map((t) => ({ id: t.id, seq: activityOf(t)?.seq ?? 0 })),
-              },
-        )
-        .then((ok) => {
-          if (!ok) addToast({ type: 'error', message: 'Couldn’t mark these read in your Inbox.' })
-        })
-    }
+    // Says the same to the Inbox, only for the cards drawn right now: one a filter, the
+    // date range, a folded column or a full cell keeps out of sight stays unread there.
+    const drawn = new Set(
+      Array.from(
+        rootRef.current?.querySelectorAll<HTMLElement>('[data-focus-restore-id]') ?? [],
+        (el) => el.dataset['focusRestoreId'],
+      ),
+    )
+    const inbox = useInboxStore.getState()
+    const reads = tasksRef.current
+      .filter((t) => drawn.has(t.id) && isUnread(t, inbox))
+      .map((t) => inbox.markRead(t.id, activityOf(t)?.seq ?? 0))
+    void Promise.all(reads).then((results) => {
+      if (results.includes(false)) {
+        addToast({ type: 'error', message: 'Couldn’t mark these read in your Inbox.' })
+      }
+    })
     setAnnouncement('Everything marked seen.')
     rootRef.current
       ?.querySelector<HTMLElement>('[data-testid="board-range-title"], [data-testid="board-find"]')
       ?.focus()
-  }, [markAllSeen, teamFilter, addToast])
+  }, [markAllSeen, addToast])
 
   // ── Find ──
   const closeFind = useCallback(() => {

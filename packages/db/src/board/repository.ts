@@ -49,7 +49,7 @@ import {
   DEFAULT_ROOT_CREATE_WINDOW_MS,
   isVerdictPromotable,
 } from '@clawboo/governance'
-import { and, count, desc, eq, gt, gte, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, gte, inArray, isNull, like, lt, ne, or, sql } from 'drizzle-orm'
 
 import { readyOrder } from './readyOrder'
 
@@ -1056,7 +1056,11 @@ const CHAT_HAND_OFF_READ_LIMIT = 200
 export function listChatHandOffTasks(
   db: ClawbooDb,
   sessionKey: string,
-  opts: { changedSince?: number } = {},
+  opts: {
+    changedSince?: number
+    /** Only what has not ended, so a long chat's finished work cannot crowd it out. */
+    open?: boolean
+  } = {},
 ): DbTask[] {
   const rows = db
     .select()
@@ -1066,6 +1070,8 @@ export function listChatHandOffTasks(
         eq(tasks.chatSessionKey, sessionKey),
         eq(tasks.isMainTask, 0),
         eq(tasks.dropped, 0),
+        opts.open ? ne(tasks.status, 'done') : undefined,
+        opts.open ? ne(tasks.status, 'cancelled') : undefined,
         opts.changedSince !== undefined ? gte(tasks.updatedAt, opts.changedSince) : undefined,
       ),
     )

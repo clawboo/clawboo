@@ -19,9 +19,12 @@ import { ALERT_BATCH_MS, ALERT_RETRY_MS } from '@/features/alerts/NeedsYouAlerts
 import { useInboxStore, type InboxSnapshot } from './inboxStore'
 import { createInboxWatcher } from './inboxWatcher'
 
-async function readInbox(): Promise<boolean> {
+/** Far more than this small read takes, even on a busy server. */
+const INBOX_READ_DEADLINE_MS = 15_000
+
+async function readInbox(signal: AbortSignal): Promise<boolean> {
   try {
-    const res = await apiFetch('/api/board/inbox')
+    const res = await apiFetch('/api/board/inbox', { signal })
     if (!res.ok) return false
     useInboxStore.getState().apply((await res.json()) as InboxSnapshot)
     return true
@@ -34,13 +37,14 @@ export function InboxBridge(): null {
   useEffect(() => {
     let missed = false
     const watcher = createInboxWatcher({
-      read: () => {
+      read: (signal) => {
         if (document.hidden) {
           missed = true
           return Promise.resolve(true)
         }
-        return readInbox()
+        return readInbox(signal)
       },
+      deadlineMs: INBOX_READ_DEADLINE_MS,
       batchMs: ALERT_BATCH_MS,
       retryMs: ALERT_RETRY_MS,
     })

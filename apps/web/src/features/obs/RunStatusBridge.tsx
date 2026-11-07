@@ -35,7 +35,7 @@ function sameLines(a: Map<string, string>, b: Map<string, string>): boolean {
 }
 
 export function RunStatusBridge(): null {
-  const { events, boardActivity } = useObsStream({}, { limit: BACKFILL, activity: true })
+  const { events, boardActivity, live } = useObsStream({}, { limit: BACKFILL, activity: true })
   // The fleet loads independently of the event tail, and either can win the
   // race. Without this key the effect runs once against an empty fleet, every
   // `agents.find` misses, and the statuses are never applied — the graph stays
@@ -88,6 +88,13 @@ export function RunStatusBridge(): null {
       useAlertSignal.getState().noteBoardActivity(boardActivity.seq, boardActivity.read)
     }
   }, [boardActivity])
+  // A stream coming back says the server is back, even with nothing new on the board. A
+  // read that used up its retries while it was gone would otherwise wait for the next change.
+  const wasLive = useRef(false)
+  useEffect(() => {
+    if (live && !wasLive.current) useAlertSignal.getState().pokeInbox()
+    wasLive.current = live
+  }, [live])
 
   useEffect(() => {
     if (events.length === 0 || agentIdKey === '') return

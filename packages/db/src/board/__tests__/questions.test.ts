@@ -10,8 +10,9 @@ import {
   askQuestion,
   listTaskQuestions,
   pendingQuestionsForTasks,
+  personCommentedSinceAsked,
 } from '../questions'
-import { claimTask, createTask, dropTask, getTask, updateStatus } from '../repository'
+import { addComment, claimTask, createTask, dropTask, getTask, updateStatus } from '../repository'
 
 let db: ClawbooDb
 beforeEach(() => {
@@ -103,6 +104,53 @@ describe('asking', () => {
     const id = claimed()
     updateStatus(db, id, 'blocked', { actor: 'person' })
     expect(ask(id)).toMatchObject({ ok: false, reason: 'person_moved' })
+  })
+})
+
+describe('a person’s comment against a question, by row order', () => {
+  const asked = (taskId: string) => {
+    const r = ask(taskId)
+    if (!r.ok) throw new Error(r.reason)
+    return r.question
+  }
+  const fromPerson = (taskId: string) => addComment(db, taskId, 'Words', 'user', null).id
+
+  it('one written before it is before it, and one written after is after', () => {
+    const id = claimed()
+    const before = fromPerson(id)
+    const question = asked(id)
+    const after = fromPerson(id)
+    expect(personCommentedSinceAsked(db, question, [before])).toBe(false)
+    expect(personCommentedSinceAsked(db, question, [after])).toBe(true)
+    expect(personCommentedSinceAsked(db, question, [before, after])).toBe(true)
+    expect(personCommentedSinceAsked(db, question, [])).toBe(false)
+  })
+
+  it('with no comment on the task yet, the next one is after it', () => {
+    const id = claimed()
+    const question = asked(id)
+    expect(question.commentMark).toBe(0)
+    expect(personCommentedSinceAsked(db, question, [fromPerson(id)])).toBe(true)
+  })
+
+  it('another task’s comments do not move the mark, and an agent’s is not a person’s', () => {
+    const id = claimed()
+    const other = claimed()
+    fromPerson(other)
+    const question = asked(id)
+    expect(question.commentMark).toBe(0)
+    const agents = addComment(db, id, 'Words', 'agent', 'a3').id
+    expect(personCommentedSinceAsked(db, question, [agents])).toBe(false)
+  })
+
+  it('a question from before the mark existed goes by the clock', () => {
+    const id = claimed()
+    const question = { ...asked(id), commentMark: null }
+    const after = fromPerson(id)
+    expect(
+      personCommentedSinceAsked(db, { ...question, createdAt: Date.now() + 60_000 }, [after]),
+    ).toBe(false)
+    expect(personCommentedSinceAsked(db, { ...question, createdAt: 0 }, [after])).toBe(true)
   })
 })
 

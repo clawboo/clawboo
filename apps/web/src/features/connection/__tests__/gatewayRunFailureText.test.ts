@@ -84,6 +84,30 @@ describe('gatewayRunFailureText — a context-overflow label', () => {
     )
   })
 
+  it('says what the ledger says about too many tokens', () => {
+    // apps/web/server/lib/__tests__/runFailureText.test.ts pins the same table.
+    for (const raw of [
+      'too many tokens',
+      'too many tokens, try again later',
+      'quota exceeded: too many tokens',
+      'usage limit exceeded: too many tokens',
+      'Status: 429: too many tokens',
+      'too many tokens for this hour',
+      'too many tokens per day',
+    ]) {
+      expect(gatewayRunFailureText(raw)).toBe(`The run failed: ${raw}`)
+    }
+    for (const raw of [
+      'too many tokens in the request',
+      'too many tokens for this model',
+      'Prompt has too many tokens',
+      'HTTP 400: too many tokens',
+      'Context overflow: too many tokens',
+    ]) {
+      expect(gatewayRunFailureText(raw)).toMatch(/context-window setting/i)
+    }
+  })
+
   it('leaves an unrelated failure verbatim, so real errors still reach the user', () => {
     expect(gatewayRunFailureText('ECONNREFUSED 127.0.0.1:18789')).toBe(
       'The run failed: ECONNREFUSED 127.0.0.1:18789',

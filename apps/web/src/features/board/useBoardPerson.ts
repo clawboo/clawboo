@@ -14,6 +14,9 @@ export interface BoardPerson {
   role: string | null
 }
 
+/** How long before a read that failed is tried again, while something still asks. */
+export const BOARD_PERSON_RETRY_MS = 10_000
+
 let known: BoardPerson | null = null
 let reading: Promise<BoardPerson | null> | null = null
 
@@ -33,15 +36,23 @@ export function useBoardPerson(needed = true): BoardPerson {
       return
     }
     let live = true
-    reading ??= fetchBoardPerson()
-    void reading.then((read) => {
-      // A read that failed is tried again by the next board to open.
-      if (!read) reading = null
-      else known = read
-      if (live && read) setPerson(read)
-    })
+    let retry: ReturnType<typeof setTimeout> | undefined
+    const readPerson = (): void => {
+      reading ??= fetchBoardPerson()
+      void reading.then((read) => {
+        if (!read) reading = null
+        else known = read
+        if (!live) return
+        if (read) setPerson(read)
+        // A list that says "nothing assigned to you" would otherwise stay wrong until
+        // the page reloads.
+        else retry = setTimeout(readPerson, BOARD_PERSON_RETRY_MS)
+      })
+    }
+    readPerson()
     return () => {
       live = false
+      clearTimeout(retry)
     }
   }, [needed])
   return person

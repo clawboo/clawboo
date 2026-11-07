@@ -22,7 +22,6 @@ import {
   agentWakeFromOf,
   agentWakeVerdictFor,
   getAncestors,
-  getComments,
   getQuestion,
   getTask,
   holdTaskWakes,
@@ -33,6 +32,7 @@ import {
   listUnsettledTaskWakes,
   listWaitingTaskWakes,
   markInboxDelivered,
+  personCommentedSinceAsked,
   noteAgentWakeStarted,
   noteTaskWakeSkip,
   openAgentWakeCard,
@@ -230,13 +230,13 @@ function settleFinished(db: ClawbooDb, task: DbTask | null, row: DbTaskWake): vo
     data: { wakeId: row.id, reason: 'finished', wakeReason: row.reason },
   })
   if (!task || wakeCommentIds(row).length === 0) return
-  // That note is for the person who wrote the comment: a teammate's stays on the thread.
-  if (!wakeFromPerson(row.reason)) return
   // A mailbox row for it would otherwise land in the agent's next, unrelated run.
   const stale = listUndeliveredInbox(db, row.agentId, { teamId: row.teamId, limit: 50 })
     .filter((m) => m.taskId === task.id)
     .map((m) => m.id)
   if (stale.length > 0) markInboxDelivered(db, stale, 'signal')
+  // The note is for the person who wrote the comment: a teammate's stays on the thread.
+  if (!wakeFromPerson(row.reason)) return
   // A task the runner runs reads its comments from the mailbox: with none left
   // waiting there, its agent did read this one.
   if (runnerTargetOf(db, task) !== null && stale.length === 0) return
@@ -322,11 +322,7 @@ export function pumpTaskWakeNow(
 function commentedSinceAsking(db: ClawbooDb, row: DbTaskWake, questionId: string): boolean {
   if (row.reason !== 'person_comment') return false
   const asked = getQuestion(db, questionId)
-  if (!asked) return false
-  const carried = new Set(wakeCommentIds(row))
-  return getComments(db, row.taskId).some(
-    (c) => carried.has(c.id) && c.authorType === 'user' && c.createdAt >= asked.createdAt,
-  )
+  return !!asked && personCommentedSinceAsked(db, asked, wakeCommentIds(row))
 }
 
 function pumpOne(

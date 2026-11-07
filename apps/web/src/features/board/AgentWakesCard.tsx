@@ -28,10 +28,13 @@ const TEAMMATE = 'A teammate'
 export function AgentWakesCard({
   card,
   teamId,
+  checkFailed = false,
   onDecided,
 }: {
   card: AgentWakeCard
   teamId: string | null
+  /** The task also failed its check. A yes starts the agent, and the check still stands. */
+  checkFailed?: boolean
   onDecided: () => void
 }) {
   const addToast = useToastStore((s) => s.addToast)
@@ -61,6 +64,12 @@ export function AgentWakesCard({
     if (result.reason === 'no_card') onDecided()
   }
 
+  const failedCheck = checkFailed ? (
+    <p data-testid="agent-wakes-check-failed" className="m-0 text-xs text-muted-foreground">
+      This task also failed its check. Saying yes does not change that.
+    </p>
+  ) : null
+
   if (card.kind === 'ask') {
     return (
       <div data-testid="agent-wakes-card" className="flex flex-col gap-2">
@@ -78,6 +87,7 @@ export function AgentWakesCard({
               : `${card.alsoWaiting} other tasks are waiting on this answer, and it covers those too.`}
           </p>
         ) : null}
+        {failedCheck}
         <div className="flex flex-wrap gap-2">
           <Button size="sm" variant="secondary" disabled={busy} onClick={() => void press('job')}>
             Allow on this job
@@ -101,6 +111,7 @@ export function AgentWakesCard({
           ? `Agents on this job have started each other ${MAX_AGENT_WAKES_PER_HOUR} times this hour, so this one is paused.`
           : `${from ?? TEAMMATE} and ${to ?? 'a teammate'} keep waking each other, so this one is stopped.`}
       </p>
+      {failedCheck}
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="secondary" disabled={busy} onClick={() => void press('job')}>
           Let them carry on

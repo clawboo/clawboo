@@ -17,8 +17,13 @@ import {
   createTask,
   getSetting,
   getTask,
+  listEvents,
   listExecutions,
   listRooms,
+  LOCAL_READER,
+  markAllTasksRead,
+  boardActivityHead,
+  unreadTasks,
   setSetting,
   setTaskRunnerInputs,
   teams,
@@ -299,6 +304,41 @@ describe('rooms REST', () => {
     await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
     expect(getTask(db, step.id)).toMatchObject({ status: 'todo', roomId: null })
     expect(listExecutions(db, step.id).map((e) => e.status)).toEqual(['cancelled'])
+  })
+
+  it('delete wakes the Inbox for a task it stopped with no change to the task itself', async () => {
+    // A queued task only gains a stopped run, so the board's record of changes does not
+    // move and an open Needs you list has nothing else to tell it to read again.
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const queued = createTask(db, {
+      title: 'Queued for a1',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: encodeHumanAssignment('a1', 'n1'),
+    })
+    const head = boardActivityHead(db)
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
+    expect(boardActivityHead(db)).toBe(head)
+    const events = listEvents(db, { taskId: queued.id }).filter((e) => e.kind === 'status_changed')
+    expect(events.map((e) => JSON.parse(e.data as string))).toMatchObject([
+      { to: 'todo', reason: 'room_archived' },
+    ])
+  })
+
+  it('a run the delete itself stops is not news to the person who deleted the room', async () => {
+    const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
+    const step = createTask(db, {
+      title: 'Step in flight',
+      teamId: 'T',
+      roomId: room.id,
+      sourceDelegationId: 'run-1:deleg:agent:a1:reflectTo:a2',
+    })
+    claimTask(db, step.id, 'a1')
+    createExecutionProcess(db, { taskId: step.id, executorType: 'openclaw', engineRun: true })
+    markAllTasksRead(db, LOCAL_READER, boardActivityHead(db))
+    await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
+    expect(getTask(db, step.id)?.status).toBe('todo')
+    expect(unreadTasks(db, LOCAL_READER)).toEqual([])
   })
 
   it("delete leaves the task runner's own tasks to the runner", async () => {

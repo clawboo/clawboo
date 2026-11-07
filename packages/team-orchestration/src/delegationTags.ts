@@ -307,15 +307,21 @@ const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/
 const QUOTE_LINE_RE = /^ {0,3}>/
 const INDENTED_RE = /^(?: {4}|\t)/
 const BLANK_LINE_RE = /\n[ \t]*\r?\n/
+/** A line that ends a quote's paragraph without a blank line: a heading, a list item or
+ *  a rule. Any other line straight after a quote's words is still that quote. */
+const ENDS_QUOTE_PARAGRAPH_RE =
+  /^ {0,3}(?:#{1,6}(?:\s|$)|[-*+]\s|\d{1,9}[.)]\s|(?:[-*_][ \t]*){3,}$)/
 
-/** Fenced blocks (a fence never closed runs to the end, as markdown renders it), quote
- *  lines, and indented blocks, which begin only after a blank line. One pass by line. */
+/** Fenced blocks (a fence never closed runs to the end, as markdown renders it), quotes,
+ *  which run on to the next line with no `>` until a blank line, and indented blocks,
+ *  which begin only after a blank line. One pass by line. */
 function blockSpans(text: string): Span[] {
   const spans: Span[] = []
   let at = 0
   let fence: { char: string; length: number; start: number } | null = null
   let blankBefore = true
   let inIndented = false
+  let inQuoteParagraph = false
   for (const line of text.split(/(?<=\n)/)) {
     const end = at + line.length
     const body = line.replace(/\r?\n$/, '')
@@ -330,13 +336,20 @@ function blockSpans(text: string): Span[] {
       const open = FENCE_OPEN_RE.exec(body)?.[1]
       if (open) {
         fence = { char: open[0]!, length: open.length, start: at }
+        inQuoteParagraph = false
       } else if (QUOTE_LINE_RE.test(body)) {
         spans.push([at, end])
-      } else if (!blank && INDENTED_RE.test(body) && (blankBefore || inIndented)) {
+        inQuoteParagraph = body.replace(QUOTE_LINE_RE, '').trim() !== ''
+      } else if (inQuoteParagraph && !blank && !ENDS_QUOTE_PARAGRAPH_RE.test(body)) {
         spans.push([at, end])
-        inIndented = true
-      } else if (!blank) {
-        inIndented = false
+      } else {
+        inQuoteParagraph = false
+        if (!blank && INDENTED_RE.test(body) && (blankBefore || inIndented)) {
+          spans.push([at, end])
+          inIndented = true
+        } else if (!blank) {
+          inIndented = false
+        }
       }
     }
     blankBefore = blank
@@ -391,6 +404,21 @@ const CLOSING_QUOTES = new Set(['"', "'", '”', '’'])
 const inQuotationMarks = (text: string, start: number, end: number): boolean =>
   OPENING_QUOTES.has(text[start - 1] ?? '') && CLOSING_QUOTES.has(text[end] ?? '')
 
+/** A tag partway through a quoted sentence on one line: a quote opens before it and is
+ *  still open, and closes after it. A straight apostrophe says nothing, so `'` is left out. */
+function inQuotedSentence(text: string, start: number, end: number): boolean {
+  const lineEnd = text.indexOf('\n', end)
+  const before = text.slice(text.lastIndexOf('\n', start - 1) + 1, start)
+  const after = text.slice(end, lineEnd === -1 ? text.length : lineEnd)
+  const opens = (open: string, close: string): boolean =>
+    before.lastIndexOf(open) > before.lastIndexOf(close) && after.includes(close)
+  return (
+    ((before.match(/"/g)?.length ?? 0) % 2 === 1 && after.includes('"')) ||
+    opens('“', '”') ||
+    opens('‘', '’')
+  )
+}
+
 /** `text` with these ranges blanked, so every other offset stays where it was. */
 function blanked(text: string, ranges: readonly Span[]): string {
   const parts: string[] = []
@@ -415,10 +443,35 @@ export interface ActionableHandOffs {
   shownPlans: PlanBlock[]
 }
 
+/** Openers shown in code or a quote that do not close there. They only mention a tag,
+ *  and left in they would pair with the closer of the real tag after them. One inside a
+ *  real tag's brief is passed over, so the brief keeps it. */
+function shownOpenersWithNoClose(text: string, spans: readonly Span[]): Span[] {
+  const closes = [...text.matchAll(DELEGATE_CLOSE_RE)]
+  const mentions: Span[] = []
+  let cursor = 0
+  for (const open of text.matchAll(DELEGATE_OPEN_RE)) {
+    const at = open.index ?? 0
+    if (at < cursor) continue
+    const bodyStart = at + open[0].length
+    const close = closes.find((c) => (c.index ?? 0) >= bodyStart)
+    const shownIn = spans.find(([start, end]) => at >= start && at < end)
+    if (shownIn && (!close || (close.index ?? 0) >= shownIn[1])) {
+      mentions.push([at, bodyStart])
+      continue
+    }
+    if (!close) break
+    cursor = (close.index ?? 0) + close[0].length
+  }
+  return mentions
+}
+
 export function findActionableHandOffs(text: string): ActionableHandOffs {
   const spans = shownSpans(text)
   const isShown = (start: number, end: number): boolean =>
-    inSpans(spans, start) || inQuotationMarks(text, start, end)
+    inSpans(spans, start) ||
+    inQuotationMarks(text, start, end) ||
+    inQuotedSentence(text, start, end)
   const allPlans = findPlanBlocks(text)
   const plans = allPlans.filter((p) => !isShown(p.blockStart, p.blockEnd))
   const shownPlans = allPlans.filter((p) => isShown(p.blockStart, p.blockEnd))
@@ -427,7 +480,9 @@ export function findActionableHandOffs(text: string): ActionableHandOffs {
     text,
     allPlans.map((p): Span => [p.blockStart, p.blockEnd]),
   )
-  const allDelegates = findDelegationBlocks(withoutPlans)
+  const allDelegates = findDelegationBlocks(
+    blanked(withoutPlans, shownOpenersWithNoClose(withoutPlans, spans)),
+  )
   return {
     delegates: allDelegates.filter((d) => !isShown(d.blockStart, d.blockEnd)),
     plans,

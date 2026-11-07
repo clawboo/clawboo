@@ -118,7 +118,7 @@ const MORE_CONTEXT_OVERFLOW_RE =
 // HTTP error's message with its status. CONTEXT_OVERFLOW_RE stays as it is: the browser
 // keeps a copy of it, character for character.
 const RATE_LIMIT_MESSAGE_RE =
-  /^\s*429\b|\b(?:http|status|error code:?)\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|per[\s_-]?min(?:ute)?\b|\btpm\b|wait before/i
+  /^\s*429\b|\b(?:http|status|error code):?\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|\bquota\b|usage[\s_-]?limit|\bper[\s_-]?(?:min(?:ute)?|hour|day)\b|\bthis (?:minute|hour|day)\b|\btp[mhd]\b|wait before/i
 
 /** True when a provider error message indicates the prompt exceeded the model's
  *  context window (an oversized-input 400), as opposed to a rate limit or another
@@ -127,6 +127,26 @@ export function isContextOverflowMessage(message: string): boolean {
   return (
     (CONTEXT_OVERFLOW_RE.test(message) || MORE_CONTEXT_OVERFLOW_RE.test(message)) &&
     !RATE_LIMIT_MESSAGE_RE.test(message)
+  )
+}
+
+// "too many tokens" beside what it counts or the status that refused it, which is how
+// `classifyError` tells an overflow from a limit nothing names.
+const NAMED_TOKEN_LIMIT_RE =
+  /\b(?:400|413|422|prompt|input|request|messages?|context)\b[^\n]*too many tokens|too many tokens\b[^\n]*\b(?:prompt|input|request|messages?|context|model)\b/i
+
+/**
+ * Whether a failure notice should call this message the context window. A caller holding
+ * a provider's 400 can read a bare "too many tokens" as an overflow, but a notice has only
+ * the words, and the ledger files those words as a rate limit (`classifyError`). So the
+ * phrase counts only beside what it counts, and otherwise the message needs other words
+ * that say so. The browser's `gatewayRunFailureText` reads a message the same way.
+ */
+export function readsAsContextOverflow(message: string): boolean {
+  return (
+    isContextOverflowMessage(message) &&
+    (NAMED_TOKEN_LIMIT_RE.test(message) ||
+      isContextOverflowMessage(message.replace(/too many tokens/gi, '')))
   )
 }
 

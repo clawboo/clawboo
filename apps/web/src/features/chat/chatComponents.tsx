@@ -820,10 +820,14 @@ export const DelegationCard = memo(function DelegationCard({
   task,
   teamId,
   animationIndex = 0,
+  pending = false,
 }: {
   targetName: string
   task: string
   teamId?: string
+  /** Still being written, and nothing has started: a one-to-one chat's reply, whose
+   *  hand-offs the server decides once it ends. */
+  pending?: boolean
   /**
    * Per-card index inside a batch. Used to stagger entry animations
    * (delay = idx * 40 ms). Defaults to 0 for standalone inline cards.
@@ -896,7 +900,7 @@ export const DelegationCard = memo(function DelegationCard({
             className="font-mono text-[10px] font-semibold uppercase tracking-widest"
             style={{ color: tint }}
           >
-            Delegated to
+            {pending ? 'Handing off to' : 'Delegated to'}
           </span>
           <span className="truncate font-mono text-[11.5px] font-semibold text-foreground">
             @{targetName}
@@ -1162,6 +1166,7 @@ export const StreamingCard = memo(function StreamingCard({
                   key={`stream-delegation-${idx}`}
                   targetName={segment.targetName}
                   task={segment.task}
+                  pending={handOffs === 'chat-card'}
                 />
               )
             ) : (

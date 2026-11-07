@@ -21,7 +21,8 @@ vi.mock('../../platform', async (importActual) => {
   return { ...actual, resolveRuntimeBin: () => fakeBin.path }
 })
 
-const { createHermesDriver, hermesQuietFailure } = await import('../hermesDriver')
+const { createHermesDriver, hermesQuietFailure, withoutStartupBanner } =
+  await import('../hermesDriver')
 const { runFailureText } = await import('../../runFailureText')
 
 const OPTS: StartOpts = { agentId: 'hm', sessionKey: 'agent:hm:team:t1', message: 'work' }
@@ -163,11 +164,11 @@ describe.skipIf(process.platform === 'win32')('createHermesDriver: a failed run'
     await rm(dir, { recursive: true, force: true })
   })
 
-  async function resultOf(
+  async function eventsOf(
     stdout: string,
     stderr: string,
     code: number,
-  ): Promise<Extract<HermesNativeEvent, { type: 'result' }>> {
+  ): Promise<HermesNativeEvent[]> {
     await writeFile(
       fakeBin.path,
       `#!/usr/bin/env node
@@ -186,10 +187,21 @@ process.exitCode = ${code}
     while (!seen.some((e) => e.type === 'result') && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 10))
     }
-    const result = seen.find((e) => e.type === 'result')
+    return seen
+  }
+
+  async function resultOf(
+    stdout: string,
+    stderr: string,
+    code: number,
+  ): Promise<Extract<HermesNativeEvent, { type: 'result' }>> {
+    const result = (await eventsOf(stdout, stderr, code)).find((e) => e.type === 'result')
     expect(result).toBeDefined()
     return result as Extract<HermesNativeEvent, { type: 'result' }>
   }
+
+  const messagesIn = (events: HermesNativeEvent[]): string[] =>
+    events.flatMap((e) => (e.type === 'message' ? [e.text] : []))
 
   it('types the captured overflow and keeps its session id', async () => {
     const result = await resultOf(CAPTURED_STDOUT, CAPTURED_STDERR, 1)
@@ -208,10 +220,31 @@ process.exitCode = ${code}
 
   it('a quiet reply does not carry the startup banner', async () => {
     const banner = CAPTURED_STDOUT.split('\n')[0]
-    const result = await resultOf(`${banner}\nThe parser is fixed.\n`, '\nsession_id: s4\n', 0)
-    expect(result.summary).toBe('The parser is fixed.')
+    const events = await eventsOf(`${banner}\nThe parser is fixed.\n`, '\nsession_id: s4\n', 0)
+    expect(messagesIn(events)).toEqual(['The parser is fixed.\n'])
+    expect(events.find((e) => e.type === 'result')).toMatchObject({
+      summary: 'The parser is fixed.',
+    })
     // Nor does a run that printed the banner and nothing else claim it as its reply.
-    expect((await resultOf(`${banner}\n`, '\nsession_id: s5\n', 0)).summary).toBe('')
+    const quiet = await eventsOf(`${banner}\n`, '\nsession_id: s5\n', 0)
+    expect(messagesIn(quiet)).toEqual([])
+    expect(quiet.find((e) => e.type === 'result')).toMatchObject({ summary: '' })
+  })
+
+  it('a reply that opens with its own warning about the scanner keeps it', async () => {
+    const reply = '⚠ Tirith cannot scan this command safely.\nSo I did not run it.'
+    const events = await eventsOf(`${reply}\n`, '\nsession_id: s6\n', 0)
+    expect(messagesIn(events).join('')).toBe(`${reply}\n`)
+    expect(events.find((e) => e.type === 'result')).toMatchObject({ summary: reply })
+  })
+
+  it('takes only the banner off the start of what a stopped run printed', () => {
+    const banner = CAPTURED_STDOUT.split('\n')[0]!
+    // The reply can quote the warning, and it has started by then.
+    const stdout = `${banner}\nThe scanner said:\n${banner}\nSo it is off.\n`
+    expect(withoutStartupBanner(stdout)).toBe(`The scanner said:\n${banner}\nSo it is off.\n`)
+    expect(withoutStartupBanner(`${banner}\n`)).toBe('')
+    expect(withoutStartupBanner('session_id: s7\n' + `${banner}\nDone.\n`)).toBe('Done.\n')
   })
 
   it('a successful run that happens to mention the words is untouched', async () => {

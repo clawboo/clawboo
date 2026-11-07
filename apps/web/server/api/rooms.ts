@@ -37,6 +37,7 @@ import { eq, like } from 'drizzle-orm'
 
 import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
+import { emitEvent } from '../lib/obs'
 import { runsOnTaskRunner } from '../lib/runnerRoute'
 import { chatClearedAt } from '../lib/teamChat/chatCleared'
 import { queueGatewayAborts } from '../lib/teamChat/gatewayRunAborts'
@@ -279,19 +280,21 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     db.delete(settings)
       .where(like(settings.key, nativeTeamSessionKeysForRoomLike(teamId, roomId)))
       .run()
-    // Stop its engine, so nothing it is running outlives the room, and wait for
-    // the Stop to be written: its running tasks released, its queued ones marked
-    // stopped. Moved before that, the team chat's engine would start them.
-    await stopAsOwnWrite(db, ownWriterOf(req), { teamId, roomId }, () =>
-      retireRoomOrchestrator(teamId, roomId),
-    )
-    // Its unfinished tasks go to the team's own chat, still stopped: the only
-    // engine left reads tasks with no room, so where they are, Retry, Assign and
-    // a reply would start nothing. The task runner's own tasks move unstopped,
-    // as the Stop leaves them: the runner reruns them.
-    const { moved, closedRuns } = moveArchivedRoomTasks(db, {
-      roomId,
-      skip: (t) => runsOnTaskRunner(db, t),
+    const writer = ownWriterOf(req)
+    const { moved, closedRuns } = await stopAsOwnWrite(db, writer, { teamId, roomId }, async () => {
+      // Stop its engine, so nothing it is running outlives the room, and wait for
+      // the Stop to be written: its running tasks released, its queued ones marked
+      // stopped. Moved before that, the team chat's engine would start them.
+      await retireRoomOrchestrator(teamId, roomId)
+      // Its unfinished tasks go to the team's own chat, still stopped: the only
+      // engine left reads tasks with no room, so where they are, Retry, Assign and
+      // a reply would start nothing. The task runner's own tasks move unstopped,
+      // as the Stop leaves them: the runner reruns them. Part of the same Stop, for the
+      // person who asked: a run no engine was left to stop is released here.
+      return moveArchivedRoomTasks(db, {
+        roomId,
+        skip: (t) => runsOnTaskRunner(db, t),
+      })
     })
     // A run still open here had no engine to stop it (one a previous server left),
     // so an OpenClaw one may still be going in the Gateway.
@@ -299,6 +302,16 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     if (resuming && moved.length === 0) {
       res.status(404).json({ error: 'room not found' })
       return
+    }
+    // A queued task now reads as stopped with nothing on it having changed, so nothing
+    // else tells an open Inbox, or the Board's Needs you, to read again.
+    for (const task of moved) {
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId: task.id,
+        teamId,
+        data: { to: task.status, reason: 'room_archived', ...actorField(req) },
+      })
     }
     res.json({ ok: true })
   } catch (err) {

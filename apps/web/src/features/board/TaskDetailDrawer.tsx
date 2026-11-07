@@ -357,7 +357,12 @@ function NeedsYouBanner({
         </div>
       ) : attention.agentWakes ? (
         <div className="mt-1.5">
-          <AgentWakesCard card={attention.agentWakes} teamId={teamId} onDecided={onChanged} />
+          <AgentWakesCard
+            card={attention.agentWakes}
+            teamId={teamId}
+            checkFailed={attention.checkFailed}
+            onDecided={onChanged}
+          />
         </div>
       ) : attention.jobLimit ? (
         <div className="mt-1.5">
@@ -543,6 +548,14 @@ export function TaskDetailDrawer({
   // stepped away from (J or K mid-flight) must not land on the one it shows.
   const openTaskRef = useRef(taskId)
   openTaskRef.current = taskId
+  // Still up. A reload an action started can land after the drawer has closed.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const load = useCallback(
     async (live: () => boolean = () => true) => {
@@ -552,8 +565,9 @@ export function TaskDetailDrawer({
         getWorkspaceDetail(taskId),
         fetchTaskPlan(taskId),
       ])
-      // A quick J or K can land an older task's reply after a newer one's.
-      if (!live() || openTaskRef.current !== taskId) return
+      // A quick J or K can land an older task's reply after a newer one's. One landing
+      // once the drawer has closed was never shown, so it must not read anything either.
+      if (!live() || !mountedRef.current || openTaskRef.current !== taskId) return
       setDetail(d)
       setExecutions(ex)
       setWorkspace(ws)
@@ -630,16 +644,23 @@ export function TaskDetailDrawer({
   // task rather than arriving unprompted in the person's 1:1 chat (see the native
   // driver). Naming the boo is what makes that read as a teammate reporting back
   // instead of an anonymous block of output.
-  const agentOutputs = comments.filter(
-    (c) => c.authorType === 'agent' && typeof c.body === 'string' && c.body.trim().length > 0,
-  )
-  const otherComments = comments.filter((c) => !agentOutputs.includes(c))
   const assigneeId = (task?.['assigneeAgentId'] as string | null | undefined) ?? null
   // The agent the task is bound to (kept while it waits in To do or needs you,
   // when there is no live assignee).
   const sdid =
     typeof task?.['sourceDelegationId'] === 'string' ? (task['sourceDelegationId'] as string) : null
   const boundId = delegationTargetOf(sdid)
+  const workerId = assigneeId ?? boundId
+  // A teammate's comment is theirs, not the worker's report, so it stays in Comments
+  // under their own name.
+  const agentOutputs = comments.filter(
+    (c) =>
+      c.authorType === 'agent' &&
+      typeof c.body === 'string' &&
+      c.body.trim().length > 0 &&
+      (!workerId || !c.authorAgentId || c.authorAgentId === workerId),
+  )
+  const otherComments = comments.filter((c) => !agentOutputs.includes(c))
   const reporterId = agentOutputs.find((c) => c.authorAgentId)?.authorAgentId ?? assigneeId
   const reporterName = useFleetStore(
     (st) => st.agents.find((a) => a.id === reporterId)?.name ?? null,

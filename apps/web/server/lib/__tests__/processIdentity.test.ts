@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   currentBootAt,
@@ -38,7 +38,36 @@ afterEach(() => {
   }
 })
 
+// A real probe on Windows is a PowerShell start, tried twice, each up to 30 s when busy.
+vi.setConfig({ testTimeout: 120_000 })
+
 describe('processStartTimes', () => {
+  it('tries once more when it could not answer, and takes the second answer', () => {
+    const answers = [
+      { ok: false, times: new Map<number, number>(), error: 'timed out' },
+      { ok: true, times: new Map([[7, 1_000]]) },
+    ]
+    let asked = 0
+    const probe = processStartTimes([7], () => answers[asked++]!)
+    expect(asked).toBe(2)
+    expect(probe).toEqual(answers[1])
+  })
+
+  it('asks once when the first answer stands', () => {
+    let asked = 0
+    const probe = processStartTimes([7], () => {
+      asked += 1
+      return { ok: true, times: new Map() }
+    })
+    expect(asked).toBe(1)
+    expect(probe.ok).toBe(true)
+  })
+
+  it('says the probe failed when both tries did', () => {
+    const probe = processStartTimes([7], () => ({ ok: false, times: new Map(), error: 'nope' }))
+    expect(probe).toMatchObject({ ok: false, error: 'nope' })
+  })
+
   it("reads this process's start time", () => {
     const probe = processStartTimes([process.pid])
     expect(probe.ok).toBe(true)

@@ -240,6 +240,29 @@ describe('error taxonomy', () => {
     expect(isTransientError(classifyError(null, 'too many input tokens per minute'))).toBe(true)
   })
 
+  it('reads a throughput window as a limit, whatever the tokens it counts are called', () => {
+    for (const message of [
+      'too many request tokens for this hour',
+      'too many tokens this hour',
+      'too many input tokens per hour',
+      'too many prompt tokens per day',
+      'too many tokens today, 90000 tpd',
+      'too many tokens, 40000 tph',
+    ]) {
+      expect(classifyError(null, message)).toBe('RateLimited')
+      expect(isTransientError(classifyError(null, message))).toBe(true)
+    }
+    // With no window, what it counts still means an overflow.
+    expect(classifyError(null, 'too many request tokens')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many tokens for this model')).toBe('ContextOverflow')
+  })
+
+  it('reads a status 429 after a colon before any number in its message', () => {
+    expect(classifyError(null, 'Status: 429: Requested 403 tokens')).toBe('RateLimited')
+    expect(classifyError(null, 'HTTP: 429 Requested 403 tokens')).toBe('RateLimited')
+    expect(classifyError(null, 'Status: 429: insufficient_quota')).toBe('Billing')
+  })
+
   it('still reads an empty balance sent as a rate limit as Billing: waiting does not fix it', () => {
     for (const message of [
       "Rate limit: 429 {'error': {'type': 'insufficient_quota'}}",

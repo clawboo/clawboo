@@ -104,6 +104,7 @@ import { getTeamOrchestrator } from '../teamChat/teamOrchestrator'
 import { activeTeamAgents } from '../teamChat/teamLead'
 import {
   chatResultsHeld,
+  chatResultsHeldSince,
   holdChatResults,
   onChatReportUp,
   releaseChatResults,
@@ -142,6 +143,9 @@ const BLOCK_MAX_TEAMS = 30
 const BLOCK_MAX_MEMBERS = 12
 /** A pending row is given up after this many sends: the first, and the replays. */
 const MAX_CHAT_REPORT_UP_SENDS = MAX_REPORT_UP_REPLAYS + 1
+
+/** What one turn's task update may hold. Two whole results fit, at their 20,000 limit. */
+const REPORT_TURN_BUDGET_CHARS = 40_000
 
 /** What starts a hand-off in a team. Production: the team's own engine. */
 export interface ChatHandOffRoute {
@@ -372,8 +376,12 @@ function teamsNamedBy(
     const name = sameName(team.name)
     if (wanted === name) return [{ team, teammate: null }]
     if (!wanted.startsWith(name)) return []
-    const slash = text.indexOf('/', Math.max(0, team.name.length - 1))
-    if (slash === -1 || sameName(text.slice(0, slash)) !== name) return []
+    // The first slash with the whole team name before it. A stored name can have more
+    // spaces than the tag does, so where it ends is not worked out from its length.
+    const slash = [...text.matchAll(/\//g)]
+      .map((m) => m.index ?? 0)
+      .find((at) => sameName(text.slice(0, at)) === name)
+    if (slash === undefined) return []
     return [
       {
         team,
@@ -653,10 +661,25 @@ export async function startHandOffsFromReply(
       heard:
         'A tag inside code or a quote starts nothing, so nothing was handed off from it. To hand off, write the tag in plain text.',
     })
-  if (delegates.length === 0 && plans.length === 0 && looksLikeBrokenHandOff(reply))
+  if (looksLikeBrokenHandOff(reply))
     sayNotStarted(db, turn, {
       person: 'A hand-off in this reply could not be read, so it did not start.',
     })
+
+  // Pressed while these are being decided, Stop ends the rest: a hand-off can wait on a
+  // team starting up or on a person's approval.
+  const heldWhenItEnded = chatResultsHeldSince(db, agentId)
+  let stopped = false
+  const stoppedSinceItEnded = (): boolean => {
+    if (stopped) return true
+    const held = chatResultsHeldSince(db, agentId)
+    if (!held || held === heldWhenItEnded) return false
+    stopped = true
+    sayNotStarted(db, turn, {
+      heard: 'A Stop came before the rest of this reply was handed off, so the rest did not start.',
+    })
+    return true
+  }
 
   const turnId = randomUUID()
   const routeFor = chatRoute(params)
@@ -728,6 +751,7 @@ export async function startHandOffsFromReply(
   }
 
   for (const { team, targets } of starting.values()) {
+    if (stoppedSinceItEnded()) break
     const route = routeFor(team.id)
     const parentTaskId = parentIn(team)
     // What every hand-off of this reply to this team says about where it came from.
@@ -746,6 +770,7 @@ export async function startHandOffsFromReply(
       if (asked) continue
     }
     for (const target of targets) {
+      if (stoppedSinceItEnded()) break
       const started = { by: target.agentName, task: target.task, team }
       try {
         const outcome = await route.handOffFromChat({
@@ -805,6 +830,16 @@ function takeHeldReports(
       settleOrLater(db, [row.id], 'gave_up')
       continue
     }
+    // A pause on the team or tree a result is on holds it past this message too. It rides
+    // the next one after the resume. A note with no task has no result in it.
+    if (
+      parsed.taskId &&
+      pauseFor(db, {
+        teamId: row.teamId === NO_TEAM_REPORT_UP ? null : row.teamId,
+        taskId: parsed.taskId,
+      })
+    )
+      continue
     const room = HELD_REPORT_UPS_BUDGET_CHARS - used
     if (room <= 0) break
     if (parsed.summary.length > room && taken.length > 0) break
@@ -933,12 +968,22 @@ export async function runChatTurn(
       // next one.
       if (ending.how === 'finished') settleOrLater(db, carriedHeld, 'delivered')
       for (const id of carriedHeld) if (!settleLater.has(id)) inHand.delete(id)
-      carrying?.onEnded(ending.how, ending.paused === true, ending.budgetHeld === true)
+      const endCarrying = (): void =>
+        carrying?.onEnded(ending.how, ending.paused === true, ending.budgetHeld === true)
       if (ending.how === 'finished') {
-        await startHandOffsFromReply(params, ending.reply, fence)
+        // The results it read stay unsettled until what it handed out is decided, so the
+        // request stays open: a team engine starting up sweeps idle requests first.
+        try {
+          await startHandOffsFromReply(params, ending.reply, fence)
+        } finally {
+          endCarrying()
+        }
         // After its hand-offs: what it handed out keeps the request open.
         await carrying?.onReplyHandled?.(ending.reply)
-      } else if (findActionableHandOffs(ending.reply).delegates.length > 0) {
+        return
+      }
+      endCarrying()
+      if (findActionableHandOffs(ending.reply).delegates.length > 0) {
         // The person who pressed Stop knows, and wants no more from this chat.
         const turn = { agentId, sessionKey }
         if (ending.how === 'stopped')
@@ -1003,7 +1048,7 @@ function boardPicture(
   const tasks = (
     mainTaskId
       ? requestOpenTasks(db, mainTaskId)
-      : listChatHandOffTasks(db, sessionKey).filter((t) => !t.parentTaskId)
+      : listChatHandOffTasks(db, sessionKey, { open: true }).filter((t) => !t.parentTaskId)
   ).filter((t) => !batchIds.has(t.id) && t.status !== 'done' && t.status !== 'cancelled')
   const attention = attentionForTasks(db, tasks)
   for (const task of tasks) {
@@ -1182,6 +1227,22 @@ interface ChatReportUpRow {
   main: DbTask | null
 }
 
+/** Several long results in one turn could outgrow the model's window on every try. All
+ *  of them still go, since the turn answers for all of them, each cut to its share. */
+function fitToOneTurn(items: ReportUp[]): ReportUp[] {
+  const total = items.reduce((sum, i) => sum + i.summary.length, 0)
+  if (total <= REPORT_TURN_BUDGET_CHARS) return items
+  const share = Math.max(400, Math.floor(REPORT_TURN_BUDGET_CHARS / items.length) - 200)
+  return items.map((i) =>
+    i.summary.length > share
+      ? {
+          ...i,
+          summary: `${i.summary.slice(0, share)}\n… (cut: the whole result is on the task's card)`,
+        }
+      : i,
+  )
+}
+
 /** Send one request's rows as one turn, or the rows outside any request. */
 async function sendChatReports(
   db: ClawbooDb,
@@ -1204,7 +1265,7 @@ async function sendChatReports(
   // in the team chat: a refusal or a found task says nothing about the rest.
   const reportsOnTasks = items.some((i) => i.taskId)
   const foundOpen = items.some((i) => i.outcome === 'already_open')
-  const message = buildTaskUpdateMessage(items, outstanding, {
+  const message = buildTaskUpdateMessage(fitToOneTurn(items), outstanding, {
     ...(reportsOnTasks && !foundOpen ? { allIn: { needPerson, notStarted } } : {}),
     ...(main
       ? {

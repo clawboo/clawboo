@@ -375,23 +375,24 @@ Primary key: `task_id`, `depends_on_task_id`. Indexes: `idx_task_deps_task` (`ta
 
 What an agent asked a person about a task, and the answer. A task has at most one question open.
 
-| Column            | Type                                  | Notes                                                                                                 |
-| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `id`              | `TEXT`, PK                            |                                                                                                       |
-| `task_id`         | `TEXT`, not null, FK `tasks.id`       |                                                                                                       |
-| `team_id`         | `TEXT`                                | Plain reference to `teams.id`                                                                         |
-| `agent_id`        | `TEXT`                                | The agent that asked                                                                                  |
-| `kind`            | `TEXT`, not null                      | `question`, `confirm` or `suggest_tasks`                                                              |
-| `payload`         | `TEXT`, not null                      | JSON: the prompt, and the options or suggested tasks                                                  |
-| `status`          | `TEXT`, not null, default `'pending'` | `pending`, `answered`, `expired` or `cancelled`                                                       |
-| `idempotency_key` | `TEXT`                                | Set by the asker, so a repeated call asks once. Cleared when the question closes unanswered           |
-| `execution_id`    | `TEXT`                                | The `execution_processes` row of the run that asked, when an agent's run did. Null otherwise          |
-| `answer`          | `TEXT`                                | JSON: the answer                                                                                      |
-| `answered_by`     | `TEXT`                                | JSON `{ id, name, role }`: the person a sign-in proxy vouched for, else the install's built-in person |
-| `close_reason`    | `TEXT`                                | Why it closed unanswered: `replaced`, `task_closed`, `moved` or `stopped`                             |
-| `created_at`      | `INTEGER`, not null                   |                                                                                                       |
-| `updated_at`      | `INTEGER`, not null                   |                                                                                                       |
-| `answered_at`     | `INTEGER`                             |                                                                                                       |
+| Column            | Type                                  | Notes                                                                                                                                                                               |
+| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`, PK                            |                                                                                                                                                                                     |
+| `task_id`         | `TEXT`, not null, FK `tasks.id`       |                                                                                                                                                                                     |
+| `team_id`         | `TEXT`                                | Plain reference to `teams.id`                                                                                                                                                       |
+| `agent_id`        | `TEXT`                                | The agent that asked                                                                                                                                                                |
+| `kind`            | `TEXT`, not null                      | `question`, `confirm` or `suggest_tasks`                                                                                                                                            |
+| `payload`         | `TEXT`, not null                      | JSON: the prompt, and the options or suggested tasks                                                                                                                                |
+| `status`          | `TEXT`, not null, default `'pending'` | `pending`, `answered`, `expired` or `cancelled`                                                                                                                                     |
+| `idempotency_key` | `TEXT`                                | Set by the asker, so a repeated call asks once. Cleared when the question closes unanswered                                                                                         |
+| `execution_id`    | `TEXT`                                | The `execution_processes` row of the run that asked, when an agent's run did. Null otherwise                                                                                        |
+| `comment_mark`    | `INTEGER`                             | The task's newest comment (its rowid) when this was asked, 0 with none, so a comment reads as before or after the question by row order. Null on a question from before this column |
+| `answer`          | `TEXT`                                | JSON: the answer                                                                                                                                                                    |
+| `answered_by`     | `TEXT`                                | JSON `{ id, name, role }`: the person a sign-in proxy vouched for, else the install's built-in person                                                                               |
+| `close_reason`    | `TEXT`                                | Why it closed unanswered: `replaced`, `task_closed`, `moved` or `stopped`                                                                                                           |
+| `created_at`      | `INTEGER`, not null                   |                                                                                                                                                                                     |
+| `updated_at`      | `INTEGER`, not null                   |                                                                                                                                                                                     |
+| `answered_at`     | `INTEGER`                             |                                                                                                                                                                                     |
 
 Indexes: `idx_task_questions_task` (`task_id`, `status`), and the unique `idx_task_questions_idempotency` (`task_id`, `idempotency_key`).
 
@@ -1150,7 +1151,7 @@ Indexes: `uniq_graph_layouts_name_url` (unique: `name`, `gateway_url`).
 
 ## Full-text search
 
-Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 41 tables. Three triggers keep it in step with `memory_facts`:
+Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 51 tables. Three triggers keep it in step with `memory_facts`:
 
 | Trigger           | Runs         | Does                                        |
 | ----------------- | ------------ | ------------------------------------------- |

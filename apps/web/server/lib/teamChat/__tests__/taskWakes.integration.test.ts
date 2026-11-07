@@ -615,41 +615,59 @@ describe('saved wakes, end to end', () => {
       expect(allWakes()[0]!.settledHow).toBe('delivered')
     })
 
-    it('two wakes for one agent in one pump pass: each task gets its own run, brief and comment', async () => {
-      // Served first whichever millisecond each was created in: the scripts go in order.
-      const a = newTask({ title: 'task a', description: 'task a', priority: 1 })
-      const b = newTask({ title: 'task b', description: 'task b' })
-      updateStatus(db, a.id, 'blocked')
-      updateStatus(db, b.id, 'blocked')
-      for (const [task, body] of [
-        [a, 'note for a'],
-        [b, 'note for b'],
-      ] as const) {
-        const c = personComment(task.id, body)
-        recordTaskWake(db, {
-          teamId: TEAM,
-          agentId: WORKER,
-          taskId: task.id,
-          reason: 'person_comment',
-          commentIds: [c.id],
+    // Two tasks made in one millisecond have no order of their own, so the priority says
+    // which goes first, and both orders are run: a task's result is its own either way.
+    it.each([
+      ['a', 'b'],
+      ['b', 'a'],
+    ] as const)(
+      'two wakes for one agent in one pump pass, %s first: each task gets its own run, brief and comment',
+      async (first, second) => {
+        const a = newTask({
+          title: 'task a',
+          description: 'task a',
+          priority: first === 'a' ? 1 : 0,
         })
-      }
-      script([done('a is done')], [done('b is done')])
-      pumpTaskWakes(db, pumpDeps())
-      await settle(() => getTask(db, a.id)?.status === 'done', 'the first task')
-      await settle(() => getTask(db, b.id)?.status === 'done', 'the second task')
-      expect(started()).toHaveLength(2)
-      const byBrief = (brief: string) => started().find((o) => o.message.includes(brief))!
-      expect(byBrief('task a').context).toContain('note for a')
-      expect(byBrief('task a').context).not.toContain('note for b')
-      expect(byBrief('task b').context).toContain('note for b')
-      expect(byBrief('task b').context).not.toContain('note for a')
-      // Each task's result is its own.
-      expect(getComments(db, a.id).map((c) => c.body)).toContain('a is done')
-      expect(getComments(db, b.id).map((c) => c.body)).toContain('b is done')
-      for (const id of [a.id, b.id])
-        expect(listExecutions(db, id).filter((e) => e.status === 'running')).toEqual([])
-    })
+        const b = newTask({
+          title: 'task b',
+          description: 'task b',
+          priority: first === 'b' ? 1 : 0,
+        })
+        updateStatus(db, a.id, 'blocked')
+        updateStatus(db, b.id, 'blocked')
+        for (const [task, body] of [
+          [a, 'note for a'],
+          [b, 'note for b'],
+        ] as const) {
+          const c = personComment(task.id, body)
+          recordTaskWake(db, {
+            teamId: TEAM,
+            agentId: WORKER,
+            taskId: task.id,
+            reason: 'person_comment',
+            commentIds: [c.id],
+          })
+        }
+        // A script is taken by whichever run starts next.
+        script([done(`${first} is done`)], [done(`${second} is done`)])
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, a.id)?.status === 'done', 'the first task')
+        await settle(() => getTask(db, b.id)?.status === 'done', 'the second task')
+        expect(started().map((o) => o.message)).toEqual(
+          [`task ${first}`, `task ${second}`].map((t) => expect.stringContaining(t)),
+        )
+        const byBrief = (brief: string) => started().find((o) => o.message.includes(brief))!
+        expect(byBrief('task a').context).toContain('note for a')
+        expect(byBrief('task a').context).not.toContain('note for b')
+        expect(byBrief('task b').context).toContain('note for b')
+        expect(byBrief('task b').context).not.toContain('note for a')
+        // Each task's result is its own.
+        expect(getComments(db, a.id).map((c) => c.body)).toContain('a is done')
+        expect(getComments(db, b.id).map((c) => c.body)).toContain('b is done')
+        for (const id of [a.id, b.id])
+          expect(listExecutions(db, id).filter((e) => e.status === 'running')).toEqual([])
+      },
+    )
 
     it('a run waiting for a run slot is the live run, and takes the comment that came meanwhile', async () => {
       // Every slot is taken, so the task's run waits: claimed, in progress, its context
@@ -1811,6 +1829,72 @@ describe('saved wakes, end to end', () => {
         expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'question' })
       })
 
+      describe('in the same millisecond, or with the clock going backwards', () => {
+        // Row order says which came first. The clock cannot: two writes can share a
+        // millisecond, and it can step back.
+        const parkedOnQuestion = (): { task: DbTask; execId: string } => {
+          const task = newTask()
+          claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+          return { task, execId: listExecutions(db, task.id).at(-1)!.id }
+        }
+        const ask = (taskId: string): void => {
+          const asked = askQuestion(db, {
+            taskId,
+            agentId: WORKER,
+            kind: 'confirm',
+            payload: { prompt: 'Deploy?' },
+          })
+          if (!asked.ok) throw new Error(`ask refused: ${asked.reason}`)
+        }
+        const wakeFor = (taskId: string, commentId: string): void => {
+          recordTaskWake(db, {
+            teamId: TEAM,
+            agentId: WORKER,
+            taskId,
+            reason: 'person_comment',
+            commentIds: [commentId],
+          })
+        }
+
+        it('a comment written just before the question still waits for the answer', () => {
+          const { task, execId } = parkedOnQuestion()
+          const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+          wakeFor(task.id, personComment(task.id, 'Use the staging database.').id)
+          ask(task.id)
+          clock.mockRestore()
+          completeExecutionProcess(db, execId, { status: 'succeeded' })
+
+          pumpTaskWakes(db, pumpDeps())
+          expect(getTask(db, task.id)?.status).toBe('blocked')
+          expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'question' })
+        })
+
+        it('a comment written just after the question starts the task', () => {
+          const { task, execId } = parkedOnQuestion()
+          const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+          ask(task.id)
+          wakeFor(task.id, personComment(task.id, 'Do not deploy, use staging.').id)
+          clock.mockRestore()
+          completeExecutionProcess(db, execId, { status: 'succeeded' })
+
+          pumpTaskWakes(db, pumpDeps())
+          expect(getTask(db, task.id)?.status).toBe('todo')
+        })
+
+        it('a comment written after the question starts it, even if the clock stepped back', () => {
+          const { task, execId } = parkedOnQuestion()
+          const clock = vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000)
+          ask(task.id)
+          clock.mockReturnValue(1_800_000_000_000 - 60_000)
+          wakeFor(task.id, personComment(task.id, 'Do not deploy, use staging.').id)
+          clock.mockRestore()
+          completeExecutionProcess(db, execId, { status: 'succeeded' })
+
+          pumpTaskWakes(db, pumpDeps())
+          expect(getTask(db, task.id)?.status).toBe('todo')
+        })
+      })
+
       it('a run it stops keeps the question its agent asked: no failure, no note, no restart', async () => {
         const task = newTask()
         let questionId = ''
@@ -2514,6 +2598,21 @@ describe('saved wakes, end to end', () => {
         teammateSays(task.id)
         const mail = listUndeliveredInbox(db, WORKER, { teamId: TEAM })
         expect(mail.map((r) => r.body).join()).toContain('Here is the key')
+      })
+
+      it('a task that finished first leaves nothing for the agent’s next, unrelated run', () => {
+        const task = runnerTask(BOUND)
+        teammateSays(task.id)
+        expect(listUndeliveredInbox(db, WORKER, { teamId: TEAM })).toHaveLength(1)
+        expect(updateStatus(db, task.id, 'cancelled').ok).toBe(true)
+        pumpTaskWakes(db, pumpDeps())
+        expect(listUndeliveredInbox(db, WORKER, { teamId: TEAM })).toEqual([])
+        // That note is for a person who wrote a comment.
+        expect(
+          getComments(db, task.id)
+            .map((c) => c.body)
+            .join(),
+        ).not.toContain('finished before')
       })
 
       it('with no binding, To do stays put: only a wake that ends a wait starts it', () => {

@@ -53,7 +53,16 @@ const CONTEXT_OVERFLOW_RE =
  * RATE_LIMIT_MESSAGE_RE in the same server file, for the same reason.
  */
 const RATE_LIMIT_MESSAGE_RE =
-  /^\s*429\b|\b(?:http|status|error code:?)\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|per[\s_-]?min(?:ute)?\b|\btpm\b|wait before/i
+  /^\s*429\b|\b(?:http|status|error code):?\s*429\b|rate[\s_-]?limit|too many requests|resource[\s_-]?exhausted|\bquota\b|usage[\s_-]?limit|\bper[\s_-]?(?:min(?:ute)?|hour|day)\b|\bthis (?:minute|hour|day)\b|\btp[mhd]\b|wait before/i
+
+/**
+ * "too many tokens" beside what it counts or the status that refused it. With neither,
+ * the ledger files those words as a rate limit, so this notice must not call them the
+ * context window. Kept character-for-character with NAMED_TOKEN_LIMIT_RE in the same
+ * server file.
+ */
+const NAMED_TOKEN_LIMIT_RE =
+  /\b(?:400|413|422|prompt|input|request|messages?|context)\b[^\n]*too many tokens|too many tokens\b[^\n]*\b(?:prompt|input|request|messages?|context|model)\b/i
 
 /**
  * The sentence for a Gateway run that ended in `error` having said nothing.
@@ -71,6 +80,8 @@ const RATE_LIMIT_MESSAGE_RE =
  */
 export function gatewayRunFailureText(reason: string | null | undefined): string {
   const trimmed = reason?.trim()
+  const overflowWords = (text: string): boolean =>
+    CONTEXT_OVERFLOW_RE.test(text) && !RATE_LIMIT_MESSAGE_RE.test(text)
   if (!trimmed) {
     return 'The run ended without reporting a result. The connection to the runtime may have dropped; try sending again.'
   }
@@ -85,7 +96,10 @@ export function gatewayRunFailureText(reason: string | null | undefined): string
   // The runtime's own advice is "/reset (or /new)", which clears the
   // conversation: the one part that was not the problem. An operator followed it
   // five times.
-  if (CONTEXT_OVERFLOW_RE.test(trimmed) && !RATE_LIMIT_MESSAGE_RE.test(trimmed)) {
+  if (
+    overflowWords(trimmed) &&
+    (NAMED_TOKEN_LIMIT_RE.test(trimmed) || overflowWords(trimmed.replace(/too many tokens/gi, '')))
+  ) {
     return (
       'This run stopped because the runtime believed it was out of context room. ' +
       'That is usually a wrong context-window setting rather than a genuinely oversized prompt: ' +
