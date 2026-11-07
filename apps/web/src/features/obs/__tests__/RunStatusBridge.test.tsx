@@ -34,11 +34,18 @@ import type { ObsLogEvent } from '../useObsStream'
 
 let streamEvents: ObsLogEvent[] = []
 let streamActivity: { seq: number; read: number } | null = null
+let streamLive = false
 const streamOpts: unknown[] = []
 vi.mock('../useObsStream', () => ({
   useObsStream: (_scope: unknown, opts: unknown) => {
     streamOpts.push(opts)
-    return { events: streamEvents, boardActivity: streamActivity, error: null, connected: true }
+    return {
+      events: streamEvents,
+      boardActivity: streamActivity,
+      live: streamLive,
+      error: null,
+      connected: true,
+    }
   },
 }))
 
@@ -84,6 +91,7 @@ const statusOf = (id: string) => useFleetStore.getState().agents.find((a) => a.i
 beforeEach(() => {
   seq = 0
   streamEvents = []
+  streamLive = false
   useFleetStore.setState({ agents: [] })
   useRunActivityStore.setState({ byAgent: new Map() })
 })
@@ -91,6 +99,24 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks())
 
 describe('RunStatusBridge', () => {
+  it('asks for the inbox again when the stream comes back, with nothing new on the board', () => {
+    // A read that used up its retries while the server was gone has no change to wake it.
+    useAlertSignal.setState({ inbox: 0 })
+    streamLive = true
+    const view = render(<RunStatusBridge />)
+    const opened = useAlertSignal.getState().inbox
+    view.rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(opened)
+
+    streamLive = false
+    view.rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(opened)
+
+    streamLive = true
+    view.rerender(<RunStatusBridge />)
+    expect(useAlertSignal.getState().inbox).toBe(opened + 1)
+  })
+
   it('notes the newest event the browser alerts care about, from the same tail', () => {
     useAlertSignal.setState({ seq: 0 })
     streamEvents = [

@@ -195,6 +195,44 @@ describe('the team’s setting', () => {
   })
 })
 
+describe('the team setting that could not be read', () => {
+  it('says so and offers a retry, rather than reading as off', async () => {
+    let reads = 0
+    server.use(
+      http.get('/api/team-agent-wakes/T', () => {
+        reads += 1
+        return reads === 1
+          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
+          : HttpResponse.json({ always: true })
+      }),
+    )
+    render(<TeamAgentWakesToggle teamId="T" />)
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Couldn’t read this setting.')
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    const toggle = screen.getByRole('switch')
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
+    expect(toggle).toBeEnabled()
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+describe('a task that also failed its check', () => {
+  it('says so on the card, and only then', () => {
+    const { rerender } = render(
+      <AgentWakesCard card={CARD} teamId="T" checkFailed onDecided={() => {}} />,
+    )
+    expect(screen.getByTestId('agent-wakes-check-failed')).toBeInTheDocument()
+    rerender(<AgentWakesCard card={CARD} teamId="T" onDecided={() => {}} />)
+    expect(screen.queryByTestId('agent-wakes-check-failed')).toBeNull()
+  })
+
+  it('keeps that from the server when it reads the attention', () => {
+    const attention = { reason: 'agent_wakes', failedRuns: 0, agentWakes: CARD, checkFailed: true }
+    expect(taskAttentionOf({ status: 'blocked', attention })?.checkFailed).toBe(true)
+  })
+})
+
 describe('browser alerts', () => {
   it('announce the card: an agent’s doing, and a person has to answer', () => {
     expect(ANNOUNCED_REASONS).toContain('agent_wakes')

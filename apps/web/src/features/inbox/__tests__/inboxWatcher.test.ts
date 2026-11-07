@@ -7,6 +7,7 @@ import { createInboxWatcher, type InboxWatcher } from '../inboxWatcher'
 
 const BATCH = 1000
 const RETRIES = [5_000, 20_000, 60_000]
+const DEADLINE = 15_000
 
 let watcher: InboxWatcher
 let reads: number
@@ -29,7 +30,7 @@ beforeEach(() => {
   reads = 0
   answers = []
   results = []
-  watcher = createInboxWatcher({ read, batchMs: BATCH, retryMs: RETRIES })
+  watcher = createInboxWatcher({ read, deadlineMs: DEADLINE, batchMs: BATCH, retryMs: RETRIES })
 })
 afterEach(() => {
   watcher.stop()
@@ -136,6 +137,60 @@ describe('createInboxWatcher', () => {
     expect(reads).toBe(1)
     await answer()
     expect(reads).toBe(2)
+  })
+
+  describe('a read that never answers', () => {
+    let signals: AbortSignal[]
+
+    beforeEach(() => {
+      signals = []
+      watcher.stop()
+      watcher = createInboxWatcher({
+        read: (signal) => {
+          reads += 1
+          signals.push(signal)
+          return new Promise(() => {})
+        },
+        deadlineMs: DEADLINE,
+        batchMs: BATCH,
+        retryMs: RETRIES,
+      })
+    })
+
+    it('is aborted at its deadline and counts as failed, so the retries run', async () => {
+      void watcher.readNow()
+      await vi.advanceTimersByTimeAsync(DEADLINE - 1)
+      expect(signals[0]!.aborted).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(signals[0]!.aborted).toBe(true)
+      await vi.advanceTimersByTimeAsync(RETRIES[0]!)
+      expect(reads).toBe(2)
+    })
+
+    it('does not hold off a wake that arrived while it hung', async () => {
+      void watcher.readNow()
+      watcher.poke()
+      await vi.advanceTimersByTimeAsync(BATCH)
+      expect(reads).toBe(1)
+      await vi.advanceTimersByTimeAsync(DEADLINE)
+      expect(reads).toBe(2)
+    })
+
+    it('stop aborts it, and nothing follows', async () => {
+      void watcher.readNow()
+      watcher.stop()
+      expect(signals[0]!.aborted).toBe(true)
+      expect(vi.getTimerCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(600_000)
+      expect(reads).toBe(1)
+    })
+  })
+
+  it('a read that answers leaves no deadline running', async () => {
+    void watcher.readNow()
+    expect(vi.getTimerCount()).toBe(1)
+    await answer()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('stop drops whatever was waiting', async () => {

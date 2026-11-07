@@ -108,6 +108,73 @@ describe('marking a task read', () => {
   })
 })
 
+describe('two marks of the same task at once', () => {
+  /** Requests that stay out until the test refuses them, oldest first. */
+  function heldRefusals(): () => void {
+    const held: Array<() => void> = []
+    stubFetch(
+      () => new Promise((resolve) => held.push(() => resolve(new Response(null, { status: 500 })))),
+    )
+    return () => held.shift()?.()
+  }
+
+  it('both refused: it stays unread, whichever answers first', async () => {
+    const refuse = heldRefusals()
+    store().apply(snapshot({ unread: [{ id: 'a', seq: 7 }], through: 7 }))
+    const first = store().markRead('a', 7)
+    const second = store().markRead('a', 7)
+    refuse()
+    await first
+    refuse()
+    await second
+    expect(unreadIds(store())).toEqual(['a'])
+    store().apply(snapshot({ unread: [{ id: 'a', seq: 7 }], through: 7 }))
+    expect(unreadIds(store())).toEqual(['a'])
+  })
+
+  it('an older refusal leaves a newer mark alone', async () => {
+    const refuse = heldRefusals()
+    store().apply(snapshot({ unread: [{ id: 'a', seq: 7 }], through: 7 }))
+    const older = store().markRead('a', 5)
+    const newer = store().markRead('a', 7)
+    refuse()
+    await older
+    expect(store().marks).toEqual({ a: 7 })
+    refuse()
+    await newer
+    expect(store().marks).toEqual({})
+  })
+
+  it('says whether the server took it', async () => {
+    stubFetch(() => Response.json({ ok: true, unread: false }))
+    await expect(store().markRead('a', 7)).resolves.toBe(true)
+    stubFetch(() => new Response(null, { status: 403 }))
+    await expect(store().markRead('b', 7)).resolves.toBe(false)
+  })
+
+  it('two refused marks of the whole board leave nothing hidden', async () => {
+    const refuse = heldRefusals()
+    store().apply(snapshot({ unread: [{ id: 'a', seq: 5 }], through: 5 }))
+    const first = store().markAllRead({ through: 5 })
+    const second = store().markAllRead({ through: 5 })
+    refuse()
+    await first
+    refuse()
+    await second
+    expect(store().allMark).toBe(0)
+    expect(unreadIds(store())).toEqual(['a'])
+  })
+
+  it('a refused mark of one team leaves the whole board’s mark alone', async () => {
+    stubFetch(() => Response.json({ ok: true }))
+    await store().markAllRead({ through: 3 })
+    stubFetch(() => new Response(null, { status: 500 }))
+    await store().markAllRead({ through: 5, teamId: 'T', shown: [{ id: 'a', seq: 5 }] })
+    expect(store().allMark).toBe(3)
+    expect(store().marks).toEqual({})
+  })
+})
+
 describe('a read landing', () => {
   it('moves the revision the list follows, and only that does', async () => {
     stubFetch(() => Response.json({ ok: true, unread: false }))

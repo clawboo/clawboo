@@ -32,7 +32,7 @@ import {
   type AgentWakeVerdict,
   type TaskStatus,
 } from '@clawboo/board-core'
-import { and, eq, inArray, isNull, isNotNull, ne } from 'drizzle-orm'
+import { and, eq, inArray, isNull, isNotNull, ne, or } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { getSetting, setSetting } from '../db'
@@ -360,6 +360,7 @@ export function openAgentWakeCard(
       DbTask | undefined
     if (!task) return null
     const jobTaskId = ensureGateTx(tx, task, now)
+    // The job's own row whatever team it last named: a job can hold tasks in two teams.
     const others = tx
       .select()
       .from(agentWakeGates)
@@ -367,20 +368,30 @@ export function openAgentWakeCard(
         and(
           isNotNull(agentWakeGates.cardKind),
           task.teamId
-            ? eq(agentWakeGates.teamId, task.teamId)
+            ? or(eq(agentWakeGates.teamId, task.teamId), eq(agentWakeGates.jobTaskId, jobTaskId))
             : eq(agentWakeGates.jobTaskId, jobTaskId),
         ),
       )
       .all() as DbAgentWakeGate[]
     for (const other of others) {
       if (other.cardTaskId === task.id) {
-        if (other.cardKind === input.kind) return null
+        // Another agent's comment can merge into the wake, and the card names who is
+        // waking now: a yes lets the pair it names carry on.
+        if (
+          other.cardKind === input.kind &&
+          other.cardFromAgentId === input.fromAgentId &&
+          other.cardToAgentId === input.toAgentId
+        )
+          return null
         continue
       }
       if (cardStands(tx, other, now)) return null
     }
     tx.update(agentWakeGates)
       .set({
+        // The card's team, which is what its answer is about ("always in this team", the
+        // pair's chain, who waits behind it), and the job's row may have started in another.
+        teamId: task.teamId ?? null,
         cardKind: input.kind,
         cardTaskId: task.id,
         cardFromAgentId: input.fromAgentId,

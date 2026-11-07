@@ -329,6 +329,7 @@ export function taskAttentionOf(task: {
       personId,
       handedBack,
       agentWakes,
+      checkFailed,
       jobLimit,
     } = a as {
       reason?: unknown
@@ -341,6 +342,7 @@ export function taskAttentionOf(task: {
       personId?: unknown
       handedBack?: unknown
       agentWakes?: unknown
+      checkFailed?: unknown
       jobLimit?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
@@ -359,6 +361,7 @@ export function taskAttentionOf(task: {
         ...(typeof personId === 'string' ? { personId } : {}),
         ...(handedBack === true ? { handedBack: true } : {}),
         ...(card ? { agentWakes: card } : {}),
+        ...(checkFailed === true ? { checkFailed: true } : {}),
         ...(limitCard ? { jobLimit: limitCard } : {}),
       }
     }

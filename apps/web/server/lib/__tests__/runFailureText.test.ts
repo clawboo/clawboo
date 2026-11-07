@@ -6,6 +6,7 @@
 // moment another one did, and a user sent to the wrong runtime's settings cannot
 // fix anything there.
 
+import { classifyError } from '@clawboo/obs'
 import { describe, expect, it } from 'vitest'
 
 import { runFailureText } from '../runFailureText'
@@ -94,6 +95,33 @@ describe('runFailureText — a context-overflow label', () => {
       'HTTP 429: too many tokens',
     ]) {
       expect(runFailureText(raw, 'codex')).toBe(`The run failed: ${raw}`)
+    }
+  })
+
+  it('says what the ledger says about too many tokens', () => {
+    // gatewayRunFailureText.test.ts pins the same table on the browser's copy.
+    for (const raw of [
+      'too many tokens',
+      'too many tokens, try again later',
+      'quota exceeded: too many tokens',
+      'usage limit exceeded: too many tokens',
+      'Status: 429: too many tokens',
+      'too many tokens for this hour',
+      'too many tokens per day',
+    ]) {
+      expect(classifyError(null, raw)).toBe('RateLimited')
+      expect(runFailureText(raw, 'codex')).toBe(`The run failed: ${raw}`)
+      expect(runFailureText(raw, null)).toBe(`The run failed: ${raw}`)
+    }
+    for (const raw of [
+      'too many tokens in the request',
+      'too many tokens for this model',
+      'Prompt has too many tokens',
+      'HTTP 400: too many tokens',
+      'Context overflow: too many tokens',
+    ]) {
+      expect(classifyError(null, raw)).toBe('ContextOverflow')
+      expect(runFailureText(raw, null)).toMatch(/context-window setting/i)
     }
   })
 

@@ -23,16 +23,16 @@ import {
   type QuestionPayload,
   type TaskStatus,
 } from '@clawboo/board-core'
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, gte, inArray, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { appendEvent } from '../events/appendEvent'
 import { personJson, type PersonRecord } from '../person'
-import { taskQuestions, tasks, type DbTask, type DbTaskQuestion } from '../schema'
+import { taskComments, taskQuestions, tasks, type DbTask, type DbTaskQuestion } from '../schema'
 import { immediateWrite } from './contention'
 import { emitBoardLifecycle } from './events'
 import { planAnswerRefusalTx, settlePlanAnswerTx, type PlanAcceptRefusal } from './plans'
-import { expirePendingQuestionsTx } from './questionExpiry'
+import { commentMarkTx, expirePendingQuestionsTx } from './questionExpiry'
 import { firedByRoutine, personMovedSinceLastRun } from './repository'
 
 export interface AskQuestionInput {
@@ -56,6 +56,37 @@ export type AskQuestionResult =
         'not_found' | 'not_yours' | 'finished' | 'person_moved' | 'illegal_transition' | 'routine'
       task?: DbTask
     }
+
+/**
+ * Did a person write one of these comments after this question was asked? By row order,
+ * which is the order the writes landed in. The clock cannot say: two writes can share a
+ * millisecond, a comment reads its time before it waits for the write lock, and a clock
+ * can step back. A question from before `comment_mark` existed goes by the clock.
+ */
+export function personCommentedSinceAsked(
+  db: ClawbooDb,
+  question: DbTaskQuestion,
+  commentIds: readonly string[],
+): boolean {
+  if (commentIds.length === 0) return false
+  return (
+    db
+      .select({ id: taskComments.id })
+      .from(taskComments)
+      .where(
+        and(
+          eq(taskComments.taskId, question.taskId),
+          eq(taskComments.authorType, 'user'),
+          inArray(taskComments.id, [...commentIds]),
+          question.commentMark === null
+            ? gte(taskComments.createdAt, question.createdAt)
+            : sql`rowid > ${question.commentMark}`,
+        ),
+      )
+      .limit(1)
+      .get() !== undefined
+  )
+}
 
 export function askQuestion(db: ClawbooDb, input: AskQuestionInput): AskQuestionResult {
   const key = input.idempotencyKey || null
@@ -92,6 +123,7 @@ export function askQuestion(db: ClawbooDb, input: AskQuestionInput): AskQuestion
       status: 'pending',
       idempotencyKey: key,
       executionId: input.executionId ?? null,
+      commentMark: commentMarkTx(tx, row.id),
       answer: null,
       answeredBy: null,
       closeReason: null,

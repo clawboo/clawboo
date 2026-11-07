@@ -129,6 +129,42 @@ describe('collectAlertItems', () => {
   })
 })
 
+describe('the card about agents waking each other', () => {
+  const SINCE = 5000
+  const read = (tasks: AlertTaskInput[]): AlertRead => ({
+    tasks,
+    approvals: [],
+    approvalsComplete: true,
+  })
+  const cardTask = (kind: 'ask' | 'back_and_forth'): AlertTaskInput =>
+    task('t1', 'agent_wakes', {
+      updatedAt: 6000,
+      attention: {
+        reason: 'agent_wakes',
+        failedRuns: 0,
+        agentWakes: { jobTaskId: 'j', kind, fromAgentId: 'a', toAgentId: 'b' },
+      },
+    })
+
+  it('is announced once, and a repeat read says nothing', () => {
+    const m = startAlertMemory(SINCE)
+    const first = foldAlertRead(m, read([cardTask('ask')]), { announce: true })
+    expect(first.fresh.map((i) => i.kind === 'task' && i.reason)).toEqual(['agent_wakes'])
+    const again = foldAlertRead(first.memory, read([cardTask('ask')]), { announce: true })
+    expect(again.fresh).toEqual([])
+  })
+
+  it('one card after another on a task is news, with no read seeing the task leave', () => {
+    const first = foldAlertRead(startAlertMemory(SINCE), read([cardTask('ask')]), {
+      announce: true,
+    })
+    const next = foldAlertRead(first.memory, read([cardTask('back_and_forth')]), {
+      announce: true,
+    })
+    expect(next.fresh).toHaveLength(1)
+  })
+})
+
 describe('foldAlertRead', () => {
   const SINCE = 5000
   const read = (over: Partial<AlertRead> = {}): AlertRead => ({
@@ -380,6 +416,17 @@ describe('latestInboxTrigger', () => {
       ]),
     ).toBe(4)
     expect(latestInboxTrigger([{ seq: 3, kind: 'tool_result' }])).toBe(0)
+  })
+
+  // Each by itself: in a mix, a newer one hides an older one that no longer counts.
+  it.each([
+    'execution_completed',
+    'status_changed',
+    'approval_requested',
+    'job_limit_reached',
+    'approval_resolved',
+  ])('wakes for %s', (kind) => {
+    expect(latestInboxTrigger([{ seq: 5, kind }])).toBe(5)
   })
 })
 

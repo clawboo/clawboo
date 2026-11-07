@@ -18,7 +18,12 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { currentBootAt, currentInitStart, currentPidNamespace } from '../../processIdentity'
+import {
+  currentBootAt,
+  currentInitStart,
+  currentPidNamespace,
+  type StartTimes,
+} from '../../processIdentity'
 import { killProcessTreeByPid } from '../killTree'
 import {
   __resetRuntimePidRecordForTests,
@@ -26,6 +31,8 @@ import {
   recordRuntimePid,
   runtimePidDir,
   startRuntimePidRecord,
+  type RuntimeReapDeps,
+  type RuntimeReapReport,
 } from '../runtimePidFile'
 import { createSpawnDriver } from '../subprocess'
 
@@ -163,6 +170,16 @@ describe('runtime pid record', () => {
   })
 })
 
+/** On Windows the real probe is a PowerShell start, which on a loaded runner can take
+ *  past a test's timeout. There these tests stand in what it would say of a process that
+ *  has just started. It has its own test below, given the time it can need. */
+const startedJustNow = (pids: readonly number[]): StartTimes => ({
+  ok: true,
+  times: new Map(pids.map((pid) => [pid, Date.now()])),
+})
+const reap = (deps: RuntimeReapDeps = {}): RuntimeReapReport =>
+  reapOrphanedRuntimeChildren({ ...(isWin ? { startTimes: startedJustNow } : {}), ...deps })
+
 describe('boot reap of runtime children', () => {
   it('kills a live child of an engine that is gone and drops the file', () => {
     const child = spawnSleeper()
@@ -171,7 +188,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now(), command: 'node' }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([child])
     expect(report.killed).toBe(1)
     expect(existsSync(file)).toBe(false)
@@ -187,7 +204,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: stranger, startedAt: Date.now() - 10 * 60_000 }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
     expect(alive(stranger)).toBe(true)
@@ -203,7 +220,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: stranger, startedAt: Date.now() - 30_000 }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
     expect(alive(stranger)).toBe(true)
@@ -219,7 +236,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       pidNamespace: 'pid:[111]',
     })
@@ -236,7 +253,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.foreign).toBe(1)
     expect(existsSync(file)).toBe(true)
@@ -249,7 +266,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    reapOrphanedRuntimeChildren({
+    reap({
       kill: (pid) => killed.push(pid),
       pidNamespace: 'pid:[111]',
       initStart: 4_000,
@@ -274,7 +291,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: stranger, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       pidNamespace: 'pid:[111]',
       initStart: 4_000,
@@ -295,7 +312,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       pidNamespace: 'pid:[111]',
       initStart: 4_000,
@@ -314,7 +331,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       pidNamespace: 'pid:[111]',
       initStart: null,
@@ -341,7 +358,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.liveEngines).toBe(1)
     expect(existsSync(file)).toBe(true)
@@ -363,7 +380,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([child])
   })
 
@@ -381,7 +398,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([child])
   })
 
@@ -392,7 +409,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
     expect(existsSync(file)).toBe(false)
@@ -405,7 +422,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() - 13 * 60 * 60_000 }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(report.expired).toBe(1)
   })
@@ -419,13 +436,52 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       startTimes: () => ({ ok: false, times: new Map() }),
     })
     expect(killed).toEqual([])
     expect(report.unverified).toBe(1)
   })
+
+  it('keeps the file when it could not check, so a later start that can check kills the child', () => {
+    // A slow probe must not cost the only record of an agent still running.
+    const child = spawnSleeper()
+    const file = writeEngineFile('gone.json', {
+      owner: goneEngine(),
+      children: [
+        { pid: child, startedAt: Date.now() },
+        { pid: DEAD_PID, startedAt: Date.now() },
+      ],
+    })
+    const killed: number[] = []
+    reap({
+      kill: (pid) => killed.push(pid),
+      startTimes: () => ({ ok: false, times: new Map(), error: 'timed out' }),
+    })
+    expect(killed).toEqual([])
+    expect(existsSync(file)).toBe(true)
+
+    const report = reap({ kill: (pid) => killed.push(pid) })
+    expect(killed).toEqual([child])
+    expect(report.killed).toBe(1)
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it(
+    'kills a live child by the real probe, however long it takes to answer',
+    { timeout: 120_000 },
+    () => {
+      const child = spawnSleeper()
+      writeEngineFile('gone.json', {
+        owner: goneEngine(),
+        children: [{ pid: child, startedAt: Date.now() }],
+      })
+      const killed: number[] = []
+      reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+      expect(killed).toEqual([child])
+    },
+  )
 
   it('assumes a held engine pid is the engine when start times are unavailable', () => {
     const engine = spawnSleeper()
@@ -441,7 +497,7 @@ describe('boot reap of runtime children', () => {
       children: [{ pid: child, startedAt: Date.now() }],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({
+    const report = reap({
       kill: (pid) => killed.push(pid),
       startTimes: () => ({ ok: false, times: new Map() }),
     })
@@ -458,7 +514,7 @@ describe('boot reap of runtime children', () => {
       ],
     })
     const killed: number[] = []
-    reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
   })
 
@@ -473,7 +529,7 @@ describe('boot reap of runtime children', () => {
       ],
     })
     const killed: number[] = []
-    const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    const report = reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([child])
     expect(report.unverified).toBe(0)
   })
@@ -483,14 +539,14 @@ describe('boot reap of runtime children', () => {
     const child = spawnSleeper()
     recordRuntimePid(child, 'node')
     const killed: number[] = []
-    reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+    reap({ kill: (pid) => killed.push(pid) })
     expect(killed).toEqual([])
     expect(readOwn().children.map((c) => c.pid)).toEqual([child])
   })
 
   it('discards an unreadable file rather than throwing', () => {
     const file = writeEngineFile('corrupt.json', '{not json')
-    expect(() => reapOrphanedRuntimeChildren({ kill: () => {} })).not.toThrow()
+    expect(() => reap({ kill: () => {} })).not.toThrow()
     expect(existsSync(file)).toBe(false)
   })
 

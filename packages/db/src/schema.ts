@@ -559,6 +559,9 @@ export const taskQuestions = sqliteTable(
     idempotencyKey: text('idempotency_key'),
     // The execution row of the run that asked, when an agent's run did.
     executionId: text('execution_id'),
+    // The task's newest comment (its rowid) when this was asked, 0 with none: a comment
+    // is from before or after the question by row order, never by the clock.
+    commentMark: integer('comment_mark'),
     // JSON QuestionAnswer.
     answer: text('answer'),
     // Who answered: a JSON {id, name, role}.

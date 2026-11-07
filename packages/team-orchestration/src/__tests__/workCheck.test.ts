@@ -361,6 +361,36 @@ describe('team-chat work check', () => {
     expect(before.updates()[0]!.task).toMatch(/restart/i)
   })
 
+  it('a run in review that another owner marked, with no label, is not parked', async () => {
+    const before = makeHarness()
+    const id = await delegate(before)
+    await before.engine.onEvent(sk('a2'), doneEvent('r2', 'done'))
+    await settle()
+    expect(statusOf(before.board, id)).toBe('in_review')
+    vi.clearAllTimers()
+
+    const listed = before.board.listExecutions.bind(before.board)
+    before.board.listExecutions = async (taskId) =>
+      (await listed(taskId))?.map(({ executorType: _label, ...row }) => ({
+        ...row,
+        engineRun: 0,
+      })) ?? null
+    const after = createBoardOrchestrator({
+      teamId: 't1',
+      board: before.board,
+      known: () => KNOWN,
+      leaderAgentId: () => 'leader',
+      sessionKeyForAgent: sk,
+      agentIdForSession,
+      deliver: async () => {},
+      stopGen: () => 0,
+      workCheck: { begin: async () => undefined, prepare: async () => null },
+    })
+    await after.resume()
+
+    expect(statusOf(before.board, id)).toBe('in_review')
+  })
+
   it('a resume while this engine checks a task leaves the check alone', async () => {
     const h = makeHarness()
     const id = await delegate(h)

@@ -681,6 +681,11 @@ describe('isContextOverflowMessage', () => {
       'Rate limit reached for gpt-4o on tokens per min (TPM): too many tokens in the request',
       '{"type":"error","error":{"type":"rate_limit_error","message":"too many tokens"}}',
       'RESOURCE_EXHAUSTED: too many tokens',
+      'quota exceeded: too many tokens',
+      'usage limit exceeded: too many tokens',
+      'Status: 429: too many tokens',
+      'too many tokens for this hour',
+      'too many tokens, 90000 tpd',
     ]) {
       expect(isContextOverflowMessage(msg)).toBe(false)
     }

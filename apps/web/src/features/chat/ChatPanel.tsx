@@ -240,14 +240,16 @@ export function ChatPanel({
 
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const teams = useTeamStore((s) => s.teams)
-  const isBooZeroChat = Boolean(agent && booZeroAgentId && agent.id === booZeroAgentId)
   // Boo Zero's chat hands work to teams when the server runs it, since only then does
-  // the server see the reply. An OpenClaw Boo Zero's chat goes straight to the Gateway,
-  // and its reply can start nothing: its anchor and its notes say so. The stream says
-  // which this is: `booZeroAgentId` is this browser's idea, which falls back to the
-  // first teamless agent, and the server's is the one that acts.
+  // the server read the reply. An OpenClaw Boo Zero's chat runs in the Gateway, and its
+  // reply can start nothing: its anchor and its notes say so. The stream says which this
+  // is: `booZeroAgentId` is this browser's idea, which falls back to the first teamless
+  // agent, and the server's is the one that acts.
   const handOffsWork = useChatHandOffStore(
     (s) => isServerChat && agent !== null && s.handsOffByAgent.get(agent.id) === true,
+  )
+  const isBooZeroChat = Boolean(
+    agent && (handOffsWork || (booZeroAgentId && agent.id === booZeroAgentId)),
   )
 
   // Every turn that is not all hand-off tags: one that is has its cards to show for it,

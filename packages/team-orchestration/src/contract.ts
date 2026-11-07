@@ -1918,6 +1918,43 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
     })
 
+    it('resume honours the marker from a host that gives no label', async () => {
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'marked run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-reported-openclaw',
+      })
+      const listed = board.listExecutions.bind(board)
+      board.listExecutions = async (id) =>
+        (await listed(id))?.map(({ executorType: _label, ...row }) => row) ?? null
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('in_progress')
+      expect(board.statusUpdates.filter((u) => u.taskId === t)).toEqual([])
+    })
+
+    it('resume still attaches a run from a host that gives neither field', async () => {
+      let clock = 1_000
+      const { board, orchestrator } = makeHarness({ now: () => clock })
+      const t = board.seedInProgress({
+        title: 'bare run',
+        sourceDelegationId: 'rX:deleg:reflectTo:leader',
+        assigneeAgentId: 'a3',
+        exec: 'running-openclaw',
+      })
+      const listed = board.listExecutions.bind(board)
+      board.listExecutions = async (id) =>
+        (await listed(id))?.map(({ executorType: _label, engineRun: _mark, ...row }) => row) ?? null
+      await orchestrator.resume()
+      clock += DELEGATION_IDLE_TIMEOUT_MS + 1
+      await orchestrator.sweepStaleSessions()
+      expect(board.statusOf(t)).toBe('blocked')
+    })
+
     it('resume attaches an engine run from before the marker, by its label', async () => {
       let clock = 1_000
       const { board, orchestrator } = makeHarness({ now: () => clock })

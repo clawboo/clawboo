@@ -212,14 +212,24 @@ export function InboxPanel() {
     [agents, teams],
   )
 
-  // J and K step through the list the drawer was opened from.
+  // J and K step through the list the drawer was opened from, as it stood then. Opening a
+  // task reads it, which takes it off Unread, and stepping back still has to find it.
+  const [stepIds, setStepIds] = useState<readonly string[]>([])
+  const openFromList = (id: string): void => {
+    setStepIds(tab === 'needs-you' ? needsYou.stuck.map((s) => s.task.id) : list.map((t) => t.id))
+    setOpenId(id)
+  }
   const position = useMemo<DrawerPosition | null>(() => {
     if (!openId) return null
-    const ids = list.map((t) => t.id)
-    const index = ids.indexOf(openId)
+    const index = stepIds.indexOf(openId)
     if (index < 0) return null
-    return { index, total: ids.length, prev: ids[index - 1] ?? null, next: ids[index + 1] ?? null }
-  }, [openId, list])
+    return {
+      index,
+      total: stepIds.length,
+      prev: stepIds[index - 1] ?? null,
+      next: stepIds[index + 1] ?? null,
+    }
+  }, [openId, stepIds])
 
   const markAll = useCallback(async () => {
     const through = newestSeq(tasks)
@@ -276,8 +286,9 @@ export function InboxPanel() {
           <div ref={tabsRef} className="-ml-3 max-w-full overflow-x-auto">
             <Tabs tabs={TABS} value={tab} onChange={onTabChange} />
           </div>
-          {/* It clears every unread task, so not from a tab showing only some of them. */}
-          {(tab === 'unread' || tab === 'all') && unreadCount > 0 ? (
+          {/* It clears every unread task, so not from a tab showing only some of them, and
+              not until this team's rows are here: the last team's say nothing about it. */}
+          {loaded && !failed && (tab === 'unread' || tab === 'all') && unreadCount > 0 ? (
             <Button variant="ghost" size="sm" onClick={() => void markAll()}>
               Mark all read
             </Button>
@@ -307,7 +318,7 @@ export function InboxPanel() {
             <NeedsYouItems
               model={needsYou}
               teamFilter={teamFilter}
-              onOpenTask={setOpenId}
+              onOpenTask={openFromList}
               onTasksChanged={() => void refresh()}
             />
           ) : shown.length === 0 ? (
@@ -323,7 +334,7 @@ export function InboxPanel() {
                     task={task}
                     unread={isUnread(task, readMarks)}
                     detail={detailOf(task)}
-                    onOpen={setOpenId}
+                    onOpen={openFromList}
                   />
                 ))}
               </ul>

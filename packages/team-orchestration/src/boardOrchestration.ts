@@ -1566,7 +1566,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const result = isHumanAssignment(sdidOf(task))
       ? 'Its result goes to the person, on its card.'
       : chatSessionKey && task['chatSessionKey'] !== chatSessionKey
-        ? "It was not handed off from this chat, so its result goes to the team's chat, not here."
+        ? task['chatSessionKey']
+          ? 'It was handed off from another chat, so its result goes there, not here. It is on its card too.'
+          : "It was not handed off from this chat, so its result goes to the team's chat, not here."
         : reportsTo === delegatorAgentId
           ? 'Its result will reach you when it ends.'
           : `Its result goes to ${nameOf(reportsTo ?? deps.leaderAgentId())}.`
@@ -5780,6 +5782,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     )
   }
 
+  /** A running exec this engine must leave alone. Either field can say so, and a host that
+   *  gives neither has only the engine's own runs to report. */
+  const isOthersRun = (run: ExecutionSummary): boolean =>
+    (run.executorType !== undefined || (run.engineRun !== undefined && run.engineRun !== null)) &&
+    !isEngineRun(run)
+
   /** The last report a run left on a task's card. */
   const lastReplyOf = (detail: TaskDetail | null): string | null => {
     for (const c of [...(detail?.comments ?? [])].reverse()) {
@@ -5802,7 +5810,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const execs = await deps.board.listExecutions(t.id)
     const last = execs?.[execs.length - 1]
     if (!last || last.status !== 'running') return
-    if (last.executorType !== undefined && !isEngineRun(last)) return
+    if (isOthersRun(last)) return
     // Parked first: until the move lands the run stays open, so the next
     // `resume()` finds the task the same way and tries again.
     if (
@@ -5866,7 +5874,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         if (execs === null) continue
         const last = execs[execs.length - 1]
         if (!last || last.status !== 'running') continue
-        if (last.executorType !== undefined && !isEngineRun(last)) continue
+        if (isOthersRun(last)) continue
         const sk = deps.sessionKeyForAgent(assignee)
         if (sk && !sessionToTask.has(sk) && !takingSession.has(sk)) {
           sessionToTask.set(sk, t.id)

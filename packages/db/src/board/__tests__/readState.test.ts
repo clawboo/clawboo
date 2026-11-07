@@ -323,6 +323,18 @@ describe('own writes', () => {
     expect(unreadIds()).toEqual([])
   })
 
+  it('a write that says it made nothing new reads nothing', () => {
+    const id = readTask()
+    addComment(db, id, 'While the retry was on its way.', 'agent', 'coder')
+    runOwnWrite(
+      db,
+      LOCAL_READER,
+      () => null,
+      () => 'found the task already there',
+    )
+    expect(unreadIds()).toEqual([id])
+  })
+
   it('returns what the write returned', () => {
     const id = readTask()
     const comment = runOwnWrite(db, LOCAL_READER, id, () => addComment(db, id, 'Hello.', 'user'))
@@ -520,6 +532,23 @@ describe('telling this person’s other browsers', () => {
 })
 
 describe('where a reader starts', () => {
+  it('goes by the stored baseline when another process set the reader up first', () => {
+    // Its row landed between this read of the head and this insert, so the insert
+    // conflicts. The change after that row's baseline must still show as news.
+    const before = createTask(db, { title: 'Before', status: 'todo' })
+    const after = createTask(db, { title: 'After', status: 'todo' })
+    db.run(
+      sql.raw(`CREATE TRIGGER other_process BEFORE INSERT ON task_readers
+        WHEN NEW.reader_id = 'person:new'
+          AND NOT EXISTS (SELECT 1 FROM task_readers WHERE reader_id = 'person:new')
+        BEGIN
+          INSERT INTO task_readers (reader_id, baseline_seq, updated_at)
+          VALUES ('person:new', ${seqOf(before.id)}, 0);
+        END`),
+    )
+    expect(unreadIds('person:new')).toEqual([after.id])
+  })
+
   it('a new person behind a sign-in proxy starts caught up', () => {
     const task = createTask(db, { title: 'Before they arrived', status: 'todo' })
     expect(unreadIds('person:new')).toEqual([])

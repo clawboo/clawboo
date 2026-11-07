@@ -42,6 +42,11 @@ export function chatResultsHeld(db: ClawbooDb, agentId: string): boolean {
   return Boolean(getSetting(db, chatResultsHeldKey(agentId)))
 }
 
+/** When the Stop holding this chat's results came, or nothing with no hold. */
+export function chatResultsHeldSince(db: ClawbooDb, agentId: string): string | null {
+  return getSetting(db, chatResultsHeldKey(agentId)) || null
+}
+
 type ChatReportUpListener = (sessionKey: string) => void
 
 let listener: ChatReportUpListener | null = null

@@ -182,6 +182,26 @@ describe('NeedsYouColumn', () => {
     expect(within(card).getByText(/Coder/)).toBeInTheDocument()
   })
 
+  it('a card about agents waking each other keeps Review when the task failed its check', async () => {
+    const agentWakes = { jobTaskId: 'j', kind: 'ask', fromAgentId: 'a', toAgentId: 'b' }
+    renderColumn([
+      failedTask({
+        attention: { reason: 'agent_wakes', failedRuns: 0, agentWakes, checkFailed: true },
+      }),
+    ])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).getByTestId('agent-wakes-card')).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'Review' })).toBeInTheDocument()
+  })
+
+  it('and has no Review when it did not: the answer is the action', async () => {
+    const agentWakes = { jobTaskId: 'j', kind: 'ask', fromAgentId: 'a', toAgentId: 'b' }
+    renderColumn([failedTask({ attention: { reason: 'agent_wakes', failedRuns: 0, agentWakes } })])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).getByTestId('agent-wakes-card')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Review' })).toBeNull()
+  })
+
   it.each([
     ['no_result', 'No result'],
     ['rate_limited', 'Rate limited'],

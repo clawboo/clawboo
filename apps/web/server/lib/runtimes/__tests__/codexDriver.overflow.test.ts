@@ -134,14 +134,14 @@ process.exitCode = ${code}
   it("types a rate limit in an overflow's words as a rate limit, and files and reads as one", async () => {
     const body = JSON.stringify({
       status: 429,
-      error: { code: 'rate_limit_exceeded', message: 'too many tokens in this minute' },
+      error: { code: 'rate_limit_exceeded', message: 'too many tokens' },
     })
     const result = await resultOf(failed(body), '', 1)
     expect(result.errorCode).toBe('rate_limit')
-    expect(result.errorMessage).toBe('Rate limit: too many tokens in this minute')
+    expect(result.errorMessage).toBe('Rate limit: too many tokens')
     expect(classifyError(result.errorCode, result.errorMessage)).toBe('RateLimited')
     expect(runFailureText(result.errorMessage, 'codex')).toBe(
-      'The run failed: Rate limit: too many tokens in this minute',
+      'The run failed: Rate limit: too many tokens',
     )
   })
 

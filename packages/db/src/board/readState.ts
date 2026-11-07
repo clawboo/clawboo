@@ -101,12 +101,14 @@ export function activitySeqOf(db: ClawbooDb, taskId: string): number {
  * they start again from here on the next read.
  */
 function readerBaseline(db: ClawbooDb, readerId: string): number {
-  const row = db
-    .select({ baselineSeq: taskReaders.baselineSeq })
-    .from(taskReaders)
-    .where(eq(taskReaders.readerId, readerId))
-    .get()
-  if (row) return row.baselineSeq
+  const stored = (): number | undefined =>
+    db
+      .select({ baselineSeq: taskReaders.baselineSeq })
+      .from(taskReaders)
+      .where(eq(taskReaders.readerId, readerId))
+      .get()?.baselineSeq
+  const known = stored()
+  if (known !== undefined) return known
   if (readerId === LOCAL_READER) return 0
   const head = boardActivityHead(db)
   try {
@@ -120,7 +122,9 @@ function readerBaseline(db: ClawbooDb, readerId: string): number {
   } catch {
     // Reads must not fail on this; see above.
   }
-  return head
+  // Another process can get there first, with an older head. Its row is the one that
+  // stays, and going by this read's newer head would hide what landed between the two.
+  return stored() ?? head
 }
 
 function readSeqOf(db: ClawbooDb, readerId: string, taskId: string): number {
@@ -370,7 +374,9 @@ export function runLaterOwnWrite<T>(
  *
  * `readerId` null means the caller is not a person, so the write counts as someone
  * else's. `task` is the task's id, or how to read it from what the write returns,
- * for a task the write creates.
+ * for a task the write creates. That reads null when the write made nothing new, such
+ * as a retried create that found its task already there: what has happened on the task
+ * since is someone else's, and stays news.
  *
  * The write and the mark share one transaction. Taken apart, a comment from the
  * stdio bin could land between them and be swallowed. The write's own repository
@@ -380,7 +386,7 @@ export function runLaterOwnWrite<T>(
 export function runOwnWrite<T>(
   db: ClawbooDb,
   readerId: string | null,
-  task: string | ((result: T) => string),
+  task: string | ((result: T) => string | null),
   write: () => T,
 ): T {
   if (readerId === null) return write()
@@ -389,6 +395,7 @@ export function runOwnWrite<T>(
     const before = typeof task === 'string' ? activitySeqOf(db, task) : 0
     const result = write()
     const taskId = typeof task === 'string' ? task : task(result)
+    if (taskId === null) return result
     const after = activitySeqOf(db, taskId)
     if (after > before) {
       writeRead(db, readerId, taskId, after)

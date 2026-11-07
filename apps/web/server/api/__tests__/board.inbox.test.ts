@@ -18,13 +18,44 @@ import {
   claimTask,
   createApproval,
   createTask,
+  linkDep,
   listWaitingTaskWakes,
   tasks,
   teams,
   updateStatus,
+  updateTaskFields,
 } from '@clawboo/db'
 import express, { type Request, type Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+// Another process writing between two of the handler's reads, which nothing in this
+// process can do: runs once, right after the named read.
+const between = vi.hoisted(() => ({
+  after: null as { read: 'getTask' | 'listTasks' | 'taskReadStates'; write: () => void } | null,
+}))
+vi.mock('@clawboo/db', async (importOriginal) => {
+  const real = await importOriginal<typeof import('@clawboo/db')>()
+  const hooked =
+    <A extends unknown[], R>(
+      read: 'getTask' | 'listTasks' | 'taskReadStates',
+      fn: (...a: A) => R,
+    ) =>
+    (...args: A): R => {
+      const out = fn(...args)
+      if (between.after?.read === read) {
+        const { write } = between.after
+        between.after = null
+        write()
+      }
+      return out
+    }
+  return {
+    ...real,
+    getTask: hooked('getTask', real.getTask),
+    listTasks: hooked('listTasks', real.listTasks),
+    taskReadStates: hooked('taskReadStates', real.taskReadStates),
+  }
+})
 
 const dispatched: Array<{ teamId: string; taskId: string }> = []
 vi.mock('../../lib/teamChat/boardDispatch', () => ({
@@ -247,6 +278,42 @@ describe('a person’s inbox', () => {
     })
   })
 
+  describe('a write from another process landing between two reads', () => {
+    const editLater = (id: string): void => {
+      updateTaskFields(getDb(), id, { title: 'Edited meanwhile' })
+    }
+
+    // Whichever side of the read state it lands on, the page marks what it was given
+    // and the edit must still be unread.
+    it.each(['getTask', 'taskReadStates'] as const)(
+      'opening a task does not swallow an edit landing after %s',
+      async (read) => {
+        const id = await agentTask()
+        await open(id)
+        between.after = { read, write: () => editLater(id) }
+        await open(id)
+        expect(between.after).toBeNull()
+        expect(await unreadIds()).toEqual([id])
+      },
+    )
+
+    it.each(['listTasks', 'taskReadStates'] as const)(
+      'marking a list row does not swallow an edit landing after %s',
+      async (read) => {
+        const id = await agentTask()
+        await open(id)
+        between.after = { read, write: () => editLater(id) }
+        const listed = (await board()).find((t) => t.id === id)!
+        expect(between.after).toBeNull()
+        await call(boardTaskReadPOST, {
+          params: { taskId: id },
+          body: { through: listed.activity?.seq ?? 0 },
+        })
+        expect(await unreadIds()).toEqual([id])
+      },
+    )
+  })
+
   describe('own writes', () => {
     it('a person’s own comment does not make it unread; the agent’s answer does', async () => {
       const id = await agentTask()
@@ -306,6 +373,47 @@ describe('a person’s inbox', () => {
       const r = await call(boardCreatePOST, { body: { title: 'Mine', teamId: TEAM } })
       expect(r.status).toBe(200)
       expect(await unreadIds()).toEqual([])
+    })
+
+    it('a retried create leaves what happened since unread', async () => {
+      const body = { title: 'Mine', teamId: TEAM, idempotencyKey: 'draft-1' }
+      const first = await call(boardCreatePOST, { body })
+      const id = (first.body['task'] as Row).id
+      expect(await unreadIds()).toEqual([])
+      agentComment(id)
+      const retry = await call(boardCreatePOST, { body })
+      expect(retry.body['deduplicated']).toBe(true)
+      expect(await unreadIds()).toEqual([id])
+    })
+
+    it('a person’s cancel takes the steps waiting on it, and those are not news either', async () => {
+      const first = await agentTask('First')
+      const next = await agentTask('Next')
+      linkDep(getDb(), next, first)
+      await open(first)
+      await open(next)
+      const r = await call(boardUpdatePATCH, {
+        params: { taskId: first },
+        body: { status: 'cancelled' },
+      })
+      expect(r.body['cancelledDependents']).toEqual([{ id: next, title: 'Next' }])
+      expect(await unreadIds()).toEqual([])
+      agentComment(next, 'Too late, but said.')
+      expect(await unreadIds()).toEqual([next])
+    })
+
+    it('a cancel from anyone but the dashboard’s page leaves the steps as news', async () => {
+      const first = await agentTask('First')
+      const next = await agentTask('Next')
+      linkDep(getDb(), next, first)
+      await open(first)
+      await open(next)
+      await call(boardUpdatePATCH, {
+        params: { taskId: first },
+        body: { status: 'cancelled' },
+        headers: SCRIPT,
+      })
+      expect((await unreadIds()).sort()).toEqual([first, next].sort())
     })
 
     it('a person’s Retry and Assign are not unread; the run they start is', async () => {

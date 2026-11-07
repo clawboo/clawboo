@@ -397,9 +397,10 @@ function primaryActionOf(
       return 'review'
     case 'blocked':
       return 'open'
-    // The answer controls are the action.
-    case 'question':
+    // The answer controls are the action. A check it failed still wants looking at.
     case 'agent_wakes':
+      return attention.checkFailed ? 'review' : 'none'
+    case 'question':
     case 'job_limit':
       return 'none'
     case 'assigned':
@@ -669,7 +670,12 @@ function NeedsYouTaskCard({
       ) : null}
       {agentWakes ? (
         <div className="mt-2">
-          <AgentWakesCard card={agentWakes} teamId={teamId} onDecided={onChanged} />
+          <AgentWakesCard
+            card={agentWakes}
+            teamId={teamId}
+            checkFailed={attention.checkFailed}
+            onDecided={onChanged}
+          />
         </div>
       ) : null}
       {jobLimit ? (

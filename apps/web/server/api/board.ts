@@ -81,7 +81,7 @@ import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
-import { ownWriterOf, withReadState } from '../lib/boardReader'
+import { markReleasedTasksRead, ownWriterOf, readStatesOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -133,14 +133,15 @@ export function boardListGET(req: Request, res: Response): void {
     const status =
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
+    // Before the rows: see readStatesOf.
+    const states = readStatesOf(db, req)
     res.json({
       tasks: withPause(
         db,
         withOpenQuestion(
           db,
           withReadState(
-            db,
-            req,
+            states,
             withLabels(
               db,
               withRunningSince(
@@ -169,6 +170,8 @@ export function boardGetGET(req: Request, res: Response): void {
   try {
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    // Before the task: see readStatesOf.
+    const states = readStatesOf(db, req, { taskId })
     const task = getTask(db, taskId)
     if (!task) {
       res.status(404).json({ error: 'task not found' })
@@ -177,7 +180,7 @@ export function boardGetGET(req: Request, res: Response): void {
     const [withWaiting] = withOpenQuestion(db, [task])
     res.json({
       task: {
-        ...withReadState(db, req, [withWaiting!])[0]!,
+        ...withReadState(states, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
         jobStopped: jobStoppedTaskIds(db, [task]).has(taskId),
         pause: pauseViewOfTask(db, task),
@@ -407,7 +410,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
     const task = runOwnWrite(
       db,
       ownWriterOf(req),
-      (t: DbTask) => t.id,
+      (t: DbTask & { deduplicated?: boolean }) => (t.deduplicated ? null : t.id),
       () =>
         createTask(db, {
           ...input,
@@ -837,6 +840,15 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
             title: d.title,
           }),
         )
+        // The person did that too, so these do not come back to them as news.
+        if (writer && cancelledDependents.length > 0) {
+          markReleasedTasksRead(
+            db,
+            writer,
+            cancelledDependents.map((d) => d.id),
+            'cancelled',
+          )
+        }
       }
       if (humanOverride && status === 'done') {
         const t = result.task

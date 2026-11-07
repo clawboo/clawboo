@@ -63,12 +63,12 @@ export function ownWriterOf(req: Request): string | null {
  * This is the seam for how Stop works. The engine is untouched: only `RELEASED_TO`
  * knows where a stopped task goes.
  */
-export async function stopAsOwnWrite(
+export async function stopAsOwnWrite<T>(
   db: ClawbooDb,
   reader: string | null,
   scope: { teamId: string; roomId: string | null },
-  stop: () => Promise<void>,
-): Promise<void> {
+  stop: () => Promise<T>,
+): Promise<T> {
   if (!reader) return stop()
   const running = RUNNING_STATUSES.flatMap((status) =>
     listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status }).map((t) => t.id),
@@ -86,9 +86,10 @@ export async function stopAsOwnWrite(
     else if (waitingOnPlan(db, t))
       (isPlanHolder(t.sourceDelegationId) ? holders : running).push(t.id)
   }
-  await stop()
+  const result = await stop()
   markReleasedTasksRead(db, reader, running)
   markReleasedTasksRead(db, reader, holders, 'cancelled')
+  return result
 }
 
 /** The tasks a person's pause would release, by the same reading as Stop: what is
@@ -131,20 +132,31 @@ export interface RowReadState {
 
 const NOTHING_NEW: RowReadState = { unread: false, activity: null }
 
-/** The read state of these rows for this request's reader. The board still loads
- *  when this cannot be read: nothing shows as unread until the next read. */
-export function withReadState<T extends { id: string }>(
+/**
+ * This request's reader's state for every task, or just `taskId`'s. Read it BEFORE the
+ * rows it goes on. A write from another process can land between the two reads, and in
+ * this order that is harmless: newer fields under an older seq stay unread after the
+ * page marks that seq. The other way round, the mark would cover an edit nobody saw.
+ * The board still loads when this cannot be read: nothing shows as unread until the
+ * next read.
+ */
+export function readStatesOf(
   db: ClawbooDb,
   req: Request,
-  rows: readonly T[],
-): Array<T & RowReadState> {
-  let states: Map<string, TaskReadState>
+  opts: { taskId?: string } = {},
+): ReadonlyMap<string, TaskReadState> {
   try {
-    // One row, as when the drawer opens a task, need not read the whole board's.
-    states = taskReadStates(db, readerOf(req), rows.length === 1 ? { taskId: rows[0]!.id } : {})
+    return taskReadStates(db, readerOf(req), opts)
   } catch (err) {
     log.warn({ err }, 'reading the read state failed')
-    states = new Map()
+    return new Map()
   }
+}
+
+/** These rows with their read state, from `readStatesOf`. */
+export function withReadState<T extends { id: string }>(
+  states: ReadonlyMap<string, TaskReadState>,
+  rows: readonly T[],
+): Array<T & RowReadState> {
   return rows.map((t) => ({ ...t, ...(states.get(t.id) ?? NOTHING_NEW) }))
 }

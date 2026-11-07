@@ -539,6 +539,17 @@ describe('the card', () => {
     expect(attentionForTask(db, id)?.reason).not.toBe('agent_wakes')
   })
 
+  it('names who is waking now when another agent’s comment merges into the wake', () => {
+    const id = parked()
+    asking(id, 'back_and_forth')
+    saveAgentCommentWake(db, id, comment(id, 'c'))
+    const now = { fromAgentId: 'c', toAgentId: 'b' }
+    expect(openAgentWakeCard(db, { taskId: id, kind: 'back_and_forth', ...now })).toBe(true)
+    expect(attentionForTask(db, id)?.agentWakes).toMatchObject(now)
+    // Nothing changed this time, so nothing is announced.
+    expect(openAgentWakeCard(db, { taskId: id, kind: 'back_and_forth', ...now })).toBe(false)
+  })
+
   it('with no card open, a decision is refused: it answers nothing', () => {
     const id = parked()
     expect(decideAgentWakes(db, id, 'job', LOCAL_PERSON)).toEqual({ ok: false, reason: 'no_card' })
@@ -570,6 +581,81 @@ describe('the card', () => {
     expect(decideAgentWakes(db, id, 'job', LOCAL_PERSON).ok).toBe(true)
     expect(readAgentWakeGate(db, id)?.windowCount).toBe(0)
     expect(agentWakeVerdictFor(db, id, A_TO_B)).toBe('allowed')
+  })
+})
+
+describe('a job with tasks in two teams', () => {
+  /** Agent b's part of the job, in this team, parked on what it says it needs. */
+  const partIn = (parentTaskId: string, teamId: string): string => {
+    const t = createSubtask(db, parentTaskId, {
+      title: `Part in ${teamId}`,
+      teamId,
+      status: 'todo',
+      sourceDelegationId: BOUND,
+    })
+    claimTask(db, t.id, 'b')
+    updateStatus(db, t.id, 'blocked', {
+      waitingOn: { kind: 'person', need: 'A key', by: 'agent' },
+    })
+    return t.id
+  }
+  /** A job whose row was first written from team T. */
+  const jobStartedInT = (): string => {
+    const root = createTask(db, { title: 'Root', teamId: 'T', status: 'todo' })
+    noteAgentWakeStarted(db, root.id, { fromAgentId: 'x', toAgentId: 'y' })
+    expect(readAgentWakeGate(db, root.id)?.teamId).toBe('T')
+    return root.id
+  }
+
+  it('"always in this team" means the team of the task the card is on', () => {
+    const there = partIn(jobStartedInT(), 'U')
+    asking(there)
+    expect(decideAgentWakes(db, there, 'team', LOCAL_PERSON).ok).toBe(true)
+    expect(readTeamAlwaysAllow(db, 'U')).toBe(true)
+    expect(readTeamAlwaysAllow(db, 'T')).toBe(false)
+  })
+
+  it('a yes lets carry on the pair in the card’s team, where their chain is', () => {
+    const there = partIn(jobStartedInT(), 'U')
+    setSetting(db, teamAgentWakesSettingKey('U'), '{"always":true}')
+    for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+      noteAgentWakeStarted(db, there, i % 2 === 0 ? A_TO_B : B_TO_A)
+    asking(there, 'back_and_forth')
+    expect(agentWakeVerdictFor(db, there, A_TO_B)).toBe('back_and_forth')
+    expect(decideAgentWakes(db, there, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(agentWakeVerdictFor(db, there, A_TO_B)).toBe('allowed')
+  })
+
+  it('the wakes waiting behind its card are those of the card’s team', () => {
+    const there = partIn(jobStartedInT(), 'U')
+    const another = parked({ title: 'Another job in T' })
+    saveAgentCommentWake(db, another, comment(another))
+    const [row] = listWaitingTaskWakes(db, { taskId: another })
+    noteTaskWakeSkip(db, row!.id, 'ask_once')
+    asking(there)
+    expect(agentWakeCardsForTasks(db, [{ id: there, status: 'blocked' }]).get(there)).toMatchObject(
+      { kind: 'ask' },
+    )
+    expect(
+      agentWakeCardsForTasks(db, [{ id: there, status: 'blocked' }]).get(there)?.alsoWaiting,
+    ).toBeUndefined()
+  })
+
+  it('has one card: a part in the other team waits behind the one standing, and does not take it', () => {
+    const root = jobStartedInT()
+    const here = partIn(root, 'T')
+    const there = partIn(root, 'U')
+    expect(asking(here)).toBe(true)
+    expect(asking(there)).toBe(false)
+    expect(asking(here)).toBe(false)
+    const cards = agentWakeCardsForTasks(db, [
+      { id: here, status: 'blocked' },
+      { id: there, status: 'blocked' },
+    ])
+    expect([...cards.keys()]).toEqual([here])
+    // The answer is for the job, so it covers the part behind it too.
+    expect(decideAgentWakes(db, here, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(agentWakeVerdictFor(db, there, A_TO_B)).toBe('allowed')
   })
 })
 

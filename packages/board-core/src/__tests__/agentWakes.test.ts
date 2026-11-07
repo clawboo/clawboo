@@ -382,6 +382,21 @@ describe('the card in Needs you', () => {
     ).toMatchObject({ reason: 'agent_wakes', agentWakes: card })
   })
 
+  it('keeps a failed check in reach beside the card', () => {
+    const blocked = {
+      status: 'blocked',
+      execs: [{ status: 'succeeded' }],
+      waitingOn: { kind: 'person', need: 'A key', by: 'agent' },
+      agentWakes: card,
+    }
+    expect(taskAttention({ ...blocked, verificationBlocked: true })).toMatchObject({
+      reason: 'agent_wakes',
+      agentWakes: card,
+      checkFailed: true,
+    })
+    expect(taskAttention(blocked)).not.toHaveProperty('checkFailed')
+  })
+
   it('a task waiting on other work stays out of Needs you, card or no card', () => {
     expect(
       taskAttention({

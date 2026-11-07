@@ -134,10 +134,12 @@ describe('a 1:1 chat that acts on its hand-offs (a server-run Boo Zero)', () => 
     expect(screen.getByTestId('a-card')).toBeInTheDocument()
   })
 
-  it('shows the "Delegated to" card while the reply streams', () => {
+  it('shows a card that says it is on its way while the reply streams', () => {
     renderList([], TAGGED, { handOffs: 'chat-card' })
     expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
-    expect(screen.getByTestId('delegation-card')).toBeInTheDocument()
+    // Nothing has started yet: the server decides once the reply ends.
+    expect(screen.getByTestId('delegation-card')).toHaveTextContent('Handing off to')
+    expect(screen.getByTestId('delegation-card')).not.toHaveTextContent('Delegated to')
   })
 
   it('draws no card for a tag in code while the reply streams: nothing starts from it', () => {

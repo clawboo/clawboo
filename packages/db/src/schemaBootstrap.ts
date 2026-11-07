@@ -335,6 +335,9 @@ const SCHEMA_DDL = `
       idempotency_key TEXT,
       -- The execution row of the run that asked, when an agent's run did.
       execution_id    TEXT,
+      -- The task's newest comment (its rowid) when this was asked, 0 with none: a comment
+      -- is from before or after the question by row order, never by the clock.
+      comment_mark    INTEGER,
       answer          TEXT,
       answered_by     TEXT,
       close_reason    TEXT,
