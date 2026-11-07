@@ -77,6 +77,19 @@ describe('serverBoardClient (direct-DB BoardClient over the board repo)', () => 
   // the two tests below pin.
   const kinds = (): string[] => listEvents(db).map((e) => e.kind)
 
+  it('addComment says whether the comment was written', async () => {
+    const client = createServerBoardClient(db)
+    const task = await client.createTask({ title: 'do X', teamId: TEAM })
+    expect(await client.addComment(task!.id, 'written', 'agent', 'a1')).toBe(true)
+    // A write the database refuses, and it never throws.
+    db.$client.exec(
+      `CREATE TRIGGER refuse_comments BEFORE INSERT ON task_comments
+       BEGIN SELECT RAISE(ABORT, 'database is locked'); END`,
+    )
+    expect(await client.addComment(task!.id, 'refused', 'agent', 'a1')).toBe(false)
+    expect(getComments(db, task!.id).map((c) => c.body)).toEqual(['written'])
+  })
+
   it('createTask → row + task_created obs', async () => {
     const client = createServerBoardClient(db)
     const task = await client.createTask({ title: 'do X', teamId: TEAM })

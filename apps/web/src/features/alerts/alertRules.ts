@@ -24,6 +24,7 @@ export const ANNOUNCED_REASONS = [
   'question',
   'assigned',
   'agent_wakes',
+  'job_limit',
   'no_result',
   'rate_limited',
   'provider_down',
@@ -42,6 +43,7 @@ export const ALERT_TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'execution_completed',
   'status_changed',
   'approval_requested',
+  'job_limit_reached',
 ])
 
 /** The newest `seq` among the trigger events, or 0 when there is none. */
@@ -272,6 +274,7 @@ const WHAT_HAPPENED: Record<AnnouncedReason, string> = {
   question: 'has a question for you',
   assigned: 'was handed back to a person',
   agent_wakes: 'needs your OK for agents to wake each other',
+  job_limit: 'has started as many runs by itself as it may',
   no_result: 'finished with no result',
   rate_limited: 'is rate limited by its provider',
   provider_down: 'could not reach its provider',

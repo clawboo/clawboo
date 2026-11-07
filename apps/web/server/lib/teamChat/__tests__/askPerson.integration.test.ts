@@ -287,6 +287,7 @@ describe('ask, stop, answer', () => {
     const pump: TaskWakePumpDeps = {
       held: () => false,
       startForPerson: (t) => void engine.dispatchTask(t.id),
+      startByItself: (t) => void engine.dispatchTask(t.id, { automatic: true }),
       pumpRoom: () => undefined,
       alert: () => false,
     }

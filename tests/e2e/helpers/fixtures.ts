@@ -210,7 +210,9 @@ export async function connectToMockGateway(
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
       for (const team of data.teams ?? []) {
-        await request.delete(`${API_BASE}/api/teams/${team.id}`)
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
       }
     }
   } catch {

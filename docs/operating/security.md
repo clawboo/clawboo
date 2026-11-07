@@ -219,6 +219,7 @@ These writes take the same check and answer the same `403`:
 - Creating a task for a named agent: `POST /api/board` with `assigneeAgentId`, or with a `sourceDelegationId` that names an agent or says a person chose. Both write what Assign writes. So does `assignToMe`, which makes the task the sender's. A task with none of them does not need the check.
 - Reopening a finished task, assigning a task to a person, answering a question an agent asked and answering the card about agents waking each other: see [What counts as a person](#what-counts-as-a-person).
 - A team's setting that lets its agents wake each other without asking: `PUT /api/team-agent-wakes/:teamId`.
+- A job's answer at its limit of runs started by itself: `POST /api/board/job-limit/:jobTaskId`.
 - A team's switch for asking before a plan starts: `PUT /api/team-plan-approval/:teamId`. Accepting or turning down a plan is answering a question, above.
 - A team's readable-id letters, its labels and a task's labels.
 - Marking a task or the inbox read.
@@ -229,10 +230,15 @@ These writes take the same check and answer the same `403`:
 - Archiving or restoring a team, or changing who leads it: `PATCH /api/teams/:id` when it changes `isArchived` or `leaderAgentId`. A change of lead also goes in the audit log.
 - Pressing Stop: `POST /api/teams/:id/chat/stop` and `POST /api/agents/:agentId/chat/stop`.
 - Budgets: `POST /api/governance/budgets` and `POST /api/governance/budgets/:scope/:scopeId/resume`.
+- What decides whether anyone is asked. An agent's posture: `POST /api/exec-settings`, `POST /api/agents/:agentId/shell`. Standing grants: `POST /api/grants`, `POST /api/grants/:id/revoke`, `POST /api/grants/:id/resume`, `POST /api/exec-allowlist/revoke`, and `POST /api/system/approve-device` for a device. OpenClaw's own settings: `PATCH /api/system/openclaw-config`, `POST /api/system/configure-openclaw`, `POST /api/system/auto-configure-openclaw`. What a runtime may use: `POST /api/capabilities/enable` and `disable`.
+- Who is on a team, and whether a team or a room is there at all: `POST /api/teams/:id/agents`, `DELETE /api/teams/:id/agents/:agentId`, `POST /api/agents/:agentId/move`, `DELETE /api/agents/:agentId`, `POST /api/agents/cleanup-ghosts`, `POST /api/agents/sync` with a list, `DELETE /api/teams/:id`, and `DELETE /api/teams/:id/rooms/:roomId`. Deleting a team and archiving a room go in the audit log.
+- Creating an agent (`POST /api/agents`) when the body names a team or sets how it is asked: a `teamId`, any `execConfig` on OpenClaw, or `execConfig.execAsk` or `execConfig.tools.shell` elsewhere. A plain agent needs no check.
 - Routines and OpenClaw's cron jobs: `POST /api/schedules`, `PATCH` and `DELETE /api/schedules/:id`, and `POST /api/schedules/:id/run`. Setting the time zone (`PUT /api/schedules/time-zone`) stays open.
 - A task's brief: `PATCH /api/board/:taskId` when it changes `title` or `description`. The next run follows them.
 
 `POST /api/board/:taskId/executions` answers `409 person_moved` while a person's move stands, because a new run is what ends one. `POST /api/runtimes/:id/run` does too, and also answers `409` with the reason when the board would not start the task by itself, such as `stopped` after a Stop. With the check, it runs anyway.
+
+The attach signature on a run's MCP URLs names the server it is for, so a Memory URL's signature cannot open the Tasks tools. A runtime can still attach with no signature at all, and get what an [unverified caller](/reference/mcp-tools#callers-and-scoping) gets.
 
 The chat message routes stay open, without a person's authority, so a script can still talk to an agent. A message through `POST /api/teams/:id/chat` or `POST /api/agents/:agentId/chat` without the check reads `Local API call` in the chat rather than `You`, and records no one as asking. To a team, it leaves the failure breaker as it is, and the lead can still hand work out. To Boo Zero in its one-to-one chat, it starts no work, does not end the hold a Stop left, and does not read results waiting for you.
 

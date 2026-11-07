@@ -18,6 +18,7 @@ import {
   recordTaskWake,
   updateStatus,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -105,6 +106,7 @@ describe('stopTaskRuns', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory that

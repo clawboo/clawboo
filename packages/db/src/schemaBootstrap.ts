@@ -490,6 +490,7 @@ const SCHEMA_DDL = `
       error              TEXT,
       error_class        TEXT,
       made_progress      INTEGER,
+      job_counted        INTEGER,
       result_claim       TEXT,
       recovery_tombstone INTEGER NOT NULL DEFAULT 0,
       tenant_id          TEXT,
@@ -889,6 +890,7 @@ const SCHEMA_DDL = `
     );
     CREATE INDEX IF NOT EXISTS idx_report_up_outbox_pending ON report_up_outbox (team_id, room_id, settled_at);
     CREATE INDEX IF NOT EXISTS idx_report_up_outbox_chat ON report_up_outbox (chat_session_key, settled_at);
+    CREATE INDEX IF NOT EXISTS idx_report_up_outbox_task ON report_up_outbox (task_id, created_at);
 
     CREATE TABLE IF NOT EXISTS task_wakes (
       id                TEXT    PRIMARY KEY,
@@ -924,6 +926,7 @@ const SCHEMA_DDL = `
       card_at            INTEGER,
       window_started_at  INTEGER,
       window_count       INTEGER NOT NULL DEFAULT 0,
+      wake_path          TEXT,
       updated_at         INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_agent_wake_gates_card ON agent_wake_gates (card_task_id);
@@ -938,6 +941,26 @@ const SCHEMA_DDL = `
       updated_at         INTEGER NOT NULL,
       PRIMARY KEY (team_key, agent_a, agent_b)
     );
+
+    -- ── How many runs a job has started by itself: see src/board/jobRuns.ts ─────
+    -- One row per job (a person's request, or a top-level task). Written in the same
+    -- transaction as the claim that opens the run. run_limit is where it stops now, and
+    -- a person's "carry on" raises it. limit_hit_at says something was refused at it.
+    CREATE TABLE IF NOT EXISTS job_runs (
+      job_task_id     TEXT    PRIMARY KEY,
+      team_id         TEXT,
+      runs            INTEGER NOT NULL DEFAULT 0,
+      run_limit       INTEGER NOT NULL,
+      limit_hit_at    INTEGER,
+      carried_on_by   TEXT,
+      carried_on_at   INTEGER,
+      stopped_at      INTEGER,
+      stopped_by      TEXT,
+      updated_at      INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_job_runs_hit ON job_runs (limit_hit_at);
+    CREATE INDEX IF NOT EXISTS idx_job_runs_stopped ON job_runs (stopped_at);
+    CREATE INDEX IF NOT EXISTS idx_job_runs_team ON job_runs (team_id);
 
     -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
     -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript

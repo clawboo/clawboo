@@ -35,6 +35,7 @@ import type {
 } from '@clawboo/executor'
 
 import { getDb, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime } from '../executorRunner'
 
 type Reason = 'success' | 'max_turns' | 'error'
@@ -127,6 +128,7 @@ describe('executor runner — session rotation + memory injection', () => {
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory

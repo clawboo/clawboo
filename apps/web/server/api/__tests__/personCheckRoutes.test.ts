@@ -14,14 +14,18 @@ import {
   askQuestion,
   claimTask,
   createLabel,
+  createRoom,
   createTask,
   getComments,
+  getGrant,
+  getRoom,
   getSetting,
   getTask,
   handBackTask,
   linkDep,
   listEvents,
   listGovernanceAudit,
+  listGrants,
   listPauses,
   listPendingChatReportUps,
   listPendingReportUps,
@@ -32,12 +36,15 @@ import {
   proposePlan,
   readAgentWakeGate,
   readTeamAlwaysAllow,
+  revokeGrant,
   saveAgentCommentWake,
   setBudgetLimit,
   setSetting,
   teams,
   updateStatus,
+  upsertGrant,
 } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -62,7 +69,19 @@ const { boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
 const { teamLabelDELETE, teamLabelPATCH, teamLabelsPOST, teamTaskPrefixPUT } =
   await import('../teamLabels')
 const { pausesDELETE, pausesPOST } = await import('../pauses')
-const { teamChatStopPOST, teamsPATCH } = await import('../teams')
+const { teamAgentDELETE, teamAgentPOST, teamChatStopPOST, teamsDELETE, teamsPATCH } =
+  await import('../teams')
+const { teamRoomDELETE } = await import('../rooms')
+const { agentMovePOST, agentsCleanupPOST, agentsCreatePOST, agentsDELETE, agentsSyncPOST } =
+  await import('../agents')
+const { execSettingsPOST } = await import('../execSettings')
+const { execAllowlistRevokePOST } = await import('../execAllowlist')
+const { nativeShellPOST } = await import('../nativeShell')
+const { grantsCreatePOST, grantsResumePOST, grantsRevokePOST } = await import('../grants')
+const { capabilitiesActionPOST } = await import('../capabilities')
+const { approveDevicePOST, autoConfigureOpenclawPOST, configureOpenclawPOST, openclawConfigPATCH } =
+  await import('../system')
+const { resolveTeamLeadId } = await import('../../lib/teamChat/teamLead')
 const { agentChatStopPOST } = await import('../agentChat')
 const { teamRulesPUT } = await import('../teamRules')
 const { teamOnboardingPATCH } = await import('../teamOnboarding')
@@ -441,6 +460,361 @@ describe.each(ROUTES)('%s', (_name, call) => {
     const r = mockRes()
     await call({ headers: DASHBOARD }, r.res)
     expect(r.code()).toBeLessThan(300)
+  })
+})
+
+/** The other team, for what crosses from one to another. */
+const OTHER = 'T2'
+function otherTeam(): void {
+  const now = Date.now()
+  getDb()
+    .insert(teams)
+    .values({ id: OTHER, name: 'Other', icon: 'x', color: 'x', createdAt: now, updatedAt: now })
+    .run()
+}
+
+const memberOf = (agentId: string): string | null | undefined =>
+  getDb().select({ teamId: agents.teamId }).from(agents).where(eq(agents.id, agentId)).get()?.teamId
+
+function grantForCoder() {
+  return upsertGrant(getDb(), {
+    subjectKind: 'agent',
+    subjectId: 'coder',
+    capabilityKind: 'connector',
+    connectorId: 'conn-1',
+    capabilityId: null,
+    origin: 'operator',
+  })
+}
+
+/** Routes whose person side touches the machine or a live Gateway: refused is what these
+ *  pin. That the check lets a person through is pinned by the routes above. */
+const REFUSED: Array<[string, (res: Response) => unknown]> = [
+  ['deleting a team', (res) => teamsDELETE(req({ params: { id: TEAM } }), res)],
+  [
+    'archiving a room',
+    (res) => {
+      const room = createRoom(getDb(), { teamId: TEAM, name: 'Launch', memberIds: [] })
+      return teamRoomDELETE(req({ params: { id: TEAM, roomId: room.id } }), res)
+    },
+  ],
+  [
+    'adding an agent to a team',
+    (res) => teamAgentPOST(req({ params: { id: TEAM }, body: { agentId: 'coder' } }), res),
+  ],
+  [
+    'taking an agent off a team',
+    (res) => teamAgentDELETE(req({ params: { id: TEAM, agentId: 'coder' } }), res),
+  ],
+  [
+    'moving an agent',
+    (res) => agentMovePOST(req({ params: { agentId: 'coder' }, body: { teamId: TEAM } }), res),
+  ],
+  ['deleting an agent', (res) => agentsDELETE(req({ params: { agentId: 'coder' } }), res)],
+  [
+    'dropping agents a list leaves out',
+    (res) => agentsCleanupPOST(req({ body: { liveAgentIds: ['nobody'] } }), res),
+  ],
+  [
+    'archiving agents a list leaves out',
+    (res) => agentsSyncPOST(req({ body: { agents: [] } }), res),
+  ],
+  [
+    'an agent’s exec settings',
+    (res) => execSettingsPOST(req({ body: { agentId: 'coder', values: { execAsk: 'off' } } }), res),
+  ],
+  [
+    'an agent’s shell switch',
+    (res) => nativeShellPOST(req({ params: { agentId: 'coder' }, body: { enabled: true } }), res),
+  ],
+  [
+    'revoking a standing exec grant',
+    (res) => execAllowlistRevokePOST(req({ body: { agentId: 'coder', keys: ['k'] } }), res),
+  ],
+  [
+    'a grant that asks no one',
+    (res) =>
+      grantsCreatePOST(
+        req({
+          body: {
+            subjectKind: 'agent',
+            subjectId: 'coder',
+            capabilityKind: 'connector',
+            connectorId: 'conn-1',
+            mode: 'admin',
+            approvalPolicy: 'never',
+          },
+        }),
+        res,
+      ),
+  ],
+  ['revoking a grant', (res) => grantsRevokePOST(req({ params: { id: grantForCoder().id } }), res)],
+  ['resuming a grant', (res) => grantsResumePOST(req({ params: { id: grantForCoder().id } }), res)],
+  [
+    'OpenClaw’s exec default',
+    (res) => openclawConfigPATCH(req({ body: { exec: { ask: 'off' } } }), res),
+  ],
+  [
+    'configuring OpenClaw',
+    (res) => configureOpenclawPOST(req({ body: { provider: 'anthropic', apiKey: 'key' } }), res),
+  ],
+  ['configuring OpenClaw by itself', (res) => autoConfigureOpenclawPOST(req({}), res)],
+  ['approving a device', (res) => approveDevicePOST(req({}), res)],
+  [
+    'enabling a capability',
+    (res) => capabilitiesActionPOST(req({ params: { action: 'enable' }, body: { id: 'x' } }), res),
+  ],
+  [
+    'disabling a capability',
+    (res) => capabilitiesActionPOST(req({ params: { action: 'disable' }, body: { id: 'x' } }), res),
+  ],
+  [
+    'an agent that starts on a team',
+    (res) => agentsCreatePOST(req({ body: { name: 'New', teamId: TEAM } }), res),
+  ],
+  [
+    'an OpenClaw agent with no ask set',
+    (res) => agentsCreatePOST(req({ body: { name: 'New', execConfig: {} } }), res),
+  ],
+  [
+    'an OpenClaw agent that is asked nothing',
+    (res) => agentsCreatePOST(req({ body: { name: 'New', execConfig: { execAsk: 'off' } } }), res),
+  ],
+  [
+    'a native agent with a shell',
+    (res) =>
+      agentsCreatePOST(
+        req({
+          body: {
+            name: 'New',
+            sourceId: 'clawboo-native',
+            execConfig: { tools: { shell: true } },
+          },
+        }),
+        res,
+      ),
+  ],
+]
+
+describe('a caller nothing vouches for', () => {
+  it.each(REFUSED)('gets no say over %s', async (_name, call) => {
+    const r = mockRes()
+    await call(r.res)
+    expect(r.code()).toBe(403)
+    expect(r.body()['error']).toBe('person_only')
+  })
+
+  it('cannot delete a team: its agents stay on it, and no one’s request closes', async () => {
+    const task = createTask(getDb(), { title: 'x', teamId: TEAM, status: 'todo' })
+    const r = mockRes()
+    await teamsDELETE(req({ params: { id: TEAM } }), r.res)
+    expect(r.code()).toBe(403)
+    expect(
+      getDb()
+        .select()
+        .from(teams)
+        .all()
+        .map((t) => t.id),
+    ).toEqual([TEAM])
+    expect(memberOf('coder')).toBe(TEAM)
+    expect(getTask(getDb(), task.id)?.status).toBe('todo')
+    expect(listGovernanceAudit(getDb(), { limit: 10 })).toEqual([])
+  })
+
+  it('cannot archive a room: nothing about it changes', async () => {
+    const room = createRoom(getDb(), { teamId: TEAM, name: 'Launch', memberIds: [] })
+    await teamRoomDELETE(req({ params: { id: TEAM, roomId: room.id } }), mockRes().res)
+    expect(getRoom(getDb(), room.id)?.archivedAt).toBeNull()
+    expect(listGovernanceAudit(getDb(), { limit: 10 })).toEqual([])
+  })
+
+  it('cannot walk around a team’s lead: taking it off, moving it or deleting it', async () => {
+    otherTeam()
+    getDb().update(teams).set({ leaderAgentId: 'coder' }).where(eq(teams.id, TEAM)).run()
+    const lead = (): string | null => resolveTeamLeadId(getDb(), TEAM)
+    expect(lead()).toBe('coder')
+
+    teamAgentDELETE(req({ params: { id: TEAM, agentId: 'coder' } }), mockRes().res)
+    agentMovePOST(req({ params: { agentId: 'coder' }, body: { teamId: OTHER } }), mockRes().res)
+    await agentsDELETE(req({ params: { agentId: 'coder' } }), mockRes().res)
+    agentsCleanupPOST(req({ body: { liveAgentIds: ['nobody'] } }), mockRes().res)
+
+    expect(memberOf('coder')).toBe(TEAM)
+    expect(lead()).toBe('coder')
+  })
+
+  it('cannot turn off who is asked: the stored setting stays as it was', async () => {
+    await execSettingsPOST(
+      req({ body: { agentId: 'coder', values: { execAsk: 'off' } } }),
+      mockRes().res,
+    )
+    const row = getDb().select().from(agents).where(eq(agents.id, 'coder')).get()
+    expect(row?.execConfig ?? null).toBeNull()
+  })
+
+  it('cannot widen a grant: none is written', () => {
+    const r = mockRes()
+    grantsCreatePOST(
+      req({
+        body: {
+          subjectKind: 'agent',
+          subjectId: 'coder',
+          capabilityKind: 'connector',
+          connectorId: 'conn-1',
+          mode: 'admin',
+          approvalPolicy: 'never',
+        },
+      }),
+      r.res,
+    )
+    expect(r.code()).toBe(403)
+    expect(listGrants(getDb(), { subjectId: 'coder' })).toEqual([])
+  })
+
+  it('cannot take a grant away, or bring one back', () => {
+    const grant = grantForCoder()
+    grantsRevokePOST(req({ params: { id: grant.id } }), mockRes().res)
+    expect(getGrant(getDb(), grant.id)?.state).toBe('active')
+    revokeGrant(getDb(), grant.id, 'a person took it back')
+    grantsResumePOST(req({ params: { id: grant.id } }), mockRes().res)
+    expect(getGrant(getDb(), grant.id)?.state).toBe('revoked')
+  })
+
+  it('can still create a plain agent, with the settings a script needs', async () => {
+    const r = mockRes()
+    await agentsCreatePOST(
+      req({
+        body: {
+          name: 'Clean Install Smoke',
+          sourceId: 'clawboo-native',
+          execConfig: {
+            primaryProvider: 'ollama',
+            primaryModel: 'stub',
+            tools: { memory: false, tools: false, tasks: false, teamchat: false },
+            maxTurns: 2,
+          },
+        },
+      }),
+      r.res,
+    )
+    expect(r.code()).toBe(201)
+  })
+})
+
+describe('a person', () => {
+  it('can delete a team, and the audit log says who did it', async () => {
+    const r = mockRes()
+    await teamsDELETE(req({ params: { id: TEAM }, person: ADA }), r.res)
+    expect(r.code()).toBe(200)
+    expect(getDb().select().from(teams).all()).toEqual([])
+    expect(memberOf('coder')).toBeNull()
+    const row = listGovernanceAudit(getDb(), { eventType: 'board', limit: 10 })[0]!
+    expect(row.teamId).toBe(TEAM)
+    expect(JSON.parse(row.summary)).toMatchObject({
+      action: 'delete_team',
+      name: 'Team',
+      actor: { kind: 'person' },
+      person: ADA,
+    })
+  })
+
+  it('leaves nothing in the audit log for a team that was not there', async () => {
+    const r = mockRes()
+    await teamsDELETE(req({ params: { id: 'nope' }, headers: DASHBOARD }), r.res)
+    expect(r.code()).toBe(200)
+    expect(listGovernanceAudit(getDb(), { limit: 10 })).toEqual([])
+  })
+
+  it('can archive a room, and the audit log says who did it', async () => {
+    const room = createRoom(getDb(), { teamId: TEAM, name: 'Launch', memberIds: [] })
+    const r = mockRes()
+    await teamRoomDELETE(req({ params: { id: TEAM, roomId: room.id }, person: ADA }), r.res)
+    expect(r.code()).toBe(200)
+    expect(getRoom(getDb(), room.id)?.archivedAt).not.toBeNull()
+    const row = listGovernanceAudit(getDb(), { eventType: 'board', limit: 10 })[0]!
+    expect(JSON.parse(row.summary)).toMatchObject({
+      action: 'archive_room',
+      roomId: room.id,
+      name: 'Launch',
+      actor: { kind: 'person' },
+      person: ADA,
+    })
+  })
+
+  it('takes an agent off the team it is on', () => {
+    const r = mockRes()
+    teamAgentDELETE(req({ params: { id: TEAM, agentId: 'coder' }, headers: DASHBOARD }), r.res)
+    expect(r.code()).toBe(200)
+    expect(memberOf('coder')).toBeNull()
+  })
+
+  it('gets a 404 for an agent that is on another team, and it stays there', () => {
+    otherTeam()
+    const r = mockRes()
+    teamAgentDELETE(req({ params: { id: OTHER, agentId: 'coder' }, headers: DASHBOARD }), r.res)
+    expect(r.code()).toBe(404)
+    expect(memberOf('coder')).toBe(TEAM)
+  })
+
+  it('gets a 404 for an agent no one has heard of', () => {
+    const r = mockRes()
+    teamAgentDELETE(req({ params: { id: TEAM, agentId: 'nobody' }, headers: DASHBOARD }), r.res)
+    expect(r.code()).toBe(404)
+  })
+
+  it('can put an agent on a team, move it, and start one on a team', async () => {
+    otherTeam()
+    const added = mockRes()
+    await teamAgentPOST(
+      req({ params: { id: OTHER }, body: { agentId: 'coder' }, headers: DASHBOARD }),
+      added.res,
+    )
+    expect(added.code()).toBe(200)
+    expect(memberOf('coder')).toBe(OTHER)
+    const moved = mockRes()
+    agentMovePOST(
+      req({ params: { agentId: 'coder' }, body: { teamId: TEAM }, headers: DASHBOARD }),
+      moved.res,
+    )
+    expect(moved.code()).toBe(200)
+    expect(memberOf('coder')).toBe(TEAM)
+    const made = mockRes()
+    await agentsCreatePOST(
+      req({
+        body: { name: 'New', sourceId: 'clawboo-native', teamId: TEAM },
+        headers: DASHBOARD,
+      }),
+      made.res,
+    )
+    expect(made.code()).toBe(201)
+  })
+
+  it('can set what a grant asks, and take it back', () => {
+    const made = mockRes()
+    grantsCreatePOST(
+      req({
+        body: {
+          subjectKind: 'agent',
+          subjectId: 'coder',
+          capabilityKind: 'connector',
+          connectorId: 'conn-1',
+          mode: 'admin',
+          approvalPolicy: 'never',
+        },
+        headers: DASHBOARD,
+      }),
+      made.res,
+    )
+    expect(made.code()).toBe(200)
+    const id = (made.body()['grant'] as { id: string }).id
+    const taken = mockRes()
+    grantsRevokePOST(req({ params: { id }, headers: DASHBOARD }), taken.res)
+    expect(taken.code()).toBe(200)
+    expect(getGrant(getDb(), id)?.state).toBe('revoked')
+    const undone = mockRes()
+    grantsResumePOST(req({ params: { id }, headers: DASHBOARD }), undone.res)
+    expect(undone.code()).toBe(200)
+    expect(getGrant(getDb(), id)?.state).toBe('active')
   })
 })
 

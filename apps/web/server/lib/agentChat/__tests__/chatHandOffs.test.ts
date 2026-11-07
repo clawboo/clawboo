@@ -13,12 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { BUDGET_HELD_RECHECK_MS, isEngineRun } from '@clawboo/board-core'
 import {
+  createTask,
   agents,
   answerQuestion,
   chatMessages,
   closeMainTaskByPerson,
   completeExecutionProcess,
-  createTask,
   getComments,
   getTask,
   liftPause,
@@ -26,7 +26,13 @@ import {
   listExecutions,
   listHeldChatReportUps,
   listHeldReportUps,
+  carryOnJob,
+  getBudget,
+  jobLimitedTaskIds,
+  jobRuns,
+  jobRunState,
   listPendingChatReportUps,
+  LOCAL_PERSON,
   listPendingReportUps,
   listRoomsWithIdleMainTasks,
   listRoomsWithPendingReportUps,
@@ -64,6 +70,7 @@ import {
   REFLECT_WINDOW_MS,
   type BoardOrchestrator,
   type ReportUp,
+  personCommentReport,
 } from '@clawboo/team-orchestration'
 import { eq, sql } from 'drizzle-orm'
 import type { Request, Response } from 'express'
@@ -95,7 +102,7 @@ import {
   type ChatTurnOptions,
   type ChatTurnParams,
 } from '../chatHandOffs'
-import { createChatReportUps } from '../chatReportUpOutbox'
+import { createChatReportUps, releaseChatResults } from '../chatReportUpOutbox'
 import { directChatSessionKey, stopAgentChat } from '../driveAgentChat'
 
 const TEAM = 'T'
@@ -644,6 +651,214 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       expect(boo.starts).toHaveLength(1)
       expect(boo.starts[0]!.message).toContain('the result')
       expect(settledHow(row!.id)).toBe('delivered')
+    })
+
+    it('so does a cap on the team whose results it would read', async () => {
+      await handOffAndFinish()
+      setBudgetLimit(db, { scope: 'team', scopeId: TEAM, limitUsdCents: 1, mode: 'cap' })
+      recordSpend(db, 'team', TEAM, 1000)
+
+      boo = new ScriptedAdapter([[done('never')]])
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts).toEqual([])
+      expect(listHeldChatReportUps(db, CHAT)).toHaveLength(1)
+    })
+
+    it('so does a cap on the job those results are from', async () => {
+      const taskId = await handOffAndFinish()
+      const job = jobRunState(db, taskId).jobTaskId
+      setBudgetLimit(db, { scope: 'mission', scopeId: job, limitUsdCents: 1, mode: 'cap' })
+      recordSpend(db, 'mission', job, 1000)
+
+      boo = new ScriptedAdapter([[done('never')]])
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts).toEqual([])
+      expect(listHeldChatReportUps(db, CHAT)).toHaveLength(1)
+    })
+
+    it('charges what it costs to the team and the job as well as the agent', async () => {
+      const taskId = await handOffAndFinish()
+      const job = jobRunState(db, taskId).jobTaskId
+      for (const [scope, scopeId] of [
+        ['agent', BZ],
+        ['team', TEAM],
+        ['mission', job],
+      ] as const)
+        setBudgetLimit(db, { scope, scopeId, limitUsdCents: 100_000, mode: 'warn' })
+
+      boo = new ScriptedAdapter([
+        [
+          {
+            kind: 'cost',
+            costUsd: 0.5,
+            usage: { inputTokens: 1, outputTokens: 1 },
+          } as unknown as RuntimeEvent,
+          done('It is done.'),
+        ],
+      ])
+      await flushChatReportUps(db, CHAT, opts())
+
+      for (const [scope, scopeId] of [
+        ['agent', BZ],
+        ['team', TEAM],
+        ['mission', job],
+      ] as const)
+        expect(getBudget(db, scope, scopeId)?.spentUsdCents).toBeGreaterThanOrEqual(50)
+    })
+
+    it('counts toward the job, and waits at its limit, uncounted, until a person says so', async () => {
+      const taskId = await handOffAndFinish()
+      const job = jobRunState(db, taskId).jobTaskId
+      const before = jobRunState(db, taskId).runs
+      db.update(jobRuns).set({ runLimit: before }).where(eq(jobRuns.jobTaskId, job)).run()
+
+      boo = new ScriptedAdapter([[done('It is done.')]])
+      await flushChatReportUps(db, CHAT, opts())
+      expect(boo.starts).toEqual([])
+      expect(listPendingChatReportUps(db, CHAT)[0]?.replays).toBe(0)
+      expect(jobLimitedTaskIds(db)).toEqual([job])
+
+      expect(carryOnJob(db, job, LOCAL_PERSON).ok).toBe(true)
+      await flushChatReportUps(db, CHAT, opts())
+      expect(boo.starts).toHaveLength(1)
+      expect(jobRunState(db, taskId).runs).toBe(before + 1)
+    })
+
+    it('a budget refusing the update counts nothing toward the job', async () => {
+      const taskId = await handOffAndFinish()
+      const before = jobRunState(db, taskId).runs
+      setBudgetLimit(db, { scope: 'team', scopeId: TEAM, limitUsdCents: 1, mode: 'cap' })
+      recordSpend(db, 'team', TEAM, 1000)
+
+      boo = new ScriptedAdapter([[done('never')]])
+      await flushChatReportUps(db, CHAT, opts())
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts).toEqual([])
+      expect(jobRunState(db, taskId).runs).toBe(before)
+    })
+
+    it('a person’s words go at the job’s limit, and count nothing', async () => {
+      const top = createTask(db, {
+        title: 'a request',
+        teamId: TEAM,
+        status: 'todo',
+        sourceDelegationId: `r:deleg:agent:${CODER}:reflectTo:${BZ}`,
+        chatSessionKey: CHAT,
+      })
+      db.insert(jobRuns)
+        .values({ jobTaskId: top.id, teamId: TEAM, runs: 3, runLimit: 3, updatedAt: 1 })
+        .run()
+      recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: top.id,
+        payload: JSON.stringify(
+          personCommentReport({ id: top.id, title: top.title, leadAgentId: BZ }, 'Use the logo'),
+        ),
+        chatSessionKey: CHAT,
+      })
+
+      boo = new ScriptedAdapter([[done('On it.')]])
+      await flushChatReportUps(db, CHAT, opts())
+
+      await vi.waitFor(() => expect(boo.starts).toHaveLength(1))
+      expect(boo.starts[0]!.message).toContain('Use the logo')
+      expect(jobRunState(db, top.id).runs).toBe(3)
+    })
+
+    it('a note that only names a task is held at the limit, so it waits on no card', async () => {
+      const top = createTask(db, {
+        title: 'a job',
+        teamId: TEAM,
+        status: 'todo',
+        sourceDelegationId: `r:deleg:agent:${CODER}:reflectTo:${BZ}`,
+        chatSessionKey: CHAT,
+      })
+      db.insert(jobRuns)
+        .values({ jobTaskId: top.id, teamId: TEAM, runs: 3, runLimit: 3, updatedAt: 1 })
+        .run()
+      recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: null,
+        payload: JSON.stringify({
+          toAgentId: BZ,
+          by: 'Coder',
+          summary: 'Not handed off.',
+          outcome: 'not_started',
+          forTaskId: top.id,
+        }),
+        chatSessionKey: CHAT,
+      })
+
+      boo = new ScriptedAdapter([[done('never')]])
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(boo.starts).toEqual([])
+      expect(listPendingChatReportUps(db, CHAT)).toEqual([])
+      expect(listHeldChatReportUps(db, CHAT)).toHaveLength(1)
+    })
+
+    it('waits for the chat’s own turn, then goes as one', async () => {
+      await handOffAndFinish()
+      boo = new ScriptedAdapter(['hang', [done('It is done.')]])
+      const person = runChatTurn({ db, agentId: BZ, message: 'how is it going', ...opts() })
+      await vi.waitFor(() => expect(boo.starts).toHaveLength(1))
+
+      await flushChatReportUps(db, CHAT, opts())
+      expect(boo.starts).toHaveLength(1)
+      expect(listPendingChatReportUps(db, CHAT)[0]?.replays).toBe(0)
+
+      await stopAgentChat(BZ)
+      await person
+      releaseChatResults(db, BZ)
+      await flushChatReportUps(db, CHAT, opts())
+      await vi.waitFor(() => expect(boo.starts).toHaveLength(2))
+      expect(boo.starts[1]!.message).toMatch(/^\[Task Update\]/)
+    })
+
+    it('what it hands out on a result with no request goes under that job', async () => {
+      const top = createTask(db, {
+        title: 'a job with no request',
+        teamId: TEAM,
+        status: 'todo',
+        sourceDelegationId: `r:deleg:agent:${CODER}:reflectTo:${BZ}`,
+        chatSessionKey: CHAT,
+      })
+      updateStatus(db, top.id, 'in_progress')
+      updateStatus(db, top.id, 'done')
+      recordReportUp(db, {
+        teamId: TEAM,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: top.id,
+        payload: JSON.stringify({
+          toAgentId: BZ,
+          by: 'Coder',
+          title: top.title,
+          summary: 'first piece done',
+          taskId: top.id,
+          chatSessionKey: CHAT,
+        }),
+        chatSessionKey: CHAT,
+      })
+      const before = jobRunState(db, top.id).runs
+
+      boo = new ScriptedAdapter([[done('<delegate to="@Coder">the next piece</delegate>')]])
+      await flushChatReportUps(db, CHAT, opts())
+
+      await vi.waitFor(() =>
+        expect(listChatHandOffTasks(db, CHAT).some((t) => t.title === 'the next piece')).toBe(true),
+      )
+      const next = listChatHandOffTasks(db, CHAT).find((t) => t.title === 'the next piece')!
+      expect(next.parentTaskId).toBe(top.id)
+      // Its own update turn, and the hand-off that turn started.
+      await vi.waitFor(() => expect(jobRunState(db, top.id).runs).toBe(before + 2))
     })
 
     it('a chat whose agent is gone gives its rows up: the results are on their cards', async () => {

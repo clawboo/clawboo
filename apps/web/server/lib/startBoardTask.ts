@@ -11,7 +11,8 @@ import { requestTaskDispatch } from './teamChat/boardDispatch'
  * Start a task a person asked for: through the task runner when `runner` is
  * given, else through its team's chat. Either way, a rerun of this task still
  * waiting to claim it is stopped first, so it cannot claim the task after the
- * run started here.
+ * run started here. `automatic`: no person is behind this start, so the run is
+ * one its job counts, and its limit can refuse it.
  */
 export function startTask(
   db: ClawbooDb,
@@ -19,6 +20,7 @@ export function startTask(
   teamId: string | null,
   runner: { agentId: string; rerun: RunnerRerun } | null,
   mcpBaseUrl: string | null,
+  opts: { automatic?: boolean } = {},
 ): void {
   cancelRunnerRerun(taskId)
   if (runner) {
@@ -27,8 +29,9 @@ export function startTask(
       assigneeAgentId: runner.agentId,
       rerun: runner.rerun,
       mcpBaseUrl,
+      ...(opts.automatic ? { automaticStart: true } : {}),
     })
   } else if (teamId) {
-    requestTaskDispatch(teamId, taskId, mcpBaseUrl)
+    requestTaskDispatch(teamId, taskId, mcpBaseUrl, opts)
   }
 }

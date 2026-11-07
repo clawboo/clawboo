@@ -20,6 +20,8 @@ vi.mock('../../lib/runtimes/codexAuth', () => ({
 import { setRuntimeSecret } from '../../lib/secretsVault'
 import { autoConfigureOpenclawPOST, configureOpenclawPOST } from '../system'
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+
 const modeOf = (p: string): number => statSync(p).mode & 0o777
 
 function res(): Response {
@@ -61,7 +63,10 @@ describe.skipIf(process.platform === 'win32')('OpenClaw setup file modes', () =>
 
   it('configure-openclaw: a fresh install gets a 0700 state dir, a 0600 .env and settings.json', async () => {
     await configureOpenclawPOST(
-      { body: { provider: 'anthropic', apiKey: 'sk-ant-test' } } as unknown as Request,
+      {
+        headers: DASHBOARD,
+        body: { provider: 'anthropic', apiKey: 'sk-ant-test' },
+      } as unknown as Request,
       res(),
     )
     expect(modeOf(stateDir)).toBe(0o700)
@@ -75,7 +80,10 @@ describe.skipIf(process.platform === 'win32')('OpenClaw setup file modes', () =>
     writeFileSync(envPath, 'GATEWAY_AUTH_TOKEN=old\n')
     chmodSync(envPath, 0o644)
     await configureOpenclawPOST(
-      { body: { provider: 'anthropic', apiKey: 'sk-ant-test' } } as unknown as Request,
+      {
+        headers: DASHBOARD,
+        body: { provider: 'anthropic', apiKey: 'sk-ant-test' },
+      } as unknown as Request,
       res(),
     )
     expect(modeOf(envPath)).toBe(0o600)
@@ -87,7 +95,7 @@ describe.skipIf(process.platform === 'win32')('OpenClaw setup file modes', () =>
     const envPath = path.join(stateDir, '.env')
     writeFileSync(envPath, 'SOME_OTHER=1\n')
     chmodSync(envPath, 0o644)
-    await autoConfigureOpenclawPOST({ body: {} } as unknown as Request, res())
+    await autoConfigureOpenclawPOST({ headers: DASHBOARD, body: {} } as unknown as Request, res())
     expect(modeOf(envPath)).toBe(0o600)
     expect(modeOf(path.join(clawbooDir, 'settings.json'))).toBe(0o600)
   })

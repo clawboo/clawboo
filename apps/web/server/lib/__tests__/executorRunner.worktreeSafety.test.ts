@@ -22,6 +22,7 @@ import {
   getWorkspaceForTask,
   updateWorkspaceStatus,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -136,6 +137,7 @@ describe('executor runner: a rebuild never discards uncommitted work', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
 

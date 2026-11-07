@@ -47,7 +47,7 @@ import {
 import { subscribeBoardChange } from '../boardChangeBus'
 import { publishBoardChangeWithAttention } from '../publishBoardChange'
 import { createReportUpOutbox } from '../reportUpOutbox'
-import { stopPausedRunsOf } from '../teamOrchestrator'
+import { stopJobRunsOf, stopPausedRunsOf } from '../teamOrchestrator'
 import { settle } from './settleCascade'
 
 const NOTE = 'Stopped: this agent is paused. The task starts again on resume.'
@@ -481,6 +481,65 @@ describe('pausing an agent in team chat', () => {
       expect(lead.started).toBe(3)
       lead.complete()
       await settle(() => getTask(db, mainId)!.status === 'done', 'the request to close')
+    })
+  })
+
+  describe('a person’s Stop on a job’s card, beside a pause', () => {
+    const NOTES = { task: 'A person stopped this job.', turn: 'A person stopped this job.' }
+
+    it('takes out what is about the job and leaves what is not', async () => {
+      const about = { reportForTaskId: 'x', stopGen: 0 }
+      const elsewhere = { reportForTaskId: 'y', stopGen: 0 }
+      const cancel = vi.fn()
+      const cancelElsewhere = vi.fn()
+      const abortAbout = vi.fn(async () => undefined)
+      const abortElsewhere = vi.fn(async () => undefined)
+      const live = (stamp: object, abort: () => Promise<void>) =>
+        ({ adapter: { abort }, run: {}, stamp, taskId: null }) as never
+      await stopJobRunsOf(
+        {
+          engine: { stopJobRuns: async () => [], taskForSession: () => null },
+          abortMap: new Map([
+            [skFor(LEAD), live({ reportForTaskId: null, stopGen: 0, jobTaskId: 'x' }, abortAbout)],
+            [
+              skFor(OTHER),
+              live({ reportForTaskId: null, stopGen: 0, mainTaskId: 'y' }, abortElsewhere),
+            ],
+          ]),
+          queuedRuns: new Map([
+            [skFor(WORKER), { cancel, report: { taskId: 'x', stamp: about } }],
+            [
+              'queued-elsewhere',
+              { cancel: cancelElsewhere, report: { taskId: 'y', stamp: elsewhere } },
+            ],
+          ]),
+        },
+        new Set(['x']),
+        NOTES,
+      )
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(cancelElsewhere).not.toHaveBeenCalled()
+      expect(abortAbout).toHaveBeenCalledOnce()
+      expect(abortElsewhere).not.toHaveBeenCalled()
+    })
+
+    it('stops that job’s run and none other, on the real engine', async () => {
+      const h = wire(db, adapters)
+      const job = assigned(WORKER, 'this job')
+      const rest = assigned(OTHER, 'another job')
+      await h.engine.dispatchTask(job)
+      await h.engine.dispatchTask(rest)
+      await settle(() => worker.running && other.running, 'both to start')
+
+      expect(await h.engine.stopJobRuns(new Set([job]), NOTES.task)).toEqual([job])
+      await settle(() => !worker.running, 'the job’s run to stop')
+      expect(other.running).toBe(true)
+      expect(getTask(db, job)?.status).toBe('todo')
+      expect(getTask(db, rest)?.status).toBe('in_progress')
+      expect(attentionForTask(db, job)?.reason).toBe('stopped')
+      expect(getComments(db, job).at(-1)?.body).toBe(NOTES.task)
+      expect(listExecutions(db, job).at(-1)?.status).toBe('cancelled')
+      other.complete()
     })
   })
 

@@ -29,7 +29,9 @@ async function connectWithTeam(
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
       for (const team of data.teams ?? []) {
-        await request.delete(`${API_BASE}/api/teams/${team.id}`)
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
       }
     }
   } catch {
@@ -42,6 +44,7 @@ async function connectWithTeam(
   })
   const { team } = (await teamResp.json()) as { team: { id: string } }
   await request.post(`${API_BASE}/api/teams/${team.id}/agents`, {
+    headers: DASHBOARD_HEADERS,
     data: { agentId: 'a2', agentName: 'Research Boo' },
   })
 

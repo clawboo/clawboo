@@ -130,10 +130,9 @@ export function mcpHttpUrl(
   // alone rather than a signature over nothing.
   const claimsScope = Boolean(scope.teamId || scope.agentId || scope.tenantId)
   // A run the team engine drives (`teamRun=1`, inside the signature). The Tasks
-  // server withholds the writes the engine owns from such a run. The mark rides
-  // the Memory and Tools URLs too, so no URL a team run holds signs a plain
-  // team-and-agent scope: one that did would verify on the Tasks mount as a run
-  // the engine does not drive, and win back every write.
+  // server withholds the writes the engine owns from such a run. The mark rides the
+  // Memory and Tools URLs too, though their signatures no longer open the Tasks mount:
+  // each signature names the server it is for.
   const teamRun = scope.delegate === true
   const chatRun = scope.chatRun === true
   // Each URL's mark, set only when it is true: unmarked URLs keep their exact bytes.
@@ -141,8 +140,9 @@ export function mcpHttpUrl(
   // What each URL's signature covers, built field by field rather than spread
   // from `scope`: a field only some URLs carry (the bound task, the run's id) must
   // never reach another URL's signature, or that URL would stop verifying.
-  const sign = (claim: Omit<SignableScope, 'teamId' | 'agentId' | 'tenantId'>): string =>
+  const sign = (claim: Omit<SignableScope, 'server' | 'teamId' | 'agentId' | 'tenantId'>): string =>
     signAttachScope(scope.attachSecret!, {
+      server,
       teamId: scope.teamId,
       agentId: scope.agentId,
       tenantId: scope.tenantId,
@@ -194,6 +194,7 @@ export function mcpHttpUrl(
       p.set(
         'scopeSig',
         signAttachScope(scope.attachSecret, {
+          server,
           teamId: tasksTeamId,
           agentId: scope.agentId,
           tenantId: scope.tenantId,

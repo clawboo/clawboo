@@ -283,6 +283,8 @@ curl http://localhost:18790/api/exec-settings/all
 
 ### `POST /api/exec-settings`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Stores the value first, then, for an OpenClaw agent, writes it into OpenClaw's policy under OpenClaw's own id for the agent. A refusal from the Gateway never loses what you sent. An `agentId` with no agent row gets a placeholder row (named after the id).
 
 - **Request body**:
@@ -334,6 +336,7 @@ After a `502`, `GET /api/exec-settings` returns the value you sent, not the one 
 
 ```bash
 curl -X POST http://localhost:18790/api/exec-settings \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<agent-id>","values":{"execAsk":"always"}}'
 ```
@@ -434,6 +437,8 @@ curl "http://localhost:18790/api/exec-allowlist?agentId=<agent-id>"
 
 ### `POST /api/exec-allowlist/revoke`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Removes rows from one agent's own list. The Gateway has no call that removes one row, so the route rewrites OpenClaw's whole policy through the Gateway, with a check that nothing else changed it in between. Every other agent's policy is carried over unchanged; this agent keeps its own `security` and `ask`; an emptied list is kept rather than removed. Success is checked against the policy the Gateway returns after the write.
 
 On the sensitive rate limit as well as the general one.
@@ -523,6 +528,7 @@ Pass `key` values back exactly as the GET returned them: a key is a fingerprint 
 
 ```bash
 curl -X POST http://localhost:18790/api/exec-allowlist/revoke \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<agent-id>","keys":["<key-from-the-GET>"]}'
 ```

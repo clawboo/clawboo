@@ -23,6 +23,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import type { ResultClaim } from '@clawboo/board-core'
+import { DEFAULT_MAX_JOB_RUNS } from '@clawboo/governance'
 import { describe, expect } from 'vitest'
 
 import {
@@ -34,6 +35,11 @@ import {
   createTask,
   getTask,
   getTaskVerification,
+  setTaskVerification,
+  jobRunState,
+  jobRunStopped,
+  jobRuns,
+  noteJobRun,
   listTaskQuestions,
   listTasks,
   recordResultClaim,
@@ -41,7 +47,6 @@ import {
   parseQuestionPayload,
   planApprovalSettingKey,
   setSetting,
-  setTaskVerification,
   updateStatus,
   type ClawbooDb,
   type TaskStatus,
@@ -211,6 +216,12 @@ class RealCascadeBoard implements CascadeBoard {
   clearDelegationFailure(teamId: string, target: string, task: string): Promise<void> {
     return this.real.clearDelegationFailure(teamId, target, task)
   }
+  jobRunRefused(taskId: string): Promise<boolean> {
+    return this.real.jobRunRefused(taskId)
+  }
+  personStartedJob(taskId: string): Promise<void> {
+    return this.real.personStartedJob(taskId)
+  }
   async claim(
     taskId: string,
     assigneeAgentId: string,
@@ -238,9 +249,19 @@ class RealCascadeBoard implements CascadeBoard {
     body: string,
     authorType?: 'agent' | 'user' | 'system',
     authorAgentId?: string,
-  ): Promise<void> {
-    this.comments.push({ taskId, body })
-    return this.real.addComment(taskId, body, authorType, authorAgentId)
+  ): Promise<boolean> {
+    const wrote = await this.real.addComment(taskId, body, authorType, authorAgentId)
+    if (wrote) this.comments.push({ taskId, body })
+    return wrote
+  }
+  failComments(on: boolean): void {
+    // A write the database refuses, through the real client's own path.
+    this.db.$client.exec(
+      on
+        ? `CREATE TRIGGER IF NOT EXISTS fail_comments BEFORE INSERT ON task_comments
+           BEGIN SELECT RAISE(ABORT, 'database is locked'); END`
+        : 'DROP TRIGGER IF EXISTS fail_comments',
+    )
   }
   getTask(taskId: string): Promise<TaskDetail | null> {
     return this.real.getTask(taskId)
@@ -343,6 +364,78 @@ class RealCascadeBoard implements CascadeBoard {
   seedResultClaim(taskId: string, claim: ResultClaim): void {
     const agent = getTask(this.db, taskId)?.assigneeAgentId ?? ''
     expect(recordResultClaim(this.db, taskId, agent, claim)).toEqual({ ok: true })
+  }
+  seedJobRuns(taskId: string, runs: number, limit: number = runs): void {
+    const { jobTaskId } = jobRunState(this.db, taskId)
+    this.db
+      .insert(jobRuns)
+      .values({ jobTaskId, teamId: TEAM, runs, runLimit: limit, updatedAt: Date.now() })
+      .onConflictDoUpdate({
+        target: jobRuns.jobTaskId,
+        set: { runs, runLimit: limit, limitHitAt: null },
+      })
+      .run()
+  }
+  jobRunsOf(taskId: string): number {
+    return jobRunState(this.db, taskId).runs
+  }
+  carryOnJobRuns(taskId: string): void {
+    // The room itself: the card asks the durable outbox what waits, and the contract's
+    // outbox is in memory. `carryOnJob` has its own tests with a real one.
+    const { jobTaskId, runs } = jobRunState(this.db, taskId)
+    this.db
+      .update(jobRuns)
+      .set({ runLimit: runs + DEFAULT_MAX_JOB_RUNS, limitHitAt: null })
+      .where(eq(jobRuns.jobTaskId, jobTaskId))
+      .run()
+  }
+  noteJobRun(taskId: string): void {
+    noteJobRun(this.db, taskId)
+  }
+  seedJobStopped(taskId: string): void {
+    const { jobTaskId } = jobRunState(this.db, taskId)
+    this.db
+      .update(jobRuns)
+      .set({ stoppedAt: Date.now(), limitHitAt: null })
+      .where(eq(jobRuns.jobTaskId, jobTaskId))
+      .run()
+  }
+  jobIsStopped(taskId: string): boolean {
+    return jobRunStopped(this.db, taskId)
+  }
+  seedFailedCheck(taskId: string): void {
+    setTaskVerification(this.db, taskId, {
+      status: 'fail',
+      attempts: [
+        {
+          attempt: 1,
+          at: 1,
+          deterministic: {
+            command: 'pnpm test',
+            exitCode: 1,
+            passed: false,
+            stdoutTail: '',
+            stderrTail: '',
+            durationMs: 5,
+            timedOut: false,
+          },
+          critic: {
+            ran: false,
+            findings: [],
+            reviewerRuntime: null,
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'fail',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [],
+      updatedAt: 1,
+    })
+  }
+  hasFailedCheck(taskId: string): boolean {
+    return getTaskVerification(this.db, taskId)?.status === 'fail'
   }
   forceRelease(taskId: string): void {
     // Simulate an EXTERNAL release (the server stale-sweep): route through the repo

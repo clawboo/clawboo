@@ -152,7 +152,7 @@ export function redactAttachCredentials(url: string): string {
  *  `mcpHttpUrl`). Exported for unit testing. */
 export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined {
   const params = attachParams(req)
-  return params ? signedScope(params, params.get('teamRun') === '1') : undefined
+  return params ? signedScope('memory', params, params.get('teamRun') === '1') : undefined
 }
 
 /** Read the Tasks attach URL's binding: the scope `parseBoundScope` reads,
@@ -176,7 +176,7 @@ export function parseTasksBinding(req?: IncomingMessage):
   const teamRun = params.get('teamRun') === '1'
   const taskId = params.get('scopeTaskId')
   const executionId = params.get('scopeExecutionId')
-  const scope = signedScope(params, teamRun, taskId, executionId)
+  const scope = signedScope('tasks', params, teamRun, taskId, executionId)
   return scope
     ? {
         scope,
@@ -198,7 +198,7 @@ export function parseToolsBinding(
   const params = attachParams(req)
   if (!params) return undefined
   const taskId = params.get('scopeTaskId')
-  const scope = signedScope(params, params.get('teamRun') === '1', taskId)
+  const scope = signedScope('tools', params, params.get('teamRun') === '1', taskId)
   return scope ? { scope, ...(taskId ? { taskId } : {}) } : undefined
 }
 
@@ -215,6 +215,7 @@ function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
  *  `boundTaskId` is the run's task, on the Tasks and Tools URLs; `boundExecutionId`
  *  is the run's id, on the Tasks URL. No other URL carries either. */
 function signedScope(
+  server: McpServerName,
   params: URLSearchParams,
   teamRun: boolean,
   boundTaskId: string | null = null,
@@ -226,6 +227,7 @@ function signedScope(
   if (!teamId && !agentId && !tenantId) return undefined
   if (
     !verifiedScope(params, {
+      server,
       teamId,
       agentId,
       tenantId,
@@ -305,7 +307,14 @@ export function parseTeamChatBinding(req?: IncomingMessage): TeamChatBoundIdenti
   if (!teamId || !agentId) return undefined
   // `delegate` is INSIDE the signature: it is a privilege, not an address, and a
   // team-scoped run appending `delegate=1` to its signed URL must not verify.
-  if (!verifiedScope(params, { teamId, agentId, delegate: params.get('delegate') === '1' }))
+  if (
+    !verifiedScope(params, {
+      server: 'teamchat',
+      teamId,
+      agentId,
+      delegate: params.get('delegate') === '1',
+    })
+  )
     return undefined
   // `delegate=1` is written EXCLUSIVELY by serverDeliver (an orchestrator-driven
   // run) — it exposes the `team_delegate` signal tool on this session. A merely

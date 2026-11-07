@@ -15,6 +15,7 @@ import { createLogger } from '@clawboo/logger'
 import type { Request, Response } from 'express'
 
 import { getRegistry } from '../lib/agentSource'
+import { refuseUnlessPerson } from '../lib/auth'
 import { loadAgentConfig, saveAgentConfig } from '../lib/runtimes/native/agentConfigStore'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
@@ -62,6 +63,8 @@ export async function nativeShellGET(req: Request, res: Response): Promise<void>
 
 // POST /api/agents/:agentId/shell { enabled: boolean }
 export async function nativeShellPOST(req: Request, res: Response): Promise<void> {
+  // A person's call: an agent must not be able to give itself a shell to ask for.
+  if (refuseUnlessPerson(req, res)) return
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
     const body = req.body as { enabled?: unknown } | undefined

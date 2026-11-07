@@ -15,15 +15,19 @@ import {
   agents,
   createHandOffUnderRequest,
   createTask,
+  getScheduledRun,
   getTask,
   listExecutions,
   listRoomsWithFireableDelegations,
   recordTaskWake,
+  registerScheduledRun,
   setTaskRunnerInputs,
   teams,
   type ClawbooDb,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
+
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 
 const queued = vi.hoisted(() => ({
   cancelled: [] as string[],
@@ -56,6 +60,7 @@ const { engineRefusal, startRefusal } = await import('../../lib/teamChat/roomRos
 const { pumpTaskWakeNow, pumpTaskWakes } = await import('../../lib/teamChat/taskWakes')
 const { getTeamOrchestrator, hasTeamOrchestrator, resetTeamOrchestrators, roomCanRun } =
   await import('../../lib/teamChat/teamOrchestrator')
+const { dispatchRoutine } = await import('../../lib/routines/wakeBridge')
 const { teamsDELETE } = await import('../teams')
 
 const TEAM = 'T'
@@ -78,7 +83,7 @@ function fakeRes(): { res: Response; status: () => number } {
 const del = async (): Promise<void> => {
   const r = fakeRes()
   await teamsDELETE(
-    { params: { id: TEAM }, body: {}, query: {}, headers: {} } as never as Request,
+    { params: { id: TEAM }, body: {}, query: {}, headers: DASHBOARD } as never as Request,
     r.res,
   )
   expect(r.status()).toBe(200)
@@ -195,6 +200,93 @@ describe('deleting a team with work going', () => {
     expect(hasTeamOrchestrator(TEAM)).toBe(false)
   })
 
+  describe('its routines', () => {
+    const routine = (agentId: string, template: Record<string, unknown>): string => {
+      const made = registerScheduledRun(db, {
+        agentId,
+        teamId: TEAM,
+        cronSpec: '0 9 * * *',
+        taskTemplate: JSON.stringify({
+          title: 'Chore',
+          kind: 'research',
+          priority: 1,
+          ...template,
+        }),
+        nextRunAt: 1_000,
+        tenantId: null,
+      })
+      if (!made.ok) throw new Error(made.reason)
+      return made.run.id
+    }
+
+    it('an agent routine stays with its agent, and files its task with no team', async () => {
+      const id = routine('lead', {})
+      await del()
+      const run = getScheduledRun(db, id)!
+      expect(run.teamId).toBeNull()
+      expect(run.status).toBe('idle')
+
+      const started: string[] = []
+      const outcome = await dispatchRoutine(run, {
+        db,
+        mcpBaseUrl: null,
+        runTask: async (input) => {
+          started.push(input.taskId)
+          return {
+            ok: true,
+            runtimeId: 'claude-code',
+            execId: 'e1',
+            doneReason: 'success',
+            status: 'done',
+            summary: 'ok',
+            costUsd: null,
+            usedWorktree: false,
+            degradations: [],
+          }
+        },
+      })
+      expect(outcome.ok).toBe(true)
+      expect(getTask(db, started[0]!)?.teamId).toBeNull()
+      await expect(stat(teamWorkdirPath(TEAM))).rejects.toThrow()
+    })
+
+    it('a team routine keeps the team, and says it no longer exists', async () => {
+      const id = routine('', { target: 'team', description: 'Summarize.' })
+      await del()
+      const run = getScheduledRun(db, id)!
+      expect(run.teamId).toBe(TEAM)
+      await expect(dispatchRoutine(run, { db, mcpBaseUrl: null })).resolves.toMatchObject({
+        ok: false,
+        error: 'The team this routine posts to no longer exists.',
+      })
+    })
+
+    it('another team’s routines stay as they are', async () => {
+      const now = Date.now()
+      db.insert(teams)
+        .values({
+          id: 'OTHER',
+          name: 'O',
+          icon: 'x',
+          color: '#000',
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run()
+      const made = registerScheduledRun(db, {
+        agentId: 'lead',
+        teamId: 'OTHER',
+        cronSpec: '0 9 * * *',
+        taskTemplate: JSON.stringify({ title: 'Chore', kind: 'research', priority: 1 }),
+        nextRunAt: 1_000,
+        tenantId: null,
+      })
+      if (!made.ok) throw new Error(made.reason)
+      await del()
+      expect(getScheduledRun(db, made.run.id)?.teamId).toBe('OTHER')
+    })
+  })
+
   it('a wake on a task it left behind starts nothing, and its folder stays gone', async () => {
     const left = assigned('on the engine')
     const onRunner = assigned('on the runner')
@@ -221,7 +313,13 @@ describe('deleting a team with work going', () => {
     }
     const startForPerson = vi.fn()
     const pumpRoom = vi.fn()
-    const deps = { held: () => false, startForPerson, pumpRoom, alert: () => true }
+    const deps = {
+      held: () => false,
+      startForPerson,
+      startByItself: startForPerson,
+      pumpRoom,
+      alert: () => true,
+    }
     // A person's own action reads the wake on the spot, before any reap.
     expect(pumpTaskWakeNow(db, onRunner.id, deps)).toEqual({ do: 'wait', skip: 'no_team' })
     expect(pumpTaskWakeNow(db, left.id, deps)).toEqual({ do: 'wait', skip: 'no_team' })

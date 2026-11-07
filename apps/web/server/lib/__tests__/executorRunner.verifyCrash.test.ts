@@ -36,6 +36,7 @@ import {
   taskWakes,
   updateStatus,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -183,6 +184,7 @@ describe('task runner: a crash while the work is being checked', () => {
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     expect(getDbPath().startsWith(home)).toBe(true)
+    seedSandboxTeam(home)
     repo = await initRepo()
     check.during = null
     check.fails = false

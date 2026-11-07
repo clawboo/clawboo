@@ -31,6 +31,7 @@ export {
   tasks,
   agentWakeChains,
   agentWakeGates,
+  jobRuns,
   taskWakes,
   teamChat,
   teams,

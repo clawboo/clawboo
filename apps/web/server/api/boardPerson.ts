@@ -9,11 +9,15 @@
 
 import type { Request, Response } from 'express'
 
-import type { AgentWakeChoice } from '@clawboo/board-core'
+import { parseWaitingOn, type AgentWakeChoice } from '@clawboo/board-core'
 import {
   addComment,
   agentCommentWakesOfJob,
   agentWakesBody,
+  carryOnJob,
+  jobLimitBody,
+  jobLimitedTaskIds,
+  jobRunState,
   answerForAgent,
   answerQuestion,
   answerWords,
@@ -29,6 +33,8 @@ import {
   getTask,
   listExecutions,
   listTaskQuestions,
+  stopJob,
+  tasksOfJob,
   noteBlockedReason,
   parsePersonJson,
   parseQuestionPayload,
@@ -46,12 +52,14 @@ import { createLogger } from '@clawboo/logger'
 import { personCommentReport } from '@clawboo/team-orchestration'
 
 import { actingPerson, actorField, refuseUnlessPerson } from '../lib/auth'
-import { ownWriterOf } from '../lib/boardReader'
+import { markReleasedTasksRead, ownWriterOf } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
+import { cancelRunnerRerun } from '../lib/runnerRerun'
 import { runnerTargetOf } from '../lib/runnerRoute'
+import { stopTaskRuns, whenTaskRunsEnd } from '../lib/runStops'
 import { startTask } from '../lib/startBoardTask'
 import { pumpRoomOfTask } from '../lib/teamChat/boardDispatch'
 import { noteHumanMove } from '../lib/teamChat/humanMove'
@@ -66,11 +74,17 @@ import { createChatReportUps, notifyChatReportUp } from '../lib/agentChat/chatRe
 import { createReportUpOutbox } from '../lib/teamChat/reportUpOutbox'
 import { engineRefusal, roomIdForTask, startRefusal } from '../lib/teamChat/roomRoster'
 import { writeRequestNote } from '../lib/teamChat/requestNote'
-import { getTaskOrchestrator } from '../lib/teamChat/teamOrchestrator'
+import { getTaskOrchestrator, stopJobTeamRuns } from '../lib/teamChat/teamOrchestrator'
 import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 
 const log = createLogger('board-person')
+
+/** What a person's Stop on a job's card says on the card it was pressed on. */
+const JOB_STOPPED_BY_PERSON =
+  'Stop: this job’s runs have ended and nothing under it starts by itself. A Retry or a comment starts work again.'
+/** What it says on each run it ended. */
+const JOB_STOPPED_NOTE = 'A person stopped this job.'
 
 /** What a reopened request's lead reads when the person gave no words of their own. */
 const REOPENED_REQUEST = 'A person reopened this request.'
@@ -90,6 +104,10 @@ function pumpDeps(db: ClawbooDb, req: Request, taskId: string): TaskWakePumpDeps
     held: engineHeld,
     startForPerson: (task) =>
       startTask(db, task.id, task.teamId, runnerTargetOf(db, task), mcpBaseUrl),
+    startByItself: (task) =>
+      startTask(db, task.id, task.teamId, runnerTargetOf(db, task), mcpBaseUrl, {
+        automatic: true,
+      }),
     pumpRoom: () => undefined,
     alert: () => false,
     asOwnWrite: (write) => runOwnWrite(db, writer, taskId, write),
@@ -407,6 +425,117 @@ export function boardAgentWakesPOST(req: Request, res: Response): void {
         })
       }
     res.json({ ok: true, task: getTask(db, shownOn), attention: attentionForTask(db, shownOn) })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) })
+  }
+}
+
+// ─── POST /api/board/job-limit/:jobTaskId ────────────────────────────────────
+// A job started all the runs it may by itself, and a person answers. Carry on adds another
+// lot. Stop is about this job alone: its live runs end, on the team's engine and the task
+// runner, nothing under it starts by itself, and the card stays down until a person starts
+// work in it again. Other work in the room goes on. Person-only, since an agent answering
+// this would be a job lifting its own limit.
+export async function boardJobLimitPOST(req: Request, res: Response): Promise<void> {
+  try {
+    if (refuseUnlessPerson(req, res)) return
+    const parsed = jobLimitBody.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: 'invalid body' })
+      return
+    }
+    const db = getDb()
+    const jobTaskId = (req.params['jobTaskId'] as string | undefined) ?? ''
+    const task = getTask(db, jobTaskId)
+    if (!task) {
+      res.status(404).json({ ok: false, error: 'task not found' })
+      return
+    }
+    const decision = parsed.data.decision
+    const state = jobRunState(db, jobTaskId)
+    if (state.jobTaskId !== jobTaskId || !jobLimitedTaskIds(db).includes(jobTaskId)) {
+      res.status(409).json({ ok: false, error: 'no_card' })
+      return
+    }
+    if (decision === 'stop') {
+      const person = actingPerson(req)
+      const writer = ownWriterOf(req)
+      // What this moves, read first. None of it is news to the person pressing it.
+      const moving = writer
+        ? tasksOfJob(db, jobTaskId).filter((id) => {
+            const t = getTask(db, id)
+            return (
+              t?.status === 'in_progress' ||
+              t?.status === 'in_review' ||
+              (t?.status === 'blocked' && parseWaitingOn(t.waitingOn)?.kind === 'subtasks')
+            )
+          })
+        : []
+      const result = runOwnWrite(db, writer, jobTaskId, () => {
+        const stopped = stopJob(db, jobTaskId, person)
+        if (stopped.ok)
+          addComment(db, jobTaskId, JOB_STOPPED_BY_PERSON, 'user', null, { person, kind: 'note' })
+        return stopped
+      })
+      if (!result.ok) {
+        res.status(409).json({ ok: false, error: result.reason })
+        return
+      }
+      const under = new Set(result.taskIds)
+      const onRunner: string[] = []
+      for (const id of under) {
+        if (stopTaskRuns(id, JOB_STOPPED_NOTE)) onRunner.push(id)
+        cancelRunnerRerun(id)
+      }
+      // An engine not loaded has no runs, and what it would start is marked already.
+      await stopJobTeamRuns(under, { task: JOB_STOPPED_NOTE, turn: JOB_STOPPED_NOTE })
+      if (writer) {
+        markReleasedTasksRead(db, writer, moving)
+        // The runner's run writes its own ending, once its abort has reached it.
+        for (const id of onRunner) {
+          whenTaskRunsEnd(id, () => markReleasedTasksRead(db, writer, [id]))
+        }
+      }
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId: jobTaskId,
+        teamId: task.teamId,
+        data: { to: task.status, reason: 'job_stopped', by: 'person', ...actorField(req) },
+      })
+    } else {
+      const person = actingPerson(req)
+      const result = runOwnWrite(db, ownWriterOf(req), jobTaskId, () => {
+        const carried = carryOnJob(db, jobTaskId, person)
+        if (carried.ok)
+          addComment(
+            db,
+            jobTaskId,
+            `Carry on: this job may start up to ${carried.limit} runs by itself.`,
+            'user',
+            null,
+            { person, kind: 'note' },
+          )
+        return carried
+      })
+      if (!result.ok) {
+        res.status(409).json({ ok: false, error: result.reason })
+        return
+      }
+      emitEvent(db, {
+        kind: 'job_limit_carried_on',
+        taskId: jobTaskId,
+        teamId: task.teamId,
+        data: { runs: result.runs, limit: result.limit, ...actorField(req) },
+      })
+      if (task.teamId) pumpRoomOfTask(task.teamId, jobTaskId, loopbackMcpBaseUrl(req))
+    }
+    appendAudit(db, {
+      eventType: 'board',
+      taskId: jobTaskId,
+      teamId: task.teamId,
+      summary: { jobLimit: decision, jobTaskId, ...actorField(req) },
+    })
+    res.json({ ok: true, task: getTask(db, jobTaskId), attention: attentionForTask(db, jobTaskId) })
   } catch (err) {
     res.status(500).json({ ok: false, error: String(err) })
   }

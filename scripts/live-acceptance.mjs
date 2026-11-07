@@ -8,9 +8,9 @@
 // request host, so the runtime can read the board/memory over MCP.
 //
 // Prereq: a clawboo server running with the all-on flags + CLAWBOO_RUNTIME_CLAUDE_CODE=1,
-// and a logged-in `claude` CLI (or ANTHROPIC_API_KEY). It uses a LABEL teamId
-// string (no real team row) so it leaves no team behind; residual throwaway
-// task/execution/obs rows + the worktree are reported for cleanup.
+// and a logged-in `claude` CLI (or ANTHROPIC_API_KEY). Its task is on no team, so
+// it leaves no team behind; residual throwaway task/execution/obs rows + the
+// worktree are reported for cleanup.
 //
 //   BASE=http://localhost:18790 LIVE_MODEL=haiku node scripts/live-acceptance.mjs
 
@@ -21,7 +21,6 @@ import path from 'node:path'
 
 const BASE = process.env.BASE || 'http://localhost:18790'
 const MODEL = process.env.LIVE_MODEL || 'haiku'
-const TEAM_LABEL = 'live-acceptance'
 const evidence = { base: BASE, model: MODEL, steps: {} }
 
 async function api(method, p, body, headers = {}) {
@@ -74,14 +73,13 @@ async function main() {
   evidence.steps.repo = repo
   log('throwaway repo', repo)
 
-  // 3. Create a durable board task (label teamId — no real team row).
+  // 3. Create a durable board task, on no team.
   const task = await api('POST', '/api/board', {
     title: 'Create greeting.txt and a passing verify command',
     description:
       'In the current working directory, create a file named greeting.txt containing a single short greeting line. ' +
       "Then edit init.sh so the line reads exactly: VERIFY_CMD='test -f greeting.txt'. " +
       'Keep the change minimal. Reply with a one-line summary when done.',
-    teamId: TEAM_LABEL,
   })
   const taskId = task.json?.id ?? task.json?.task?.id
   evidence.steps.taskCreated = { status: task.status, taskId, body: task.json }
@@ -155,7 +153,7 @@ async function main() {
   const wtRoot = path.join(os.homedir(), '.openclaw', 'clawboo', 'worktrees')
   evidence.steps.worktreeRootExists = existsSync(wtRoot)
   evidence.cleanup = {
-    note: 'Label teamId only — no team row created. Residual throwaway task/execution/obs rows remain in the dev DB.',
+    note: 'No team row created. Residual throwaway task/execution/obs rows remain in the dev DB.',
     throwawayTaskId: taskId,
     worktreeRoot: wtRoot,
     repo,

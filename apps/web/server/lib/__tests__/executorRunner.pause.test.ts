@@ -29,6 +29,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime, type RunTaskResult } from '../executorRunner'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../runSlots'
 import { stopPausedTaskRuns } from '../runStops'
@@ -103,6 +104,7 @@ describe('a pause on the task runner', () => {
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     resetDb()
     expect(getDbPath().startsWith(home)).toBe(true)
+    seedSandboxTeam(home)
     slots = createRunSlots(1)
     setRunSlotsForTests(slots)
   })

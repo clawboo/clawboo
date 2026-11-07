@@ -39,6 +39,7 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | GET    | `/api/board/:taskId/questions`            | The questions agents asked on a task                          | No      |
 | POST   | `/api/board/questions/:questionId/answer` | A person answers a question                                   | No      |
 | POST   | `/api/board/agent-wakes/:jobTaskId`       | A person answers the card about agents waking each other      | No      |
+| POST   | `/api/board/job-limit/:jobTaskId`         | A person answers the card on a job at its limit of runs       | No      |
 | GET    | `/api/board/:taskId/plan`                 | A task's plan: a revision, and the list of them               | No      |
 | GET    | `/api/board/inbox`                        | What is unread and what needs the person, for the badge       | No      |
 | POST   | `/api/board/inbox/read`                   | Mark everything read, or one team's tasks                     | No      |
@@ -99,7 +100,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 
 ### Responses
 
-**`200 OK`**: the task list, most recently updated first (the `ready=true` list keeps the order at the top of this section). The `ready=true` rows carry none of `attention`, `runCost` and `runningSince`. Other sections call one of these rows `DbTask`:
+**`200 OK`**: the task list, most recently updated first (the `ready=true` list keeps the order at the top of this section). The `ready=true` rows carry none of `attention`, `runCost`, `runningSince` and `jobStopped`. Other sections call one of these rows `DbTask`:
 
 ```ts
 {
@@ -167,6 +168,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         | 'out_of_room'
         | 'budget'
         | 'breaker'
+        | 'job_limit'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out; what a person must do
       cause?: 'sign_in' | 'billing' // the provider refused the account: fix this before a retry
@@ -176,6 +178,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
       personId?: string // for assigned: the person whose turn it is
       handedBack?: true // for assigned: an agent handed it back
       agentWakes?: object // for agent_wakes: the card, described below
+      jobLimit?: { jobTaskId: string; runs: number; limit: number } // for job_limit: the job and how far it has got
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -187,11 +190,13 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     // When the current run started (epoch ms); null when no run is going. Not
     // returned by the `ready=true` variant.
     runningSince: number | null
+    // A person stopped this task's job on the job's card, and has not started work in it since.
+    jobStopped: boolean
   }>
 }
 ```
 
-`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A `blocked` task whose agent's comment still waits on the card about agents waking each other is `agent_wakes`, with `agentWakes: { jobTaskId, kind, fromAgentId, toAgentId, alsoWaiting? }`. `alsoWaiting` counts the other tasks that wait on the same answer, and a card nothing waits on any more is not shown. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one, unless it waits on another task or its sub-tasks: `no_result`, `out_of_room`, `rate_limited` or `provider_down`, or `budget` from what it waits on; else `needs_review` when its verdict cannot be promoted; else `blocked` for what an agent said a person must do; else `budget`, `breaker`, `timed_out` or `failed` from its last run; else `needs_review` when it waits on a check; else `blocked`. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), a hard budget cap (`budget`), the circuit breaker (`breaker`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
+`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. The task at the top of a job that has started as many runs by itself as it may is `job_limit`, ahead of every other reason and whatever its status, until a person answers with `POST /api/board/job-limit/:jobTaskId`. A `blocked` task whose agent's comment still waits on the card about agents waking each other is `agent_wakes`, with `agentWakes: { jobTaskId, kind, fromAgentId, toAgentId, alsoWaiting? }`. `alsoWaiting` counts the other tasks that wait on the same answer, and a card nothing waits on any more is not shown. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one, unless it waits on another task or its sub-tasks: `no_result`, `out_of_room`, `rate_limited` or `provider_down`, or `budget` from what it waits on; else `needs_review` when its verdict cannot be promoted; else `blocked` for what an agent said a person must do; else `budget`, `breaker`, `timed_out` or `failed` from its last run; else `needs_review` when it waits on a check; else `blocked`. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), a hard budget cap (`budget`), the circuit breaker (`breaker`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
 
 `runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource` `'reported'` or `'local'`; a row with a null source counts as an estimate. `local: true` appears only when every counted row is `'local'`, a run on a model the user's own Ollama served, and the board then shows the cost as `free`. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
@@ -319,7 +324,7 @@ Resumes it, and waiting work starts again at once. `:kind` is `agent`, `team`, `
 
 **`200 OK`**: `{ ok: true }`. **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`. **`404 Not Found`**: `{ "ok": false, "error": "not_paused" }`.
 
-## A person's main task
+## Main tasks
 
 A row with `isMainTask: 1` holds a person's request from the chat: their words, who asked (`requestedBy`), the agent looking after it (`assigneeAgentId`), and the work filed under it (`parentTaskId`). It sits `in_progress` with `waitingOn: {"kind":"subtasks"}` until its lead's summary, and holds no run.
 
@@ -455,6 +460,25 @@ A person answers the card about agents waking each other on a job. Yes also star
 
 **`400 Bad Request`**: a wrong body. **`404 Not Found`**: no such task. **`409 Conflict`**: `{ "ok": false, "error": "no_card" }` when no card is up or nothing waits on it any more, so a second press changes nothing, or `"no_team"` for `team` on a job with no team.
 
+## `POST /api/board/job-limit/:jobTaskId`
+
+A person answers the card on a job that has started as many runs by itself as it may. **Carry on** allows another 100 from where it stands, and starts what was waiting. **Stop** is about this job alone, with or without a team: it ends the runs going under it on the team engine and the task runner, holds what was on its way, and starts nothing more by itself, so the card stays down. Other work in the room goes on. A person's Retry, comment or Reopen starts work again, and the job's next refusal may bring the card back.
+
+**A person's route**, like `reopen`.
+
+- **Path param**: `jobTaskId`: the task at the top of the job, from `attention.jobLimit.jobTaskId`.
+- **Request body**:
+
+```ts
+{
+  decision: 'carry_on' | 'stop'
+}
+```
+
+**`200 OK`**: `{ ok: true, task: DbTask, attention: TaskAttention | null }`.
+
+**`400 Bad Request`**: a wrong body. **`404 Not Found`**: no such task. **`409 Conflict`**: `{ "ok": false, "error": "no_card" }` when no card is up, so a second press changes nothing.
+
 ## `POST /api/board/questions/:questionId/answer`
 
 A person answers an agent's question. The question goes on the task's comments under the agent that asked it, the answer goes there in the person's name, and the task starts again for its agent, as a person's reply starts it. No Tasks tool can do this.
@@ -522,6 +546,7 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     attention
     runCost
     runningSince // shape as in GET /api/board
+    jobStopped // shape as in GET /api/board
     // How the run working on the task takes a comment now: the run's own way,
     // which can differ from its runtime's (a Hermes run that fell back to
     // `hermes chat` stops and resumes). null when no run is registered here.

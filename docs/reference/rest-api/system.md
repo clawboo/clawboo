@@ -157,6 +157,8 @@ curl -N -X POST http://localhost:18790/api/system/install-openclaw
 
 ## `POST /api/system/configure-openclaw`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Writes a fresh `openclaw.json` and `.env` for one provider, makes a new Gateway token, and saves the Gateway URL and token in Clawboo's settings. No dashboard screen calls this route; it is for scripts and manual setup. The dashboard's OpenClaw setup (in **Settings > Runtimes** and onboarding's **Add more runtimes** step) uses `POST /api/system/auto-configure-openclaw` instead, and when that answers `needsKey` it saves the key you paste with `POST /api/providers/:id/connect` and calls auto-configure again.
 
 <Warning>
@@ -227,6 +229,7 @@ The key line in `.env` uses the provider's own variable (for example `ANTHROPIC_
 
 ```bash
 curl -X POST http://localhost:18790/api/system/configure-openclaw \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"provider":"anthropic","apiKey":"sk-ant-...","gatewayPort":18789}'
 ```
@@ -234,6 +237,8 @@ curl -X POST http://localhost:18790/api/system/configure-openclaw \
 ---
 
 ## `POST /api/system/auto-configure-openclaw`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Sets up OpenClaw from a credential you have already connected, so the OpenClaw setup never asks for a key it could find itself. The dashboard's OpenClaw setup calls it first and shows the key prompt only when this route finds nothing to use. Unlike `configure-openclaw`, it keeps what is already in `openclaw.json` and `.env` (see the list after the responses).
 
@@ -302,7 +307,8 @@ The returned and saved `gatewayUrl` uses the port the Gateway route will use: th
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/system/auto-configure-openclaw
+curl -X POST http://localhost:18790/api/system/auto-configure-openclaw \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
@@ -473,6 +479,8 @@ curl http://localhost:18790/api/system/openclaw-config
 
 ## `PATCH /api/system/openclaw-config`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Changes parts of `openclaw.json` and, when keys are sent, writes them to `.env` and every OpenClaw agent's `auth-profiles.json`. Every field is optional and only the fields you send are touched. A missing or unreadable `openclaw.json` is treated as empty. Keys sent here go to OpenClaw's files only, not to Clawboo's vault.
 
 - **Path/query params**: none.
@@ -530,6 +538,7 @@ What each field writes:
 
 ```bash
 curl -X PATCH http://localhost:18790/api/system/openclaw-config \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"model":"anthropic/claude-sonnet-4-5","agentToAgent":{"enabled":true}}'
 
@@ -542,6 +551,8 @@ curl -X PATCH http://localhost:18790/api/system/openclaw-config \
 ---
 
 ## `POST /api/system/approve-device`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Approves the most recent pending OpenClaw device-pairing request. OpenClaw does not pair a new device on its own: the device waits until a person approves it, and until then its Gateway connection fails with `NOT_PAIRED` ("pairing required: device is not approved yet"). The dashboard's pairing card (**Approve this device**) calls this route.
 
@@ -591,7 +602,8 @@ Finding the UUID depends on the wording of OpenClaw's output (the pattern `/open
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/system/approve-device
+curl -X POST http://localhost:18790/api/system/approve-device \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
@@ -727,6 +739,7 @@ The answer is built from the running process alone: no database read, no network
     "board.mainTasks": true,
     "board.wakes": true,
     "board.agentWakes": true,
+    "board.jobLimit": true,
     "board.planDocuments": true,
     "board.planApproval": true,
     "board.reopen": true,
@@ -776,9 +789,10 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                                                                              |
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                                                                              |
 | `board.inbox`                                                               | Always. Read state per task on the server (`/api/board/inbox`, `POST /api/board/:taskId/read`). The event stream says when to read it.                                                                                                                                                                            |
-| `board.mainTasks`                                                           | Always. A lead's hand-offs for a person's chat message are filed under one main task, a row with `isMainTask: 1`. See [A person's main task](/reference/rest-api/board#a-persons-main-task).                                                                                                                      |
+| `board.mainTasks`                                                           | Always. A lead's hand-offs for a person's chat message are filed under one main task, a row with `isMainTask: 1`. See [A person's main task](/reference/rest-api/board#main-tasks).                                                                                                                               |
 | `board.wakes`                                                               | Always. A person's comment and a dependency moving to done save a wake that starts the task's agent, one per agent and task, within seconds.                                                                                                                                                                      |
 | `board.agentWakes`                                                          | Always. An agent's comment can wake a teammate once a person has allowed it on the job: `POST /api/board/agent-wakes/:jobTaskId`, `/api/team-agent-wakes/:teamId`.                                                                                                                                                |
+| `board.jobLimit`                                                            | Always. A job at its limit of runs started by itself waits for a person: `POST /api/board/job-limit/:jobTaskId`.                                                                                                                                                                                                  |
 | `board.planDocuments`                                                       | Always. A task's plan as a document, in revisions: `GET /api/board/:taskId/plan`, and `write_plan` for an agent's run.                                                                                                                                                                                            |
 | `board.planApproval`                                                        | Always. A team can ask a person before a plan starts: `/api/team-plan-approval/:teamId`.                                                                                                                                                                                                                          |
 | `board.personCheck`                                                         | Always. Moves, Retry, Assign, Reopen, approval and question answers, the card about agents waking each other, labels, read marks and a team's work check take a person's authority only from the dashboard's page or a person a sign-in proxy vouched for (see [Security](/operating/security#the-person-check)). |

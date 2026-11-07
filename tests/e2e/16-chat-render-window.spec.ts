@@ -45,13 +45,17 @@ test('bounded render window: real-layout scroll anchoring', async ({ page, reque
   const list = await request.get(`${API_BASE}/api/teams`)
   if (list.ok()) {
     const { teams = [] } = (await list.json()) as { teams?: { id: string }[] }
-    for (const t of teams) await request.delete(`${API_BASE}/api/teams/${t.id}`)
+    for (const t of teams)
+      await request.delete(`${API_BASE}/api/teams/${t.id}`, {
+        headers: DASHBOARD_HEADERS,
+      })
   }
   const teamResp = await request.post(`${API_BASE}/api/teams`, {
     data: { name: 'Window Team', icon: '🪟', color: '#34D399' },
   })
   const { team } = (await teamResp.json()) as { team: { id: string } }
   await request.post(`${API_BASE}/api/teams/${team.id}/agents`, {
+    headers: DASHBOARD_HEADERS,
     data: { agentId: 'a2', agentName: 'Window Boo' },
   })
   await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {

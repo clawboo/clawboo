@@ -60,14 +60,19 @@ test.describe('Native onboarding on a local Ollama', () => {
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
-      for (const team of data.teams ?? []) await request.delete(`${API_BASE}/api/teams/${team.id}`)
+      for (const team of data.teams ?? [])
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
     }
     const agentsResp = await request.get(`${API_BASE}/api/agents`)
     if (agentsResp.ok()) {
       const data = (await agentsResp.json()) as { agents?: { id: string; runtime?: string }[] }
       for (const a of data.agents ?? []) {
         if (a.runtime === 'clawboo-native' || a.id.startsWith('native-')) {
-          await request.delete(`${API_BASE}/api/agents/${a.id}`)
+          await request.delete(`${API_BASE}/api/agents/${a.id}`, {
+            headers: DASHBOARD_HEADERS,
+          })
         }
       }
     }

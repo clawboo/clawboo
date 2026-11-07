@@ -15,6 +15,8 @@
 import { agedTaskPriority, PAUSED_RUN_CLASS } from '@clawboo/board-core'
 import {
   addComment,
+  giveBackJobRun,
+  jobRunRefused,
   appendAudit,
   claimTask,
   completeExecutionProcess,
@@ -40,6 +42,7 @@ import {
   startTaskHeartbeat,
   updateStatus,
   startRefusedBy,
+  teamExists,
   type ClawbooDb,
   type DbExecutionProcess,
   type RunCostSource,
@@ -86,7 +89,7 @@ import {
 } from '@clawboo/worktrees'
 
 import { reserveRunBudget, type RunBudgetHold } from './budgetHold'
-import { budgetPreflight, budgetRefusalText } from './budgetPreflight'
+import { budgetPreflight, budgetRefusalText, reviewerBudgetRefusal } from './budgetPreflight'
 import { getMcpAttachSecret } from './mcpAttachSecret'
 import { buildResumeNote } from './resumeNote'
 import { RunQueueAbortedError, withRunSlot } from './runSlots'
@@ -232,6 +235,9 @@ export interface RunTaskInput {
   /** Max successor sessions per task before rotation gives up (bounds the chain).
    *  Falls back to DEFAULT_ROTATION.maxRotations. */
   maxRotations?: number
+  /** The board started this, not a person: it spends from the job's count of runs started
+   *  by itself, and waits at its limit. */
+  automaticStart?: boolean
   /** External cancellation. When it aborts (e.g. the dispatch client
    *  disconnected), the live run is aborted and the task released to `todo` —
    *  the run (and its subprocess) does not keep going after the caller is gone. */
@@ -256,6 +262,8 @@ export type RunTaskResult =
         // A person paused its agent, team or task tree (or its team was archived).
         // Nothing was claimed, and the task starts again when that lifts.
         | 'paused'
+        // Its team was deleted, which leaves its task rows behind. Nothing was claimed.
+        | 'no_team'
     }
   | {
       ok: true
@@ -624,6 +632,18 @@ async function runTaskOnRuntimeInner(
     const maxFix = Math.max(0, verifyMaxAttempts() - 1)
     let cycle = 0
     while (result.ok && result.needsVerifyFix && cycle < maxFix) {
+      // A fix round is a run nobody asked for. At the job's limit the task waits in To do,
+      // with the check it failed still on it, until a person says to carry on.
+      if (jobRunRefused(input.db, input.taskId)) {
+        if (updateStatus(input.db, input.taskId, 'todo', { keepVerdict: true }).ok)
+          addComment(
+            input.db,
+            input.taskId,
+            'This job has started as many runs by itself as it may, so the next fix waits for a person.',
+            'system',
+          )
+        break
+      }
       cycle++
       result = await runOnce({ ...input, fixCycle: cycle })
     }
@@ -631,6 +651,14 @@ async function runTaskOnRuntimeInner(
     // no run left to give it back. To do, to start again on resume.
     if (!result.ok && stop.byPause && getTask(input.db, input.taskId)?.status === 'in_progress') {
       releaseTask(input.db, input.taskId, { keepVerdict: true })
+    }
+    // Its team was deleted between two fix cycles: the same, with no resume to come.
+    if (
+      !result.ok &&
+      result.reason === 'no_team' &&
+      getTask(input.db, input.taskId)?.status === 'in_progress'
+    ) {
+      releaseTask(input.db, input.taskId)
     }
     return result
   } catch (err) {
@@ -789,6 +817,10 @@ async function runTaskInner(
   const task = getTask(db, taskId)
   if (!task) return { ok: false, reason: 'not_found' }
 
+  // A team that was deleted runs nothing, whatever path asked: the folder below would
+  // come back, and the spend would land on a budget nobody can see.
+  if (task.teamId && !teamExists(db, task.teamId)) return { ok: false, reason: 'no_team' }
+
   // Bounded recursion via the board ancestor chain (single reduce point). `>` not
   // `>=`: a task sitting exactly AT the ceiling is the deepest legal one, and the
   // creation caps already guarantee nothing deeper exists. See MAX_SPAWN_DEPTH.
@@ -838,7 +870,7 @@ async function runTaskInner(
     // Atomic claim: a lost claim is a conflict and is NEVER retried. The run opens in
     // the same write, so the task is stamped with it and takes what waits on it.
     const claim = claimTask(db, taskId, assigneeAgentId, runtimeId, {
-      run: { executorType: runtimeId, runReason },
+      run: { executorType: runtimeId, runReason, automatic: input.automaticStart === true },
     })
     if (!claim.ok || !claim.execution) return { ok: false, reason: 'conflict' }
     claimedExec = claim.execution
@@ -886,8 +918,10 @@ async function runTaskInner(
   }
 
   // A fix cycle holds the claim already: its run moves the task's stamp to itself.
+  // It counts toward its job in the same write, as a claim does.
   const exec =
-    claimedExec ?? createExecutionProcess(db, { taskId, executorType: runtimeId, runReason })
+    claimedExec ??
+    createExecutionProcess(db, { taskId, executorType: runtimeId, runReason, countJobRun: true })
   // Share it with the outer safety net so an unexpected throw can close the row
   // instead of leaving it `running` with no runner behind it. (The liveness beat
   // is owned by the runTaskOnRuntime wrapper — one interval spanning the mutex
@@ -1146,6 +1180,8 @@ async function runTaskInner(
     const error = `budget_${finalGate.reason}:${finalGate.scope}`
     const refusedStatus = finalGate.reason === 'held' ? 'budget_held' : 'budget_paused'
     addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
+    // It never started, so its job's count gets back what opening it took.
+    giveBackJobRun(db, exec.id)
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
       status: refusedStatus,
       error,
@@ -2147,6 +2183,18 @@ async function runTaskInner(
           reviewerModel,
           reviewPaused: () =>
             startRefusedBy(db, { agentId: assigneeAgentId, teamId: task.teamId, taskId }) !== null,
+          // The review spends like any run, so the same budgets answer first. It runs in
+          // this run's own slot: taking a second one would deadlock a cap of one.
+          reviewGate: () => {
+            const gate = reserveRunBudget(
+              db,
+              { agentId: assigneeAgentId, missionId, teamId: task.teamId },
+              { kind: 'review', ref: taskId },
+            )
+            return gate.blocked
+              ? { refused: reviewerBudgetRefusal(gate.scope, gate.reason) }
+              : { release: () => gate.hold.release() }
+          },
           mcpBaseUrl: input.mcpBaseUrl,
           // The review is paid work done for this task, so it is charged to the
           // same agent, mission and team budgets and shows in Tokens Used. A

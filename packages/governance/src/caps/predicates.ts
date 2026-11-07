@@ -32,6 +32,13 @@ export const DEFAULT_ROOT_CREATE_WINDOW_MS = 5 * 60_000
  *  one too long is refused whole rather than started and cut. */
 export const DEFAULT_MAX_PLAN_STEPS = 25
 
+/** The most runs one job (a person's request, or a top-level task) may start by itself
+ *  before a person says to carry on. Each brake below this one reads one task or one
+ *  kind of run, so this is the only count of a whole job: wakes, follow-ups, fix rounds,
+ *  extra turns, retries, plan steps, update turns and hand-offs all spend from it. What a
+ *  person starts directly never does. "Carry on" adds this many again. */
+export const DEFAULT_MAX_JOB_RUNS = 100
+
 /** Reject once the existing ancestor depth has reached the max (would create depth+1). */
 export function checkDepthCap({ depth, max }: { depth: number; max: number }): CapResult {
   if (depth >= max) return { ok: false, reason: `delegation depth ${depth} >= max ${max}` }

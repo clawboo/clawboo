@@ -173,7 +173,7 @@ describe('personMovedTask: a person cancels or finishes a running task', () => {
     const sent = reflections(h.delivered)
     expect(sent).toHaveLength(1)
     expect(sent[0]!.sessionKey).toBe(sk('leader'))
-    expect(sent[0]!.origin).toEqual({ kind: 'system' })
+    expect(sent[0]!.origin).toMatchObject({ kind: 'system' })
     expect(sent[0]!.task).toContain("✕ Cancelled by a person (it was Bug Boo's)")
     expect(sent[0]!.task).toContain(
       'A person cancelled it on the board. Do NOT redo cancelled work or hand it to anyone again.',

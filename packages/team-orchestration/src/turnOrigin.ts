@@ -75,8 +75,22 @@ export type TurnOrigin =
    *
    *  `mainTaskId`, present only when set, says which person's request this update
    *  is about: what the recipient hands out goes under it, and when all its work is
-   *  in, the reply is the summary that closes it. Never with `forTaskId`. */
-  | { kind: 'system'; forTaskId?: string; reportUpIds?: string[]; mainTaskId?: string }
+   *  in, the reply is the summary that closes it. Never with `forTaskId`.
+   *
+   *  `jobTaskId`, present only when set, is the job an update outside any request read:
+   *  the top of the task it reports on, or of the first one when it read several. What
+   *  the recipient hands out nests there, so it counts toward that job and not as work
+   *  from nowhere. */
+  | {
+      kind: 'system'
+      forTaskId?: string
+      reportUpIds?: string[]
+      mainTaskId?: string
+      jobTaskId?: string
+      /** The jobs this turn counts toward, by whoever starts it, once its run has started:
+       *  a turn a budget refuses started nothing. Absent on a person's words. */
+      countJobs?: string[]
+    }
   /** A routine the person scheduled posted this into team chat on their behalf.
    *  It carries their words, so it frames like a human turn, but nobody is
    *  necessarily watching when it runs. */
@@ -207,6 +221,8 @@ export interface RunStamp {
   request?: TurnRequest
   /** An update about one request: `TurnOrigin.mainTaskId`. */
   mainTaskId?: string
+  /** An update outside any request: `TurnOrigin.jobTaskId`. */
+  jobTaskId?: string
 }
 
 /**

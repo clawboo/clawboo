@@ -27,6 +27,8 @@ import {
   getAncestors,
   getSetting,
   getTask,
+  giveBackJobRun,
+  noteJobRun,
   listUndeliveredInbox,
   markInboxDelivered,
   recordExecutionUsage,
@@ -176,6 +178,16 @@ export interface RunEntry {
   pauseNote?: string | null
   /** The board task this run works on, when it is a task's run. */
   taskId?: string | null
+}
+
+/** Give back what a refused run took from its job's count. Best-effort: it is a count, and
+ *  the refusal still has to reach the engine. */
+function noteRunNeverStarted(db: ClawbooDb, execId: string): void {
+  try {
+    giveBackJobRun(db, execId)
+  } catch (err) {
+    log.error({ err, execId }, 'giving a refused run back to its job failed')
+  }
 }
 
 /** Stop this run for a pause. The engine reads it as a stop from the stamp, and the
@@ -995,7 +1007,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // Everything else ranks by its task's priority, and a routine or a task update with
     // no task reads as Normal.
     const mainTaskId = origin.kind === 'system' ? origin.mainTaskId : undefined
-    const queueTaskId = runTaskId ?? reportForTaskId ?? mainTaskId ?? null
+    // An update outside any request: the job it read, whose hand-offs its turn counts toward.
+    const jobTaskId = origin.kind === 'system' ? origin.jobTaskId : undefined
+    const queueTaskId = runTaskId ?? reportForTaskId ?? mainTaskId ?? jobTaskId ?? null
     const pauseSubject = { agentId: targetAgentId, teamId, taskId: queueTaskId }
     const queueTask =
       queueTaskId === null ? null : queueTaskId === runTaskId ? briefTask : getTask(db, queueTaskId)
@@ -1018,6 +1032,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // goes under that request's main task.
       ...(request ? { request } : {}),
       ...(mainTaskId ? { mainTaskId } : {}),
+      ...(jobTaskId ? { jobTaskId } : {}),
       // The run stamped on the task's claim, and the saved wakes it carries: both
       // ride every event of this run back to the engine.
       ...(runExecId !== null ? { execId: runExecId } : {}),
@@ -1599,7 +1614,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               log.error({ err, agentId: targetAgentId }, 'budget gate could not read the budgets')
             }
             const refuseForBudget = (scope: BudgetScope, reason: BudgetRefusalReason): void => {
-              const text = budgetRefusalText(scope, reason)
+              // It never started, so its job's count gets back what its claim took.
+              if (runExecId !== null) noteRunNeverStarted(db, runExecId)
+              // A task update tries again by itself; anything else waits for a person.
+              const text = budgetRefusalText(scope, reason, origin.kind === 'system')
               // What it carries waits for the room to come back, having spent no try.
               if (reason === 'held') stamp.budgetHeld = true
               const personAsked = origin.kind === 'human' || origin.kind === 'schedule'
@@ -1725,6 +1743,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             runStarted = true
             leaveQueue()
             budgetNoticeShown.delete(targetAgentId)
+            // An update turn counts toward the jobs it read, now that it has started.
+            if (origin.kind === 'system')
+              for (const job of origin.countJobs ?? []) {
+                try {
+                  noteJobRun(db, job)
+                } catch (err) {
+                  log.error({ err, job }, 'counting an update turn toward its job failed')
+                }
+              }
             // The run STARTED with the catch-up in its context, so the cursor may
             // advance — and only now. Advancing at render time would let a failed
             // start eat the posts, which is the same rule the digest follows one
@@ -1907,6 +1934,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // setting the run up included) never reaches the engine's retry. The
       // report-ups it carries are handed back instead (see `onRunNotStarted`).
       {
+        // A person's message goes ahead of what the session has queued.
+        ...(origin.kind === 'human' ? { ahead: true } : {}),
         onQueuedFailure: (err) => {
           if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
           // A refusal has already put its reason in the chat.

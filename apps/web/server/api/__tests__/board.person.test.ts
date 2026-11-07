@@ -19,6 +19,11 @@ import {
   createRoom,
   createTask,
   getComments,
+  jobLimitedTaskIds,
+  jobRunRefused,
+  jobRuns,
+  jobRunState,
+  listGovernanceAudit,
   getTask,
   handBackTask,
   linkDep,
@@ -37,14 +42,19 @@ import {
   teams,
   updateStatus,
   wakeCommentIds,
+  createSubtask,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const dispatched: Array<{ teamId: string; taskId: string }> = []
+const pumped: Array<{ teamId: string; taskId: string }> = []
 vi.mock('../../lib/teamChat/boardDispatch', () => ({
   requestTaskDispatch: (teamId: string, taskId: string) => {
     dispatched.push({ teamId, taskId })
+  },
+  pumpRoomOfTask: (teamId: string, taskId: string) => {
+    pumped.push({ teamId, taskId })
   },
 }))
 
@@ -69,6 +79,7 @@ vi.mock('../../lib/teamChat/personWake', async (importOriginal) => {
   }
 })
 
+const { registerRunStop } = await import('../../lib/runStops')
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const { engineHold } = await import('../../lib/engineHold')
 const {
@@ -82,6 +93,7 @@ const {
 } = await import('../board')
 const {
   boardAgentWakesPOST,
+  boardJobLimitPOST,
   boardAssignPersonPOST,
   boardQuestionAnswerPOST,
   boardQuestionsGET,
@@ -676,6 +688,148 @@ describe('a person’s writes on the board', () => {
       )
       expect(n.body().delivery).toMatchObject({ status: 'not-delivered', reason: 'unassigned' })
       expect(getTask(db, own.id)?.assigneePersonId).toBe('local')
+    })
+  })
+
+  describe('POST /api/board/job-limit/:jobTaskId', () => {
+    function atLimit(): string {
+      const db = getDb()
+      const t = createTask(db, {
+        title: 'The job',
+        teamId: TEAM,
+        status: 'todo',
+        sourceDelegationId: BOUND,
+      })
+      db.insert(jobRuns)
+        .values({ jobTaskId: t.id, teamId: TEAM, runs: 100, runLimit: 100, updatedAt: 1 })
+        .run()
+      expect(jobRunRefused(db, t.id)).toBe(true)
+      return t.id
+    }
+    const press = async (
+      jobTaskId: string,
+      decision: string,
+      headers: Record<string, string> = DASHBOARD,
+    ) => {
+      const m = mockRes()
+      await boardJobLimitPOST(req({ params: { jobTaskId }, headers, body: { decision } }), m.res)
+      return m
+    }
+
+    it('carry on adds another lot, in the person’s name', async () => {
+      const job = atLimit()
+      const m = await press(job, 'carry_on')
+      expect(m.body()).toMatchObject({ ok: true })
+      expect(m.statusCode()).toBe(200)
+      const db = getDb()
+      expect(jobRunState(db, job)).toMatchObject({ runs: 100, limit: 200, hitAt: null })
+      expect(jobLimitedTaskIds(db)).toEqual([])
+      expect(getComments(db, job).at(-1)?.body).toContain('Carry on')
+      expect(listEvents(db, { kinds: ['job_limit_carried_on'] })).toHaveLength(1)
+      // What waited starts now, not at the next pass.
+      expect(pumped.at(-1)).toEqual({ teamId: TEAM, taskId: job })
+      expect(listGovernanceAudit(db, { eventType: 'board' }).at(0)?.summary).toContain('carry_on')
+    })
+
+    it('a second press changes nothing', async () => {
+      const job = atLimit()
+      await press(job, 'carry_on')
+      const m = await press(job, 'carry_on')
+      expect(m.statusCode()).toBe(409)
+      expect(m.body()).toEqual({ ok: false, error: 'no_card' })
+      expect(jobRunState(getDb(), job).limit).toBe(200)
+    })
+
+    it('stop takes the card down for good, in the person’s name', async () => {
+      const job = atLimit()
+      const m = await press(job, 'stop')
+      expect(m.statusCode()).toBe(200)
+      const db = getDb()
+      expect(jobLimitedTaskIds(db)).toEqual([])
+      expect(jobRunState(db, job).limit).toBe(100)
+      expect(attentionForTask(db, job)?.reason).toBe('stopped')
+      expect(getComments(db, job).at(-1)?.body).toContain('Stop:')
+      expect(listGovernanceAudit(db, { eventType: 'board' }).at(0)?.summary).toContain('stop')
+      // However often it is asked again.
+      for (let i = 0; i < 3; i++) expect(jobRunRefused(db, job)).toBe(true)
+      expect(jobLimitedTaskIds(db)).toEqual([])
+      expect((await press(job, 'stop')).statusCode()).toBe(409)
+      expect((await press(job, 'carry_on')).statusCode()).toBe(409)
+    })
+
+    it('stop answers with no team too: a runner’s job has no room to stop', async () => {
+      const db = getDb()
+      const t = createTask(db, { title: 'Lone', status: 'todo', sourceDelegationId: BOUND })
+      db.insert(jobRuns)
+        .values({ jobTaskId: t.id, teamId: null, runs: 100, runLimit: 100, updatedAt: 1 })
+        .run()
+      jobRunRefused(db, t.id)
+      const m = await press(t.id, 'stop')
+      expect(m.statusCode()).toBe(200)
+      expect(jobLimitedTaskIds(db)).toEqual([])
+    })
+
+    it('stop ends a task runner’s run under the job, and no other job’s', async () => {
+      const db = getDb()
+      const job = atLimit()
+      const under = createSubtask(db, job, {
+        title: 'Under',
+        status: 'todo',
+        sourceDelegationId: BOUND,
+      })
+      const other = createTask(db, { title: 'Elsewhere', teamId: TEAM, status: 'todo' })
+      const notes: string[] = []
+      const running = registerRunStop(under.id, () => {
+        notes.push(running.note ?? '')
+      })
+      const elsewhere = registerRunStop(other.id, () => {
+        notes.push('elsewhere stopped')
+      })
+      expect((await press(job, 'stop')).statusCode()).toBe(200)
+      expect(notes).toEqual(['A person stopped this job.'])
+      running.release()
+      elsewhere.release()
+    })
+
+    it('a task its Stop moved is no news to the person who pressed it', async () => {
+      const db = getDb()
+      const job = atLimit()
+      const parent = createSubtask(db, job, {
+        title: 'Parent',
+        status: 'todo',
+        sourceDelegationId: BOUND,
+      })
+      claimTask(db, parent.id, 'a1')
+      createSubtask(db, parent.id, { title: 'Kid', status: 'todo' })
+      updateStatus(db, parent.id, 'blocked', { waitingOn: { kind: 'subtasks' } })
+      expect((await press(job, 'stop')).statusCode()).toBe(200)
+      expect(getTask(db, parent.id)?.status).toBe('todo')
+      expect(attentionForTask(db, parent.id)?.reason).toBe('stopped')
+      expect(taskReadStates(db, LOCAL_READER, { taskId: parent.id }).get(parent.id)?.unread).toBe(
+        false,
+      )
+    })
+
+    it('stop needs a person too', async () => {
+      const job = atLimit()
+      expect((await press(job, 'stop', {})).statusCode()).toBe(403)
+      expect(jobLimitedTaskIds(getDb())).toEqual([job])
+    })
+
+    it('only a person can answer: an agent lifting its own limit is the loop', async () => {
+      const job = atLimit()
+      const m = await press(job, 'carry_on', {})
+      expect(m.statusCode()).toBe(403)
+      expect(m.body()).toMatchObject({ error: 'person_only' })
+      expect(jobRunState(getDb(), job).limit).toBe(100)
+    })
+
+    it('refuses a wrong body, an unknown task and a task under the job', async () => {
+      const job = atLimit()
+      expect((await press(job, 'maybe')).statusCode()).toBe(400)
+      expect((await press('nope', 'carry_on')).statusCode()).toBe(404)
+      const sub = createSubtask(getDb(), job, { title: 'Sub', status: 'todo' })
+      expect((await press(sub.id, 'carry_on')).statusCode()).toBe(409)
     })
   })
 

@@ -34,6 +34,7 @@ import type {
 } from '@clawboo/executor'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { seedTeamRow } from '../../__tests__/seedTeam'
 import { runTaskOnRuntime } from '../../executorRunner'
 import { noteHumanMove } from '../../teamChat/humanMove'
 import { createRoutinesTicker } from '../ticker'
@@ -106,6 +107,7 @@ describe('a person moving a routine fire’s card while it runs', () => {
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     db = createDb(path.join(home, 'test.db'))
+    seedTeamRow(db)
     const now = Date.now()
     db.insert(agents)
       .values({

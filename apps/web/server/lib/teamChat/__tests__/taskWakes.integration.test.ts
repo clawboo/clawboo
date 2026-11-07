@@ -29,6 +29,7 @@ import {
   claimTask,
   completeExecutionProcess,
   createExecutionProcess,
+  createSubtask,
   createTask,
   decideAgentWakes,
   executionProcesses,
@@ -36,6 +37,10 @@ import {
   getTask,
   handBackTask,
   holdTaskWakes,
+  jobRuns,
+  jobRunState,
+  jobRunStopped,
+  jobLimitedTaskIds,
   linkDep,
   listEvents,
   listExecutions,
@@ -101,7 +106,12 @@ import { deliverPersonReply, type ReplyDeps } from '../personReply'
 import { savePersonWake, startPersonWake } from '../personWake'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
-import { createTaskWakeOutbox, pumpTaskWakes, type TaskWakePumpDeps } from '../taskWakes'
+import {
+  createTaskWakeOutbox,
+  pumpTaskWakes,
+  pumpTaskWakesByRoom,
+  type TaskWakePumpDeps,
+} from '../taskWakes'
 import { engineRefusal } from '../roomRoster'
 import { resetTeamOrchestrators } from '../teamOrchestrator'
 import { createRunSlots, setRunSlotsForTests } from '../../runSlots'
@@ -249,6 +259,9 @@ describe('saved wakes, end to end', () => {
     held: () => false,
     startForPerson: (task) => {
       void proc.engine.dispatchTask(task.id)
+    },
+    startByItself: (task) => {
+      void proc.engine.dispatchTask(task.id, { automatic: true })
     },
     pumpRoom: () => {
       void proc.engine.resume()
@@ -1163,14 +1176,22 @@ describe('saved wakes, end to end', () => {
         expect(row?.heldAt).toBeNull()
         expect(row?.replays).toBe(0)
         const starts: string[] = []
-        const startForPerson = (t: DbTask): void => {
-          starts.push(t.id)
+        const byItself: string[] = []
+        const hands = {
+          startForPerson: (t: DbTask): void => {
+            starts.push(t.id)
+          },
+          startByItself: (t: DbTask): void => {
+            byItself.push(t.id)
+          },
         }
-        pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => true, startForPerson }))
-        expect(starts).toEqual([])
+        pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => true, ...hands }))
+        expect([...starts, ...byItself]).toEqual([])
         expect(skips()).toEqual(['budget'])
-        pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => false, startForPerson }))
-        expect(starts).toEqual([task.id])
+        pumpTaskWakes(db, pumpDeps({ budgetRefuses: () => false, ...hands }))
+        // A cap raised lets it go, and only a person's own start goes free of its job.
+        expect(starts).toEqual(reason === 'person_comment' ? [task.id] : [])
+        expect(byItself).toEqual(reason === 'person_comment' ? [] : [task.id])
       },
     )
 
@@ -2219,6 +2240,151 @@ describe('saved wakes, end to end', () => {
       ).toBe('allowed')
     })
 
+    it('a stopped pair stays stopped after an hour of quiet, until a person answers', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+        noteAgentWakeStarted(
+          db,
+          task.id,
+          i % 2 === 0
+            ? { fromAgentId: OTHER, toAgentId: WORKER }
+            : { fromAgentId: WORKER, toAgentId: OTHER },
+        )
+      teammateSays(task.id, 'Your turn again')
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['back_and_forth'])
+      const later = Date.now() + 3 * 60 * 60_000
+      pumpTaskWakes(db, pumpDeps({ now: () => later }))
+      await new Promise((resolve) => setImmediate(resolve))
+      expect(skips()).toEqual(['back_and_forth'])
+      expect(started()).toEqual([])
+    })
+
+    it('a wake that brings a task back keeps the check it failed', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      db.update(tasks)
+        .set({ verification: JSON.stringify({ status: 'fail', attempts: [{}] }) })
+        .where(eq(tasks.id, task.id))
+        .run()
+      teammateSays(task.id, 'I found it')
+      script([done('on it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => started().length > 0, 'the run')
+      expect(
+        db.select({ v: tasks.verification }).from(tasks).where(eq(tasks.id, task.id)).get()?.v,
+      ).toContain('"status":"fail"')
+    })
+
+    it('a job at its limit holds a teammate’s wake, and starts nothing', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      db.insert(jobRuns)
+        .values({ jobTaskId: task.id, teamId: TEAM, runs: 3, runLimit: 3, updatedAt: 1 })
+        .run()
+      teammateSays(task.id, 'I found it')
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['job_limit'])
+      expect(started()).toEqual([])
+      expect(getTask(db, task.id)?.status).toBe('blocked')
+    })
+
+    it('a job a person stopped says so, and raises no card', async () => {
+      const task = parked()
+      setTeamAlwaysAllow(db, TEAM, true)
+      db.insert(jobRuns)
+        .values({
+          jobTaskId: task.id,
+          teamId: TEAM,
+          runs: 3,
+          runLimit: 3,
+          stoppedAt: 1,
+          updatedAt: 1,
+        })
+        .run()
+      teammateSays(task.id, 'I found it')
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => skips().length > 0, 'the skip note')
+      expect(skips()).toEqual(['job_stopped'])
+      expect(started()).toEqual([])
+      expect(jobLimitedTaskIds(db)).toEqual([])
+    })
+
+    it('a person’s comment still goes in a job they stopped, and ends the stop', async () => {
+      const task = parked()
+      db.insert(jobRuns)
+        .values({
+          jobTaskId: task.id,
+          teamId: TEAM,
+          runs: 3,
+          runLimit: 3,
+          stoppedAt: 1,
+          updatedAt: 1,
+        })
+        .run()
+      recordTaskWake(db, {
+        teamId: TEAM,
+        agentId: WORKER,
+        taskId: task.id,
+        reason: 'person_comment',
+      })
+      script([done('on it')])
+      pumpTaskWakes(db, pumpDeps())
+      await settle(() => started().length > 0, 'the run')
+      expect(jobRunStopped(db, task.id)).toBe(false)
+      expect(jobRunState(db, task.id).runs).toBe(3)
+    })
+
+    it('one pass pumps each room once, however many of its wakes it found', () => {
+      for (const title of ['one', 'two', 'three']) {
+        const t = newTask({ title })
+        recordTaskWake(db, {
+          teamId: TEAM,
+          agentId: WORKER,
+          taskId: t.id,
+          reason: 'dependency_done',
+        })
+      }
+      const pumps: string[] = []
+      pumpTaskWakesByRoom(
+        db,
+        (pumpRoom) => pumpDeps({ pumpRoom }),
+        (teamId, roomId) => pumps.push(`${teamId}/${roomId}`),
+      )
+      expect(pumps).toEqual([`${TEAM}/null`])
+    })
+
+    it('asks the budget gate once a pass for one agent’s job, however many wakes wait', () => {
+      const root = newTask({ title: 'The job' })
+      for (const title of ['one', 'two', 'three']) {
+        const sub = createSubtask(db, root.id, {
+          title,
+          status: 'todo',
+          sourceDelegationId: `r0:deleg:agent:${WORKER}:reflectTo:${LEAD}`,
+        })
+        recordTaskWake(db, {
+          teamId: TEAM,
+          agentId: WORKER,
+          taskId: sub.id,
+          reason: 'dependency_done',
+        })
+      }
+      let asked = 0
+      pumpTaskWakes(
+        db,
+        pumpDeps({
+          budgetRefuses: () => {
+            asked += 1
+            return true
+          },
+        }),
+      )
+      expect(asked).toBe(1)
+    })
+
     it('holds across jobs: two agents answering each other on two tasks stop too', async () => {
       const mine = parked()
       setTeamAlwaysAllow(db, TEAM, true)
@@ -2368,7 +2534,10 @@ describe('saved wakes, end to end', () => {
         pumpTaskWakes(
           db,
           pumpDeps({
-            startForPerson: (t) => startedHere.push(t.id),
+            startForPerson: () => {
+              throw new Error('a teammate’s wake is no person’s start')
+            },
+            startByItself: (t) => startedHere.push(t.id),
             pumpRoom: () => {
               throw new Error('the room’s engine does not run this task')
             },

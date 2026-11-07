@@ -49,6 +49,8 @@ import {
   subtaskViewsOf,
   updateStatus,
 } from '../repository'
+import { jobRunRefused, jobRunState, noteJobRun } from '../jobRuns'
+import { jobRuns } from '../../schema'
 
 let db: ClawbooDb
 const person = { person: LOCAL_PERSON }
@@ -95,6 +97,26 @@ const accept = (id: string, extra: Record<string, unknown> = {}, d: ClawbooDb = 
 
 const stepsOf = (d: ClawbooDb = db) =>
   listTasks(d, { teamId: 'T' }).filter((t) => t.sourceDelegationId?.includes(':plan:'))
+
+describe('a job at its limit of runs started by itself', () => {
+  it('still starts the steps of a plan a person accepted', () => {
+    const top = createTask(db, { title: 'The job', teamId: 'T', status: 'todo' })
+    db.insert(jobRuns)
+      .values({ jobTaskId: top.id, teamId: 'T', runs: 100, runLimit: 100, updatedAt: 1 })
+      .run()
+    on()
+    const r = propose({ parentTaskId: top.id })
+    if (r.status !== 'proposed') throw new Error(r.status)
+    accept(r.question.id)
+    expect(stepsOf()).toHaveLength(STEPS.length)
+    expect(jobRunState(db, top.id)).toMatchObject({ runs: 100, limit: 100 + STEPS.length })
+    for (const step of stepsOf()) {
+      expect(jobRunRefused(db, step.id)).toBe(false)
+      noteJobRun(db, step.id)
+    }
+    expect(jobRunRefused(db, top.id)).toBe(true)
+  })
+})
 
 describe('plan documents', () => {
   it('keeps every revision, so one is readable after a newer one', () => {

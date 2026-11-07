@@ -16,6 +16,7 @@
 import type { Request, Response } from 'express'
 import {
   addRoomMembers,
+  appendAudit,
   archiveRoom,
   createRoom,
   getActiveRoom,
@@ -34,6 +35,7 @@ import {
 } from '@clawboo/db'
 import { eq, like } from 'drizzle-orm'
 
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { runsOnTaskRunner } from '../lib/runnerRoute'
 import { chatClearedAt } from '../lib/teamChat/chatCleared'
@@ -246,6 +248,8 @@ export function teamRoomPATCH(req: Request, res: Response): void {
 // gone, as it always was (404).
 
 export async function teamRoomDELETE(req: Request, res: Response): Promise<void> {
+  // A person's call: it stops the room's runs, as the Stop button does.
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
   const roomId = req.params['roomId'] as string | undefined
   if (!teamId || !roomId) {
@@ -262,7 +266,14 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     const resuming = room.archivedAt != null
     // Archived first: from here nothing builds an engine for this room or routes
     // a task to it, so nothing new can start in it while it winds down.
-    if (!resuming) archiveRoom(db, roomId)
+    if (!resuming) {
+      archiveRoom(db, roomId)
+      appendAudit(db, {
+        eventType: 'board',
+        teamId,
+        summary: { action: 'archive_room', roomId, name: room.name, ...actorField(req) },
+      })
+    }
     // Its agents start fresh if the room were ever reopened: no resume pointer
     // carries the archived conversation forward.
     db.delete(settings)

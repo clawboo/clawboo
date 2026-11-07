@@ -55,6 +55,12 @@ describe('the pump moving a card for a person’s comment', () => {
         run: { executorType: 'openclaw', engineRun: true },
       })
     },
+    startByItself: (task, agentId) => {
+      started.push(task.id)
+      claimTask(db, task.id, agentId, 'hermes', {
+        run: { executorType: 'openclaw', engineRun: true, automatic: true },
+      })
+    },
     pumpRoom: () => undefined,
     alert: () => true,
     budgetRefuses: () => false,

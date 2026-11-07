@@ -66,7 +66,7 @@ Each team has an `id`. Each agent has an `id`, a `displayName` and a `teamId`. A
 </Step>
 <Step title="Get a signed attach URL">
 
-Ask Clawboo for the snippet. The team must exist, and an id that belongs to a Clawboo agent must be on that team. An id that no Clawboo agent uses is signed as you typed it, so copy it exactly.
+Ask Clawboo for the snippet. The team must exist, and an id that belongs to a Clawboo agent must be on that team. An id that no Clawboo agent uses is signed as you typed it, so copy it exactly. Each URL works only on its own server. A signed URL you copied from an older version stops being trusted and is served as an unverified caller, so copy it again. Clawboo rewrites the URLs of the runs it starts on every run, so those need nothing from you.
 
 ```bash
 curl -s 'http://127.0.0.1:18790/api/mcp/config?runtime=claude-code&server=tasks&scopeTeamId=<team-id>&scopeAgentId=<agent-id>'

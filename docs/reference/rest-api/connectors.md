@@ -738,6 +738,8 @@ curl "http://localhost:18790/api/grants?subjectId=<agent-id>"
 
 ### `POST /api/grants`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Creates a grant, or updates the existing grant for the same subject and capability. An update sets `state` back to `active`, clears `revokedAt` and `revokedReason`, and moves `grantedAt` to now. Grants made here have `origin: 'operator'`, and updating an `owner` grant turns it into an `operator` one. The server has no caller identity, so a new grant records `grantedBy: null`.
 
 - **Request body**:
@@ -768,11 +770,14 @@ Creates a grant, or updates the existing grant for the same subject and capabili
 
 ```bash
 curl -X POST http://localhost:18790/api/grants \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"subjectKind":"agent","subjectId":"<agent-id>","capabilityKind":"connector","connectorId":"github","mode":"read","approvalPolicy":"risk"}'
 ```
 
 ### `POST /api/grants/:id/revoke`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Revokes a grant and deletes the standing rules recorded against it, so a remembered **Always** cannot outlive the grant. Only an `active` grant changes state; for a grant in any other state the route still answers `200` with the grant as it stands. The standing rules are deleted whatever the state.
 
@@ -790,11 +795,14 @@ Revokes a grant and deletes the standing rules recorded against it, so a remembe
 
 ```bash
 curl -X POST http://localhost:18790/api/grants/<grant-id>/revoke \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"reason":"detached from the graph"}'
 ```
 
 ### `POST /api/grants/:id/resume`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Undoes a revoke within 15 seconds of `revokedAt`, the window behind the dashboard's **Undo**. It sets the grant back to `active` and clears `revokedAt` and `revokedReason`, but the standing rules the revoke deleted stay deleted. An `active` grant comes back unchanged. Takes no body.
 
@@ -815,7 +823,8 @@ Undoes a revoke within 15 seconds of `revokedAt`, the window behind the dashboar
 #### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/grants/<grant-id>/resume
+curl -X POST http://localhost:18790/api/grants/<grant-id>/resume \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 **Source of truth:** `apps/web/server/api/connectors.ts`, `composio.ts` and `grants.ts`; request schemas in `packages/db/src/grants/connectorSchemas.ts` and `packages/db/src/grants/schemas.ts`; the refusal reasons in `packages/connector-catalog/src/connectable.ts`; the grant decision in `packages/governance/src/grants/decide.ts`.

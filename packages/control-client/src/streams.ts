@@ -77,6 +77,14 @@ export const taskAttentionFrameSchema = z.object({
       alsoWaiting: z.number().optional(),
     })
     .optional(),
+  // For `job_limit`: the job, and how far it has got.
+  jobLimit: z
+    .object({
+      jobTaskId: z.string(),
+      runs: z.number(),
+      limit: z.number(),
+    })
+    .optional(),
 })
 
 /** A board task changed (`event: board`, team chat only). Only `id` is always

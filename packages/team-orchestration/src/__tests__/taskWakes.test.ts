@@ -219,6 +219,21 @@ describe('a wake run', () => {
     })
   })
 
+  it('at the job’s limit a teammate’s wake waits, and a person’s goes', async () => {
+    const h = harness()
+    const id = h.board.addTask(BOUND)
+    h.board.seedJobRuns(id, 3)
+    h.board.waiting.set(id, [{ id: 'w1', reason: 'agent_comment', commentIds: ['c1'] }])
+    await h.engine.resume()
+    expect(h.delivered).toEqual([])
+
+    h.board.waiting.set(id, [{ id: 'w2', reason: 'person_comment', commentIds: ['c2'] }])
+    h.person.set(id, [{ id: 'w2', commentIds: ['c2'] }])
+    await h.engine.resume()
+    expect(h.delivered).toHaveLength(1)
+    expect(h.board.jobRunsOf(id)).toBe(3)
+  })
+
   it('a task a person assigned keeps reporting to them', async () => {
     const h = harness()
     const id = h.board.addTask('assign:n:agent:a2:origin:human')

@@ -120,6 +120,9 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
     }
 
     if (action === 'enable' || action === 'disable') {
+      // A person's call: this is what a runtime may use at all (OpenClaw's tools.allow and
+      // tools.deny, a brokered tool, a native agent's tool switches).
+      if (refuseUnlessPerson(req, res)) return
       const id = strParam(body['id'])
       if (!id) {
         res.status(400).json({ error: `${action} requires { id }` })

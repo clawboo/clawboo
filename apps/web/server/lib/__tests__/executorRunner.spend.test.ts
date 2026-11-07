@@ -22,6 +22,7 @@ import {
   listExecutions,
   setBudgetLimit,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
 import { eq } from 'drizzle-orm'
 import type {
@@ -192,6 +193,7 @@ describe('executor runner — unreported spend is visible', () => {
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory
@@ -251,6 +253,7 @@ describe('executor runner: what the run cost, on its ledger row', () => {
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory
@@ -328,6 +331,7 @@ describe('executor runner: what a run is charged, and when a cap stops it', () =
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory

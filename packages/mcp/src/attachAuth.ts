@@ -29,11 +29,17 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
+import type { McpServerName } from './config'
+
 /** The semantic fields a signature covers. `delegate` is included because it is
  *  a PRIVILEGE, not an address — leaving it outside the HMAC would let a merely
  *  team-scoped run append `delegate=1` to its signed URL and gain the
  *  `team_delegate` tool. */
 export interface SignableScope {
+  /** The server the URL is for. All of a run's URLs claim the same agent, so a signature
+   *  that named no server opened every mount: a chat run's Memory URL signs no team, and
+   *  on the Tasks mount that shed the hold to the agent's own team. */
+  server: McpServerName
   teamId?: string | null
   agentId?: string | null
   tenantId?: string | null
@@ -57,11 +63,13 @@ export interface SignableScope {
 /** One canonical byte string per semantic scope, independent of which param
  *  spelling carried it (`scopeAgentId` vs `postAuthorAgentId`). `\x1f` separators
  *  cannot appear in ids, so fields can never bleed into each other. `teamRun`, the
- *  bound task and the run's id are appended only when set, so every scope that
- *  existed before them signs to the same bytes as before. */
+ *  bound task and the run's id are appended only when set. `v2` is the version that
+ *  names the server: every URL a run holds is rewritten for that run, and a URL copied
+ *  by hand from `/api/mcp/config` before it has to be copied again. */
 const canonical = (s: SignableScope): string =>
   [
-    'v1',
+    'v2',
+    s.server,
     s.teamId ?? '',
     s.agentId ?? '',
     s.tenantId ?? '',

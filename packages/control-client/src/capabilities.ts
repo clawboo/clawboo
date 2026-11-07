@@ -62,6 +62,8 @@ export const ENGINE_FEATURES = [
   'board.mainTasks',
   'board.wakes',
   'board.agentWakes',
+  // A job's count of runs it started by itself, and a person's answer at its limit.
+  'board.jobLimit',
   // Run endings told apart: empty replies, provider retries, budget and breaker stops.
   'board.endings',
   // A person's writes on the board: Reopen, tasks assigned to a person, and questions

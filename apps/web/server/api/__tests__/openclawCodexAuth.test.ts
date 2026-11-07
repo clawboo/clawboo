@@ -58,7 +58,9 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   } as unknown as Response
   return { res, statusCode: () => code, body: () => payload }
 }
-const req = (body: unknown = {}): Request => ({ params: {}, query: {}, body }) as unknown as Request
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+const req = (body: unknown = {}): Request =>
+  ({ params: {}, query: {}, body, headers: DASHBOARD }) as unknown as Request
 
 /** Write an agent auth-profiles.json into the sandboxed state dir. */
 function writeProfiles(stateDir: string, agentId: string, profiles: Record<string, unknown>): void {

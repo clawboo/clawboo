@@ -48,6 +48,7 @@ import { resolveRuntimeKey } from '../lib/secretsVault'
 import { getRegistry } from '../lib/agentSource'
 import { detectOpenClaw, invalidateOpenClawCache } from '../lib/openclawDetect'
 import { gatewayFailureReason, needsDoctorFix, runDoctorFix } from '../lib/openclawRepair'
+import { refuseUnlessPerson } from '../lib/auth'
 import { liveCwd } from '../lib/cwdGuard'
 import { MODEL_GROUPS as STATIC_MODEL_GROUPS, providerSlug } from '@clawboo/model-catalog'
 
@@ -472,7 +473,9 @@ export async function systemStatusGET(_req: Request, res: Response): Promise<voi
 // here and the throw discarded the stdout containing the requestId before
 // the regex could run, so the user saw "Command failed: …" in the SPA's
 // approval dialog instead of a successful approval.
-export async function approveDevicePOST(_req: Request, res: Response): Promise<void> {
+export async function approveDevicePOST(req: Request, res: Response): Promise<void> {
+  // A person's call: this is a standing grant to the Gateway, for whichever device asked.
+  if (refuseUnlessPerson(req, res)) return
   const oc = await detectOpenClaw()
   if (!oc.installed || !oc.path) {
     res.status(400).json({ error: 'OpenClaw not installed' })
@@ -647,6 +650,8 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
 
 // POST /api/system/configure-openclaw
 export async function configureOpenclawPOST(req: Request, res: Response): Promise<void> {
+  // A person's call: this writes the file the PATCH above guards.
+  if (refuseUnlessPerson(req, res)) return
   try {
     const body = req.body as Record<string, unknown> | undefined
     if (!body || typeof body !== 'object') {
@@ -753,7 +758,9 @@ export async function configureOpenclawPOST(req: Request, res: Response): Promis
 //   5. Nothing → { ok:false, needsKey:true } (the UI falls back to the key prompt).
 // Non-destructive: upserts the key + gateway token into .env (never overwrites) and
 // ensures openclaw.json exists with a local gateway + a default model.
-export async function autoConfigureOpenclawPOST(_req: Request, res: Response): Promise<void> {
+export async function autoConfigureOpenclawPOST(req: Request, res: Response): Promise<void> {
+  // A person's call: this writes the file the PATCH above guards.
+  if (refuseUnlessPerson(req, res)) return
   try {
     const stateDir = resolveStateDir()
     let provider: string
@@ -1353,6 +1360,8 @@ export async function openclawConfigGET(_req: Request, res: Response): Promise<v
 
 // PATCH /api/system/openclaw-config
 export async function openclawConfigPATCH(req: Request, res: Response): Promise<void> {
+  // A person's call: `exec` here is whether OpenClaw asks before running a command.
+  if (refuseUnlessPerson(req, res)) return
   try {
     const body = req.body as Record<string, unknown> | undefined
     if (!body || typeof body !== 'object') {

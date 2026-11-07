@@ -8,16 +8,12 @@
 //   POST /api/grants/:id/resume   <- revokeGrant.ts       (the 8-second Undo)
 //   GET  /api/grants              <- no shipped caller; the inspector's read
 //
-// SECURITY POSTURE, STATED PLAINLY. There is no caller identity on any
-// state-changing route in this server: `getUserId` returns null unconditionally,
-// the origin guard admits any request with no Origin (which is what a local curl
-// or a spawned runtime sends), and the access gate is off unless
-// STUDIO_ACCESS_TOKEN is set. So a local process can mint and widen its own
-// grant. That is not a regression these routes introduce -- every REST write has
-// the property -- but this is the first surface where it is a privilege
-// boundary, so `granted_by` is written null rather than fabricating an actor,
-// and nothing here may treat "the request reached this handler" as operator
-// intent.
+// WHO MAY. A grant decides what an agent can reach and whether anyone is asked first
+// (`mode`, `approvalPolicy`), so every write here takes the person check. The dashboard's
+// own fetches pass it, and a local process, a spawned runtime's curl included, does not
+// unless it sends the same headers: on a local install this is a speed bump, not a
+// boundary (see the security page). `granted_by` stays null: the check says a person
+// asked, not which one, on an install with no accounts.
 
 import {
   createGrantBody,
@@ -30,6 +26,7 @@ import {
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
+import { refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { redactValue } from '../lib/redact'
 
@@ -46,6 +43,7 @@ export function grantsListGET(req: Request, res: Response): void {
 
 // POST /api/grants
 export function grantsCreatePOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   try {
     const parsed = createGrantBody.safeParse(req.body)
     if (!parsed.success) {
@@ -80,6 +78,7 @@ export function grantsCreatePOST(req: Request, res: Response): void {
 
 // POST /api/grants/:id/revoke
 export function grantsRevokePOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   try {
     // The shipped caller sends no body at all, which arrives as `undefined`
     // rather than `{}`. Parsing that directly would 400 every Detach.
@@ -100,6 +99,7 @@ export function grantsRevokePOST(req: Request, res: Response): void {
 
 // POST /api/grants/:id/resume: the Undo behind the Detach toast.
 export function grantsResumePOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   try {
     const id = (req.params['id'] as string | undefined) ?? ''
     const db = getDb()

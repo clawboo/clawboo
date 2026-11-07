@@ -17,8 +17,11 @@
 // result it read. So can a person's message that carries a held result or what a team
 // has been doing (the @Team block), plus any team their own words name: that text is
 // theirs to read, not theirs to have said. A message that failed the person check starts
-// nothing. This reads the turn in front of it: a resumed session still holds what earlier
-// turns read, and the model can act on that when a later message reaches any team.
+// nothing. That is the whole fence. Notes recalled at the start of a conversation are
+// quoted and scanned, what a turn's own tools read comes back as tool output, and a
+// resumed session holds what earlier turns read. None of them hold a turn, or Boo Zero
+// could not choose a team when the person names none. The person decides by reading the
+// hand-off's card.
 //
 // Nothing goes quiet. Whatever a reply asked for that did not start, the chat says so
 // in plain words, and Boo Zero hears it on its next turn, since its session still holds
@@ -56,6 +59,8 @@ import {
   listExecutions,
   listHeldChatReportUps,
   listPendingChatReportUps,
+  jobRunRefused,
+  jobRunState,
   mainTaskOfTask,
   markReportUpsReplayed,
   NO_TEAM_REPORT_UP,
@@ -106,6 +111,7 @@ import {
 import { agentIdFromDirectChatKey } from './directChatSessionKey'
 import {
   agentChatSessionKey,
+  chatTurnUnderWay,
   driveAgentChat,
   isServerChatAgent,
   stopAgentChat,
@@ -164,14 +170,21 @@ export interface ChatTurnParams extends ChatTurnOptions {
   words?: string
   /** That message's id: what it hands out goes under one main task per team. */
   messageId?: string
+  /** A turn nobody asked for: these jobs count it, once its run has started. */
+  countJobs?: string[]
   /** This turn reads results, not a person's message: the teams they are from. It may
    *  start more work only in those. Empty, it starts none, which is also how a message
    *  that failed the person check runs. */
   readingResultsFrom?: readonly string[]
   /** A person's message that carries what a team has been doing (the @Team block). */
   carriesTeamActivity?: boolean
-  /** The request those results are on: what this turn hands out in its team goes under it. */
+  /** The request those results are on, or outside any request the job they are from: what
+   *  this turn hands out in that team goes under it, and counts toward it. */
   readingRequest?: { teamId: string; mainTaskId: string }
+  /** That team and job, which this turn is asked about and charged to as well. */
+  budgetScopes?: { teamId?: string | null; missionId?: string | null }
+  /** Nobody is waiting at the keyboard for this turn. */
+  background?: boolean
 }
 
 interface ActiveTeam {
@@ -722,6 +735,7 @@ export async function startHandOffsFromReply(
       fromAgentId: agentId,
       turnId,
       chatSessionKey: sessionKey,
+      onTold: (said: string) => note(db, agentId, sessionKey, said),
       ...person,
       ...message,
       ...(parentTaskId ? { parentTaskId } : {}),
@@ -836,7 +850,12 @@ export async function runChatTurn(
   } | null = null,
 ): Promise<void> {
   const { db, agentId, message, mcpBaseUrl, makeAdapter } = params
-  const seam = makeAdapter ? { makeAdapter } : {}
+  const seam = {
+    ...(makeAdapter ? { makeAdapter } : {}),
+    ...(params.budgetScopes ? { budgetScopes: params.budgetScopes } : {}),
+    ...(params.background ? { background: true } : {}),
+    ...(params.countJobs ? { countJobs: params.countJobs } : {}),
+  }
   // A person's message lifts the hold their Stop left, and carries what waited. One that
   // failed the person check does neither.
   const notFromPerson = !carrying && params.readingResultsFrom !== undefined
@@ -1046,6 +1065,12 @@ export async function flushChatReportUps(
   const rows = listPendingChatReportUps(db, sessionKey).filter((r) => !inHand.has(r.id))
   if (rows.length === 0) return
   const agentId = agentIdFromDirectChatKey(sessionKey)
+  // The chat is on a turn. What came in waits for it to end and goes as one update, with
+  // whatever else comes in meanwhile, and a person who writes next goes first.
+  if (agentId && chatTurnUnderWay(agentId)) {
+    scheduleChatReportUps(db, sessionKey, opts)
+    return
+  }
   // A person pressed Stop and has not spoken since: these wait for their next message.
   if (agentId && chatResultsHeld(db, agentId)) {
     holdReportUps(
@@ -1087,6 +1112,20 @@ export async function flushChatReportUps(
       })
     )
       continue
+    // Its job has started all the runs it may by itself: it stays pending, and uncounted,
+    // and the card on that job says so. A person's carry on lets the next pass send it.
+    // Their own words are no automatic run. A note that only names a task is one the card
+    // cannot read, so it rides the chat's next turn instead of waiting with no way out.
+    if (about && item.outcome !== 'person_comment' && jobRunRefused(db, about)) {
+      if (!item.taskId) {
+        try {
+          holdReportUps(db, [row.id])
+        } catch (err) {
+          log.error({ err, sessionKey }, 'could not keep a note for the next turn')
+        }
+      }
+      continue
+    }
     const main = about ? mainTaskOfTask(db, about) : null
     // A person closed the request: no one is waiting on this, and a run would only spend.
     if (main && (main.dropped || main.status === 'done' || main.status === 'cancelled')) {
@@ -1121,11 +1160,13 @@ export async function flushChatReportUps(
   }
   if (send.length === 0) return
 
-  // Each request gets its own turn, whose reply is about that request alone. They run
-  // one at a time on the agent's lock, and every row is in hand before the first waits.
+  // Each request gets its own turn, whose reply is about that request alone, and so does
+  // each team's work outside any request, since a turn is asked about and charged to the
+  // team it reads. They run one at a time on the agent's lock, and every row is in hand
+  // before the first waits.
   const batches = new Map<string, ChatReportUpRow[]>()
   for (const row of send) {
-    const key = row.main?.id ?? ''
+    const key = row.main?.id ?? `team:${row.teamId}`
     batches.set(key, [...(batches.get(key) ?? []), row])
   }
   await Promise.all(
@@ -1176,6 +1217,24 @@ async function sendChatReports(
       : {}),
   })
   const fromTeams = [...new Set(send.map((s) => s.teamId))].filter((id) => id !== NO_TEAM_REPORT_UP)
+  // The jobs these results are from. A turn reading several counts against each; what it
+  // hands out nests under the first, which it read first. Roots from before there was a
+  // count are their own jobs, and count from here on.
+  const jobs = [
+    ...new Set(
+      items.flatMap((i) => {
+        const about = i.taskId ?? i.forTaskId
+        return about ? [jobRunState(db, about).jobTaskId] : []
+      }),
+    ),
+  ]
+  const team = main?.teamId ?? fromTeams[0] ?? null
+  const job = main?.id ?? jobs[0] ?? null
+  // A turn nobody asked for counts toward each of those, once it has started. One carrying
+  // a person's words is theirs. No room left since the read above: the rows stay pending,
+  // and the card says why.
+  const countJobs = items.some((i) => i.outcome === 'person_comment') ? [] : jobs
+  if (countJobs.some((id) => jobRunRefused(db, id))) return
 
   const ids = send.map((s) => s.id)
   try {
@@ -1203,7 +1262,10 @@ async function sendChatReports(
       readingResultsFrom: fromTeams,
       // With one team in the batch, a teammate named alone is on it.
       namedTeamId: fromTeams.length === 1 ? fromTeams[0]! : null,
-      ...(main?.teamId ? { readingRequest: { teamId: main.teamId, mainTaskId: main.id } } : {}),
+      ...(team && job ? { readingRequest: { teamId: team, mainTaskId: job } } : {}),
+      budgetScopes: { teamId: team, missionId: job },
+      background: true,
+      ...(countJobs.length > 0 ? { countJobs } : {}),
     },
     {
       ids,

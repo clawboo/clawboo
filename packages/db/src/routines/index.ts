@@ -24,6 +24,7 @@ export {
   updateScheduledRun,
   deleteScheduledRun,
   deleteScheduledRunsForAgent,
+  detachAgentRoutinesFromTeam,
   reconcileScheduledRuns,
   rearmIdleScheduledRuns,
   type RearmIdleScheduledRunsOptions,

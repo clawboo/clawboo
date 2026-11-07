@@ -208,7 +208,7 @@ describe('the failure breaker and the team', () => {
     noteDelegationFailure(getDb(), TEAM, 'a1', 'task')
     let done = false
     await teamsDELETE(
-      { params: { id: TEAM }, body: {}, headers: {} } as unknown as Request,
+      { params: { id: TEAM }, body: {}, headers: DASHBOARD } as unknown as Request,
       {
         status() {
           return this

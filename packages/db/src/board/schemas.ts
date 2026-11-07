@@ -58,6 +58,10 @@ export const agentWakesBody = z.object({
   decision: z.enum(['job', 'team', 'no']),
 })
 
+export const jobLimitBody = z.object({
+  decision: z.enum(['carry_on', 'stop']),
+})
+
 export const taskLabelsBody = z.object({
   labelIds: z.array(z.string().min(1)).max(100),
 })
@@ -183,6 +187,8 @@ export const ancestorRowSchema = z.object({
   status: z.string(),
   /** 1: a person's main task, which the depth caps skip (see `spawnDepth`). */
   is_main_task: z.number(),
+  assignee_agent_id: z.string().nullable().optional(),
+  source_delegation_id: z.string().nullable().optional(),
 })
 export const ancestorRowsSchema = z.array(ancestorRowSchema)
 export type AncestorRow = z.infer<typeof ancestorRowSchema>

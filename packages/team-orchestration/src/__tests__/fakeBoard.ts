@@ -10,6 +10,7 @@ import {
   delegatorOf,
   encodePlanHolder,
   HAND_OFF_TITLE_CHARS,
+  isAutomaticRunReason,
   isPlanHolder,
   isTaskStatus,
   ledgerWillAutoFire,
@@ -22,6 +23,7 @@ import {
   unfinishedNeed,
   unfinishedSubtasks,
   waitsOnOtherWork,
+  wakeFromPerson,
   type HandOffLink,
   type ResultClaim,
   type SubtaskView,
@@ -29,6 +31,7 @@ import {
 } from '@clawboo/board-core'
 import {
   DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_JOB_RUNS,
   DEFAULT_MAX_ROOT_CREATES,
   DEFAULT_ROOT_CREATE_WINDOW_MS,
 } from '@clawboo/governance'
@@ -98,8 +101,13 @@ export class FakeBoard implements CascadeBoard {
   readonly execOpened = new Map<string, number>()
   readonly execClosed = new Map<string, number>()
   /** Comments as the board stores them: what the engine reads back on a task. */
-  readonly commentRows: Array<{ taskId: string; body: string; kind: string; createdAt: number }> =
-    []
+  readonly commentRows: Array<{
+    taskId: string
+    body: string
+    kind: string
+    createdAt: number
+    authorAgentId?: string
+  }> = []
   /** A sub-task created under a task, on the board rather than through the engine. */
   addSubTask(parentTaskId: string, title: string): string {
     const id = `task-${++this.taskN}`
@@ -216,6 +224,10 @@ export class FakeBoard implements CascadeBoard {
     return this.runnerTasks.has(taskId)
   }
 
+  private commentsFailing = false
+  failComments(on: boolean): void {
+    this.commentsFailing = on
+  }
   /** Tasks holding what a check found (the real board's `verification`). */
   verdicts = new Set<string>()
   seedVerdict(taskId: string): void {
@@ -704,7 +716,7 @@ export class FakeBoard implements CascadeBoard {
   }
   async openMainTasks(): Promise<MainTaskState[]> {
     return [...this.tasks.values()]
-      .filter((t) => t.isMainTask && t.status !== 'done' && t.status !== 'cancelled')
+      .filter((t) => t.isMainTask && t.status === 'in_progress')
       .map((t) => this.stateOf(t))
   }
   async closeMainTask(taskId: string, to: 'done' | 'cancelled'): Promise<boolean> {
@@ -760,7 +772,7 @@ export class FakeBoard implements CascadeBoard {
     taskId: string,
     assigneeAgentId?: string,
     _assigneeRuntime?: string,
-    run?: { runReason?: string | null },
+    run?: { runReason?: string | null; automatic?: boolean },
   ): Promise<ClaimResult> {
     this.onClaim?.()
     this.claims.push(taskId)
@@ -768,6 +780,21 @@ export class FakeBoard implements CascadeBoard {
     const t = this.tasks.get(taskId)
     if (!t || t.status !== 'todo' || t.assigneeAgentId || t.isMainTask)
       return { ok: false, reason: 'conflict' }
+    // The real claim reads the job's count in its own write, the same way.
+    const waiting = this.savedWakes.get(taskId) ?? []
+    const counted =
+      !!run &&
+      run.automatic !== false &&
+      !waiting.some((w) => wakeFromPerson(w.reason)) &&
+      (run.automatic === true ||
+        isAutomaticRunReason(run.runReason) ||
+        waiting.some((w) => isAutomaticRunReason(w.reason)))
+    if (counted) {
+      if (this.jobAt(taskId).runs >= this.jobAt(taskId).limit)
+        return { ok: false, reason: 'job_limit' }
+      const job = this.jobAt(taskId)
+      this.jobCounts.set(this.jobOf(taskId), { ...job, runs: job.runs + 1 })
+    } else if (run) this.stoppedJobs.delete(this.jobOf(taskId))
     t.status = 'in_progress'
     t.assigneeAgentId = assigneeAgentId ?? 'someone'
     this.waits.delete(taskId)
@@ -781,6 +808,61 @@ export class FakeBoard implements CascadeBoard {
       )
     return { ok: true, task: this.toBoardTask(t), ...(wakes ? { wakes } : {}) }
   }
+  // ─── The job's count of runs it started by itself ──────────────────────────
+  private jobCounts = new Map<string, { runs: number; limit: number }>()
+  private jobOf(taskId: string): string {
+    const seen = new Set<string>([taskId])
+    let at = taskId
+    for (;;) {
+      const parent = this.tasks.get(at)?.parentTaskId
+      if (!parent || seen.has(parent)) return at
+      seen.add(parent)
+      at = parent
+    }
+  }
+  private jobAt(taskId: string): { runs: number; limit: number } {
+    return this.jobCounts.get(this.jobOf(taskId)) ?? { runs: 0, limit: DEFAULT_MAX_JOB_RUNS }
+  }
+  noteJobRun(taskId: string): void {
+    const job = this.jobAt(taskId)
+    this.jobCounts.set(this.jobOf(taskId), { ...job, runs: job.runs + 1 })
+  }
+  async jobRunRefused(taskId: string): Promise<boolean> {
+    const job = this.jobAt(taskId)
+    return job.runs >= job.limit
+  }
+  private stoppedJobs = new Set<string>()
+  /** Whether the job reads as stopped (`stopJob` in the real board). */
+  seedJobStopped(taskId: string): void {
+    this.stoppedJobs.add(this.jobOf(taskId))
+  }
+  jobIsStopped(taskId: string): boolean {
+    return this.stoppedJobs.has(this.jobOf(taskId))
+  }
+  async personStartedJob(taskId: string): Promise<void> {
+    this.stoppedJobs.delete(this.jobOf(taskId))
+  }
+  seedJobRuns(taskId: string, runs: number, limit: number = runs): void {
+    this.jobCounts.set(this.jobOf(taskId), { runs, limit })
+  }
+  jobRunsOf(taskId: string): number {
+    return this.jobAt(taskId).runs
+  }
+  private failedChecks = new Set<string>()
+  seedFailedCheck(taskId: string): void {
+    this.failedChecks.add(taskId)
+  }
+  hasFailedCheck(taskId: string): boolean {
+    return this.failedChecks.has(taskId)
+  }
+  carryOnJobRuns(taskId: string): void {
+    const job = this.jobAt(taskId)
+    this.jobCounts.set(this.jobOf(taskId), {
+      runs: job.runs,
+      limit: job.runs + DEFAULT_MAX_JOB_RUNS,
+    })
+  }
+
   async updateStatus(
     taskId: string,
     status: string,
@@ -798,7 +880,11 @@ export class FakeBoard implements CascadeBoard {
     t.status = status
     if (status === 'todo') {
       t.assigneeAgentId = null // released → re-claimable
-      if (!opts?.keepVerdict) this.verdicts.delete(taskId)
+      // As the real move does, unless it is the same work coming back.
+      if (!opts?.keepVerdict) {
+        this.verdicts.delete(taskId)
+        this.failedChecks.delete(taskId)
+      }
     }
     if (['done', 'cancelled', 'blocked', 'backlog'].includes(status))
       this.releaseParent(t.parentTaskId)
@@ -817,20 +903,34 @@ export class FakeBoard implements CascadeBoard {
     taskId: string,
     body: string,
     authorType?: 'agent' | 'user' | 'system',
-  ): Promise<void> {
+    authorAgentId?: string,
+  ): Promise<boolean> {
+    if (this.commentsFailing) return false
     this.comments.push({ taskId, body })
-    // A run's report, in the shape the real board stores it.
+    // The real board files what an agent wrote as its result.
     if (authorType === 'agent')
-      this.commentRows.push({ taskId, body, kind: 'result', createdAt: Date.now() })
+      this.commentRows.push({
+        taskId,
+        body,
+        kind: 'result',
+        createdAt: Date.now(),
+        ...(authorAgentId ? { authorAgentId } : {}),
+      })
+    return true
   }
   async getTask(taskId: string): Promise<TaskDetail | null> {
     const t = this.tasks.get(taskId)
     if (!t) return null
-    const ancestors: { id: string; isMainTask?: boolean }[] = []
+    const ancestors: { id: string; isMainTask?: boolean; agentId?: string | null }[] = []
     let cur = t.parentTaskId
     while (cur) {
-      ancestors.push({ id: cur, ...(this.tasks.get(cur)?.isMainTask ? { isMainTask: true } : {}) })
-      cur = this.tasks.get(cur)?.parentTaskId ?? null
+      const above = this.tasks.get(cur)
+      ancestors.push({
+        id: cur,
+        ...(above?.isMainTask ? { isMainTask: true } : {}),
+        agentId: delegationTargetOf(above?.sourceDelegationId) ?? above?.assigneeAgentId ?? null,
+      })
+      cur = above?.parentTaskId ?? null
     }
     return {
       task: this.toBoardTask(t),
@@ -841,8 +941,9 @@ export class FakeBoard implements CascadeBoard {
   async createExecution(
     taskId: string,
     _executorType?: string,
-    opts?: { runReason?: string },
+    opts?: { runReason?: string; countJobRun?: boolean },
   ): Promise<ExecutionRef | null> {
+    if (opts?.countJobRun) this.noteJobRun(taskId)
     const id = `exec-${++this.execN}`
     this.execs.set(id, taskId)
     this.execReasons.set(id, this.claimReasons.get(taskId) ?? opts?.runReason ?? null)

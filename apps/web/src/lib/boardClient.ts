@@ -69,13 +69,14 @@ export const boardClient: BoardClient = {
 
   async addComment(taskId, body, authorType = 'system', authorAgentId) {
     try {
-      await apiFetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
+      const res = await apiFetch(`/api/board/${encodeURIComponent(taskId)}/comments`, {
         method: 'POST',
         headers: JSON_HEADERS,
         body: JSON.stringify({ body, authorType, authorAgentId }),
       })
+      return res.ok
     } catch {
-      // best-effort
+      return false
     }
   },
 
@@ -512,6 +513,14 @@ export function decideAgentWakes(
   decision: AgentWakeChoice,
 ): Promise<HandOffResult> {
   return postHandOff(`/api/board/agent-wakes/${encodeURIComponent(jobTaskId)}`, { decision })
+}
+
+/** A person's answer when a job has started all the runs it may by itself. */
+export function decideJobLimit(
+  jobTaskId: string,
+  decision: 'carry_on' | 'stop',
+): Promise<HandOffResult> {
+  return postHandOff(`/api/board/job-limit/${encodeURIComponent(jobTaskId)}`, { decision })
 }
 
 /** Answer a question an agent asked. The answer starts the task again. */

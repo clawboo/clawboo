@@ -39,6 +39,7 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime } from '../executorRunner'
 import type { RuntimeRunContext } from '../runtimes'
 import { createNativeDriver } from '../runtimes/native'
@@ -114,6 +115,7 @@ describe('executor runner — native runtime integration', () => {
     prevHome = process.env['HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home, 'team-n')
     repo = await initRepo()
   })
   afterEach(async () => {

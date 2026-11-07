@@ -12,7 +12,9 @@
 //   · it waits on a person (`waiting_on`), which includes a question an agent
 //     asked, or it is assigned to a person;
 //   · a teammate's comment would start it, and a person has to say whether agents may
-//     wake each other on this job, or they have been pausing and it is theirs to lift.
+//     wake each other on this job, or they have been pausing and it is theirs to lift;
+//   · it is the top of a job that has started all the runs it may by itself, and work
+//     under it waits for a person to say carry on.
 //
 // A task waiting on another task or on its own sub-tasks is not on this list: the
 // board moves it on when that work finishes.
@@ -60,6 +62,9 @@ export type AttentionReason =
   /** A person is asked whether agents may wake each other on this job, or has to lift a
    *  pause in those wakes. The task's own wait is untouched. */
   | 'agent_wakes'
+  /** The job this task heads has started all the runs it may by itself. Work waits, and
+   *  a person says to carry on or stop. */
+  | 'job_limit'
   /** Its agent finished twice with nothing to show for it. */
   | 'no_result'
   /** The provider kept rate limiting it, and the automatic retries are used up. */
@@ -97,6 +102,17 @@ export interface TaskAttention {
   handedBack?: boolean
   /** For `agent_wakes`: the card and what it is about. */
   agentWakes?: AgentWakeCard
+  /** For `job_limit`: the job and how far it has gone. */
+  jobLimit?: JobLimitCard
+}
+
+/** What the job limit's card carries, on the attention of the task that heads the job. */
+export interface JobLimitCard {
+  jobTaskId: string
+  /** Runs it has started by itself. */
+  runs: number
+  /** Where it stops now. */
+  limit: number
 }
 
 /** Longest failure reason a card shows; the full text stays on the task. */
@@ -139,6 +155,8 @@ export interface AttentionInput {
   assigneePersonId?: string | null
   /** The card on this task, if the job has one open here. */
   agentWakes?: AgentWakeCard | null
+  /** This task heads a job stopped at its limit, with work waiting. */
+  jobLimit?: JobLimitCard | null
 }
 
 /** When the latest run started: its start, else its claim, else its creation. */
@@ -167,6 +185,11 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
   const last = lastRun?.status ?? null
   const waiting = parseWaitingOn(input.waitingOn)
   const open = input.status !== 'done' && input.status !== 'cancelled'
+
+  // Nothing automatic starts anywhere under this task until a person answers, whatever
+  // state the task itself is in: it may even have finished, with work it handed out still
+  // going. Ahead of everything, because every other reason on it can wait behind this one.
+  if (input.jobLimit) return { reason: 'job_limit', failedRuns, jobLimit: input.jobLimit }
 
   // Whose turn it is comes before what the ledger says: a question is waiting
   // whatever the last run did, and a person's task is theirs whatever came before.

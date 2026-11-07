@@ -28,6 +28,8 @@ import {
   createTask,
   deriveCreateKey,
   getAncestors,
+  jobRunRefused,
+  personStartedJob,
   getComments,
   getReadyTasks,
   handOffCapacity,
@@ -341,6 +343,23 @@ export function createServerBoardClient(
       }
     },
 
+    async jobRunRefused(taskId): Promise<boolean> {
+      try {
+        return jobRunRefused(db, taskId)
+      } catch {
+        // Unread is not room: the pump looks again next pass.
+        return true
+      }
+    },
+
+    async personStartedJob(taskId): Promise<void> {
+      try {
+        personStartedJob(db, taskId)
+      } catch {
+        // Their words still go. The job says stopped until a person's next start.
+      }
+    },
+
     async claim(taskId, assigneeAgentId, assigneeRuntime, run): Promise<ClaimResult> {
       // A held engine (see engineHold) claims nothing: a claimed task would sit
       // `in_progress` waiting for a run slot across the stop the hold is for.
@@ -440,7 +459,8 @@ export function createServerBoardClient(
       })
     },
 
-    async addComment(taskId, body, authorType = 'system', authorAgentId): Promise<void> {
+    async addComment(taskId, body, authorType = 'system', authorAgentId): Promise<boolean> {
+      let wrote = false
       try {
         // Clawboo's own note, or a run's result recorded by the engine. The engine
         // posts a run's report in its agent's name, around when it closes the run's
@@ -451,6 +471,7 @@ export function createServerBoardClient(
           kind: authorType === 'system' ? 'note' : authorType === 'agent' ? 'result' : null,
           executionId: execId,
         })
+        wrote = true
         emitEvent(db, {
           kind: 'comment_added',
           taskId,
@@ -464,8 +485,9 @@ export function createServerBoardClient(
           },
         })
       } catch {
-        // best-effort
+        // best-effort: the engine reads the answer where it matters
       }
+      return wrote
     },
 
     async getTask(taskId): Promise<TaskDetail | null> {
@@ -478,6 +500,7 @@ export function createServerBoardClient(
           ancestors: getAncestors(db, taskId).map((a) => ({
             id: a.id,
             ...(a.is_main_task === 1 ? { isMainTask: true } : {}),
+            agentId: delegationTargetOf(a.source_delegation_id) ?? a.assignee_agent_id ?? null,
           })),
         }
       } catch {
@@ -492,6 +515,7 @@ export function createServerBoardClient(
           executorType,
           engineRun: true,
           runReason: opts?.runReason ?? null,
+          ...(opts?.countJobRun ? { countJobRun: true } : {}),
         })
         const task = getTask(db, taskId)
         emitEvent(db, {

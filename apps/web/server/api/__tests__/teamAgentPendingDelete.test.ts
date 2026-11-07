@@ -65,7 +65,12 @@ describe('teamAgentPOST with a pending OpenClaw delete', () => {
   async function assign(agentId: string) {
     const r = mockRes()
     await teamAgentPOST(
-      { params: { id: 't1' }, query: {}, body: { agentId } } as unknown as Request,
+      {
+        params: { id: 't1' },
+        query: {},
+        body: { agentId },
+        headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+      } as unknown as Request,
       r.res,
     )
     return r

@@ -11,12 +11,18 @@ import type { IncomingMessage } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 
-import { mcpHttpUrl } from '@clawboo/mcp'
+import { mcpHttpUrl, type McpServerName } from '@clawboo/mcp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../../lib/db'
 import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
-import { parseBoundProvenance, parseBoundScope, parseTasksBinding, parseToolsBinding } from '../mcp'
+import {
+  parseBoundProvenance,
+  parseBoundScope,
+  parseTasksBinding,
+  parseTeamChatBinding,
+  parseToolsBinding,
+} from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
@@ -45,6 +51,70 @@ const signedUrl = (scope: { teamId?: string; agentId?: string; tenantId?: string
     ...scope,
     attachSecret: getMcpAttachSecret(getDb()),
   }).replace('http://127.0.0.1:1', '')
+
+describe('a signature names the server it is for', () => {
+  const urlFor = (
+    server: McpServerName,
+    scope: {
+      teamId?: string | null
+      agentId?: string
+      chatRun?: boolean
+      chatRunTeamId?: string | null
+    },
+  ): string =>
+    mcpHttpUrl('http://127.0.0.1:1', server, {
+      ...scope,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+  const sigOf = (url: string): string => new URLSearchParams(url.split('?')[1]).get('scopeSig')!
+
+  // A person's chat with an agent on team-A: its Tasks URL is held to team-A, and its
+  // Memory and Tools URLs sign no team.
+  const chat = { teamId: null, agentId: 'A', chatRun: true, chatRunTeamId: 'team-A' }
+
+  it.each(['memory', 'tools'] as const)(
+    'a chat run’s %s signature does not open Tasks with no team hold',
+    (server) => {
+      const replayed = `/api/mcp/tasks?scopeAgentId=A&chatRun=1&scopeSig=${sigOf(urlFor(server, chat))}`
+      expect(parseTasksBinding(req(replayed))).toBeUndefined()
+    },
+  )
+
+  it('a Tasks signature does not open Memory or Tools', () => {
+    const scope = { teamId: 'team-A', agentId: 'A' }
+    const sig = sigOf(urlFor('tasks', scope))
+    const query = `scopeTeamId=team-A&scopeAgentId=A&scopeSig=${sig}`
+    expect(parseBoundScope(req(`/api/mcp/memory?${query}`))).toBeUndefined()
+    expect(parseToolsBinding(req(`/api/mcp/tools?${query}`))).toBeUndefined()
+  })
+
+  it('a Memory signature does not open Tools, or post in a room', () => {
+    const scope = { teamId: 'team-A', agentId: 'A' }
+    const sig = sigOf(urlFor('memory', scope))
+    expect(
+      parseToolsBinding(req(`/api/mcp/tools?scopeTeamId=team-A&scopeAgentId=A&scopeSig=${sig}`)),
+    ).toBeUndefined()
+    expect(
+      parseTeamChatBinding(
+        req(`/api/mcp/teamchat?roomTeamId=team-A&postAuthorAgentId=A&scopeSig=${sig}`),
+      ),
+    ).toBeUndefined()
+  })
+
+  it('each URL still reads on its own mount', () => {
+    expect(parseTasksBinding(req(urlFor('tasks', chat)))).toMatchObject({
+      scope: { teamId: 'team-A', agentId: 'A' },
+      chatRun: true,
+    })
+    expect(parseBoundScope(req(urlFor('memory', chat)))).toEqual({ agentId: 'A' })
+    expect(parseToolsBinding(req(urlFor('tools', chat)))).toEqual({ scope: { agentId: 'A' } })
+    const scope = { teamId: 'team-A', agentId: 'A' }
+    expect(parseTeamChatBinding(req(urlFor('teamchat', scope)))).toMatchObject({
+      agentId: 'A',
+      teamId: 'team-A',
+    })
+  })
+})
 
 describe('parseBoundScope — signed URLs bind', () => {
   it('honours a clawboo-signed scope end to end (producer → parser)', () => {

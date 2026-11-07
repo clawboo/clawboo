@@ -276,6 +276,26 @@ const CARRYING_ON_REASONS: ReadonlySet<string> = new Set([
   'subtasks_closed',
 ])
 
+/** The run reasons nobody asked for at the time: the board or a teammate started it. Each
+ *  spends from its job's count (see `DEFAULT_MAX_JOB_RUNS`). Anything else is a person
+ *  (their comment, their answer, their Retry, a task they assigned) or a host that names
+ *  its own reason and says for itself whether the start is automatic. */
+const AUTOMATIC_RUN_REASONS: ReadonlySet<string> = new Set([
+  'delegation',
+  'fix_round',
+  'empty_reply',
+  'max_turns',
+  'provider_retry',
+  'dependency_done',
+  'agent_comment',
+  'subtasks_closed',
+])
+
+/** Did the board or a teammate start a run of this reason, rather than a person? */
+export function isAutomaticRunReason(reason: string | null | undefined): boolean {
+  return !!reason && AUTOMATIC_RUN_REASONS.has(reason)
+}
+
 /** Does a run of this reason carry on what an earlier run began? */
 export function carriesOnEarlierRun(reason: string | null | undefined): boolean {
   return !!reason && CARRYING_ON_REASONS.has(reason)
@@ -346,15 +366,19 @@ export const BRAKE_MAX_WAIT_MS = 30 * 60_000
  * closes, and stored on its ledger row, so the answer survives a restart.
  *
  * Yes when any of these holds:
- *   • a sub-task was created under the task during the run (whatever the outcome:
- *     work was handed on, so running it again is not the same run);
- *   • the run ended well and left a result;
- *   • the run ended well and the card moved forward (In review or Done).
+ *   • a sub-task was created under the task during the run (whatever the outcome so
+ *     far: work was handed on, so running it again is not the same run). If none of
+ *     them gets done, the board takes that back when the run's task stops waiting on
+ *     them, or the run would count as progress for handing out work that always fails.
+ *     A sub-task that got done while the task waited counts for the run that waited;
+ *   • the run ended well and the card moved forward (In review or Done);
+ *   • the run ended well, left a result, and its task did not stop to wait.
  *
  * No for any other ending. Deliberately not counted: comments (the one thing two
  * agents could exchange forever, which is the loop this brake is for), tokens
  * spent, tool calls and files touched, none of which the board can see as work
- * done.
+ * done. Nor is a reply from a run whose task went to Blocked: "I am waiting" is text,
+ * and a run that commented, blocked itself and said so must not read as work.
  *
  * Null, no verdict either way, for a run that says nothing about progress: a
  * person's Stop, an account refusal (parked until a person fixes it), a hard
@@ -375,7 +399,9 @@ export function runMadeProgress(run: {
   if (providerFailureOf({ status: run.status, errorClass: run.errorClass })) return null
   if (run.subTasks > 0) return true
   if (run.status !== 'succeeded') return false
-  return !!run.summary?.trim() || run.taskStatus === 'done' || run.taskStatus === 'in_review'
+  if (run.taskStatus === 'done' || run.taskStatus === 'in_review') return true
+  if (run.taskStatus === 'blocked') return false
+  return !!run.summary?.trim()
 }
 
 /**

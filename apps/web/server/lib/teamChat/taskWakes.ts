@@ -46,6 +46,8 @@ import {
   taskDependenciesDone,
   teamExists,
   updateStatus,
+  jobRunRefused,
+  jobRunStopped,
   wakeCommentIds,
   type ClawbooDb,
   type DbTask,
@@ -136,7 +138,9 @@ export function createTaskWakeOutbox(
     },
     noteSkip(taskId, reason) {
       try {
-        for (const row of listWaitingTaskWakes(db, { taskId })) noteSkip(db, row, reason)
+        // The engine knows it hit the limit. Whether a person stopped the job is the board's.
+        const why = reason === 'job_limit' && jobRunStopped(db, taskId) ? 'job_stopped' : reason
+        for (const row of listWaitingTaskWakes(db, { taskId })) noteSkip(db, row, why)
       } catch (err) {
         log.error({ err, taskId, reason }, 'noting a skipped task wake failed')
       }
@@ -150,6 +154,9 @@ export interface TaskWakePumpDeps {
   /** Start a task straight away, the way a person's Retry would: for a wake a person is
    *  behind, or one on a task no pump would pick up. */
   startForPerson: (task: DbTask, agentId: string) => void
+  /** Start a task straight away with no person behind it: a raised budget cap let it go,
+   *  or a teammate's wake on a task no pump would pick up. Its job counts the run. */
+  startByItself: (task: DbTask, agentId: string) => void
   /** Pump the room's engine: an automatic start goes through its fire policy. */
   pumpRoom: (teamId: string, roomId: string | null) => void
   /** Tell the team's chat a wake was given up. False when it could not be written,
@@ -252,13 +259,44 @@ export function pumpTaskWakes(db: ClawbooDb, deps: TaskWakePumpDeps): void {
   reapTaskWakes(db)
   const now = deps.now?.() ?? Date.now()
   const held = deps.held()
+  // The gate takes and gives back a hold each time it is asked, so one pass asks once per
+  // agent and job, however many wakes wait there.
+  const askedGate = new Map<string, boolean>()
+  const budgetRefuses = (task: DbTask, agentId: string): boolean => {
+    const root = getAncestors(db, task.id).find((a) => a.parent_task_id == null)?.id ?? task.id
+    const key = `${agentId}\u0000${root}\u0000${task.teamId ?? ''}`
+    const known = askedGate.get(key)
+    if (known !== undefined) return known
+    const refused = (deps.budgetRefuses ?? ((t, a) => budgetGateRefuses(db, t, a)))(task, agentId)
+    askedGate.set(key, refused)
+    return refused
+  }
   for (const row of listWaitingTaskWakes(db, { includeHeld: true })) {
     try {
-      pumpOne(db, row, deps, held, now)
+      pumpOne(db, row, { ...deps, budgetRefuses }, held, now)
     } catch (err) {
       log.error({ err, wakeId: row.id, taskId: row.taskId }, 'pumping a task wake failed')
     }
   }
+}
+
+/**
+ * One pass that pumps each room once, however many of its wakes it found. A room's pump
+ * walks its whole ready list, so a pump per wake is that list squared, every two seconds.
+ */
+export function pumpTaskWakesByRoom(
+  db: ClawbooDb,
+  depsFor: (pumpRoom: TaskWakePumpDeps['pumpRoom']) => TaskWakePumpDeps,
+  pumpRoomNow: TaskWakePumpDeps['pumpRoom'],
+): void {
+  const rooms = new Map<string, { teamId: string; roomId: string | null }>()
+  pumpTaskWakes(
+    db,
+    depsFor((teamId, roomId) => {
+      rooms.set(`${teamId}\u0000${roomId ?? ''}`, { teamId, roomId })
+    }),
+  )
+  for (const { teamId, roomId } of rooms.values()) pumpRoomNow(teamId, roomId)
 }
 
 /**
@@ -346,6 +384,8 @@ function pumpOne(
               ? engineRefusal(db, task)
               : 'no_team',
     budgetRefused: false,
+    jobLimited: jobRunRefused(db, task.id),
+    jobStopped: jobRunStopped(db, task.id),
     personAssigned: task.assigneePersonId !== null,
     waitingOnQuestion:
       waiting?.kind === 'question' && !commentedSinceAsking(db, row, waiting.questionId),
@@ -394,7 +434,8 @@ function pumpOne(
   if (!agentId) return decision
   if (decision.moveToTodo) {
     const move = (): boolean => {
-      const moved = updateStatus(db, task.id, 'todo')
+      // The same work coming back: a check it failed still stands, whoever woke it.
+      const moved = updateStatus(db, task.id, 'todo', { keepVerdict: true })
       if (!moved.ok) return false
       if (pair) noteAgentWakeStarted(db, task.id, pair, now)
       addComment(
@@ -428,7 +469,8 @@ function pumpOne(
     decision.force ||
     (decision.moveToTodo && runner && !delegationTargetOf(task.sourceDelegationId))
   ) {
-    deps.startForPerson(getTask(db, task.id) ?? task, agentId)
+    const start = decision.byPerson ? deps.startForPerson : deps.startByItself
+    start(getTask(db, task.id) ?? task, agentId)
     return decision
   }
   // A task the runner runs is started by the same pass of the runner's own pump.

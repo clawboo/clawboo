@@ -27,6 +27,7 @@ import {
   waitsOnOtherWork,
   type AccountFailure,
   type AgentWakeCard,
+  type JobLimitCard,
   type AttentionReason,
   type TaskAttention,
   type TaskStatus,
@@ -145,6 +146,7 @@ const ATTENTION_REASONS = new Set<string>([
   'question',
   'assigned',
   'agent_wakes',
+  'job_limit',
   'no_result',
   'rate_limited',
   'provider_down',
@@ -207,6 +209,11 @@ export const ATTENTION_META: Record<
     label: 'Waiting for your OK',
     tone: 'warning',
     hint: 'An agent wants to start a teammate on this job. Say whether agents may wake each other.',
+  },
+  job_limit: {
+    label: 'Waiting for your OK',
+    tone: 'warning',
+    hint: 'This job has started as many runs by itself as it may. Say whether it carries on.',
   },
   no_result: {
     label: 'No result',
@@ -287,6 +294,16 @@ function readAgentWakeCard(value: unknown): AgentWakeCard | null {
   }
 }
 
+/** The card about a job's limit, off a task's attention. */
+function readJobLimitCard(value: unknown): JobLimitCard | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  const { jobTaskId, runs, limit } = v
+  if (typeof jobTaskId !== 'string' || typeof runs !== 'number' || typeof limit !== 'number')
+    return null
+  return { jobTaskId, runs, limit }
+}
+
 /**
  * A task's needs-you state as the board should render it. Reads the server's
  * `attention` field; a `blocked` task always needs a person, so one that arrives
@@ -312,6 +329,7 @@ export function taskAttentionOf(task: {
       personId,
       handedBack,
       agentWakes,
+      jobLimit,
     } = a as {
       reason?: unknown
       failedRuns?: unknown
@@ -323,10 +341,12 @@ export function taskAttentionOf(task: {
       personId?: unknown
       handedBack?: unknown
       agentWakes?: unknown
+      jobLimit?: unknown
     }
     if (typeof reason === 'string' && ATTENTION_REASONS.has(reason)) {
       const known = cause === 'sign_in' || cause === 'billing' ? cause : null
       const card = readAgentWakeCard(agentWakes)
+      const limitCard = readJobLimitCard(jobLimit)
       return {
         reason: reason as AttentionReason,
         failedRuns: typeof failedRuns === 'number' ? failedRuns : 0,
@@ -339,6 +359,7 @@ export function taskAttentionOf(task: {
         ...(typeof personId === 'string' ? { personId } : {}),
         ...(handedBack === true ? { handedBack: true } : {}),
         ...(card ? { agentWakes: card } : {}),
+        ...(limitCard ? { jobLimit: limitCard } : {}),
       }
     }
   }
@@ -472,10 +493,19 @@ export function waitingWorkLabel(task: {
   waitingOn?: unknown
   waitingOnDetail?: unknown
   pause?: unknown
+  attention?: unknown
+  jobStopped?: unknown
 }): string | null {
   // A pause holds it back, whatever else it would be waiting for: it reads Paused.
   if (task.pause) return null
   const w = parseWaitingOn(task.waitingOn)
+  // A person stopped its job. Its turn may come, and it still starts nothing by itself.
+  if (
+    task.jobStopped === true &&
+    !task.attention &&
+    (task.status === 'todo' || (task.status === 'blocked' && waitsOnOtherWork(w)))
+  )
+    return 'Stopped with its job. A Retry or your comment starts work again'
   if (task.status === 'todo' && w?.kind === 'retry')
     return `Retrying soon: ${w.cause === 'rate_limited' ? 'rate limited' : 'provider down'}`
   if (task.status === 'todo' && w?.kind === 'budget' && w.held)

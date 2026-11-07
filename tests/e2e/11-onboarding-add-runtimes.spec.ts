@@ -7,7 +7,14 @@
 // now impossible by construction. (The RuntimeConnectionCard connect state
 // machine itself is covered by the RTL step tests.)
 
-import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
+import {
+  test,
+  expect,
+  API_BASE,
+  assertSandboxed,
+  DASHBOARD_HEADERS,
+  stubNativeHealthcheck,
+} from './helpers/fixtures'
 
 test.describe('Add-runtimes onboarding step', () => {
   test('seed native team → the add-runtimes surface is present → Continue → land in the working team', async ({
@@ -20,7 +27,10 @@ test.describe('Add-runtimes onboarding step', () => {
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
-      for (const team of data.teams ?? []) await request.delete(`${API_BASE}/api/teams/${team.id}`)
+      for (const team of data.teams ?? [])
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
     }
     const agentsResp = await request.get(`${API_BASE}/api/agents`)
     if (agentsResp.ok()) {
@@ -33,7 +43,9 @@ test.describe('Add-runtimes onboarding step', () => {
           a.sourceId === 'clawboo-native' ||
           a.id.startsWith('native-')
         ) {
-          await request.delete(`${API_BASE}/api/agents/${a.id}`)
+          await request.delete(`${API_BASE}/api/agents/${a.id}`, {
+            headers: DASHBOARD_HEADERS,
+          })
         }
       }
     }

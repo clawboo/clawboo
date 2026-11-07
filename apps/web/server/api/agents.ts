@@ -24,6 +24,7 @@ import {
 } from '@clawboo/db'
 import { AGENT_FILE_NAMES, type AgentFileName, type AgentSource } from '@clawboo/agent-registry'
 import { eq, sql, inArray, like } from 'drizzle-orm'
+import { refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { ensureBrowserGrantsForAgent } from '../lib/connectors/browserGrants'
 import { getTenantId } from '../lib/tenant'
@@ -176,6 +177,20 @@ interface CreateAgentBody {
   files?: Record<string, string>
   sourceId?: string
 }
+/**
+ * What in a new agent only a person can ask for. Its team: that is the move
+ * `POST /api/teams/:id/agents` guards. And whether anyone is asked before it runs a
+ * command. On OpenClaw any `execConfig` counts, since one with no `execAsk` skips the
+ * ask-on-miss default and leaves the Gateway running everything unasked.
+ */
+function newAgentNeedsPerson(body: CreateAgentBody, onOpenClaw: boolean): boolean {
+  if (body.teamId) return true
+  if (body.execConfig == null) return false
+  if (onOpenClaw) return true
+  const exec = body.execConfig as { execAsk?: unknown; tools?: { shell?: unknown } | null }
+  return exec.execAsk !== undefined || Boolean(exec.tools?.shell)
+}
+
 export async function agentsCreatePOST(req: Request, res: Response): Promise<void> {
   const body = req.body as CreateAgentBody | undefined
   if (!body || typeof body.name !== 'string' || !body.name.trim()) {
@@ -188,6 +203,7 @@ export async function agentsCreatePOST(req: Request, res: Response): Promise<voi
     res.status(400).json({ error: `unknown sourceId '${String(body.sourceId)}'` })
     return
   }
+  if (newAgentNeedsPerson(body, source === reg.source) && refuseUnlessPerson(req, res)) return
   // Gate BEFORE the source write, so a blocked payload never reaches the Gateway
   // or SQLite, and so the 422 is returned even when the Gateway is disconnected.
   const name = body.name.trim()
@@ -255,6 +271,9 @@ export async function agentsSyncPOST(req: Request, res: Response): Promise<void>
   const body = req.body as SyncBody | undefined
   try {
     if (body && Array.isArray(body.agents)) {
+      // A list it is handed archives every OpenClaw agent the list leaves out, a team's
+      // lead among them. Only the dashboard's own page has a list worth trusting.
+      if (refuseUnlessPerson(req, res)) return
       const result = source.upsertFromList(body.agents, {
         defaultId: body.defaultId ?? '',
         mainKey: (body.mainKey ?? '').trim() || 'main',
@@ -540,6 +559,8 @@ function deleteLocalAgentRows(agentId: string): void {
 }
 
 export async function agentsDELETE(req: Request, res: Response): Promise<void> {
+  // A person's call: deleting a team's lead hands the team to its first member.
+  if (refuseUnlessPerson(req, res)) return
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })
@@ -585,6 +606,8 @@ export async function agentsDELETE(req: Request, res: Response): Promise<void> {
 // Boo Zero, for a team's lead, and while the agent has a task in progress.
 
 export function agentMovePOST(req: Request, res: Response): void {
+  // A person's call: moving a team's lead away hands the team to its first member.
+  if (refuseUnlessPerson(req, res)) return
   const agentId = req.params['agentId'] as string | undefined
   const body = req.body as { teamId?: unknown } | undefined
   const teamId = typeof body?.teamId === 'string' ? body.teamId.trim() : ''
@@ -628,6 +651,8 @@ interface CleanupBody {
 }
 
 export function agentsCleanupPOST(req: Request, res: Response): void {
+  // A person's call: this deletes every OpenClaw agent the list leaves out.
+  if (refuseUnlessPerson(req, res)) return
   const body = req.body as CleanupBody | undefined
   if (!body || !Array.isArray(body.liveAgentIds)) {
     res.status(400).json({ error: 'liveAgentIds array required' })

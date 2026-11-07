@@ -1158,6 +1158,36 @@ describe('NeedsYouColumn: a question and a person’s task', () => {
     expect(within(card).queryByRole('button', { name: 'Retry' })).toBeNull()
   })
 
+  it('a job at its limit shows on its top, even a finished one, with its own answers', async () => {
+    const answers: unknown[] = []
+    server.use(
+      http.post('/api/board/job-limit/job1', async ({ request }) => {
+        answers.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const { onTasksChanged } = renderColumn([
+      {
+        id: 'job1',
+        title: 'The job',
+        status: 'done',
+        teamId: 'team1',
+        attention: {
+          reason: 'job_limit',
+          failedRuns: 0,
+          jobLimit: { jobTaskId: 'job1', runs: 100, limit: 100 },
+        },
+      } as BoardTask,
+    ])
+    const card = await screen.findByTestId('needs-you-task')
+    expect(card).toHaveAttribute('data-attention', 'job_limit')
+    expect(within(card).getByText('This job has started 100 runs by itself.')).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'Retry' })).toBeNull()
+    await userEvent.click(within(card).getByRole('button', { name: 'Carry on' }))
+    await waitFor(() => expect(answers).toEqual([{ decision: 'carry_on' }]))
+    await waitFor(() => expect(onTasksChanged).toHaveBeenCalled())
+  })
+
   it('a person’s task leads with Mark done and is never unassigned', async () => {
     let moved: unknown = null
     server.use(

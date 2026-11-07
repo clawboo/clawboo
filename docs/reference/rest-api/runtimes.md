@@ -592,12 +592,12 @@ How each runtime's cost is reported or estimated is in [Budgets and spend](/usin
 { "ok": false, "reason": "conflict" }
 ```
 
-Without [the person check](/operating/security#the-person-check), a `409` also says this run would undo something: `person_moved` while a person's move of the card stands, or why the board would not start the task by itself, such as `stopped` after a Stop, `failed_too_often` or `budget`. A person can run it anyway.
+Without [the person check](/operating/security#the-person-check), a `409` also says this run would undo something: `person_moved` while a person's move of the card stands, or why the board would not start the task by itself, such as `stopped` after a Stop, `failed_too_often` or `budget`, or `job_limit` when the job has started as many runs by itself as it may. Such a run counts toward that limit. A person can run it anyway, and a person's run does not count.
 
 **`422 Unprocessable Entity`**: the run was refused before it started:
 
 ```ts
-{ ok: false, reason: 'too_deep' | 'connected_substrate' | 'budget_paused' | 'workspace_unavailable' }
+{ ok: false, reason: 'too_deep' | 'connected_substrate' | 'budget_paused' | 'workspace_unavailable' | 'no_team' }
 ```
 
 | `reason`                | Meaning                                                                                                                                                       |
@@ -606,6 +606,7 @@ Without [the person check](/operating/security#the-person-check), a `409` also s
 | `connected_substrate`   | The runtime runs work over its own live connection (OpenClaw), so this route cannot run it.                                                                   |
 | `budget_paused`         | A hard-cap budget covering this agent, this delegation tree or this team is paused. Warn-only budgets never block.                                            |
 | `workspace_unavailable` | The task needs a worktree and none could be prepared (no `repoPath`, or the worktree failed), or the team's folder for a read-only task could not be created. |
+| `no_team`               | The task's team was deleted, or its `teamId` names no team. Nothing is claimed and no folder is made.                                                         |
 
 **`500 Internal Server Error`**: an unexpected error inside the run:
 

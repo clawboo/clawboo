@@ -32,7 +32,8 @@ import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../../db'
-import { directChatSessionKey, driveAgentChat } from '../driveAgentChat'
+import { estimateRunReserveCents, reserveRunBudget } from '../../budgetHold'
+import { directChatSessionKey, driveAgentChat, type ChatTurnEnding } from '../driveAgentChat'
 
 const CAPS: Capabilities = {
   streaming: true,
@@ -82,8 +83,8 @@ describe('driveAgentChat: cost records and budget holds', () => {
       prev[k] = process.env[k]
       process.env[k] = home
     }
-    db = getDb()
     expect(getDbPath().startsWith(home)).toBe(true)
+    db = getDb()
   })
   afterEach(async () => {
     resetDb()
@@ -291,6 +292,57 @@ describe('driveAgentChat: cost records and budget holds', () => {
     })
   })
 
+  it('a turn reading a team’s results is refused by that team’s cap, and charged to it', async () => {
+    seedAgent('cc-x', 'claude-code')
+    const sk = directChatSessionKey('cc-x', 'claude-code')
+    const costing = new FakeAdapter((run) =>
+      (async function* () {
+        yield {
+          ...base(run.sessionKey, 1),
+          kind: 'cost',
+          costUsd: 0.5,
+          usage: { inputTokens: 1, outputTokens: 1 },
+        } as RuntimeEvent
+        yield {
+          ...base(run.sessionKey, 2),
+          kind: 'done',
+          reason: 'success',
+          summary: 'ok',
+        } as RuntimeEvent
+      })(),
+    )
+    setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100_000, mode: 'warn' })
+    setBudgetLimit(db, { scope: 'mission', scopeId: 'M', limitUsdCents: 100_000, mode: 'warn' })
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => costing,
+      budgetScopes: { teamId: 'T', missionId: 'M' },
+    })
+    expect(getBudget(db, 'team', 'T')?.spentUsdCents).toBeGreaterThanOrEqual(50)
+    expect(getBudget(db, 'mission', 'M')?.spentUsdCents).toBeGreaterThanOrEqual(50)
+    expect(holds()).toEqual([])
+
+    setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 1, mode: 'cap' })
+    recordSpend(db, 'team', 'T', 1000)
+    let started = false
+    await driveAgentChat({
+      db,
+      agentId: 'cc-x',
+      message: 'hi',
+      mcpBaseUrl: null,
+      makeAdapter: () => {
+        started = true
+        return costing
+      },
+      budgetScopes: { teamId: 'T', missionId: 'M' },
+    })
+    expect(started).toBe(false)
+    expect(chatRows(sk).at(-1)?.text).toContain('team budget')
+  })
+
   it('a turn beside another run of the agent is refused when the cap has no room for both', async () => {
     seedAgent('cc-x', 'claude-code')
     const sk = directChatSessionKey('cc-x', 'claude-code')
@@ -356,6 +408,74 @@ describe('driveAgentChat: cost records and budget holds', () => {
       }),
     ])
     expect(holds()).toEqual([])
+  })
+
+  describe('the final gate, when runs already going set aside the room meanwhile', () => {
+    const turn = async (
+      id: string,
+      extra: Partial<Parameters<typeof driveAgentChat>[0]> = {},
+    ): Promise<{ adapter: FakeAdapter; ending: ChatTurnEnding | null }> => {
+      seedAgent(id, 'claude-code')
+      setBudgetLimit(db, { scope: 'agent', scopeId: id, limitUsdCents: 100, mode: 'cap' })
+      const adapter = new FakeAdapter((run) =>
+        (async function* () {
+          yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'hi' }
+        })(),
+      )
+      let ending: ChatTurnEnding | null = null
+      await driveAgentChat({
+        db,
+        agentId: id,
+        message: 'hi',
+        mcpBaseUrl: null,
+        onTurnEnded: (e) => {
+          ending = e
+        },
+        // The adapter is built once the turn has been let start, holding its estimate.
+        // Another run sets aside the rest of the cap, and a little of it is spent.
+        makeAdapter: () => {
+          const other = reserveRunBudget(
+            db,
+            { agentId: id },
+            { kind: 'chat', ref: 'other', estimateCents: 100 - estimateRunReserveCents(db, id) },
+          )
+          expect(other.blocked).toBe(false)
+          recordSpend(db, 'agent', id, 1)
+          return adapter
+        },
+        ...extra,
+      })
+      return { adapter, ending }
+    }
+
+    it('a turn that retries by itself says so, and reads as held', async () => {
+      const { adapter, ending } = await turn('cc-h1', { retriesWhileBudgetHeld: true })
+      expect(adapter.startCalls).toBe(0)
+      expect(ending).toMatchObject({ how: 'refused', budgetHeld: true })
+      expect(chatRows(directChatSessionKey('cc-h1', 'claude-code'))).toEqual([
+        expect.objectContaining({
+          kind: 'meta',
+          text: expect.stringContaining('It goes out by itself'),
+        }),
+      ])
+    })
+
+    it('says nothing when the chat has heard it already', async () => {
+      const { ending } = await turn('cc-h2', {
+        retriesWhileBudgetHeld: true,
+        quietWhileBudgetHeld: true,
+      })
+      expect(ending).toMatchObject({ how: 'refused', budgetHeld: true })
+      expect(chatRows(directChatSessionKey('cc-h2', 'claude-code'))).toEqual([])
+    })
+
+    it('a person’s own turn is told to try again', async () => {
+      const { ending } = await turn('cc-h3')
+      expect(ending).toMatchObject({ how: 'refused', budgetHeld: true })
+      expect(chatRows(directChatSessionKey('cc-h3', 'claude-code'))).toEqual([
+        expect.objectContaining({ text: expect.stringContaining('Try again') }),
+      ])
+    })
   })
 
   it('a turn the server ends for going quiet frees its hold', async () => {

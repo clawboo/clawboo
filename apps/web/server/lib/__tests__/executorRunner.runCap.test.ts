@@ -20,6 +20,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime, type RunTaskResult } from '../executorRunner'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../runSlots'
 import { stopTaskRuns } from '../runStops'
@@ -102,6 +103,7 @@ describe('the run cap on the task runner', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
     slots = createRunSlots(1)
     setRunSlotsForTests(slots)
   })

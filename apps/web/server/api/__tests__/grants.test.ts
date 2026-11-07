@@ -30,8 +30,9 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   return { res, statusCode: () => code, body: () => payload }
 }
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const post = (body: unknown, params: Record<string, string> = {}): Request =>
-  ({ query: {}, params, body }) as unknown as Request
+  ({ query: {}, params, body, headers: DASHBOARD }) as unknown as Request
 
 /** EXACTLY what grantConnector.ts sends. Do not "tidy" this shape. */
 const SHIPPED_BODY = {
@@ -106,7 +107,10 @@ describe('grants REST', () => {
     const res = mockRes()
     // revokeGrant.ts posts with no body at all: express leaves req.body
     // undefined, and parsing that directly would 400 every single Detach.
-    grantsRevokePOST({ query: {}, params: { id } } as unknown as Request, res.res)
+    grantsRevokePOST(
+      { query: {}, params: { id }, headers: DASHBOARD } as unknown as Request,
+      res.res,
+    )
     expect(res.statusCode()).toBe(200)
     expect(getGrant(getDb(), id)?.state).toBe('revoked')
   })

@@ -510,6 +510,7 @@ describe('a person’s request as one main task', () => {
     const deps: TaskWakePumpDeps = {
       held: () => false,
       startForPerson: (t) => started.push(t.id),
+      startByItself: (t) => started.push(t.id),
       pumpRoom: () => started.push('room'),
       alert: () => true,
     }

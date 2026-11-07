@@ -18,8 +18,8 @@ Reference pages state exact facts: names, defaults, limits and formats, checked 
 | [Limits and defaults](/reference/limits-and-defaults)     | Every built-in number: delegation caps, watchdogs, breakers, approval windows, rate limits, ports and timeouts                             |
 | [Keyboard shortcuts](/reference/keyboard-shortcuts)       | Every dashboard shortcut, the chat slash commands, and Settings search                                                                     |
 | [MCP tools](/reference/mcp-tools)                         | The four MCP servers (Tasks, Memory, Tools, TeamChat) and every tool's inputs                                                              |
-| [Events and errors](/reference/events-and-errors)         | The 32 kinds of event in the event log and the error classes a run can end with                                                            |
-| [Database schema](/reference/database-schema)             | The 40 tables in `clawboo.db` and their columns                                                                                            |
+| [Events and errors](/reference/events-and-errors)         | The 34 kinds of event in the event log and the error classes a run can end with                                                            |
+| [Database schema](/reference/database-schema)             | The 51 tables in `clawboo.db` and their columns                                                                                            |
 | [Marketplace catalog](/reference/marketplace-catalog)     | The 19 packs behind the marketplace's 436 agents and 85 teams, and how Clawboo fetches and checks them                                     |
 
 ## REST API and MCP

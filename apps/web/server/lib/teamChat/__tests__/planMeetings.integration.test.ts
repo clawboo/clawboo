@@ -228,6 +228,7 @@ describe('a plan that waits for a person, where it meets the rest of the board',
       pump: {
         held: () => false,
         startForPerson: (t) => void engine.dispatchTask(t.id),
+        startByItself: (t) => void engine.dispatchTask(t.id, { automatic: true }),
         pumpRoom: () => void engine.resume(),
         alert: () => false,
       },
