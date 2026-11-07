@@ -98,3 +98,18 @@ describe('normalizeTaskTitle', () => {
     expect(normalizeTaskTitle('???')).not.toBe(normalizeTaskTitle('!!!'))
   })
 })
+
+describe('normalizeTaskTitle on a very long title', () => {
+  it('stays fast on a long run of punctuation with a word after it', () => {
+    const title = '!'.repeat(200_000) + 'a' + '!'.repeat(200_000) + ' b'
+    const started = Date.now()
+    expect(normalizeTaskTitle(title).endsWith(' b')).toBe(true)
+    expect(Date.now() - started).toBeLessThan(2_000)
+  })
+
+  it('strips what it did before, an emoji included', () => {
+    expect(normalizeTaskTitle('  --Fix the Parser!!  ')).toBe('fix the parser')
+    expect(normalizeTaskTitle('🚀 Launch 🚀')).toBe('launch')
+    expect(normalizeTaskTitle('!!!')).toBe('!!!')
+  })
+})

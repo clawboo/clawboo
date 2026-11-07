@@ -71,9 +71,21 @@ export function isTaskIdentifier(ref: string): boolean {
  */
 export function normalizeTaskTitle(title: string): string {
   const spaced = title.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim()
-  const bare = spaced.replace(/^[\p{P}\p{S}\s]+|[\p{P}\p{S}\s]+$/gu, '')
-  return bare || spaced
+  return stripEdgePunctuation(spaced) || spaced
 }
+
+/** Walks in from each end, so a very long title of punctuation stays linear: a regex
+ *  anchored on the end would retry from every position. */
+function stripEdgePunctuation(text: string): string {
+  const chars = Array.from(text)
+  let start = 0
+  let end = chars.length
+  while (start < end && EDGE_CHAR.test(chars[start]!)) start += 1
+  while (end > start && EDGE_CHAR.test(chars[end - 1]!)) end -= 1
+  return chars.slice(start, end).join('')
+}
+
+const EDGE_CHAR = /^[\p{P}\p{S}\s]$/u
 
 /** How long a hand-off's title may be; the engine keeps the whole ask as the
  *  description. A title this long may be cut, so it alone does not say two asks
