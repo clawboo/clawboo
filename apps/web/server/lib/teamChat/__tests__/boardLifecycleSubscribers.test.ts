@@ -24,6 +24,7 @@ import {
   releaseTask,
   updateStatus,
   resetBoardLifecycleListeners,
+  setTaskRunnerInputs,
   teams,
   getSetting,
   setSetting,
@@ -292,6 +293,70 @@ describe('board lifecycle subscribers', () => {
     expect(mail[0]!.taskId).toBe(t.id)
     expect(mail[0]!.body).toContain('ship the thing')
     expect(mail[0]!.body).toContain('succeeded')
+  })
+
+  it('does not call a task runner run that left its task blocked "finished"', () => {
+    // The task runner's own notice (the agent blocked it, or its check failed for
+    // good) tells the delegator what actually happened.
+    const db = getDb()
+    const t = createTask(db, {
+      title: 'waits on a person',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    claimTask(db, t.id, 'a2')
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'codex',
+      assigneeAgentId: 'a2',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+    updateStatus(db, t.id, 'blocked')
+    completeExecutionProcess(db, ex.id, { status: 'succeeded' })
+
+    expect(listUndeliveredInbox(db, 'leader', { teamId: TEAM })).toEqual([])
+  })
+
+  it.each(['openclaw-routine', 'my-ci'])(
+    'still reports a %s run on a blocked task: nothing else tells the delegator',
+    (executorType) => {
+      // The routine dispatcher closes `succeeded`, then fails its move to Done and
+      // only comments on the card. An outside executor has no notice of its own.
+      const db = getDb()
+      const t = createTask(db, {
+        title: 'waits on a person',
+        teamId: TEAM,
+        sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+      })
+      claimTask(db, t.id, 'a2')
+      const ex = createExecutionProcess(db, { taskId: t.id, executorType })
+      updateStatus(db, t.id, 'blocked')
+      completeExecutionProcess(db, ex.id, { status: 'succeeded' })
+
+      const mail = listUndeliveredInbox(db, 'leader', { teamId: TEAM })
+      expect(mail).toHaveLength(1)
+      expect(mail[0]!.body).toContain('succeeded')
+    },
+  )
+
+  it('still reports a failed run on a blocked task', () => {
+    // Nothing else says so: a failure is not a block anyone announced.
+    const db = getDb()
+    const t = createTask(db, {
+      title: 'waits on a person',
+      teamId: TEAM,
+      sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+    })
+    claimTask(db, t.id, 'a2')
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+    updateStatus(db, t.id, 'blocked')
+    completeExecutionProcess(db, ex.id, { status: 'failed' })
+
+    const mail = listUndeliveredInbox(db, 'leader', { teamId: TEAM })
+    expect(mail).toHaveLength(1)
+    expect(mail[0]!.body).toContain('failed')
   })
 
   it('SKIPS an engine-owned (openclaw) terminal — the engine reflects those itself', () => {

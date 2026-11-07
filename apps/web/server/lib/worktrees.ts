@@ -15,11 +15,14 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
+import { setAwakeTimeout } from '@clawboo/executor'
+import { WORK_CHECK_TIMEOUT_MS } from '@clawboo/team-orchestration'
 import {
   addComment,
   createWorkspace,
   getTask,
   getWorkspaceForTask,
+  listExecutions,
   listActiveWorkspaces,
   setTaskWorkspaceRefs,
   updateStatus,
@@ -391,7 +394,12 @@ export type ActionResult =
       complete: CompleteResult
       taskStatus: string
       verified?: string
+      /** The check no longer spoke for the task when it ended (see `runId`), so its
+       *  verdict moved nothing and no fix run is due. */
+      superseded?: boolean
     }
+  /** The run named by `runId` had already lost the task: nothing was touched. */
+  | { ok: true; action: 'superseded'; taskStatus: string }
   | { ok: false; reason: 'not_found' }
 
 /** Verification options for a `complete` action. All optional;
@@ -402,6 +410,34 @@ export interface CompleteWorkspaceOpts {
   mcpBaseUrl?: string | null
   /** Told what the reviewer's run cost, so the caller can charge it. */
   onReviewerSpend?: (spend: ReviewerSpend) => void
+  /**
+   * The run this check belongs to, still open: the task runner closes its run only
+   * after the verdict, so a crash during the check leaves a `running` row the boot
+   * reap and the stale sweep can find. Once that row is closed for it, or a newer
+   * run has started, the check no longer speaks for the task: its verdict is not
+   * written. A run already in that state when it gets here touches nothing.
+   */
+  runId?: string
+  /** Override how long a run's check may take (tests). */
+  checkDeadlineMs?: number
+}
+
+/** The check's answer, or null once `ms` of awake time has passed without one. The
+ *  work is left to finish on its own, and what it says then is ignored. */
+function withinDeadline<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve, reject) => {
+    const timer = setAwakeTimeout(() => resolve(null), ms)
+    work.then(
+      (value) => {
+        timer.clear()
+        resolve(value)
+      },
+      (err: unknown) => {
+        timer.clear()
+        reject(err)
+      },
+    )
+  })
 }
 
 /**
@@ -437,7 +473,35 @@ export async function actOnTaskWorkspace(
     return { ok: true, action: 'pause', pause }
   }
 
+  const runStillOpen = (): boolean => {
+    if (!opts.runId) return true
+    const last = listExecutions(db, taskId).at(-1)
+    return last?.id === opts.runId && last.status === 'running'
+  }
+  // The stale sweep or a person's Retry took the task from this run while it worked,
+  // and a newer run may be in this same checkout. `complete` would clean up an empty
+  // diff under it, and the moves below would pull its card into review, or leave a
+  // released task In review with no run for anything to find. Nothing here is this
+  // run's any more. Its work stays in the checkout for whoever runs the task next.
+  if (!runStillOpen()) {
+    return {
+      ok: true,
+      action: 'superseded',
+      taskStatus: getTask(db, taskId)?.status ?? 'unknown',
+    }
+  }
+
   const complete = await completeWorktree(ws.repoPath, worktree, roots)
+  // Comparing the diff waits on git, and the run can lose the task meanwhile.
+  if (!runStillOpen()) {
+    return {
+      ok: true,
+      action: 'complete',
+      complete,
+      taskStatus: getTask(db, taskId)?.status ?? 'unknown',
+      superseded: true,
+    }
+  }
 
   // `complete` ends a run, so the moves below start from `in_progress`. A task
   // back in `todo` (released by a pause hand-off, or never claimed) has no legal
@@ -476,7 +540,7 @@ export async function actOnTaskWorkspace(
       ...(current === 'blocked' ? { verified: 'fail' as const } : {}),
     }
   }
-  const verdict = await verifyTask({
+  const checking = verifyTask({
     db,
     taskId,
     repoPath: ws.repoPath,
@@ -489,19 +553,41 @@ export async function actOnTaskWorkspace(
     reviewerModel: opts.reviewerModel,
     mcpBaseUrl: opts.mcpBaseUrl,
     onReviewerSpend: opts.onReviewerSpend,
+    shouldRecord: runStillOpen,
   })
-
-  // A person finished or cancelled the task while its check ran. Their move is
-  // the outcome: the verdict stays on the task as a record of what the check
-  // found, but nothing moves it and no one is told it was routed for review.
-  const decided = getTask(db, taskId)?.status
-  if (decided === 'done' || decided === 'cancelled') {
+  // A run's check has a limit, as the team chat's has: the verify command has its own,
+  // but a reviewer has none, and the run stays open and beating until the check ends.
+  // Only a run's: nothing else keeps a row open for this to close.
+  const deadlineMs = opts.checkDeadlineMs ?? WORK_CHECK_TIMEOUT_MS
+  const verdict = opts.runId ? await withinDeadline(checking, deadlineMs) : await checking
+  if (!verdict) {
+    if (getTask(db, taskId)?.status === 'in_review' && runStillOpen()) {
+      // The runner parks a check that throws: see `runTaskOnRuntime`.
+      throw new Error(`The check did not answer within ${Math.round(deadlineMs / 60_000)} minutes.`)
+    }
     return {
       ok: true,
       action: 'complete',
       complete,
-      taskStatus: decided,
+      taskStatus: getTask(db, taskId)?.status ?? 'unknown',
+      superseded: true,
+    }
+  }
+
+  // A person moved the task while its check ran (their move is the outcome: the
+  // verdict stays on the task as a record of what the check found), or the check
+  // lost its run to a restart's reap or sweep, or to a newer run. Either way the
+  // task is no longer this check's to move, and no one is told it was routed for
+  // review. A fix run would be run over someone else's decision, so none is asked.
+  const decided = getTask(db, taskId)?.status
+  if (decided !== 'in_review' || !runStillOpen()) {
+    return {
+      ok: true,
+      action: 'complete',
+      complete,
+      taskStatus: decided ?? 'unknown',
       verified: verdict.status,
+      superseded: true,
     }
   }
 

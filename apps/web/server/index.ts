@@ -21,8 +21,6 @@ import {
   moveArchivedRoomTasks,
   reapOrphanInbox,
   listRoomsWithFireableDelegations,
-  reconcileOrphans,
-  reconcileStaleInProgress,
   seedBuiltinTools,
   setDashboardPorts,
 } from '@clawboo/db'
@@ -40,10 +38,11 @@ import { gcTaskWorkspaces } from './lib/worktrees'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
 import { startMemoryEmbedding } from './lib/memoryEmbedding'
-import { createStaleTaskSweep } from './lib/staleTaskSweep'
+import { createStaleTaskSweep, reapOrphanedRuns, sweepStaleRuns } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
+import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
 import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
@@ -553,7 +552,7 @@ async function main() {
   // boot. Shares CLAWBOO_BOARD_STALE_TTL_MS with the sweep.
   try {
     const staleAfterMs = positiveIntEnv('CLAWBOO_BOARD_STALE_TTL_MS', 3 * 60_000)
-    const { reconciled } = reconcileOrphans(getDb(), { staleAfterMs })
+    const reconciled = reapOrphanedRuns(getDb(), staleAfterMs)
     if (reconciled > 0) {
       log.info({ reconciled }, 'Board: reconciled orphaned executions on startup')
     }
@@ -581,10 +580,15 @@ async function main() {
   // than started by the pump below. Idempotent; best-effort; never blocks boot.
   try {
     const db = getDb()
-    const moved = moveArchivedRoomTasks(db, { skip: (t) => runsOnTaskRunner(db, t) })
+    const { moved, closedRuns } = moveArchivedRoomTasks(db, {
+      skip: (t) => runsOnTaskRunner(db, t),
+    })
     if (moved.length > 0) {
       log.info({ moved: moved.length }, 'Board: moved unfinished tasks out of archived rooms')
     }
+    // No engine stopped those runs, so an OpenClaw one may still be going in the
+    // Gateway, which is not connected yet at this point. They wait for it.
+    queueGatewayAborts(db, closedRuns)
   } catch (err) {
     log.error({ err }, 'Board: moving tasks out of archived rooms failed (non-fatal)')
   }
@@ -708,12 +712,12 @@ async function main() {
     const pass = createStaleTaskSweep({
       ttlMs,
       intervalMs,
-      reconcile: (olderThanMs) => reconcileStaleInProgress(getDb(), olderThanMs).reconciled,
+      reconcile: (olderThanMs) => sweepStaleRuns(getDb(), olderThanMs),
     })
     const sweep = (): void => {
       try {
         const reconciled = pass()
-        if (reconciled > 0) log.info({ reconciled }, 'Board: released stale in_progress tasks')
+        if (reconciled > 0) log.info({ reconciled }, 'Board: moved tasks whose runs went silent')
       } catch (err) {
         log.error({ err }, 'Board: stale-task sweep failed (non-fatal)')
       }

@@ -10,7 +10,17 @@
 // judges each row by the time the process was awake since its last beat. Within
 // that TTL every live drain has beaten again, and the normal cutoff resumes.
 
+import {
+  reconcileOrphans,
+  reconcileStaleInProgress,
+  reconcileStaleInReview,
+  type ClawbooDb,
+  type ParkedReviewsResult,
+} from '@clawboo/db'
 import { createSuspendDetector } from '@clawboo/executor'
+
+import { emitEvent } from './obs'
+import { notifyCheckInterrupted } from './teamChat/inboxNotices'
 
 export interface StaleTaskSweepOptions {
   /** A row this long without a beat (of awake time) is released. */
@@ -41,4 +51,36 @@ export function createStaleTaskSweep(opts: StaleTaskSweepOptions): () => number 
     }
     return opts.reconcile(opts.ttlMs + (at < creditUntil ? credit : 0))
   }
+}
+
+/** Tasks a dead process left In review now wait in Needs you: say so on the event
+ *  log (the browser alerts wake on it) and to whoever handed the task out. */
+function announceParkedReviews(db: ClawbooDb, parked: ParkedReviewsResult['parked']): void {
+  for (const { taskId, teamId, agentId } of parked) {
+    emitEvent(db, {
+      kind: 'status_changed',
+      taskId,
+      teamId,
+      agentId,
+      data: { to: 'blocked', reason: 'check_interrupted' },
+    })
+    notifyCheckInterrupted(db, taskId, teamId)
+  }
+}
+
+/** The boot reap of runs whose process is gone; returns how many it closed. */
+export function reapOrphanedRuns(db: ClawbooDb, staleAfterMs: number): number {
+  const { reconciled, parked } = reconcileOrphans(db, { staleAfterMs })
+  announceParkedReviews(db, parked)
+  return reconciled
+}
+
+/** One pass over rows older than `olderThanMs`, for {@link StaleTaskSweepOptions.reconcile}:
+ *  a run with no beat goes back to To do, or, when its work was being checked, to a
+ *  person. Returns how many tasks it moved. */
+export function sweepStaleRuns(db: ClawbooDb, olderThanMs: number): number {
+  const released = reconcileStaleInProgress(db, olderThanMs).reconciled
+  const { reconciled, parked } = reconcileStaleInReview(db, olderThanMs)
+  announceParkedReviews(db, parked)
+  return released + reconciled
 }

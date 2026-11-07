@@ -178,7 +178,7 @@ A task moved to another status. `to` is always present.
 `Person` is the `person` shape above. Some writers add fields the typed shape does not declare:
 
 - `by: 'person'` marks a move a person made on the board, and `person` names them when a sign-in proxy vouched for them.
-- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
+- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `agent_blocked` (a task runner run's own agent blocked the task), `check_interrupted` (a task runner's check never reached a verdict), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
 
 ### comment_added
 

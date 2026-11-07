@@ -1,8 +1,9 @@
 // Dependency-light inbox-notice helpers — importable from BOTH the executor
 // runner and the lifecycle subscribers without closing the module cycle
 // (executorRunner → subscribers → teamOrchestrator → serverDeliver →
-// executorRunner). Imports only @clawboo/db.
+// executorRunner). Imports only @clawboo/db and @clawboo/board-core.
 
+import { isHumanAssignment } from '@clawboo/board-core'
 import { enqueueInbox, getTask, teams, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq } from 'drizzle-orm'
@@ -47,5 +48,72 @@ export function notifyVerificationParked(
     enqueueInbox(db, { agentId: recipient, teamId, kind: 'alert', taskId, body: detail })
   } catch (err) {
     log.error({ err, taskId }, 'verification-parked notice failed')
+  }
+}
+
+/** The longest reply a notice quotes: the whole of it is on the task. The MCP
+ *  piggyback shows all of this, and a digest cuts the row at 400 characters. */
+const NOTICE_REPLY_MAX_CHARS = 2_000
+
+/** Who hears about a task that now waits on a person: its delegator or the team's
+ *  leader, but no agent for a task a person assigned (its result is theirs, on the
+ *  card), and not the agent that is the task's own. */
+function agentToTell(
+  db: ClawbooDb,
+  taskId: string,
+  teamId: string | null,
+  ownAgentId?: string | null,
+): string | null {
+  if (isHumanAssignment(getTask(db, taskId)?.sourceDelegationId)) return null
+  const recipient = recipientFor(db, taskId, teamId)
+  return recipient && recipient !== ownAgentId ? recipient : null
+}
+
+/**
+ * Durable notice that the task runner's agent blocked its own task: the task waits
+ * on a person, and the steps after it stay queued. The team engine reports the same
+ * ending as a `[Task Update]`. Delivery rides the next digest / MCP piggyback.
+ */
+export function notifyBlockedByAgent(
+  db: ClawbooDb,
+  taskId: string,
+  teamId: string | null,
+  agentId: string,
+  reply: string,
+): void {
+  try {
+    const recipient = agentToTell(db, taskId, teamId, agentId)
+    if (!recipient) return
+    // Where the rest is comes first, because a digest cuts what follows.
+    const why = reply
+      ? `Its whole reply is on the task. It said: ${reply.slice(0, NOTICE_REPLY_MAX_CHARS)}`
+      : 'It did not say why.'
+    enqueueInbox(db, {
+      agentId: recipient,
+      teamId,
+      kind: 'task_update',
+      taskId,
+      body: `“${getTask(db, taskId)?.title ?? taskId}” is blocked: its agent needs a person before it can go on. ${why}`,
+    })
+  } catch (err) {
+    log.error({ err, taskId }, 'agent-blocked notice failed')
+  }
+}
+
+/** Durable notice that a task runner's check died with its server, so no run closes
+ *  with the usual notice: the task waits on a person. */
+export function notifyCheckInterrupted(db: ClawbooDb, taskId: string, teamId: string | null): void {
+  try {
+    const recipient = agentToTell(db, taskId, teamId)
+    if (!recipient) return
+    enqueueInbox(db, {
+      agentId: recipient,
+      teamId,
+      kind: 'alert',
+      taskId,
+      body: `The check on “${getTask(db, taskId)?.title ?? taskId}” did not finish, so the task waits for a person.`,
+    })
+  } catch (err) {
+    log.error({ err, taskId }, 'check-interrupted notice failed')
   }
 }

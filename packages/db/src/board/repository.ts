@@ -30,6 +30,7 @@ import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzl
 import type { ClawbooDb } from '../db'
 import { personJson, type PersonRecord } from '../person'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
+import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import {
   executionProcesses,
@@ -572,6 +573,43 @@ export function startTaskHeartbeat(
   const beat = (): void => {
     try {
       heartbeatTask(db, taskId, opts)
+    } catch {
+      /* a missed beat must never break the owner */
+    }
+  }
+  beat()
+  const timer = setInterval(beat, TASK_HEARTBEAT_MS)
+  ;(timer as { unref?: () => void }).unref?.()
+  return () => clearInterval(timer)
+}
+
+/**
+ * The same beat for a task In review, which {@link heartbeatTask} leaves alone. The
+ * task runner keeps its run open while the run's work is checked, and a check can
+ * take many minutes, so it beats through the check: {@link reconcileStaleInReview}
+ * and the boot reap read a silent one as a run that died with its process. Guarded
+ * like the other beat, on the status and, when given, the assignee.
+ */
+export function startReviewHeartbeat(
+  db: ClawbooDb,
+  taskId: string,
+  opts?: { assigneeAgentId?: string },
+): () => void {
+  const beat = (): void => {
+    try {
+      withWriteRetry(() =>
+        db
+          .update(tasks)
+          .set({ updatedAt: Date.now() })
+          .where(
+            and(
+              eq(tasks.id, taskId),
+              eq(tasks.status, 'in_review'),
+              ...(opts?.assigneeAgentId ? [eq(tasks.assigneeAgentId, opts.assigneeAgentId)] : []),
+            ),
+          )
+          .run(),
+      )
     } catch {
       /* a missed beat must never break the owner */
     }
@@ -1408,6 +1446,12 @@ export interface ReconcileResult {
   reconciled: number
 }
 
+/** A reconcile pass that can park a task in review, and which ones it parked, so
+ *  the server can say so (the database layer has no event log or mailbox policy). */
+export interface ParkedReviewsResult extends ReconcileResult {
+  parked: Array<{ taskId: string; teamId: string | null; agentId: string | null }>
+}
+
 /** The comment on a task in review whose run stopped with the server. */
 export const ORPHANED_REVIEW_NOTE =
   'The run working on this task stopped when Clawboo restarted while the task was in review, so it is waiting for you. Retry runs it again, or Dismiss drops it.'
@@ -1428,11 +1472,15 @@ export const ORPHANED_REVIEW_NOTE =
  * todo` is not a legal move. Both follow the transition table. One BEGIN
  * IMMEDIATE txn.
  */
-export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }): ReconcileResult {
+export function reconcileOrphans(
+  db: ClawbooDb,
+  opts?: { staleAfterMs?: number },
+): ParkedReviewsResult {
   // Default: the same order of magnitude as the sweep TTL (6 missed beats).
   const staleAfterMs = opts?.staleAfterMs ?? 6 * TASK_HEARTBEAT_MS
   const releasedEvents: BoardLifecycleEvent[] = []
-  const result = immediateWrite(db, (tx) => {
+  const parkedReviews: ParkedReviewsResult['parked'] = []
+  const result = immediateWrite(db, (tx): ParkedReviewsResult => {
     const cutoff = Date.now() - staleAfterMs
     const candidates = tx
       .select()
@@ -1488,10 +1536,15 @@ export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }
         .update(tasks)
         .set({ status: 'blocked', updatedAt: now })
         .where(and(eq(tasks.id, ex.taskId), eq(tasks.status, 'in_review')))
-        .returning({ teamId: tasks.teamId })
-        .all() as Array<{ teamId: string | null }>
+        .returning({ teamId: tasks.teamId, assigneeAgentId: tasks.assigneeAgentId })
+        .all() as Array<{ teamId: string | null; assigneeAgentId: string | null }>
       if (parked.length > 0) {
         const teamId = parked[0]!.teamId ?? null
+        parkedReviews.push({
+          taskId: ex.taskId,
+          teamId,
+          agentId: parked[0]!.assigneeAgentId ?? null,
+        })
         tx.insert(taskComments)
           .values({
             id: randomUUID(),
@@ -1515,7 +1568,7 @@ export function reconcileOrphans(db: ClawbooDb, opts?: { staleAfterMs?: number }
         )
       }
     }
-    return { reconciled: orphans.length }
+    return { reconciled: orphans.length, parked: parkedReviews }
   })
   // Post-commit: subscribers must never see an uncommitted release.
   for (const ev of releasedEvents) emitBoardLifecycle(ev)
@@ -1584,5 +1637,75 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
   })
   // Post-commit: subscribers must never see an uncommitted release.
   for (const ev of releasedEvents) emitBoardLifecycle(ev)
+  return result
+}
+
+/**
+ * The periodic backstop for a task In review whose task-runner run stopped beating:
+ * its process died while the run's work was being checked, and a restart inside the
+ * beat window left it to this pass (`reconcileOrphans` cannot yet tell it from a live
+ * run). Nothing will finish that check, so the task goes to a person the way the boot
+ * reap sends it, with the same row and note, so Needs you reads the same whichever
+ * caught it. Only a runner's run, the one driver that beats a task in review: the team
+ * engine parks its own interrupted checks (`listRoomsWithEngineTasksInReview`), and an
+ * outside executor's silence says nothing about a restart. Idempotent (a parked task is
+ * no longer in review).
+ */
+export function reconcileStaleInReview(db: ClawbooDb, olderThanMs: number): ParkedReviewsResult {
+  const events: BoardLifecycleEvent[] = []
+  const result = immediateWrite(db, (tx): ParkedReviewsResult => {
+    const cutoff = Date.now() - olderThanMs
+    const stale = tx
+      .select()
+      .from(tasks)
+      .where(and(eq(tasks.status, 'in_review'), eq(tasks.dropped, 0), lt(tasks.updatedAt, cutoff)))
+      .all() as DbTask[]
+    const now = Date.now()
+    const parked: ParkedReviewsResult['parked'] = []
+    for (const t of stale) {
+      const running = tx
+        .select({ id: executionProcesses.id, executorType: executionProcesses.executorType })
+        .from(executionProcesses)
+        .where(and(eq(executionProcesses.taskId, t.id), eq(executionProcesses.status, 'running')))
+        .all()
+      const runnerRuns = running.filter((r) => isTaskRunnerRun(t, r.executorType))
+      if (runnerRuns.length === 0) continue
+      tx.update(executionProcesses)
+        .set({
+          status: 'failed',
+          completedAt: now,
+          error: ORPHANED_RUN_ERROR,
+          recoveryTombstone: 1,
+        })
+        .where(
+          inArray(
+            executionProcesses.id,
+            runnerRuns.map((r) => r.id),
+          ),
+        )
+        .run()
+      tx.update(tasks).set({ status: 'blocked', updatedAt: now }).where(eq(tasks.id, t.id)).run()
+      tx.insert(taskComments)
+        .values({
+          id: randomUUID(),
+          taskId: t.id,
+          authorAgentId: null,
+          authorType: 'system',
+          body: ORPHANED_REVIEW_NOTE,
+          tenantId: null,
+          createdAt: now,
+        })
+        .run()
+      const teamId = t.teamId ?? null
+      parked.push({ taskId: t.id, teamId, agentId: t.assigneeAgentId ?? null })
+      events.push(
+        { kind: 'status_changed', taskId: t.id, teamId, status: 'blocked' },
+        { kind: 'comment_added', taskId: t.id, teamId, authorType: 'system', authorAgentId: null },
+      )
+    }
+    return { reconciled: parked.length, parked }
+  })
+  // Post-commit: subscribers must never see an uncommitted move.
+  for (const ev of events) emitBoardLifecycle(ev)
   return result
 }

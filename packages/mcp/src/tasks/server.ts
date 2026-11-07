@@ -286,10 +286,6 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   /** Appended to a one-task tool's description when a task is bound. */
   const ownTaskHint = (verb: string): string =>
     boundTaskId ? ` Leave out taskId to ${verb} the task you are working on.` : ''
-  // block_task takes the run's own task only on a team run, whose engine handles
-  // a task its agent blocked. The task runner binds its task too but does not
-  // yet, so there the id stays required and no hint points at it.
-  const blockDefault = teamRun ? boundTaskId : undefined
 
   const claimFor = (args: Record<string, unknown>, assigneeAgentId: string): McpToolResult => {
     const denied = outOfTeam(str(args['taskId']))
@@ -497,12 +493,14 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'block_task',
+      // The team engine and the task runner both end a run whose agent blocked its
+      // own task as that agent's call, with its reply kept and the delegator told.
       description: teamRun
-        ? `Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.${blockDefault ? ' Leave out taskId to block it.' : ''}`
-        : 'Mark a task blocked.',
-      inputSchema: z.object({ taskId: blockDefault ? z.string().min(1).optional() : z.string() }),
+        ? `Mark the task you are working on blocked, when you cannot go on without a person. Say why in your reply.${boundTaskId ? ' Leave out taskId to block it.' : ''}`
+        : `Mark a task blocked.${boundTaskId ? ' Leave out taskId to block the task you are working on, when you cannot go on without a person, and say why in your reply.' : ''}`,
+      inputSchema: z.object({ taskId: taskIdField }),
       handler: (args) => {
-        const taskId = optStr(args['taskId']) || blockDefault || ''
+        const taskId = taskOf(args)
         const denied = outOfTeam(taskId)
         if (denied) return denied
         if (teamRun && getTask(db, taskId)?.assigneeAgentId !== boundAgentId)

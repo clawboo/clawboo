@@ -37,6 +37,7 @@ import { eq, like } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { runsOnTaskRunner } from '../lib/runnerRoute'
 import { chatClearedAt } from '../lib/teamChat/chatCleared'
+import { queueGatewayAborts } from '../lib/teamChat/gatewayRunAborts'
 import { nativeTeamSessionKeysForRoomLike } from '../lib/teamChat/nativeTeamSession'
 import { retireRoomOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { getTenantId } from '../lib/tenant'
@@ -274,7 +275,13 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     // engine left reads tasks with no room, so where they are, Retry, Assign and
     // a reply would start nothing. The task runner's own tasks move unstopped,
     // as the Stop leaves them: the runner reruns them.
-    const moved = moveArchivedRoomTasks(db, { roomId, skip: (t) => runsOnTaskRunner(db, t) })
+    const { moved, closedRuns } = moveArchivedRoomTasks(db, {
+      roomId,
+      skip: (t) => runsOnTaskRunner(db, t),
+    })
+    // A run still open here had no engine to stop it (one a previous server left),
+    // so an OpenClaw one may still be going in the Gateway.
+    queueGatewayAborts(db, closedRuns)
     if (resuming && moved.length === 0) {
       res.status(404).json({ error: 'room not found' })
       return
