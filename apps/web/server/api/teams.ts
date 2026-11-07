@@ -8,6 +8,7 @@ import {
   teams,
   agents,
   settings,
+  teamAgentWakesSettingKey,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
@@ -268,6 +269,7 @@ export function teamsPATCH(req: Request, res: Response): void {
 // behind in the key/value store:
 //   - `team-rules:<teamId>`     — user-captured rules
 //   - `team-onboarding:<teamId>` — onboarding flags + user intro text
+//   - `team-agent-wakes:<teamId>`: may its agents wake each other without asking
 //   - `team-verify-command:<teamId>`: the check the verification gate runs
 //   - `native-team-session:<agentId>:<teamId>` — native leader session-resume
 //     pointers (one per team member; the amnesia-fix continuity handles), and the
@@ -301,6 +303,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
           `team-rules:${teamId}`,
           `team-onboarding:${teamId}`,
           teamVerifyCommandSettingKey(teamId),
+          teamAgentWakesSettingKey(teamId),
           chatClearedSettingKey(teamId),
         ]),
       )

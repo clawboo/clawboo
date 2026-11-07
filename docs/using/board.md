@@ -126,19 +126,22 @@ Cards are neutral: color appears only in the status marks, and amber marks what 
 - **Approvals**: an agent wants to run a command, use a risky tool, or make a risky handoff. Answer them on their card. See [Approvals](/using/approvals).
 - **Tasks that will not move by themselves**. Each card says why in amber, with the reason the run recorded when there is one, and shows the agent.
 
-| Badge                       | What happened                                                                 |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| **Failed**                  | The last run ended in an error                                                |
-| **Sign-in failed**          | The runtime's key or login was refused, missing or expired                    |
-| **Billing problem**         | The provider refused the account: no credit, a hold or a pending verification |
-| **Timed out**               | The agent stopped responding and its run was ended                            |
-| **Stopped**                 | You pressed **Stop** on its run. It never restarts by itself                  |
-| **Needs review**            | Verification could not pass it                                                |
-| **Blocked**                 | An agent marked it blocked. The card says what it needs                       |
-| **Waiting for your answer** | An agent asked you a question and stopped. The card has the answer controls   |
-| **Assigned to you**         | The task is yours, or an agent handed it back to you and says what it needs   |
-| **Unassigned**              | No agent is bound to it, so nobody will pick it up                            |
-| **Not started**             | It is in In progress with no agent, so no run is going                        |
+| Badge                       | What happened                                                                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| **Failed**                  | The last run ended in an error                                                                                                            |
+| **Sign-in failed**          | The runtime's key or login was refused, missing or expired                                                                                |
+| **Billing problem**         | The provider refused the account: no credit, a hold or a pending verification                                                             |
+| **Timed out**               | The agent stopped responding and its run was ended                                                                                        |
+| **Stopped**                 | You pressed **Stop** on its run. It never restarts by itself                                                                              |
+| **Needs review**            | Verification could not pass it                                                                                                            |
+| **Blocked**                 | An agent marked it blocked. The card says what it needs                                                                                   |
+| **Waiting for your answer** | An agent asked you a question and stopped. The card has the answer controls                                                               |
+| **Assigned to you**         | The task is yours, or an agent handed it back to you and says what it needs                                                               |
+| **Waiting for your OK**     | A teammate's comment would start this task, and you have not said yes for this job, or agents on it hit a limit. The card has the buttons |
+| **Unassigned**              | No agent is bound to it, so nobody will pick it up                                                                                        |
+| **Not started**             | It is in In progress with no agent, so no run is going                                                                                    |
+
+A **Waiting for your OK** card asks whether agents may wake each other on this job. **Allow on this job** covers the task and everything under it, and starts what was waiting. **Always allow in this team** also stops asking for the team's other jobs. **No** keeps the comments on the thread and starts nothing, and you are not asked again on this job. A team shows one such card at a time: when other tasks wait on the same answer the card says how many, and your answer covers them too. The same card comes back as **Let them carry on** or **No more on this job** when agents on the job have started each other 12 times in an hour, or two of them keep answering each other, on one job or across several. A pause for the hourly limit also ends by itself when the hour is over. A card goes away by itself once no comment is waiting on it, for example when a run on the task took the comment. A comment from you always wakes the agent, whatever the card says. To change the team's setting later, open the team's settings, under **Agents waking each other**.
 
 When several runs in a row failed, the badge counts them, for example **Failed 2×**. Each card has one button for the next step, and a **More** menu (the three dots) with the rest.
 

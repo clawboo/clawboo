@@ -9,6 +9,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { tasks, type DbTask } from '../schema'
+import { agentWakeCardsForTasks } from './agentWakes'
 import { getTask, listExecutionsForTasks } from './repository'
 
 /** A stored verdict exists and cannot be promoted to done. An absent or
@@ -42,6 +43,7 @@ export function attentionForTasks(
       )
       .map((t) => t.id),
   )
+  const cards = agentWakeCardsForTasks(db, rows)
   const out = new Map<string, TaskAttention | null>()
   for (const t of rows) {
     out.set(
@@ -56,6 +58,7 @@ export function attentionForTasks(
         runnerBound: t.runnerInputs != null,
         waitingOn: t.waitingOn,
         assigneePersonId: t.assigneePersonId,
+        agentWakes: cards.get(t.id) ?? null,
       }),
     )
   }

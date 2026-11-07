@@ -32,6 +32,7 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | POST   | `/api/board/:taskId/assign-person`        | Give a task to a person, or take a person off                 | No      |
 | GET    | `/api/board/:taskId/questions`            | The questions agents asked on a task                          | No      |
 | POST   | `/api/board/questions/:questionId/answer` | A person answers a question                                   | No      |
+| POST   | `/api/board/agent-wakes/:jobTaskId`       | A person answers the card about agents waking each other      | No      |
 | GET    | `/api/board/inbox`                        | What is unread and what needs the person, for the badge       | No      |
 | POST   | `/api/board/inbox/read`                   | Mark everything read, or one team's tasks                     | No      |
 | POST   | `/api/board/:taskId/read`                 | Mark one task read, through the change the page showed        | No      |
@@ -165,7 +166,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 }
 ```
 
-`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `needs_review` when it waits on a check, else `blocked`), unless it waits on another task or on its own sub-tasks: then it has none. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
+`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A `blocked` task whose agent's comment still waits on the card about agents waking each other is `agent_wakes`, with `agentWakes: { jobTaskId, kind, fromAgentId, toAgentId, alsoWaiting? }`. `alsoWaiting` counts the other tasks that wait on the same answer, and a card nothing waits on any more is not shown. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `needs_review` when it waits on a check, else `blocked`), unless it waits on another task or on its own sub-tasks: then it has none. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
 
 `runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource` `'reported'` or `'local'`; a row with a null source counts as an estimate. `local: true` appears only when every counted row is `'local'`, a run on a model the user's own Ollama served, and the board then shows the cost as `free`. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
@@ -388,6 +389,25 @@ Gives a task nobody is working on to a person. It takes any agent off it, includ
 ## `GET /api/board/:taskId/questions`
 
 The questions agents asked on a task, oldest first: `{ questions: DbTaskQuestion[] }`. See [`task_questions`](/reference/database-schema#task_questions).
+
+## `POST /api/board/agent-wakes/:jobTaskId`
+
+A person answers the card about agents waking each other on a job. Yes also starts the job's hour and the two agents' count again, which lifts a pause, and starts what was waiting. An answer to the first ask also covers the other tasks waiting on it (`alsoWaiting`). No Tasks tool can do this.
+
+**A person's route**, like `reopen`.
+
+- **Path param**: `jobTaskId`: the job's task, from `attention.agentWakes.jobTaskId`.
+- **Request body**:
+
+```ts
+{
+  decision: 'job' | 'team' | 'no' // on this job; always in this team; no on this job
+}
+```
+
+**`200 OK`**: `{ ok: true, task: DbTask, attention: TaskAttention | null }`, for the task the card showed on.
+
+**`400 Bad Request`**: a wrong body. **`404 Not Found`**: no such task. **`409 Conflict`**: `{ "ok": false, "error": "no_card" }` when no card is up or nothing waits on it any more, so a second press changes nothing, or `"no_team"` for `team` on a job with no team.
 
 ## `POST /api/board/questions/:questionId/answer`
 

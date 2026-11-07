@@ -138,6 +138,8 @@ A hand-off tool call that names no teammate in the chat, or the agent itself, st
 
 A teammate on a team chat run can also mark its own task blocked, and must say what it waits on: a person and what they must do, another task, or its own sub-tasks. Waiting on a person, the card shows in Needs you as **Blocked** with what is needed. The teammate's reply is kept as its comment, and whoever handed it off is told the task needs a person. Steps waiting on it are not cancelled, so a **Retry** carries the plan on. A task waiting on other work stays out of Needs you, and goes back to the queue when that work is done, and whoever handed it off is told not to redo it. If that work is cancelled, it comes to Needs you instead. A wait that could not end, such as one on work in the Backlog or on a task that needs this one first, is refused when the teammate asks for it.
 
+A teammate can also comment on another's task. If that task is Blocked on what its agent said it needs, the comment can start it, once you have allowed that on the job. See [What wakes an agent](/concepts/the-board#what-wakes-an-agent).
+
 A teammate that needs a person to settle something can ask them, with `ask_person`: a question, a yes or no, or a list of tasks to accept or edit. The task waits in Needs you as **Waiting for your answer**, and the run ends. Whoever handed it off is told it waits on an answer, so it is not redone or handed out again, and that stays true if the run then fails. Your answer starts the teammate again, with the answer on the task's thread. A teammate can also hand its task back to the person who asked for it, saying what they must do. A run from a scheduled routine does not ask: its person may be away, so it assumes and says so.
 
 ## Stop, and your own moves

@@ -32,6 +32,7 @@ import {
   parseQuestionPayload,
   releaseTask,
   resolveTaskRef,
+  saveAgentCommentWake,
   setTaskDelegator,
   TaskDependencyCycleError,
   taskStatusSchema,
@@ -44,6 +45,7 @@ import {
   type DbTask,
   type DbTaskQuestion,
   type GuardedCreateResult,
+  type AgentCommentWake,
   type QuestionAnswer,
   type QuestionKind,
   type QuestionPayload,
@@ -109,6 +111,22 @@ function statusWriteResult(r: UpdateStatusResult, verb: string): McpToolResult {
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+
+/** What became of a comment on a teammate's task, in words the model can act on: it
+ *  must not stop and wait for someone a person has not allowed it to wake. */
+function agentCommentWakeNote(
+  wake: AgentCommentWake,
+): { state: string; agent: string; note: string } | null {
+  if (wake.state === 'none') return null
+  return {
+    state: wake.state,
+    agent: wake.agentId,
+    note:
+      wake.state === 'declined'
+        ? 'A person said agents do not wake each other on this job. It reads this in its next run on the task, whenever that is.'
+        : 'It reads this in its next run on the task, whenever that is. Nothing tells a run going now, and a person may have to allow it before this starts anything. Do not wait for a reply.',
+  }
+}
 
 /** Statuses a task only enters waiting for something, so an agent must say what. */
 const WAITING_STATUSES = new Set(['blocked', 'in_review'])
@@ -966,21 +984,20 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         // speaking as the person or the engine to whoever runs the task next.
         const unverified = opts?.unverifiedCaller === true
         const asSelf = unverified || boundAgentId !== undefined
-        return jsonResult(
-          addComment(
-            db,
-            taskId,
-            str(args['body']),
-            asSelf
-              ? 'agent'
-              : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ??
-                  'agent'),
-            unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
-            // Written through a Tasks session bound to its agent. Only that may ever
-            // count as the agent's own words; no comment wakes anyone from here today.
-            boundAgentId !== undefined && !unverified ? { kind: 'agent' } : {},
-          ),
+        const comment = addComment(
+          db,
+          taskId,
+          str(args['body']),
+          asSelf
+            ? 'agent'
+            : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ?? 'agent'),
+          unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
+          // Written through a Tasks session bound to its agent. Only that may ever count
+          // as the agent's own words, so only that may wake a teammate.
+          boundAgentId !== undefined && !unverified ? { kind: 'agent' } : {},
         )
+        const wake = agentCommentWakeNote(saveAgentCommentWake(db, taskId, comment))
+        return jsonResult({ ...comment, ...(wake ? { wake } : {}) })
       },
     },
     {

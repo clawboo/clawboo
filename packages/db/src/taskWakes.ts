@@ -26,6 +26,7 @@ import {
 import { and, asc, eq, getTableColumns, inArray, isNull, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
+import { clearAgentWakeChainsTx } from './board/agentWakeState'
 import { immediateWrite, withWriteRetry, type BoardTx } from './board/contention'
 import { emitBoardLifecycle } from './board/events'
 import { readyOrder } from './board/readyOrder'
@@ -67,6 +68,7 @@ export function recordTaskWakeTx(
   input: RecordTaskWakeInput,
   now: number,
 ): { id: string; merged: boolean; startsAfresh?: boolean } {
+  if (wakeFromPerson(input.reason)) clearAgentWakeChainsTx(tx, input.teamId, input.agentId, now)
   const waiting = tx
     .select()
     .from(taskWakes)

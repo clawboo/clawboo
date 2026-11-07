@@ -23,6 +23,7 @@ export const ANNOUNCED_REASONS = [
   'needs_review',
   'question',
   'assigned',
+  'agent_wakes',
 ] as const
 export type AnnouncedReason = (typeof ANNOUNCED_REASONS)[number]
 
@@ -264,6 +265,7 @@ const WHAT_HAPPENED: Record<AnnouncedReason, string> = {
   needs_review: 'did not pass its checks',
   question: 'has a question for you',
   assigned: 'was handed back to you',
+  agent_wakes: 'needs your OK for agents to wake each other',
 }
 
 /** What an agent waiting on an approval wants to do, in plain words. */

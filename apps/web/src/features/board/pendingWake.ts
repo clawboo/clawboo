@@ -65,6 +65,12 @@ export function pendingWakeText(wake: PendingWake, name: string): string {
       return `This task is with a person. ${name} reads ${what} when it is given back`
     case 'question':
       return `${name} reads ${what} when its question is answered`
+    case 'ask_once':
+      return `Waiting for your OK in Needs you: agents may not wake each other on this job until you say`
+    case 'hourly_cap':
+      return `Agents on this job have started each other too often this hour. It goes when the hour is over, or when you let them carry on`
+    case 'back_and_forth':
+      return `${name} and a teammate keep waking each other. It goes when you let them carry on, or comment`
     case 'backlog':
       return `In Backlog. Move it to To do to send ${what} to ${name}`
     case 'no_agent':

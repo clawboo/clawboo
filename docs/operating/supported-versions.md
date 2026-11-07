@@ -59,6 +59,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | Readable task ids                                   | `board.readableIds`                                                         |
 | Team labels on tasks                                | `board.labels`                                                              |
 | Agents that wake on what happens to their task      | `board.wakes`                                                               | Supported                      | Planned     | Planned       |
+| Agents waking each other, once you allow it         | `board.agentWakes`                                                          | Supported                      |
 | Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                  | Supported                      | Planned     | Planned       |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                       | Supported                      | Planned     | Planned       |
 | Agent browser screenshots                           | `agent.screenshots`                                                         | Supported                      | Planned     | Planned       |

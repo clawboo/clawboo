@@ -9,16 +9,22 @@
 
 import type { Request, Response } from 'express'
 
+import type { AgentWakeChoice } from '@clawboo/board-core'
 import {
   addComment,
+  agentCommentWakesOfJob,
+  agentWakesBody,
   answerForAgent,
   answerQuestion,
   answerWords,
   askedWords,
   answerQuestionBody,
+  appendAudit,
   assignPersonBody,
   assignTaskToPerson,
   attentionForTask,
+  decideAgentWakes,
+  emitBoardLifecycle,
   getQuestion,
   getTask,
   listExecutions,
@@ -26,6 +32,7 @@ import {
   noteBlockedReason,
   parsePersonJson,
   parseQuestionPayload,
+  readAgentWakeGate,
   reopenTask,
   reopenTaskBody,
   runOwnWrite,
@@ -52,7 +59,7 @@ import {
   type SavePersonWakeDeps,
 } from '../lib/teamChat/personWake'
 import { engineRefusal } from '../lib/teamChat/roomRoster'
-import type { TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
+import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 
 const log = createLogger('board-person')
@@ -274,6 +281,72 @@ export function boardQuestionsGET(req: Request, res: Response): void {
     res.json({ questions: listTaskQuestions(db, taskId) })
   } catch (err) {
     res.status(500).json({ error: String(err) })
+  }
+}
+
+// ─── POST /api/board/agent-wakes/:jobTaskId ──────────────────────────────────
+// What a person pressed on the card about agents waking each other on a job: allow it
+// on this job, always in this team, or no. A yes also lifts a pause, and starts what
+// was waiting for it. No Tasks tool can answer it: the agents are who it is about.
+const AGENT_WAKES_NOTE: Record<AgentWakeChoice, string> = {
+  job: 'Agents may wake each other on this job.',
+  team: 'Agents may wake each other in this team, without asking.',
+  no: 'Agents do not wake each other on this job.',
+}
+
+export function boardAgentWakesPOST(req: Request, res: Response): void {
+  try {
+    if (refuseUnlessDashboard(req, res)) return
+    const parsed = agentWakesBody.safeParse(req.body)
+    if (!parsed.success) {
+      res.status(400).json({ ok: false, error: 'invalid body' })
+      return
+    }
+    const db = getDb()
+    const jobTaskId = (req.params['jobTaskId'] as string | undefined) ?? ''
+    if (!getTask(db, jobTaskId)) {
+      res.status(404).json({ ok: false, error: 'task not found' })
+      return
+    }
+    const choice = parsed.data.decision
+    const person = actingPerson(req)
+    const shownOn = readAgentWakeGate(db, jobTaskId)?.cardTaskId ?? jobTaskId
+    const result = runOwnWrite(db, ownWriterOf(req), shownOn, () => {
+      const decided = decideAgentWakes(db, jobTaskId, choice, person)
+      if (decided.ok)
+        addComment(db, shownOn, AGENT_WAKES_NOTE[choice], 'user', null, { person, kind: 'note' })
+      return decided
+    })
+    if (!result.ok) {
+      res.status(409).json({ ok: false, error: result.reason })
+      return
+    }
+    const task = getTask(db, shownOn)
+    appendAudit(db, {
+      eventType: 'board',
+      taskId: shownOn,
+      teamId: task?.teamId ?? null,
+      summary: { agentWakes: choice, jobTaskId: result.jobTaskId, ...personField(req) },
+    })
+    // Start what waited on this answer, as far as this request can. The pump's next pass
+    // does the rest, which its own event brings within seconds.
+    if (choice !== 'no')
+      for (const row of result.jobTaskIds.flatMap((job) => agentCommentWakesOfJob(db, job))) {
+        try {
+          pumpTaskWakeNow(db, row.taskId, pumpDeps(db, req, row.taskId))
+        } catch (err) {
+          log.error({ err, taskId: row.taskId }, 'starting a teammate’s wake failed')
+        }
+        emitBoardLifecycle({
+          kind: 'task_wake_recorded',
+          taskId: row.taskId,
+          teamId: row.teamId,
+          reason: 'agent_comment',
+        })
+      }
+    res.json({ ok: true, task: getTask(db, shownOn), attention: attentionForTask(db, shownOn) })
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) })
   }
 }
 

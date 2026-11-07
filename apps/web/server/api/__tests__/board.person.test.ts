@@ -8,6 +8,7 @@ import path from 'node:path'
 
 import { encodeHumanAssignment, parseWaitingOn } from '@clawboo/board-core'
 import {
+  addComment,
   agents,
   archiveRoom,
   askQuestion,
@@ -21,10 +22,16 @@ import {
   getTask,
   handBackTask,
   linkDep,
+  listEvents,
   listTaskQuestions,
   listUndeliveredInbox,
   listWaitingTaskWakes,
+  noteTaskWakeSkip,
   LOCAL_READER,
+  openAgentWakeCard,
+  readAgentWakeGate,
+  readTeamAlwaysAllow,
+  saveAgentCommentWake,
   setTaskRunnerInputs,
   taskReadStates,
   teams,
@@ -72,8 +79,14 @@ const {
   boardListGET,
   boardRetryPOST,
 } = await import('../board')
-const { boardAssignPersonPOST, boardQuestionAnswerPOST, boardQuestionsGET, boardReopenPOST } =
-  await import('../boardPerson')
+const {
+  boardAgentWakesPOST,
+  boardAssignPersonPOST,
+  boardQuestionAnswerPOST,
+  boardQuestionsGET,
+  boardReopenPOST,
+} = await import('../boardPerson')
+const { teamAgentWakesGET, teamAgentWakesPUT } = await import('../teamAgentWakes')
 
 /** What the routes answer, as far as these tests read it. */
 interface RouteBody {
@@ -626,6 +639,135 @@ describe('a person’s writes on the board', () => {
       )
       expect(n.body().delivery).toMatchObject({ status: 'not-delivered', reason: 'unassigned' })
       expect(getTask(db, own.id)?.assigneePersonId).toBe('local')
+    })
+  })
+
+  describe('POST /api/board/agent-wakes/:jobTaskId', () => {
+    /** A task with the card up: an agent wants to wake its agent. */
+    function asking(): string {
+      const db = getDb()
+      const t = createTask(db, {
+        title: 'Parked',
+        teamId: TEAM,
+        status: 'todo',
+        sourceDelegationId: BOUND,
+      })
+      claimTask(db, t.id, 'a1')
+      updateStatus(db, t.id, 'blocked', {
+        waitingOn: { kind: 'person', need: 'A key', by: 'agent' },
+      })
+      saveAgentCommentWake(
+        db,
+        t.id,
+        addComment(db, t.id, 'Here it is', 'agent', 'a2', { kind: 'agent' }),
+      )
+      openAgentWakeCard(db, { taskId: t.id, kind: 'ask', fromAgentId: 'a2', toAgentId: 'a1' })
+      return t.id
+    }
+    const press = async (
+      jobTaskId: string,
+      decision: string,
+      headers: Record<string, string> = DASHBOARD,
+    ) => {
+      const m = mockRes()
+      await boardAgentWakesPOST(req({ params: { jobTaskId }, headers, body: { decision } }), m.res)
+      return m
+    }
+
+    it('works only for a request the dashboard’s page sent', async () => {
+      const id = asking()
+      const m = await press(id, 'job', {})
+      expect(m.statusCode()).toBe(403)
+      expect(m.body().error).toBe('dashboard_only')
+      expect(readAgentWakeGate(getDb(), id)?.decision).toBeNull()
+    })
+
+    it('yes on this job: starts the wake that waited, and records who said so', async () => {
+      const id = asking()
+      const m = await press(id, 'job')
+      expect(m.statusCode()).toBe(200)
+      const db = getDb()
+      expect(readAgentWakeGate(db, id)).toMatchObject({ decision: 'allow', cardKind: null })
+      expect(getTask(db, id)?.status).toBe('todo')
+      expect(listEvents(db, { kinds: ['status_changed'] }).at(-1)?.data).toContain('wake')
+      expect(getComments(db, id).some((c) => c.body.includes('wake each other on this job'))).toBe(
+        true,
+      )
+      expect(taskReadStates(db, LOCAL_READER, { taskId: id }).get(id)?.unread).toBe(false)
+    })
+
+    it('a yes starts the other jobs waiting on the same answer too', async () => {
+      const id = asking()
+      const behind = asking()
+      const db = getDb()
+      noteTaskWakeSkip(db, listWaitingTaskWakes(db, { taskId: behind })[0]!.id, 'ask_once')
+      expect(attentionForTask(db, id)?.agentWakes?.alsoWaiting).toBe(1)
+      expect((await press(id, 'job')).statusCode()).toBe(200)
+      expect(readAgentWakeGate(db, behind)?.decision).toBe('allow')
+      expect(getTask(db, id)?.status).toBe('todo')
+      expect(getTask(db, behind)?.status).toBe('todo')
+    })
+
+    it('always in this team: sets the team’s setting, for the next job too', async () => {
+      const id = asking()
+      expect((await press(id, 'team')).statusCode()).toBe(200)
+      expect(readTeamAlwaysAllow(getDb(), TEAM)).toBe(true)
+    })
+
+    it('no: closes the wake, and the task stays as it was', async () => {
+      const id = asking()
+      expect((await press(id, 'no')).statusCode()).toBe(200)
+      const db = getDb()
+      expect(readAgentWakeGate(db, id)?.decision).toBe('deny')
+      expect(listWaitingTaskWakes(db, { taskId: id })).toEqual([])
+      expect(getTask(db, id)?.status).toBe('blocked')
+      expect(attentionForTask(db, id)?.reason).toBe('blocked')
+      // Their own answer, with nothing moved after it, is not news to them.
+      expect(taskReadStates(db, LOCAL_READER, { taskId: id }).get(id)?.unread).toBe(false)
+    })
+
+    it('a second press answers nothing, and a wrong word is refused', async () => {
+      const id = asking()
+      expect((await press(id, 'maybe')).statusCode()).toBe(400)
+      await press(id, 'no')
+      const again = await press(id, 'job')
+      expect(again.statusCode()).toBe(409)
+      expect(again.body().error).toBe('no_card')
+      expect(readAgentWakeGate(getDb(), id)?.decision).toBe('deny')
+    })
+  })
+
+  describe('the team’s setting', () => {
+    const put = (body: unknown, headers: Record<string, string> = DASHBOARD) => {
+      const m = mockRes()
+      teamAgentWakesPUT(req({ params: { teamId: TEAM }, headers, body }), m.res)
+      return m
+    }
+
+    it('reads off by default, and a person can turn it on and off', () => {
+      const read = mockRes()
+      teamAgentWakesGET(req({ params: { teamId: TEAM } }), read.res)
+      expect(read.body()).toMatchObject({ always: false })
+      expect(put({ always: true }).statusCode()).toBe(200)
+      expect(readTeamAlwaysAllow(getDb(), TEAM)).toBe(true)
+      expect(put({ always: false }).statusCode()).toBe(200)
+      expect(readTeamAlwaysAllow(getDb(), TEAM)).toBe(false)
+    })
+
+    it('only the dashboard’s page may change it', () => {
+      const m = put({ always: true }, {})
+      expect(m.statusCode()).toBe(403)
+      expect(readTeamAlwaysAllow(getDb(), TEAM)).toBe(false)
+    })
+
+    it('refuses an unknown team and a wrong body', () => {
+      const m = mockRes()
+      teamAgentWakesPUT(
+        req({ params: { teamId: 'nope' }, headers: DASHBOARD, body: { always: true } }),
+        m.res,
+      )
+      expect(m.statusCode()).toBe(404)
+      expect(put({ always: 'yes' }).statusCode()).toBe(400)
     })
   })
 

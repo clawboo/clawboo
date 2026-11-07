@@ -10,7 +10,16 @@ import type { AddressInfo } from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 
-import { askQuestion, claimTask, createTask, getTask, listTaskQuestions } from '@clawboo/db'
+import {
+  askQuestion,
+  claimTask,
+  createTask,
+  getTask,
+  listTaskQuestions,
+  openAgentWakeCard,
+  readAgentWakeGate,
+  readTeamAlwaysAllow,
+} from '@clawboo/db'
 import express from 'express'
 import { SignJWT, type JWK } from 'jose'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -21,7 +30,9 @@ const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const { attachIdentity } = await import('../../lib/auth')
 const { createAssertionVerifier } = await import('../../lib/proxyIdentity/verifier')
 const { createProxyIdentityLane } = await import('../../lib/proxyIdentity/lane')
-const { boardQuestionAnswerPOST, boardReopenPOST } = await import('../boardPerson')
+const { boardAgentWakesPOST, boardQuestionAnswerPOST, boardReopenPOST } =
+  await import('../boardPerson')
+const { teamAgentWakesPUT } = await import('../teamAgentWakes')
 
 const ed = generateKeyPairSync('ed25519')
 const config = {
@@ -88,6 +99,8 @@ describe('a person’s writes in `required` mode', () => {
     app.post('/api/board/:taskId/reopen', (req, res) => {
       void boardReopenPOST(req, res)
     })
+    app.post('/api/board/agent-wakes/:jobTaskId', boardAgentWakesPOST)
+    app.put('/api/team-agent-wakes/:teamId', teamAgentWakesPUT)
     server = http.createServer(app)
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
@@ -154,6 +167,30 @@ describe('a person’s writes in `required` mode', () => {
     expect(res.status).toBe(200)
     const q = listTaskQuestions(getDb(), taskId)[0]
     expect(JSON.parse(q?.answeredBy ?? '{}')).toEqual({ id: 'user-42', name: 'Ada', role: 'admin' })
+  })
+
+  it('refuses an answer about agents waking each other with no verified person', async () => {
+    const db = getDb()
+    const t = createTask(db, { title: 'Parked', status: 'todo' })
+    openAgentWakeCard(db, { taskId: t.id, kind: 'ask', fromAgentId: 'a', toAgentId: 'b' })
+    const res = await fetch(`${base}/api/board/agent-wakes/${t.id}`, {
+      method: 'POST',
+      headers: DASHBOARD,
+      body: JSON.stringify({ decision: 'job' }),
+    })
+    expect(res.status).toBe(401)
+    expect(readAgentWakeGate(db, t.id)?.decision).toBeNull()
+    expect(readAgentWakeGate(db, t.id)?.cardKind).toBe('ask')
+  })
+
+  it('refuses the team’s setting with no verified person', async () => {
+    const res = await fetch(`${base}/api/team-agent-wakes/some-team`, {
+      method: 'PUT',
+      headers: DASHBOARD,
+      body: JSON.stringify({ always: true }),
+    })
+    expect(res.status).toBe(401)
+    expect(readTeamAlwaysAllow(getDb(), 'some-team')).toBe(false)
   })
 
   it('refuses a Reopen with no verified person too', async () => {

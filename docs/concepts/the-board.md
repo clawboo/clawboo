@@ -111,11 +111,16 @@ Clawboo saves a reply as a wake on the task before it does anything else, so a r
 
 An agent starts on its task the moment something happens on it, rather than at the next scan:
 
-- **Your comment.** Only a comment from you, sent from the dashboard, wakes an agent. An agent's comment wakes no one, and neither do the notes Clawboo writes itself.
+- **Your comment.** A comment from you, sent from the dashboard, always wakes an agent, at once. The notes Clawboo writes itself wake no one.
+- **A teammate's comment, once you allow it.** An agent can start a teammate with a comment when the teammate's task is Blocked on something the teammate said it needs. The first time that would happen on a job, Needs you asks **Allow on this job**, **Always allow in this team**, or **No**. Until you say yes, the comment waits on the task and nothing starts. A job is a task and everything under it. A team has one of these cards up at a time: other tasks that would ask wait behind it, the card says how many, and your answer covers them too, so a lead handing work to several helpers asks you once.
 - **A task it waits on finishing.** When a dependency moves to Done on any path, a task waiting on it that is bound to an agent starts within seconds. A task with no agent bound stays put. A Done written by a [stdio MCP bin](/operating/mcp-servers#the-stdio-bins) reaches the server at its next scan instead, up to a minute later, because a bin is a separate process.
 - **All of its hand-offs closing.** This is the [report](/concepts/delegation-and-orchestration) to whoever handed the work off: it says when everything they handed off is in and which of those need you, or, when a task they handed off will not start without you (stopped, parked after failing, moved to Backlog), that it is not all in.
 
 An `@` mention in a comment is text: it wakes no one, and the comment still goes only to the task's own agent.
+
+Agents waking each other have limits, whatever you allowed. A job's agents can start each other 12 times an hour, then the next one waits and Needs you says so. Two agents answering each other are stopped after 4 wakes in a row, on one job or across a team's jobs, and that shows in Needs you too. The count starts again once they have been quiet for an hour, when you let them carry on, or when you comment to either of them. Runs that show no progress back off. A budget comes before all of this: with a cap reached you are not asked, and the wake waits for the cap.
+
+A teammate's comment never ends a question, a task handed back to you, a failed run or a check: those stay yours. Nor does it end a wait on another task or on sub-tasks, which end when that work does: the comment stays on the thread and wakes nothing. Clawboo does not pass a teammate's comment into a run that is going. That run sees it only if it reads the task, and otherwise the agent reads it in a later run. A task the task runner runs reads it from its mailbox when its next run starts.
 
 A task has one live run at a time. A wake that arrives while a run is waiting for a slot, while a check is under way, or while a fix round is about to go out joins that run instead of starting a second one. Until Clawboo can prove a run is alive, a wake does not count on it: it keeps waiting until the run is cleared, and then starts its own. Every wake that waits says why, in the task drawer and in the [activity log](/reference/events-and-errors#task_wake_skipped).
 

@@ -875,6 +875,34 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_task_wakes_pending ON task_wakes (settled_at, carried_exec_id);
     CREATE INDEX IF NOT EXISTS idx_task_wakes_task ON task_wakes (task_id);
 
+    CREATE TABLE IF NOT EXISTS agent_wake_gates (
+      job_task_id        TEXT    PRIMARY KEY,
+      team_id            TEXT,
+      decision           TEXT,
+      decided_by         TEXT,
+      decided_at         INTEGER,
+      card_kind          TEXT,
+      card_task_id       TEXT,
+      card_from_agent_id TEXT,
+      card_to_agent_id   TEXT,
+      card_at            INTEGER,
+      window_started_at  INTEGER,
+      window_count       INTEGER NOT NULL DEFAULT 0,
+      updated_at         INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_gates_card ON agent_wake_gates (card_task_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_wake_gates_team ON agent_wake_gates (team_id);
+
+    CREATE TABLE IF NOT EXISTS agent_wake_chains (
+      team_key           TEXT    NOT NULL,
+      agent_a            TEXT    NOT NULL,
+      agent_b            TEXT    NOT NULL,
+      last_from_agent_id TEXT,
+      chain_count        INTEGER NOT NULL DEFAULT 0,
+      updated_at         INTEGER NOT NULL,
+      PRIMARY KEY (team_key, agent_a, agent_b)
+    );
+
     -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
     -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript
     -- in @clawboo/connector-catalog, this row is a configured INSTANCE, and a

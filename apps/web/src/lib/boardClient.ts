@@ -7,6 +7,7 @@
 // null/false result, never throw) and 409-aware: a claim conflict means
 // "someone else won" and MUST NOT be retried.
 
+import type { AgentWakeChoice } from '@clawboo/board-core'
 import { apiFetch } from '@clawboo/control-client'
 import type { BoardClient, BoardTask, TaskDetail, ExecutionRef } from '@clawboo/team-orchestration'
 
@@ -472,6 +473,14 @@ export type QuestionAnswerInput =
   | { text: string }
   | { confirmed: boolean }
   | { accepted: boolean; tasks?: Array<{ title: string; description?: string }> }
+
+/** A person's answer about agents waking each other on a job. */
+export function decideAgentWakes(
+  jobTaskId: string,
+  decision: AgentWakeChoice,
+): Promise<HandOffResult> {
+  return postHandOff(`/api/board/agent-wakes/${encodeURIComponent(jobTaskId)}`, { decision })
+}
 
 /** Answer a question an agent asked. The answer starts the task again. */
 export function answerTaskQuestion(

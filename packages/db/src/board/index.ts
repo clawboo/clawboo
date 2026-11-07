@@ -50,6 +50,7 @@ export type {
   TaskStatus,
   WaitingOn,
 } from '@clawboo/board-core'
+export * from './agentWakes'
 export * from './attention'
 export * from './attempts'
 export { deriveCreateKey } from './createDedupe'

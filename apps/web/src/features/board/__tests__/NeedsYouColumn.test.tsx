@@ -941,6 +941,38 @@ describe('NeedsYouColumn: a question and a person’s task', () => {
     await waitFor(() => expect(onTasksChanged).toHaveBeenCalled())
   })
 
+  it('the card about agents waking each other answers from the card', async () => {
+    const answers: unknown[] = []
+    server.use(
+      http.post('/api/board/agent-wakes/job1', async ({ request }) => {
+        answers.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const { onTasksChanged } = renderColumn([
+      {
+        id: 'w-task',
+        title: 'Publish the page',
+        status: 'blocked',
+        teamId: 'team1',
+        assigneeAgentId: 'a1',
+        attention: {
+          reason: 'agent_wakes',
+          failedRuns: 0,
+          agentWakes: { jobTaskId: 'job1', kind: 'ask', fromAgentId: 'a2', toAgentId: 'a1' },
+        },
+      } as BoardTask,
+    ])
+    const card = await screen.findByTestId('needs-you-task')
+    expect(card).toHaveAttribute('data-attention', 'agent_wakes')
+    expect(within(card).getByText('Waiting for your OK')).toBeInTheDocument()
+    await userEvent.click(within(card).getByRole('button', { name: 'Allow on this job' }))
+    await waitFor(() => expect(answers).toEqual([{ decision: 'job' }]))
+    await waitFor(() => expect(onTasksChanged).toHaveBeenCalled())
+    // The buttons are the action: no second one offers to do something else.
+    expect(within(card).queryByRole('button', { name: 'Retry' })).toBeNull()
+  })
+
   it('a person’s task leads with Mark done and is never unassigned', async () => {
     let moved: unknown = null
     server.use(
