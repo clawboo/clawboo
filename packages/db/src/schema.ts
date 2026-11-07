@@ -406,6 +406,9 @@ export const tasks = sqliteTable(
     // the claim, moved to a fix round's execution, and cleared when the run ends or
     // the task is let go. Null while no run holds it (a claim that opened no run).
     runExecutionId: text('run_execution_id'),
+    // A person's request from the chat: the main task the helpers' work is filed
+    // under (see board/repository.ts). It holds no run of its own and nothing fires it.
+    isMainTask: integer('is_main_task').notNull().default(0),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),

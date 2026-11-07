@@ -150,6 +150,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.readableIds': true,
     'board.labels': true,
     'board.inbox': true,
+    // Inside the engine and the board's own writes, so no route of its own: a request's
+    // main task is a row with `isMainTask`, and its work is filed under it.
+    'board.mainTasks': true,
     // Part of the board's own writes and the dispatch pump, so it has no route of its
     // own and no switch. What a comment did is in its reply's `delivery`.
     'board.wakes': true,

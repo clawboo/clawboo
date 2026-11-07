@@ -10,6 +10,8 @@
 
 import type { BoardTask } from '@/lib/boardClient'
 
+import { isMainTask } from './mainTasks'
+
 import { isSameDay, startOfDay, taskAnchor } from './calendar/calendarModel'
 
 export type FinishStatus = 'done' | 'cancelled'
@@ -77,6 +79,8 @@ export interface FinishPromptNeed {
   running: boolean
   /** Its stored check holds a move to Done. */
   failedCheck: boolean
+  /** A person's request with this many sub-tasks still open, which end with it. */
+  openSubtasks?: number
 }
 
 /** The agent whose run is working on the task right now, or null. */
@@ -92,14 +96,23 @@ export function finishNeedFor(task: BoardTask, to: FinishStatus, now: number): F
     otherDay: sitsOnOtherDay(task, now) != null,
     running: runningAgentId(task) != null,
     failedCheck: to === 'done' && verdictHoldsDone(task),
+    ...(openSubtasksOf(task) > 0 ? { openSubtasks: openSubtasksOf(task) } : {}),
   }
+}
+
+/** How many sub-tasks a person's request has open, as its row says; 0 for anything
+ *  else. */
+export function openSubtasksOf(task: BoardTask): number {
+  if (!isMainTask(task)) return 0
+  const detail = task['waitingOnDetail'] as { openSubtasks?: unknown } | null | undefined
+  return typeof detail?.openSubtasks === 'number' ? detail.openSubtasks : 0
 }
 
 /** Whether the move asks first: Cancelled always does; Done does when there is a
  *  day to pick, a run to stop or a failed check to override. */
 export function finishPromptNeeded(need: FinishPromptNeed): boolean {
   if (need.to === 'cancelled') return true
-  return need.otherDay || need.running || need.failedCheck
+  return need.otherDay || need.running || need.failedCheck || (need.openSubtasks ?? 0) > 0
 }
 
 /**

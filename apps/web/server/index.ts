@@ -23,6 +23,7 @@ import {
   reapOrphanInbox,
   listRoomsWithFireableDelegations,
   releaseFinishedSubtaskWaits,
+  listRoomsWithIdleMainTasks,
   seedBuiltinTools,
   setDashboardPorts,
 } from '@clawboo/db'
@@ -836,6 +837,9 @@ async function main() {
         // Rooms whose `[Task Update]`s a restart or an eviction left pending:
         // building the room's engine sends them again.
         for (const r of roomsWithUnheldReportUps(db))
+          wake.set(orchestratorKey(r.teamId, r.roomId), r)
+        // Rooms with a person's request whose work has closed and nobody told its lead.
+        for (const r of listRoomsWithIdleMainTasks(db))
           wake.set(orchestratorKey(r.teamId, r.roomId), r)
         // Rooms whose team-chat work check a restart cut short: building the
         // room's engine hands those tasks to a person.

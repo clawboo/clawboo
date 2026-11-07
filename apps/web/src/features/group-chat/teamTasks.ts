@@ -6,6 +6,12 @@
 // waits on a person whatever its status says. Everything else goes by status.
 
 import { taskAttentionOf, type TaskAttention } from '@/features/board/boardStatus'
+import {
+  isMainTask,
+  openUnderFinished,
+  type NestableTask,
+  type RequestNesting,
+} from '@/features/board/mainTasks'
 
 export type TaskSectionId = 'needs_you' | 'in_progress' | 'todo' | 'done' | 'cancelled'
 
@@ -49,6 +55,41 @@ export function taskSectionOf(task: GroupableTask): TaskSectionId {
       // todo, backlog, and any status the board does not know yet: waiting work.
       return 'todo'
   }
+}
+
+/**
+ * The rows a section list draws: each person's request with the work filed under it
+ * right below it, and any other task on its own. A sub-task that needs a person sits in
+ * Needs you as well, so it is never only under a folded section. `nested` says how to
+ * draw it; `request` names the request above a row that is not under its own.
+ */
+export interface TaskRowItem<T> {
+  task: T
+  nested: boolean
+  request: T | null
+}
+
+export function taskRowsOf<T extends GroupableTask & NestableTask>(
+  rows: readonly T[],
+  section: TaskSectionId,
+  nesting: RequestNesting<T>,
+): Array<TaskRowItem<T>> {
+  const out: Array<TaskRowItem<T>> = []
+  for (const task of rows) {
+    const main = nesting.mainOf(task)
+    if (main) {
+      // A sub-task is drawn under its request, unless a person must look at it, or the
+      // request says it is finished and the sub-task is still going.
+      if (section === 'needs_you' || openUnderFinished(task, main))
+        out.push({ task, nested: false, request: main })
+      continue
+    }
+    out.push({ task, nested: false, request: null })
+    if (!isMainTask(task)) continue
+    for (const sub of nesting.subtasksOf(task.id))
+      out.push({ task: sub, nested: true, request: task })
+  }
+  return out
 }
 
 /** Every section, each newest first. Empty sections are kept (with no rows) so

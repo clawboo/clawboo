@@ -11,6 +11,8 @@
 
 import { create } from 'zustand'
 
+import { isPlanHolder } from '@clawboo/board-core'
+
 import { isTerminalStatus, taskAttentionOf, type TaskAttention } from '@/features/board/boardStatus'
 import type { BoardChange } from '@/features/group-chat/boardOrchestration'
 import { boardClient } from '@/lib/boardClient'
@@ -42,6 +44,10 @@ export interface BoardTaskView {
   assigneePerson?: string | null
   /** When its check began waiting for teammates to leave the team folder. */
   checkHeldSince?: number | null
+  /** A person's main task: their request, with the helpers' work filed under it. */
+  isMainTask?: boolean
+  /** A card that only holds a plan: it does no work, so a request's progress skips it. */
+  planHolder?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -55,6 +61,7 @@ export type BoardChangeFrame = BoardChange & {
   waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
   assigneePersonId?: string | null
   assigneePerson?: string | null
+  planHolder?: boolean
 }
 
 function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame): BoardTaskView {
@@ -91,6 +98,8 @@ function mergeTask(existing: BoardTaskView | undefined, change: BoardChangeFrame
         ? change.assigneePerson
         : (existing?.assigneePerson ?? null),
     parentTaskId: change.parentTaskId ?? existing?.parentTaskId ?? null,
+    isMainTask: change.isMainTask ?? existing?.isMainTask ?? false,
+    planHolder: change.planHolder ?? existing?.planHolder ?? false,
     // summary is additive — a later non-summary change must not erase it.
     summary: change.summary ?? (reopened ? null : (existing?.summary ?? null)),
     // Like the verdict below: what the frame said, else the old one holds only while
@@ -165,6 +174,10 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
               typeof r['assigneePersonId'] === 'string' ? r['assigneePersonId'] : null,
             assigneePerson: typeof r['assigneePerson'] === 'string' ? r['assigneePerson'] : null,
             checkHeldSince: typeof r['checkHeldSince'] === 'number' ? r['checkHeldSince'] : null,
+            isMainTask: r.isMainTask === 1 || r.isMainTask === true,
+            planHolder: isPlanHolder(
+              typeof r['sourceDelegationId'] === 'string' ? r['sourceDelegationId'] : null,
+            ),
             createdAt: r.createdAt,
             updatedAt: r.updatedAt,
           }),

@@ -163,6 +163,7 @@ export function useStatusMutation(): (input: StatusMutationInput) => Promise<Sta
             createdAt,
             runningAgent: task ? agentName(runningAgentId(task)) : null,
             failedCheck: need.failedCheck,
+            openSubtasks: need.openSubtasks ?? 0,
             now,
             weekStartsOn: weekStartsOn ?? localeWeekStart(),
           })

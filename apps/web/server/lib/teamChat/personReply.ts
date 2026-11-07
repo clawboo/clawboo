@@ -17,6 +17,8 @@
 //     it in the ticket block when the task next runs.
 //   - done or cancelled: not delivered. A person reopens it first (the Reopen route
 //     takes their comment), or starts a follow-up task for the same agent.
+// A person's main task has no run to steer or start: the words go to the agent looking
+// after it, as an update about that request, and what it hands out is filed under it.
 // A reply on a task an agent handed back gives the turn back to that agent.
 // While the engine is held, a reply that would start the task waits for the hold to
 // lift. A reply that would start the task again is refused instead, before anything
@@ -81,6 +83,9 @@ export interface ReplyDeps {
   /** Runs a write the reply causes as part of the person's own write, so it does
    *  not come back to them as news. */
   asOwnWrite?: <T>(write: () => T) => T
+  /** Pass a person's words on a main task to the agent looking after it. False when
+   *  the request is closed. */
+  commentOnRequest?: (task: DbTask, words: string) => Promise<boolean>
 }
 
 export async function deliverPersonReply(
@@ -89,6 +94,7 @@ export async function deliverPersonReply(
   comment: { id: string; body: string },
   deps: ReplyDeps,
 ): Promise<ReplyDelivery> {
+  if (task.isMainTask === 1) return deliverToRequestLead(db, task, comment.body, deps)
   const agentId = task.assigneeAgentId ?? delegationTargetOf(task.sourceDelegationId)
   if (!agentId) return { status: 'not-delivered', agentId: null, reason: 'unassigned' }
   if (task.status === 'done' || task.status === 'cancelled' || task.dropped) {
@@ -150,6 +156,35 @@ export async function deliverPersonReply(
 
   if (!wakeable || !task.teamId) return { status: 'queued', agentId, reason: 'next-run' }
   return wake(db, task, task.teamId, agentId, merged, deps)
+}
+
+/** A person's words on their request, which reach its lead as an update (durable, like
+ *  any update) and start its next turn. */
+async function deliverToRequestLead(
+  db: ClawbooDb,
+  task: DbTask,
+  words: string,
+  deps: ReplyDeps,
+): Promise<ReplyDelivery> {
+  const agentId = task.assigneeAgentId
+  if (task.status === 'done' || task.status === 'cancelled' || task.dropped)
+    return { status: 'not-delivered', agentId, reason: 'finished' }
+  const refusal = deps.startRefusal?.(task) ?? null
+  if (refusal) return { status: 'not-delivered', agentId, reason: refusal }
+  if (!agentId) return { status: 'not-delivered', agentId, reason: 'unassigned' }
+  if (!deps.commentOnRequest) return { status: 'not-delivered', agentId, reason: 'failed' }
+  const went = await deps.commentOnRequest(task, words)
+  if (!went) return { status: 'not-delivered', agentId, reason: 'finished' }
+  if (deps.held?.()) return { status: 'queued', agentId, reason: 'held' }
+  // A pause keeps the update back, and its lead reads it after the resume.
+  const refused = startRefusedByTask(db, task)
+  if (refused)
+    return {
+      status: 'queued',
+      agentId,
+      reason: refused.kind === 'archived_team' ? 'next-run' : 'paused',
+    }
+  return { status: 'woke-agent', agentId }
 }
 
 /** Start the task again for the reply, as a person's Retry does. `merged`: the reply

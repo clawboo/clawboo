@@ -181,6 +181,18 @@ export const ancestorRowSchema = z.object({
   parent_task_id: z.string().nullable(),
   title: z.string(),
   status: z.string(),
+  /** 1: a person's main task, which the depth caps skip (see `spawnDepth`). */
+  is_main_task: z.number(),
 })
 export const ancestorRowsSchema = z.array(ancestorRowSchema)
 export type AncestorRow = z.infer<typeof ancestorRowSchema>
+
+/** One task under another, from the recursive read in `subtreeOf`. */
+export const subtreeRowSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  completed_at: z.number().nullable(),
+  source_delegation_id: z.string().nullable(),
+})
+export const subtreeRowsSchema = z.array(subtreeRowSchema)
+export type SubtreeRow = z.infer<typeof subtreeRowSchema>

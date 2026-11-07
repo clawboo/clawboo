@@ -21,13 +21,14 @@
 // cascade invariants (sessionToTask 1:1, idle watchdog, reflect batching, stop-release,
 // loop breakers) are UNCHANGED — they live inside the ported engine.
 
+import { LOCAL_PERSON } from '@clawboo/board-core'
 import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   enqueueInbox,
   getActiveRoom,
+  getTask,
   listHeldReportUps,
   listPendingReportUps,
-  getTask,
   listRoomsWithEngineTasksInReview,
   listRoomsWithPendingReportUps,
   reapReportUps,
@@ -44,7 +45,6 @@ import {
   createBoardOrchestrator,
   createNudgeQueue,
   DeliveryRefusedError,
-  HUMAN_TURN,
   type BoardOrchestrator,
   type DispatchOutcome,
   type KnownAgent,
@@ -172,6 +172,10 @@ export interface TeamOrchestrator {
     to: string,
     opts?: { cancelledDependents?: Array<{ id: string; title?: string | null }> },
   ): Promise<void>
+  /** A person commented on a request's main task: their words go to the agent looking
+   *  after it, and the chat says so. False when the request is closed. See the
+   *  engine's `personCommentedOnMainTask`. */
+  personCommentedOnMainTask(taskId: string, words: string): Promise<boolean>
   /** Tear down timers + the engine (idle eviction / shutdown). */
   dispose(): void
 }
@@ -527,9 +531,18 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
           error: roomId ? 'The room has no active members.' : 'The team has no active members.',
         }
       const targetId = teamMessageTarget(db, teamId, roomId, stimulus, input.targetAgentId)!
+      // The message goes on the turn, so its first hand-off can make the main task:
+      // the verified person, else the built-in one. A routine names no person.
       const origin: TurnOrigin = input.routine
-        ? { kind: 'schedule', routineName: input.routine.name }
-        : HUMAN_TURN
+        ? {
+            kind: 'schedule',
+            routineName: input.routine.name,
+            request: { words: stimulus, routineName: input.routine.name },
+          }
+        : {
+            kind: 'human',
+            request: { words: stimulus, requestedBy: input.person ?? { ...LOCAL_PERSON } },
+          }
       // Persist the user message under the target's team key (observability seed).
       persistTeamChatEntry(db, {
         teamId,
@@ -668,6 +681,23 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
       touch()
       await ready
       await engine.personMovedTask(taskId, to, opts)
+    },
+    async personCommentedOnMainTask(taskId, words): Promise<boolean> {
+      touch()
+      await ready
+      const went = await engine.personCommentedOnMainTask(taskId, words)
+      // The lead's answer lands in the chat, which has to say what it answers.
+      const task = went ? getTask(db, taskId) : null
+      if (task?.assigneeAgentId)
+        persistTeamChatEntry(db, {
+          teamId,
+          roomId,
+          agentId: task.assigneeAgentId,
+          text: `A person commented on ${task.identifier ?? `“${task.title}”`}: ${words}`,
+          role: 'system',
+          kind: 'meta',
+        })
+      return went
     },
     signalAgent(agentId: string, text: string): void {
       const sk = buildTeamSessionKey(agentId, teamId, roomId)
@@ -964,13 +994,13 @@ export async function stopPausedRunsOf(
   const { engine, abortMap, queuedRuns, teamId } = host
   // Turns with no task, read first: stopping a task run below leaves its session
   // live and unmapped until its terminal, and it must not read as one of these. A
-  // follow-up counts under the task it reports on.
+  // follow-up counts under the task it reports on, an update under its request.
   const liveTurns = [...abortMap].filter(([sk, e]) => {
     const agentId = agentIdFromSessionKey(sk)
     return (
       agentId !== null &&
       engine.taskForSession(sk) === null &&
-      covers({ agentId, teamId, taskId: e.stamp?.reportForTaskId ?? null })
+      covers({ agentId, teamId, taskId: e.stamp?.reportForTaskId ?? e.stamp?.mainTaskId ?? null })
     )
   })
   for (const [sk, q] of [...queuedRuns]) {

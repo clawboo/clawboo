@@ -172,8 +172,27 @@ class RealCascadeBoard implements CascadeBoard {
     if (result.ok && !result.deduplicated) this.created.push(result.task)
     return result
   }
-  handOffRoom(teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null> {
-    return this.real.handOffRoom(teamId, parentTaskId)
+  handOffRoom(
+    teamId: string,
+    parentTaskId: string | null,
+    opts?: { newRequest?: boolean },
+  ): Promise<HandOffCapacity | null> {
+    return this.real.handOffRoom(teamId, parentTaskId, opts)
+  }
+  mainTaskState(taskId: string) {
+    return this.real.mainTaskState(taskId)
+  }
+  openMainTasks(teamId: string) {
+    return this.real.openMainTasks(teamId)
+  }
+  closeMainTask(taskId: string, to: 'done' | 'cancelled') {
+    return this.real.closeMainTask(taskId, to)
+  }
+  parkMainTask(taskId: string, need: string) {
+    return this.real.parkMainTask(taskId, need)
+  }
+  resumeMainTask(taskId: string) {
+    return this.real.resumeMainTask(taskId)
   }
   handOffChain(taskId: string): Promise<HandOffLink[] | null> {
     return this.real.handOffChain(taskId)

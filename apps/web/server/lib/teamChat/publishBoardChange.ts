@@ -8,6 +8,7 @@
 // whether it needs a person, so the attention read is skipped for everything
 // else; the room is one primary-key read.
 
+import { isPlanHolder } from '@clawboo/board-core'
 import {
   attentionForTask,
   getTask,
@@ -31,6 +32,8 @@ export type RoomedBoardChange = BoardChange & {
   waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
   assigneePersonId?: string | null
   assigneePerson?: string | null
+  /** A card that only holds a plan. */
+  planHolder?: boolean
 }
 
 export function publishBoardChangeWithAttention(
@@ -47,7 +50,15 @@ export function publishBoardChangeWithAttention(
   } catch {
     // Best-effort: without it the client keeps the room it already knew.
   }
-  const roomed: RoomedBoardChange = roomId === undefined ? change : { ...change, roomId }
+  const roomed: RoomedBoardChange =
+    roomId === undefined
+      ? change
+      : {
+          ...change,
+          roomId,
+          ...(row?.isMainTask === 1 ? { isMainTask: true } : {}),
+          ...(isPlanHolder(row?.sourceDelegationId) ? { planHolder: true } : {}),
+        }
   if (change.status === undefined) {
     publishBoardChange(teamId, roomed)
     return

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { PAUSED_RUN_CLASS } from '../dispatch'
 import { encodePlanHolder } from '../plans'
 import {
+  requestWaitsOn,
   subtaskNames,
   subtasksStillOut,
   subtaskStanding,
@@ -324,5 +325,40 @@ describe('subtaskStanding: a card that only holds a plan', () => {
     const step = view({ id: 'step', status: 'todo', execs: [] })
     expect(subtaskStanding(step)).toBe('coming')
     expect(subtasksStillOut(tallySubtasks([holder({ status: 'done' }), step]))).toBe(true)
+  })
+})
+
+describe('requestWaitsOn: what a person’s request waits on', () => {
+  it.each([
+    ['work that is coming', view({ status: 'in_progress', assigneeAgentId: 'a2' }), true],
+    ['work with a person', blocked({ kind: 'question', questionId: 'q' }), true],
+    ['work a failure ended, until a person decides', blocked({ kind: 'failure' }), true],
+    ['work a Stop ended', view({ status: 'todo', execs: [{ status: 'cancelled' }] }), true],
+    [
+      'an open card holding a plan, which the barrier reads as not handed out',
+      view({ status: 'blocked', sourceDelegationId: encodePlanHolder('a2', 'x') }),
+      true,
+    ],
+    [
+      'a task a person filed and has not given to anyone',
+      view({ sourceDelegationId: null, requestedBy: '{"id":"p1"}' }),
+      true,
+    ],
+    ['an agent’s note to itself', view({ sourceDelegationId: null }), false],
+    [
+      'work that needs the request closed first',
+      view({ status: 'blocked', waitingOn: { kind: 'task', taskId: 'm' }, waitsOnThisTask: true }),
+      false,
+    ],
+    ['work that is done', view({ status: 'done' }), false],
+    ['work that is cancelled', view({ status: 'cancelled' }), false],
+    ['work that was removed', view({ status: 'todo', dropped: 1 }), false],
+    [
+      'a card holding a plan, once answered',
+      view({ status: 'done', sourceDelegationId: encodePlanHolder('a2', 'x') }),
+      false,
+    ],
+  ])('%s', (_name, task, waits) => {
+    expect(requestWaitsOn(task)).toBe(waits)
   })
 })

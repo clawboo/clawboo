@@ -63,6 +63,7 @@ const ROOMS_ARCHIVED =
   'These tasks’ chat rooms were archived, so nothing can run them there. Restart Clawboo to move them to General, then try again.'
 
 const RETRY_REFUSED: Record<string, string> = {
+  main_task: 'This is your request, which runs nothing itself. Retry its sub-tasks.',
   unassigned: 'Assign an agent to this task first.',
   not_retryable: 'This task is already running or finished.',
   no_team: 'This task has no team, so no agent can run it.',
@@ -133,7 +134,11 @@ export interface TaskActions {
   markDone: (taskId: string) => Promise<boolean>
   /** Reopen a finished task, with an optional note for its agent. `onThread`: the note
    *  is a reply already saved on the task. */
-  reopen: (taskId: string, comment?: string, opts?: { onThread?: boolean }) => Promise<boolean>
+  reopen: (
+    taskId: string,
+    comment?: string,
+    opts?: { onThread?: boolean; request?: boolean },
+  ) => Promise<boolean>
 }
 
 export function useTaskActions(): TaskActions {
@@ -296,8 +301,16 @@ export function useTaskActions(): TaskActions {
   )
 
   const reopen = useCallback(
-    async (taskId: string, comment?: string, opts?: { onThread?: boolean }) => {
-      const res = await reopenTask(taskId, comment, opts)
+    async (
+      taskId: string,
+      comment?: string,
+      opts?: {
+        onThread?: boolean
+        /** It is a person's request: it waits on its lead, and does not go to To do. */
+        request?: boolean
+      },
+    ) => {
+      const res = await reopenTask(taskId, comment, opts?.onThread ? { onThread: true } : {})
       if (res.ok) {
         const missed = res.delivery?.status === 'not-delivered' ? res.delivery.reason : null
         const paused = res.delivery?.status === 'queued' && res.delivery.reason === 'paused'
@@ -305,16 +318,25 @@ export function useTaskActions(): TaskActions {
           missed
             ? {
                 type: 'info',
-                message: `Reopened. It’s back in To do, but ${
-                  comment ? 'your note did not reach an agent' : 'it could not start'
-                }: ${notDeliveredWhy(missed)}`,
+                message: opts?.request
+                  ? `Reopened, but its lead was not told: ${notDeliveredWhy(missed)}`
+                  : `Reopened. It’s back in To do, but ${
+                      comment ? 'your note did not reach an agent' : 'it could not start'
+                    }: ${notDeliveredWhy(missed)}`,
               }
             : paused
               ? {
                   type: 'info',
-                  message: 'Reopened. It’s back in To do, and starts after the resume.',
+                  message: opts?.request
+                    ? 'Reopened. Its lead takes it from here after the resume.'
+                    : 'Reopened. It’s back in To do, and starts after the resume.',
                 }
-              : { type: 'success', message: 'Reopened. The task is back in To do.' },
+              : {
+                  type: 'success',
+                  message: opts?.request
+                    ? 'Reopened. Its lead takes it from here.'
+                    : 'Reopened. The task is back in To do.',
+                },
         )
         return true
       }

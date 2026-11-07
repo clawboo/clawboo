@@ -131,6 +131,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     personMovedAt: number | null // when a person last moved the card (see PATCH below)
     runnerInputs: string | null // JSON: what the task runner ran it with; null if it never did (see retry below)
     checkHeldSince: number | null // when its team-chat check began waiting for the team folder; null otherwise
+    isMainTask: number // 1: it holds a person's request, with the helpers' work filed under it. See below
     waitingOn: string | null // JSON: what it waits for, a kind and what it points at (see below)
     assigneePersonId: string | null // the person it is assigned to; never with assigneeAgentId
     assigneePerson: string | null // JSON { id, name, role } of that person
@@ -300,6 +301,16 @@ Pauses it, and stops the runs it covers without waiting for them: the pause hold
 Resumes it, and waiting work starts again at once. `:kind` is `agent`, `team`, `task` (any task in the tree) or `task_tree`. It takes [the person check](/operating/security#the-person-check).
 
 **`200 OK`**: `{ ok: true }`. **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`. **`404 Not Found`**: `{ "ok": false, "error": "not_paused" }`.
+
+## A person's main task
+
+A row with `isMainTask: 1` holds a person's request from the chat: their words, who asked (`requestedBy`), the agent looking after it (`assigneeAgentId`), and the work filed under it (`parentTaskId`). It sits `in_progress` with `waitingOn: {"kind":"subtasks"}` until its lead's summary, and holds no run.
+
+- `POST .../retry` and `POST .../executions` answer **409** `main_task`. `POST .../assign` answers **409** `not_assignable`. `POST .../claim` answers **409** `conflict`.
+- `POST .../comments` from a person passes their words to the agent looking after it, and answers `delivery: { status: "woke-agent" }`, or `queued` with `held` while new runs are held and `paused` while a pause covers it. On a closed one it answers `not-delivered` with `finished`.
+- `POST .../reopen` moves it back to `in_progress`, not `todo`, and passes the person's words, or a line saying they reopened it, to that agent. Reopening a sub-task under a closed main task reopens the main task too.
+- `GET /api/board/:taskId` adds `subtasks`: everything filed under it, at any depth, oldest first, each with its `attention`.
+- `POST /api/board` under a closed main task, at any depth, works and opens that main task again. An agent's `create_subtask` anywhere under one answers with `main_closed`.
 
 ## `POST /api/board/:taskId/retry`
 
@@ -675,6 +686,7 @@ A `priority` of Urgent is kept only from a request that passes [the person check
 This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task. These rules hold for a request that passes [the person check](/operating/security#the-person-check):
 
 - A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (up to 5 minutes ahead of the server clock is allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
+- On a person's main task (`isMainTask: 1`), a person can only move it to `done` or `cancelled`, from any open status. Anything else, and any move by a caller that does not pass the person check, answers **409** `main_task`. Either move also cancels every open task under it, at any depth, in the same write, stops their runs, and returns them as `cancelledDependents`. A move it refuses changes none of them.
 - A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`. It frees each of their places under their parent for the [Tasks tools' child cap](/reference/mcp-tools#creation-caps).
 - A move to `backlog`, `todo`, `blocked`, `done` or `cancelled` stops the run working on the task, whether team chat, the task runner or an OpenClaw Routine fire started it, and closes its ledger row as cancelled. A move to `in_progress` or `in_review` stops nothing. A task moved back to `todo` while it was running is started again for its bound agent.
 - Whoever delegated the task (the `:reflectTo:` agent in its `sourceDelegationId`) is told a person marked it done or cancelled it: through a `[Task Update]` when the team's engine is running, else as a mailbox notice read at its next turn. A task a person assigned reports to nobody.

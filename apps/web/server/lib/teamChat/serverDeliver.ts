@@ -982,10 +982,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const reportForTaskId = framing.reportsForTask ?? null
     const chatVisible = isChatVisible(origin, framing)
     // Who the run is for, as a pause reads it, and its place in the run queue. The
-    // task a follow-up reports on counts as its task for both. A person's message
-    // goes first, because they are watching. Everything else ranks by its task's
-    // priority, and a routine or a task update with no task reads as Normal.
-    const queueTaskId = runTaskId ?? reportForTaskId
+    // task a follow-up reports on counts as its task for both, and so does the request
+    // an update is about. A person's message goes first, because they are watching.
+    // Everything else ranks by its task's priority, and a routine or a task update with
+    // no task reads as Normal.
+    const mainTaskId = origin.kind === 'system' ? origin.mainTaskId : undefined
+    const queueTaskId = runTaskId ?? reportForTaskId ?? mainTaskId ?? null
     const pauseSubject = { agentId: targetAgentId, teamId, taskId: queueTaskId }
     const queueTask =
       queueTaskId === null ? null : queueTaskId === runTaskId ? briefTask : getTask(db, queueTaskId)
@@ -997,11 +999,17 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // engine settles them when THIS run ends, not whichever run ends next.
     const reportUpIds = origin.kind === 'system' ? origin.reportUpIds : undefined
     const wakeIds = origin.kind === 'wake' ? origin.wakeIds : undefined
+    const request =
+      origin.kind === 'human' || origin.kind === 'schedule' ? origin.request : undefined
     const stamp: RunStamp = {
       reportForTaskId,
       stopGen: deliveredGen,
       deliveryId: randomUUID(),
       ...(reportUpIds?.length ? { reportUpIds } : {}),
+      // A person's message, or an update about their request: what the turn hands out
+      // goes under that request's main task.
+      ...(request ? { request } : {}),
+      ...(mainTaskId ? { mainTaskId } : {}),
       // The run stamped on the task's claim, and the saved wakes it carries: both
       // ride every event of this run back to the engine.
       ...(runExecId !== null ? { execId: runExecId } : {}),

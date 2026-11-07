@@ -14,8 +14,9 @@ import {
 import type { BoardTx } from './contention'
 
 /**
- * The job a task belongs to: its top-level ancestor, or itself. A person's main task will
- * take this place when it lands. Never follows a loop in the data.
+ * The job a task belongs to: its top-level ancestor, or itself. For work on a person's
+ * request that is its main task, so everything filed under one request is one job. Never
+ * follows a loop in the data.
  */
 export function jobTaskIdOf(tx: ClawbooDb | BoardTx, taskId: string): string {
   const seen = new Set<string>([taskId])

@@ -55,6 +55,7 @@ export const ENGINE_FEATURES = [
   // A person's inbox: read state per task on the server, and the small read behind
   // the badge. The event stream says when to read it (`?activity=1`).
   'board.inbox',
+  'board.mainTasks',
   'board.wakes',
   'board.agentWakes',
   // Run endings told apart: empty replies, provider retries, budget and breaker stops.

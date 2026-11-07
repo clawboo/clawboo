@@ -20,6 +20,7 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   getAncestors,
+  spawnDepth,
   getTask,
   getTaskVerification,
   classifyAttempts,
@@ -791,7 +792,9 @@ async function runTaskInner(
   // Bounded recursion via the board ancestor chain (single reduce point). `>` not
   // `>=`: a task sitting exactly AT the ceiling is the deepest legal one, and the
   // creation caps already guarantee nothing deeper exists. See MAX_SPAWN_DEPTH.
-  if (getAncestors(db, taskId).length > maxDepth) return { ok: false, reason: 'too_deep' }
+  if (spawnDepth(getAncestors(db, taskId)) > maxDepth) return { ok: false, reason: 'too_deep' }
+  // A person's main task holds a request and never runs by itself.
+  if (task.isMainTask === 1) return { ok: false, reason: 'conflict' }
 
   // Probe static capabilities (no driver is created until start()).
   const probe = input.makeAdapter({})

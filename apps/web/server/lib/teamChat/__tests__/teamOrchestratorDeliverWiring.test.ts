@@ -23,15 +23,20 @@ import { encodeHumanAssignment } from '@clawboo/board-core'
 import { agents, createTask, getComments, listExecutions, listTasks, teams } from '@clawboo/db'
 import type { RuntimeEvent } from '@clawboo/executor'
 
+import type { TurnOrigin } from '@clawboo/team-orchestration'
+
 import type { ServerDeliverDeps } from '../serverDeliver'
 
 const captured = vi.hoisted(() => ({ deps: null as ServerDeliverDeps | null }))
+const captureOrigins = vi.hoisted(() => ({ push: null as ((origin: never) => void) | null }))
 
 vi.mock('../serverDeliver', () => ({
   // Keep the deps the orchestrator wires, and deliver to nobody.
   createServerDeliver: (deps: ServerDeliverDeps) => {
     captured.deps = deps
-    return async () => undefined
+    return async (_sk: string, _agentId: string, _task: string, origin: never) => {
+      captureOrigins.push?.(origin)
+    }
   },
 }))
 
@@ -109,6 +114,41 @@ describe('team orchestrator: the run primitive wiring', () => {
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
     await rm(home, { recursive: true, force: true })
+  })
+
+  it('a person’s message and a routine’s carry their words for the main task', async () => {
+    const seen: TurnOrigin[] = []
+    const orchestrator = getTeamOrchestrator('T', { mcpBaseUrl: null })
+    await flush()
+    captureOrigins.push = (origin) => seen.push(origin)
+    await orchestrator.enqueueUserMessage({
+      stimulus: 'Build it',
+      person: { id: 'p1', name: 'Pat', role: null },
+    })
+    await orchestrator.enqueueUserMessage({ stimulus: 'No one vouched for this' })
+    await orchestrator.enqueueUserMessage({
+      stimulus: 'Sweep the logs',
+      routine: { id: 'r1', name: 'Nightly' },
+    })
+    captureOrigins.push = null
+    expect(seen).toEqual([
+      {
+        kind: 'human',
+        request: { words: 'Build it', requestedBy: { id: 'p1', name: 'Pat', role: null } },
+      },
+      {
+        kind: 'human',
+        request: {
+          words: 'No one vouched for this',
+          requestedBy: { id: 'local', name: 'You', role: null },
+        },
+      },
+      {
+        kind: 'schedule',
+        routineName: 'Nightly',
+        request: { words: 'Sweep the logs', routineName: 'Nightly' },
+      },
+    ])
   })
 
   it('the Stop generation follows stop(), and the run stamp reaches the real engine', async () => {

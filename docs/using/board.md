@@ -103,6 +103,16 @@ There is no Blocked column and no In review column. A blocked task needs a perso
 
 Each column title has a small status mark in the column's color, and counts the tasks the column holds in the range on screen (every task on Kanban). An empty column shows no count, and an empty Kanban lane says so, for example "Nothing running".
 
+### Your requests and their sub-tasks
+
+When a team's lead hands out work for something you asked in chat, the board shows your request as one card, with the helpers' tasks under it. The card says how far the work has got, like **2 of 3 done**, and its cost is what its work has cost so far. Click **3 sub-tasks** to fold or open the list, and click a row to open that sub-task. A finished request starts folded.
+
+The card moves by itself: it sits in **In progress** until everything under it has closed and the lead has written its summary, then moves to **Done**, or to **Cancelled** if none of its work got done. You cannot drag it. To end it early, open it and set its status to **Done** or **Cancelled**: the sub-tasks still open are cancelled too, and any run on them stops. The board asks first.
+
+To add to a request, type in its reply box. Your words go to the agent looking after it, which can hand out more under it. To say more on a finished one, **Reopen** it with your words: it goes back to **In progress**, its lead reads them, and it closes again after the lead's reply unless that hands out more. A new message in the chat is a new request.
+
+A sub-task that needs you also shows in **Needs you**, with **For CLB-12** under its title to say which request it belongs to. If you filter the board so a request is hidden but one of its sub-tasks is not, the sub-task shows on its own with the same label.
+
 ### Read a card
 
 Cards are neutral: color appears only in the status marks, and amber marks what needs you. A card shows the task's title, on up to two lines, and one row of details:
@@ -458,7 +468,7 @@ In **Today**, **Week** and **Month**, the upcoming runs of your [routines](/usin
 
 Click a run to see the routine's schedule in plain words, where it goes, its next runs, and what happens when it runs. **Run now** starts it at once, and **Open routine** opens it to edit, pause or delete it.
 
-When an agent routine runs, it becomes a task card on that day. A team routine posts to the team's General chat, and the tasks the team creates appear as they are made.
+When an agent routine runs, it becomes a task card on that day. A team routine posts to the team's General chat, and if its turn hands out work, that run shows as one request card with the work under it.
 
 Only routines that will run show runs. A paused routine, one halted after a failed run, and a one-time routine that already ran have none, and neither do the OpenClaw Gateway's own scheduled jobs. **Routine runs** under **Display** shows or hides the runs, and its note says how many are coming up on screen. Times are in your local time, and when routines run in another time zone (see [the time zone](/using/routines#the-time-zone)), the schedule names that zone.
 
@@ -543,7 +553,7 @@ This chip is kept in the browser, and compares where cards sit now with where th
 
 ## Tasks in team chat
 
-The same tasks appear in the team chat they came from: as cards in the conversation, and in the chat's **Tasks** card. General shows the tasks handed out in General, and each room shows only its own. The expand icon on a chat card, and **Open on Board** in the **Tasks** card, open the task here with its drawer open. See [Team chat](/using/team-chat).
+The same tasks appear in the team chat they came from: as cards in the conversation, and in the chat's **Tasks** card. A request shows as one card in the conversation, with each sub-task's own card inside it, and in the **Tasks** card its sub-tasks sit right under it. General shows the tasks handed out in General, and each room shows only its own. The expand icon on a chat card, and **Open on Board** in the **Tasks** card, open the task here with its drawer open. See [Team chat](/using/team-chat).
 
 ## Troubleshooting
 

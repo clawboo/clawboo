@@ -110,6 +110,23 @@ A task has one assignee, an agent or a person, never both. A task assigned to a 
 
 On a local install there is one built-in person, "You". Behind a [sign-in proxy](/guides/sso-proxy), you are the person the proxy's token names, and a task that an agent handed back with no one on record who asked goes to whoever opens it. There is no member list: you can assign a task to yourself, or to the person who asked for it.
 
+## Your request is one main task
+
+When you ask a team for something in chat and its lead hands out work, your message becomes one **main task**, with every hand-off and plan step for it filed under it as a sub-task. So the board shows what you asked for, with the helpers' work nested under it, not a pile of top-level cards. A plain answer stays in chat and makes nothing: the main task is made with the first hand-off.
+
+- **What it holds.** Your words, you as who asked, and the agent you were talking to looking after it (the team lead, or a teammate you @mentioned).
+- **It runs nothing.** No agent claims it, nothing starts it, and it cannot fail. It costs helpers no level of hand-offs: they go as deep as they would have without it. The caps on sub-tasks still apply: 24 under one main task, and a plan that would not fit is refused whole.
+- **Its life.** It shows how far its work has got and waits In progress. When everything under it has closed and its lead has written the summary, which goes to chat and on the card, it moves to **Done**. If none of its work got done, it moves to **Cancelled** instead. Anything its lead hands out on the way goes under it too. It waits on what a task handing out work waits on, plus two things: work that did not finish holds it until you retry or cancel that work, and so does a plan waiting for your answer. A note an agent left itself holds nothing, and neither does a task that needs the request closed first.
+- **A sub-task that needs you** still shows in Needs you, labelled with its main task. Nothing that needs you hides.
+- **To add to a request,** comment on its main task. Your words go to the agent looking after it, which can hand out more under it. A second message in the chat is a new request with its own main task, so unrelated work never merges. If the agent looking after it moves to another team, that chat's lead takes it over.
+- **Stop.** A Stop halts the helpers as it always did: their tasks wait in Needs you. The main task stays open and starts nothing. If its work had all closed, what came back waits for the lead's next run, and the request closes after that run. The lead's reply is in the chat, though that run may have been about something else.
+- **Cancel or Done.** Cancelling a main task, or marking it Done, cancels every sub-task still open and stops any run on them, all in one write. The board asks first. The lead is not started just to hear it. A closed request takes no more work from an agent. New work a person files under it opens it again, as does reopening one of its sub-tasks, so nothing runs hidden inside a finished card.
+- **Pause and budgets.** A main task is the top of its tree, so a pause or a mission budget on it covers the whole request. Under a pause its sub-tasks stop and wait in To do, nothing is reported to its lead, and anything you say on it waits too. The lead's update comes after you resume, and the request closes on its reply as usual. Spend still lands on each run's own task; the card adds it up.
+
+A task you create on the board is already its own main task: what its agent hands out is filed under it, and it runs itself, so it counts as a level. A team routine's message becomes a main task the same way a person's does, when its turn hands out work. An agent routine's card is its own. Tasks from before this stay as they are.
+
+Only the team engine files work this way. A task an agent makes with the Tasks tools during a chat turn stays where it put it.
+
 ## One agent per task
 
 A task is worked by one agent at a time. When an agent starts a task, it claims the card, and only one claim can win, even when several agents try at the same moment. The others see the card as taken and leave it.
@@ -257,6 +274,7 @@ A pause does not cover a 1:1 chat with an OpenClaw agent, which runs in the Open
 
 - **Pause work**: pause an agent, a team or a task tree, and resume it when you are ready.
 - **Give an agent a task**: use **New task** on the board. It starts at once if the agent is free, and waits in To do otherwise.
+- **Close a request**: change its main task's status to Done or Cancelled in its drawer. It finishes by itself otherwise.
 - **Move a card**: drag it, or change its status in the task drawer. Your move is final. Clawboo stops any run working on the task, and tells whoever handed it off when you finish or cancel it. The agent cannot move the card back: its own status changes are refused until a new run on the task starts.
 - **Steer a task**: reply on it in the board's task drawer, the team chat's **Tasks** card or the agent's page.
 - **Unstick a task**: use **Retry**, assign an agent, or **Dismiss** from Needs you.
@@ -279,7 +297,7 @@ By default a plan's steps start as soon as the agent writes them. To decide firs
 - The same steps from a later turn are recognised for 48 hours after you answer. Nothing new is created, and the agent is told you already decided.
 - **Stop** closes what waits: nothing starts, and a later press of **Accept** creates nothing. Moving the task's card closes it too.
 
-The plan waits on the task the agent was running, which stays **Blocked** until you answer, and your answer starts that task again. A lead writing a plan from chat has no such task, and neither does a follow-up on a finished task or a routine's run, so its plan waits on a card of its own, titled **Plan:** and the first step. You answer it the same way. That card holds only the plan: its steps are created beside it, not under it, and no agent runs on it. Your answer closes it, **Done** if you accepted and **Cancelled** if you did not, and the agent hears your answer in its chat as a task update. A task does not wait for such a card as it waits for work it handed out: only the steps you accept count as that.
+The plan waits on the task the agent was running, which stays **Blocked** until you answer, and your answer starts that task again. A lead writing a plan from chat has no such task, and neither does a follow-up on a finished task or a routine's run, so its plan waits on a card of its own, titled **Plan:** and the first step. You answer it the same way. That card holds only the plan: its steps are created beside it, not under it, and no agent runs on it. On a request from chat, the card and the steps you accept are all filed under its main task. Your answer closes it, **Done** if you accepted and **Cancelled** if you did not, and the agent hears your answer in its chat as a task update. A task does not wait for such a card as it waits for work it handed out: only the steps you accept count as that.
 
 The switch does not cover everything. A hand-off made by tool call starts when it arrives, one at a time, because nothing can know another is coming. So a lead can still hand off a task, or several in turn, without a question. So can one `<delegate>` tag in a reply.
 
@@ -288,7 +306,7 @@ Turning the switch off leaves a waiting plan for you to answer. If its agent the
 ## Limits
 
 - One agent works a task at a time. To split work, hand out separate tasks.
-- Agents that create tasks with Clawboo's task tools, or hand them off in team chat, are capped: at most 24 child tasks under one parent and 30 new top-level tasks in 5 minutes (for a hand-off, per team). Finished and cancelled children count, so an agent cannot clear its own way; only your cancel frees a place. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
+- Agents that create tasks with Clawboo's task tools, or hand them off in team chat, are capped: at most 24 child tasks under one parent and 30 new top-level tasks in 5 minutes (for a hand-off, per team, where a request's main task is the top-level one). Finished and cancelled children count, so an agent cannot clear its own way; only your cancel frees a place. Tasks you create on the board are not capped. See [Governance](/concepts/governance).
 - One team-chat turn can start at most 8 hand-offs, counted across the whole turn, and a plan can have at most 25 steps. A plan too long, or with no room, is refused whole.
 - A plan's steps start at once unless the team asks first. See [Plans](#plans).
 - An agent can set a task's priority up to High. Only you can make a task Urgent.

@@ -44,6 +44,8 @@ export interface BoardTask {
   parentTaskId?: string | null
   createdAt?: number
   updatedAt?: number
+  /** 1: a person's main task, which holds their request and never runs by itself. */
+  isMainTask?: number | boolean
   [k: string]: unknown
 }
 
@@ -76,7 +78,8 @@ export interface ClaimedWake {
 export interface TaskDetail {
   task: BoardTask
   comments: unknown[]
-  ancestors: { id: string }[]
+  /** `isMainTask`: a person's main task, which is not a level for the depth caps. */
+  ancestors: { id: string; isMainTask?: boolean }[]
 }
 
 export interface ExecutionRef {
@@ -199,9 +202,45 @@ export interface HandOffInput extends CreateTaskInput {
    * means each one. A later turn saying the same words is a retry.
    */
   turnId?: string
+  /** File it under the main task of this person's message, making that task if this
+   *  is its first hand-off. A repeat of open work makes neither. */
+  mainTask?: MainTaskInput
 }
 
-export type HandOffRefusal = 'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap'
+/** A person's request as a main task (see `HandOffInput.mainTask`). */
+export interface MainTaskInput {
+  title: string
+  /** Their whole words. */
+  description: string
+  /** The agent looking after it: who its reports go to. */
+  leadAgentId: string
+  requestedBy?: { id: string; name: string | null; role: string | null } | null
+  /** One per message, so every hand-off of its turn finds the same main task. */
+  key: string
+}
+
+/** Where a person's request stands, read from the board. */
+export interface MainTaskState {
+  id: string
+  title: string
+  identifier: string | null
+  status: string
+  leadAgentId: string | null
+  /** Not Done or Cancelled, and not removed. */
+  open: boolean
+  /** Everything filed under it, at any depth. */
+  subtaskIds: string[]
+  /** What it still waits on, at any depth (`requestWaitsOn`). */
+  openSubtasks: number
+  doneSubtasks: number
+  cancelledSubtasks: number
+  /** When its last sub-task closed; null while none has. */
+  lastClosedAt: number | null
+}
+
+/** `main_closed`: the person's request it would be filed under has been closed. */
+export type HandOffRefusal =
+  'parent_not_found' | 'child_cap' | 'depth_cap' | 'root_rate_cap' | 'main_closed'
 
 export type HandOffResult =
   | {
@@ -210,6 +249,8 @@ export type HandOffResult =
       /** The hand-off made no task: this one was there already. `key` is a replay of
        *  this same hand-off, `title` is an open task with the same words. */
       deduplicated?: 'key' | 'title'
+      /** The main task this create made (see `HandOffInput.mainTask`). */
+      mainTask?: BoardTask
     }
   | {
       ok: false
@@ -240,6 +281,9 @@ export interface ProposePlanInput {
   turnId: string
   /** A batch of hand-offs rather than an ordered plan: accepted, its steps start at once. */
   parallel?: boolean
+  /** The person's message this answers, when no task holds it yet: its main task lands
+   *  with the card holding the plan, and the card and the accepted steps file under it. */
+  mainTask?: MainTaskInput
 }
 
 export type PlanProposal =
@@ -251,6 +295,8 @@ export type PlanProposal =
       task: BoardTask
       /** It waits on a card of its own, not on the run's task. */
       holder: boolean
+      /** The main task this proposal made (see `ProposePlanInput.mainTask`). */
+      mainTask?: BoardTask
       /** The plan that was waiting, which this one took the place of. */
       replaced?: { title: string }
     }
@@ -269,8 +315,13 @@ export type PlanProposal =
 export interface EngineBoardClient extends BoardClient {
   createHandOff(input: HandOffInput): Promise<HandOffResult>
   /** How many more of this team's tasks fit under this parent (null: at the root).
-   *  Null when unread. */
-  handOffRoom(teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null>
+   *  `newRequest`: they go under a main task the first of them would make. Null when
+   *  unread. */
+  handOffRoom(
+    teamId: string,
+    parentTaskId: string | null,
+    opts?: { newRequest?: boolean },
+  ): Promise<HandOffCapacity | null>
   /** A task and its ancestors, nearest first. Null when unread. */
   handOffChain(taskId: string): Promise<HandOffLink[] | null>
   delegationFailure(
@@ -310,4 +361,14 @@ export interface EngineBoardClient extends BoardClient {
   }): Promise<void>
   /** A Stop closes the plans waiting in this team. Best-effort. */
   closeWaitingPlans?(teamId: string): Promise<void>
+  /** Where a main task stands. Null for any other task, and when unread. */
+  mainTaskState(taskId: string): Promise<MainTaskState | null>
+  /** This room's open main tasks, oldest first. Empty when unread. */
+  openMainTasks(teamId: string): Promise<MainTaskState[]>
+  /** Close a request after its lead's summary. False when nothing moved. */
+  closeMainTask(taskId: string, to: 'done' | 'cancelled'): Promise<boolean>
+  /** Hand a request to a person, saying why: its summary never came. */
+  parkMainTask(taskId: string, need: string): Promise<boolean>
+  /** Back to waiting: a person said more on a parked request. */
+  resumeMainTask(taskId: string): Promise<boolean>
 }

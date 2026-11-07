@@ -50,6 +50,7 @@ import {
   type AttentionReason,
   type TaskAttention,
 } from './boardStatus'
+import { isMainTask, requestLabel, RequestNestingContext } from './mainTasks'
 import { countLabel, longDate, timeLabel } from './calendar/calendarFormat'
 import { StatusGlyph } from './StatusGlyph'
 import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
@@ -493,8 +494,10 @@ function NeedsYouTaskCard({
   const handBackNeed = assigned ? (attention.detail ?? null) : null
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
-  const canAssign = !bound && (members.length > 0 || !assigned)
+  // A person's request runs nothing, so no agent is what it lacks.
+  const canAssign = !bound && !isMainTask(task) && (members.length > 0 || !assigned)
   const primary = primaryActionOf(attention, canRetry, canAssign)
+  const above = useContext(RequestNestingContext)?.nesting.mainOf(task) ?? null
   const detail =
     attention.detail ?? (attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint)
   const retryIt = (id: string) => retry(id, attention)
@@ -527,7 +530,10 @@ function NeedsYouTaskCard({
         onSelect: () => act(retryIt, opener),
       })
     }
-    if (!assigned && primary !== 'assign') {
+    // A person's request runs nothing, so nobody can take it: it finishes by itself, or
+    // by the person, from its drawer.
+    const canGive = !isMainTask(task)
+    if (canGive && !assigned && primary !== 'assign') {
       items.push({
         key: 'me',
         label: 'Take it yourself',
@@ -535,7 +541,7 @@ function NeedsYouTaskCard({
         onSelect: () => takeIt(opener),
       })
     }
-    if (primary !== 'assign') {
+    if (canGive && primary !== 'assign') {
       members
         .filter((a) => a.id !== bound)
         .forEach((a, i) =>
@@ -596,6 +602,15 @@ function NeedsYouTaskCard({
         <span className="line-clamp-2 text-sm font-medium text-foreground">
           {task.title ?? '(untitled)'}
         </span>
+        {above ? (
+          <span
+            data-testid="needs-you-request"
+            title={typeof above.title === 'string' ? above.title : undefined}
+            className="mt-0.5 block truncate text-xs text-muted-foreground"
+          >
+            {requestLabel(above)}
+          </span>
+        ) : null}
         <span
           id={detailId}
           data-testid={sinceTitle ? 'needs-you-since' : undefined}
@@ -711,6 +726,7 @@ function AgentStack({ agentIds }: { agentIds: string[] }) {
 
 /** One task inside a group card: its title, and the way into its drawer. */
 function GroupRow({ task, attention, onOpen }: StuckItem & { onOpen: () => void }) {
+  const above = useContext(RequestNestingContext)?.nesting.mainOf(task) ?? null
   const sinceId = useId()
   const title = task.title ?? '(untitled)'
   const sinceTitle = waitingTitle(waitingSince(task))
@@ -727,6 +743,11 @@ function GroupRow({ task, attention, onOpen }: StuckItem & { onOpen: () => void 
       className="group/row flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-xs text-foreground transition-colors hover:bg-foreground/[0.05] focus-visible:outline-2 focus-visible:outline-offset-1"
     >
       <span className="min-w-0 flex-1 truncate">{title}</span>
+      {above ? (
+        <span data-testid="needs-you-request" className="shrink-0 text-muted-foreground">
+          {requestLabel(above)}
+        </span>
+      ) : null}
       <ChevronRight
         size={12}
         strokeWidth={2}

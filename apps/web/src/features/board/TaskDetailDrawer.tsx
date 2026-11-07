@@ -57,6 +57,7 @@ import type { PauseView } from '@/stores/pauses'
 import { AssignAgentSelect } from './AssignAgentSelect'
 import { AgentWakesCard } from './AgentWakesCard'
 import { isFinishedStatus } from './calendar/calendarModel'
+import { isMainTask, progressLabel, requestCost, type RequestProgress } from './mainTasks'
 import { QuestionAnswer, type OpenQuestion } from './QuestionAnswer'
 import { TaskPlanTab } from './TaskPlanTab'
 import { useBoardPerson } from './useBoardPerson'
@@ -281,6 +282,23 @@ function Pill({ children }: { children: ReactNode }) {
 const CODE_BOX =
   'max-h-[260px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-[var(--code-block-bg)] px-3 py-2.5 font-mono text-micro text-foreground'
 
+/** One row of a request's work, as its main task's detail read gives it. */
+interface DrawerSubtask {
+  id: string
+  identifier: string | null
+  title: string
+  status: string
+  assigneeAgentId: string | null
+  attention?: unknown
+  waitingOn?: unknown
+}
+
+function subtaskProgress(subtasks: readonly DrawerSubtask[]): RequestProgress {
+  const done = subtasks.filter((t) => t.status === 'done').length
+  const cancelled = subtasks.filter((t) => t.status === 'cancelled').length
+  return { total: subtasks.length, done, cancelled, open: subtasks.length - done - cancelled }
+}
+
 /** Why the task waits on a person, and every way to get it moving: Retry, a
  *  new agent, or Dismiss. The board's card leads with one of these; here they
  *  are all at hand. */
@@ -293,10 +311,13 @@ function NeedsYouBanner({
   asker,
   question,
   onChanged,
+  mainTask = false,
 }: {
   taskId: string
   teamId: string | null
   attention: TaskAttention
+  /** It is a person's request, which runs nothing, so no agent is what it lacks. */
+  mainTask?: boolean
   /** The agent the task is bound to, if any. */
   bound: string | null
   /** Who has a person's task, when that is not you. */
@@ -369,7 +390,7 @@ function NeedsYouBanner({
             {assigned ? 'Give back to its agent' : 'Retry'}
           </Button>
         )}
-        {teamId && (
+        {teamId && !mainTask && (
           <AssignAgentSelect
             taskId={taskId}
             teamId={teamId}
@@ -409,7 +430,16 @@ function askerOf(
 
 /** Reopen a finished task, with an optional note for its agent. The note is what the
  *  agent wakes with; with none it starts again and reads the task's thread. */
-function ReopenTask({ taskId, onChanged }: { taskId: string; onChanged: () => void }) {
+function ReopenTask({
+  taskId,
+  request,
+  onChanged,
+}: {
+  taskId: string
+  /** It is a person's request. */
+  request?: boolean
+  onChanged: () => void
+}) {
   const { reopen } = useTaskActions()
   const [open, setOpen] = useState(false)
   const [note, setNote] = useState('')
@@ -424,7 +454,7 @@ function ReopenTask({ taskId, onChanged }: { taskId: string; onChanged: () => vo
   }
   const send = async (): Promise<void> => {
     setBusy(true)
-    const ok = await reopen(taskId, note.trim() || undefined)
+    const ok = await reopen(taskId, note.trim() || undefined, { request })
     setBusy(false)
     if (ok) {
       setOpen(false)
@@ -627,6 +657,10 @@ export function TaskDetailDrawer({
   const shownAsker = asker && asker.id !== me.id ? asker : null
   const question = task && attention?.reason === 'question' ? openQuestionOf(task) : null
   const waitingWork = task ? waitingWorkLabel(task) : null
+  const mainTask = isMainTask(task)
+  const subtasks = (detail as { subtasks?: DrawerSubtask[] } | null)?.subtasks ?? []
+  // A person's request runs nothing itself: what it cost is what its work cost.
+  const shownCost = mainTask ? requestCost(subtasks as unknown as BoardTask[]) : runCost
   // What the person asked for, when it says more than the title does.
   const brief =
     typeof task?.description === 'string' &&
@@ -831,6 +865,7 @@ export function TaskDetailDrawer({
                   asker={shownAsker}
                   question={question}
                   onChanged={refreshAfterAction}
+                  mainTask={mainTask}
                 />
               )}
 
@@ -838,7 +873,7 @@ export function TaskDetailDrawer({
 
               {(task.status === 'done' || task.status === 'cancelled') && (
                 <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <ReopenTask taskId={task.id} onChanged={refreshAfterAction} />
+                  <ReopenTask taskId={task.id} request={mainTask} onChanged={refreshAfterAction} />
                 </div>
               )}
 
@@ -856,6 +891,41 @@ export function TaskDetailDrawer({
                       </div>
                     ))}
                   </div>
+                </Section>
+              )}
+
+              {subtasks.length > 0 && (
+                <Section title="Sub-tasks" testId="task-subtasks">
+                  <p className="mb-2 text-xs text-muted-foreground" data-testid="task-progress">
+                    {progressLabel(subtaskProgress(subtasks))}
+                    {subtaskProgress(subtasks).open > 0 && task.status !== 'done'
+                      ? '. Marking this done or cancelled cancels the ones still open.'
+                      : ''}
+                  </p>
+                  <ul className="m-0 flex list-none flex-col p-0">
+                    {subtasks.map((sub) => (
+                      <li key={sub.id} className="min-w-0">
+                        <button
+                          type="button"
+                          disabled={!onOpenTask}
+                          onClick={() => onOpenTask?.(sub.id)}
+                          data-testid="task-subtask"
+                          className="flex h-8 w-full min-w-0 items-center gap-2 rounded-md px-1.5 text-left text-sm text-foreground transition-colors enabled:cursor-pointer enabled:hover:bg-foreground/[0.05] focus-visible:outline-2 focus-visible:outline-offset-1"
+                        >
+                          <StatusGlyph kind={glyphKindOf(boardColumnOf(sub))} />
+                          {sub.identifier ? (
+                            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+                              {sub.identifier}
+                            </span>
+                          ) : null}
+                          <span className="min-w-0 flex-1 truncate">{sub.title}</span>
+                          {sub.assigneeAgentId ? (
+                            <AgentBooAvatar agentId={sub.assigneeAgentId} size={16} />
+                          ) : null}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 </Section>
               )}
 
@@ -951,7 +1021,10 @@ export function TaskDetailDrawer({
                       />
                     </PropRow>
                   ) : null}
-                  {teamId && !attention && (task.status === 'todo' || task.status === 'backlog') ? (
+                  {teamId &&
+                  !attention &&
+                  !mainTask &&
+                  (task.status === 'todo' || task.status === 'backlog') ? (
                     <PropRow label="Assigned to">
                       <AssignAgentSelect
                         taskId={task.id}
@@ -962,19 +1035,21 @@ export function TaskDetailDrawer({
                       />
                     </PropRow>
                   ) : null}
-                  <PropRow label="Runtime">
-                    {taskRuntime
-                      ? runtimeNameOf(taskRuntime)
-                      : ownerId
-                        ? 'Unknown'
-                        : 'Not assigned'}
-                  </PropRow>
+                  {mainTask ? null : (
+                    <PropRow label="Runtime">
+                      {taskRuntime
+                        ? runtimeNameOf(taskRuntime)
+                        : ownerId
+                          ? 'Unknown'
+                          : 'Not assigned'}
+                    </PropRow>
+                  )}
                   <PropRow label="Cost">
                     <span className="tabular-nums">
-                      {runCost?.usd != null
-                        ? formatRunCost(runCost.usd, runCost.estimated, {
+                      {shownCost?.usd != null
+                        ? formatRunCost(shownCost.usd, shownCost.estimated, {
                             precise: true,
-                            local: runCost.local,
+                            local: shownCost.local,
                           })
                         : 'None recorded'}
                     </span>
@@ -1258,6 +1333,7 @@ export function TaskDetailDrawer({
                   status={task.status}
                   agentName={ownerId ? (ownerName ?? ownerId) : null}
                   paused={taskPause !== null}
+                  request={mainTask}
                   onSent={({ commentId, delivery, body }) => {
                     if (commentId && delivery) {
                       setReceipts((m) => new Map(m).set(commentId, { delivery, body }))

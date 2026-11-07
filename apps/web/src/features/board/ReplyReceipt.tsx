@@ -12,6 +12,7 @@ import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 
 import { notDeliveredWhy } from './boardStatus'
+import { isMainTask } from './mainTasks'
 import { useTaskActions } from './useTaskActions'
 
 /** The note's words for a delivery, with the agent's name. */
@@ -43,7 +44,7 @@ export function ReplyReceipt({
 }: {
   delivery: ReplyDelivery
   /** The task replied on: the follow-up is filed under it, on its team. */
-  task: { id: string; title?: string | null; teamId?: string | null }
+  task: { id: string; title?: string | null; teamId?: string | null; isMainTask?: unknown }
   /** The reply, which becomes the follow-up's brief. */
   body: string
   /** A follow-up task was made, with its id. */
@@ -65,14 +66,16 @@ export function ReplyReceipt({
     delivery.status === 'not-delivered' &&
     delivery.reason === 'finished' &&
     !!delivery.agentId &&
-    !!task.teamId
+    !!task.teamId &&
+    // To say more on a request, a person reopens it: its lead then reads their words.
+    !isMainTask(task)
 
   const canReopen = delivery.status === 'not-delivered' && delivery.reason === 'finished'
   // The reply is saved on the task already, and nothing passed it on. Reopening with
   // it passes it on: a run on the task runner has no thread to read it from.
   const reopenIt = async (): Promise<void> => {
     setReopened('sending')
-    const ok = await reopen(task.id, body, { onThread: true })
+    const ok = await reopen(task.id, body, { onThread: true, request: isMainTask(task) })
     setReopened(ok ? 'sent' : 'idle')
     if (ok) onReopened?.()
   }

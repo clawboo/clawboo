@@ -40,8 +40,10 @@ import {
   activitySeqOf,
   type ClawbooDb,
   type QuestionAnswer,
+  startRefusedByTask,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
+import { personCommentReport } from '@clawboo/team-orchestration'
 
 import { actingPerson, actorField, refuseUnlessPerson } from '../lib/auth'
 import { ownWriterOf } from '../lib/boardReader'
@@ -60,11 +62,17 @@ import {
   type SavedPersonWake,
   type SavePersonWakeDeps,
 } from '../lib/teamChat/personWake'
-import { engineRefusal } from '../lib/teamChat/roomRoster'
+import { persistTeamChatEntry } from '../lib/teamChat/persistTeamChatEntry'
+import { createReportUpOutbox } from '../lib/teamChat/reportUpOutbox'
+import { engineRefusal, roomIdForTask } from '../lib/teamChat/roomRoster'
+import { getTaskOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 
 const log = createLogger('board-person')
+
+/** What a reopened request's lead reads when the person gave no words of their own. */
+const REOPENED_REQUEST = 'A person reopened this request.'
 
 /** What saving a person's wake needs: as Retry, team chat could not run a task its
  *  engine cannot see. */
@@ -133,6 +141,24 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
     const reopened = runOwnWrite(db, ownWriterOf(req), taskId, () => {
       const result = before.dropped ? null : reopenTask(db, taskId)
       if (!result?.ok || !result.task) return { result, wake: null }
+      // A main task has no run to wake: its lead hears, in this same write, so nothing
+      // can read the reopened request as one with no one left to answer it. An engine
+      // built for this runs its own first pass before anything else reaches it.
+      if (before.isMainTask === 1) {
+        if (comment && !parsed.data.onThread)
+          addComment(db, taskId, comment, 'user', null, { person, kind: 'person' })
+        else if (!comment)
+          addComment(db, taskId, REOPENED_REQUEST, 'user', null, { person, kind: 'note' })
+        const refusal = engineRefusal(db, result.task)
+        if (!refusal && before.teamId)
+          createReportUpOutbox(db, before.teamId as string, roomIdForTask(db, taskId)).record(
+            personCommentReport(
+              { id: taskId, title: before.title, leadAgentId: result.task.assigneeAgentId },
+              comment ?? REOPENED_REQUEST,
+            ),
+          )
+        return { result, wake: null, requestRefusal: refusal }
+      }
       const written =
         comment && parsed.data.onThread
           ? null
@@ -172,13 +198,44 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
       taskId,
       teamId: before.teamId,
       data: {
-        to: 'todo',
+        to: result.task.status,
         from: result.from,
         reason: 'reopened',
         person,
         actor: { kind: 'person' },
       },
     })
+    // Reopened, a request waits on its lead again. Its lead's reply closes it again unless
+    // the person's words give it more to do.
+    if (before.isMainTask === 1) {
+      const lead = result.task.assigneeAgentId
+      const refusal = reopened.requestRefusal ?? null
+      // The lead's answer lands in the chat, which has to say what it answers.
+      if (!refusal && before.teamId && lead)
+        persistTeamChatEntry(db, {
+          teamId: before.teamId,
+          roomId: roomIdForTask(db, taskId),
+          agentId: lead,
+          text: `A person reopened ${before.identifier ?? `“${before.title}”`}${comment ? `: ${comment}` : '.'}`,
+          role: 'system',
+          kind: 'meta',
+        })
+      if (!refusal && before.teamId)
+        void getTaskOrchestrator(before.teamId, taskId, { mcpBaseUrl: loopbackMcpBaseUrl(req), db })
+          .pump()
+          .catch((err: unknown) => log.error({ err, taskId }, 'pumping a reopened request failed'))
+      const delivery: ReplyDelivery = refusal
+        ? { status: 'not-delivered', agentId: lead, reason: refusal }
+        : !lead
+          ? { status: 'not-delivered', agentId: null, reason: 'unassigned' }
+          : engineHeld()
+            ? { status: 'queued', agentId: lead, reason: 'held' }
+            : startRefusedByTask(db, result.task)
+              ? { status: 'queued', agentId: lead, reason: 'paused' }
+              : { status: 'woke-agent', agentId: lead }
+      res.json({ ok: true, task: getTask(db, taskId), delivery })
+      return
+    }
     // Back in the queue: a person's move, which tells a resident engine.
     noteHumanMove(db, { taskId, teamId: before.teamId, from: result.from ?? null, to: 'todo' })
     // With nothing to say and no agent to tell, no answer is owed: Needs you shows it.

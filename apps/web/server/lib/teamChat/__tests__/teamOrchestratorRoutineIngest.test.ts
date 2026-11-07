@@ -104,7 +104,15 @@ describe('team chat ingest from a routine', () => {
         sessionKey: 'agent:lead:team:T',
         agentId: 'lead',
         task: 'Summarize what shipped yesterday.',
-        origin: { kind: 'schedule', routineName: 'Morning briefing' },
+        origin: {
+          kind: 'schedule',
+          routineName: 'Morning briefing',
+          // What its first hand-off makes the run's main task from.
+          request: {
+            words: 'Summarize what shipped yesterday.',
+            routineName: 'Morning briefing',
+          },
+        },
       },
     ])
     const [entry] = transcript()
@@ -130,7 +138,7 @@ describe('team chat ingest from a routine', () => {
   it('a typed message keeps the human origin and carries no routine', async () => {
     const result = await getTeamOrchestrator('T').enqueueUserMessage({ stimulus: 'hello' })
     expect(result).toEqual({ ok: true, targetAgentId: 'lead' })
-    expect(delivered[0]?.origin).toEqual({ kind: 'human' })
+    expect(delivered[0]?.origin).toMatchObject({ kind: 'human', request: { words: 'hello' } })
     expect(transcript()[0]).not.toHaveProperty('origin')
   })
 

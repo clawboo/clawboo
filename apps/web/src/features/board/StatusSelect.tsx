@@ -17,6 +17,7 @@ import { Spinner } from '@/features/shared/Spinner'
 import type { BoardTask } from '@/lib/boardClient'
 
 import { STATUS_LABEL, isTerminalStatus, manualStatusOptions, statusLabel } from './boardStatus'
+import { isMainTask } from './mainTasks'
 import { useStatusMutation, type StatusCommit } from './useStatusMutation'
 
 export interface StatusSelectProps {
@@ -52,7 +53,10 @@ export function StatusSelect({
     if (!saving) setValue(status)
   }, [status, saving])
 
-  const options = manualStatusOptions(value, { personAssigned: !!task?.['assigneePersonId'] })
+  const options = manualStatusOptions(value, {
+    personAssigned: !!task?.['assigneePersonId'],
+    mainTask: isMainTask(task),
+  })
 
   // Off-list status (nothing legal to offer) → read-only display, matching the
   // board's catch-all "Other" handling rather than a broken, empty dropdown.

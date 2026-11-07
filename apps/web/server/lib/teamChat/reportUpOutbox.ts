@@ -7,6 +7,7 @@
 
 import {
   holdReportUps,
+  latestReportUpForTasks,
   listHeldReportUps,
   listPendingReportUps,
   markReportUpsReplayed,
@@ -15,7 +16,7 @@ import {
   type ClawbooDb,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
-import type { ReportUp, ReportUpOutbox } from '@clawboo/team-orchestration'
+import type { ReportUp, ReportUpOutbox, ReportUpSettlement } from '@clawboo/team-orchestration'
 
 const log = createLogger('report-up-outbox')
 
@@ -121,6 +122,17 @@ export function createReportUpOutbox(
       } catch (err) {
         log.error({ err, teamId, roomId, how }, 'report-up settle failed')
         return false
+      }
+    },
+    latestFor(taskIds, recipientAgentId) {
+      try {
+        const row = latestReportUpForTasks(db, taskIds, recipientAgentId)
+        return row
+          ? { at: row.createdAt, settled: (row.settledHow as ReportUpSettlement | null) ?? null }
+          : null
+      } catch (err) {
+        log.error({ err, teamId, roomId }, 'report-up outbox read failed')
+        return null
       }
     },
   }

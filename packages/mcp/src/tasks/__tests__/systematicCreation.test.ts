@@ -4,6 +4,7 @@
 
 import {
   createDb,
+  createHandOffUnderRequest,
   createTask,
   getComments,
   getTask,
@@ -421,5 +422,52 @@ describe('the child cap message', () => {
     expect(refused.isError).toBe(true)
     expect(refused.text).toMatch(/person/)
     expect(refused.text).not.toMatch(/drop one/)
+  })
+})
+
+describe('a person’s main task', () => {
+  const request = (): { mainId: string; first: string } => {
+    const r = createHandOffUnderRequest(
+      db,
+      { title: 'Build it', description: 'Build it', leadAgentId: 'lead', key: 'main:A:d1' },
+      { title: 'first', teamId: 'A', sourceDelegationId: 'd1:deleg:agent:coder:reflectTo:lead' },
+    )
+    if (!r.ok) throw new Error(r.reason)
+    return { mainId: r.task.parentTaskId as string, first: r.task.id }
+  }
+
+  it('costs a helper no level of sub-tasks', async () => {
+    const { first } = request()
+    const c = await client()
+    const one = parse(await callText(c, 'create_subtask', { parentTaskId: first, title: 'one' }))
+    const two = parse(await callText(c, 'create_subtask', { parentTaskId: one.id, title: 'two' }))
+    expect(two.parentTaskId).toBe(one.id)
+    const three = await callText(c, 'create_subtask', { parentTaskId: two.id, title: 'three' })
+    expect(three.isError).toBe(true)
+    expect(three.text).toContain('nesting depth')
+  })
+
+  it('takes no status write from an agent, and no release or claim', async () => {
+    const { mainId } = request()
+    const c = await client()
+    for (const status of ['done', 'cancelled', 'todo']) {
+      const r = await callText(c, 'update_task_status', { taskId: mainId, status })
+      expect(r.isError).toBe(true)
+      expect(r.text).toContain('person’s request'.replace('’', "'"))
+    }
+    const released = await callText(c, 'release_task', { taskId: mainId })
+    expect(released.isError).toBe(true)
+    expect(
+      (await callText(c, 'claim_task', { taskId: mainId, assigneeAgentId: 'x' })).isError,
+    ).toBe(true)
+    expect(getTask(db, mainId)?.status).toBe('in_progress')
+  })
+
+  it('takes no more work once a person closed it', async () => {
+    const { mainId } = request()
+    updateStatus(db, mainId, 'cancelled', { actor: 'person' })
+    const r = await callText(await client(), 'create_subtask', { parentTaskId: mainId, title: 'x' })
+    expect(r.isError).toBe(true)
+    expect(r.text).toContain('closed')
   })
 })

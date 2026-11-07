@@ -27,6 +27,7 @@ import {
   claimTask,
   completeExecutionProcess,
   createExecutionProcess,
+  createHandOffUnderRequest,
   createTask,
   enqueueInbox,
   listUndeliveredInbox,
@@ -607,6 +608,45 @@ describe('executor runner (real board + real git worktree)', () => {
     // be refused for depth, and it must actually have started.
     if (!ok.ok) expect(ok.reason).not.toBe('too_deep')
     expect(atCeiling.startedOpts).not.toBeNull()
+  })
+
+  it('reads a person’s main task as no level, and never runs one', async () => {
+    const db = getDb()
+    const made = createHandOffUnderRequest(
+      db,
+      { title: 'ask', description: 'ask', leadAgentId: 'lead', key: 'main:runner' },
+      { title: 'first', teamId: null },
+    )
+    if (!made.ok) throw new Error(made.reason)
+    const mainId = made.task.parentTaskId as string
+    const mid = createTask(db, { title: 'mid', status: 'todo', parentTaskId: made.task.id })
+    const deep = createTask(db, { title: 'deep', status: 'todo', parentTaskId: mid.id })
+
+    // Two levels below the first hand-off, with the main task above it: at the ceiling.
+    const atCeiling = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
+    const ok = await runTaskOnRuntime({
+      db,
+      makeAdapter: () => atCeiling,
+      taskId: deep.id,
+      assigneeAgentId: 'claude-2',
+      repoPath: repo,
+      maxSpawnDepth: 2,
+    })
+    if (!ok.ok) expect(ok.reason).not.toBe('too_deep')
+    expect(atCeiling.startedOpts).not.toBeNull()
+
+    const never = new FakeRunnerAdapter('claude-code', FULL_CAPS, 'nope')
+    expect(
+      await runTaskOnRuntime({
+        db,
+        makeAdapter: () => never,
+        taskId: mainId,
+        assigneeAgentId: 'claude-1',
+        repoPath: repo,
+      }),
+    ).toEqual({ ok: false, reason: 'conflict' })
+    expect(never.startedOpts).toBeNull()
+    expect(listExecutions(db, mainId)).toEqual([])
   })
 
   it('applies capability degradation for a runtime missing resume + approval + streaming', async () => {

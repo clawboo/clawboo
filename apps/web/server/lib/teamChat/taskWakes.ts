@@ -280,7 +280,8 @@ function pumpOne(
   now: number,
 ): WakeDecision {
   const task = getTask(db, row.taskId)
-  if (!task) {
+  // A person's main task never runs, so nothing can come of a wake on it.
+  if (!task || task.isMainTask === 1) {
     settleTaskWakes(db, [row.id], 'finished')
     return { do: 'settle', how: 'finished' }
   }

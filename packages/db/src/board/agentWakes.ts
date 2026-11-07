@@ -191,8 +191,9 @@ export function saveAgentCommentWake(
           }`,
         })
       }
-      // A person's task is their turn, and a card in Backlog was parked on purpose.
-      if (task.assigneePersonId || task.status === 'backlog') return null
+      // A person's task is their turn, a card in Backlog was parked on purpose, and a
+      // person's main task has no turn to give.
+      if (task.assigneePersonId || task.status === 'backlog' || task.isMainTask === 1) return null
       if (waitEndsWithOtherWork(parseWaitingOn(task.waitingOn))) return null
       const denied = gateOfJob(tx, jobTaskIdOf(tx, taskId))?.decision === 'deny'
       if (!commentMayWake(comment, { agentWakes: !denied }))

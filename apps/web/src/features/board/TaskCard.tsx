@@ -41,6 +41,13 @@ import { isFinishedStatus } from './calendar/calendarModel'
 import { sitsOnOtherDay } from './finishMove'
 import { StatusGlyph } from './StatusGlyph'
 import { LabelChip } from './TaskLabelsSelect'
+import {
+  isMainTask,
+  progressLabel,
+  requestCost,
+  requestLabel,
+  RequestNestingContext,
+} from './mainTasks'
 import { formatCostUsd, formatRunCost, runCostOf } from './taskCost'
 import { useBoardPerson } from './useBoardPerson'
 
@@ -470,11 +477,34 @@ export function TaskCard({
   const ownerName = useFleetStore((s) =>
     ownerId ? (s.agents.find((a) => a.id === ownerId)?.name ?? null) : null,
   )
-  const cost = runCostOf(task)
+  const nesting = useContext(RequestNestingContext)?.nesting ?? null
+  const main = isMainTask(task)
+  // A person's request runs nothing itself: what it cost is what its work cost.
+  const cost = main && nesting ? requestCost(nesting.subtasksOf(task.id)) : runCostOf(task)
   const verdict = verdictStatus(task)
   const stamped = stamp != null
   const waiting = waitingWorkLabel(task)
-  const mark = waiting ? (
+  // Its sub-tasks say how far it has got, and the column already says the rest.
+  const progress = main && nesting ? progressLabel(nesting.progressOf(task.id)) : null
+  // A sub-task out on its own (a filter left its request out) says which it belongs to.
+  const above = !main && nesting ? nesting.mainOf(task) : null
+  const mark = progress ? (
+    <span
+      data-testid="board-card-progress"
+      title={progress}
+      className="min-w-0 truncate text-xs text-muted-foreground"
+    >
+      {progress}
+    </span>
+  ) : above ? (
+    <span
+      data-testid="board-card-request"
+      title={typeof above.title === 'string' ? above.title : undefined}
+      className="min-w-0 truncate text-xs text-muted-foreground"
+    >
+      {requestLabel(above)}
+    </span>
+  ) : waiting ? (
     <span
       data-testid="board-card-waiting"
       title={waiting}

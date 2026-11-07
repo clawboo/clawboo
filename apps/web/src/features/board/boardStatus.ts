@@ -101,8 +101,13 @@ const RUN_STATUSES = new Set<string>(['in_progress', 'in_review'])
  */
 export function manualStatusOptions(
   from: string,
-  ctx: { personAssigned?: boolean } = {},
+  ctx: { personAssigned?: boolean; mainTask?: boolean } = {},
 ): TaskStatus[] {
+  // A person's main task moves by itself; all a person does is finish it, from anywhere.
+  if (ctx.mainTask) {
+    if (!isTaskStatus(from) || isTerminal(from)) return statusOptions(from)
+    return TASK_STATUSES.filter((s) => s === from || s === 'done' || s === 'cancelled')
+  }
   const options = statusOptions(from).filter((s) => !RUN_STATUSES.has(s) || s === from)
   // A person's own task: nothing else will move it to Done, so they can from anywhere.
   if (ctx.personAssigned && isTaskStatus(from) && !isTerminal(from) && !options.includes('done'))
