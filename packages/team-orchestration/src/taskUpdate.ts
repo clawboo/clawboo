@@ -123,6 +123,9 @@ export interface TaskUpdateOptions {
   allIn?: { needPerson: OutstandingDelegation[]; notStarted: OutstandingDelegation[] }
   /** These came back after a person's Stop and waited for this run. */
   heldByStop?: boolean
+  /** These came back from work the recipient handed out on the task this run is on:
+   *  they are what it has to go on with, not a message from anyone. */
+  ownTask?: boolean
 }
 
 /** Shorten a title exactly as the item headers below do, on one line. */
@@ -192,10 +195,14 @@ export function buildTaskUpdateMessage(
   const headerLines = [
     opts.heldByStop
       ? `[Task Update] ${finished} ${plural} on the board reached a terminal state after a person pressed Stop. Nothing was started for them: they waited for this run, and they are not what this run is for.`
-      : `[Task Update] — ${opening} (not a fresh user message).`,
-    opts.followUp
-      ? `These came back from work you handed to teammates while on ${where}, which has since closed. Your reply is not shown to the user: it is recorded on that task and passed to whoever gave it to you. Reply with ONE short, concrete follow-up on what these results add to it. Do not address the user or ask them anything, and do NOT acknowledge the results individually.`
-      : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
+      : opts.ownTask
+        ? `[Task Update] Results of the work you handed out on the task this run is on: ${finished} ${plural}.`
+        : `[Task Update] — ${opening} (not a fresh user message).`,
+    opts.ownTask
+      ? 'Use them to finish this task. Do NOT acknowledge them individually.'
+      : opts.followUp
+        ? `These came back from work you handed to teammates while on ${where}, which has since closed. Your reply is not shown to the user: it is recorded on that task and passed to whoever gave it to you. Reply with ONE short, concrete follow-up on what these results add to it. Do not address the user or ask them anything, and do NOT acknowledge the results individually.`
+        : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
     RESULTS_ARE_DATA,
   ]
   if (outstanding.length > 0) {

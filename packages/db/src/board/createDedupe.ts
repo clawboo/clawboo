@@ -20,7 +20,13 @@
 
 import { createHash } from 'node:crypto'
 
-import { HAND_OFF_TITLE_CHARS, ledgerAllowsAutoFire, normalizeTaskTitle } from '@clawboo/board-core'
+import {
+  HAND_OFF_TITLE_CHARS,
+  ledgerAllowsAutoFire,
+  normalizeTaskTitle,
+  parseWaitingOn,
+  waitsOnOtherWork,
+} from '@clawboo/board-core'
 import { and, asc, eq, gt, inArray, isNotNull, isNull, like, or } from 'drizzle-orm'
 
 import { executionProcesses, taskCreateKeys, tasks, type DbTask } from '../schema'
@@ -119,6 +125,7 @@ function bySameTitle(tx: BoardTx, input: CreateIdentity, now: number): DbTask | 
       description: tasks.description,
       status: tasks.status,
       sourceDelegationId: tasks.sourceDelegationId,
+      waitingOn: tasks.waitingOn,
     })
     .from(tasks)
     .where(
@@ -133,7 +140,9 @@ function bySameTitle(tx: BoardTx, input: CreateIdentity, now: number): DbTask | 
         // Nothing starts a Backlog card by itself, so a hand-off it answered would wait.
         inArray(
           tasks.status,
-          input.titleMatchNeedsOwner ? OPEN_STATUSES.filter((s) => s !== 'backlog') : OPEN_STATUSES,
+          input.titleMatchNeedsOwner
+            ? [...OPEN_STATUSES.filter((s) => s !== 'backlog'), 'blocked']
+            : [...OPEN_STATUSES, 'blocked'],
         ),
         ...(input.titleMatchNeedsOwner
           ? [or(isNotNull(tasks.assigneeAgentId), like(tasks.sourceDelegationId, '%:agent:%'))]
@@ -147,7 +156,10 @@ function bySameTitle(tx: BoardTx, input: CreateIdentity, now: number): DbTask | 
     (c) =>
       askOf(c) === wanted &&
       !(ownTurn && c.sourceDelegationId?.startsWith(ownTurn)) &&
-      (c.status !== 'todo' || startsByItself(tx, c.id)),
+      (c.status !== 'todo' || startsByItself(tx, c.id)) &&
+      // Blocked is open only while it waits on other work: the board moves it on by
+      // itself, and its result still comes. Any other wait needs someone to act.
+      (c.status !== 'blocked' || waitsOnOtherWork(parseWaitingOn(c.waitingOn))),
   )
   if (!match) return null
   return tx.select().from(tasks).where(eq(tasks.id, match.id)).get() as DbTask

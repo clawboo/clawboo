@@ -231,7 +231,7 @@ function withOpenQuestion<T extends DbTask>(
 ): Array<
   T & {
     openQuestion: DbTaskQuestion | null
-    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number }
+    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number }
   }
 > {
   const byId = pendingQuestionsForTasks(

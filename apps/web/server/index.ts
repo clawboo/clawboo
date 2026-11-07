@@ -22,6 +22,7 @@ import {
   moveArchivedRoomTasks,
   reapOrphanInbox,
   listRoomsWithFireableDelegations,
+  releaseFinishedSubtaskWaits,
   seedBuiltinTools,
   setDashboardPorts,
 } from '@clawboo/db'
@@ -809,6 +810,9 @@ async function main() {
         // One orchestrator per team chat room, so the scan names the room too
         // (null = the team's own group chat).
         const wake = new Map<string, { teamId: string; roomId: string | null }>()
+        // A task waiting on sub-tasks that have nothing more to report goes back to the
+        // queue here, before the scan: this is what a restart leans on.
+        releaseFinishedSubtaskWaits(db)
         for (const r of listRoomsWithFireableDelegations(db))
           wake.set(orchestratorKey(r.teamId, r.roomId), r)
         // Saved wakes. The room is read now, at fire time: archiving a room moves its

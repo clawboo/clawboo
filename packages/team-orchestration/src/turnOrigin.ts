@@ -39,13 +39,16 @@ export type TurnOrigin =
    *  wake (see `task_wakes`). A task run like the two above. `reason` says why,
    *  `wakeIds` names the rows it carries, settled when this run ends, and
    *  `fromAgentId` is who the result reports to. `assigned`, present only when
-   *  true: a person assigned the task, so its report stays on the card. */
+   *  true: a person assigned the task, so its report stays on the card. `inChat`,
+   *  present only when true: this is the team lead's follow-up on its own task, and
+   *  its summary reaches the chat as well as the card. */
   | {
       kind: 'wake'
       reason: TaskWakeReason
       wakeIds: string[]
       fromAgentId: string | null
       assigned?: true
+      inChat?: true
     }
   /** Clawboo itself: a batched `[Task Update]` (the reflection batcher is the
    *  only producer). No human is waiting on the other end of this turn.
@@ -127,8 +130,15 @@ export function classifyTurn(input: {
       : null
   const isUserAssigned =
     input.origin.kind === 'assignment' || (input.origin.kind === 'wake' && !!input.origin.assigned)
+  // The team lead's follow-up on its own task reaches the chat. It is the lead speaking for
+  // the team, as for a `[Task Update]`, not a worker whose reply goes to someone else.
+  const leadInChat =
+    input.origin.kind === 'wake' &&
+    input.origin.inChat === true &&
+    input.targetAgentId === input.leaderAgentId
   const isWorker =
     reportFor === null &&
+    !leadInChat &&
     (input.origin.kind === 'delegation' ||
       input.origin.kind === 'wake' ||
       isUserAssigned ||
@@ -195,9 +205,10 @@ export function isChatVisible(
       return true
     case 'system':
       return framing.reportsForTask === undefined
+    case 'wake':
+      return origin.inChat === true
     case 'delegation':
     case 'assignment':
-    case 'wake':
       return false
   }
 }

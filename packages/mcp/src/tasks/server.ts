@@ -31,6 +31,7 @@ import {
   LOCAL_PERSON,
   openSubtasksOf,
   parseQuestionPayload,
+  recordResultClaim,
   releaseTask,
   resolveTaskRef,
   saveAgentCommentWake,
@@ -263,6 +264,13 @@ function noteCancelForDelegator(
 const ROUTINE_NO_WAIT =
   'This task comes from a scheduled routine, and its person may be away. Do not wait on them: make a reasonable assumption, say it in your reply, and finish.'
 
+/** Why a report was refused, in words the model can act on. */
+const REPORT_REFUSAL: Record<string, string> = {
+  not_found: 'This task no longer exists.',
+  not_yours: 'You are not working on this task, so it is not yours to report on.',
+  no_run: 'There is no run open on this task, so there is nothing to report on.',
+}
+
 const ASK_REFUSAL: Record<string, string> = {
   not_found: 'This task no longer exists.',
   not_yours: 'You are not working on this task, so you cannot ask about it.',
@@ -295,8 +303,9 @@ function repeatedAskText(q: DbTaskQuestion): string {
  *  must not mutate the board at all (a Clawboo Native team run). */
 const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
 /** Served to a read-only team run as well: asking a person moves only the run's own
- *  task, and it is the only way such a run can wait for someone. */
-const ASK_TOOL_NAMES = new Set(['ask_person'])
+ *  task, and it is the only way such a run can wait for someone. Reporting moves
+ *  nothing at all: it is evidence for the server's decision when the run ends. */
+const ASK_TOOL_NAMES = new Set(['ask_person', 'report_result'])
 /** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
 const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
 /** Tools that move a card: who may call them depends on who is calling. */
@@ -948,6 +957,53 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
               if (r.reason === 'person_moved')
                 return statusWriteResult({ ok: false, reason: 'person_moved', task: r.task }, 'ask')
               return textResult(ASK_REFUSAL[r.reason] ?? `ask failed: ${r.reason}`, true)
+            },
+          },
+          {
+            name: 'report_result',
+            description:
+              "Say how the task you are working on went, before you end your turn. outcome 'done': the work is finished. outcome 'not_done': it is not, and summary says why and what a person should do next. A report, not a move: it changes no status, and the board decides when your run ends. Reporting done does not get past a failed check. Optional: if you do not call it, your reply is the report. To wait on something, use ask_person, hand_back_task or block_task instead.",
+            inputSchema: z.object({
+              taskId: z.string().min(1).optional(),
+              outcome: z.enum(['done', 'not_done']),
+              summary: z.string().min(1).max(4_000),
+              deliverables: z.array(z.string().min(1).max(500)).max(20).optional(),
+            }),
+            handler: (args: Record<string, unknown>): McpToolResult => {
+              const named = optStr(args['taskId'])
+              if (named && named !== ownTask)
+                return textResult(
+                  'report_result reports only on the task you are working on. To raise something about another task, use add_comment on it.',
+                  true,
+                )
+              const summary = str(args['summary']).trim()
+              if (!summary)
+                return textResult('report_result needs summary: what you did, or why not.', true)
+              const deliverables = Array.isArray(args['deliverables'])
+                ? (args['deliverables'] as string[])
+                : []
+              const outcome = str(args['outcome']) === 'done' ? 'done' : 'not_done'
+              const r = recordResultClaim(
+                db,
+                ownTask,
+                boundAgentId ?? '',
+                { outcome, summary, ...(deliverables.length > 0 ? { deliverables } : {}) },
+                { executionId: boundExecutionId ?? null },
+              )
+              if (!r.ok) return textResult(REPORT_REFUSAL[r.reason] ?? r.reason, true)
+              // Who said it and on which run, from the binding. Never its words: the log is
+              // read more widely than the run's row. A report moves nothing, so `to` is
+              // where the task still is, as for a wait that changed without a move.
+              const reported = getTask(db, ownTask)
+              if (reported)
+                recordWrite('status_changed', reported, {
+                  to: reported.status,
+                  reason: 'result_reported',
+                  outcome,
+                })
+              return textResult(
+                'Noted. This is a report: the board decides when your run ends. Finish your turn with your reply as usual.',
+              )
             },
           },
           {

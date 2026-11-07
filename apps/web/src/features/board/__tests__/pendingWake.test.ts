@@ -25,6 +25,14 @@ describe('the line for a wake that has not reached its agent', () => {
     ).toBe("Held by a Stop: Ada reads 2 comments on the task's next run")
   })
 
+  it('a task waiting on other work is not waiting on a person, so it does not say so', () => {
+    const wake = { reason: 'agent_comment', skipReason: 'blocked', comments: 1, held: false }
+    expect(pendingWakeText(wake, 'Ada')).toBe('Waiting on you: Retry starts Ada on it')
+    expect(pendingWakeText(wake, 'Ada', { onOtherWork: true })).toBe(
+      'Ada reads this when the work it waits on has closed',
+    )
+  })
+
   it('reads the field defensively', () => {
     expect(readPendingWake(null)).toBeNull()
     expect(readPendingWake({ reason: 3 })).toBeNull()

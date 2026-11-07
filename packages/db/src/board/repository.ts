@@ -19,13 +19,21 @@ import {
   parseWaitingOn,
   personMoveAllowed,
   strongerWakeReason,
+  subtasksStillOut,
+  subtaskStanding,
+  subtaskWaitOver,
+  tallySubtasks,
+  unfinishedNeed,
+  unfinishedSubtasks,
   waitingOnJson,
   runMadeProgress,
   type CommentKind,
   type HandOffLink,
   type LedgerRun,
   type RunCostSource,
+  type SubtaskView,
   type TaskStatus,
+  type TaskWakeReason,
   type WaitingOn,
 } from '@clawboo/board-core'
 import {
@@ -614,6 +622,7 @@ function buildExecutionRow(input: CreateExecInput, id: string, now: number): DbE
     error: null,
     errorClass: null,
     madeProgress: null,
+    resultClaim: null,
     recoveryTombstone: 0,
     tenantId: null,
     createdAt: now,
@@ -1230,6 +1239,9 @@ export function updateStatus(
       expirePendingQuestionsTx(tx, taskId, isTerminal(to) ? 'task_closed' : 'moved', now)
     if (isTerminal(to) && from !== to)
       waitersReleased.push(...releaseWaitersTx(tx, updated, to, now))
+    // A sub-task that stops short of closing may be the last its parent waited on.
+    else if ((to === 'blocked' || to === 'backlog') && updated.parentTaskId)
+      waitersReleased.push(...releaseParentWaitTx(tx, updated.parentTaskId, now))
     return { ok: true, task: updated, from }
   })
   if (result.ok && result.task)
@@ -1290,80 +1302,6 @@ function releaseWaitersTx(
   const events: BoardLifecycleEvent[] = []
   const finished = to === 'done'
   const name = `“${closed.title}”`
-  const release = (waiter: DbTask, ready: boolean, note: string, ifNot: string): void => {
-    const runOpen = tx
-      .select({ id: executionProcesses.id })
-      .from(executionProcesses)
-      .where(
-        and(eq(executionProcesses.taskId, waiter.id), eq(executionProcesses.status, 'running')),
-      )
-      .get()
-    const toQueue = ready && !runOpen && delegationTargetOf(waiter.sourceDelegationId) !== null
-    const moved = tx
-      .update(tasks)
-      .set(
-        toQueue
-          ? {
-              status: 'todo',
-              waitingOn: null,
-              assigneeAgentId: null,
-              assigneeRuntime: null,
-              verification: null,
-              updatedAt: now,
-            }
-          : { waitingOn: waitingOnJson({ kind: 'person', need: ifNot }), updatedAt: now },
-      )
-      .where(and(eq(tasks.id, waiter.id), eq(tasks.status, 'blocked')))
-      .run()
-    if (moved.changes === 0) return
-    // Saved in this write, so the pump's rules decide when it starts and the run's
-    // "Why this run" line says why, as for a dependency.
-    if (toQueue)
-      recordTaskWakeTx(
-        tx,
-        {
-          teamId: waiter.teamId ?? null,
-          agentId: delegationTargetOf(waiter.sourceDelegationId) as string,
-          taskId: waiter.id,
-          reason: 'dependency_done',
-        },
-        now,
-      )
-    tx.insert(taskComments)
-      .values({
-        id: randomUUID(),
-        taskId: waiter.id,
-        authorAgentId: null,
-        authorType: 'system',
-        body: toQueue ? note : ifNot,
-        tenantId: null,
-        createdAt: now,
-      })
-      .run()
-    const teamId = waiter.teamId ?? null
-    events.push(
-      toQueue
-        ? { kind: 'task_released', taskId: waiter.id, teamId, via: 'release' }
-        : { kind: 'status_changed', taskId: waiter.id, teamId, status: 'blocked' },
-      ...(toQueue
-        ? [
-            {
-              kind: 'task_wake_recorded' as const,
-              taskId: waiter.id,
-              teamId,
-              reason: 'dependency_done' as const,
-            },
-          ]
-        : []),
-      {
-        kind: 'comment_added',
-        taskId: waiter.id,
-        teamId,
-        authorType: 'system',
-        authorAgentId: null,
-      },
-    )
-  }
 
   const waiting = tx
     .select()
@@ -1375,54 +1313,203 @@ function releaseWaitersTx(
   for (const waiter of waiting) {
     const w = parseWaitingOn(waiter.waitingOn)
     if (w?.kind !== 'task' || w.taskId !== closed.id) continue
-    release(
-      waiter,
-      finished,
-      `${name}, the task this waited on, is done.`,
-      finished
+    releaseWaiterTx(tx, waiter, now, events, {
+      ready: finished,
+      note: `${name}, the task this waited on, is done.`,
+      ifNot: finished
         ? `${name}, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
         : `${name}, the task this waited on, was cancelled. Decide what happens next.`,
-    )
+      reason: 'dependency_done',
+    })
   }
 
-  if (closed.parentTaskId) {
-    const parent = tx.select().from(tasks).where(eq(tasks.id, closed.parentTaskId)).get() as
-      DbTask | undefined
-    if (parent && parent.status === 'blocked' && !parent.dropped) {
-      if (parseWaitingOn(parent.waitingOn)?.kind === 'subtasks') {
-        const open = tx
-          .select({ n: count() })
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.parentTaskId, parent.id),
-              eq(tasks.dropped, 0),
-              sql`${tasks.status} NOT IN ('done', 'cancelled')`,
-            ),
-          )
-          .get()
-        if ((open?.n ?? 0) === 0) {
-          // Any that did not get done was a decision, as a cancelled blocker is. That
-          // takes in one dropped while open, and leaves out one dropped once done.
-          const unfinished = tx
-            .select({ n: count() })
-            .from(tasks)
-            .where(and(eq(tasks.parentTaskId, parent.id), sql`${tasks.status} != 'done'`))
-            .get()
-          const allDone = (unfinished?.n ?? 0) === 0
-          release(
-            parent,
-            allDone,
-            'All the sub-tasks this waited on are done.',
-            allDone
-              ? 'All the sub-tasks this waited on are done, and nothing started this one again. Retry it or decide what happens next.'
-              : 'A sub-task this waited on was cancelled or removed, and none is still open. Decide what happens next.',
-          )
-        }
-      }
-    }
-  }
+  if (closed.parentTaskId) events.push(...releaseParentWaitTx(tx, closed.parentTaskId, now))
   return events
+}
+
+/** Move a task off a wait that is over: see {@link releaseWaitersTx}. */
+function releaseWaiterTx(
+  tx: BoardTx,
+  waiter: DbTask,
+  now: number,
+  events: BoardLifecycleEvent[],
+  how: { ready: boolean; note: string; ifNot: string; reason: TaskWakeReason },
+): void {
+  const { ready, note, ifNot, reason } = how
+  const runOpen = tx
+    .select({ id: executionProcesses.id })
+    .from(executionProcesses)
+    .where(and(eq(executionProcesses.taskId, waiter.id), eq(executionProcesses.status, 'running')))
+    .get()
+  const toQueue = ready && !runOpen && delegationTargetOf(waiter.sourceDelegationId) !== null
+  const moved = tx
+    .update(tasks)
+    .set(
+      toQueue
+        ? {
+            status: 'todo',
+            waitingOn: null,
+            assigneeAgentId: null,
+            assigneeRuntime: null,
+            verification: null,
+            updatedAt: now,
+          }
+        : { waitingOn: waitingOnJson({ kind: 'person', need: ifNot }), updatedAt: now },
+    )
+    .where(and(eq(tasks.id, waiter.id), eq(tasks.status, 'blocked')))
+    .run()
+  if (moved.changes === 0) return
+  // Saved in this write, so the pump's rules decide when it starts and the run's
+  // "Why this run" line says why, as for a dependency.
+  if (toQueue)
+    recordTaskWakeTx(
+      tx,
+      {
+        teamId: waiter.teamId ?? null,
+        agentId: delegationTargetOf(waiter.sourceDelegationId) as string,
+        taskId: waiter.id,
+        reason,
+      },
+      now,
+    )
+  tx.insert(taskComments)
+    .values({
+      id: randomUUID(),
+      taskId: waiter.id,
+      authorAgentId: null,
+      authorType: 'system',
+      body: toQueue ? note : ifNot,
+      tenantId: null,
+      createdAt: now,
+    })
+    .run()
+  const teamId = waiter.teamId ?? null
+  events.push(
+    toQueue
+      ? { kind: 'task_released', taskId: waiter.id, teamId, via: 'release' }
+      : { kind: 'status_changed', taskId: waiter.id, teamId, status: 'blocked' },
+    ...(toQueue
+      ? [{ kind: 'task_wake_recorded' as const, taskId: waiter.id, teamId, reason }]
+      : []),
+    {
+      kind: 'comment_added',
+      taskId: waiter.id,
+      teamId,
+      authorType: 'system',
+      authorAgentId: null,
+    },
+  )
+}
+
+/**
+ * The way out for a task waiting on its sub-tasks: when none of them has anything more
+ * to report, it gets its follow-up turn, the failed ones included. What closed means is
+ * `subtaskStanding`'s, and it is read from the board in this write, so nothing has to
+ * remember which sub-tasks reported. A run still open on the task is left to end: the
+ * pump's pass ({@link releaseFinishedSubtaskWaits}) finds it then.
+ */
+function releaseParentWaitTx(tx: BoardTx, parentId: string, now: number): BoardLifecycleEvent[] {
+  const events: BoardLifecycleEvent[] = []
+  const parent = tx.select().from(tasks).where(eq(tasks.id, parentId)).get() as DbTask | undefined
+  if (!parent || parent.status !== 'blocked' || parent.dropped) return events
+  const wait = parseWaitingOn(parent.waitingOn)
+  const views = subtaskViewsOf(tx, parent.id)
+  const tally = tallySubtasks(views)
+  if (wait?.kind === 'person' && wait.untilSubtasks) {
+    // Its agent had its turn and some of them did not finish, and the card told a person
+    // to retry them. It comes back once none is left unfinished, and until then the card
+    // names only the ones that still are.
+    if (unfinishedSubtasks(tally) > 0) {
+      const need = unfinishedNeed(views)
+      if (need !== wait.need)
+        tx.update(tasks)
+          .set({ waitingOn: waitingOnJson({ ...wait, need }), updatedAt: now })
+          .where(eq(tasks.id, parent.id))
+          .run()
+      return events
+    }
+    if (subtasksStillOut(tally)) return events
+  } else {
+    if (wait?.kind !== 'subtasks') return events
+    if (!subtaskWaitOver(tally, { handedOutOnly: wait.handedOut === true })) return events
+  }
+  const runOpen = tx
+    .select({ id: executionProcesses.id })
+    .from(executionProcesses)
+    .where(and(eq(executionProcesses.taskId, parent.id), eq(executionProcesses.status, 'running')))
+    .get()
+  if (runOpen) return events
+  const allDone = tally.cancelled + tally.notComing === 0
+  releaseWaiterTx(tx, parent, now, events, {
+    ready: true,
+    note: allDone
+      ? 'All the sub-tasks this waited on are done.'
+      : 'None of the sub-tasks this waited on has more to report, and not all of them got done.',
+    ifNot: allDone
+      ? 'All the sub-tasks this waited on are done, and nothing started this one again. Retry it or decide what happens next.'
+      : 'None of the sub-tasks this waited on has more to report, and not all of them got done. Decide what happens next.',
+    reason: 'subtasks_closed',
+  })
+  return events
+}
+
+/**
+ * One pass over every task waiting on its sub-tasks, for what no closing write marks: a
+ * sub-task parked by its ledger, or closed by a raw write, and a parent whose own run
+ * was still open when its last sub-task closed. Called by the dispatch pump, so a
+ * restart is a pause. Returns how many it released.
+ */
+export function releaseFinishedSubtaskWaits(db: ClawbooDb): number {
+  const waiting = db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.status, 'blocked'),
+        eq(tasks.dropped, 0),
+        or(like(tasks.waitingOn, '%"subtasks"%'), like(tasks.waitingOn, '%"untilSubtasks"%')),
+      ),
+    )
+    .all()
+  let released = 0
+  for (const { id } of waiting) {
+    const events = releaseOneSubtaskWait(db, id)
+    if (events.some((e) => e.kind === 'task_released' || e.kind === 'status_changed')) released += 1
+  }
+  return released
+}
+
+/** {@link releaseFinishedSubtaskWaits} for one task, right now. */
+export function releaseOneSubtaskWait(db: ClawbooDb, taskId: string): BoardLifecycleEvent[] {
+  const events = immediateWrite(db, (tx) => releaseParentWaitTx(tx, taskId, Date.now()))
+  noteWaitersReleased(db, events)
+  return events
+}
+
+/** A task's sub-tasks as the barrier reads them (see `subtaskStanding`), dropped ones
+ *  included. A ledger is read only where it decides anything: a sub-task in To do. */
+export function subtaskViewsOf(tx: ClawbooDb | BoardTx, taskId: string): SubtaskView[] {
+  const rows = tx.select().from(tasks).where(eq(tasks.parentTaskId, taskId)).all() as DbTask[]
+  return rows.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    dropped: t.dropped,
+    waitingOn: t.waitingOn,
+    sourceDelegationId: t.sourceDelegationId,
+    assigneeAgentId: t.assigneeAgentId,
+    assigneePersonId: t.assigneePersonId,
+    waitsOnThisTask: waitReaches(tx, [t.id], taskId),
+    execs:
+      t.status === 'todo'
+        ? (tx
+            .select()
+            .from(executionProcesses)
+            .where(eq(executionProcesses.taskId, t.id))
+            .orderBy(executionProcesses.createdAt)
+            .all() as DbExecutionProcess[])
+        : [],
+  }))
 }
 
 /** Say why a task that stayed Blocked is still here, when a person's action could not
@@ -1438,15 +1525,28 @@ export function noteBlockedReason(db: ClawbooDb, taskId: string, waitingOn: Wait
 }
 
 /** What a task waiting on other work waits on, for its card to name: the task's
- *  title, or how many of its sub-tasks are open. Undefined for any other wait. */
+ *  title, or how many of its sub-tasks are open and how many of those need a person.
+ *  Undefined for any other wait. */
 export function waitingOnDetailOf(
   db: ClawbooDb,
   task: Pick<DbTask, 'id' | 'waitingOn'>,
-): { taskTitle?: string; openSubtasks?: number } | undefined {
+): { taskTitle?: string; openSubtasks?: number; needPerson?: number } | undefined {
   const w = parseWaitingOn(task.waitingOn)
   if (w?.kind === 'task') return { taskTitle: getTask(db, w.taskId)?.title ?? '' }
-  if (w?.kind === 'subtasks') return { openSubtasks: countOpenSubtasks(db, task.id) }
-  return undefined
+  if (w?.kind !== 'subtasks') return undefined
+  const views = subtaskViewsOf(db, task.id)
+  const t = tallySubtasks(views)
+  // Open, as the wait counts them: what is coming, and what needs someone to act.
+  const open =
+    t.coming + t.withPerson + t.stopped + t.notComing + (w.handedOut ? 0 : t.notHandedOut)
+  // The ones the card sends a person to, so the ones Needs you shows: nothing there
+  // points at the Backlog.
+  const needPerson = views.filter(
+    (v) =>
+      v.status !== 'backlog' &&
+      ['with_person', 'stopped', 'not_coming'].includes(subtaskStanding(v)),
+  ).length
+  return { openSubtasks: open, ...(needPerson > 0 ? { needPerson } : {}) }
 }
 
 /**

@@ -42,6 +42,8 @@ export const ENGINE_FEATURES = [
   // its task (a saved wake).
   'board.verification',
   'board.checkHold',
+  'board.reportResult',
+  'board.parentWaits',
   'board.steering',
   // Moves, Retry, Assign, approval answers and a team's work check take a person's
   // authority only from a request the person check lets through (the dashboard's

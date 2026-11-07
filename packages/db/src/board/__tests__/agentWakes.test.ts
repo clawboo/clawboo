@@ -168,6 +168,51 @@ describe('saving an agent’s comment as a wake', () => {
     expect(listWaitingTaskWakes(db)).toEqual([])
   })
 
+  it('a parent waiting on what it handed out: the comment is on the thread, and no wake', () => {
+    const parent = createTask(db, {
+      title: 'Parent',
+      teamId: 'T',
+      status: 'todo',
+      sourceDelegationId: BOUND,
+    })
+    claimTask(db, parent.id, 'b')
+    updateStatus(db, parent.id, 'blocked', { waitingOn: { kind: 'subtasks', handedOut: true } })
+    expect(saveAgentCommentWake(db, parent.id, comment(parent.id))).toEqual({ state: 'none' })
+
+    // Kept from Done until its sub-tasks come through: the same, though it reads `person`.
+    const kept = createTask(db, {
+      title: 'Kept',
+      teamId: 'T',
+      status: 'todo',
+      sourceDelegationId: BOUND,
+    })
+    claimTask(db, kept.id, 'b')
+    updateStatus(db, kept.id, 'blocked', {
+      waitingOn: {
+        kind: 'person',
+        need: 'Part a did not finish.',
+        by: 'agent',
+        untilSubtasks: true,
+      },
+    })
+    expect(saveAgentCommentWake(db, kept.id, comment(kept.id))).toEqual({ state: 'none' })
+    expect(listWaitingTaskWakes(db)).toEqual([])
+  })
+
+  it('an agent that reported it did not finish said what it needs: a comment can answer that', () => {
+    const t = createTask(db, {
+      title: 'Short of done',
+      teamId: 'T',
+      status: 'todo',
+      sourceDelegationId: BOUND,
+    })
+    claimTask(db, t.id, 'b')
+    updateStatus(db, t.id, 'blocked', {
+      waitingOn: { kind: 'person', need: 'The API key is missing.', by: 'agent' },
+    })
+    expect(saveAgentCommentWake(db, t.id, comment(t.id))).toEqual({ state: 'saved', agentId: 'b' })
+  })
+
   it('after a no it stays on the thread and wakes no one', () => {
     const id = parked()
     asking(id)

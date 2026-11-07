@@ -135,6 +135,10 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // Inside the team-chat work check too, so no route of its own: a waiting check
     // marks its task with `checkHeldSince`.
     'board.checkHold': true,
+    // An agent's report on its task, which moves nothing (the server decides Done).
+    'board.reportResult': true,
+    // A task that hands out work waits for it, and gets one follow-up turn.
+    'board.parentWaits': true,
     'board.steering': true,
     // Enforced inside each person write (lib/auth.ts), on no route of its own.
     'board.personCheck': true,

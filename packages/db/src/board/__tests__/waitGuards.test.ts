@@ -446,35 +446,49 @@ describe('a parent waiting on its sub-tasks', () => {
     expect(getTask(db, parent)?.status).toBe('todo')
   })
 
-  it('goes to a person when the last one is cancelled, and is not started', () => {
+  // Cancelled is closed: its agent gets its follow-up turn, told what did not get done,
+  // and what comes next is decided at that turn's end.
+  it('goes back to the queue when the last one is cancelled, saying not all got done', () => {
     const { parent, subs } = parentWith(2)
     finish(subs[0]!)
     updateStatus(db, subs[1]!, 'cancelled', { actor: 'person' })
     const row = getTask(db, parent)
-    expect(row?.status).toBe('blocked')
-    expect(attentionForTask(db, parent)?.reason).toBe('blocked')
-    expect(parseWaitingOn(row?.waitingOn)).toMatchObject({ kind: 'person' })
-    expect(getComments(db, parent).at(-1)?.body).toMatch(/cancelled/i)
-    expect(getComments(db, parent).at(-1)?.body).not.toMatch(/have finished\.$/)
+    expect(row?.status).toBe('todo')
+    expect(listWaitingTaskWakes(db, { taskId: parent }).map((w) => w.reason)).toEqual([
+      'subtasks_closed',
+    ])
+    expect(getComments(db, parent).at(-1)?.body).toMatch(/not all of them got done/)
   })
 
-  it('goes to a person when one was cancelled earlier and the last one is done', () => {
+  it('does the same when one was cancelled earlier and the last one is done', () => {
     const { parent, subs } = parentWith(2)
     updateStatus(db, subs[0]!, 'cancelled', { actor: 'person' })
     finish(subs[1]!)
-    expect(getTask(db, parent)?.status).toBe('blocked')
-    expect(parseWaitingOn(getTask(db, parent)?.waitingOn)).toMatchObject({ kind: 'person' })
+    expect(getTask(db, parent)?.status).toBe('todo')
+    expect(getComments(db, parent).at(-1)?.body).toMatch(/not all of them got done/)
   })
 
-  it('goes to a person when they are all cancelled, or an open one was dropped', () => {
+  it('does the same when they are all cancelled, or an open one was dropped', () => {
     const all = parentWith(2)
     all.subs.forEach((s) => updateStatus(db, s, 'cancelled', { actor: 'person' }))
-    expect(getTask(db, all.parent)?.status).toBe('blocked')
+    expect(getTask(db, all.parent)?.status).toBe('todo')
 
     const some = parentWith(2)
     dropTask(db, some.subs[0]!)
     finish(some.subs[1]!)
-    expect(getTask(db, some.parent)?.status).toBe('blocked')
+    expect(getTask(db, some.parent)?.status).toBe('todo')
+  })
+
+  it('goes to a person, saying so, when no agent is bound to it', () => {
+    const t = createTask(db, { title: 'Parent', teamId: 'T', status: 'todo' })
+    claimTask(db, t.id, 'a2')
+    const s = createSubtask(db, t.id, { title: 'Part', status: 'todo' })
+    updateStatus(db, t.id, 'blocked', { waitingOn: { kind: 'subtasks' } })
+    updateStatus(db, s.id, 'cancelled', { actor: 'person' })
+    expect(getTask(db, t.id)?.status).toBe('blocked')
+    expect(attentionForTask(db, t.id)?.reason).toBe('blocked')
+    expect(parseWaitingOn(getTask(db, t.id)?.waitingOn)).toMatchObject({ kind: 'person' })
+    expect(getComments(db, t.id).at(-1)?.body).toMatch(/Decide what happens next/)
   })
 
   it('a done sub-task dropped later is not a decision against the work', () => {

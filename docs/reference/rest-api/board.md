@@ -137,7 +137,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     // The question it has open, when it waits on one. Not returned by the `ready=true` variant.
     openQuestion: null | { id: string; kind: string; payload: string; status: 'pending' /* ... */ }
     // For a task waiting on other work: the title of the task, or how many sub-tasks are open.
-    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number }
+    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number }
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {

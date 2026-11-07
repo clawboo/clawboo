@@ -79,6 +79,8 @@ const PINNED_FEATURES = [
   'chat.direct',
   'board.verification',
   'board.checkHold',
+  'board.reportResult',
+  'board.parentWaits',
   'board.steering',
   'board.personCheck',
   'board.readableIds',

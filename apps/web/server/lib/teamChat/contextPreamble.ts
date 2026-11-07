@@ -196,11 +196,11 @@ You are executing ONE scoped task the user assigned to you directly from the tea
 // a person now, by asking and stopping. Assuming stays the first choice, because a
 // question parks the task until someone answers.
 const WORKER_ASK_BLOCK = `[Your task (read carefully)]
-You are executing ONE scoped task delegated to you by your team lead. Your reply goes to your team lead, not the user. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only a person can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. When you're done, report a short, concrete result, not a question.
+You are executing ONE scoped task delegated to you by your team lead. Your reply goes to your team lead, not the user. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only a person can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. Work you hand to a teammate reports back to you: end your turn, and you get one more turn on this task when all of it has closed. When you're done, report a short, concrete result, not a question. If you could not get it done, call \`report_result\` with outcome \`not_done\` and say why.
 [End Your task]`
 
 const USER_ASSIGNED_ASK_BLOCK = `[Your task (read carefully)]
-You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only they can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. Do not hand the task to a teammate. When you're done, report a short, concrete result, not a question.
+You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only they can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. Do not hand the task to a teammate. Work you hand off for part of it reports back to you: end your turn, and you get one more turn on this task when all of it has closed. When you're done, report a short, concrete result, not a question. If you could not get it done, call \`report_result\` with outcome \`not_done\` and say why.
 [End Your task]`
 
 // A FOLLOW-UP: results of work the agent handed out while on a task it has since
@@ -493,6 +493,8 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     why = 'a person commented on this task; what they wrote is below.'
   } else if (reason === 'dependency_done') {
     why = 'a task it was waiting on is finished; its result is below.'
+  } else if (reason === 'subtasks_closed') {
+    why = 'the work you handed out on it has closed; the results are below.'
   } else if (reason === 'question_answered') {
     why = 'a person answered your question; their answer is below.'
   } else if (reason === 'agent_comment') {

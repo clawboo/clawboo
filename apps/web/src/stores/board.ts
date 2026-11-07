@@ -36,7 +36,7 @@ export interface BoardTaskView {
   /** What it waits on (the JSON reason), as the server last said for this status. */
   waitingOn?: string | null
   /** For a wait on other work, what its card names. */
-  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number } | null
+  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
   /** The person it is assigned to. Never with `assigneeAgentId`. */
   assigneePersonId?: string | null
   assigneePerson?: string | null
@@ -52,7 +52,7 @@ export interface BoardTaskView {
 export type BoardChangeFrame = BoardChange & {
   roomId?: string | null
   waitingOn?: string | null
-  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number } | null
+  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
   assigneePersonId?: string | null
   assigneePerson?: string | null
 }

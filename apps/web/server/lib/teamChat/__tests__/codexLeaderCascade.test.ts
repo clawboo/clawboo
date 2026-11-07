@@ -53,6 +53,7 @@ import {
 import { getDb, resetDb } from '../../db'
 import { booZeroForTeam } from '../booZero'
 import { nativeTeamSessionSettingKey } from '../nativeTeamSession'
+import { createReportUpOutbox } from '../reportUpOutbox'
 import { createServerBoardClient } from '../serverBoardClient'
 import { HUMAN_TURN } from '@clawboo/team-orchestration'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
@@ -300,8 +301,8 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
 
   it("a worker's FOLLOW-UP goes to its task card and the lead, never the chat", async () => {
     // The worker hands part of its task to a sub-agent and finishes its own part
-    // first, so its task closes before the sub-task reports. What it then writes
-    // about the combined result is a report for the lead, not a chat message.
+    // first, so its task waits for the sub-task. What it then writes about the combined
+    // result is its task's result, reported to the lead, not a chat message.
     const SUB = 'codex-sub'
     const now = Date.now()
     db.insert(agents)
@@ -328,8 +329,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
         LEAD,
         new ScriptedCodex([
           [delegateTo('Codex Worker', 'build the parser and its tests'), done('handed off')],
-          [done('SYNTHESIS 1')],
-          [done('SYNTHESIS 2')],
+          [done('SYNTHESIS')],
         ]),
       ],
       [
@@ -351,6 +351,7 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       abortMap: new Map<string, RunEntry>(),
       onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
       onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
+      takeHeldReportUps: (sk, taskId) => engineRef.current!.takeHeldReportUps(sk, taskId),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
       execForSession: (sk) => engineRef.current!.execForSession(sk),
       stopGen: () => 0,
@@ -374,13 +375,15 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
       deliver,
       stopGen: () => 0,
       caps: { maxFanout: 8 },
+      reportUps: createReportUpOutbox(db, TEAM, null),
     })
 
     await deliver(skFor(LEAD), LEAD, 'team: build a CSV parser', HUMAN_TURN)
-    await settle(() => persisted.length >= 3, "the lead's second synthesis")
+    await settle(() => persisted.length >= 2, "the lead's synthesis")
 
-    // 1. Only the lead's turns reach the chat: the ack and its two syntheses.
-    expect(persisted.map((p) => p.text)).toEqual(['handed off', 'SYNTHESIS 1', 'SYNTHESIS 2'])
+    // 1. Only the lead's turns reach the chat: the ack and its one synthesis, once the
+    //    worker's task is done, and no partial answer before it.
+    expect(persisted.map((p) => p.text)).toEqual(['handed off', 'SYNTHESIS'])
     expect(persisted.every((p) => p.sk === skFor(LEAD))).toBe(true)
     const chat = persisted.map((p) => p.text).join('\n')
     for (const leak of ['FOLLOW-UP', 'my part done', 'sub result']) expect(chat).not.toContain(leak)
@@ -393,21 +396,20 @@ describe('Codex-led cascade (delegate MCP tool → board → report-up → synth
     const subTask = tasks.find((t) => t.assigneeAgentId === SUB)!
     expect(subTask.parentTaskId).toBe(workerTask.id)
 
-    // 3. The follow-up is recorded on the worker's (closed) task card.
+    // 3. The follow-up is recorded on the worker's task card, and is its result.
     const comments = getComments(db, workerTask.id).map((c) => c.body)
     expect(comments.join('\n')).toContain('FOLLOW-UP: combined')
 
-    // 4. The worker's second turn was framed as a follow-up, not a chat turn.
+    // 4. The worker's second turn is one more run of its task, with the result in hand.
     const workerStarts = adapters.get(WORKER)!.startOpts
     expect(workerStarts).toHaveLength(2)
-    expect(workerStarts[1]!.message).toContain('[Task Update]')
-    expect(workerStarts[1]!.message).toContain('not shown to the user')
-    expect(workerStarts[1]!.context ?? '').toContain('[Following up on your task')
+    expect(workerStarts[1]!.message).toContain('[Sub-tasks in]')
+    expect(workerStarts[1]!.context ?? '').toContain('sub result')
 
-    // 5. The lead heard the follow-up as its own [Task Update] turn.
+    // 5. The lead heard it once, as its own [Task Update] turn.
     const leadStarts = adapters.get(LEAD)!.startOpts
-    expect(leadStarts).toHaveLength(3)
-    expect(leadStarts[2]!.message).toContain('FOLLOW-UP: combined')
+    expect(leadStarts).toHaveLength(2)
+    expect(leadStarts[1]!.message).toContain('FOLLOW-UP: combined')
 
     // 6. A follow-up never writes the worker's user-facing resume pointer.
     expect(getSetting(db, nativeTeamSessionSettingKey(WORKER, TEAM)) || null).toBeNull()
