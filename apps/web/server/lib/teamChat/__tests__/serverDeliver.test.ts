@@ -296,7 +296,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
   })
 
   it("holds the wedge open for the engine's tool-call allowance while the run is inside a tool call", async () => {
-    // K7. A run silent inside one tool call (a long build, a command that prints
+    // A run silent inside one tool call (a long build, a command that prints
     // nothing, an approval the person has not answered) was aborted by the
     // 10-minute wedge, before the engine's 24-minute allowance for an open call.
     const adapter = new FakeAdapter((run) =>

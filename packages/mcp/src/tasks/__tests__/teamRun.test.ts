@@ -29,7 +29,7 @@ function claimedBy(agentId: string, title = 'Write the parser'): string {
 }
 
 describe('Tasks MCP on a team run', () => {
-  it('serves reads, creates, comments, links and block_task, and none of the engine-owned writes', async () => {
+  it('serves reads, creates, comments and block_task, and none of the engine-owned writes', async () => {
     const names = await listToolNames(await connectInMemory(createTasksServer(db, TEAM_RUN)))
     expect(names.sort()).toEqual(
       [
@@ -38,7 +38,6 @@ describe('Tasks MCP on a team run', () => {
         'create_subtask',
         'create_task',
         'get_task',
-        'link_task',
         'list_tasks',
       ].sort(),
     )
@@ -53,6 +52,8 @@ describe('Tasks MCP on a team run', () => {
       ['release_task', { taskId }],
       ['update_task_status', { taskId, status: 'done' }],
       ['unblock_task', { taskId }],
+      // A dependency would hold a teammate's card back with nothing to say so.
+      ['link_task', { taskId, dependsOnTaskId: taskId }],
     ] as const) {
       const res = await callText(client, name, args)
       expect(res.isError, name).toBe(true)

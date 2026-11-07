@@ -30,6 +30,7 @@ import {
   linkDep,
   listTasks,
   LOCAL_PERSON,
+  oneLine,
   openSubtasksOf,
   parseQuestionPayload,
   recordResultClaim,
@@ -266,7 +267,7 @@ function noteCancelForDelegator(
       teamId: task.teamId,
       kind: 'task_update',
       taskId: task.id,
-      body: `“${task.title}” was cancelled through the Tasks tools.${steps} Do not hand it out again unless the work is still needed.`,
+      body: `“${oneLine(task.title)}” was cancelled through the Tasks tools.${steps} Do not hand it out again unless the work is still needed.`,
     })
     return null
   } catch {
@@ -337,6 +338,9 @@ const READ_ONLY_TOOL_NAMES = new Set(['list_tasks', 'get_task'])
  *  nothing at all: it is evidence for the server's decision when the run ends. Its plan
  *  is a document on that task, which moves no card either. */
 const ASK_TOOL_NAMES = new Set(['ask_person', 'report_result', 'write_plan'])
+/** All a person's one-to-one chat gets. It holds no task and no engine drives it, so
+ *  work goes through a hand-off and the fences on those, not through a card it moved. */
+const CHAT_RUN_TOOL_NAMES = new Set([...READ_ONLY_TOOL_NAMES, 'add_comment'])
 /** Tools whose ARGUMENTS name an agent, so an unidentified caller acts as anyone. */
 const IDENTITY_TOOL_NAMES = new Set(['claim_task', 'assign_task'])
 /** Tools that move a card: who may call them depends on who is calling. */
@@ -363,6 +367,9 @@ const TEAM_RUN_WITHHELD_TOOL_NAMES = new Set([
   'release_task',
   'update_task_status',
   'unblock_task',
+  // A dependency holds a card back from its agent with nothing to say so: the engine
+  // links a plan's steps itself.
+  'link_task',
 ])
 
 export interface TasksServerOptions {
@@ -432,6 +439,14 @@ export interface TasksServerOptions {
   teamRun?: boolean
 
   /**
+   * A run of a person's one-to-one chat, signed on the attach URL (`chatRun=1`). It
+   * gets the reads and `add_comment`, held to `boundScope.teamId` when the agent is on
+   * a team. Its comment stays on the thread and wakes no one, and no mailbox rows ride
+   * its results: those are for the agent's runs on its work, not for this person's turn.
+   */
+  chatRun?: boolean
+
+  /**
    * Is this agent a lead of the team? A hand-off to a lead is an escalation, which
    * the cycle guard lets through. Defaults to the team's own lead; the server adds
    * Boo Zero, which leads every team.
@@ -465,6 +480,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   // binds it; in-process (Clawboo Native) the driver binds it.
   const boundAgentId = opts?.boundScope?.agentId ?? undefined
   const teamRun = opts?.teamRun === true
+  const chatRun = opts?.chatRun === true
   // The run's own task, when bound: the default for the one-task tools below.
   const boundTaskId = opts?.boundScope?.taskId ?? undefined
   // Optional when a task is bound, but never empty: "" would read as "my task".
@@ -1199,7 +1215,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     },
     {
       name: 'add_comment',
-      description: `Add a comment to a task (report-up summaries, system notes).${ownTaskHint('comment on')}`,
+      description: chatRun
+        ? 'Add a comment to a task. It stays on the task, its agent reads it in its next run there, and it starts no one. To give a team work, write a hand-off.'
+        : `Add a comment to a task (report-up summaries, system notes).${ownTaskHint('comment on')}`,
       inputSchema: z.object({
         taskId: taskIdField,
         body: z.string(),
@@ -1242,10 +1260,13 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
             ? 'agent'
             : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ?? 'agent'),
           unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
-          // Written through a Tasks session bound to its agent. Only that may ever count
-          // as the agent's own words, so only that may wake a teammate.
+          // Written through a Tasks session bound to its agent, on its work. Only that may
+          // ever count as the agent's own words, so only that may wake a teammate. A
+          // person's one-to-one chat is not its work.
           {
-            ...(boundAgentId !== undefined && !unverified ? { kind: 'agent' as const } : {}),
+            ...(boundAgentId !== undefined && !unverified && !chatRun
+              ? { kind: 'agent' as const }
+              : {}),
             executionId: boundExecutionId ?? null,
           },
         )
@@ -1313,17 +1334,23 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
     for (const name of [...IDENTITY_TOOL_NAMES, ...STATUS_TOOL_NAMES, 'write_plan'])
       withheld.add(name)
   const active = (
-    opts?.readOnly === true
-      ? tools.filter(
-          (t) =>
-            READ_ONLY_TOOL_NAMES.has(t.name) ||
-            (ASK_TOOL_NAMES.has(t.name) && !withheld.has(t.name)),
+    chatRun
+      ? tools.filter((t) =>
+          (opts?.readOnly === true ? READ_ONLY_TOOL_NAMES : CHAT_RUN_TOOL_NAMES).has(t.name),
         )
-      : tools.filter((t) => !withheld.has(t.name))
+      : opts?.readOnly === true
+        ? tools.filter(
+            (t) =>
+              READ_ONLY_TOOL_NAMES.has(t.name) ||
+              (ASK_TOOL_NAMES.has(t.name) && !withheld.has(t.name)),
+          )
+        : tools.filter((t) => !withheld.has(t.name))
   ).map(acceptReadableIds)
   // Mid-run inbox piggyback for a bound calling agent (see ../piggyback.ts).
   return buildServer(
     'clawboo-tasks',
-    boundAgentId ? withInboxPiggyback(active, db, boundAgentId, { teamId: boundTeamId }) : active,
+    boundAgentId && !chatRun
+      ? withInboxPiggyback(active, db, boundAgentId, { teamId: boundTeamId })
+      : active,
   )
 }

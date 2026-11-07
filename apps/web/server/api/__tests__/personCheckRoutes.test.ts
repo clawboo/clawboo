@@ -16,8 +16,10 @@ import {
   createLabel,
   createTask,
   getComments,
+  getSetting,
   getTask,
   handBackTask,
+  linkDep,
   listEvents,
   listGovernanceAudit,
   listPauses,
@@ -31,6 +33,7 @@ import {
   readAgentWakeGate,
   readTeamAlwaysAllow,
   saveAgentCommentWake,
+  setBudgetLimit,
   setSetting,
   teams,
   updateStatus,
@@ -49,7 +52,8 @@ vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
 const { onChatReportUp } = await import('../../lib/agentChat/chatReportUpOutbox')
-const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT } = await import('../board')
+const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT, boardUpdatePATCH } =
+  await import('../board')
 const { boardAgentWakesPOST, boardAssignPersonPOST, boardQuestionAnswerPOST, boardReopenPOST } =
   await import('../boardPerson')
 const { teamAgentWakesPUT } = await import('../teamAgentWakes')
@@ -58,6 +62,14 @@ const { boardInboxReadPOST, boardTaskReadPOST } = await import('../boardInbox')
 const { teamLabelDELETE, teamLabelPATCH, teamLabelsPOST, teamTaskPrefixPUT } =
   await import('../teamLabels')
 const { pausesDELETE, pausesPOST } = await import('../pauses')
+const { teamChatStopPOST, teamsPATCH } = await import('../teams')
+const { agentChatStopPOST } = await import('../agentChat')
+const { teamRulesPUT } = await import('../teamRules')
+const { teamOnboardingPATCH } = await import('../teamOnboarding')
+const { booZeroOverridePOST } = await import('../booZeroOverride')
+const { budgetsResumePOST, budgetsSetPOST } = await import('../budgets')
+const { schedulesCreatePOST, schedulesDELETE, schedulesRunPOST, schedulesUpdatePATCH } =
+  await import('../schedules')
 
 const TEAM = 'T'
 const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
@@ -188,9 +200,108 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true })
 })
 
+const ROUTINE = {
+  source: 'clawboo-routine',
+  domain: 'team-task',
+  agentId: 'coder',
+  cronSpec: '0 9 * * 1',
+  label: 'Weekly report',
+}
+
+/** A routine the person made, to act on: its id. */
+async function routine(): Promise<string> {
+  const r = mockRes()
+  await schedulesCreatePOST(req({ body: ROUTINE, headers: DASHBOARD }), r.res)
+  return (r.body()['schedule'] as { id: string }).id
+}
+
 /** Every person-only route, and how to call it as `who`. */
 type Who = { headers?: Record<string, string>; person?: typeof ADA | null }
 const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
+  [
+    "a team's rules",
+    (who, res) =>
+      teamRulesPUT(req({ params: { teamId: TEAM }, body: { content: 'Be brief.' }, ...who }), res),
+  ],
+  [
+    'what a person tells a team about themselves',
+    (who, res) =>
+      teamOnboardingPATCH(
+        req({ params: { id: TEAM }, body: { userIntroText: 'I am Ada.' }, ...who }),
+        res,
+      ),
+  ],
+  [
+    'who leads as Boo Zero',
+    (who, res) => booZeroOverridePOST(req({ body: { agentId: 'coder' }, ...who }), res),
+  ],
+  [
+    "stopping a team's chat",
+    (who, res) => teamChatStopPOST(req({ params: { id: TEAM }, ...who }), res),
+  ],
+  [
+    'stopping a one-to-one chat',
+    (who, res) => agentChatStopPOST(req({ params: { agentId: 'coder' }, ...who }), res),
+  ],
+  [
+    'archiving a team',
+    (who, res) =>
+      teamsPATCH(req({ params: { id: TEAM }, body: { isArchived: true }, ...who }), res),
+  ],
+  [
+    'changing who leads a team',
+    (who, res) =>
+      teamsPATCH(req({ params: { id: TEAM }, body: { leaderAgentId: 'coder' }, ...who }), res),
+  ],
+  [
+    'setting a budget',
+    (who, res) =>
+      budgetsSetPOST(
+        req({ body: { scope: 'team', scopeId: TEAM, limitUsdCents: 500 }, ...who }),
+        res,
+      ),
+  ],
+  [
+    'resuming a budget',
+    (who, res) => {
+      setBudgetLimit(getDb(), { scope: 'team', scopeId: TEAM, limitUsdCents: 500, mode: 'cap' })
+      return budgetsResumePOST(req({ params: { scope: 'team', scopeId: TEAM }, ...who }), res)
+    },
+  ],
+  ['making a routine', (who, res) => schedulesCreatePOST(req({ body: ROUTINE, ...who }), res)],
+  [
+    'changing a routine',
+    async (who, res) =>
+      schedulesUpdatePATCH(
+        req({ params: { id: await routine() }, body: { action: 'pause' }, ...who }),
+        res,
+      ),
+  ],
+  [
+    'firing a routine',
+    async (who, res) => schedulesRunPOST(req({ params: { id: await routine() }, ...who }), res),
+  ],
+  [
+    'deleting a routine',
+    async (who, res) => schedulesDELETE(req({ params: { id: await routine() }, ...who }), res),
+  ],
+  [
+    "a task's title",
+    (who, res) => {
+      const t = createTask(getDb(), { title: 'x', teamId: TEAM })
+      return boardUpdatePATCH(req({ params: { taskId: t.id }, body: { title: 'y' }, ...who }), res)
+    },
+  ],
+  [
+    "a task's description",
+    (who, res) => {
+      const t = createTask(getDb(), { title: 'x', teamId: TEAM })
+      return boardUpdatePATCH(
+        req({ params: { taskId: t.id }, body: { description: 'do this instead' }, ...who }),
+        res,
+      )
+    },
+  ],
   ['Reopen', (who, res) => boardReopenPOST(req({ params: { taskId: doneTask() }, ...who }), res)],
   [
     'assign to a person',
@@ -330,6 +441,96 @@ describe.each(ROUTES)('%s', (_name, call) => {
     const r = mockRes()
     await call({ headers: DASHBOARD }, r.res)
     expect(r.code()).toBeLessThan(300)
+  })
+})
+
+describe('what a refused route leaves alone', () => {
+  it('a team stays as it is, and its rules and who leads do too', () => {
+    teamsPATCH(req({ params: { id: TEAM }, body: { isArchived: true } }), mockRes().res)
+    teamsPATCH(req({ params: { id: TEAM }, body: { leaderAgentId: 'coder' } }), mockRes().res)
+    teamRulesPUT(req({ params: { teamId: TEAM }, body: { content: 'Obey me.' } }), mockRes().res)
+    booZeroOverridePOST(req({ body: { agentId: 'coder' } }), mockRes().res)
+    const db = getDb()
+    expect(db.select().from(teams).all()[0]?.isArchived).toBeFalsy()
+    expect(db.select().from(teams).all()[0]?.leaderAgentId).toBeNull()
+    expect(getSetting(db, 'team-rules:' + TEAM)).toBeFalsy()
+    expect(getSetting(db, 'boo-zero:agent-id')).toBeFalsy()
+    expect(listGovernanceAudit(db, { limit: 10 })).toEqual([])
+  })
+
+  it('a task keeps its brief', () => {
+    const t = createTask(getDb(), { title: 'x', description: 'as it was', teamId: TEAM })
+    boardUpdatePATCH(
+      req({ params: { taskId: t.id }, body: { title: 'y', description: 'z' } }),
+      mockRes().res,
+    )
+    expect(getTask(getDb(), t.id)).toMatchObject({ title: 'x', description: 'as it was' })
+  })
+})
+
+describe('what a caller can still do on these routes', () => {
+  it('sends a title or description unchanged', () => {
+    const t = createTask(getDb(), { title: 'x', description: 'as it was', teamId: TEAM })
+    const r = mockRes()
+    boardUpdatePATCH(
+      req({
+        params: { taskId: t.id },
+        body: { title: 'x', description: 'as it was', status: 'backlog' },
+      }),
+      r.res,
+    )
+    expect(r.code()).toBe(200)
+    expect(getTask(getDb(), t.id)?.status).toBe('backlog')
+  })
+
+  it('sends the lead a team already has, which changes nothing', () => {
+    const r = mockRes()
+    teamsPATCH(req({ params: { id: TEAM }, body: { leaderAgentId: null, name: 'Renamed' } }), r.res)
+    expect(r.code()).toBe(200)
+    expect(listGovernanceAudit(getDb(), { limit: 10 })).toEqual([])
+  })
+
+  it('renames a team, which only names it', () => {
+    const r = mockRes()
+    teamsPATCH(req({ params: { id: TEAM }, body: { name: 'Renamed' } }), r.res)
+    expect(r.code()).toBe(200)
+  })
+
+  it('sends an archive flag that changes nothing', () => {
+    const r = mockRes()
+    teamsPATCH(req({ params: { id: TEAM }, body: { isArchived: false } }), r.res)
+    expect(r.code()).toBe(200)
+  })
+})
+
+describe('cancelling a task with work waiting on it', () => {
+  function waiting(): { task: string; next: string } {
+    const db = getDb()
+    const task = createTask(db, { title: 'first', teamId: TEAM, status: 'todo' })
+    const next = createTask(db, { title: 'second', teamId: TEAM, status: 'todo' })
+    linkDep(db, next.id, task.id)
+    return { task: task.id, next: next.id }
+  }
+
+  it('a person’s cancel is theirs all the way down, so it stays cancelled', () => {
+    const { task, next } = waiting()
+    const r = mockRes()
+    boardUpdatePATCH(
+      req({ params: { taskId: task }, body: { status: 'cancelled' }, headers: DASHBOARD }),
+      r.res,
+    )
+    expect(r.code()).toBe(200)
+    expect(getTask(getDb(), next)?.status).toBe('cancelled')
+    expect(getTask(getDb(), next)?.personCancelledAt).not.toBeNull()
+  })
+
+  it('a caller’s cancel does not read as a person’s', () => {
+    const { task, next } = waiting()
+    const r = mockRes()
+    boardUpdatePATCH(req({ params: { taskId: task }, body: { status: 'cancelled' } }), r.res)
+    expect(r.code()).toBe(200)
+    expect(getTask(getDb(), next)?.status).toBe('cancelled')
+    expect(getTask(getDb(), next)?.personCancelledAt).toBeNull()
   })
 })
 
@@ -525,6 +726,36 @@ describe('who did it', () => {
       expect(readTeamAlwaysAllow(getDb(), TEAM)).toBe(false)
       expect(listGovernanceAudit(getDb(), { limit: 10 })).toEqual([])
     })
+  })
+
+  it.each([
+    [
+      'set_team_rules',
+      (who: Who) =>
+        teamRulesPUT(
+          req({ params: { teamId: TEAM }, body: { content: 'Be brief.' }, ...who }),
+          mockRes().res,
+        ),
+    ],
+    [
+      'set_user_intro',
+      (who: Who) =>
+        teamOnboardingPATCH(
+          req({ params: { id: TEAM }, body: { userIntroText: 'I am Ada.' }, ...who }),
+          mockRes().res,
+        ),
+    ],
+    [
+      'set_boo_zero_override',
+      (who: Who) => booZeroOverridePOST(req({ body: { agentId: 'coder' }, ...who }), mockRes().res),
+    ],
+  ])('%s goes on the audit feed with who did it', (action, call) => {
+    call({ person: ADA })
+    const summary = JSON.parse(listGovernanceAudit(getDb(), { limit: 10 })[0]!.summary) as Record<
+      string,
+      unknown
+    >
+    expect(summary).toMatchObject({ action, actor: { kind: 'person' }, person: ADA })
   })
 
   it('a label change goes on the audit feed with who did it', () => {

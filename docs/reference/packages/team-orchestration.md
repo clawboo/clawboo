@@ -46,7 +46,7 @@ and talks to the server over REST and server-sent events.
 | `compact`                                        | no       | shrink tool output before it is quoted back                                                     |
 | `caps`, `onCapHit`                               | no       | the per-turn fan-out limit and a callback when it trips                                         |
 | `isRiskyDelegation`, `requestDelegationApproval` | no       | make a risky delegation wait for a person's approval                                            |
-| `abortSession`                                   | no       | stop a run when a person moves its card                                                         |
+| `abortSession`                                   | no       | stop a task's own run (`sessionKey`, `taskId`) when it fails or a person moves its card         |
 | `reportUps`                                      | no       | a durable outbox for `[Task Update]` items, so they outlive a restart                           |
 | `taskWakes`                                      | no       | the saved wakes on this room's tasks, so a comment the run did not hear gets a turn before Done |
 | `workCheck`                                      | no       | the check a task's work must pass before it is done                                             |

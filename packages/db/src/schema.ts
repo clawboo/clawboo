@@ -1392,6 +1392,8 @@ export const agentInbox = sqliteTable(
     /** Which channel delivered it ('digest' | 'mcp' | 'signal', a steer into its run). */
     deliveredVia: text('delivered_via'),
     tenantId: text('tenant_id'),
+    /** Whose words the row quotes: an agent's id or `person`. Null: clawboo's own. */
+    source: text('source'),
   },
   (t) => [index('idx_agent_inbox_pending').on(t.agentId, t.deliveredAt)],
 )

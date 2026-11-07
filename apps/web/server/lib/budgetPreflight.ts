@@ -44,7 +44,11 @@ export function budgetPreflight(
 export function budgetRefusalText(
   scope: BudgetScope,
   reason: BudgetRefusalReason = 'paused',
+  retriesItself = false,
 ): string {
+  if (reason === 'held' && retriesItself) {
+    return `The ${scope} budget is close to its hard cap, and runs already going have set aside the rest of it, so this is waiting. It goes out by itself when they finish, or raise the cap in Governance.`
+  }
   if (reason === 'held') {
     return `The ${scope} budget is close to its hard cap, and runs already going have set aside the rest of it, so this run did not start. Try again when they finish, or raise the cap in Governance.`
   }

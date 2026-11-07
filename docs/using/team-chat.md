@@ -127,7 +127,7 @@ A handoff whose text mentions a risky action waits for you before it starts. The
 
 ### Task cards in the conversation
 
-Each task card shows the task, the agent on it, and a status: **Queued**, **Working**, **Verifying**, **Done** or **Cancelled**. A task that waits on you shows why instead, for example **Failed**, **Stopped** or **Unassigned**, with **Resolve on board**. A finished card shows the agent's report, and a failed one shows the reason.
+Each task card shows the task, the agent on it, and a status: **Backlog**, **Queued**, **Working**, **Waiting**, **Verifying**, **Waiting to check**, **Paused**, **Done** or **Cancelled**. A task that waits on you shows why instead, for example **Failed**, **Stopped** or **Unassigned**, with **Resolve on board**. A finished card shows the agent's report, and a failed one shows the reason.
 
 - **Comments & activity** at the foot of a card opens its comments and its live activity inside the card.
 - The expand icon opens the task on the [board](/using/board) with its details open.
@@ -137,7 +137,7 @@ Each task card shows the task, the agent on it, and a status: **Queued**, **Work
 
 While agents in this chat are working, the send button turns into **Stop**. Pressing it:
 
-- ends every run in this chat, and drops replies and handoffs that were still waiting to start;
+- ends every run in this chat, and drops replies and handoffs that were still waiting to start. A message of yours that had not started says so under it, so send it again if you still want it;
 - sends the chat's tasks back to **To do**, where they wait under **Needs you** as **Stopped**;
 - leaves the team's other chats running.
 

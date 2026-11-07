@@ -24,11 +24,15 @@ const queued = vi.hoisted(() => ({
 }))
 
 vi.mock('../serverDeliver', () => ({
-  createServerDeliver: (deps: { queuedRuns: Map<string, { cancel(): void }> }) => {
+  createServerDeliver: (deps: {
+    queuedRuns: Map<string, { cancel(): void; taskId?: string | null }>
+    taskForSession: (sessionKey: string) => string | null
+  }) => {
     queued.map = deps.queuedRuns
     // Every slot is taken: the delivery waits in the queue and settles at once.
     return async (sessionKey: string) => {
       deps.queuedRuns.set(sessionKey, {
+        taskId: deps.taskForSession(sessionKey),
         cancel: () => {
           queued.cancelled.push(sessionKey)
           deps.queuedRuns.delete(sessionKey)
@@ -130,6 +134,15 @@ describe('team orchestrator × the run queue', () => {
     const taskId = await dispatchQueued()
     await getTeamOrchestrator('T').personMovedTask(taskId, 'done')
     expect(queued.cancelled).toEqual([leadSession])
+  })
+
+  it("a person's move on a task leaves a person's message waiting on that session alone", async () => {
+    const taskId = await dispatchQueued()
+    // By now the session's place in the queue is someone's message, not the task's run.
+    queued.map!.set(leadSession, { cancel: () => queued.cancelled.push('a message') })
+    await getTeamOrchestrator('T').personMovedTask(taskId, 'done')
+    expect(queued.cancelled).toEqual([])
+    expect(queued.map!.has(leadSession)).toBe(true)
   })
 
   it('teardown takes a queued run out of the queue', async () => {

@@ -225,6 +225,12 @@ export interface DriveAgentChatParams {
   turnExtras?: () => string | null
   /** Told how the turn ended, once it has given back its slot and its lock. */
   onTurnEnded?: (ending: ChatTurnEnding) => void | Promise<void>
+  /** This turn will try again by itself while a budget's room is set aside, so the chat
+   *  has heard why already. */
+  quietWhileBudgetHeld?: boolean
+  /** This turn carries results a person has not read and goes out again by itself, so a
+   *  held budget's note must not ask them to try again. */
+  retriesWhileBudgetHeld?: boolean
 }
 
 /** How a 1:1 turn ended. `reply` is the text it produced, for a turn that ended
@@ -238,6 +244,9 @@ export interface ChatTurnEnding {
   /** It did not finish, and a pause covers the agent: what it carried goes again on the
    *  resume, and this try does not count. */
   paused?: boolean
+  /** A budget refused it because runs already going have set aside its room, which comes
+   *  back by itself. This try does not count either. */
+  budgetHeld?: boolean
 }
 
 /**
@@ -346,7 +355,9 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
     // failed spend write does below.
     const gate: RunBudgetGate = reserveRunBudget(db, { agentId }, { kind: 'chat', ref: sessionKey })
     if (gate.blocked) {
-      persist(budgetRefusalText(gate.scope, gate.reason), true)
+      if (gate.reason === 'held') ending.budgetHeld = true
+      if (!(gate.reason === 'held' && params.quietWhileBudgetHeld))
+        persist(budgetRefusalText(gate.scope, gate.reason, params.retriesWhileBudgetHeld), true)
       ending.how = 'refused'
       return
     }
@@ -384,8 +395,15 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
       // own session in theirs, and Claude Code resumes the SDK session by id.
       resume: resumable ? priorSessionId : null,
       mcpBaseUrl,
-      // A 1:1 chat has no team: agent + global memory scope.
-      memoryScope: { teamId: null, agentId, attachSecret: getMcpAttachSecret(db) },
+      // A 1:1 chat has no team: agent + global memory scope. Its Tasks tools are the
+      // chat's own, held to the agent's team when it has one.
+      memoryScope: {
+        teamId: null,
+        agentId,
+        chatRun: true,
+        chatRunTeamId: row?.teamId ?? null,
+        attachSecret: getMcpAttachSecret(db),
+      },
       ...(homeDir ? { homeDir } : {}),
       ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),
     }

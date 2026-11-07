@@ -212,7 +212,7 @@ function wake(
   }
   // Its agent has not finished stopping (it asked, or handed back, and the run is still
   // ending). A move to To do now would read as being taken off the task. The run's end
-  // brings the pump, and the wake goes then.
+  // brings the pump, or the stale sweep ends a run that never does, and the wake goes then.
   if (task.status === 'blocked' && autoFireRefusal(listExecutions(db, task.id)) === 'running')
     return { status: 'queued', agentId, reason: 'next-run' }
   if (task.status !== 'todo') {

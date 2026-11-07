@@ -94,7 +94,7 @@ import { noteHumanMove, statusWord } from '../lib/teamChat/humanMove'
 import { reflectToRoom } from '../lib/teamChat/reflect'
 import { deliverPersonReply, type ReplyDelivery } from '../lib/teamChat/personReply'
 import { pauseViewOfTask, pauseViews, type PauseView } from '../lib/pauseViews'
-import { engineRefusal } from '../lib/teamChat/roomRoster'
+import { startRefusal } from '../lib/teamChat/roomRoster'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 import {
   actOnTaskWorkspace,
@@ -248,7 +248,12 @@ function withOpenQuestion<T extends DbTask>(
 ): Array<
   T & {
     openQuestion: DbTaskQuestion | null
-    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number }
+    waitingOnDetail?: {
+      taskTitle?: string
+      openSubtasks?: number
+      needPerson?: number
+      openUnder?: number
+    }
   }
 > {
   const byId = pendingQuestionsForTasks(
@@ -531,7 +536,7 @@ export function boardRetryPOST(req: Request, res: Response): void {
     }
     // Team chat would hand it to an engine that cannot see it: refuse before
     // anything is written, rather than answer that it started.
-    const refusal = rerun ? null : engineRefusal(db, task)
+    const refusal = startRefusal(db, task, rerun !== null)
     if (refusal) {
       res.status(409).json({ ok: false, error: refusal })
       return
@@ -608,7 +613,7 @@ export function boardAssignPOST(req: Request, res: Response): void {
     const rerun = runnerRerunFor(db, task, agentId)
     // Team chat would hand it to an engine that cannot see it: refuse before the
     // new binding is written, rather than answer that it starts now.
-    const refusal = rerun ? null : engineRefusal(db, task)
+    const refusal = startRefusal(db, task, rerun !== null)
     if (refusal) {
       res.status(409).json({ ok: false, error: refusal })
       return
@@ -714,7 +719,7 @@ export function boardClaimPOST(req: Request, res: Response): void {
 // A caller the person check does not let through still moves the card, as an
 // agent's own status write does, without the person's authority: it stops no run,
 // cannot overrule a person's move or the verification gate, and is not recorded as
-// a person.
+// a person. Changing the title or the description takes the check.
 export function boardUpdatePATCH(req: Request, res: Response): void {
   try {
     const parsed = updateTaskBody.safeParse(req.body)
@@ -726,6 +731,16 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const { status, humanOverride: overrideAsked, completedAt, priority, ...rest } = parsed.data
     const byPerson = actsAsPerson(req)
+    // A task's title and description are the brief its next run is told to follow, so
+    // changing them takes a person's request. Sent unchanged, they change nothing.
+    const current = getTask(db, taskId)
+    if (
+      current &&
+      ((rest.title !== undefined && rest.title !== current.title) ||
+        (rest.description !== undefined && rest.description !== (current.description ?? ''))) &&
+      refuseUnlessPerson(req, res)
+    )
+      return
     const humanOverride = byPerson && overrideAsked
     const allowedPriority = priorityFor(req, priority)
     const fields = {
@@ -800,10 +815,12 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       // could run either: cancel them with it rather than leave them looking
       // queued forever.
       if (status === 'cancelled' && priorStatus !== 'cancelled') {
-        cancelledDependents = cancelDependents(db, taskId, { byPerson: true }).map((d) => ({
-          id: d.id,
-          title: d.title,
-        }))
+        cancelledDependents = cancelDependents(db, taskId, byPerson ? { byPerson } : {}).map(
+          (d) => ({
+            id: d.id,
+            title: d.title,
+          }),
+        )
       }
       if (humanOverride && status === 'done') {
         const t = result.task
@@ -896,6 +913,10 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
     // for 'system': a later run reads that as clawboo itself. A speed bump, not a
     // boundary: see actsAsPerson.
     const authorType = actsAsPerson(req) ? parsed.data.authorType : 'agent'
+    // The same for who wrote it: a later run reads this name as the comment's author,
+    // and takes an assignee's last comment as its finished task's result. A caller that
+    // did not pass the check cannot prove it is the agent it names.
+    const authorAgentId = actsAsPerson(req) ? parsed.data.authorAgentId : undefined
     const ownWriter = ownWriterOf(req)
     const comment = runOwnWrite(db, authorType === 'user' ? ownWriter : null, taskId, () =>
       addComment(
@@ -903,7 +924,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         taskId,
         parsed.data.body,
         authorType,
-        parsed.data.authorAgentId,
+        authorAgentId,
         // Set here, by the writer: a person's comment is one that passed the check.
         // What may wake an agent is read from this, never from the author type.
         { person: personOf(req), ...(authorType === 'user' ? { kind: 'person' as const } : {}) },
@@ -912,7 +933,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
     emitEvent(db, {
       kind: 'comment_added',
       taskId,
-      agentId: parsed.data.authorAgentId ?? null,
+      agentId: authorAgentId ?? null,
       data: { authorType, body: parsed.data.body, ...actorField(req) },
     })
     // Narrate the comment into the team room so every peer sees it, not just the
@@ -920,7 +941,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
     const task = getTask(db, taskId)
     let delivery: ReplyDelivery | null = null
     if (task) {
-      const author = parsed.data.authorAgentId ?? authorType
+      const author = authorAgentId ?? authorType
       reflectToRoom(
         db,
         task.teamId,
@@ -942,7 +963,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
                 startTask(db, id, teamId, current ? runnerTargetOf(db, current) : null, mcpBaseUrl)
               },
               // As Retry: team chat could not run a task its engine cannot see.
-              startRefusal: (t) => (runnerTargetOf(db, t) ? null : engineRefusal(db, t)),
+              startRefusal: (t) => startRefusal(db, t, runnerTargetOf(db, t) !== null),
               held: engineHeld,
               // Restarting it for the reply is part of the person's own write.
               asOwnWrite: (write) => runOwnWrite(db, ownWriter, taskId, write),

@@ -120,6 +120,8 @@ curl http://localhost:18790/api/schedules
 
 ## `POST /api/schedules`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Creates a schedule in the source named by `source`. Before the source is touched, two checks run in order: a read-only (`observe-only`) source answers **403**, and a `domain: 'team-task'` create aimed at the Gateway cron answers **422** (the Gateway cron source refuses it too). The source then runs its own checks.
 
 For a `clawboo-routine` create, the cron spec is checked (a spec that does not parse is a **400**), and the Routine's task template is built from `label`, `taskTemplate` and `target`. The template's `title` defaults to `label` (or `Scheduled team task`), and its `description` is the instructions each run carries. The target is checked too:
@@ -268,6 +270,8 @@ curl -X POST http://localhost:18790/api/schedules \
 
 ## `PATCH /api/schedules/:id`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Pauses or resumes a schedule, or changes its cron spec, label, task template, payload or target. The body takes one of two shapes; a body with neither is a **400**, and a body with both runs `action` and ignores `patch`. The change goes to the source named in `:id`.
 
 For a Routine:
@@ -391,6 +395,8 @@ curl -X PATCH http://localhost:18790/api/schedules/clawboo-routine:<routine-id> 
 
 ## `DELETE /api/schedules/:id`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Removes a schedule: a Routine is deleted from Clawboo's database, and a Gateway job is removed with the Gateway's `cron.remove`.
 
 - **Path params**: `id` (composite schedule id).
@@ -434,12 +440,15 @@ Removes a schedule: a Routine is deleted from Clawboo's database, and a Gateway 
 ### Example
 
 ```bash
-curl -X DELETE http://localhost:18790/api/schedules/openclaw-gateway-cron:<job-id>
+curl -X DELETE http://localhost:18790/api/schedules/openclaw-gateway-cron:<job-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
 
 ## `POST /api/schedules/:id/run`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Runs a schedule now. The answer only says the run was queued; it does not wait for the run. A Routine moves to `queued` and Clawboo's scheduler picks it up at once; a Gateway job gets the Gateway's `cron.run { id, mode: 'force' }`. Only an `idle` Routine can be queued: a paused, errored, queued, claimed or running one answers **409**. So does one a [pause](/using/board#pause-work) holds back, in words that say what is paused. Follow the result in the Routine's run history (`GET /api/schedules/:id/runs`), the event log, or OpenClaw's own cron history.
 
@@ -490,7 +499,8 @@ Runs a schedule now. The answer only says the run was queued; it does not wait f
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/schedules/clawboo-routine:<routine-id>/run
+curl -X POST http://localhost:18790/api/schedules/clawboo-routine:<routine-id>/run \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---

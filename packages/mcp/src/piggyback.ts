@@ -12,10 +12,11 @@
 // A note can quote text clawboo did not write (a person's comment, an agent's
 // task title), so each one is framed as data (`formatInterSessionMessage`): one
 // header saying it is not the person, every line of it quoted. Rendered raw, a
-// note could carry a forged header or instructions that read as clawboo's (K12).
+// note could carry a forged header or instructions that read as clawboo's.
 
 import {
   formatInterSessionMessage,
+  inboxRowSource,
   listUndeliveredInbox,
   markInboxDelivered,
   type ClawbooDb,
@@ -86,7 +87,9 @@ export function withInboxPiggyback(
                 // concatenation (the native bridge) still render a clean break
                 // after a JSON first block.
                 text: `\n\n[team updates — delivered with this tool result]\n${PIGGYBACK_NOTE}\n${won
-                  .map((r) => formatInterSessionMessage({ from: 'clawboo', kind: r.kind }, r.body))
+                  .map((r) =>
+                    formatInterSessionMessage({ from: inboxRowSource(r), kind: r.kind }, r.body),
+                  )
                   .join('\n')}`,
               },
             ],

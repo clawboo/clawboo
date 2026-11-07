@@ -28,7 +28,7 @@
 // Registered once at boot. Every handler is best-effort and synchronous-cheap;
 // anything heavier (the pump) is debounced and detached.
 
-import { brakeUntil, isEngineRun, trailingNoProgressRuns } from '@clawboo/board-core'
+import { brakeUntil, isEngineRun, oneLine, trailingNoProgressRuns } from '@clawboo/board-core'
 import {
   addComment,
   enqueueInbox,
@@ -39,6 +39,7 @@ import {
   listWaitingTaskWakes,
   onBoardLifecycle,
   startRefusedBy,
+  teamExists,
   type BoardLifecycleEvent,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -92,6 +93,8 @@ function schedulePump(teamId: string, taskId: string, mcpBaseUrl: string | null)
     // wakes an archived team, or a team a person paused.
     if (engineHeld()) return
     if (startRefusedBy(getDb(), { teamId }) !== null) return
+    // Nor a team that was deleted: an engine built for it would run what it left behind.
+    if (!teamExists(getDb(), teamId)) return
     getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
       .pump()
       .catch((err: unknown) => log.error({ err, teamId, roomId }, 'wake-on-work pump failed'))
@@ -295,7 +298,7 @@ export function registerBoardLifecycleSubscribers(opts: {
         )
           return
         // Cheap dedupe: don't stack an identical undelivered row per rotation.
-        const body = `“${task?.title ?? ev.taskId}” finished with ${TERMINAL_EXEC_STATUS_WORDS[ev.status]}. Check the board for the result.`
+        const body = `“${oneLine(task?.title ?? ev.taskId)}” finished with ${TERMINAL_EXEC_STATUS_WORDS[ev.status]}. Check the board for the result.`
         const already = listUndeliveredInbox(db, recipient, { teamId: ev.teamId }).some(
           (r) => r.taskId === ev.taskId && r.body === body,
         )

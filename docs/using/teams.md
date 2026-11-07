@@ -215,6 +215,8 @@ Right-click the team's icon in the team rail and choose how much to delete.
 
 Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/.clawboo/workspaces/<team id>`) with every file its agents saved there. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
 
+Both choices stop whatever the team is doing first. Its runs end, a person's request still open on its board is cancelled with the work under it, and its other tasks stay on the board, where nothing can start them again. A result still on its way to one of its agents is dropped. The result stays on its task.
+
 **Delete with agents** works without the OpenClaw Gateway. An OpenClaw member leaves the Gateway at once if it is connected, otherwise the next time Clawboo connects to it. If some agents cannot be deleted, the team is still deleted, and a message says how many agents were removed.
 
 <Warning>

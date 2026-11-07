@@ -102,6 +102,10 @@ export interface CascadeBoard extends EngineBoardClient {
   /** Simulate an EXTERNAL release (server stale-sweep): → todo + unassigned, NOT
    *  recorded as an engine status update. */
   forceRelease(taskId: string): void
+  /** Give the task a stored verdict, as a failed check leaves it. */
+  seedVerdict(taskId: string): void
+  /** Does the task still hold its stored verdict? */
+  hasVerdict(taskId: string): boolean
   /** Simulate the agent's `report_result` on the run its task is on now. */
   seedResultClaim(taskId: string, claim: ResultClaim): void
   /** Pre-seed a durable in_progress task (a refresh: in-memory maps empty, only the
@@ -227,6 +231,8 @@ interface HarnessOpts {
   deliverRejectsFor?: Set<string>
   /** When set, `deliver` refuses these target agent ids with the mapped reason. */
   deliverRefusesFor?: Map<string, string>
+  /** When set, `deliver` throws what this returns for a target agent. */
+  deliverThrows?: (agentId: string) => Error | null
   /** Sessions the HOST reports as having a live run (the server's abortMap). */
   busySessions?: Set<string>
   /** Sessions with ANY turn in flight or queued (the server's nudge queue). */
@@ -260,6 +266,8 @@ export class MemoryReportUps implements ReportUpOutbox {
   private n = 0
   /** How many of the next writes fail, as `record` does when the database refuses. */
   failRecords = 0
+  /** How many of the next holds fail. */
+  failHolds = 0
   record(item: ReportUp, opts: { held?: boolean } = {}): string | null {
     if (this.failRecords > 0) {
       this.failRecords -= 1
@@ -280,11 +288,19 @@ export class MemoryReportUps implements ReportUpOutbox {
       .map(([id, r]) => ({ id, item: r.item }))
   }
   hold(ids: string[]): boolean {
+    if (this.failHolds > 0) {
+      this.failHolds -= 1
+      return false
+    }
     for (const id of ids) {
       const r = this.rows.get(id)
       if (r && r.settled === null) r.held = true
     }
     return true
+  }
+  /** How a row ended, or null while it has not. */
+  settledHow(id: string): string | null {
+    return this.rows.get(id)?.settled ?? null
   }
   markReplayed(ids: string[]): boolean {
     for (const id of ids) {
@@ -344,6 +360,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     changes: BoardChange[]
     narrations: { sessionKey: string; text: string }[]
     aborted: string[]
+    abortedTasks: string[]
     orchestrator: ReturnType<typeof createBoardOrchestrator>
   } {
     const board = opts?.board ?? harness.makeBoard()
@@ -352,8 +369,12 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     const changes: BoardChange[] = []
     const narrations: { sessionKey: string; text: string }[] = []
     const aborted: string[] = []
+    const abortedTasks: string[] = []
     const orchestrator = createBoardOrchestrator({
-      abortSession: (sessionKey) => aborted.push(sessionKey),
+      abortSession: (sessionKey, taskId) => {
+        aborted.push(sessionKey)
+        abortedTasks.push(taskId)
+      },
       teamId: 't1',
       board,
       known: () => KNOWN,
@@ -364,6 +385,8 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         if (opts?.deliverRejectsFor?.has(agentId)) throw new Error('delivery rejected')
         const refusal = opts?.deliverRefusesFor?.get(agentId)
         if (refusal) throw new DeliveryRefusedError(refusal)
+        const thrown = opts?.deliverThrows?.(agentId)
+        if (thrown) throw thrown
         await opts?.onDeliverStart?.(agentId)
         const held = opts?.reportUps
           ? orchestrator.takeHeldReportUps(
@@ -400,7 +423,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       ...(opts?.now ? { now: opts.now } : {}),
       ...(opts?.runHeldBy ? { runHeldBy: opts.runHeldBy } : {}),
     })
-    return { board, delivered, changes, narrations, aborted, orchestrator }
+    return { board, delivered, changes, narrations, aborted, abortedTasks, orchestrator }
   }
 
   // Fake timers gate ONLY the reflection batcher's debounce; the board calls
@@ -4122,7 +4145,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     })
   })
 
-  // ─── A delegate that blocks its own task (K5) ────
+  // ─── A delegate that blocks its own task ────
   // On a team run the agent may block the task it is working on, when it cannot
   // go on without a person. Its run then ends normally. That ending used to fail
   // the `done` write (blocked to done is illegal) and land in the "released or
@@ -4178,7 +4201,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     })
   })
 
-  // ─── A hand-off nobody can take (K8) ────
+  // ─── A hand-off nobody can take ────
   // Both delegate tools answer before the engine acts. For a name the engine
   // could not match to a teammate, or the sender itself, nothing was created and
   // nothing came back: the sender read its tool's answer and waited forever.
@@ -6382,6 +6405,340 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(next.delivered)).toEqual([])
+    })
+  })
+  // ─── A task's whole life: what one ending must not lose for the next ────────
+  describe("createBoardOrchestrator: a task's whole life", () => {
+    const handOff = doneEvent('r1', '<delegate to="@Bug Boo">fix the parser</delegate>')
+
+    describe('a pause and the verdict', () => {
+      const NOTE = 'Paused by a person. This run was stopped and starts again on resume.'
+
+      it('a run a pause stopped keeps what its check found', async () => {
+        const { board, orchestrator } = makeHarness()
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        board.seedVerdict(id!)
+        expect(await orchestrator.pauseRuns(() => true, NOTE)).toEqual([id])
+        expect(board.statusOf(id!)).toBe('todo')
+        expect(board.hasVerdict(id!)).toBe(true)
+      })
+
+      it('so does a fix round a pause catches before it starts', async () => {
+        let paused = false
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        const h = makeHarness({
+          board,
+          runHeldBy: () => (paused ? NOTE : null),
+          workCheck: {
+            async begin() {},
+            async prepare(taskId) {
+              return async () => {
+                await board.updateStatus(taskId, 'in_review')
+                paused = true
+                return { verdict: 'retry', fixNote: 'the parser still fails' }
+              }
+            },
+          },
+        })
+        await h.orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        board.seedVerdict(id!)
+        await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'fixed'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('todo')
+        expect(board.hasVerdict(id!)).toBe(true)
+      })
+    })
+
+    describe('a Stop', () => {
+      it('holds a report-up that was only waiting for the sweep, so it starts nothing', async () => {
+        const outbox = new MemoryReportUps()
+        const left = outbox.record({ toAgentId: 'leader', by: 'Bug Boo', summary: 'an old result' })
+        let gen = 0
+        const { delivered, orchestrator } = makeHarness({ reportUps: outbox, stopGen: () => gen })
+        gen = 1
+        await orchestrator.markStopped()
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered)).toEqual([])
+        expect(outbox.pending()).toEqual([])
+        expect(outbox.held().map((r) => r.id)).toEqual([left])
+      })
+
+      it('holds it even when the write fails the first time', async () => {
+        const outbox = new MemoryReportUps()
+        const left = outbox.record({ toAgentId: 'leader', by: 'Bug Boo', summary: 'an old result' })
+        let gen = 0
+        const { delivered, orchestrator } = makeHarness({ reportUps: outbox, stopGen: () => gen })
+        // It fails at the Stop and again at the first sweep, which still sends nothing.
+        outbox.failHolds = 2
+        gen = 1
+        await orchestrator.markStopped()
+        expect(outbox.pending().map((r) => r.id)).toEqual([left])
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered)).toEqual([])
+        expect(outbox.pending().map((r) => r.id)).toEqual([left])
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered)).toEqual([])
+        expect(outbox.held().map((r) => r.id)).toEqual([left])
+      })
+
+      it('ends what a round was told: the next try of a later run is not told it', async () => {
+        let gen = 0
+        const { board, delivered, orchestrator } = makeHarness({ stopGen: () => gen })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        // An empty reply: the agent is told so, in a round of its own.
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', ''))
+        await vi.advanceTimersByTimeAsync(0)
+        const toWorker = (): Delivered[] => delivered.filter((d) => d.agentId === 'a2')
+        expect(toWorker().at(-1)!.task).toMatch(/^\[No reply\]/)
+
+        gen = 1
+        await orchestrator.markStopped()
+        await orchestrator.onEvent(sk('a2'), failedDoneEvent('r3', 'aborted', ''))
+        expect(await orchestrator.dispatchTask(id!)).toBe('started')
+        expect(toWorker().at(-1)!.task).not.toMatch(/No reply/)
+
+        await orchestrator.onEvent(
+          sk('a2'),
+          errorEvent('r4', '429 rate_limit_error: too many requests', true, 'rate_limit'),
+        )
+        await vi.advanceTimersByTimeAsync(BRAKE_MAX_WAIT_MS)
+        expect(toWorker().length).toBeGreaterThan(3)
+        expect(toWorker().at(-1)!.task).not.toMatch(/No reply/)
+      })
+    })
+
+    describe('the reply and its check', () => {
+      const answering = (
+        board: CascadeBoard,
+        answer: () => Promise<WorkCheckResult>,
+      ): WorkCheck => ({
+        async begin() {},
+        async prepare(taskId) {
+          return async () => {
+            await board.updateStatus(taskId, 'in_review')
+            return answer()
+          }
+        },
+      })
+      const repliesOn = (board: CascadeBoard, id: string, reply: string): number =>
+        board.comments.filter((c) => c.taskId === id && c.body === reply).length
+
+      it('is on the card as soon as the check starts, and a restart keeps it', async () => {
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        const first = makeHarness({
+          board,
+          workCheck: answering(board, () => new Promise<WorkCheckResult>(() => undefined)),
+        })
+        await first.orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        await first.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'I changed parser.ts'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('in_review')
+        expect(repliesOn(board, id!, 'I changed parser.ts')).toBe(1)
+
+        // The server dies mid-check, and the next engine finds the task.
+        vi.clearAllTimers()
+        const next = makeHarness({
+          board,
+          workCheck: { begin: async () => undefined, prepare: async () => null },
+        })
+        await next.orchestrator.resume()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(board.statusOf(id!)).toBe('blocked')
+        const [update] = reflections(next.delivered)
+        expect(update!.task).toMatch(/restarted/i)
+        expect(update!.task).toContain('I changed parser.ts')
+      })
+
+      it('is not posted again when the check passes', async () => {
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        const { orchestrator } = makeHarness({
+          board,
+          workCheck: answering(board, async () => ({ verdict: 'pass' })),
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'I changed parser.ts'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('done')
+        expect(repliesOn(board, id!, 'I changed parser.ts')).toBe(1)
+      })
+
+      it('each round says its own, once', async () => {
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        const answers: WorkCheckResult[] = [
+          { verdict: 'retry', fixNote: 'it still fails' },
+          { verdict: 'pass' },
+        ]
+        const { orchestrator } = makeHarness({
+          board,
+          workCheck: answering(board, async () => answers.shift()!),
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'first try'))
+        await vi.advanceTimersByTimeAsync(0)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r3', 'second try'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('done')
+        expect(repliesOn(board, id!, 'first try')).toBe(1)
+        expect(repliesOn(board, id!, 'second try')).toBe(1)
+      })
+
+      it('stays on the card once when a Stop ends the wait for its check', async () => {
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        let gen = 0
+        const { orchestrator } = makeHarness({
+          board,
+          stopGen: () => gen,
+          workCheck: {
+            async begin() {},
+            async prepare() {
+              return Object.assign(async (): Promise<WorkCheckResult> => ({ verdict: 'pass' }), {
+                hold: async (signal: AbortSignal) =>
+                  new Promise<() => void>((_resolve, reject) => {
+                    signal.addEventListener('abort', () => reject(new Error('ended')))
+                  }),
+              })
+            },
+          },
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'I changed parser.ts'))
+        await vi.advanceTimersByTimeAsync(0)
+        gen = 1
+        await orchestrator.markStopped()
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('todo')
+        expect(repliesOn(board, id!, 'I changed parser.ts')).toBe(1)
+      })
+    })
+
+    describe('a budget whose room runs already going set aside', () => {
+      const held = (): Error =>
+        new DeliveryRefusedError('Runs already going set aside the room.', {
+          budget: true,
+          budgetReason: 'held',
+        })
+
+      it('holds a task update back, uncounted, until there is room', async () => {
+        const outbox = new MemoryReportUps()
+        let room = false
+        const { delivered, narrations, orchestrator } = makeHarness({
+          reportUps: outbox,
+          deliverThrows: (agentId) => (agentId === 'leader' && !room ? held() : null),
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a result'))
+        for (let i = 0; i < 8; i++) {
+          await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+          await orchestrator.sweepStaleSessions()
+        }
+        const [row] = outbox.pending()
+        expect(row).toBeDefined()
+        expect(row!.replays).toBe(0)
+        expect(outbox.settledHow(row!.id)).toBeNull()
+        expect(narrations.filter((n) => /could not be delivered/.test(n.text))).toEqual([])
+        expect(reflections(delivered)).toEqual([])
+
+        room = true
+        await orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered)).toHaveLength(1)
+        expect(reflections(delivered)[0]!.task).toContain('a result')
+      })
+
+      it('counts no try for one it refused while it waited for its turn', async () => {
+        const outbox = new MemoryReportUps()
+        const { delivered, orchestrator } = makeHarness({ reportUps: outbox })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a result'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const [update] = reflections(delivered)
+        const ids = update!.origin.kind === 'system' ? update!.origin.reportUpIds! : []
+        expect(ids).toHaveLength(1)
+        for (let i = 0; i < 6; i++) {
+          orchestrator.onRunNotStarted({
+            reportForTaskId: null,
+            stopGen: 0,
+            reportUpIds: ids,
+            budgetHeld: true,
+          })
+          await orchestrator.sweepStaleSessions()
+          await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        }
+        expect(outbox.settledHow(ids[0]!)).toBeNull()
+      })
+
+      it('a cap a person must raise still ends in telling them', async () => {
+        const outbox = new MemoryReportUps()
+        const { narrations, orchestrator } = makeHarness({
+          reportUps: outbox,
+          deliverThrows: (agentId) =>
+            agentId === 'leader'
+              ? new DeliveryRefusedError('The cap is reached.', { budget: true })
+              : null,
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a result'))
+        for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(narrations.filter((n) => /could not be delivered/.test(n.text))).toHaveLength(1)
+      })
+    })
+
+    it('failing a task aborts that task’s run, and names it', async () => {
+      const { board, abortedTasks, orchestrator } = makeHarness()
+      await orchestrator.onEvent(sk('leader'), handOff)
+      const [id] = idsOf(board)
+      await orchestrator.onEvent(sk('a2'), errorEvent('r2', 'it broke', true))
+      expect(abortedTasks).toEqual([id])
+    })
+
+    it('a hand-off a closed request refused is said in the chat, and to its sender', async () => {
+      const { board, delivered, narrations, orchestrator } = makeHarness({
+        reportUps: new MemoryReportUps(),
+      })
+      await orchestrator.onEvent(sk('leader'), handOff, {
+        reportForTaskId: null,
+        stopGen: 0,
+        deliveryId: 'd1',
+        request: { words: 'Fix the parser', requestedBy: { id: 'p1', name: 'Pat', role: null } },
+      })
+      const mainId = (await board.getTask(idsOf(board)[0]!))!.task.parentTaskId as string
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const update = reflections(delivered).at(-1)!
+      const before = reflections(delivered).length
+      expect(await board.closeMainTask(mainId, 'cancelled')).toBe(true)
+
+      await orchestrator.onEvent(
+        sk('leader'),
+        toolCallEvent('r3', 'delegate', { assignee: 'Design Boo', task: 'and one more thing' }),
+        {
+          reportForTaskId: null,
+          stopGen: 0,
+          deliveryId: 'u',
+          ...(update.origin.kind === 'system' && update.origin.mainTaskId
+            ? { mainTaskId: update.origin.mainTaskId }
+            : {}),
+        },
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(narrations.some((n) => /This request has closed/.test(n.text))).toBe(true)
+      // It starts no run: the note waits in the mailbox for the sender's next turn.
+      expect(reflections(delivered)).toHaveLength(before)
     })
   })
 }

@@ -29,6 +29,7 @@ import {
 } from '@/features/board/boardStatus'
 import { useBoardPerson } from '@/features/board/useBoardPerson'
 import { ReplyReceipt } from '@/features/board/ReplyReceipt'
+import { taskRuntimeOf } from '@/features/board/TaskCard'
 import { replyHint } from '@/features/board/TaskReplyBox'
 import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
 import {
@@ -378,17 +379,18 @@ export function composerHint(
   hasAgent: boolean,
 ): string {
   // A person's request has no run to steer: its lead reads the words as an update.
-  if (isMainTask(task)) return replyHint(task.status, name, false, true)
+  if (isMainTask(task)) return replyHint(task.status, name, task.pause != null, true)
   if (task.status === 'done' || task.status === 'cancelled')
     return 'This task is finished. Reopen it, or send your comment as a follow-up task.'
   if (!hasAgent) return 'No agent is on this task yet. Your comment is saved on it.'
   const who = name ?? 'The agent'
+  if (task.pause) return `This is paused. ${who} starts on your comment after the resume.`
   if (task.status === 'in_progress') {
     if (delivery === 'live') return `${who} gets this now, before its next step.`
     if (delivery === 'resume') return `${who} pauses to read this, then carries on.`
     return `${who} sees this the next time it checks in.`
   }
-  if (task.status === 'in_review') return `${who} sees this the next time it runs.`
+  if (task.status === 'in_review') return `${who} reads this after the check.`
   if (task.status === 'blocked' || task.status === 'todo')
     return `Sending starts ${name ?? 'the agent'} on this again.`
   return `${who} reads this when the task starts.`
@@ -483,7 +485,8 @@ function TaskDetail({ task }: { task: BoardTaskView }) {
     asSteering(row?.runSteering),
     runtimeSteering?.runtime === assigneeRuntime ? runtimeSteering.steering : null,
   )
-  const runtime = typeof row?.assigneeRuntime === 'string' ? row.assigneeRuntime : null
+  // Open work reads the agent: the engine writes the row's runtime only when a run ends.
+  const runtime = row ? taskRuntimeOf(row, assigneeRuntime) : assigneeRuntime
   const cost = row ? runCostOf(row) : null
   const description = typeof row?.description === 'string' ? row.description.trim() : ''
   const output = outputOf(task, comments)

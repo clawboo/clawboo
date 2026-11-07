@@ -9,8 +9,9 @@
 // SOUL.md persistence).
 
 import type { Request, Response } from 'express'
-import { chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { appendAudit, chatMessages, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { like } from 'drizzle-orm'
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 
 interface OnboardingState {
@@ -103,7 +104,10 @@ interface PatchBody {
 
 const MAX_USER_INTRO_CHARS = 4000
 
+// A person's request only: what the person wrote about themselves reaches every run they
+// talk to as `[About the User]`.
 export function teamOnboardingPATCH(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -130,6 +134,16 @@ export function teamOnboardingPATCH(req: Request, res: Response): void {
           : current.userIntroText,
     }
     setSetting(db, settingsKey(teamId), JSON.stringify(next))
+    if (next.userIntroText !== current.userIntroText)
+      appendAudit(db, {
+        eventType: 'board',
+        teamId,
+        summary: {
+          action: 'set_user_intro',
+          chars: next.userIntroText.length,
+          ...actorField(req),
+        },
+      })
     res.json(next)
   } catch (err) {
     res.status(500).json({ error: String(err) })

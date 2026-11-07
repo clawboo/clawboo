@@ -42,6 +42,12 @@ describe('UserMessageCard', () => {
     expect(screen.getByText('Summarize what shipped yesterday.')).toBeInTheDocument()
   })
 
+  it('a message that failed the person check does not read as "You"', () => {
+    render(<UserMessageCard entry={{ ...ENTRY, fromCaller: true }} targetAgentName="Boo Zero" />)
+    expect(screen.getByTestId('user-message-caller')).toHaveTextContent('Local API call')
+    expect(screen.queryByText(/^You/)).toBeNull()
+  })
+
   it('a message the person typed still reads as theirs', () => {
     render(<UserMessageCard entry={ENTRY} targetAgentName="Boo Zero" />)
     expect(screen.getByText('You → Boo Zero')).toBeInTheDocument()

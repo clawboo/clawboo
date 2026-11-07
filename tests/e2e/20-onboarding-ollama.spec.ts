@@ -13,7 +13,14 @@
 
 import type { APIRequestContext } from '@playwright/test'
 
-import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
+import {
+  test,
+  expect,
+  API_BASE,
+  assertSandboxed,
+  DASHBOARD_HEADERS,
+  stubNativeHealthcheck,
+} from './helpers/fixtures'
 
 interface NativeStatus {
   connectionState?: string
@@ -66,7 +73,10 @@ test.describe('Native onboarding on a local Ollama', () => {
     }
     // A Boo Zero override left by an earlier spec would hide the native Boo Zero
     // this spec asserts on.
-    await request.post(`${API_BASE}/api/boo-zero/override`, { data: { agentId: null } })
+    await request.post(`${API_BASE}/api/boo-zero/override`, {
+      headers: DASHBOARD_HEADERS,
+      data: { agentId: null },
+    })
     expect((await nativeStatus(request)).connectionState).toBe('needs-auth')
 
     await page.addInitScript(() => {

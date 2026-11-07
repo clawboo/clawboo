@@ -27,6 +27,7 @@ import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
 import {
   ATTENTION_META,
   assigneePersonOf,
+  attentionHint,
   attentionLabel,
   isTaskStatus,
   otherAssigneeName,
@@ -47,14 +48,14 @@ import { useViewStore } from '@/stores/view'
 
 // Compact pill vocabulary for the chat timeline. Deliberately SHORTER than the
 // board's STATUS_LABEL ("Working", not "In progress") because this pill sits in a
-// narrow card beside an avatar and a timestamp; `todo` and `backlog` both read as
-// "Queued" since triage position is board detail, not chat signal.
+// narrow card beside an avatar and a timestamp. `backlog` says so because nothing
+// starts it by itself, which "Queued" would promise.
 //
 // Typed as a TOTAL Record over the shared TaskStatus union, so adding an eighth
 // status to @clawboo/board-core fails the typecheck here instead of silently
 // rendering the new status as idle "Queued" work.
 const PILL: Record<TaskStatus, { tone: StatusTone; label: string }> = {
-  backlog: { tone: 'idle', label: 'Queued' },
+  backlog: { tone: 'idle', label: 'Backlog' },
   todo: { tone: 'idle', label: 'Queued' },
   in_progress: { tone: 'working', label: 'Working' },
   in_review: { tone: 'working', label: 'Verifying' },
@@ -319,7 +320,7 @@ export const BoardTaskCard = memo(function BoardTaskCard({
             className="mt-2 text-[12px] leading-relaxed text-foreground/60"
             data-testid="board-task-attention"
           >
-            {attention.detail ?? ATTENTION_META[attention.reason].hint}
+            {attention.detail ?? attentionHint(attention, otherAssigneeName(task, me))}
           </p>
         )}
 

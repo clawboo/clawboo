@@ -56,7 +56,7 @@ A task that waits says what for. Agents must give the reason when they block a t
 | Your answer to a question           | Needs you as **Waiting for your answer**, with its controls                    | Your answer, saved as a wake on the task, so a restart cannot lose it                                                                           |
 | Another task                        | In progress, saying **Waiting on** and the task's title                        | That task finishing. If it is cancelled instead, the task comes to Needs you to say so                                                          |
 | Its own sub-tasks                   | In progress, saying **Waiting on 3 sub-tasks**, and how many of those need you | The last one closing, which starts its agent once more. See [A task that hands out work waits for it](#a-task-that-hands-out-work-waits-for-it) |
-| A check, a failure, a stop          | Needs you, as before                                                           | **Retry** or **Assign**                                                                                                                         |
+| A check, a failure, a stop          | Needs you, saying why                                                          | **Retry** or **Assign**                                                                                                                         |
 | Its turn to try again               | To do, saying **Retrying soon**                                                | The wait running out, or a comment from you                                                                                                     |
 | Room in a budget                    | To do, saying **Waiting for room in a budget**                                 | Runs already going ending. If the cap fills instead, the task comes to Needs you to say so                                                      |
 
@@ -193,25 +193,28 @@ A task has one live run at a time. A wake that arrives while a run is waiting fo
 
 **Needs you** is the board's first column. It holds everything that will not move without a person: pending approvals, and tasks that are stuck for one of these reasons.
 
-| Label                   | What happened                                                           |
-| ----------------------- | ----------------------------------------------------------------------- |
-| Failed                  | The run ended with an error.                                            |
-| No result               | The agent finished twice with nothing to show for it.                   |
-| Rate limited            | The provider kept refusing, and Clawboo stopped trying by itself.       |
-| Provider unavailable    | The provider stayed out of reach, and Clawboo stopped trying by itself. |
-| Out of room             | The agent ran out of room twice before finishing.                       |
-| Budget cap              | A hard budget cap stopped it.                                           |
-| Stopped by the breaker  | The circuit breaker stopped a run going wrong.                          |
-| Timed out               | The agent stopped responding and the run was ended.                     |
-| Stopped                 | You stopped the run. It will not restart on its own.                    |
-| Needs review            | A check could not pass the work.                                        |
-| Blocked                 | An agent marked it blocked, and says what it needs.                     |
-| Waiting for your answer | An agent asked you a question and stopped.                              |
-| Assigned to you         | The task is yours, or an agent handed it back to you.                   |
-| Unassigned              | No agent is bound to it, so no one will pick it up.                     |
-| Not started             | It is in progress, but no agent and no run is working on it.            |
+| Label                   | What happened                                                                                                                              |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Failed                  | The run ended with an error.                                                                                                               |
+| No result               | The agent finished twice with nothing to show for it.                                                                                      |
+| Rate limited            | The provider kept refusing, and Clawboo stopped trying by itself.                                                                          |
+| Provider unavailable    | The provider stayed out of reach, and Clawboo stopped trying by itself.                                                                    |
+| Out of room             | The agent ran out of room twice before finishing.                                                                                          |
+| Budget cap              | A hard budget cap stopped it.                                                                                                              |
+| Stopped by the breaker  | The circuit breaker stopped a run going wrong.                                                                                             |
+| Sign-in failed          | The runtime's key or login was refused, missing or expired.                                                                                |
+| Billing problem         | The provider refused the account: no credit, a hold or a pending verification.                                                             |
+| Timed out               | The agent stopped responding and the run was ended.                                                                                        |
+| Stopped                 | You stopped the run. It will not restart on its own.                                                                                       |
+| Needs review            | A check could not pass the work.                                                                                                           |
+| Blocked                 | An agent marked it blocked, and says what it needs.                                                                                        |
+| Waiting for your answer | An agent asked you a question and stopped.                                                                                                 |
+| Assigned to you         | The task is yours, or an agent handed it back to you.                                                                                      |
+| Waiting for your OK     | A teammate's comment would start this task, and you have not said yes for this job, or agents on it hit a limit. The card has the buttons. |
+| Unassigned              | No agent is bound to it, so no one will pick it up.                                                                                        |
+| Not started             | It is in progress, but no agent and no run is working on it.                                                                               |
 
-Each card leads with the one action that gets it going: **Retry** runs it again, **Assign** hands a task with no agent to one, and **Review** or **Open** opens the task. Its **More** menu holds the rest, including **Dismiss**, which moves the task to Cancelled for good. Failed and Timed out show a count, such as **Failed 3×**, when it has happened more than once in a row.
+Each card leads with the one action that gets it going: **Retry** runs it again, **Assign** hands a task with no agent to one, **Fix sign-in** opens the runtime whose key or login was refused, **Mark done** finishes a task that is yours, and **Review** or **Open** opens the task. Its **More** menu holds the rest, including **Dismiss**, which moves the task to Cancelled for good. Failed and Timed out show a count, such as **Failed 3×**, when it has happened more than once in a row.
 
 ## Unread
 
@@ -299,7 +302,7 @@ By default a plan's steps start as soon as the agent writes them. To decide firs
 - The same steps from a later turn are recognised for 48 hours after you answer. Nothing new is created, and the agent is told you already decided.
 - **Stop** closes what waits: nothing starts, and a later press of **Accept** creates nothing. Moving the task's card closes it too.
 
-The plan waits on the task the agent was running, which stays **Blocked** until you answer, and your answer starts that task again. A lead writing a plan from chat has no such task, and neither does a follow-up on a finished task or a routine's run, so its plan waits on a card of its own, titled **Plan:** and the first step. You answer it the same way. That card holds only the plan: its steps are created beside it, not under it, and no agent runs on it. On a request from chat, the card and the steps you accept are all filed under its main task. Your answer closes it, **Done** if you accepted and **Cancelled** if you did not, and the agent hears your answer in its chat as a task update. A task does not wait for such a card as it waits for work it handed out: only the steps you accept count as that.
+The plan waits on the task the agent was running, which stays **Blocked** until you answer, and your answer starts that task again. A lead writing a plan from chat has no such task, and neither does a follow-up on a finished task or a routine's run, so its plan waits on a card of its own, titled **Plan:** and the first step. You answer it the same way. That card holds only the plan: its steps are created beside it, not under it, and no agent runs on it unless you move the card back to To do. On a request from chat, the card and the steps you accept are all filed under its main task. Your answer closes it, **Done** if you accepted and **Cancelled** if you did not, and the agent hears your answer in its chat as a task update. A task does not wait for such a card as it waits for work it handed out: only the steps you accept count as that.
 
 The switch does not cover everything. A hand-off made by tool call starts when it arrives, one at a time, because nothing can know another is coming. So a lead can still hand off a task, or several in turn, without a question. So can one `<delegate>` tag in a reply.
 

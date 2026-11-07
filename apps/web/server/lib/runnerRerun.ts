@@ -24,6 +24,7 @@ import {
   readTaskRunnerInputs,
   updateStatus,
   startRefusedByTask,
+  teamExists,
   type ClawbooDb,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
@@ -224,6 +225,8 @@ export function requestRunnerRerun(
 export function pumpRunnerReruns(db: ClawbooDb, mcpBaseUrl: string | null): void {
   for (const task of getReadyTasks(db)) {
     if (!task.runnerInputs || waiting.has(task.id)) continue
+    // A team that was deleted runs nothing, and a run would bring its folder back.
+    if (task.teamId && !teamExists(db, task.teamId)) continue
     const execs = listExecutions(db, task.id)
     // A run a pause stopped comes back whether or not an agent is bound to it: a run
     // through POST /api/runtimes/:id/run names one only in what the runner saved.

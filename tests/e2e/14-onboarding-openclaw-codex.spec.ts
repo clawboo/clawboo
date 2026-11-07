@@ -13,7 +13,14 @@
 // covered by the server unit tests (openclawCodexAuth.test.ts); the inline
 // setup's subscription panel is covered by OpenClawInlineSetup.test.tsx.
 
-import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
+import {
+  test,
+  expect,
+  API_BASE,
+  assertSandboxed,
+  DASHBOARD_HEADERS,
+  stubNativeHealthcheck,
+} from './helpers/fixtures'
 
 test.describe('OpenClaw ChatGPT-subscription onboarding', () => {
   test('Add-runtimes OpenClaw setup → ChatGPT-subscription panel → Re-check proceeds keylessly', async ({
@@ -47,7 +54,10 @@ test.describe('OpenClaw ChatGPT-subscription onboarding', () => {
         }
       }
     }
-    await request.post(`${API_BASE}/api/boo-zero/override`, { data: { agentId: null } })
+    await request.post(`${API_BASE}/api/boo-zero/override`, {
+      headers: DASHBOARD_HEADERS,
+      data: { agentId: null },
+    })
 
     await page.addInitScript(() => {
       localStorage.removeItem('clawboo.onboarded')

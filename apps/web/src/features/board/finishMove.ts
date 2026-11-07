@@ -100,11 +100,14 @@ export function finishNeedFor(task: BoardTask, to: FinishStatus, now: number): F
   }
 }
 
-/** How many sub-tasks a person's request has open, as its row says; 0 for anything
- *  else. */
+/** How many open tasks finishing a person's request would cancel, as its row says; 0
+ *  for anything else. That is everything open under it, which can be more than it waits
+ *  on: a parked request waits on a person, and still holds what an agent noted down. */
 export function openSubtasksOf(task: BoardTask): number {
   if (!isMainTask(task)) return 0
-  const detail = task['waitingOnDetail'] as { openSubtasks?: unknown } | null | undefined
+  const detail = task['waitingOnDetail'] as
+    { openSubtasks?: unknown; openUnder?: unknown } | null | undefined
+  if (typeof detail?.openUnder === 'number') return detail.openUnder
   return typeof detail?.openSubtasks === 'number' ? detail.openSubtasks : 0
 }
 

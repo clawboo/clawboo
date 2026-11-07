@@ -2,4 +2,4 @@
 'clawboo': minor
 ---
 
-Agents wake when something happens on their task. A person's comment and a dependency moving to done save a durable wake, one per agent and task, that survives a restart and starts the right run exactly once; a comment arriving during a run reaches the agent at its next turn, once. Every run is stamped on its task's claim, and a task that keeps running with no visible progress waits before it starts again by itself. After a Stop, a report-up or a wake is no longer dropped: it starts nothing, and rides the next run that comes.
+Agents start when something happens on their task. Your comment, or a task it waits on finishing, is saved so a restart cannot lose it, and starts the right run once. A comment during a run reaches the agent at its next turn. A task that keeps running with nothing to show waits before it starts again by itself. After a Stop, a waiting report or comment is kept, starts nothing, and rides the next run.

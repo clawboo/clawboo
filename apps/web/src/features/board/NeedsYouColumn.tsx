@@ -25,7 +25,7 @@ import {
   UserPlus,
   UserRound,
 } from 'lucide-react'
-import { delegationTargetOf } from '@clawboo/board-core'
+import { delegationTargetOf, isPlanHolder } from '@clawboo/board-core'
 import { BooAvatar } from '@clawboo/ui'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -43,9 +43,11 @@ import {
   ACCOUNT_FAILURE_META,
   ATTENTION_META,
   FIX_SIGN_IN,
+  attentionHint,
   attentionLabel,
   openQuestionOf,
   otherAssigneeName,
+  personCanRestart,
   taskAttentionOf,
   type AttentionReason,
   type TaskAttention,
@@ -53,6 +55,7 @@ import {
 import { isMainTask, requestLabel, RequestNestingContext } from './mainTasks'
 import { countLabel, longDate, timeLabel } from './calendar/calendarFormat'
 import { StatusGlyph } from './StatusGlyph'
+import { TaskIdentifier } from './TaskIdentifier'
 import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
 import { AgentWakesCard } from './AgentWakesCard'
 import { QuestionAnswer } from './QuestionAnswer'
@@ -122,12 +125,21 @@ function agentOf(task: BoardTask): string | null {
 }
 
 /** Retry needs somebody to hand the task back to; a task nobody is bound to
- *  needs a person to pick who, so it offers the team's agents instead. */
+ *  needs a person to pick who, so it offers the team's agents instead. A card that
+ *  only holds a plan has no work of its own to run. */
 function canRetryTask(task: BoardTask, attention: TaskAttention): boolean {
   if (attention.reason === 'unassigned') return false
+  if (!personCanRestart(task, attention)) return false
   if (typeof task.teamId !== 'string' || !task.teamId) return false
   const sdid = typeof task['sourceDelegationId'] === 'string' ? task['sourceDelegationId'] : null
-  return !!delegationTargetOf(sdid)
+  return !!delegationTargetOf(sdid) && !isPlanHolder(sdid)
+}
+
+/** Whether the task can go to someone else: not a person's request, which runs nothing,
+ *  nor a card that only holds a plan, and only what the server would accept. */
+function canGiveTask(task: BoardTask, attention: TaskAttention): boolean {
+  const sdid = typeof task['sourceDelegationId'] === 'string' ? task['sourceDelegationId'] : null
+  return !isMainTask(task) && !isPlanHolder(sdid) && personCanRestart(task, attention)
 }
 
 /** When it started waiting: the task's last change is the move that stranded it. */
@@ -180,6 +192,8 @@ function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
     // Each of these is one person's turn, with its own controls.
     if (!detail || reason === 'question' || reason === 'assigned' || reason === 'agent_wakes')
       return null
+    // A person's request goes with the work under it, which a group's Dismiss cannot say.
+    if (isMainTask(s.task)) return null
     return `${reason}:${causeOf(detail)}${cause ? `|${cause}:${runtime ?? ''}` : ''}`
   }
   const members = new Map<string, StuckItem[]>()
@@ -481,7 +495,6 @@ function NeedsYouTaskCard({
   const teamName = useTeamStore((s) =>
     showTeam && task.teamId ? (s.teams.find((t) => t.id === task.teamId)?.name ?? null) : null,
   )
-  const meta = ATTENTION_META[attention.reason]
   const teamId = typeof task.teamId === 'string' ? task.teamId : null
   const bound = delegationTargetOf(
     typeof task['sourceDelegationId'] === 'string' ? task['sourceDelegationId'] : null,
@@ -494,12 +507,12 @@ function NeedsYouTaskCard({
   const handBackNeed = assigned ? (attention.detail ?? null) : null
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
+  const canGive = canGiveTask(task, attention)
   // A person's request runs nothing, so no agent is what it lacks.
-  const canAssign = !bound && !isMainTask(task) && (members.length > 0 || !assigned)
+  const canAssign = !bound && canGive && (members.length > 0 || !assigned)
   const primary = primaryActionOf(attention, canRetry, canAssign)
   const above = useContext(RequestNestingContext)?.nesting.mainOf(task) ?? null
-  const detail =
-    attention.detail ?? (attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint)
+  const detail = attention.detail ?? attentionHint(attention, otherAssigneeName(task, me))
   const retryIt = (id: string) => retry(id, attention)
 
   // Focus stays on the pressed button until the board's next read takes the
@@ -532,7 +545,6 @@ function NeedsYouTaskCard({
     }
     // A person's request runs nothing, so nobody can take it: it finishes by itself, or
     // by the person, from its drawer.
-    const canGive = !isMainTask(task)
     if (canGive && !assigned && primary !== 'assign') {
       items.push({
         key: 'me',
@@ -558,7 +570,7 @@ function NeedsYouTaskCard({
       key: 'dismiss',
       label: 'Dismiss',
       separator: items.length > 0,
-      onSelect: () => act(dismiss, opener),
+      onSelect: () => act((id) => dismiss(id, { request: isMainTask(task) }), opener),
     })
     return items
   }
@@ -617,6 +629,7 @@ function NeedsYouTaskCard({
           title={sinceTitle ?? undefined}
           className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
+          <TaskIdentifier task={task} testId="needs-you-identifier" />
           <ReasonLabel
             reason={attention.reason}
             label={attentionLabel(attention, otherAssigneeName(task, me))}
@@ -742,6 +755,7 @@ function GroupRow({ task, attention, onOpen }: StuckItem & { onOpen: () => void 
       title={sinceTitle ? `${title}\n${sinceTitle}` : title}
       className="group/row flex h-6 w-full min-w-0 cursor-pointer items-center gap-1 rounded-md px-1.5 text-left text-xs text-foreground transition-colors hover:bg-foreground/[0.05] focus-visible:outline-2 focus-visible:outline-offset-1"
     >
+      <TaskIdentifier task={task} testId="needs-you-identifier" />
       <span className="min-w-0 flex-1 truncate">{title}</span>
       {above ? (
         <span data-testid="needs-you-request" className="shrink-0 text-muted-foreground">

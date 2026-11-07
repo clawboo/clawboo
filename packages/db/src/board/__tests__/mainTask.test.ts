@@ -334,6 +334,41 @@ describe('what a main task’s row says it waits on', () => {
   })
 })
 
+describe('what closing a request would cancel', () => {
+  it('a parked request still counts what is open under it', () => {
+    const first = firstHandOff()
+    const mainId = first.task.parentTaskId as string
+    const note = createCappedSubtask(db, mainId, { title: 'a note to myself' })
+    if (!note.ok) throw new Error(note.reason)
+    updateStatus(db, first.task.id, 'cancelled')
+    parkMainTask(db, mainId, 'The lead could not write its summary.')
+    const parked = getTask(db, mainId)!
+    expect(parked.status).toBe('blocked')
+    expect(waitingOnDetailOf(db, parked)).toEqual({ openSubtasks: 0, openUnder: 1 })
+    // What the row promises is what a close does.
+    expect(closeOpenSubtasksOfMain(db, mainId, { byPerson: true }).map((t) => t.id)).toEqual([
+      note.task.id,
+    ])
+  })
+
+  it('names the wider count only when it differs from what it waits on', () => {
+    const first = firstHandOff()
+    const mainId = first.task.parentTaskId as string
+    expect(waitingOnDetailOf(db, getTask(db, mainId)!)).toEqual({ openSubtasks: 1 })
+    const note = createCappedSubtask(db, mainId, { title: 'a note to myself' })
+    if (!note.ok) throw new Error(note.reason)
+    expect(waitingOnDetailOf(db, getTask(db, mainId)!)).toEqual({ openSubtasks: 1, openUnder: 2 })
+  })
+
+  it('has nothing to say about a request with nothing left open', () => {
+    const first = firstHandOff()
+    const mainId = first.task.parentTaskId as string
+    closeMainTaskByPerson(db, mainId, 'cancelled')
+    expect(waitingOnDetailOf(db, getTask(db, mainId)!)).toBeUndefined()
+    expect(waitingOnDetailOf(db, getTask(db, first.task.id)!)).toBeUndefined()
+  })
+})
+
 describe('what a request waits on: the barrier’s reading', () => {
   it('nobody’s note holds nothing, so it closes around it', () => {
     const first = firstHandOff()

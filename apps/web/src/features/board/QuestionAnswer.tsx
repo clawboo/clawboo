@@ -152,14 +152,16 @@ function QuestionControls({
         {tasks.map((t, i) => (
           <div key={i} className="flex min-w-0 flex-col gap-0.5">
             <div className="flex min-w-0 items-start gap-1.5">
-              {/* Grows with its words: a step has to be read before it is accepted. */}
+              {/* Opens tall enough for its words, and a person can drag it taller: a step
+                  has to be read before it is accepted, where `field-sizing` is not there
+                  to grow it. */}
               <textarea
-                rows={1}
+                rows={Math.min(8, Math.ceil(wordsOf(t).length / 40) + 1)}
                 aria-label={`Suggested task ${i + 1}`}
                 maxLength={QUESTION_ANSWER_MAX_CHARS}
                 value={wordsOf(t)}
                 onChange={(e) => edit(i, e.target.value)}
-                className="max-h-48 min-w-0 flex-1 resize-none rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground [field-sizing:content] focus-visible:outline-2 focus-visible:outline-offset-2"
+                className="max-h-48 min-w-0 flex-1 resize-y rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground [field-sizing:content] focus-visible:outline-2 focus-visible:outline-offset-2"
               />
               <button
                 type="button"

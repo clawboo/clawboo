@@ -10,7 +10,8 @@
 // within an hour and agents repeated the same mistakes.
 
 import type { Request, Response } from 'express'
-import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { appendAudit, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 
 interface TeamRules {
@@ -61,7 +62,10 @@ interface PutBody {
   content?: string
 }
 
+// A person's request only: every run in the team reads these as set by the user, and
+// everything else it reads is told it cannot change them.
 export function teamRulesPUT(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['teamId'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -83,7 +87,19 @@ export function teamRulesPUT(req: Request, res: Response): void {
   try {
     const db = getDb()
     const next: TeamRules = { content: body.content }
+    const previous = readTeamRules(db, teamId).content
     setSetting(db, settingsKey(teamId), JSON.stringify(next))
+    if (next.content !== previous)
+      appendAudit(db, {
+        eventType: 'board',
+        teamId,
+        summary: {
+          action: 'set_team_rules',
+          chars: next.content.length,
+          previousChars: previous.length,
+          ...actorField(req),
+        },
+      })
     res.json(next)
   } catch (err) {
     res.status(500).json({ error: String(err) })

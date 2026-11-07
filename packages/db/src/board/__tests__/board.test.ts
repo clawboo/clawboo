@@ -7,15 +7,17 @@ import { eq, sql as dsql } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
-import { executionProcesses, tasks, type DbTask } from '../../schema'
+import { executionProcesses, tasks, teams, type DbTask } from '../../schema'
 import {
   addComment,
   assignTaskDelegation,
   cancelDependents,
   claimTask,
+  closeRequestsOfTeam,
   createCappedRootTask,
   createCappedSubtask,
   createExecutionProcess,
+  createHandOffUnderRequest,
   createSubtask,
   createTask,
   DEFAULT_MAX_CHILDREN,
@@ -40,6 +42,7 @@ import {
   reconcileStaleInProgress,
   TaskDependencyCycleError,
   ORPHANED_REVIEW_NOTE,
+  teamExists,
   updateStatus,
   updateTaskFields,
   type GuardedCreateResult,
@@ -314,7 +317,99 @@ describe('downstream-chain recovery + stale sweep', () => {
     expect(getTask(db, t.id)!.status).toBe('in_progress')
   })
 
+  it('the sweep ends a run left open on a Blocked task, and keeps the card and its reason', () => {
+    const t = createTask(db, { title: 'blocked by its agent', teamId: 'T' })
+    claimTask(db, t.id, 'a1')
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    updateStatus(db, t.id, 'blocked', { waitingOn: { kind: 'person', need: 'A key', by: 'agent' } })
+    // Younger than the window: its process may still be on its way out.
+    expect(reconcileStaleInProgress(db, 60_000).reconciled).toBe(0)
+    expect(listExecutions(db, t.id).at(-1)?.status).toBe('running')
+
+    db.update(executionProcesses)
+      .set({ createdAt: Date.now() - 120_000 })
+      .where(eq(executionProcesses.id, ex.id))
+      .run()
+    db.update(tasks)
+      .set({ updatedAt: Date.now() - 120_000 })
+      .where(eq(tasks.id, t.id))
+      .run()
+    expect(reconcileStaleInProgress(db, 60_000).reconciled).toBe(0)
+
+    expect(listExecutions(db, t.id).at(-1)?.status).toBe('timed_out')
+    const after = getTask(db, t.id)!
+    expect(after.status).toBe('blocked')
+    expect(after.waitingOn).toContain('A key')
+    expect(after.runExecutionId).toBeNull()
+  })
+
+  it('a run on a Blocked task that was just moved is left alone', () => {
+    const t = createTask(db, { title: 'blocked a moment ago', teamId: 'T' })
+    claimTask(db, t.id, 'a1')
+    const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'openclaw' })
+    db.update(executionProcesses)
+      .set({ createdAt: Date.now() - 120_000 })
+      .where(eq(executionProcesses.id, ex.id))
+      .run()
+    updateStatus(db, t.id, 'blocked', { waitingOn: { kind: 'person', need: 'A key', by: 'agent' } })
+    expect(reconcileStaleInProgress(db, 60_000).reconciled).toBe(0)
+    expect(listExecutions(db, t.id).at(-1)?.status).toBe('running')
+  })
+
+  it('a team that is gone is not listed, and neither are its requests left open', () => {
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'T1', name: 'T1', icon: 'T', color: '#e94560', createdAt: now, updatedAt: now })
+      .run()
+    createTask(db, {
+      title: 'mine',
+      teamId: 'T1',
+      sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:leader',
+    })
+    createTask(db, {
+      title: 'left behind',
+      teamId: 'DELETED',
+      sourceDelegationId: 'r2:deleg:agent:a2:reflectTo:leader',
+    })
+    expect(teamExists(db, 'T1')).toBe(true)
+    expect(teamExists(db, 'DELETED')).toBe(false)
+    expect(listTeamsWithFireableDelegations(db)).toEqual(['T1'])
+  })
+
+  it('closeRequestsOfTeam closes its requests and the work under them, and says why', () => {
+    const made = (teamId: string, key: string) => {
+      const r = createHandOffUnderRequest(
+        db,
+        { title: 'A request', description: 'A request', leadAgentId: 'lead', key },
+        {
+          title: 'part',
+          teamId,
+          sourceDelegationId: `${key}:deleg:agent:a2:reflectTo:lead`,
+          agentCreated: true,
+          titleMatchNeedsOwner: true,
+        },
+      )
+      if (!r.ok) throw new Error(r.reason)
+      return { sub: r.task.id, main: r.task.parentTaskId as string }
+    }
+    const mine = made('T', 'main:T:d1')
+    const other = made('OTHER', 'main:OTHER:d1')
+    expect(closeRequestsOfTeam(db, 'T', 'Stopped: its team was deleted.')).toBe(1)
+    expect(getTask(db, mine.main)?.status).toBe('cancelled')
+    expect(getTask(db, mine.sub)?.status).toBe('cancelled')
+    expect(getComments(db, mine.main).at(-1)?.body).toBe('Stopped: its team was deleted.')
+    expect(getTask(db, other.main)?.status).toBe('in_progress')
+    // Already closed: nothing more to say.
+    expect(closeRequestsOfTeam(db, 'T', 'again')).toBe(0)
+  })
+
   it('listTeamsWithFireableDelegations: ready + policy-clean only', () => {
+    const now = Date.now()
+    for (const id of ['T1', 'T2', 'T3', 'T4']) {
+      db.insert(teams)
+        .values({ id, name: id, icon: 'T', color: '#e94560', createdAt: now, updatedAt: now })
+        .run()
+    }
     // Fireable: todo, :agent:-marked, deps satisfied, ledger clean.
     const fireable = createTask(db, {
       title: 'fireable',

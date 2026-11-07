@@ -24,10 +24,10 @@ const MODEL = process.env.LIVE_MODEL || 'haiku'
 const TEAM_LABEL = 'live-acceptance'
 const evidence = { base: BASE, model: MODEL, steps: {} }
 
-async function api(method, p, body) {
+async function api(method, p, body, headers = {}) {
   const res = await fetch(`${BASE}${p}`, {
     method,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: body ? JSON.stringify(body) : undefined,
   })
   const text = await res.text()
@@ -92,11 +92,13 @@ async function main() {
   //     this run's real spend (uncapped → no row; capped → spend accrues).
   if (process.env.BUDGET_CENTS) {
     const limitUsdCents = Number(process.env.BUDGET_CENTS)
-    const bud = await api('POST', '/api/governance/budgets', {
-      scope: 'agent',
-      scopeId: 'la-claude',
-      limitUsdCents,
-    })
+    const bud = await api(
+      'POST',
+      '/api/governance/budgets',
+      { scope: 'agent', scopeId: 'la-claude', limitUsdCents },
+      // Setting a budget is a person's write: this script acts for the one running it.
+      { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors' },
+    )
     evidence.steps.budgetSet = { limitUsdCents, status: bud.status, body: bud.json }
     log('budget limit set (agent/la-claude)', evidence.steps.budgetSet)
   }

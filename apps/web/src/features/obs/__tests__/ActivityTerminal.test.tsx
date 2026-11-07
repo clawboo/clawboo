@@ -121,6 +121,68 @@ describe('presentEvent', () => {
     )
   })
 
+  it('words a report and a plan, which move nothing, instead of repeating the status', () => {
+    expect(
+      presentEvent(
+        parsed(1, 'status_changed', {
+          to: 'in_progress',
+          reason: 'result_reported',
+          outcome: 'not_done',
+        }),
+      ),
+    ).toMatchObject({ badge: 'report', body: 'Not done' })
+    expect(
+      presentEvent(
+        parsed(2, 'status_changed', {
+          to: 'in_progress',
+          reason: 'result_reported',
+          outcome: 'done',
+        }),
+      ),
+    ).toMatchObject({ badge: 'report', body: 'Done' })
+    expect(
+      presentEvent(
+        parsed(3, 'status_changed', { to: 'blocked', reason: 'plan_written', revision: 2 }),
+      ),
+    ).toMatchObject({ badge: 'plan', body: 'Revision 2', tone: 'idle' })
+  })
+
+  it('names a status, a run’s outcome and who claimed it as the board does', () => {
+    expect(presentEvent(parsed(1, 'status_changed', { to: 'in_progress' }))?.body).toBe(
+      'In progress',
+    )
+    expect(presentEvent(parsed(2, 'execution_completed', { status: 'budget_paused' }))?.label).toBe(
+      'Stopped by a budget cap',
+    )
+    expect(
+      presentEvent(parsed(3, 'task_claimed', { assigneeAgentId: 'a1' }), (id) =>
+        id === 'a1' ? 'Coder' : '',
+      )?.body,
+    ).toBe('Coder')
+  })
+
+  it('says why a wake waits in words a person can act on', () => {
+    const skipped = presentEvent(
+      {
+        ...parsed(1, 'task_wake_skipped', { reason: 'run_unproven', wakeReason: 'person_comment' }),
+        agentId: 'a1',
+      },
+      (id) => (id === 'a1' ? 'Coder' : ''),
+    )
+    expect(skipped).toMatchObject({
+      badge: 'wake',
+      label: 'A person commented',
+      body: 'The run on this task stopped answering. Coder reads this once it is cleared',
+    })
+    expect(presentEvent(parsed(2, 'task_wake_recorded', { reason: 'dependency_done' }))?.body).toBe(
+      'The task it waits on is done',
+    )
+    expect(
+      presentEvent(parsed(3, 'task_wake_skipped', { reason: 'finished', wakeReason: 'reopened' }))
+        ?.body,
+    ).toBe('The task had already finished')
+  })
+
   it('drops pure trace bookkeeping (span_start / span_end / dep_linked)', () => {
     expect(presentEvent(parsed(1, 'span_start', { name: 'run' }))).toBeNull()
     expect(presentEvent(parsed(2, 'span_end', { name: 'run' }))).toBeNull()

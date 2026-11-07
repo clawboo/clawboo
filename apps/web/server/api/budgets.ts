@@ -14,7 +14,7 @@ import {
   setBudgetLimit,
 } from '@clawboo/db'
 
-import { actorField } from '../lib/auth'
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { auditBudgetEdit } from '../lib/budgetAudit'
 import { getDb } from '../lib/db'
 
@@ -32,6 +32,9 @@ export function budgetsListGET(_req: Request, res: Response): void {
 // (set/raise a cap). Without `mode`, a new budget is warn-only and an existing one
 // keeps its mode.
 export function budgetsSetPOST(req: Request, res: Response): void {
+  // A person's request only: a hard cap is what stops an agent, so it is not an
+  // agent's to lift.
+  if (refuseUnlessPerson(req, res)) return
   const parsed = setBudgetBody.safeParse(req.body ?? {})
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
@@ -49,6 +52,7 @@ export function budgetsSetPOST(req: Request, res: Response): void {
 // resume makes forward progress. Returns `willRepause: true` when the scope is
 // resumed while still at/over its limit (no grace) — the UI warns the operator.
 export function budgetsResumePOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const scope = req.params['scope']
   const scopeId = typeof req.params['scopeId'] === 'string' ? req.params['scopeId'] : ''
   if (!isScope(scope)) {

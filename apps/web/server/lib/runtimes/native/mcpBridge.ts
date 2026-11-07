@@ -49,6 +49,10 @@ export interface McpBridgeOptions {
    *  still gets none of the writes the engine owns (see the Tasks server's
    *  `teamRun`), as the HTTP runtimes' signed team-run URLs do. */
   teamRun?: boolean
+  /** A run of a person's one-to-one chat: the reads and `add_comment` at most, held to
+   *  `chatRunTeamId` (see the Tasks server's `chatRun`). */
+  chatRun?: boolean
+  chatRunTeamId?: string | null
   /** The board task the run works on: the Tasks tools use it when a call leaves
    *  taskId out, as the HTTP runtimes' signed Tasks URLs say. An approval its
    *  Tools server opens names the same task. */
@@ -97,6 +101,8 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
 
   const db = opts.db
   const clients: InMemoryMcpClient[] = []
+  // A chat run is held to the agent's own team, whatever its Memory scope says.
+  const tasksTeamId = opts.chatRun ? opts.chatRunTeamId : opts.memoryScope?.teamId
   if (enable.tasks)
     clients.push(
       await connectInMemoryClient(
@@ -104,14 +110,15 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
           isLeadAgent: (teamId, agentId) => isLeadOfTeam(db, teamId, agentId),
           readOnly: enable.tasks === 'read',
           ...(opts.teamRun ? { teamRun: true } : {}),
+          ...(opts.chatRun ? { chatRun: true } : {}),
           // Same binding the Memory + TeamChat servers get: the run's team is
           // authoritative, so a bare `list_tasks` returns THIS team's board
           // (the agent is never told its own teamId to pass). The agentId
           // additionally enables the mid-run inbox piggyback.
-          ...(opts.memoryScope?.teamId || opts.agentId
+          ...(tasksTeamId || opts.agentId
             ? {
                 boundScope: {
-                  ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
+                  ...(tasksTeamId ? { teamId: tasksTeamId } : {}),
                   ...(opts.agentId ? { agentId: opts.agentId } : {}),
                   ...(opts.boundTaskId ? { taskId: opts.boundTaskId } : {}),
                   ...(opts.boundExecutionId ? { executionId: opts.boundExecutionId } : {}),

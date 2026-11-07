@@ -494,8 +494,10 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
       .all()
       .map((a) => [a.id, a.name] as const),
   )
+  // Only a name from the roster: an id nobody knows is not something to print as who
+  // wrote a comment, where it could read as `person` or `clawboo`.
   const nameOf = (id: string | null | undefined): string | null =>
-    id ? (names.get(id) ?? id) : null
+    id ? (names.get(id) ?? null) : null
   // The kind its writer gave it comes first: Retry and Assign write their notes as
   // `user` comments, and those are clawboo's words.
   const authorOf = (c: DbTaskComment): string =>

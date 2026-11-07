@@ -17,6 +17,7 @@ import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
 
 import { InboxPanel } from '../InboxPanel'
+import { changeLabel } from '../inboxModel'
 import { resetInboxStore, useInboxStore } from '../inboxStore'
 
 const T = { timeout: 4000 }
@@ -197,6 +198,46 @@ describe('InboxPanel', () => {
     )
     await waitFor(() => expect(tab(/Needs you/)).toHaveTextContent('1'), T)
     expect(tab(/Unread/)).toHaveAttribute('aria-selected', 'true')
+  })
+
+  it('shows a row’s readable id, and nothing for a row with none', async () => {
+    rows = [
+      row('named', {
+        unread: true,
+        identifier: 'RES-12',
+        activity: { seq: 2, kind: 'status', at: Date.now() },
+      }),
+      row('plain', { unread: true }),
+    ]
+    mount()
+    await waitFor(() => expect(listed()).toEqual(['named', 'plain']), T)
+    const [named, plain] = screen.getAllByTestId('inbox-row')
+    expect(within(named!).getByTestId('inbox-row-identifier')).toHaveTextContent('RES-12')
+    expect(within(plain!).queryByTestId('inbox-row-identifier')).toBeNull()
+  })
+
+  it('says why a task moved, rather than the status a person cannot act on', async () => {
+    const moved = (status: string, extra: Record<string, unknown>) =>
+      changeLabel({
+        id: 't',
+        title: 'T',
+        status,
+        activity: { seq: 1, kind: 'status', at: 1 },
+        ...extra,
+      })
+    expect(moved('blocked', { attention: { reason: 'failed', failedRuns: 1 } })).toBe('Failed')
+    expect(moved('blocked', { attention: { reason: 'question', failedRuns: 0 } })).toBe(
+      'Waiting for your answer',
+    )
+    expect(
+      moved('blocked', {
+        attention: null,
+        waitingOn: '{"kind":"subtasks"}',
+        waitingOnDetail: { openSubtasks: 2 },
+      }),
+    ).toBe('Waiting on 2 sub-tasks')
+    expect(moved('in_review', { attention: null })).toBe('Being checked')
+    expect(moved('todo', { attention: null })).toBe('Moved to To do')
   })
 
   it('lists what changed, newest change first, and says what the change was', async () => {

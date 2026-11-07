@@ -160,11 +160,11 @@ describe('classifyAttempts', () => {
   })
 })
 
-// K17: the team engine writes `timed_out` too, for a run that went silent while
+// The team engine writes `timed_out` too, for a run that went silent while
 // its process lived (its idle watchdog), and so does the OpenClaw routine
 // watchdog. Neither is a crash: the process was alive, and the engine stopped
 // the run itself. Only the stale sweep's `timed_out` means nobody was there.
-describe('classifyAttempts on the team engine ledger (K17)', () => {
+describe('classifyAttempts on the team engine ledger', () => {
   const watchdog = (): AttemptRow => ({
     status: 'timed_out',
     error: 'No response from the delegate for 8 minutes.',

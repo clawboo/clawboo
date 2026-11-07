@@ -178,7 +178,7 @@ describe('the lazy report-up fetch', () => {
 
 describe('the status pill', () => {
   it.each([
-    ['backlog', 'Queued'],
+    ['backlog', 'Backlog'],
     ['todo', 'Queued'],
     ['in_progress', 'Working'],
     ['in_review', 'Verifying'],
@@ -353,6 +353,37 @@ describe('Open on board', () => {
 
 describe('BoardTaskCard: waits and people', () => {
   afterEach(() => cleanup())
+
+  it('says whose it is when the task handed to a person is not yours', async () => {
+    reportUp('')
+    render(
+      task({
+        status: 'blocked',
+        assigneePersonId: 'p2',
+        assigneePerson: JSON.stringify({ id: 'p2', name: 'Priya' }),
+        attention: { reason: 'assigned', failedRuns: 0, personId: 'p2' },
+      }),
+    )
+    expect(await screen.findByText('Assigned to Priya')).toBeInTheDocument()
+    expect(screen.getByTestId('board-task-attention')).toHaveTextContent(
+      'Priya has this. Give it to an agent or mark it done.',
+    )
+  })
+
+  it('does not say a paused task is waiting on anything', async () => {
+    reportUp('')
+    render(
+      task({
+        status: 'blocked',
+        attention: null,
+        waitingOn: '{"kind":"subtasks"}',
+        waitingOnDetail: { openSubtasks: 2 },
+        pause: { kind: 'team', id: 'T', name: 'Team' },
+      } as never),
+    )
+    expect(await screen.findByText('Paused')).toBeInTheDocument()
+    expect(screen.queryByText('Waiting on 2 sub-tasks')).toBeNull()
+  })
 
   it('a task waiting on sub-tasks says so, with no Blocked pill and no Reason', async () => {
     server.use(

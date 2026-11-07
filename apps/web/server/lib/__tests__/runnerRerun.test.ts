@@ -19,6 +19,7 @@ import {
   placePause,
   setTaskRunnerInputs,
   tasks,
+  teams,
   LOCAL_PERSON,
   type ClawbooDb,
   type DbTask,
@@ -52,6 +53,11 @@ beforeEach(() => {
   nextRun = async () => ({ ok: true })
   resetRunnerRerunsForTests()
   const now = Date.now()
+  for (const id of ['t', 'T']) {
+    db.insert(teams)
+      .values({ id, name: id, icon: 'x', color: '#000', createdAt: now, updatedAt: now })
+      .run()
+  }
   for (const [id, runtime, archivedAt] of [
     ['coder', 'claude-code', null],
     ['codexer', 'codex', null],
@@ -340,6 +346,24 @@ describe('pumpRunnerReruns: a run a pause stopped', () => {
     pumpRunnerReruns(db, null)
     await vi.waitFor(() => expect(runs).toHaveLength(1))
     expect(runs[0]).toMatchObject({ taskId: id, assigneeAgentId: 'coder' })
+  })
+
+  it('starts nothing for a team that was deleted: a run would bring its folder back', async () => {
+    const t = createTask(db, {
+      title: 'left behind',
+      teamId: 'DELETED',
+      sourceDelegationId: encodeHumanAssignment('coder', 'n1'),
+    })
+    setTaskRunnerInputs(db, t.id, {
+      runtime: 'claude-code',
+      assigneeAgentId: 'coder',
+      repoPath: null,
+      kind: null,
+      model: null,
+    })
+    pumpRunnerReruns(db, null)
+    await new Promise((r) => setImmediate(r))
+    expect(runs).toHaveLength(0)
   })
 
   it('starts a bound task again on resume too', async () => {

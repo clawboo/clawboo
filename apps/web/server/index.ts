@@ -17,7 +17,6 @@ import {
 import { loadSettings, resolveBasePath } from '@clawboo/config'
 import { createLogger } from '@clawboo/logger'
 import {
-  isTeamArchived,
   listAgentsWithUndeliveredInbox,
   moveArchivedRoomTasks,
   reapOrphanInbox,
@@ -51,7 +50,7 @@ import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
 import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
 import {
   getTeamOrchestrator,
-  isActiveTeamRoom,
+  roomCanRun,
   orchestratorKey,
   roomsWithUnheldChecks,
   roomsWithUnheldReportUps,
@@ -774,7 +773,7 @@ async function main() {
       alert: (alert) => writeTeamAlert(getDb(), alert),
     })
     const pumpRoomNow = (teamId: string, roomId: string | null): void => {
-      if (!isActiveTeamRoom(teamId, roomId)) return
+      if (!roomCanRun(getDb(), teamId, roomId)) return
       getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
         .pump()
         .catch((err: unknown) => log.error({ err, teamId, roomId }, 'Board: wake pump failed'))
@@ -848,8 +847,8 @@ async function main() {
         // room's engine hands those tasks to a person.
         for (const r of roomsWithUnheldChecks(db)) wake.set(orchestratorKey(r.teamId, r.roomId), r)
         for (const { teamId, roomId } of wake.values()) {
-          // Nothing wakes an archived team, whatever it left behind.
-          if (!isActiveTeamRoom(teamId, roomId) || isTeamArchived(db, teamId)) continue
+          // Nothing wakes an archived or deleted team, whatever it left behind.
+          if (!roomCanRun(db, teamId, roomId)) continue
           getTeamOrchestrator(teamId, { mcpBaseUrl: mcpBase, roomId })
             .pump()
             .catch((err: unknown) =>

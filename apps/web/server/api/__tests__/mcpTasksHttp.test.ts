@@ -107,7 +107,9 @@ describe('Tasks over HTTP', () => {
       delegate: true,
       attachSecret: secret(),
     })
-    expect(await toolNames(url)).toEqual([...MOVES_NO_CARD, 'block_task'].sort())
+    expect(await toolNames(url)).toEqual(
+      [...MOVES_NO_CARD.filter((name) => name !== 'link_task'), 'block_task'].sort(),
+    )
   })
 
   it('serves every tool to a signed run the engine does not drive (the task runner)', async () => {
@@ -127,6 +129,36 @@ describe('Tasks over HTTP', () => {
         'update_task_status',
       ].sort(),
     )
+  })
+
+  it('serves a one-to-one chat the reads and add_comment (the URL a chat turn writes)', async () => {
+    const url = mcpHttpUrl(base, 'tasks', {
+      teamId: null,
+      agentId: 'boo-zero',
+      chatRun: true,
+      chatRunTeamId: null,
+      attachSecret: secret(),
+    })
+    expect(await toolNames(url)).toEqual(['add_comment', 'get_task', 'list_tasks'])
+  })
+
+  it("never serves a chat every tool through its own Tools or Memory URL's signature", async () => {
+    const scope = {
+      teamId: null,
+      agentId: 'boo-zero',
+      chatRun: true,
+      chatRunTeamId: null,
+      attachSecret: secret(),
+    }
+    for (const server of ['tools', 'memory'] as const) {
+      const repointed = mcpHttpUrl(base, server, scope).replace(
+        `/api/mcp/${server}`,
+        '/api/mcp/tasks',
+      )
+      const names = await toolNames(repointed)
+      for (const withheld of ['claim_task', 'assign_task', 'update_task_status', 'release_task'])
+        expect(names, `${server} URL served ${withheld}`).not.toContain(withheld)
+    }
   })
 
   it("never serves a team run every tool through its own Tools or Memory URL's signature", async () => {

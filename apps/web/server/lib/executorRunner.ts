@@ -630,7 +630,7 @@ async function runTaskOnRuntimeInner(
     // A pause landed between two fix cycles: this run still holds the claim, with
     // no run left to give it back. To do, to start again on resume.
     if (!result.ok && stop.byPause && getTask(input.db, input.taskId)?.status === 'in_progress') {
-      releaseTask(input.db, input.taskId)
+      releaseTask(input.db, input.taskId, { keepVerdict: true })
     }
     return result
   } catch (err) {
@@ -2346,7 +2346,8 @@ async function runTaskInner(
       }
       await writeTaskHandoff(taskId, cleared).catch(() => undefined)
     }
-    releaseTask(db, taskId) // back to todo — retryable
+    // Back to todo, retryable. Work a pause stopped comes back with what its check found.
+    releaseTask(db, taskId, { keepVerdict: stoppedByPause })
     // A person's move may already have put it somewhere else (releaseTask only
     // touches a task still in progress), so report where it really is.
     status = getTask(db, taskId)?.status ?? 'todo'

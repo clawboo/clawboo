@@ -122,6 +122,31 @@ afterEach(() => {
   useFleetStore.setState({ agents: [] })
 })
 
+describe('the runtime a task’s card names', () => {
+  it('reads the agent on open work, not what the engine wrote on the row', async () => {
+    server.use(
+      http.get('/api/runtimes', () => {
+        runtimesCalls += 1
+        return HttpResponse.json({ runtimes: [] })
+      }),
+      http.get('/api/board/:taskId', ({ params }) => {
+        detailCalls += 1
+        return HttpResponse.json({
+          task: { id: params['taskId'], status: 'todo', assigneeRuntime: 'openclaw' },
+          comments: [],
+          ancestors: [],
+        })
+      }),
+    )
+    seed('todo')
+    await openTask()
+    await waitFor(() => expect(detailCalls).toBeGreaterThan(0))
+    const detail = await screen.findByTestId('team-task-detail')
+    await waitFor(() => expect(detail).toHaveTextContent('Hermes'))
+    expect(detail).not.toHaveTextContent('OpenClaw')
+  })
+})
+
 describe('the composer hint on a running Hermes task', () => {
   it('a Hermes on its quiet path says it pauses to read the comment', async () => {
     serve('interrupt-resume', null)

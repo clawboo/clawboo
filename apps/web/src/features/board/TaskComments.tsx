@@ -17,11 +17,16 @@ import remarkGfm from 'remark-gfm'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { useFleetStore } from '@/stores/fleet'
 
+import { otherPersonName } from './boardStatus'
+import { useBoardPerson } from './useBoardPerson'
+
 export interface TaskComment {
   id?: string
   body?: string
   authorType?: string
   authorAgentId?: string | null
+  /** The person a sign-in proxy vouched for, as the row stores them. */
+  person?: unknown
   createdAt?: number
 }
 
@@ -32,10 +37,11 @@ const timeFormat = new Intl.DateTimeFormat(undefined, {
   minute: '2-digit',
 })
 
-function useAuthorLabel(): (c: TaskComment) => string {
+function useAuthorLabel(comments: readonly TaskComment[]): (c: TaskComment) => string {
   const agents = useFleetStore((s) => s.agents)
+  const me = useBoardPerson(comments.some((c) => c.authorType === 'user' && !!c.person))
   return (c) => {
-    if (c.authorType === 'user') return 'You'
+    if (c.authorType === 'user') return otherPersonName(c.person, me) ?? 'You'
     if (c.authorType === 'agent') {
       const name = c.authorAgentId ? agents.find((a) => a.id === c.authorAgentId)?.name : null
       return name ?? 'Agent'
@@ -57,7 +63,7 @@ export function TaskComments({
   /** Drawn under an entry, such as where a reply the person just sent went. */
   after?: (comment: TaskComment) => ReactNode
 }) {
-  const authorOf = useAuthorLabel()
+  const authorOf = useAuthorLabel(comments)
   const visible = comments.filter((c) => typeof c.body === 'string' && c.body.trim().length > 0)
   if (visible.length === 0) {
     return <div className="text-xs text-muted-foreground">{emptyLabel}</div>

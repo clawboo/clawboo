@@ -99,7 +99,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 
 ### Responses
 
-**`200 OK`**: the task list, most recently updated first (the `ready=true` list puts the highest `priority` first, then the most recently updated). The `ready=true` rows carry none of `attention`, `runCost` and `runningSince`. Other sections call one of these rows `DbTask`:
+**`200 OK`**: the task list, most recently updated first (the `ready=true` list keeps the order at the top of this section). The `ready=true` rows carry none of `attention`, `runCost` and `runningSince`. Other sections call one of these rows `DbTask`:
 
 ```ts
 {
@@ -139,7 +139,14 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
     // The question it has open, when it waits on one. Not returned by the `ready=true` variant.
     openQuestion: null | { id: string; kind: string; payload: string; status: 'pending' /* ... */ }
     // For a task waiting on other work: the title of the task, or how many sub-tasks are open.
-    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number }
+    // A person's request has it whatever it waits on; `openUnder` is everything open under it
+    // that closing the request would cancel, when that is more than it waits on.
+    waitingOnDetail?: {
+      taskTitle?: string
+      openSubtasks?: number
+      needPerson?: number
+      openUnder?: number
+    }
     // Why the task is waiting on a person; null when the board will move it on
     // its own. Not returned by the `ready=true` variant.
     attention: null | {
@@ -153,12 +160,22 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
         | 'unstarted'
         | 'question'
         | 'assigned'
+        | 'agent_wakes'
+        | 'no_result'
+        | 'rate_limited'
+        | 'provider_down'
+        | 'out_of_room'
+        | 'budget'
+        | 'breaker'
       failedRuns: number // consecutive unsuccessful runs at the end of the ledger
       detail?: string // the last run's error, trimmed, for failed / timed_out; what a person must do
+      cause?: 'sign_in' | 'billing' // the provider refused the account: fix this before a retry
+      runtime?: string // with cause: the runtime whose sign-in to fix
       byPerson?: true // for blocked: a person moved it there and no run has started since
       questionId?: string // for question: the question waiting for its answer
       personId?: string // for assigned: the person whose turn it is
       handedBack?: true // for assigned: an agent handed it back
+      agentWakes?: object // for agent_wakes: the card, described below
     }
     // What the task's runs cost, summed from its execution ledger. Not returned by
     // the `ready=true` variant.
@@ -174,7 +191,7 @@ Lists tasks, for one team or all of them, or only the tasks that are ready to wo
 }
 ```
 
-`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A `blocked` task whose agent's comment still waits on the card about agents waking each other is `agent_wakes`, with `agentWakes: { jobTaskId, kind, fromAgentId, toAgentId, alsoWaiting? }`. `alsoWaiting` counts the other tasks that wait on the same answer, and a card nothing waits on any more is not shown. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one (`needs_review` when its verdict cannot be promoted, else `timed_out` / `failed` from its last run, else `needs_review` when it waits on a check, else `blocked`), unless it waits on another task or on its own sub-tasks: then it has none. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
+`attention` comes from the task's status, its bound agent (the `:agent:` segment of `sourceDelegationId`), its run ledger, its check result, what it waits on and who it is assigned to. A `blocked` task whose agent's comment still waits on the card about agents waking each other is `agent_wakes`, with `agentWakes: { jobTaskId, kind, fromAgentId, toAgentId, alsoWaiting? }`. `alsoWaiting` counts the other tasks that wait on the same answer, and a card nothing waits on any more is not shown. A question waiting for its answer is `question`, and an open task assigned to a person is `assigned`, unless it is in `backlog`; both come first. A `blocked` task has one, unless it waits on another task or its sub-tasks: `no_result`, `out_of_room`, `rate_limited` or `provider_down`, or `budget` from what it waits on; else `needs_review` when its verdict cannot be promoted; else `blocked` for what an agent said a person must do; else `budget`, `breaker`, `timed_out` or `failed` from its last run; else `needs_review` when it waits on a check; else `blocked`. A check whose move to Blocked keeps failing is `needs_review` while still `in_review` or `in_progress`. A `todo` task has one only when nothing will fire it: no bound agent (`unassigned`), a last run the user stopped (`stopped`), a hard budget cap (`budget`), the circuit breaker (`breaker`), or three failed runs in a row (`failed` / `timed_out`). An `in_progress` task with no assignee and no running run is `unstarted`: nothing is working on it. The board renders every task with an `attention` in its **Needs you** column.
 
 `runCost` sums the `costUsd` of the task's run ledger rows. A row with no cost (a run stopped before it priced itself) adds nothing, and `usd` stays null until some run records one. `estimated` is true unless every counted row has `costSource` `'reported'` or `'local'`; a row with a null source counts as an estimate. `local: true` appears only when every counted row is `'local'`, a run on a model the user's own Ollama served, and the board then shows the cost as `free`. A task whose rows carry no cost but whose own `costUsd` is positive predates per-run costs, so that figure is returned with `estimated: true`.
 
@@ -655,7 +672,7 @@ A **409** means another worker holds the task: do not retry it. A task left `in_
 { "ok": false, "error": "not_found" }
 ```
 
-**`409 Conflict`**: the task was not in a claimable state (already claimed, dropped, or not `todo`), or it is assigned to a person (`person_assigned`):
+**`409 Conflict`**: the task was not in a claimable state (already claimed, dropped, or not `todo`), it is assigned to a person (`person_assigned`), or a pause covers it (`paused`):
 
 ```json
 { "ok": false, "error": "conflict" }
@@ -681,7 +698,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 Changes a task's status, edits its `priority`, `title` or `description`, or both. At least one field is required. The status change follows the [status rules](#task-statuses) (an illegal move is **409** `illegal_transition`). A move to `done` is also refused with **409** `verification_required` when the task's stored check result is `fail`, or `completed_with_debt` with a failing last check. The only way past that is `humanOverride: true`, and a `done` with the override writes a `verification` row to the [audit log](/reference/rest-api/governance).
 
-A `priority` of Urgent is kept only from a request that passes [the person check](/operating/security#the-person-check); any other caller stops at High. That check is a speed bump, not a boundary (see [Security](/operating/security)).
+A `priority` of Urgent is kept only from a request that passes [the person check](/operating/security#the-person-check); any other caller stops at High. Changing `title` or `description` takes the same check, because they are the brief the task's next run follows: any other caller gets `403 { "ok": false, "error": "person_only" }`, and sent unchanged they change nothing. That check is a speed bump, not a boundary (see [Security](/operating/security)).
 
 This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task. These rules hold for a request that passes [the person check](/operating/security#the-person-check):
 
@@ -694,7 +711,7 @@ This is the route a **person** uses (the board and the task drawer), and a perso
 
 <Note>
 
-A task with no stored check result is unchecked, not failing, and moves to `done` normally. Most tasks never get a check: only task-runner runs in a git worktree with a non-empty diff are checked (see [Verification](/concepts/verification)). Moving a task to `todo` clears its assignee and check result so it can be claimed again.
+A task with no stored check result is unchecked, not failing, and moves to `done` normally. Most tasks never get a check: only task-runner runs in a git worktree with a non-empty diff, and team-chat work that changed the folder of a team with a work check, are checked (see [Verification](/concepts/verification)). Moving a task to `todo` clears its assignee and check result so it can be claimed again.
 
 </Note>
 
@@ -748,7 +765,16 @@ A status change writes a `status_changed` event with the `actor` that made it, a
 **`409 Conflict`**: the status transition is illegal, the verification gate blocked `→done`, or (from a caller the person check did not let through) a person moved the task after its latest run started:
 
 ```ts
-{ ok: false, error: 'illegal_transition' | 'verification_required' | 'person_moved' }
+{
+  ok: false
+  error:
+    | 'illegal_transition'
+    | 'verification_required'
+    | 'person_moved'
+    | 'main_task'
+    | 'person_assigned'
+    | 'awaiting_answer'
+}
 ```
 
 **`500 Internal Server Error`**:
@@ -775,6 +801,8 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 ---
 
 ## `POST /api/board/:taskId/comments`
+
+`authorAgentId` is read only from a request that passes [the person check](/operating/security#the-person-check). From any other caller it is dropped, so a script cannot sign a comment with a teammate's name.
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The route writes a `comment_added` event and posts the first 160 characters to the team's peer room. An unknown `taskId` is not checked first: the insert fails the database's foreign key and the route answers **500** (`FOREIGN KEY constraint failed`).
 

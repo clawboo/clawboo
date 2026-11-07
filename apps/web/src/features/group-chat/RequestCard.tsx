@@ -16,6 +16,7 @@ import { BoardTaskCard } from './BoardTaskCard'
 
 function pillOf(
   task: BoardTaskView,
+  subtasks: readonly BoardTaskView[],
   progress: RequestProgress,
 ): {
   tone: StatusTone
@@ -26,6 +27,10 @@ function pillOf(
     return { tone: ATTENTION_META[attention.reason].tone, label: attentionLabel(attention, null) }
   if (task.status === 'done') return { tone: 'done', label: 'Done' }
   if (task.status === 'cancelled') return { tone: 'error', label: 'Cancelled' }
+  // A pause holds it back, and work that needs a person will not move by itself: neither
+  // is the team working on it.
+  if (task.pause) return { tone: 'idle', label: 'Paused' }
+  if (subtasks.some((s) => taskAttentionOf(s))) return { tone: 'warning', label: 'Needs you' }
   return progress.open > 0
     ? { tone: 'working', label: 'Working' }
     : { tone: 'working', label: 'Summing up' }
@@ -42,7 +47,7 @@ export const RequestCard = memo(function RequestCard({
   progress: RequestProgress
   teamId?: string | null
 }) {
-  const { tone, label } = pillOf(task, progress)
+  const { tone, label } = pillOf(task, subtasks, progress)
   return (
     <div
       className="overflow-hidden rounded-xl border border-border bg-surface"

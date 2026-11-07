@@ -133,6 +133,7 @@ The Routines view groups rows under **Team routines**, **Agent routines** and, i
 | **on**                                | Waiting for its next run                                                               |
 | **queued**, **starting**, **running** | A run is on its way or under way                                                       |
 | **paused**                            | You paused it. It does not run until you resume it                                     |
+| **on hold**                           | A pause covers who it would reach. It runs once on resume                              |
 | **failed**                            | Its last run failed, and it stopped. See [When a routine stops](#when-a-routine-stops) |
 | **finished**                          | A one-time routine that already ran                                                    |
 | **disabled**                          | An OpenClaw cron job that is turned off on the Gateway                                 |

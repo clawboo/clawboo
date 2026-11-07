@@ -50,7 +50,7 @@ export function buildResumeNote(input: ResumeNoteInput): string | null {
   const { attempts } = input
   // A watchdog timeout interrupted its run too (the team engine stopped it), so
   // it gets the same note it got before the attempt reader told it apart from a
-  // crash (K17). It records no work, so it gets the honest variant.
+  // crash. It records no work, so it gets the honest variant.
   if (attempts.lastKind !== 'crash' && attempts.lastKind !== 'timeout') return null
 
   const reason = (
@@ -90,7 +90,7 @@ const MAX_REASON_CHARS = 400
  * The engine's runs have no worktree, but a coding agent works in the team's
  * folder, which outlives the run, so the executor's "nothing to pick up, start
  * from the beginning" would be wrong here: an interrupted or stopped run may
- * have done part of the work. A watchdog timeout is not a crash (K17): the
+ * have done part of the work. A watchdog timeout is not a crash: the
  * process was alive and the engine stopped it.
  */
 export function buildLastAttemptNote(attempts: AttemptSummary): string | null {

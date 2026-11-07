@@ -911,14 +911,14 @@ Runs waiting to start when the server stops do not run. Tasks agents handed to e
 
 **`200 OK`**:
 
-| Field            | Type                  | Notes                                                                                                      |
-| ---------------- | --------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `held`           | `boolean`             | `true` while any hold is live: no new agent run starts                                                     |
-| `holds`          | `object[]`            | The live holds, oldest first (below)                                                                       |
-| `backgroundWork` | `'present' \| 'none'` | `present` while an agent run is going; `none` when stopping the server now stops no run                    |
-| `runs.running`   | `number`              | Agent runs going now                                                                                       |
-| `runs.queued`    | `number`              | Runs waiting to start. While the server is held they do not start, so `backgroundWork` does not count them |
-| `runs.limit`     | `number`              | How many runs may go at once (`CLAWBOO_MAX_CONCURRENT_RUNS`, default 8)                                    |
+| Field            | Type                  | Notes                                                                                                                                         |
+| ---------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `held`           | `boolean`             | `true` while any hold is live: no new agent run starts                                                                                        |
+| `holds`          | `object[]`            | The live holds, oldest first (below)                                                                                                          |
+| `backgroundWork` | `'present' \| 'none'` | `present` while an agent run or a team chat's work check is going or waiting its turn; `none` when stopping the server now cuts neither short |
+| `runs.running`   | `number`              | Agent runs going now                                                                                                                          |
+| `runs.queued`    | `number`              | Runs waiting to start. While the server is held they do not start, so `backgroundWork` does not count them                                    |
+| `runs.limit`     | `number`              | How many runs may go at once (`CLAWBOO_MAX_CONCURRENT_RUNS`, default 8)                                                                       |
 
 Each entry in `holds`:
 

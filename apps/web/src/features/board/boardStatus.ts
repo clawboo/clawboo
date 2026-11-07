@@ -75,6 +75,19 @@ export function statusLabel(status: string): string {
   return isTaskStatus(status) ? STATUS_LABEL[status] : status
 }
 
+/** A run's outcome in words. */
+export const RUN_WORD: Record<string, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  succeeded: 'Succeeded',
+  failed: 'Failed',
+  timed_out: 'Timed out',
+  cancelled: 'Cancelled',
+  budget_paused: 'Stopped by a budget cap',
+  budget_held: 'Waited for budget room',
+  breaker_tripped: 'Stopped by the circuit breaker',
+}
+
 /**
  * The statuses the manual editor should offer for a task currently in `from`:
  * the current status (so it renders as the selected value) plus every legal
@@ -337,7 +350,31 @@ export function taskAttentionOf(task: {
   return null
 }
 
+/**
+ * Whether a person can hand this task to someone or run it again. A run still going
+ * or a check under way keeps it: the server refuses both. A card nothing is running
+ * (`unstarted`, which is In progress with no run behind it) is the exception.
+ */
+export function personCanRestart(task: { status?: unknown }, attention: TaskAttention): boolean {
+  return (
+    task.status === 'todo' ||
+    task.status === 'blocked' ||
+    task.status === 'backlog' ||
+    attention.reason === 'unstarted'
+  )
+}
+
 // ─── People ─────────────────────────────────────────────────────────────────
+
+/** The line a card shows when a reason has nothing more specific to say. Someone
+ *  else's task says whose it is, since "this one is yours" would not be true. */
+export function attentionHint(attention: TaskAttention, assignee?: string | null): string {
+  if (attention.reason === 'assigned' && assignee)
+    return `${assignee === 'a person' ? 'Someone else' : assignee} has this. Give it to an agent or mark it done.`
+  return attention.cause
+    ? ACCOUNT_FAILURE_META[attention.cause].hint
+    : ATTENTION_META[attention.reason].hint
+}
 
 /** Why a person's words did not reach an agent (a `not-delivered` reply). */
 export function notDeliveredWhy(reason: string): string {
@@ -397,6 +434,22 @@ export function isMyTask(
   return id === LOCAL_PERSON_ID || id === me?.id
 }
 
+/** A person on a row, as a comment stores them (a JSON {id, name, role}), by name:
+ *  null when it is the viewer, or the install's built-in person, or nobody named. */
+export function otherPersonName(
+  value: unknown,
+  me: { id: string } | null | undefined,
+): string | null {
+  try {
+    const doc: unknown = typeof value === 'string' ? JSON.parse(value) : value
+    const { id, name } = (doc ?? {}) as { id?: unknown; name?: unknown }
+    if (typeof id !== 'string' || id === LOCAL_PERSON_ID || id === me?.id) return null
+    return typeof name === 'string' && name ? name : null
+  } catch {
+    return null
+  }
+}
+
 /** Who has a person's task, for a badge: null when it is the viewer's, whose badge
  *  already says "you". */
 export function otherAssigneeName(
@@ -418,7 +471,10 @@ export function waitingWorkLabel(task: {
   status: string
   waitingOn?: unknown
   waitingOnDetail?: unknown
+  pause?: unknown
 }): string | null {
+  // A pause holds it back, whatever else it would be waiting for: it reads Paused.
+  if (task.pause) return null
   const w = parseWaitingOn(task.waitingOn)
   if (task.status === 'todo' && w?.kind === 'retry')
     return `Retrying soon: ${w.cause === 'rate_limited' ? 'rate limited' : 'provider down'}`

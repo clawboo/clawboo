@@ -376,6 +376,7 @@ const CHAT_MESSAGE_FIELDS = [
   'confirmed',
   'fingerprint',
   'origin',
+  'fromCaller',
   'person',
 ]
 const CHAT_DELTA_FIELDS = ['sessionKey', 'runId', 'text']

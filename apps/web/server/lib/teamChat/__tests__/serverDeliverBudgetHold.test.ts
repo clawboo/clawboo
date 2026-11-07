@@ -24,9 +24,15 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
-import { createNudgeQueue, DeliveryRefusedError, HUMAN_TURN } from '@clawboo/team-orchestration'
+import {
+  createNudgeQueue,
+  DeliveryRefusedError,
+  HUMAN_TURN,
+  type RunStamp,
+} from '@clawboo/team-orchestration'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { estimateRunReserveCents, reserveRunBudget } from '../../budgetHold'
 import { getDb, getDbPath, resetDb } from '../../db'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
 
@@ -135,6 +141,7 @@ describe('serverDeliver: budget holds', () => {
   function wire(adapters: Record<string, RuntimeAdapter>) {
     const metas: Array<{ sk: string; text: string }> = []
     const closed: string[] = []
+    const notStarted: RunStamp[] = []
     const deliver = createServerDeliver({
       db,
       teamId: 'T',
@@ -155,8 +162,11 @@ describe('serverDeliver: budget holds', () => {
         return true
       },
       makeAdapterForAgent: (agentId: string) => adapters[agentId]!,
+      onRunNotStarted: (run) => {
+        notStarted.push(run)
+      },
     })
-    return { deliver, metas, closed }
+    return { deliver, metas, closed, notStarted }
   }
   const sk = (agentId: string) => `agent:${agentId}:team:T`
 
@@ -179,6 +189,29 @@ describe('serverDeliver: budget holds', () => {
 
     a1.release!()
     await vi.waitFor(() => expect(holds()).toEqual([]))
+  })
+
+  it('a task update refused behind its recipient’s run hands back what it carried as no try', async () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+    const a1 = new HeldAdapter()
+    const w = wire({ a1 })
+    await w.deliver(sk('a1'), 'a1', 'first', HUMAN_TURN)
+    await vi.waitFor(() => expect(a1.release).not.toBeNull())
+    // Another run sets aside what is left, and this one spends a little of it.
+    const other = reserveRunBudget(
+      db,
+      { teamId: 'T' },
+      { kind: 'team-chat', ref: 'other', estimateCents: 100 - estimateRunReserveCents(db, 'a1') },
+    )
+    expect(other.blocked).toBe(false)
+    recordSpend(db, 'team', 'T', 1)
+
+    await w.deliver(sk('a1'), 'a1', '[Task Update]', { kind: 'system', reportUpIds: ['r1'] })
+    expect(w.notStarted).toEqual([])
+    a1.release!()
+    await vi.waitFor(() => expect(w.notStarted).toHaveLength(1))
+    expect(w.notStarted[0]).toMatchObject({ reportUpIds: ['r1'], budgetHeld: true })
+    if (!other.blocked) other.hold.release()
   })
 
   it('the final gate refuses a run whose cap paused while it got ready', async () => {

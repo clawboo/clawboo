@@ -861,7 +861,9 @@ const SCHEMA_DDL = `
       created_at      INTEGER NOT NULL,
       delivered_at    INTEGER,
       delivered_via   TEXT,
-      tenant_id       TEXT
+      tenant_id       TEXT,
+      -- Whose words the row quotes: an agent's id or 'person'. NULL: clawboo's own.
+      source          TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_agent_inbox_pending ON agent_inbox (agent_id, delivered_at);
 

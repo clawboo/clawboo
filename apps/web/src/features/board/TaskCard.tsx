@@ -37,6 +37,7 @@ import type { CardProperties } from './BoardToolbar'
 import { labelsOfTask } from '@/lib/teamLabels'
 
 import { assigneePersonOf, boardColumnOf, isMyTask, waitingWorkLabel } from './boardStatus'
+import { TaskIdentifier } from './TaskIdentifier'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { sitsOnOtherDay } from './finishMove'
 import { StatusGlyph } from './StatusGlyph'
@@ -295,14 +296,7 @@ function ChipMeta({
   const labels = labelsOfTask(task)
   return (
     <div className="flex min-h-4 flex-wrap items-center gap-x-1.5 gap-y-1">
-      {task.identifier ? (
-        <span
-          data-testid="board-card-identifier"
-          className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground"
-        >
-          {task.identifier}
-        </span>
-      ) : null}
+      <TaskIdentifier task={task} testId="board-card-identifier" />
       {person ? (
         <span title={`Assigned to ${personName}`} className="inline-flex shrink-0 items-center">
           <UserRound size={14} strokeWidth={2} aria-hidden className="text-muted-foreground" />

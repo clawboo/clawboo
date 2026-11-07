@@ -41,6 +41,9 @@ export interface SignableScope {
   /** The Tasks URL of a run the team engine drives (`teamRun=1`). Signed so the
    *  runtime cannot strip it and win back the board writes the engine owns. */
   teamRun?: boolean
+  /** A run of a person's one-to-one chat (`chatRun=1`). Signed so the runtime cannot
+   *  strip it and win back the board writes a chat has no business making. */
+  chatRun?: boolean
   /** The board task the run works on (`scopeTaskId`, Tasks URL only): the task
    *  the Tasks tools default to. Signed so a runtime cannot point its default at
    *  another task. Not the Memory URL's provenance task id. */
@@ -64,6 +67,7 @@ const canonical = (s: SignableScope): string =>
     s.tenantId ?? '',
     s.delegate ? '1' : '0',
     ...(s.teamRun ? ['team-run'] : []),
+    ...(s.chatRun ? ['chat-run'] : []),
     ...(s.boundTaskId ? [`task:${s.boundTaskId}`] : []),
     ...(s.boundExecutionId ? [`exec:${s.boundExecutionId}`] : []),
   ].join('\x1f')

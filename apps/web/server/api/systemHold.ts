@@ -8,7 +8,8 @@
 //
 // The drain is: POST a hold, read GET until `backgroundWork` is `none` (renewing
 // the hold before it lapses), then stop. Release the hold instead to cancel. See
-// lib/engineHold for what a hold stops and lib/runSlots for what counts as a run.
+// lib/engineHold for what a hold stops and lib/runSlots for what counts as a run. A
+// work check counts too: it holds no run slot, and a restart would cut it short.
 
 import type { Request, Response } from 'express'
 
@@ -22,6 +23,7 @@ import {
   engineHold,
 } from '../lib/engineHold'
 import { runSlots } from '../lib/runSlots'
+import { teamChecksInFlight } from '../lib/teamChat/teamOrchestrator'
 
 export interface EngineHoldState {
   /** True while any hold is live: no new agent run starts. */
@@ -34,7 +36,8 @@ export interface EngineHoldState {
     /** Time to `expiresAt` on this server's clock, for a caller whose clock differs. */
     expiresInMs: number
   }[]
-  /** `present` while an agent run is executing; `none` when stopping now kills none. */
+  /** `present` while an agent run is executing, or a work check is under way or holding;
+   *  `none` when stopping now cuts none of them short. */
   backgroundWork: 'present' | 'none'
   runs: {
     /** Agent runs executing now. */
@@ -55,7 +58,7 @@ export function engineHoldState(): EngineHoldState {
   return {
     held: holds.length > 0,
     holds,
-    backgroundWork: running > 0 ? 'present' : 'none',
+    backgroundWork: running > 0 || teamChecksInFlight() > 0 ? 'present' : 'none',
     runs: { running, queued, limit: size },
   }
 }

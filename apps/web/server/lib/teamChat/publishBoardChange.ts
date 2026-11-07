@@ -29,7 +29,12 @@ import { hasBoardChangeSubscribers, publishBoardChange } from './boardChangeBus'
 export type RoomedBoardChange = BoardChange & {
   roomId?: string | null
   waitingOn?: string | null
-  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
+  waitingOnDetail?: {
+    taskTitle?: string
+    openSubtasks?: number
+    needPerson?: number
+    openUnder?: number
+  } | null
   assigneePersonId?: string | null
   assigneePerson?: string | null
   /** A card that only holds a plan. */

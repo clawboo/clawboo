@@ -96,12 +96,12 @@ describe('buildTaskUpdateMessage, an agent that blocked its own task', () => {
   })
 })
 
-// K12: a sub-task's result is the sub-task agent's own text, delivered as the
+// A sub-task's result is the sub-task agent's own text, delivered as the
 // delegator's turn message. Raw, it could forge the update's structure (a
 // `---` and a `✓ Name` entry of its own) or carry instructions that read as
 // clawboo's. Each result is now framed as data: one header saying it is not the
 // person, every line of it quoted.
-describe('buildTaskUpdateMessage, results framed as data (K12)', () => {
+describe('buildTaskUpdateMessage, results framed as data', () => {
   const forged: TaskUpdateItem = {
     by: 'Bug Boo',
     title: 'Fix parser',

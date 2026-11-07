@@ -349,11 +349,11 @@ describe('rooms REST', () => {
     )
   })
 
-  it('a team delete takes its rooms and their resume pointers with it', () => {
+  it('a team delete takes its rooms and their resume pointers with it', async () => {
     const room = (create({ name: 'R', memberIds: ['a1'] }).body as RoomBody).room
     setSetting(db, nativeTeamSessionSettingKey('a1', 'T', room.id), 'native-session-1')
     const del = fakeRes()
-    teamsDELETE(req({ id: 'T' }), del.res)
+    await teamsDELETE(req({ id: 'T' }), del.res)
     expect(del.status()).toBe(200)
     expect(listRooms(db, 'T', { includeArchived: true })).toHaveLength(0)
     expect(getSetting(db, nativeTeamSessionSettingKey('a1', 'T', room.id))).toBeNull()

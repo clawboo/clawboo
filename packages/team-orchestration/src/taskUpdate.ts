@@ -8,7 +8,7 @@
 // one header saying who it came from and that it is not the person, then every
 // line of it quoted, so a result can neither forge this envelope's structure (a
 // `---` and a `✓ Name` entry of its own) nor read as clawboo's instructions.
-// Names and titles inside clawboo's own lines are folded onto one line (K12).
+// Names and titles inside clawboo's own lines are folded onto one line.
 
 import { formatInterSessionMessage, oneLine } from '@clawboo/board-core'
 

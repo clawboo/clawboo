@@ -1,4 +1,4 @@
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, DASHBOARD_HEADERS } from './helpers/fixtures'
 
 /**
  * Custom connect helper for group chat tests.
@@ -50,6 +50,7 @@ async function connectWithTeam(
   // until the user clicks "Know Your Team" and submits a self-introduction.
   if (skipOnboarding) {
     await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {
+      headers: DASHBOARD_HEADERS,
       data: { agentsIntroduced: true, userIntroduced: true },
     })
   }

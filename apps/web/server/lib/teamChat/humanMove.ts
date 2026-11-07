@@ -13,7 +13,7 @@
 // instead, which it reads at its next turn rather than being woken for it.
 
 import { enqueueInbox, getTask, type ClawbooDb } from '@clawboo/db'
-import { isHumanAssignment } from '@clawboo/board-core'
+import { isHumanAssignment, oneLine } from '@clawboo/board-core'
 import { createLogger } from '@clawboo/logger'
 
 import { stopTaskRuns } from '../runStops'
@@ -80,7 +80,7 @@ export function noteHumanMove(db: ClawbooDb, move: HumanMove): void {
     if (isHumanAssignment(sdid)) return
     const delegator = sdid.match(SDID_REFLECT_TO_RE)?.[1]
     if (!delegator) return
-    const title = task?.title ?? taskId
+    const title = oneLine(task?.title ?? taskId)
     const steps = (move.cancelledDependents ?? []).length
     enqueueInbox(db, {
       agentId: delegator,

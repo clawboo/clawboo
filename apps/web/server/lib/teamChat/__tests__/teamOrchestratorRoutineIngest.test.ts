@@ -135,6 +135,19 @@ describe('team chat ingest from a routine', () => {
     expect(second).not.toHaveProperty('person')
   })
 
+  it('a message no person is behind says so, and names no one as asking', async () => {
+    await getTeamOrchestrator('T').enqueueUserMessage({
+      stimulus: 'from a script',
+      person: null,
+      notFromPerson: true,
+    })
+    expect(transcript()[0]).toMatchObject({ text: 'from a script', fromCaller: true })
+    expect(delivered[0]?.origin).toMatchObject({
+      kind: 'human',
+      request: { words: 'from a script', requestedBy: null },
+    })
+  })
+
   it('a typed message keeps the human origin and carries no routine', async () => {
     const result = await getTeamOrchestrator('T').enqueueUserMessage({ stimulus: 'hello' })
     expect(result).toEqual({ ok: true, targetAgentId: 'lead' })

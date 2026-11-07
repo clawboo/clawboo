@@ -3,6 +3,7 @@
 // /executions, and /workspace/detail. The drawer is READ-ONLY — it displays
 // comments but has no compose box, so the user interaction is the Close button.
 
+import { encodePlanHolder, LOCAL_PERSON_ID } from '@clawboo/board-core'
 import { verificationResultSchema, type DebtNote } from '@clawboo/governance'
 import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -21,6 +22,7 @@ import { server } from '../../../__vitest__/mswServer'
 import { ConfirmDialog } from '../../shared/ConfirmDialog'
 import { TaskComments } from '../TaskComments'
 import { TaskDetailDrawer } from '../TaskDetailDrawer'
+import { resetBoardPerson } from '../useBoardPerson'
 
 // The agent's Boo under the title reads the theme.
 const render = (ui: ReactElement) => rtlRender(ui, { wrapper: ThemeProvider })
@@ -61,7 +63,107 @@ function runningTaskHandlers() {
   ]
 }
 
+describe('TaskComments: who wrote it', () => {
+  afterEach(() => resetBoardPerson())
+  const by = (id: string, name: string) => ({
+    body: 'Words',
+    authorType: 'user',
+    person: JSON.stringify({ id, name, role: null }),
+  })
+
+  it('names the person a sign-in proxy vouched for, unless that is you', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'me', name: 'Me', role: null } }),
+      ),
+    )
+    render(<TaskComments comments={[by('p2', 'Priya'), by('me', 'Me')]} />)
+    expect(await screen.findByText('Priya')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('You')).toBeInTheDocument())
+    expect(screen.queryByText('Me')).toBeNull()
+  })
+
+  it('reads You on the install’s built-in person, and on a comment with nobody on it', () => {
+    render(
+      <TaskComments
+        comments={[{ body: 'Words', authorType: 'user' }, by(LOCAL_PERSON_ID, 'Local')]}
+      />,
+    )
+    expect(screen.getAllByText('You')).toHaveLength(2)
+  })
+})
+
 describe('TaskDetailDrawer', () => {
+  const onDrawer = (task: Record<string, unknown>) =>
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', teamId: 'team-1', ...task },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+
+  it('says whose a person’s task is when it is not yours', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'me', name: 'Me', role: null } }),
+      ),
+    )
+    onDrawer({
+      title: 'Ship it',
+      status: 'blocked',
+      assigneePersonId: 'p2',
+      assigneePerson: JSON.stringify({ id: 'p2', name: 'Priya' }),
+      attention: { reason: 'assigned', failedRuns: 0, personId: 'p2' },
+    })
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const banner = await screen.findByTestId('task-needs-you')
+    expect(banner).toHaveTextContent('Priya has this. Give it to an agent or mark it done.')
+    expect(banner).not.toHaveTextContent('This one is yours')
+  })
+
+  it('offers no Retry or hand-over on work being checked', async () => {
+    onDrawer({
+      title: 'Ship it',
+      status: 'in_review',
+      sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:lead',
+      attention: { reason: 'needs_review', failedRuns: 0, detail: 'A check failed' },
+    })
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const banner = await screen.findByTestId('task-needs-you')
+    expect(within(banner).queryByRole('button', { name: /Retry/ })).toBeNull()
+    expect(within(banner).queryByText(/Give to someone else/)).toBeNull()
+    expect(within(banner).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
+  })
+
+  it('a card that only holds a plan keeps Dismiss, and says what a reply does', async () => {
+    useFleetStore.setState({
+      agents: [{ id: 'a1', name: 'Coder' } as AgentState],
+      selectedAgentId: null,
+    })
+    onDrawer({
+      title: 'Plan: two steps',
+      status: 'blocked',
+      sourceDelegationId: encodePlanHolder('a1', 'x'),
+      attention: { reason: 'failed', failedRuns: 1, detail: 'A step was refused' },
+    })
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const banner = await screen.findByTestId('task-needs-you')
+    expect(within(banner).queryByRole('button', { name: /Retry/ })).toBeNull()
+    expect(within(banner).queryByText(/Give to someone else/)).toBeNull()
+    expect(within(banner).getByRole('button', { name: 'Dismiss' })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'This card only holds a plan. A reply closes the plan and starts Coder on the card. Use Accept or Turn down to answer it.',
+      ),
+    ).toBeInTheDocument()
+  })
+
   it("names the boo who reported, so the task reads as a teammate's report", async () => {
     // A boo's board work stays on the board (the native driver no longer writes it
     // into the person's 1:1 chat), so this section is where they read it. Naming the

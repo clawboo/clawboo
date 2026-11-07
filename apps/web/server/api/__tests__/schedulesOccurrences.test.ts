@@ -37,8 +37,9 @@ function mockRes(): { res: Response; status: () => number; body: () => unknown }
   } as unknown as Response
   return { res, status: () => code, body: () => payload }
 }
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({ params: {}, query: {}, body: {}, headers: DASHBOARD, ...over }) as unknown as Request
 
 interface OccurrencesBody {
   now: number

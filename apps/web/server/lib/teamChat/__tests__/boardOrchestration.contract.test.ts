@@ -33,6 +33,7 @@ import {
   executionProcesses,
   createTask,
   getTask,
+  getTaskVerification,
   listTaskQuestions,
   listTasks,
   recordResultClaim,
@@ -40,6 +41,7 @@ import {
   parseQuestionPayload,
   planApprovalSettingKey,
   setSetting,
+  setTaskVerification,
   updateStatus,
   type ClawbooDb,
   type TaskStatus,
@@ -303,6 +305,40 @@ class RealCascadeBoard implements CascadeBoard {
   }
   runsOnTaskRunner(taskId: string) {
     return this.real.runsOnTaskRunner(taskId)
+  }
+  seedVerdict(taskId: string): void {
+    setTaskVerification(this.db, taskId, {
+      status: 'fail',
+      attempts: [
+        {
+          attempt: 1,
+          at: Date.now(),
+          deterministic: {
+            command: 'test',
+            exitCode: 1,
+            passed: false,
+            stdoutTail: '',
+            stderrTail: 'it failed',
+            durationMs: 1,
+            timedOut: false,
+          },
+          critic: {
+            ran: false,
+            findings: [],
+            reviewerRuntime: null,
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'fail',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [],
+      updatedAt: Date.now(),
+    })
+  }
+  hasVerdict(taskId: string): boolean {
+    return getTaskVerification(this.db, taskId) !== null
   }
   seedResultClaim(taskId: string, claim: ResultClaim): void {
     const agent = getTask(this.db, taskId)?.assigneeAgentId ?? ''

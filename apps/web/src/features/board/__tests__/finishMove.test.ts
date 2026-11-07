@@ -20,6 +20,7 @@ import {
   finishNeedFor,
   finishPromptNeeded,
   isFinishStatus,
+  openSubtasksOf,
   runningAgentId,
   runningSinceOf,
   sitsOnOtherDay,
@@ -330,5 +331,24 @@ describe('finishInstant', () => {
       ])
       expect([t.getHours(), t.getMinutes()]).toEqual([clock.getHours(), clock.getMinutes()])
     }
+  })
+})
+
+describe('openSubtasksOf', () => {
+  const main = (detail: unknown) => task({ isMainTask: 1, waitingOnDetail: detail } as never)
+
+  it('counts everything that closing the request would cancel', () => {
+    // A parked request waits on a person, yet may hold an agent's note and more.
+    expect(openSubtasksOf(main({ openSubtasks: 1, openUnder: 3 }))).toBe(3)
+    expect(openSubtasksOf(main({ openUnder: 2 }))).toBe(2)
+  })
+
+  it('reads what it waits on when that is all that is open', () => {
+    expect(openSubtasksOf(main({ openSubtasks: 2 }))).toBe(2)
+    expect(openSubtasksOf(main(null))).toBe(0)
+  })
+
+  it('says nothing for a task that is not a request', () => {
+    expect(openSubtasksOf(task({ waitingOnDetail: { openUnder: 3 } } as never))).toBe(0)
   })
 })

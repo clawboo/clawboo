@@ -1,0 +1,15 @@
+---
+'clawboo': patch
+---
+
+Words that are not yours can no longer pass for you, and a script can no longer do what only you should.
+
+**Boo Zero's chat.** What an `@Team` message pulls in, Boo Zero's saved notes and a result kept since a Stop now reach it quoted, under who wrote them, and a saved note the injection scan catches is left out. A turn carrying a team's activity or a kept result can hand work only to that team, or to a team you named in the words you typed. Boo Zero's session still holds what it read on earlier turns, so a later message can still be shaped by it.
+
+**One-to-one chats have no write tools on the board.** On Claude Code, Codex, Hermes and Clawboo Native, a one-to-one chat now gets `get_task`, `list_tasks` and `add_comment`, limited to the agent's own team when it has one. A teamless Boo Zero reads every team and hands work out with its tags. Notices meant for an agent's team runs no longer arrive on your chat turn, and a comment from a chat wakes no one. Team runs no longer get `link_task`.
+
+**A request that fails the person check.** These now answer `403 person_only`, for anything but the dashboard or a person a sign-in proxy vouched for: a team's rules and what you tell it about yourself, which agent is Boo Zero (these three are now audited), Stop on a team's chat or a one-to-one chat, archiving or restoring a team, setting and resuming a budget, creating, changing, running or deleting a Routine or an OpenClaw cron job, and changing a task's title or description. Scripts that do these need the two `Sec-Fetch-` headers. Setting the Routines time zone stays open.
+
+The chat message routes stay open without a person's authority. Such a message reads `Local API call` rather than `You`, records no one as asking, and does not reset a team's failure breaker. In a one-to-one chat it starts no work, does not end the hold a Stop left, and does not read results waiting for you.
+
+`POST /api/runtimes/:id/run` without the check no longer undoes a person's move or a Stop: it answers `409` with the reason, as the board's automatic start would. A comment posted without the check loses its `authorAgentId`, and a comment whose author is on no roster now reads as "an agent" rather than whatever id it carried. Notices in an agent's mailbox now say who wrote them instead of all reading as Clawboo, a task title in a notice stays on one line, and a teammate's comment on a job you said No on no longer lands in the agent's mailbox. A person's cancel now marks what waited on the task as cancelled by that person.
