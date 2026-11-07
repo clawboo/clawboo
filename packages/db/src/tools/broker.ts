@@ -248,6 +248,7 @@ export async function executeBrokeredCall(
       toolClass: toolClassOf(descriptor),
       toolSummary: toolSummaryOf(descriptor.description),
       teamId: ctx.teamId,
+      taskId: ctx.taskId ?? null,
     })
     const resolution = await waitForApproval(db, approval.id, {
       timeoutMs: opts.approvalTimeoutMs,

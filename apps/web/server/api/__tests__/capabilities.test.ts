@@ -44,7 +44,14 @@ function mockRes(): { res: Response; status: () => number; body: () => unknown }
   return { res, status: () => code, body: () => payload }
 }
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    // The dashboard's own page: only a person answers an approval.
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    ...over,
+  }) as unknown as Request
 
 const installSpec = (over: Record<string, unknown> = {}) => ({
   spec: {

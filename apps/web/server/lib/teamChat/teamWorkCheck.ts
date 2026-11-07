@@ -36,6 +36,7 @@ import {
   startTaskHeartbeat,
   updateStatus,
   startRefusedBy,
+  type BudgetScope,
   type ClawbooDb,
 } from '@clawboo/db'
 import type { RuntimeAdapter } from '@clawboo/executor'
@@ -51,6 +52,7 @@ import {
 import { assertSafeTaskId, execGit, KeyedMutex, type DiffStat } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { auditBudgetCrossing } from '../budgetAudit'
 import { isLocalModel } from '../costUtils'
 import { emitEvent } from '../obs'
 import { adapterFactoryFor, type RuntimeRunContext } from '../runtimes'
@@ -633,11 +635,19 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
             }))
       if (usd > 0) {
         const cents = usdToFractionalCents(usd)
-        recordSpend(db, 'agent', agentId, cents)
-        recordSpend(db, 'team', teamId, cents)
         const ancestors = getAncestors(db, taskId)
         const mission = ancestors.find((a) => a.parent_task_id == null)?.id ?? taskId
-        recordSpend(db, 'mission', mission, cents)
+        const on = { runKind: 'team-chat', agentId, teamId, taskId } as const
+        const charge = (scope: BudgetScope, scopeId: string): void =>
+          auditBudgetCrossing(db, {
+            ...on,
+            scope,
+            scopeId,
+            result: recordSpend(db, scope, scopeId, cents),
+          })
+        charge('agent', agentId)
+        charge('team', teamId)
+        charge('mission', mission)
       }
       recordRunTokens(db, {
         agentId,

@@ -17,7 +17,18 @@
 //     Gateway fans it out to every surface. Losing that race is expected, not an
 //     error to show the operator.
 
-import { agents, createDb, listEvents, teams, toolCallApprovals, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  createDb,
+  createTask,
+  getTask,
+  listEvents,
+  teams,
+  toolCallApprovals,
+  updateStatus,
+  type ClawbooDb,
+} from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 let db: ClawbooDb
@@ -84,6 +95,93 @@ const rows = (): {
 
 beforeEach(() => {
   db = createDb(':memory:')
+})
+
+// A mirrored card names the task its OpenClaw session is working on, from the
+// session key the Gateway sends. Never a guess: a session the map cannot place is
+// a card with no task (a 1:1 chat, a lead's own turn, a message from outside).
+describe('the task on a mirrored card', () => {
+  const frame = (id: string, sessionKey?: string) => ({
+    event: 'exec.approval.requested',
+    payload: {
+      id,
+      expiresAtMs: Date.now() + 1_800_000,
+      request: { command: 'ls', agentId: 'a', ...(sessionKey ? { sessionKey } : {}) },
+    },
+  })
+  const taskOf = (id: string) =>
+    db
+      .select({ taskId: toolCallApprovals.taskId })
+      .from(toolCallApprovals)
+      .where(eq(toolCallApprovals.id, id))
+      .get()?.taskId
+
+  it('reads the session key off the frame', () => {
+    expect(parseExecApprovalRequest(frame('x', 'agent:a:team:T').payload)?.sessionKey).toBe(
+      'agent:a:team:T',
+    )
+    expect(parseExecApprovalRequest(frame('x').payload)?.sessionKey).toBeNull()
+  })
+
+  it('names the task its session works on', () => {
+    const h = makeSource()
+    const seen: string[] = []
+    startExecApprovalSurface(
+      h.source,
+      () => null,
+      (sessionKey) => {
+        seen.push(sessionKey)
+        return 'task-1'
+      },
+    )
+    h.frame(frame('ap-task', 'agent:a:team:T'))
+    expect(seen).toEqual(['agent:a:team:T'])
+    expect(taskOf('ap-task')).toBe('task-1')
+  })
+
+  it('names none for a session no task is running on, or a frame with no session', () => {
+    const h = makeSource()
+    startExecApprovalSurface(
+      h.source,
+      () => null,
+      () => null,
+    )
+    h.frame(frame('ap-chat', 'agent:a:main'))
+    h.frame(frame('ap-none'))
+    expect(taskOf('ap-chat')).toBeNull()
+    expect(taskOf('ap-none')).toBeNull()
+  })
+
+  it('announces the task in the approval event', () => {
+    const h = makeSource()
+    startExecApprovalSurface(
+      h.source,
+      () => null,
+      () => 'task-1',
+    )
+    h.frame(frame('ap-event', 'agent:a:team:T'))
+    const [event] = listEvents(db, { kinds: ['approval_requested'] })
+    expect(event?.taskId).toBe('task-1')
+  })
+
+  it('its expiry at the Gateway deadline leaves a blocked task alone', () => {
+    const task = createTask(db, { title: 'gated', teamId: 'T' })
+    updateStatus(db, task.id, 'blocked')
+    const now = Date.now()
+    db.insert(toolCallApprovals)
+      .values({
+        id: 'ap-lapse',
+        kind: 'exec',
+        toolName: 'exec',
+        status: 'pending',
+        taskId: task.id,
+        createdAt: now - 10,
+        expiresAt: now - 1,
+      })
+      .run()
+    expect(expireStaleExecApprovals(db)).toBe(1)
+    expect(getTask(db, task.id)?.status).toBe('blocked')
+  })
 })
 
 describe('parseExecApprovalRequest', () => {

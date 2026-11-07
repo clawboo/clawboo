@@ -61,6 +61,7 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | Agents that wake on what happens to their task      | `board.wakes`                                                               | Supported                      | Planned     | Planned       |
 | Agents waking each other, once you allow it         | `board.agentWakes`                                                          | Supported                      |
 | Reopen, tasks for a person, questions to a person   | `board.reopen`, `board.personAssignees`, `board.questions`                  | Supported                      | Planned     | Planned       |
+| The person check on person writes                   | `board.personCheck`                                                         | Supported                      | Planned     | Planned       |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                       | Supported                      | Planned     | Planned       |
 | Agent browser screenshots                           | `agent.screenshots`                                                         | Supported                      | Planned     | Planned       |
 | Shell commands for Clawboo Native agents            | `agent.nativeShell`                                                         | Supported                      | Planned     | Planned       |

@@ -11,6 +11,8 @@ import { apiFetch } from '@clawboo/control-client'
 
 import { axe } from '@/__vitest__/axe'
 import { server } from '@/__vitest__/mswServer'
+import { PERSON_CHECK_REFUSED, resetPersonCheckNotices } from '@/lib/personCheckNotice'
+import { useToastStore } from '@/stores/toast'
 
 import { AccessLock } from '../AccessLock'
 
@@ -101,6 +103,22 @@ describe('AccessLock', () => {
       </AccessLock>,
     )
     expect(await screen.findByTestId('dashboard')).toBeInTheDocument()
+  })
+
+  it('says why when the person check refuses something on an open dashboard', async () => {
+    resetPersonCheckNotices()
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      http.get('/api/settings', () => HttpResponse.json({})),
+      http.post('/api/board/t1/retry', () =>
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
+      ),
+    )
+    renderLock()
+    await screen.findByTestId('dashboard')
+    await apiFetch('/api/board/t1/retry', { method: 'POST' })
+    await waitForCondition(() => useToastStore.getState().toasts.length > 0)
+    expect(useToastStore.getState().toasts[0]?.message).toBe(PERSON_CHECK_REFUSED)
   })
 
   it('locks a dashboard that is already open when a later read gets the gate refusal', async () => {

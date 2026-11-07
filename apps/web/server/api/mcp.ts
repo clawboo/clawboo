@@ -156,20 +156,43 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
 }
 
 /** Read the Tasks attach URL's binding: the scope `parseBoundScope` reads,
- *  whether the run is one the team engine drives (`teamRun=1`), and the board
- *  task the run works on (`scopeTaskId`), the default for its one-task tools.
- *  The same signature covers both claims, so a runtime can neither strip, add
- *  nor move them. Undefined when the URL carries no valid signed scope.
- *  Exported for unit testing. */
+ *  whether the run is one the team engine drives (`teamRun=1`), the board task
+ *  the run works on (`scopeTaskId`), the default for its one-task tools, and the
+ *  run's execution row (`scopeExecutionId`), recorded with each write. The same
+ *  signature covers all of these claims, so a runtime can neither strip, add nor
+ *  move them. Undefined when the URL carries no valid signed scope. Exported for
+ *  unit testing. */
 export function parseTasksBinding(
   req?: IncomingMessage,
-): { scope: MemoryScope; teamRun: boolean; taskId?: string } | undefined {
+): { scope: MemoryScope; teamRun: boolean; taskId?: string; executionId?: string } | undefined {
   const params = attachParams(req)
   if (!params) return undefined
   const teamRun = params.get('teamRun') === '1'
   const taskId = params.get('scopeTaskId')
-  const scope = signedScope(params, teamRun, taskId)
-  return scope ? { scope, teamRun, ...(taskId ? { taskId } : {}) } : undefined
+  const executionId = params.get('scopeExecutionId')
+  const scope = signedScope(params, teamRun, taskId, executionId)
+  return scope
+    ? {
+        scope,
+        teamRun,
+        ...(taskId ? { taskId } : {}),
+        ...(executionId ? { executionId } : {}),
+      }
+    : undefined
+}
+
+/** Read the Tools attach URL's binding: the scope `parseBoundScope` reads and the
+ *  board task the run works on (`scopeTaskId`), which an approval the broker opens
+ *  records. Undefined when the URL carries no valid signed scope. Exported for
+ *  unit testing. */
+export function parseToolsBinding(
+  req?: IncomingMessage,
+): { scope: MemoryScope; taskId?: string } | undefined {
+  const params = attachParams(req)
+  if (!params) return undefined
+  const taskId = params.get('scopeTaskId')
+  const scope = signedScope(params, params.get('teamRun') === '1', taskId)
+  return scope ? { scope, ...(taskId ? { taskId } : {}) } : undefined
 }
 
 function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
@@ -182,17 +205,29 @@ function attachParams(req?: IncomingMessage): URLSearchParams | undefined {
 }
 
 /** The scope the params claim, when their signature covers exactly that claim.
- *  `boundTaskId` is the Tasks URL's own task; no other URL carries one. */
+ *  `boundTaskId` is the run's task, on the Tasks and Tools URLs; `boundExecutionId`
+ *  is the run's id, on the Tasks URL. No other URL carries either. */
 function signedScope(
   params: URLSearchParams,
   teamRun: boolean,
   boundTaskId: string | null = null,
+  boundExecutionId: string | null = null,
 ): MemoryScope | undefined {
   const teamId = params.get('scopeTeamId')
   const agentId = params.get('scopeAgentId')
   const tenantId = params.get('scopeTenantId')
   if (!teamId && !agentId && !tenantId) return undefined
-  if (!verifiedScope(params, { teamId, agentId, tenantId, delegate: false, teamRun, boundTaskId }))
+  if (
+    !verifiedScope(params, {
+      teamId,
+      agentId,
+      tenantId,
+      delegate: false,
+      teamRun,
+      boundTaskId,
+      boundExecutionId,
+    })
+  )
     return undefined
   return {
     ...(teamId ? { teamId } : {}),
@@ -309,6 +344,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
               boundScope: {
                 ...binding.scope,
                 ...(binding.taskId ? { taskId: binding.taskId } : {}),
+                ...(binding.executionId ? { executionId: binding.executionId } : {}),
               },
             }
           : {}),
@@ -337,7 +373,8 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     // identity is worse than failing closed, so the scope is threaded here for
     // the same reason tasks and memory thread it.
     tools: createStreamableHttpHandlers((req) => {
-      const scope = parseBoundScope(req)
+      const binding = parseToolsBinding(req)
+      const scope = binding?.scope
       return createToolsServer(getDb(), {
         // THE BROKER'S OWN VOCABULARY, so the per-app gate can read which
         // upstream app a Composio meta-tool call is aimed at. The catalog
@@ -349,6 +386,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
         brokeredConnected: [...connectedAppsNow().connected],
         ...(scope?.agentId ? { agentId: scope.agentId } : {}),
         ...(scope?.teamId ? { teamId: scope.teamId } : {}),
+        ...(binding?.taskId ? { taskId: binding.taskId } : {}),
         // A LIVE source plus a subscription, so a connector connected mid-session
         // becomes visible to a session that started before it existed. Passing
         // the array would have frozen the list at initialize.

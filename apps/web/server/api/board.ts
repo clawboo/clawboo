@@ -13,6 +13,7 @@ import {
   commentMayWake,
   delegationTargetOf,
   encodeHumanAssignment,
+  isHumanAssignment,
 } from '@clawboo/board-core'
 import {
   addComment,
@@ -58,6 +59,7 @@ import {
   setTaskLabels,
   startRefusedBy,
   taskLabelsBody,
+  personMovedSinceLastRun,
   type ClawbooDb,
   pendingQuestionsForTasks,
   waitingOnDetailOf,
@@ -72,10 +74,9 @@ import { createLogger } from '@clawboo/logger'
 import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
-import { actingPerson, personField, personOf } from '../lib/auth'
+import { actingPerson, actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { ownWriterOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
-import { isDashboardRequest } from '../lib/dashboardRequest'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -265,10 +266,10 @@ function withLabels<T extends DbTask>(
 /**
  * A priority as this caller may set it. Urgent is a person's call: anything but the
  * dashboard's own page stops at High, as an agent's create_task does. A speed bump
- * (see isDashboardRequest), and the same one a person's comment goes through.
+ * (see actsAsPerson), and the same one a person's comment goes through.
  */
 function priorityFor(req: Request, priority: number | undefined): number | undefined {
-  if (priority === undefined || isDashboardRequest(req)) return priority
+  if (priority === undefined || actsAsPerson(req)) return priority
   return clampAgentTaskPriority(priority)
 }
 
@@ -314,11 +315,21 @@ function teamMember(
   return { id: row.id, name: row.name }
 }
 
+/** Does this `sourceDelegationId` bind the task to an agent, say a person chose it,
+ *  or name who hears its result? The engine fires and reports on these segments. */
+function namesAnAgent(sourceDelegationId: string | undefined): boolean {
+  if (!sourceDelegationId) return false
+  return /:(?:agent|reflectTo):/.test(sourceDelegationId) || isHumanAssignment(sourceDelegationId)
+}
+
 // ─── POST /api/board ───────────────────────────────────────────────────────
 // With `assigneeAgentId`, the task is created FOR that agent: it is bound to the
 // agent (so the dispatcher can always find it again, after a restart too) and,
 // when it starts in `todo`, handed to the team's orchestrator to run now. Its
-// result reports to the person on its card; the team lead is not involved.
+// result reports to the person on its card; the team lead is not involved. That
+// binding says a person chose, as Assign's does, so it takes a person's request.
+// So does a `sourceDelegationId` that names an agent: the engine reads that value
+// as the same binding, and fires it.
 export function boardCreatePOST(req: Request, res: Response): void {
   try {
     const parsed = createTaskBody.safeParse(req.body)
@@ -332,10 +343,11 @@ export function boardCreatePOST(req: Request, res: Response): void {
       res.status(400).json({ error: 'one_assignee' })
       return
     }
-    if (assignToMe && !isDashboardRequest(req)) {
-      res.status(403).json({ error: 'dashboard_only' })
+    if (
+      (assigneeAgentId || assignToMe || namesAnAgent(input.sourceDelegationId)) &&
+      refuseUnlessPerson(req, res)
+    )
       return
-    }
     if (assigneeAgentId) {
       if (!input.teamId) {
         res.status(400).json({ error: 'team_required' })
@@ -352,7 +364,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
     }
     // Who asked for it, so a hand-back knows where to go. A verified person, or the
     // dashboard's own page; any other caller is not a person asking.
-    const requestedBy = isDashboardRequest(req) ? actingPerson(req) : personOf(req)
+    const requestedBy = actsAsPerson(req) ? actingPerson(req) : null
     const allowedPriority = priorityFor(req, priority)
     const task = runOwnWrite(
       db,
@@ -397,7 +409,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
         title: task.title,
         status: task.status,
         parentTaskId: task.parentTaskId,
-        ...personField(req),
+        ...actorField(req),
       },
     })
     if (assigneeAgentId && task.teamId && task.status === 'todo') {
@@ -413,12 +425,9 @@ export function boardCreatePOST(req: Request, res: Response): void {
 
 // ─── PUT /api/board/:taskId/labels ──────────────────────────────────────────
 // Body: { labelIds }. Replaces the task's labels, all from its own team's. A person's
-// call, so it must come from the dashboard's own page.
+// call, so it takes a person's request (see actsAsPerson).
 export function boardTaskLabelsPUT(req: Request, res: Response): void {
-  if (!isDashboardRequest(req)) {
-    res.status(403).json({ error: 'person_only' })
-    return
-  }
+  if (refuseUnlessPerson(req, res)) return
   const parsed = taskLabelsBody.safeParse(req.body)
   if (!parsed.success) {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
@@ -440,7 +449,7 @@ export function boardTaskLabelsPUT(req: Request, res: Response): void {
       summary: {
         action: 'set_task_labels',
         labels: result.labels.map((l) => l.name),
-        ...personField(req),
+        ...actorField(req),
       },
     })
     res.json({ labels: result.labels })
@@ -461,8 +470,13 @@ export function boardTaskLabelsPUT(req: Request, res: Response): void {
 // saved (see lib/runnerRerun), so it keeps its worktree and verification; its
 // agent is the one bound to it, else the one the runner ran it for. Any other
 // task goes to its team's chat, which needs an agent bound to it.
+//
+// Only a person's request: a retry overrules the machine's limits on the person's
+// word. Any other caller gets 403, and can move the task to To do with the PATCH
+// below, where those limits still apply.
 export function boardRetryPOST(req: Request, res: Response): void {
   try {
+    if (refuseUnlessPerson(req, res)) return
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const task = getTask(db, taskId)
@@ -520,11 +534,14 @@ export function boardRetryPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId,
         teamId: task.teamId,
-        data: { to: 'todo', reason: 'retry', ...personField(req) },
+        data: { to: 'todo', reason: 'retry', ...actorField(req) },
       })
     }
     runOwnWrite(db, ownWriterOf(req), taskId, () =>
-      addComment(db, taskId, 'Retry requested.', 'user', null, { kind: 'note' }),
+      addComment(db, taskId, 'Retry requested.', 'user', null, {
+        kind: 'note',
+        person: personOf(req),
+      }),
     )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
@@ -539,8 +556,11 @@ export function boardRetryPOST(req: Request, res: Response): void {
 // `create_task`), and for re-routing a failed task to someone else. A task the
 // task runner ran is run by the runner again, on the new agent's runtime, when
 // that runtime is one the runner drives (see the Retry note above).
+//
+// Only a person's request, like Retry: the binding it writes says a person chose.
 export function boardAssignPOST(req: Request, res: Response): void {
   try {
+    if (refuseUnlessPerson(req, res)) return
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     const body = req.body as { agentId?: unknown } | undefined
@@ -589,7 +609,7 @@ export function boardAssignPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId,
         teamId: task.teamId,
-        data: { to: 'todo', reason: 'assigned', ...personField(req) },
+        data: { to: 'todo', reason: 'assigned', ...actorField(req) },
       })
     }
     // Given to someone else, the task starts fresh: no agent resumes a
@@ -606,7 +626,10 @@ export function boardAssignPOST(req: Request, res: Response): void {
       }
     }
     runOwnWrite(db, ownWriterOf(req), taskId, () =>
-      addComment(db, taskId, `Assigned to ${member.name}.`, 'user', null, { kind: 'note' }),
+      addComment(db, taskId, `Assigned to ${member.name}.`, 'user', null, {
+        kind: 'note',
+        person: personOf(req),
+      }),
     )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.json({ ok: true, task: getTask(db, taskId) })
@@ -639,7 +662,7 @@ export function boardClaimPOST(req: Request, res: Response): void {
           data: {
             assigneeAgentId: t.assigneeAgentId,
             assigneeRuntime: t.assigneeRuntime,
-            ...personField(req),
+            ...actorField(req),
           },
         })
         // Narrate the claim into the team room (fan-out to N peers; best-effort,
@@ -665,6 +688,11 @@ export function boardClaimPOST(req: Request, res: Response): void {
 // board, the task drawer): their move stops the run working on the task, a
 // cancel takes the plan steps waiting on it with it, and a move to Done or
 // Cancelled may say which day it finished (`completedAt`).
+//
+// A caller the person check does not let through still moves the card, as an
+// agent's own status write does, without the person's authority: it stops no run,
+// cannot overrule a person's move or the verification gate, and is not recorded as
+// a person.
 export function boardUpdatePATCH(req: Request, res: Response): void {
   try {
     const parsed = updateTaskBody.safeParse(req.body)
@@ -674,7 +702,9 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const { status, humanOverride, completedAt, priority, ...rest } = parsed.data
+    const { status, humanOverride: overrideAsked, completedAt, priority, ...rest } = parsed.data
+    const byPerson = actsAsPerson(req)
+    const humanOverride = byPerson && overrideAsked
     const allowedPriority = priorityFor(req, priority)
     const fields = {
       ...rest,
@@ -690,9 +720,9 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       priorStatus = getTask(db, taskId)?.status ?? null
       const result = runOwnWrite(db, ownWriterOf(req), taskId, () =>
         updateStatus(db, taskId, status, {
-          actor: 'person',
+          ...(byPerson ? { actor: 'person' as const } : { unlessPersonMoved: true }),
           // A person's own move to Blocked: theirs to decide, so it reads back as that.
-          ...(status === 'blocked'
+          ...(byPerson && status === 'blocked'
             ? {
                 waitingOn: {
                   kind: 'person' as const,
@@ -751,12 +781,16 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         taskId,
         teamId: task.teamId,
         agentId: task.assigneeAgentId,
-        data: { to: status, by: 'person', ...personField(req) },
+        data: { to: status, ...(byPerson ? { by: 'person' } : {}), ...actorField(req) },
       })
       // Narrate the mutation into the team room (fan-out to N peers).
       // Best-effort, AFTER the canonical board write; never a write path back.
-      reflectToRoom(db, task.teamId, `A person moved "${task.title}" to ${statusWord(status)}.`)
-      if (status !== priorStatus) {
+      reflectToRoom(
+        db,
+        task.teamId,
+        `${byPerson ? 'A person' : 'A local API call'} moved "${task.title}" to ${statusWord(status)}.`,
+      )
+      if (byPerson && status !== priorStatus) {
         noteHumanMove(db, {
           taskId,
           teamId: task.teamId,
@@ -766,7 +800,13 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         })
       }
     }
-    res.json({ ok: true, task, ...(status === 'cancelled' ? { cancelledDependents } : {}) })
+    res.json({
+      ok: true,
+      task,
+      ...(status === 'cancelled' ? { cancelledDependents } : {}),
+      // Told so the dashboard can say so, if this was a person it could not recognise.
+      ...(status && !byPerson ? { byPerson: false } : {}),
+    })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
@@ -783,13 +823,11 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
     // A person's comment goes into the assignee's live run as the person
-    // steering it, so 'user' is honoured only when the dashboard's own page sent
-    // it. Any other caller gets an agent comment, which steers nothing. A speed
-    // bump, not a boundary: see isDashboardRequest.
-    const authorType =
-      parsed.data.authorType === 'user' && !isDashboardRequest(req)
-        ? 'agent'
-        : parsed.data.authorType
+    // steering it, so 'user' is honoured only for a request that passes the person
+    // check. Any other caller gets an agent comment, which steers nothing. The same
+    // for 'system': a later run reads that as clawboo itself. A speed bump, not a
+    // boundary: see actsAsPerson.
+    const authorType = actsAsPerson(req) ? parsed.data.authorType : 'agent'
     const ownWriter = ownWriterOf(req)
     const comment = runOwnWrite(db, authorType === 'user' ? ownWriter : null, taskId, () =>
       addComment(
@@ -798,8 +836,8 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
         parsed.data.body,
         authorType,
         parsed.data.authorAgentId,
-        // Set here, by the writer: a person's comment is one the dashboard's own page
-        // sent. What may wake an agent is read from this, never from the author type.
+        // Set here, by the writer: a person's comment is one that passed the check.
+        // What may wake an agent is read from this, never from the author type.
         { person: personOf(req), ...(authorType === 'user' ? { kind: 'person' as const } : {}) },
       ),
     )
@@ -807,7 +845,7 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       kind: 'comment_added',
       taskId,
       agentId: parsed.data.authorAgentId ?? null,
-      data: { authorType, body: parsed.data.body, ...personField(req) },
+      data: { authorType, body: parsed.data.body, ...actorField(req) },
     })
     // Narrate the comment into the team room so every peer sees it, not just the
     // leader (best-effort, AFTER the canonical write; never a write path back).
@@ -859,6 +897,8 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       comment,
       forwarded: delivery != null && delivery.status !== 'not-delivered',
       ...(delivery ? { delivery } : {}),
+      // A person's reply that did not pass as one, so the dashboard can say so.
+      ...(parsed.data.authorType === 'user' && authorType !== 'user' ? { byPerson: false } : {}),
     })
   } catch (err) {
     res.status(500).json({ error: String(err) })
@@ -881,6 +921,12 @@ export function boardExecutionCreatePOST(req: Request, res: Response): void {
     const task = getTask(db, taskId)
     if (!task) {
       res.status(404).json({ error: 'task not found' })
+      return
+    }
+    // A new run ends a person's hold on the card (see updateStatus), so without a
+    // person's authority it would take this and one PATCH to undo their move.
+    if (!actsAsPerson(req) && personMovedSinceLastRun(db, task)) {
+      res.status(409).json({ ok: false, error: 'person_moved' })
       return
     }
     const execution = createExecutionProcess(db, { taskId, ...parsed.data })
@@ -977,7 +1023,7 @@ export function boardLinkDepPOST(req: Request, res: Response): void {
     emitEvent(db, {
       kind: 'dep_linked',
       taskId,
-      data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...personField(req) },
+      data: { dependsOnTaskId: parsed.data.dependsOnTaskId, ...actorField(req) },
     })
     // Narrate the dependency into the team room (best-effort, after the write).
     reflectToRoom(db, task.teamId, `Task "${task.title}" now depends on "${dependsOn.title}".`)
@@ -1005,7 +1051,7 @@ export function boardCancelDependentsPOST(req: Request, res: Response): void {
         kind: 'status_changed',
         taskId: t.id,
         teamId: t.teamId,
-        data: { to: 'cancelled', reason: 'blocker_failed', ...personField(req) },
+        data: { to: 'cancelled', reason: 'blocker_failed', ...actorField(req) },
       })
     }
     res.json({ cancelled: cancelled.map((t) => ({ id: t.id, title: t.title })) })
@@ -1112,10 +1158,26 @@ export async function boardWorkspaceActionPATCH(req: Request, res: Response): Pr
       return
     }
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    // `complete` moves the card, and on an empty diff past a failing check, so it
+    // takes a person's request here. A run's own completion does not come this way.
+    // `pause` moves no card.
+    if (parsed.data.action === 'complete' && refuseUnlessPerson(req, res)) return
+    const db = getDb()
+    const before = getTask(db, taskId)
     const result = await actOnTaskWorkspace(taskId, parsed.data.action)
     if (!result.ok) {
       res.status(404).json({ ok: false, error: 'workspace not found' })
       return
+    }
+    // On the event log with who asked. A move to Blocked writes its own event.
+    const to = getTask(db, taskId)?.status
+    if (before && to && to !== before.status && to !== 'blocked') {
+      emitEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: before.teamId,
+        data: { to, reason: 'workspace_complete', ...actorField(req) },
+      })
     }
     // `result` already carries `ok: true` + the action outcome.
     res.json(result)

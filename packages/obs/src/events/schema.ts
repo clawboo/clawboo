@@ -106,15 +106,32 @@ export interface EventPerson {
   name: string | null
   role: string | null
 }
+/**
+ * Who made a board write. `person`: a request the person check let through (see
+ * `person` beside it for a name, when a sign-in proxy vouched for one). `agent`: a
+ * Tasks tool call from a session clawboo bound to that agent, with the execution
+ * row of its run (null when the turn has none: a lead's turn, a 1:1 chat).
+ * `caller`: anything else, which says nothing about who it was: a REST call the
+ * person check did not let through, or an MCP call with no verified scope (every
+ * OpenClaw agent's). An event with no `actor` was written by clawboo itself, or
+ * before this field existed.
+ */
+export type EventActor =
+  | { kind: 'person' }
+  | { kind: 'agent'; agentId: string; execId: string | null }
+  | { kind: 'caller' }
+
 export interface TaskCreatedData {
   title?: string | null
   status?: string
   parentTaskId?: string | null
   priority?: string | null
   person?: EventPerson
+  actor?: EventActor
 }
 export interface TaskClaimedData {
   person?: EventPerson
+  actor?: EventActor
   assigneeAgentId?: string | null
   assigneeRuntime?: string | null
 }
@@ -124,11 +141,13 @@ export interface StatusChangedData {
   /** `person` for a person's move (the board, the task drawer). */
   by?: 'person'
   person?: EventPerson
+  actor?: EventActor
 }
 export interface CommentAddedData {
   authorType?: string
   body?: string
   person?: EventPerson
+  actor?: EventActor
 }
 export interface TaskWakeRecordedData {
   /** `TaskWakeReason` in @clawboo/board-core. */
@@ -156,6 +175,7 @@ export interface TaskBrakedData {
 export interface DepLinkedData {
   dependsOnTaskId: string
   person?: EventPerson
+  actor?: EventActor
 }
 export interface ExecutionStartedData {
   execId: string
@@ -356,6 +376,7 @@ export interface PauseEventData {
   id: string
   reason?: string | null
   person?: { id: string; name: string | null; role: string | null }
+  actor?: EventActor
 }
 
 export interface KindToData {

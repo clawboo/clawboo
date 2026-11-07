@@ -21,14 +21,29 @@ import type { RuntimeRunContext } from '../../types'
 import type { ProviderStreamEvent } from '../providers/types'
 import type { RoutedProviderClient } from '../routeCall'
 
-const bridgeCalls: Array<{ teamRun?: boolean }> = []
+const bridgeCalls: Array<{
+  teamRun?: boolean
+  boundTaskId?: string | null
+  boundExecutionId?: string | null
+}> = []
 vi.mock('../mcpBridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../mcpBridge')>()),
-  connectMcpBridge: async (opts: { teamRun?: boolean }) => {
+  connectMcpBridge: async (opts: (typeof bridgeCalls)[number]) => {
     bridgeCalls.push(opts)
     return null
   },
 }))
+const execToolCalls: Array<{ taskId?: string | null }> = []
+vi.mock('../execTool', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../execTool')>()
+  return {
+    ...actual,
+    buildExecTool: (deps: Parameters<typeof actual.buildExecTool>[0]) => {
+      execToolCalls.push(deps)
+      return actual.buildExecTool(deps)
+    },
+  }
+})
 
 const { createNativeDriver } = await import('../nativeDriver')
 
@@ -75,6 +90,35 @@ describe('native driver: the team-run flag the MCP bridge gets', () => {
       void driver.start()
     })
   }
+
+  // Native's shell card names its task like every other approval, and its Tasks
+  // writes record the run, as the HTTP runtimes' signed URLs say.
+  it('hands the run its task and id', async () => {
+    execToolCalls.length = 0
+    const ctx: RuntimeRunContext = {
+      cwd,
+      homeDir: path.join(sandbox, 'home'),
+      memoryScope: {
+        teamId: 'T',
+        agentId: 'nat',
+        boundTaskId: 'task-1',
+        boundExecutionId: 'exec-1',
+      },
+    }
+    const driver = createNativeDriver(
+      { agentId: 'nat', sessionKey: 'agent:nat:team:T', message: 'do it' },
+      ctx,
+      { client: textClient('Done.'), db },
+    )
+    await new Promise<void>((resolve) => {
+      driver.onEvent((ev: NativeEvent) => {
+        if (ev.type === 'result') resolve()
+      })
+      void driver.start()
+    })
+    expect(execToolCalls[0]?.taskId).toBe('task-1')
+    expect(bridgeCalls[0]).toMatchObject({ boundTaskId: 'task-1', boundExecutionId: 'exec-1' })
+  })
 
   it('marks a team run', async () => {
     await run({ agentId: 'nat', sessionKey: 'agent:nat:team:T', message: 'do it' })

@@ -53,7 +53,14 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
 }
 
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    // The dashboard's own page: only a person answers an approval.
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    ...over,
+  }) as unknown as Request
 
 /** A mock SSE req/res that captures the close handler, so we can fire teardown. */
 function mockSse(): { req: Request; res: Response; close: () => void } {

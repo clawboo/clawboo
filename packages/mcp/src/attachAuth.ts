@@ -45,13 +45,17 @@ export interface SignableScope {
    *  the Tasks tools default to. Signed so a runtime cannot point its default at
    *  another task. Not the Memory URL's provenance task id. */
   boundTaskId?: string | null
+  /** The execution row of the run (`scopeExecutionId`, Tasks URL only): what the
+   *  Tasks tools record as the run behind a write. Signed so a runtime cannot file
+   *  its writes under another run. */
+  boundExecutionId?: string | null
 }
 
 /** One canonical byte string per semantic scope, independent of which param
  *  spelling carried it (`scopeAgentId` vs `postAuthorAgentId`). `\x1f` separators
- *  cannot appear in ids, so fields can never bleed into each other. `teamRun` and
- *  the bound task are appended only when set, so every scope that existed before
- *  them signs to the same bytes as before. */
+ *  cannot appear in ids, so fields can never bleed into each other. `teamRun`, the
+ *  bound task and the run's id are appended only when set, so every scope that
+ *  existed before them signs to the same bytes as before. */
 const canonical = (s: SignableScope): string =>
   [
     'v1',
@@ -61,6 +65,7 @@ const canonical = (s: SignableScope): string =>
     s.delegate ? '1' : '0',
     ...(s.teamRun ? ['team-run'] : []),
     ...(s.boundTaskId ? [`task:${s.boundTaskId}`] : []),
+    ...(s.boundExecutionId ? [`exec:${s.boundExecutionId}`] : []),
   ].join('\x1f')
 
 /** Sign a scope. Hex HMAC-SHA256; safe to place in a URL. */

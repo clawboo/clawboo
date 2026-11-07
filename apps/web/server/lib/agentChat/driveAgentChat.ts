@@ -30,6 +30,7 @@ import { nativeChatSessionKey } from '@clawboo/team-orchestration'
 import { MutexAcquireTimeoutError } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
+import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget, type RunBudgetGate, type RunBudgetHold } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
@@ -441,6 +442,13 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
             const r = recordSpend(db, 'agent', agentId, usdToFractionalCents(ev.costUsd), {
               holdId,
             })
+            auditBudgetCrossing(db, {
+              scope: 'agent',
+              scopeId: agentId,
+              result: r,
+              runKind: 'chat',
+              agentId,
+            })
             paused = r?.status === 'paused' && r.mode === 'cap'
           } catch {
             // A ledger failure must never end the run without its reply.
@@ -586,7 +594,15 @@ export async function driveAgentChat(params: DriveAgentChatParams): Promise<void
         outputChars: (replyText || acc).length,
       })
       if (cost.unbilledUsd > 0)
-        recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd), { holdId })
+        auditBudgetCrossing(db, {
+          scope: 'agent',
+          scopeId: agentId,
+          result: recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd), {
+            holdId,
+          }),
+          runKind: 'chat',
+          agentId,
+        })
       recordRunTokens(db, {
         agentId,
         runtime,

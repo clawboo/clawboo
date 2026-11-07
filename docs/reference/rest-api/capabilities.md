@@ -263,6 +263,8 @@ An approval of `kind: 'exec'` (an OpenClaw shell command the Gateway is holding)
 }
 ```
 
+**`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: the request did not pass [the person check](/operating/security#the-person-check), as on `POST /api/tools/approvals/:id/resolve`. The approval is left as it was.
+
 **`400 Bad Request`**: missing `id` or a `decision` outside the allowed set:
 
 ```json

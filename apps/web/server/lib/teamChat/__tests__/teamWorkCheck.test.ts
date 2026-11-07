@@ -18,6 +18,8 @@ import {
   getComments,
   getTask,
   getTaskVerification,
+  listGovernanceAudit,
+  setBudgetLimit,
   setSetting,
   tasks,
   teams,
@@ -262,6 +264,52 @@ describe('team chat work check', () => {
     expect(critic?.ran).toBe(true)
     expect(critic?.outcome).toBe('reviewed')
     expect(critic?.reviewedSha).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  it('writes the audit row when what its reviewer cost crosses a budget', async () => {
+    class CostlyReviewer extends QuietReviewer {
+      override events(): AsyncIterable<RuntimeEvent> {
+        return (async function* () {
+          yield {
+            kind: 'cost',
+            costUsd: 0.9,
+            usage: { inputTokens: 10, outputTokens: 10 },
+            model: 'claude-sonnet-4-6',
+            runId: 'review',
+            sessionId: null,
+            ts: 1,
+            seq: 1,
+          } as RuntimeEvent
+          yield {
+            kind: 'done',
+            reason: 'success',
+            summary: '{"findings":[]}',
+            runId: 'review',
+            sessionId: null,
+            ts: 2,
+            seq: 2,
+          } as RuntimeEvent
+        })()
+      }
+    }
+    reviewer = new CostlyReviewer()
+    setBudgetLimit(db, { scope: 'team', scopeId: TEAM, limitUsdCents: 100, mode: 'warn' })
+    setCommand('true')
+    const wc = check()
+    const id = startTask()
+    await wc.begin(id, AGENT)
+    for (let i = 0; i < 6; i++)
+      await writeFile(path.join(folder, `f${i}.ts`), `export const v = ${i}\n`)
+
+    expect(await runCheck(wc, id)).toEqual({ verdict: 'pass' })
+    const [row] = listGovernanceAudit(db, { eventType: 'budget' })
+    expect(row).toMatchObject({ agentId: AGENT, teamId: TEAM, taskId: id })
+    expect(JSON.parse(row!.summary)).toMatchObject({
+      reason: 'warn',
+      level: 'soft',
+      scope: 'team',
+      runKind: 'team-chat',
+    })
   })
 
   it('leaves a task a person already moved alone', async () => {

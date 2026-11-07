@@ -20,7 +20,7 @@ const REFUSAL_WORDS: Record<PrefixRefusal, string> = {
   taken: 'Another team uses these letters. Try others.',
   locked: 'This team has tasks now, so its letters are fixed.',
   not_found: 'This team no longer exists.',
-  person_only: 'Change this from the dashboard.',
+  person_only: 'Not saved. Clawboo could not tell that this came from you in the dashboard.',
   failed: 'Could not save. Please try again.',
 }
 

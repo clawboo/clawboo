@@ -1,5 +1,5 @@
 // A person's own writes on the board: Reopen, assign to a person, answer a question.
-// Each is the dashboard's alone. The run itself is replaced by a recorder, so what is
+// Each takes the person check. The run itself is replaced by a recorder, so what is
 // asserted is each route's decision: what it writes and whether it asks for a run.
 
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -592,7 +592,7 @@ describe('a person’s writes on the board', () => {
       claimTask(db, t.id, 'a1')
       handBackTask(db, t.id, { agentId: 'a1', need: 'Look at it' })
       const m = mockRes()
-      boardRetryPOST(req({ params: { taskId: t.id } }), m.res)
+      boardRetryPOST(req({ params: { taskId: t.id }, headers: DASHBOARD }), m.res)
       expect(m.statusCode()).toBe(202)
       expect(getTask(db, t.id)?.assigneePersonId).toBeNull()
       expect(getTask(db, t.id)?.status).toBe('todo')
@@ -674,11 +674,11 @@ describe('a person’s writes on the board', () => {
       return m
     }
 
-    it('works only for a request the dashboard’s page sent', async () => {
+    it('works only for a request that passes the person check', async () => {
       const id = asking()
       const m = await press(id, 'job', {})
       expect(m.statusCode()).toBe(403)
-      expect(m.body().error).toBe('dashboard_only')
+      expect(m.body().error).toBe('person_only')
       expect(readAgentWakeGate(getDb(), id)?.decision).toBeNull()
     })
 

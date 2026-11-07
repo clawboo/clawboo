@@ -44,6 +44,7 @@ import {
   type StartRefusal,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
+import type { EventActor } from '@clawboo/obs'
 
 import { stopPausedAgentChats } from './agentChat/driveAgentChat'
 import { markReleasedTasksRead, runningTasksCovered } from './boardReader'
@@ -125,14 +126,19 @@ function eventScope(
   return { taskId: id }
 }
 
+/** Who a pause's event says did it, as the route's person check found. */
+interface PauseAuthor {
+  actor?: EventActor
+  person?: PersonRecord | null
+}
+
 /** Pause it, tell the event log, and stop its runs. A second pause changes nothing. */
 export function pauseRuns(
   db: ClawbooDb,
-  input: {
+  input: PauseAuthor & {
     kind: PauseKind
     id: string
     reason?: string | null
-    person?: PersonRecord | null
     /** Who to spare the news of the tasks this puts back: see stopPausedRuns. */
     reader?: string | null
   },
@@ -146,6 +152,7 @@ export function pauseRuns(
         scope: input.kind,
         id: input.id,
         reason: placed.pause.reason,
+        ...(input.actor ? { actor: input.actor } : {}),
         ...(input.person ? { person: input.person } : {}),
       },
     })
@@ -160,13 +167,18 @@ export function resumeRuns(
   db: ClawbooDb,
   kind: PauseKind,
   id: string,
-  person?: PersonRecord | null,
+  who: PauseAuthor = {},
 ): boolean {
   if (!liftPause(db, kind, id)) return false
   emitEvent(db, {
     kind: 'pause_lifted',
     ...eventScope(kind, id),
-    data: { scope: kind, id, ...(person ? { person } : {}) },
+    data: {
+      scope: kind,
+      id,
+      ...(who.actor ? { actor: who.actor } : {}),
+      ...(who.person ? { person: who.person } : {}),
+    },
   })
   notifyPauseLifted()
   return true

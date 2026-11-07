@@ -12,6 +12,7 @@ import {
   budgetReservations,
   getBudget,
   recordSpend,
+  listGovernanceAudit,
   setBudgetLimit,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -203,6 +204,70 @@ describe('serverDeliver: budget holds', () => {
     await vi.waitFor(() => expect(holds()).toEqual([]))
     // The estimate is gone; the run's priced cost stays.
     expect(getBudget(db, 'agent', 'a1')!.spentMicroCents).toBeGreaterThan(0)
+  })
+
+  describe('a team-chat run crossing a budget', () => {
+    /** A run that reports what it cost, then ends. */
+    class CostAdapter extends HeldAdapter {
+      constructor(private readonly usd: number) {
+        super()
+      }
+      override events(run: RunHandle): AsyncIterable<RuntimeEvent> {
+        const usd = this.usd
+        return (async function* (): AsyncGenerator<RuntimeEvent> {
+          yield {
+            ...base(run.sessionKey, 1),
+            kind: 'cost',
+            costUsd: usd,
+            usage: { inputTokens: 10, outputTokens: 10 },
+            model: 'claude-sonnet-4-6',
+          }
+          yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'ok' }
+        })()
+      }
+    }
+    const rows = () =>
+      listGovernanceAudit(db, { eventType: 'budget' }).map((r) => ({
+        agentId: r.agentId,
+        teamId: r.teamId,
+        summary: JSON.parse(r.summary) as Record<string, unknown>,
+      }))
+    const runOf = async (usd: number) => {
+      const w = wire({ a1: new CostAdapter(usd) })
+      await w.deliver(sk('a1'), 'a1', 'hi', HUMAN_TURN)
+      // A run's hold goes when its cost has settled.
+      await tick()
+      await vi.waitFor(() => expect(holds()).toEqual([]))
+    }
+
+    it('writes a warning row per budget it crosses', async () => {
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'warn' })
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'a1', limitUsdCents: 100, mode: 'warn' })
+      await runOf(0.9)
+      expect(
+        rows()
+          .map((r) => r.summary['scope'])
+          .sort(),
+      ).toEqual(['agent', 'team'])
+      expect(rows().find((r) => r.summary['scope'] === 'team')).toMatchObject({
+        agentId: 'a1',
+        teamId: 'T',
+        summary: { reason: 'warn', level: 'soft', scopeId: 'T', runKind: 'team-chat' },
+      })
+    })
+
+    it('says a hard cap paused the budget', async () => {
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+      await runOf(1.5)
+      expect(rows()).toHaveLength(1)
+      expect(rows()[0]?.summary).toMatchObject({ reason: 'auto_pause', level: 'hard' })
+    })
+
+    it('writes nothing under the line', async () => {
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 10_000, mode: 'cap' })
+      await runOf(0.1)
+      expect(rows()).toEqual([])
+    })
   })
 
   it('a run whose start throws leaves no hold', async () => {

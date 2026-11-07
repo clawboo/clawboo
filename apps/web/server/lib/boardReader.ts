@@ -19,8 +19,7 @@ import {
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 
-import { personOf } from './auth'
-import { isDashboardRequest } from './dashboardRequest'
+import { actsAsPerson, personOf } from './auth'
 
 const log = createLogger('board-reader')
 
@@ -36,11 +35,11 @@ export function readerOf(req: Request): string {
 
 /**
  * The reader this request writes as, or null when nothing says a person sent it, so
- * its writes count as someone else's and it cannot mark anything read. The
- * dashboard's own page is a speed bump, not a boundary: see isDashboardRequest.
+ * its writes count as someone else's and it cannot mark anything read. The same person
+ * check as every person write: a speed bump locally, not a boundary. See actsAsPerson.
  */
 export function ownWriterOf(req: Request): string | null {
-  return personOf(req) || isDashboardRequest(req) ? readerOf(req) : null
+  return actsAsPerson(req) ? readerOf(req) : null
 }
 
 /**

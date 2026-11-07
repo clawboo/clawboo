@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import { Pause, Play } from 'lucide-react'
 
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { confirm } from '@/stores/confirm'
 import {
   pausedByWords,
@@ -14,8 +15,22 @@ import {
   type PauseKind,
   type PauseTarget,
   type PauseView,
+  type PauseWrite,
 } from '@/stores/pauses'
 import { useToastStore } from '@/stores/toast'
+
+/** Say how it went, and whether it is done. The person check has its own notice, and
+ *  trying again would not change it. */
+function sayHowItWent(result: PauseWrite, done: string, failed: string): boolean {
+  if (result === 'person_only') notePersonCheck(PERSON_CHECK_REFUSED)
+  else {
+    useToastStore.getState().addToast({
+      type: result === 'done' ? 'success' : 'error',
+      message: result === 'done' ? done : failed,
+    })
+  }
+  return result === 'done'
+}
 
 /** Ask, then pause. Says what happens to the work, since runs stop at once. */
 export async function pauseWithConfirm(target: PauseTarget, name: string): Promise<boolean> {
@@ -31,23 +46,19 @@ export async function pauseWithConfirm(target: PauseTarget, name: string): Promi
     confirmLabel: 'Pause',
   })
   if (!ok) return false
-  const paused = await usePauseStore.getState().pause(target)
-  useToastStore.getState().addToast({
-    type: paused ? 'success' : 'error',
-    message: paused
-      ? 'Paused. Nothing new starts until you resume.'
-      : 'Could not pause. Try again.',
-  })
-  return paused
+  return sayHowItWent(
+    await usePauseStore.getState().pause(target),
+    'Paused. Nothing new starts until you resume.',
+    'Could not pause. Try again.',
+  )
 }
 
 export async function resumeWithToast(target: PauseTarget): Promise<boolean> {
-  const resumed = await usePauseStore.getState().resume(target)
-  useToastStore.getState().addToast({
-    type: resumed ? 'success' : 'error',
-    message: resumed ? 'Resumed. Waiting work starts again.' : 'Could not resume. Try again.',
-  })
-  return resumed
+  return sayHowItWent(
+    await usePauseStore.getState().resume(target),
+    'Resumed. Waiting work starts again.',
+    'Could not resume. Try again.',
+  )
 }
 
 /** The banner on a paused agent's chat, a paused team's chat and a paused task. */

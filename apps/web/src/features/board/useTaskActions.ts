@@ -16,10 +16,11 @@ import {
   updateStatusResult,
 } from '@/lib/boardClient'
 import { confirm } from '@/stores/confirm'
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 
-import { DASHBOARD_ONLY, notDeliveredWhy, type TaskAttention } from './boardStatus'
+import { notDeliveredWhy, type TaskAttention } from './boardStatus'
 import { countLabel } from './calendar/calendarFormat'
 
 const NUMBER_WORDS = 'Zero One Two Three Four Five Six Seven Eight Nine'.split(' ')
@@ -73,7 +74,6 @@ const REOPEN_REFUSED: Record<string, string> = {
   not_finished: 'This task is not finished, so there is nothing to reopen.',
   blocker_cancelled:
     'A task this one depends on was cancelled, so nothing would start it. Reopen that task first.',
-  dashboard_only: DASHBOARD_ONLY,
 }
 
 const ASSIGN_REFUSED: Record<string, string> = {
@@ -81,7 +81,13 @@ const ASSIGN_REFUSED: Record<string, string> = {
   not_assignable: 'This task is already being worked on or is finished.',
   no_team: 'This task has no team, so no agent can run it.',
   room_archived: ROOM_ARCHIVED,
-  dashboard_only: DASHBOARD_ONLY,
+}
+
+/** Say why a write was refused. The person check has its own notice, said once however
+ *  many cards were tried, and trying again would not change it. */
+function sayRefused(reason: string, refused: Record<string, string>, otherwise: string): void {
+  if (reason === 'person_only') notePersonCheck(PERSON_CHECK_REFUSED)
+  else useToastStore.getState().addToast({ type: 'error', message: refused[reason] ?? otherwise })
 }
 
 /** What has to be fixed before an account refusal can run, as the confirm says it. */
@@ -157,10 +163,7 @@ export function useTaskActions(): TaskActions {
         addToast({ type: 'success', message: `Assigned to ${agentName}. It starts now.` })
         return true
       }
-      addToast({
-        type: 'error',
-        message: ASSIGN_REFUSED[res.reason] ?? 'Couldn’t assign the task. Please try again.',
-      })
+      sayRefused(res.reason, ASSIGN_REFUSED, 'Couldn’t assign the task. Please try again.')
       return false
     },
     [addToast],
@@ -250,10 +253,7 @@ export function useTaskActions(): TaskActions {
         addToast({ type: 'success', message: 'It’s yours now. Nothing will start it.' })
         return true
       }
-      addToast({
-        type: 'error',
-        message: ASSIGN_REFUSED[res.reason] ?? 'Couldn’t assign the task. Please try again.',
-      })
+      sayRefused(res.reason, ASSIGN_REFUSED, 'Couldn’t assign the task. Please try again.')
       return false
     },
     [addToast],
@@ -266,10 +266,7 @@ export function useTaskActions(): TaskActions {
         addToast({ type: 'success', message: `Assigned to ${name}. Nothing will start it.` })
         return true
       }
-      addToast({
-        type: 'error',
-        message: ASSIGN_REFUSED[res.reason] ?? 'Couldn’t assign the task. Please try again.',
-      })
+      sayRefused(res.reason, ASSIGN_REFUSED, 'Couldn’t assign the task. Please try again.')
       return false
     },
     [addToast],
@@ -321,10 +318,7 @@ export function useTaskActions(): TaskActions {
         )
         return true
       }
-      addToast({
-        type: 'error',
-        message: REOPEN_REFUSED[res.reason] ?? 'Couldn’t reopen the task. Please try again.',
-      })
+      sayRefused(res.reason, REOPEN_REFUSED, 'Couldn’t reopen the task. Please try again.')
       return false
     },
     [addToast],

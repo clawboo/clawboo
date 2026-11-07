@@ -114,6 +114,8 @@ The card goes away and Clawboo records the request as expired, not as a refusal.
 - **Connector call.** The call is refused.
 - **Risky hand-off.** The hand-off is skipped and the leader is told. When the hand-off came from a task, that task gets the comment `Delegation to <name> not approved (<reason>); skipped.`
 
+A card for a call made while an agent works on a board task names that task. An expired card moves no task: a task in **Blocked** stays there until you decide.
+
 ## What a card does not show
 
 - **The folder, on the Board and in chat.** A command card there shows only the command, and cuts a long one off. Open the **Approval queue** in **Governance** to see the full command and its folder.
@@ -181,7 +183,8 @@ Set the board's team filter to **All teams**, or open the **Approval queue** in 
 <Accordion title="Under the hood">
 
 - **OpenClaw requests.** Clawboo's server keeps its own connection to the Gateway and copies each command request into Clawboo's tool-call approvals table as a row of kind `exec`, keyed by the Gateway's id. Every 30 seconds it marks rows past their deadline `expired`, never `deny`, and writes no audit row for them.
-- **Answers.** A tab with its own Gateway connection sends the answer straight to the Gateway (`exec.approval.resolve`). Every other answer goes through `POST /api/tools/approvals/:id/resolve`, which answers the Gateway first for an `exec` row. Answering twice is safe: the second answer changes nothing.
+- **Answers.** A tab with its own Gateway connection sends the answer straight to the Gateway (`exec.approval.resolve`). Every other answer goes through `POST /api/tools/approvals/:id/resolve`, which answers the Gateway first for an `exec` row. That route takes an answer only from the dashboard's page or a person a sign-in proxy vouched for (see [the person check](/operating/security#the-person-check)); anything else gets `403`, so an agent cannot answer a card by accident. On your own computer that is a speed bump: an agent running as you can send the same headers.
+- **Which task.** Each card records the task its run works on: a connector call's from the run's signed Tools URL, a Clawboo Native command's and a risky hand-off's from the run itself, and an OpenClaw command's from the session it came from. A card from a 1:1 chat or a lead's own turn has none, and neither does an OpenClaw agent's connector call, because the Tools address OpenClaw shares among its agents carries no task. Answering twice is safe: the second answer changes nothing.
 - **Clawboo's own requests.** Connector calls, Clawboo Native commands and risky hand-offs are rows in the same table, and the dashboard checks for new ones every 3 seconds. Clawboo records answers as `allow_once`, `allow_always` and `deny`; OpenClaw's words are `allow-once`, `allow-always` and `deny`.
 - **Remembered answers.** A connector **Always** writes a standing rule bound to the access you shared, expiring after 30 days, and stopping the share deletes its rules. A risky hand-off is filed per leader under the scope `delegate:code` and marked never-remember, so every one raises a card.
 - **Cleanup.** A connector call, Clawboo Native command or risky hand-off marks its own request `expired` as soon as it stops waiting. Once an hour, Clawboo also expires any request still pending after `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default), such as one left open when Clawboo stopped. That cleanup does not lengthen the waits on this page.

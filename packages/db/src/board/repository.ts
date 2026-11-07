@@ -1681,7 +1681,7 @@ export type HandBackResult =
 export function handBackTask(
   db: ClawbooDb,
   taskId: string,
-  input: { agentId: string; need: string },
+  input: { agentId: string; need: string; executionId?: string | null },
 ): HandBackResult {
   const result = immediateWrite(db, (tx): HandBackResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
@@ -1729,7 +1729,11 @@ export function handBackTask(
         taskId,
         teamId: result.task.teamId ?? null,
         agentId: input.agentId,
-        data: { to: 'blocked', reason: 'handed_back' },
+        data: {
+          to: 'blocked',
+          reason: 'handed_back',
+          actor: { kind: 'agent', agentId: input.agentId, execId: input.executionId ?? null },
+        },
       })
     } catch {
       // The hand-back stands; the run's end announces it too.
@@ -2033,8 +2037,13 @@ export function addComment(
   authorType: 'agent' | 'user' | 'system',
   authorAgentId?: string | null,
   /** The person whose request added it, when a sign-in proxy vouched for them, and
-   *  what wrote it (see `CommentKind`). No kind means it wakes no one. */
-  opts: { person?: PersonRecord | null; kind?: CommentKind | null } = {},
+   *  what wrote it (see `CommentKind`), and the run that wrote it, when an agent's run
+   *  did. No kind means it wakes no one. */
+  opts: {
+    person?: PersonRecord | null
+    kind?: CommentKind | null
+    executionId?: string | null
+  } = {},
 ): DbTaskComment {
   const now = Date.now()
   const row: DbTaskComment = {
@@ -2047,6 +2056,7 @@ export function addComment(
     person: personJson(opts.person),
     kind: opts.kind ?? null,
     steeredAt: null,
+    executionId: opts.executionId ?? null,
     createdAt: now,
   }
   withWriteRetry(() => db.insert(taskComments).values(row).run())

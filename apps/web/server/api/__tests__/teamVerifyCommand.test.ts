@@ -34,7 +34,13 @@ function fakeRes(): { res: Response; body: () => unknown; status: () => number }
   return { res, body: () => body, status: () => status }
 }
 
-const req = (teamId: string, body?: unknown) => ({ params: { teamId }, body }) as unknown as Request
+// The dashboard's own page: only a person sets a team's check (see personCheck.test.ts).
+const req = (teamId: string, body?: unknown) =>
+  ({
+    params: { teamId },
+    body,
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+  }) as unknown as Request
 
 describe('team verify command API', () => {
   let home: string
@@ -90,8 +96,18 @@ describe('team verify command API', () => {
     expect(rows.every((r) => r.teamId === 'team-1')).toBe(true)
     expect(summaries).toEqual(
       expect.arrayContaining([
-        { action: 'set_team_verify_command', command: 'npm test', previous: null },
-        { action: 'set_team_verify_command', command: 'pnpm test', previous: 'npm test' },
+        {
+          action: 'set_team_verify_command',
+          command: 'npm test',
+          previous: null,
+          actor: { kind: 'person' },
+        },
+        {
+          action: 'set_team_verify_command',
+          command: 'pnpm test',
+          previous: 'npm test',
+          actor: { kind: 'person' },
+        },
       ]),
     )
   })

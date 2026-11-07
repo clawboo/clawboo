@@ -1,11 +1,11 @@
 // ─── A person's own writes on the board ─────────────────────────────────────
 // Reopen, assign to a person, answer a question. Each is a person-only route: under
 // /api/ (so the access gate and the origin guard apply) and never under /api/mcp/,
-// where a runtime's attach token gets in without the cookie. Each refuses a request
-// the dashboard's page did not send (`isDashboardRequest`), and records the verified
-// person, or the install's built-in one, as who did it. Behind a sign-in proxy in
-// `required` mode every request here needs a verified person anyway. Locally it stays
-// the speed bump that check is: see lib/dashboardRequest.
+// where a runtime's attach token gets in without the cookie. Each answers to the one
+// person check (`refuseUnlessPerson`), and records the verified person, or the
+// install's built-in one, as who did it. Behind a sign-in proxy in `required` mode
+// every request here needs a verified person anyway. Locally it stays the speed bump
+// that check is: see lib/dashboardRequest.
 
 import type { Request, Response } from 'express'
 
@@ -41,10 +41,9 @@ import {
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 
-import { actingPerson, personField } from '../lib/auth'
+import { actingPerson, actorField, refuseUnlessPerson } from '../lib/auth'
 import { ownWriterOf } from '../lib/boardReader'
 import { getDb } from '../lib/db'
-import { isDashboardRequest } from '../lib/dashboardRequest'
 import { engineHeld } from '../lib/engineHold'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { emitEvent } from '../lib/obs'
@@ -63,12 +62,6 @@ import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWake
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
 
 const log = createLogger('board-person')
-
-function refuseUnlessDashboard(req: Request, res: Response): boolean {
-  if (isDashboardRequest(req)) return false
-  res.status(403).json({ ok: false, error: 'dashboard_only' })
-  return true
-}
 
 /** What saving a person's wake needs: as Retry, team chat could not run a task its
  *  engine cannot see. */
@@ -119,7 +112,7 @@ function startWake(
 // because the task was finished. The reopen, its comment and its wake are one write.
 export async function boardReopenPOST(req: Request, res: Response): Promise<void> {
   try {
-    if (refuseUnlessDashboard(req, res)) return
+    if (refuseUnlessPerson(req, res)) return
     const parsed = reopenTaskBody.safeParse(req.body ?? {})
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: 'invalid body' })
@@ -175,7 +168,13 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
       kind: 'status_changed',
       taskId,
       teamId: before.teamId,
-      data: { to: 'todo', from: result.from, reason: 'reopened', person },
+      data: {
+        to: 'todo',
+        from: result.from,
+        reason: 'reopened',
+        person,
+        actor: { kind: 'person' },
+      },
     })
     // Back in the queue: a person's move, which tells a resident engine.
     noteHumanMove(db, { taskId, teamId: before.teamId, from: result.from ?? null, to: 'todo' })
@@ -196,7 +195,7 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
 // who asked for the task. `personId: null` takes the person off again.
 export function boardAssignPersonPOST(req: Request, res: Response): void {
   try {
-    if (refuseUnlessDashboard(req, res)) return
+    if (refuseUnlessPerson(req, res)) return
     const parsed = assignPersonBody.safeParse(req.body ?? {})
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: 'invalid body' })
@@ -248,7 +247,7 @@ export function boardAssignPersonPOST(req: Request, res: Response): void {
       data: {
         to: assigned.task.status,
         reason: person ? 'assigned_person' : 'unassigned_person',
-        ...personField(req),
+        ...actorField(req),
       },
     })
     runOwnWrite(db, ownWriter, taskId, () =>
@@ -296,7 +295,7 @@ const AGENT_WAKES_NOTE: Record<AgentWakeChoice, string> = {
 
 export function boardAgentWakesPOST(req: Request, res: Response): void {
   try {
-    if (refuseUnlessDashboard(req, res)) return
+    if (refuseUnlessPerson(req, res)) return
     const parsed = agentWakesBody.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: 'invalid body' })
@@ -326,7 +325,7 @@ export function boardAgentWakesPOST(req: Request, res: Response): void {
       eventType: 'board',
       taskId: shownOn,
       teamId: task?.teamId ?? null,
-      summary: { agentWakes: choice, jobTaskId: result.jobTaskId, ...personField(req) },
+      summary: { agentWakes: choice, jobTaskId: result.jobTaskId, ...actorField(req) },
     })
     // Start what waited on this answer, as far as this request can. The pump's next pass
     // does the rest, which its own event brings within seconds.
@@ -358,7 +357,7 @@ export function boardAgentWakesPOST(req: Request, res: Response): void {
 // it: what a model wrote never lands in a person's words. No Tasks tool answers anything.
 export async function boardQuestionAnswerPOST(req: Request, res: Response): Promise<void> {
   try {
-    if (refuseUnlessDashboard(req, res)) return
+    if (refuseUnlessPerson(req, res)) return
     const parsed = answerQuestionBody.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ ok: false, error: 'invalid body' })
@@ -380,7 +379,10 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
       const { question, task } = result
       const prompt = parseQuestionPayload(question.payload)?.prompt ?? 'your question'
       const answer = JSON.parse(question.answer ?? '{}') as QuestionAnswer
-      addComment(db, task.id, askedWords(prompt), 'agent', question.agentId, { kind: 'agent' })
+      addComment(db, task.id, askedWords(prompt), 'agent', question.agentId, {
+        kind: 'agent',
+        executionId: question.executionId,
+      })
       const written = addComment(db, task.id, answerWords(answer), 'user', null, {
         person,
         kind: 'person',
@@ -405,9 +407,12 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
       return
     }
     const { question, task } = result
+    const asker = question.agentId
+      ? ({ kind: 'agent', agentId: question.agentId, execId: question.executionId } as const)
+      : ({ kind: 'caller' } as const)
     for (const data of [
-      { authorType: 'agent', questionId: question.id },
-      { authorType: 'user', questionId: question.id, person },
+      { authorType: 'agent', questionId: question.id, actor: asker },
+      { authorType: 'user', questionId: question.id, person, actor: { kind: 'person' } as const },
     ])
       emitEvent(db, { kind: 'comment_added', taskId: task.id, teamId: task.teamId, data })
     const delivery = startWake(db, req, task.id, wake as SavedPersonWake)

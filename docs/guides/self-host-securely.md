@@ -395,6 +395,12 @@ Clawboo's same-origin guard does not recognize the name or origin in the request
 
 </Accordion>
 
+<Accordion title="The dashboard says it could not tell this came from you">
+
+Answering an approval, Retry, Assign and a team's work check are refused with `403 person_only`, and moving a card does not stop its run. Clawboo reads the marks a browser puts on the dashboard's requests, and something in between changed them. Over plain `http` to another machine's address, a browser sends only `Origin`, and it has to match the `Host` Clawboo receives. A proxy that rewrites `Host`, as nginx does by default, breaks that. Add `proxy_set_header Host $host;`, or serve Clawboo over `https`, where a browser sends the marks a proxy leaves alone. See [the person check](/operating/security#the-person-check).
+
+</Accordion>
+
 <Accordion title="401: Clawboo access token required">
 
 This browser has no cookie yet, or the token changed. Open your Clawboo address with `?access_token=<your-token>` once, or open a one-time link from `clawboo open --print` on the server (replace `127.0.0.1:<port>` with the address you use) or from **Open on another device** in a signed-in browser.

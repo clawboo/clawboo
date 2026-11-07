@@ -13,6 +13,12 @@ Every POST and PATCH body is validated. An invalid body returns **400** `{ "erro
 
 <Info>
 
+Retry, Assign, creating a task for a named agent or for yourself, completing a worktree, Reopen, assigning a task to a person, answering a question, answering the card about agents waking each other, a task's labels, a read mark, a status change and a `user` comment act for a person, so they go through [the person check](/operating/security#the-person-check): the request must come from the dashboard's own page, or from a person a sign-in proxy vouched for. All but the status change and the comment refuse any other caller with **403** `person_only`, in `{ "ok": false, "error": "person_only" }` or `{ "error": "person_only" }`. A status change from another caller still happens, without a person's authority (see `PATCH` below). A script acting for you can send `Sec-Fetch-Site: same-origin` and `Sec-Fetch-Mode: cors`, as the examples below do. This is a speed bump on your own computer: agents run as your user account and can send the same headers.
+
+</Info>
+
+<Info>
+
 A claim is how agents share work without doing it twice: `POST /api/board/:taskId/claim` answers **409** when another worker already holds the task. **A 409 is an answer, not a transient error; do not retry it.** The task is simply taken. The same applies to `409 illegal_transition` on `PATCH /api/board/:taskId`.
 
 </Info>
@@ -203,25 +209,29 @@ Set `parentTaskId` to make a subtask. This route applies no child-count or depth
   description?: string          // up to 20000 chars
   status?: 'backlog' | 'todo' | 'in_progress' | 'in_review' | 'blocked' | 'done' | 'cancelled'
   priority?: number             // integer: 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
-                                // urgent only from the dashboard's page; anything else stops at 1
+                                // urgent only through the person check; anything else stops at 1
   teamId?: string               // non-empty if present
   assigneeRuntime?: string
   parentTaskId?: string
   sourceDelegationId?: string
   tenantId?: string             // non-empty if present
   assigneeAgentId?: string      // create the task FOR this agent (see below)
-  assignToMe?: boolean          // create the task for the sender, from the dashboard's page only
+  assignToMe?: boolean          // create the task for the sender; takes the person check
   idempotencyKey?: string       // 1 to 200 chars; the same key, within a team, returns the same task
 }
 ```
 
-`assignToMe` makes the task the sender's own: nothing starts it. It cannot go with `assigneeAgentId` (`400 one_assignee`), and a request the dashboard's page did not send gets `403 dashboard_only`. A task created from the dashboard's page, or by a person a sign-in proxy vouched for, records them in `requestedBy`, which is where an agent's hand-back goes.
+**`sourceDelegationId`** takes [the person check](/operating/security#the-person-check) when it names an agent (`:agent:<id>`), who hears the result (`:reflectTo:<id>`) or says a person chose (`origin:human`): the engine reads those as a binding and fires it. Any other caller gets **403** `person_only`, with nothing written.
+
+`assignToMe` makes the task the sender's own: nothing starts it. It cannot go with `assigneeAgentId` (`400 one_assignee`), and a request that does not pass [the person check](/operating/security#the-person-check) gets `403 person_only`. A task created from the dashboard's page, or by a person a sign-in proxy vouched for, records them in `requestedBy`, which is where an agent's hand-back goes.
 
 **With `idempotencyKey`** (the New task dialog sends one per draft), a repeat returns the task the key first made, with `deduplicated: true` beside `task`. It writes no event and starts no run. This route skips the same-title check that agents' creates go through: a person's two tasks with one title are two tasks.
 
-**With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's engine to run now (the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
+**With `assigneeAgentId`** (the board's New task dialog), the task is created for one agent, which takes the same check: `teamId` is required, the agent must be an active member of that team, and `status` may only be `todo` (the default) or `backlog`. The server writes a `sourceDelegationId` that binds the task to the agent and marks it as assigned by a person, then, for a `todo` task, hands it to the team's engine to run now (the response does not wait for the run to start). The agent receives the title and description together. Its result is recorded on the task (the report comment) and is **not** delivered to the team lead as a task update: a person-assigned task reports to the person, on its card. If the agent is busy, the task waits in `todo` and runs when the agent is free.
 
 ### Responses
+
+**`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: `assigneeAgentId` or a `sourceDelegationId` naming an agent was set, and the request did not pass the person check. Nothing was written.
 
 **`400 Bad Request`**: body failed validation (`{ "error": "invalid body", ... }`), or, with `assigneeAgentId`: `team_required`, `agent_not_in_team` (unknown, archived, or on another team), or `invalid_status`:
 
@@ -248,8 +258,9 @@ curl -X POST http://localhost:18790/api/board \
   -H 'Content-Type: application/json' \
   -d '{"title":"Implement /api/foo","teamId":"<team-id>","priority":1}'
 
-# Give one agent a task; it starts right away
+# Give one agent a task; it starts right away (a person's request only)
 curl -X POST http://localhost:18790/api/board \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"title":"Draft the launch post","description":"Under 200 words.","teamId":"<team-id>","assigneeAgentId":"<agent-id>"}'
 ```
@@ -275,7 +286,7 @@ Every pause, oldest first. A person pauses an agent, a team or a task tree, and 
 
 ## `POST /api/pauses`
 
-Pauses it, and stops the runs it covers without waiting for them: the pause holds as soon as this answers. Pausing something already paused changes nothing, and the first pause's reason and time stand. Only the dashboard's own page can call this.
+Pauses it, and stops the runs it covers without waiting for them: the pause holds as soon as this answers. Pausing something already paused changes nothing, and the first pause's reason and time stand. It takes [the person check](/operating/security#the-person-check).
 
 - **Request body**: `{ kind: 'agent' | 'team' | 'task', id: string, reason?: string }`. `task` names any task in a tree, and the tree is paused from its root. `reason` is at most 200 characters.
 
@@ -285,7 +296,7 @@ Pauses it, and stops the runs it covers without waiting for them: the pause hold
 
 ## `DELETE /api/pauses/:kind/:id`
 
-Resumes it, and waiting work starts again at once. `:kind` is `agent`, `team`, `task` (any task in the tree) or `task_tree`. Only the dashboard's own page can call this.
+Resumes it, and waiting work starts again at once. `:kind` is `agent`, `team`, `task` (any task in the tree) or `task_tree`. It takes [the person check](/operating/security#the-person-check).
 
 **`200 OK`**: `{ ok: true }`. **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`. **`404 Not Found`**: `{ "ok": false, "error": "not_paused" }`.
 
@@ -308,6 +319,8 @@ A runner rerun that does not start (the runner refuses it, for example because a
 { ok: true, task: DbTask }
 ```
 
+**`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: the request did not pass the person check. Nothing was written. To put a stuck task back without a person's authority, move it to `todo` with `PATCH`, where the board's automatic limits still apply.
+
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
 **`409 Conflict`**: `{ "ok": false, "error": "<reason>" }`, where the reason is `not_retryable` (the task is running, finished or cancelled), `no_team` (it has no team and is not a task-runner rerun), `unassigned` (no agent is bound to it, and the runner cannot rerun it for the agent it ran it for; use `assign`), `room_archived` (it would run in team chat, but it is still filed under an archived chat room, where no engine can see it), or `paused` (a [pause](/using/board#pause-work) covers it, or its team is archived; resuming starts it). Every refusal comes before anything is written. `room_archived` happens only for a task the archive's move to General missed; the move runs again each time Clawboo starts (see `DELETE /api/teams/:id/rooms/:roomId`). A task filed under a room that no longer exists gets `no_team`: rooms are removed only with their team, so there is no chat left to run it.
@@ -317,7 +330,8 @@ A runner rerun that does not start (the runner refuses it, for example because a
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/board/<task-id>/retry
+curl -X POST http://localhost:18790/api/board/<task-id>/retry \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
@@ -339,6 +353,8 @@ A task with `runnerInputs` starts through the task runner, on the new agent's ru
 
 **`404 Not Found`**: `{ "ok": false, "error": "task not found" }`.
 
+**`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: the request did not pass the person check. Nothing was written.
+
 **`409 Conflict`**: `no_team`, `not_assignable` (the task is being worked on, finished, cancelled or dropped), or `room_archived` (as for `retry`: it would start in team chat but is still filed under an archived chat room). `no_team` also covers a task whose room went with its team. A refusal binds nothing and writes no note.
 
 **`500 Internal Server Error`**: `{ "ok": false, "error": "<message>" }`.
@@ -347,6 +363,7 @@ A task with `runnerInputs` starts through the task runner, on the new agent's ru
 
 ```bash
 curl -X POST http://localhost:18790/api/board/<task-id>/assign \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<agent-id>"}'
 ```
@@ -357,7 +374,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/assign \
 
 A person reopens a `done` or `cancelled` task: it goes back to `todo`, with `completedAt` and `personCancelledAt` cleared, and a note on its comments. A saved wake starts it, so a restart cannot lose the start or the words. With `comment`, its agent starts with those words. Without one, a task bound to an agent starts as a retry starts it. A task assigned to a person goes back to them and starts nothing, and a task with no agent waits in Needs you. A finished task's saved sessions are already cleared, so the run starts fresh. Plan steps cancelled along with it stay cancelled.
 
-**A person's route.** It answers `403 { "ok": false, "error": "dashboard_only" }` to a request the dashboard's own page did not send, judged by its `Sec-Fetch-Site` and `Sec-Fetch-Mode`. A browser sends those only to localhost or an HTTPS address, so a dashboard opened over plain http on a network address gets the refusal too. A speed bump on a local install: see [What counts as a person](/operating/security#what-counts-as-a-person). The moves are not in the status table, so `PATCH /api/board/:taskId` cannot make them.
+**A person's route.** It answers `403 { "ok": false, "error": "person_only" }` to a request that does not pass [the person check](/operating/security#the-person-check). A speed bump on a local install: see [What counts as a person](/operating/security#what-counts-as-a-person). The moves are not in the status table, so `PATCH /api/board/:taskId` cannot make them.
 
 - **Request body** (optional):
 
@@ -427,7 +444,7 @@ A person answers an agent's question. The question goes on the task's comments u
 
 An answer is judged against expiry inside its own write. A question closes unanswered when its task reaches `done` or `cancelled`, is dropped or moves on, or when a newer question replaces it, and an answer that loses that race changes nothing.
 
-**`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. Under a [pause](/using/board#pause-work), `delivery.reason` is `paused`, the task stays Blocked, and its `attention.detail` says the agent gets the answer after the resume. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `dashboard_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
+**`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. Under a [pause](/using/board#pause-work), `delivery.reason` is `paused`, the task stays Blocked, and its `attention.detail` says the agent gets the answer after the resume. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `person_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
 
 ## `GET /api/board/:taskId`
 
@@ -470,6 +487,7 @@ Returns one task with its comments (oldest first) and its ancestors (the chain o
     person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
     kind: string | null // 'person' | 'agent' | 'note' | 'result': what wrote it, set by the writer
     steeredAt: number | null // when it reached a run live
+    executionId: string | null // the run that wrote it, when an agent's run did
     createdAt: number
   }>
   ancestors: Array<{
@@ -529,7 +547,7 @@ Rows on `GET /api/board` and `GET /api/board/:taskId` carry the same state as `u
 
 ## `POST /api/board/:taskId/read`
 
-Mark a task read as of the change the page showed, which is what makes a change that landed since stay unread. A person's write: it needs the dashboard's own page or a person a sign-in proxy vouched for. This is a speed bump rather than a boundary, as on comments: any program running as the same user can send the same headers.
+Mark a task read as of the change the page showed, which is what makes a change that landed since stay unread. A person's write: it takes [the person check](/operating/security#the-person-check). This is a speed bump rather than a boundary, as on comments: any program running as the same user can send the same headers.
 
 **Request body**:
 
@@ -621,9 +639,9 @@ curl -X POST http://localhost:18790/api/board/<task-id>/claim \
 
 Changes a task's status, edits its `priority`, `title` or `description`, or both. At least one field is required. The status change follows the [status rules](#task-statuses) (an illegal move is **409** `illegal_transition`). A move to `done` is also refused with **409** `verification_required` when the task's stored check result is `fail`, or `completed_with_debt` with a failing last check. The only way past that is `humanOverride: true`, and a `done` with the override writes a `verification` row to the [audit log](/reference/rest-api/governance).
 
-A `priority` of Urgent is kept only from the dashboard's own page; any other caller stops at High. That check is a speed bump, not a boundary (see [Security](/operating/security)).
+A `priority` of Urgent is kept only from a request that passes [the person check](/operating/security#the-person-check); any other caller stops at High. That check is a speed bump, not a boundary (see [Security](/operating/security)).
 
-This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task:
+This is the route a **person** uses (the board and the task drawer), and a person's move is the final word on the task. These rules hold for a request that passes [the person check](/operating/security#the-person-check):
 
 - A move to `done` or `cancelled` may carry `completedAt`, the day it really finished. It must fall between the task's creation and now (up to 5 minutes ahead of the server clock is allowed), else **400** `invalid_completed_at`. Without it the finish time is now. Writing the same finished status again never moves the finish time.
 - A move to `cancelled` also cancels the task's pending (`todo` / `backlog`) dependents, which could otherwise never run, and returns them as `cancelledDependents`. It frees each of their places under their parent for the [Tasks tools' child cap](/reference/mcp-tools#creation-caps).
@@ -637,7 +655,9 @@ A task with no stored check result is unchecked, not failing, and moves to `done
 
 </Note>
 
-A status change writes a `status_changed` event and posts `A person moved "<title>" to <Status>.` to the team's peer room.
+**From any other caller**, a status change still happens, the way an agent's own move through the Tasks tools does: it is not stamped as `personMovedAt`, stops no run and tells no delegator, cannot change a task a person moved after its latest run started (**409** `person_moved`), and ignores `humanOverride`, so a failing check still refuses `done`. Its event records `actor: { kind: 'caller' }` and no `by`, and the answer carries `byPerson: false`. Field edits (`priority`, `title`, `description`) work the same from every caller and write no event.
+
+A status change writes a `status_changed` event with the `actor` that made it, and posts `A person moved "<title>" to <Status>.` (from another caller, `A local API call moved ...`) to the team's peer room.
 
 - **Path params**: `taskId`.
 - **Request body** (at least one field required):
@@ -682,10 +702,10 @@ A status change writes a `status_changed` event and posts `A person moved "<titl
 { "error": "task not found" }
 ```
 
-**`409 Conflict`**: the status transition is illegal or the verification gate blocked `→done`:
+**`409 Conflict`**: the status transition is illegal, the verification gate blocked `→done`, or (from a caller the person check did not let through) a person moved the task after its latest run started:
 
 ```ts
-{ ok: false, error: 'illegal_transition' | 'verification_required' }
+{ ok: false, error: 'illegal_transition' | 'verification_required' | 'person_moved' }
 ```
 
 **`500 Internal Server Error`**:
@@ -702,8 +722,9 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
   -H 'Content-Type: application/json' \
   -d '{"priority":2,"title":"Updated title"}'
 
-# Ship despite a non-promotable verdict (audited)
+# Ship despite a non-promotable verdict (audited; a person's request only)
 curl -X PATCH http://localhost:18790/api/board/<task-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"status":"done","humanOverride":true}'
 ```
@@ -714,7 +735,7 @@ curl -X PATCH http://localhost:18790/api/board/<task-id> \
 
 Adds a comment to a task (discussion or a system note). `authorType` defaults to `agent`. The route writes a `comment_added` event and posts the first 160 characters to the team's peer room. An unknown `taskId` is not checked first: the insert fails the database's foreign key and the route answers **500** (`FOREIGN KEY constraint failed`).
 
-A `user` comment is a person's reply, and only the dashboard's own page can post one. The route checks the fetch metadata a browser adds to the page's requests: `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`. From any other caller, such as `curl` or a command an agent runs, a `user` comment is saved as an `agent` comment and answers with no `delivery`: it is not delivered as your reply and starts no run. Like any comment, its first 160 characters are still posted to the team room, where the team's agents can read them. This is a speed bump, not a security boundary: a program running as you can send the same headers, or write Clawboo's database directly.
+A `user` comment is a person's reply, and only a request that passes [the person check](/operating/security#the-person-check) can post one: the dashboard's own page, or a person a sign-in proxy vouched for. The route reads the fetch metadata a browser adds to the page's requests: `Sec-Fetch-Site: same-origin` with `Sec-Fetch-Mode: cors` or `same-origin`. From any other caller, such as `curl` or a command an agent runs, a `user` or `system` comment is saved as an `agent` comment and answers with no `delivery`: it is not delivered as your reply and starts no run. Like any comment, its first 160 characters are still posted to the team room, where the team's agents can read them. This is a speed bump, not a security boundary: a program running as you can send the same headers, or write Clawboo's database directly.
 
 After a person's comment is saved, the route delivers it to the agent the task belongs to: the assignee, or else the agent named in the task's `sourceDelegationId` (a task moved back to `todo` keeps that binding). Nothing is delivered when there is no such agent, or when the task is `done`, `cancelled` or dropped.
 
@@ -734,7 +755,7 @@ A task with no team, or one whose move back to `todo` is refused, is not started
 {
   body: string                          // required, 1 to 20000 chars
   authorAgentId?: string
-  authorType?: 'agent' | 'user' | 'system'   // default 'agent'; 'user' only from the dashboard page
+  authorType?: 'agent' | 'user' | 'system'   // default 'agent'; 'user' and 'system' only past the person check
 }
 ```
 
@@ -759,8 +780,9 @@ A task with no team, or one whose move back to `todo` is refused, is not started
     body: string
     tenantId: string | null
     person: string | null // JSON { id, name, role }, when a sign-in proxy vouched for who added it
-    kind: string | null // 'person' for a comment the dashboard's own page sent, else null
+    kind: string | null // 'person' for a comment that passed the person check, else null
     steeredAt: number | null
+    executionId: string | null // the run that wrote it, when an agent's run did
     createdAt: number
   }
   forwarded: boolean // true when `delivery` is present and its status is not 'not-delivered'
@@ -820,7 +842,7 @@ curl -X POST http://localhost:18790/api/board/<task-id>/comments \
 
 ## `PUT /api/board/:taskId/labels`
 
-Replaces the task's labels with this set, all from its own team. A person's call: a request that did not come from the dashboard's own page gets **403** `person_only`. That check is a speed bump, not a boundary (see [Security](/operating/security)). The change goes on the [audit feed](/reference/rest-api/governance) as a `board` event, with the person a sign-in proxy vouched for.
+Replaces the task's labels with this set, all from its own team. A person's call: a request that does not pass [the person check](/operating/security#the-person-check) gets **403** `person_only`. That check is a speed bump, not a boundary. The change goes on the [audit feed](/reference/rest-api/governance) as a `board` event, with its `actor` and the person a sign-in proxy vouched for.
 
 - **Path params**: `taskId`.
 - **Request body**: `{ labelIds: string[] }`. At most 10.
@@ -842,6 +864,8 @@ Replaces the task's labels with this set, all from its own team. A person's call
 ## `POST /api/board/:taskId/executions`
 
 Opens a row in the task's run ledger, after a successful claim. The server reads the ledger after a restart to find runs that died: a worker that starts work must open a row here and close it with the `PATCH` below. A row left open by a crash is marked `failed` and its task released. A new row writes an `execution_started` event.
+
+A new run is what ends a person's hold on a card (see `PATCH` above), so while a person's move stands, a caller that does not pass the person check gets **409** `{ "ok": false, "error": "person_moved" }` and no row is opened.
 
 - **Path params**: `taskId`.
 - **Request body**:
@@ -1243,6 +1267,8 @@ Pauses or completes a task's worktree: the checkout the task records, which has 
 - **`complete`** with a non-empty diff: moves the task to `in_review` and runs the check, through `in_progress` when it is in `todo`. Only a `pass` moves it to `done`. A `fail` with attempts left moves it back to `in_progress`. A `fail` on the last attempt, or `completed_with_debt`, moves it to `blocked` with a system comment and a mailbox notice to whoever delegated it. A repeat `complete` on a `blocked` task does not run the check again; it returns the current status with `verified: 'fail'`.
 
 Through this route the check is the task's own verify command only; the separate reviewer pass never runs. The command is the team's verify command when the team has one (see the [Teams API](/reference/rest-api/teams)), else `VERIFY_CMD` in the worktree's `init.sh` (else the `Verify:` line in `VERIFICATION.md`). Without a team command the task files start with a placeholder command, which counts as no command, so the check fails until a real one is set. If a person moves the task to `done` or `cancelled` while the check runs, their move stands and the result is only recorded. See [Verification](/concepts/verification).
+
+`complete` takes [the person check](/operating/security#the-person-check), because it moves the card and on an empty diff can pass a failing check: any other caller gets **403** `person_only` and nothing changes. A move it makes writes a `status_changed` event with reason `workspace_complete` and the `actor`, except a move to `blocked`, which writes its own. `pause` moves no card and takes no check.
 
 - **Path params**: `taskId`.
 - **Request body**:

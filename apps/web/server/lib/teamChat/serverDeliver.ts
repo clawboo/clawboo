@@ -77,6 +77,7 @@ import {
   type RunBudgetGate,
   type RunBudgetHold,
 } from '../budgetHold'
+import { auditBudgetCrossing } from '../budgetAudit'
 import { budgetRefusalText } from '../budgetPreflight'
 import { HOME_MUTEX_ACQUIRE_MS, homeDispatchMutex } from '../executorRunner'
 import {
@@ -372,7 +373,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       const a = recordSpend(db, 'agent', agentId, cents, spend)
       const t = recordSpend(db, 'team', teamId, cents, spend)
       const taskId = taskForSession(sessionKey)
-      const m = taskId ? recordSpend(db, 'mission', missionRootId(db, taskId), cents, spend) : null
+      const missionId = taskId ? missionRootId(db, taskId) : null
+      const m = missionId ? recordSpend(db, 'mission', missionId, cents, spend) : null
+      const on = { runKind: 'team-chat', agentId, teamId, taskId } as const
+      auditBudgetCrossing(db, { ...on, scope: 'agent', scopeId: agentId, result: a })
+      auditBudgetCrossing(db, { ...on, scope: 'team', scopeId: teamId, result: t })
+      if (missionId)
+        auditBudgetCrossing(db, { ...on, scope: 'mission', scopeId: missionId, result: m })
       if (a?.status === 'paused' && a.mode === 'cap') return true
       if (m?.status === 'paused' && m.mode === 'cap') return true
       if (t?.status === 'paused' && t.mode === 'cap') return true
@@ -1257,12 +1264,15 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // `boundTaskId`: a task run's own task, signed onto its Tasks URL so
                 // the Tasks tools use it when a call leaves taskId out. Not the
                 // provenance `taskId`, which would change how memories get promoted.
+                // `boundExecutionId`: the run's own ledger row, recorded with each
+                // write its Tasks tools make. A lead's turn has neither.
                 memoryScope: {
                   teamId,
                   agentId: targetAgentId,
                   delegate: true,
                   attachSecret: getMcpAttachSecret(db),
                   ...(runTaskId !== null ? { boundTaskId: runTaskId } : {}),
+                  ...(runExecId !== null ? { boundExecutionId: runExecId } : {}),
                 },
                 ...(homeDir ? { homeDir } : {}),
                 ...(Object.keys(apiKeyEnv).length ? { apiKeyEnv } : {}),

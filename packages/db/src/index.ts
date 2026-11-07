@@ -149,6 +149,7 @@ export * from './chat'
 // ── A person a sign-in proxy vouched for, as rows record them ──
 export { parsePersonJson, personJson } from './person'
 export type { PersonRecord } from './person'
+export type { EventActor } from '@clawboo/obs'
 
 // ── The grant spine: capability_grants IS the Ghost Graph edge ──
 export * from './grants'

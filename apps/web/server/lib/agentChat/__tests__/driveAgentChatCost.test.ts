@@ -16,6 +16,7 @@ import {
   getBudget,
   recordSpend,
   reserveBudgets,
+  listGovernanceAudit,
   setBudgetLimit,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -228,6 +229,66 @@ describe('driveAgentChat: cost records and budget holds', () => {
     expect(heldDuringRun).toBe(1)
     expect(holds()).toEqual([])
     expect(getBudget(db, 'agent', 'cc-x')?.spentMicroCents).toBe(2 * 10_000)
+  })
+
+  describe('a 1:1 turn crossing a budget', () => {
+    const rows = () =>
+      listGovernanceAudit(db, { eventType: 'budget' }).map(
+        (r) => JSON.parse(r.summary) as Record<string, unknown>,
+      )
+    const turn = (ev: 'cost' | 'tokens', usd = 0) =>
+      driveAgentChat({
+        db,
+        agentId: 'cc-x',
+        message: 'hi',
+        mcpBaseUrl: null,
+        makeAdapter: () =>
+          new FakeAdapter((run) =>
+            (async function* () {
+              yield {
+                ...base(run.sessionKey, 1),
+                kind: 'cost',
+                // Tokens and no figure: priced when the turn ends, not on the event.
+                costUsd: ev === 'cost' ? usd : null,
+                usage:
+                  ev === 'cost'
+                    ? { inputTokens: 10, outputTokens: 10 }
+                    : { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+                model: 'claude-sonnet-4-6',
+              }
+              yield { ...base(run.sessionKey, 2), kind: 'done', reason: 'success', summary: 'ok' }
+            })(),
+          ),
+      })
+
+    it('writes a warning row when a cost event crosses it', async () => {
+      seedAgent('cc-x', 'claude-code')
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 10, mode: 'warn' })
+      await turn('cost', 0.09)
+      expect(rows()).toHaveLength(1)
+      expect(rows()[0]).toMatchObject({
+        reason: 'warn',
+        level: 'soft',
+        scope: 'agent',
+        scopeId: 'cc-x',
+        runKind: 'chat',
+      })
+    })
+
+    it('says a hard cap paused it', async () => {
+      seedAgent('cc-x', 'claude-code')
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 10, mode: 'cap' })
+      await turn('cost', 0.5)
+      expect(rows()[0]).toMatchObject({ reason: 'auto_pause', level: 'hard', runKind: 'chat' })
+    })
+
+    it('writes one when the cost priced at the end crosses it', async () => {
+      seedAgent('cc-x', 'claude-code')
+      setBudgetLimit(db, { scope: 'agent', scopeId: 'cc-x', limitUsdCents: 10, mode: 'warn' })
+      await turn('tokens')
+      expect(rows()).toHaveLength(1)
+      expect(rows()[0]).toMatchObject({ reason: 'warn', level: 'hard', runKind: 'chat' })
+    })
   })
 
   it('a turn beside another run of the agent is refused when the cap has no room for both', async () => {

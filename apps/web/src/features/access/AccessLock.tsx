@@ -9,6 +9,8 @@ import { Lock } from 'lucide-react'
 
 import { apiFetch, setResponseObserver } from '@clawboo/control-client'
 
+import { watchForPersonCheckRefusal } from '@/lib/personCheckNotice'
+
 import { readInjectedBase } from '@/app/injectedBase'
 import { Button } from '@/features/shared/Button'
 
@@ -98,6 +100,7 @@ export function AccessLock({
   useEffect(() => {
     if (state !== 'open') return
     setResponseObserver((res) => {
+      watchForPersonCheckRefusal(res)
       if (res.status !== 401) return
       void res
         .clone()

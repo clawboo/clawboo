@@ -150,7 +150,7 @@ export interface CreateApprovalInput {
   reason?: string | null
   ttlMs?: number
   tenantId?: string | null
-  /** The board task this approval gates (so the TTL reaper can unblock it). */
+  /** The board task this approval gates, when the run has one. Its expiry moves no task. */
   taskId?: string | null
   grantId?: string | null
   connectorId?: string | null
@@ -378,7 +378,8 @@ function expirePendingApproval(
  * per-call `expiresAt` waiter deadline). Sets `status='expired'` + `resolvedAt` and
  * returns ONLY the rows expired by THIS call (the `status='pending'` guard +
  * RETURNING make a second pass a no-op), each announced as `approval_resolved`.
- * The caller audits + unblocks each task.
+ * The caller audits each one. An expired approval moves no task: nothing blocks a
+ * task for an approval, so a blocked task it names is blocked for another reason.
  */
 export function expireStaleApprovals(
   db: ClawbooDb,

@@ -36,7 +36,8 @@ vi.mock('../serverDeliver', () => ({
 }))
 
 const { getDb, resetDb } = await import('../../db')
-const { getTeamOrchestrator, resetTeamOrchestrators } = await import('../teamOrchestrator')
+const { getTeamOrchestrator, resetTeamOrchestrators, taskForLiveSession } =
+  await import('../teamOrchestrator')
 
 const done = (summary: string, runId: string): RuntimeEvent => ({
   kind: 'done',
@@ -175,5 +176,9 @@ describe('team orchestrator: the run primitive wiring', () => {
     expect(ledger).toHaveLength(1)
     expect(deps.execForSession('agent:W:team:T')).toBe(ledger[0]!.id)
     expect(deps.execForSession('agent:L:team:T')).toBeNull()
+    // The same reading for the OpenClaw approval mirror, which holds no engine.
+    expect(taskForLiveSession('agent:W:team:T')).toBe(deps.taskForSession('agent:W:team:T'))
+    expect(taskForLiveSession('agent:W:team:T')).not.toBeNull()
+    expect(taskForLiveSession('agent:L:team:T')).toBeNull()
   })
 })

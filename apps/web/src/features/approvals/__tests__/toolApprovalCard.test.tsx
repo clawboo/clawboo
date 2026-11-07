@@ -38,6 +38,17 @@ const show = (over: Partial<ToolApproval> = {}) => {
 }
 
 describe('ToolApprovalCard', () => {
+  it('says which task the call is for, when its run works on one', () => {
+    show({ taskId: 't1', taskTitle: 'Write the launch post' })
+    expect(screen.getByText('Task')).toBeInTheDocument()
+    expect(screen.getByText('Write the launch post')).toBeInTheDocument()
+  })
+
+  it('says nothing about a task when there is none', () => {
+    show({ taskId: null, taskTitle: null })
+    expect(screen.queryByText('Task')).not.toBeInTheDocument()
+  })
+
   it('asks in plain language and never shows the raw tool name', () => {
     show()
     expect(screen.getByRole('heading')).toHaveTextContent(

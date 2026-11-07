@@ -11,9 +11,10 @@ import { parseQuestionPayload, type SuggestedTask } from '@clawboo/board-core'
 
 import { Button } from '@/features/shared/Button'
 import { answerTaskQuestion, type QuestionAnswerInput } from '@/lib/boardClient'
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { useToastStore } from '@/stores/toast'
 
-import { DASHBOARD_ONLY, notDeliveredWhy } from './boardStatus'
+import { notDeliveredWhy } from './boardStatus'
 
 /** The fields of a `task_questions` row this reads (a board row's `openQuestion`). */
 export interface OpenQuestion {
@@ -28,7 +29,6 @@ const REFUSED: Record<string, string> = {
   cancelled: 'That question has closed.',
   not_found: 'That question is gone.',
   invalid_answer: 'That answer does not fit the question.',
-  dashboard_only: DASHBOARD_ONLY,
 }
 
 /** Option text can run to 200 characters, so unlike a `Button` it wraps. */
@@ -80,10 +80,13 @@ function QuestionControls({
       onAnswered()
       return
     }
-    addToast({
-      type: 'error',
-      message: REFUSED[result.reason] ?? 'Couldn’t send your answer. Please try again.',
-    })
+    if (result.reason === 'person_only') notePersonCheck(PERSON_CHECK_REFUSED)
+    else {
+      addToast({
+        type: 'error',
+        message: REFUSED[result.reason] ?? 'Couldn’t send your answer. Please try again.',
+      })
+    }
     // A question that closed is not coming back: refresh so the card reflects it.
     if (result.reason === 'expired' || result.reason === 'answered') onAnswered()
   }

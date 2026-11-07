@@ -51,11 +51,11 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | GET    | `/api/teams/:id/onboarding`        | Read the per-team onboarding flags + user-intro text         | No      |
 | PATCH  | `/api/teams/:id/onboarding`        | Merge-update the onboarding state                            | No      |
 | GET    | `/api/teams/:id/task-prefix`       | The letters on the team's task ids                           | No      |
-| PUT    | `/api/teams/:id/task-prefix`       | Set them, until the team's first task (dashboard only)       | No      |
+| PUT    | `/api/teams/:id/task-prefix`       | Set them, until the team's first task (person check)         | No      |
 | GET    | `/api/teams/:id/labels`            | The team's labels                                            | No      |
-| POST   | `/api/teams/:id/labels`            | Add a label (dashboard only)                                 | No      |
-| PATCH  | `/api/teams/:id/labels/:labelId`   | Rename a label (dashboard only)                              | No      |
-| DELETE | `/api/teams/:id/labels/:labelId`   | Remove a label from the team and every task (dashboard only) | No      |
+| POST   | `/api/teams/:id/labels`            | Add a label (person check)                                   | No      |
+| PATCH  | `/api/teams/:id/labels/:labelId`   | Rename a label (person check)                                | No      |
+| DELETE | `/api/teams/:id/labels/:labelId`   | Remove a label from the team and every task (person check)   | No      |
 | GET    | `/api/teams/:id/activity-summary`  | Short summary of the team's brief, board, memory and chat    | No      |
 | POST   | `/api/teams/:id/chat`              | Send a message to a chat; the reply runs in the background   | No      |
 | POST   | `/api/teams/:id/chat/stop`         | Stop one chat's running turns and release their tasks        | No      |
@@ -66,7 +66,7 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | GET    | `/api/team-verify-command/:teamId` | Read the command the verification gate runs for the team     | No      |
 | PUT    | `/api/team-verify-command/:teamId` | Set or clear that command                                    | No      |
 | GET    | `/api/team-agent-wakes/:teamId`    | Read whether its agents may wake each other without asking   | No      |
-| PUT    | `/api/team-agent-wakes/:teamId`    | Set that (dashboard only)                                    | No      |
+| PUT    | `/api/team-agent-wakes/:teamId`    | Set that. A person's route                                   | No      |
 | GET    | `/api/team-chat`                   | Read the team's peer-chat room from a cursor                 | No      |
 | POST   | `/api/team-chat/exchange`          | Start one bounded peer-chat exchange                         | No      |
 
@@ -1176,7 +1176,7 @@ The letters on the team's readable task ids (`MAR` in `MAR-12`).
 
 ## `PUT /api/teams/:id/task-prefix`
 
-Sets the letters, until the team's first task exists. After that they never change, and neither does a team rename change them. A person's call: a request that did not come from the dashboard's own page gets **403** `person_only`. That check is a speed bump, not a boundary (see [Security](/operating/security)). A change goes on the [audit feed](/reference/rest-api/governance) as a `board` event.
+Sets the letters, until the team's first task exists. After that they never change, and neither does a team rename change them. A person's call: a request that does not pass [the person check](/operating/security#the-person-check) gets **403** `person_only`. That check is a speed bump, not a boundary. A change goes on the [audit feed](/reference/rest-api/governance) as a `board` event.
 
 - **Request body**: `{ prefix: string }`. Two to six letters and numbers, starting with a letter, in either case; stored in upper case.
 
@@ -1228,7 +1228,7 @@ Renames a label, by the same rules. **`200 OK`**: `{ label: { id: string, name: 
 
 ## `DELETE /api/teams/:id/labels/:labelId`
 
-Removes the label from the team and from every task. Dashboard only, and audited. **`200 OK`**: `{ "ok": true }`. **`403`**: `person_only`. **`404`**: `not_found`.
+Removes the label from the team and from every task. Takes the person check, and audited. **`200 OK`**: `{ "ok": true }`. **`403`**: `person_only`. **`404`**: `not_found`.
 
 ---
 
@@ -1389,16 +1389,21 @@ Sets the team's verify command. The value is trimmed; an empty string clears it.
 
 **`400 Bad Request`**: `command` is absent or not a string (`command (string) required`), longer than 2000 characters (`command exceeds 2000 characters`), or more than one line (`command must be a single line`).
 
+**`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: the request did not pass [the person check](/operating/security#the-person-check). A team's check must not be its own builder's to choose, so only a person sets it. This is a speed bump on your own computer: an agent running as your user can send the same headers.
+
 **`404 Not Found`**: no team has this id:
 
 ```json
 { "error": "team not found" }
 ```
 
+Each change writes a `verification` row to the audit log with the command, the one before it and the `actor`.
+
 ### Example
 
 ```bash
 curl -X PUT http://localhost:18790/api/team-verify-command/<team-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"command":"npm test"}'
 ```
@@ -1413,7 +1418,7 @@ Whether the team's agents may wake each other without a person being asked once 
 
 ## `PUT /api/team-agent-wakes/:teamId`
 
-Set that. A person's route: it answers `403 { "ok": false, "error": "dashboard_only" }` to a request the dashboard's own page did not send. Each change goes in the audit log. The limits on wakes hold either way, and a job a person said no to stays no.
+Set that. A person's route: it answers `403 { "ok": false, "error": "person_only" }` to a request that does not pass [the person check](/operating/security#the-person-check). Each change goes in the audit log, with who made it. The limits on wakes hold either way, and a job a person said no to stays no.
 
 - **Request body**: `{ "always": boolean }`
 

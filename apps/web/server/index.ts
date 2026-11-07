@@ -52,8 +52,10 @@ import {
   orchestratorKey,
   roomsWithUnheldChecks,
   roomsWithUnheldReportUps,
+  taskForLiveSession,
   writeTeamAlert,
 } from './lib/teamChat/teamOrchestrator'
+import { taskForRoutineSession } from './lib/routines/openclawDispatch'
 import { startRoutinesTicker } from './lib/routines/ticker'
 import { engineHeld, engineHold } from './lib/engineHold'
 import { onPauseLifted } from './lib/pauseBus'
@@ -684,8 +686,8 @@ async function main() {
   safeStart('memory-embedding', () => startMemoryEmbedding())
 
   // ── Approval-TTL reaper ─────────────────────────────────────────────────────
-  // Expire abandoned pending approvals after the TTL (default 24h) + unblock any
-  // linked task. One pass at boot + a singleton unref'd interval.
+  // Expire abandoned pending approvals after the TTL (default 24h). One pass at
+  // boot + a singleton unref'd interval.
   safeStart('approval-reaper', () => startApprovalReaper({ log }))
 
   // ── Board stale-task sweep ──────────────────────────────────────────────────
@@ -874,14 +876,18 @@ async function main() {
   // capability with no handler turns a fast refusal into a silent 30-minute hang.
   safeStart('openclaw-exec-approvals', () => {
     const db = getDb()
-    startExecApprovalSurface(getRegistry().source, (sourceAgentId) => {
-      const row = db
-        .select({ id: agents.id })
-        .from(agents)
-        .where(eq(agents.sourceAgentId, sourceAgentId))
-        .get()
-      return row?.id ?? null
-    })
+    startExecApprovalSurface(
+      getRegistry().source,
+      (sourceAgentId) => {
+        const row = db
+          .select({ id: agents.id })
+          .from(agents)
+          .where(eq(agents.sourceAgentId, sourceAgentId))
+          .get()
+        return row?.id ?? null
+      },
+      (sessionKey) => taskForLiveSession(sessionKey) ?? taskForRoutineSession(sessionKey),
+    )
   })
 
   safeStart('openclaw-session-activity', () => {

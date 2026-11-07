@@ -7,6 +7,7 @@ import {
   addComment,
   answerForAgent,
   askQuestion,
+  appendEvent,
   blockTask,
   cancelDependents,
   clampAgentTaskPriority,
@@ -43,6 +44,7 @@ import {
   type CreatedTask,
   type CreateTaskInput,
   type DbTask,
+  type EventActor,
   type DbTaskQuestion,
   type GuardedCreateResult,
   type AgentCommentWake,
@@ -349,8 +351,16 @@ export interface TasksServerOptions {
    * `add_comment` and `block_task` use it when a call leaves `taskId` out, so an
    * agent reads its own task's history without having to find the id first. A
    * default only: it widens nothing, and every other guard still applies.
+   *
+   * `executionId` (when bound) is the run's execution row, recorded with the
+   * agent on each write this session makes.
    */
-  boundScope?: { teamId?: string | null; agentId?: string | null; taskId?: string | null }
+  boundScope?: {
+    teamId?: string | null
+    agentId?: string | null
+    taskId?: string | null
+    executionId?: string | null
+  }
 
   /**
    * The caller reached us over a transport that CAN carry a verified scope and
@@ -425,6 +435,48 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
   /** Appended to a one-task tool's description when a task is bound. */
   const ownTaskHint = (verb: string): string =>
     boundTaskId ? ` Leave out taskId to ${verb} the task you are working on.` : ''
+  // The run behind this session's writes, when it has one.
+  const boundExecutionId = opts?.boundScope?.executionId ?? undefined
+  // Who this session's writes are recorded as. Only a verified or in-process
+  // binding names an agent. Any other caller says nothing about who it is, and an
+  // OpenClaw agent cannot say more: its URL is unsigned and process-wide.
+  const actor: EventActor = boundAgentId
+    ? { kind: 'agent', agentId: boundAgentId, execId: boundExecutionId ?? null }
+    : { kind: 'caller' }
+  /** Record a write in the event log, with who made it. Best-effort: the log must
+   *  never fail the write it describes. Written here rather than by a host, so the
+   *  stdio bin's writes are recorded too. */
+  const recordWrite = (
+    kind: 'task_created' | 'task_claimed' | 'status_changed' | 'comment_added' | 'dep_linked',
+    task: Pick<DbTask, 'id' | 'teamId' | 'assigneeAgentId'> | null | undefined,
+    data: Record<string, unknown>,
+  ): void => {
+    if (!task) return
+    try {
+      appendEvent(db, {
+        kind,
+        taskId: task.id,
+        teamId: task.teamId,
+        agentId: task.assigneeAgentId ?? boundAgentId ?? null,
+        data: { ...data, actor },
+      })
+    } catch {
+      /* best-effort */
+    }
+  }
+  /** A status write's event, when the write happened. */
+  const recordStatus = (r: UpdateStatusResult, to: TaskStatus): void => {
+    if (r.ok) recordWrite('status_changed', r.task, { to })
+  }
+  /** A create's event, unless it found its task already there: nothing was written. */
+  const recordCreate = (result: GuardedCreateResult, parentTaskId?: string): void => {
+    if (!result.ok || result.task.deduplicated) return
+    recordWrite('task_created', result.task, {
+      title: result.task.title,
+      status: result.task.status,
+      parentTaskId: parentTaskId ?? null,
+    })
+  }
 
   const isLead = opts?.isLeadAgent ?? ((teamId, agentId) => isTeamLeadAgent(db, teamId, agentId))
 
@@ -558,6 +610,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         true,
       )
     if (!result.ok) return textResult(`claim failed: ${result.reason}`, true) // conflict → DO NOT retry
+    recordWrite('task_claimed', result.task, {
+      assigneeAgentId: result.task?.assigneeAgentId ?? assigneeAgentId,
+      assigneeRuntime: result.task?.assigneeRuntime ?? null,
+    })
     return jsonResult(result.task)
   }
   const assignSchema = z.object({
@@ -682,6 +738,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const result = parentTaskId
           ? createCappedSubtask(db, parentTaskId, input)
           : createCappedRootTask(db, input)
+        recordCreate(result, parentTaskId)
         return result.ok ? createdResult(result.task) : createDenial(result, parentTaskId)
       },
     },
@@ -713,6 +770,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
             parentTaskId,
           ),
         })
+        recordCreate(result, parentTaskId)
         return result.ok ? createdResult(result.task) : createDenial(result, parentTaskId)
       },
     },
@@ -760,7 +818,10 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
       handler: (args) => {
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
+        const before = getTask(db, str(args['taskId']))
         releaseTask(db, str(args['taskId']))
+        if (before?.status === 'in_progress')
+          recordWrite('status_changed', getTask(db, before.id), { to: 'todo', reason: 'released' })
         return textResult(`released: ${str(args['taskId'])}`)
       },
     },
@@ -791,6 +852,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
           unlessPersonMoved: true,
           ...(waitingOn ? { waitingOn } : {}),
         })
+        recordStatus(r, status)
         if (!r.ok || !r.task || status !== 'cancelled') return statusWriteResult(r, 'status change')
         // A cancelled step can never be done, so the steps waiting on it would
         // sit in To do forever, looking queued. The same cascade as a person's
@@ -836,6 +898,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const w = waitingFrom(taskId, args)
         if ('refusal' in w) return w.refusal
         const r = blockTask(db, taskId, { unlessPersonMoved: true, waitingOn: w.waitingOn })
+        recordStatus(r, 'blocked')
         return statusWriteResult(r, 'block')
       },
     },
@@ -878,6 +941,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
                 kind,
                 payload,
                 idempotencyKey: optStr(args['idempotencyKey']) ?? null,
+                executionId: boundExecutionId ?? null,
               })
               if (r.ok && r.existing) return textResult(repeatedAskText(r.question))
               if (r.ok) return textResult(`Asked. ${ASK_STOP}`)
@@ -908,7 +972,11 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
               const need = str(args['need']).trim()
               if (!need)
                 return textResult('hand_back_task needs need: what the person must do.', true)
-              const r = handBackTask(db, ownTask, { agentId: boundAgentId ?? '', need })
+              const r = handBackTask(db, ownTask, {
+                agentId: boundAgentId ?? '',
+                need,
+                executionId: boundExecutionId ?? null,
+              })
               if (r.ok) {
                 // The built-in person's name is "You", which reads as the agent itself.
                 const who =
@@ -944,6 +1012,7 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
         const denied = outOfTeam(str(args['taskId']))
         if (denied) return denied
         const r = unblockTask(db, str(args['taskId']), { unlessPersonMoved: true })
+        recordStatus(r, 'todo')
         return statusWriteResult(r, 'unblock')
       },
     },
@@ -994,8 +1063,15 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
           unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
           // Written through a Tasks session bound to its agent. Only that may ever count
           // as the agent's own words, so only that may wake a teammate.
-          boundAgentId !== undefined && !unverified ? { kind: 'agent' } : {},
+          {
+            ...(boundAgentId !== undefined && !unverified ? { kind: 'agent' as const } : {}),
+            executionId: boundExecutionId ?? null,
+          },
         )
+        recordWrite('comment_added', getTask(db, taskId), {
+          authorType: comment.authorType,
+          body: comment.body,
+        })
         const wake = agentCommentWakeNote(saveAgentCommentWake(db, taskId, comment))
         return jsonResult({ ...comment, ...(wake ? { wake } : {}) })
       },
@@ -1019,6 +1095,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
           }
           throw error
         }
+        recordWrite('dep_linked', getTask(db, str(args['taskId'])), {
+          dependsOnTaskId: str(args['dependsOnTaskId']),
+        })
         return textResult(
           `linked: ${str(args['taskId'])} depends on ${str(args['dependsOnTaskId'])}`,
         )

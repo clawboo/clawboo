@@ -28,9 +28,9 @@ export interface ResolveDelegationApprovalInput {
   targetAgentName?: string
   task: string
   kind?: string
-  /** The board task this delegation gates, when known — lets the TTL reaper unblock
-   *  the task if the approval is abandoned. Unused by the engine wiring (the task is
-   *  created AFTER the gate), so it's optional. */
+  /** The task the delegating run works on, when it works on one, shown with the
+   *  card. The hand-off's own task is created AFTER the gate, and a lead's own turn
+   *  has none, so it's optional. */
   taskId?: string | null
 }
 
@@ -60,6 +60,7 @@ export async function resolveDelegationApproval(
     appendAudit(db, {
       eventType: 'approval',
       agentId: leaderAgentId,
+      taskId,
       summary: { scopeKey, resolution, approvalId: approval.id },
     })
     return resolution

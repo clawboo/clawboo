@@ -43,6 +43,11 @@ export const ENGINE_FEATURES = [
   'board.verification',
   'board.checkHold',
   'board.steering',
+  // Moves, Retry, Assign, approval answers and a team's work check take a person's
+  // authority only from a request the person check lets through (the dashboard's
+  // page, or a person a sign-in proxy vouched for). Others get 403 or, on a move,
+  // no authority. A client acting for a person reads this first.
+  'board.personCheck',
   'board.readableIds',
   'board.labels',
   // A person's inbox: read state per task on the server, and the small read behind

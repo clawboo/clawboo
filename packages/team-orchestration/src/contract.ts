@@ -184,6 +184,7 @@ interface HarnessOpts {
     targetAgentId: string
     targetAgentName: string
     task: string
+    taskId?: string | null
   }) => Promise<DelegationResolution>
   now?: () => number
   /** Override session resolution (return null to simulate an asleep / unknown agent). */
@@ -354,6 +355,29 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       )
       expect(board.taskCount()).toBe(1)
       expect(delivered).toHaveLength(1)
+    })
+
+    it('a risky delegation names the task the delegating run works on, if any', async () => {
+      const asked: Array<string | null | undefined> = []
+      const { board, orchestrator } = makeHarness({
+        isRiskyDelegation: () => true,
+        requestDelegationApproval: async (input) => {
+          asked.push(input.taskId)
+          return 'allow_once'
+        },
+      })
+      // A lead's own turn works on no task.
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">deploy it</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      // The helper's run works on the task it was handed.
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">deploy the rest</delegate>'),
+      )
+      expect(asked).toEqual([null, parent])
     })
 
     it('a NON-risky delegation skips the approval gate entirely', async () => {

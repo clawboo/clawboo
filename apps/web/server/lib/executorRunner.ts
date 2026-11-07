@@ -1120,6 +1120,8 @@ async function runTaskInner(
       // The task this run works on, for the Tasks tools' default (signed onto
       // the Tasks URL). `taskId` above stamps memory provenance only.
       boundTaskId: taskId,
+      // The run's ledger row, recorded with each write its Tasks tools make.
+      boundExecutionId: exec.id,
     },
     homeDir,
     ...(input.apiKeyEnv ? { apiKeyEnv: input.apiKeyEnv } : {}),
@@ -2021,7 +2023,7 @@ async function runTaskInner(
   let failedClass: RuntimeErrorClass | null = null
 
   if (success) {
-    addComment(db, taskId, reported, 'agent', assigneeAgentId)
+    addComment(db, taskId, reported, 'agent', assigneeAgentId, { executionId: exec.id })
     const closeRun = (): void => {
       // BIND the result. `completeExecutionProcess` refuses (returns null) when
       // the row is already terminal: a stale sweep got there first. Emitting

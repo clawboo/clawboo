@@ -31,7 +31,14 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   return { res, statusCode: () => code, body: () => payload }
 }
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    // The dashboard's own page: only a person's move can use the override.
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    ...over,
+  }) as unknown as Request
 
 function failVerdict(): VerificationResult {
   return {

@@ -50,6 +50,8 @@ export interface ToolsServerOptions {
    * make is denied `no-grant` with nothing in the record explaining why.
    */
   teamId?: string
+  /** The board task the run works on, recorded on an approval a call opens. */
+  taskId?: string
   /** Recorded on a stored tool result, so a spill is attributable. */
   tenantId?: string
   /**
@@ -288,6 +290,7 @@ export function createToolsServer(db: ClawbooDb, opts: ToolsServerOptions = {}):
                 // Both are spread CONDITIONALLY so a builtin-only construction
                 // produces exactly the context it produced before this change.
                 ...(opts.teamId ? { teamId: opts.teamId } : {}),
+                ...(opts.taskId ? { taskId: opts.taskId } : {}),
                 ...(connectorId ? { connectorId } : {}),
               },
               { registry: live.registry, ...opts.broker },

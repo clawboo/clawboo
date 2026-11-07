@@ -156,7 +156,7 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
         </p>
       )}
 
-      {human.decisive.length > 0 && (
+      {(human.decisive.length > 0 || approval.taskTitle) && (
         <dl className="flex flex-col gap-1">
           {human.decisive.slice(0, compact ? 2 : 3).map((f) => (
             <div key={f.label} className="flex gap-2 text-[12px]">
@@ -164,6 +164,14 @@ export function ToolApprovalCard({ approval, onResolve, compact = false }: ToolA
               <dd className="min-w-0 flex-1 break-words text-foreground/90">{f.value}</dd>
             </div>
           ))}
+          {approval.taskTitle && (
+            <div className="flex gap-2 text-[12px]">
+              <dt className="w-[74px] shrink-0 text-muted-foreground">Task</dt>
+              <dd className="min-w-0 flex-1 break-words text-foreground/90">
+                {approval.taskTitle}
+              </dd>
+            </div>
+          )}
         </dl>
       )}
 

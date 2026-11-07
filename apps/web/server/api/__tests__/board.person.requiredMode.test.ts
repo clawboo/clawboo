@@ -1,7 +1,8 @@
-// Behind a sign-in proxy in `required` mode, a person's write needs a verified person
-// on top of the dashboard's fetch metadata. An agent that reads the access token file
-// and sends the same headers still has no token the proxy signed. Over real HTTP, in
-// the server's order: identity lane, identity middleware, routes.
+// Behind a sign-in proxy in `required` mode, a person's write needs a verified person:
+// the dashboard's fetch metadata alone is not enough, and a signed token is, from a
+// script as well as the dashboard. An agent that reads the access token file and sends
+// the same headers still has no token the proxy signed. Over real HTTP, in the server's
+// order: identity lane, identity middleware, routes.
 
 import { generateKeyPairSync } from 'node:crypto'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -141,7 +142,7 @@ describe('a person’s writes in `required` mode', () => {
     expect(listTaskQuestions(getDb(), taskId)[0]?.status).toBe('pending')
   })
 
-  it('refuses a verified person the dashboard’s page did not send', async () => {
+  it('takes a verified person from a script: the signed token is what vouches', async () => {
     const { taskId, questionId } = asked()
     const urlPath = `/api/board/questions/${questionId}/answer`
     const res = await fetch(`${base}${urlPath}`, {
@@ -152,8 +153,8 @@ describe('a person’s writes in `required` mode', () => {
       },
       body: JSON.stringify({ answer: { confirmed: true } }),
     })
-    expect(res.status).toBe(403)
-    expect(listTaskQuestions(getDb(), taskId)[0]?.status).toBe('pending')
+    expect(res.status).toBe(200)
+    expect(listTaskQuestions(getDb(), taskId)[0]?.status).toBe('answered')
   })
 
   it('records the verified person when both hold', async () => {

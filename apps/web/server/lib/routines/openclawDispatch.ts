@@ -38,6 +38,7 @@ import { usdToFractionalCents } from '@clawboo/governance'
 import type { TaskTemplate } from '@clawboo/scheduler'
 import { KeyedMutex } from '@clawboo/worktrees'
 
+import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget, type RunBudgetHold } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
 import { openclawAgentModel } from '../openclawAgentModel'
@@ -149,9 +150,15 @@ export async function dispatchConnectedSubstrate(
     return await withRunSlot(
       () => {
         queuedStop.release()
-        return connectedAgentMutex.run(connectedAgentKey(input.agentRow), () =>
-          dispatchConnectedSubstrateInner(input, gatewayAgentId),
-        )
+        return connectedAgentMutex.run(connectedAgentKey(input.agentRow), async () => {
+          const sessionKey = routineSessionKey(gatewayAgentId, input.run.id)
+          routineSessionTasks.set(sessionKey, input.taskId)
+          try {
+            return await dispatchConnectedSubstrateInner(input, gatewayAgentId)
+          } finally {
+            routineSessionTasks.delete(sessionKey)
+          }
+        })
       },
       {
         key: connectedAgentKey(input.agentRow),
@@ -166,6 +173,19 @@ export async function dispatchConnectedSubstrate(
   } finally {
     queuedStop.release()
   }
+}
+
+/** Stable per-routine session: context accrues across fires (the Gateway's own
+ *  `cron:<jobId>` session-keying precedent). */
+const routineSessionKey = (gatewayAgentId: string, routineId: string): string =>
+  `agent:${gatewayAgentId}:clawboo-routine-${routineId}`
+
+/** The task each routine session is running right now. */
+const routineSessionTasks = new Map<string, string>()
+
+/** The task a routine's OpenClaw session is running, or null. */
+export function taskForRoutineSession(sessionKey: string): string | null {
+  return routineSessionTasks.get(sessionKey) ?? null
 }
 
 async function dispatchConnectedSubstrateInner(
@@ -312,9 +332,7 @@ async function drainClaimedRoutineRun(
   const adapter: ConnectedAdapterLike = input.makeAdapter
     ? input.makeAdapter(client)
     : new OpenClawAdapter(client)
-  // Stable per-routine session: context accrues across fires (the Gateway's
-  // own `cron:<jobId>` session-keying precedent).
-  const sessionKey = `agent:${gatewayAgentId}:clawboo-routine-${run.id}`
+  const sessionKey = routineSessionKey(gatewayAgentId, run.id)
   const contextBlock = [
     `# Scheduled team task: ${template.title}`,
     template.description ?? '',
@@ -357,24 +375,17 @@ async function drainClaimedRoutineRun(
       if (!scopeId) continue
       const r = recordSpend(db, scope, scopeId, cents, { holdId: hold.id })
       if (!r) continue
-      if (r.crossed !== 'none') {
-        appendAudit(db, {
-          eventType: 'budget',
-          taskId,
-          teamId: run.teamId,
-          agentId: run.agentId,
-          tenantId: run.tenantId,
-          summary: {
-            scope,
-            scopeId,
-            crossed: r.crossed,
-            status: r.status,
-            mode: r.mode,
-            runtime: 'openclaw',
-            estimated,
-          },
-        })
-      }
+      auditBudgetCrossing(db, {
+        scope,
+        scopeId,
+        result: r,
+        runKind: 'routine',
+        agentId: run.agentId,
+        teamId: run.teamId,
+        taskId,
+        tenantId: run.tenantId,
+        extra: { crossed: r.crossed, status: r.status, runtime: 'openclaw', estimated },
+      })
       if (r.status === 'paused' && r.mode === 'cap' && !pausedScope) pausedScope = scope
     }
     return pausedScope
@@ -513,6 +524,16 @@ async function drainClaimedRoutineRun(
         const a = recordSpend(db, 'agent', run.agentId, cents, spend)
         const m = recordSpend(db, 'mission', missionId, cents, spend)
         const t = run.teamId ? recordSpend(db, 'team', run.teamId, cents, spend) : null
+        const on = {
+          runKind: 'routine',
+          agentId: run.agentId,
+          teamId: run.teamId,
+          taskId,
+        } as const
+        auditBudgetCrossing(db, { ...on, scope: 'agent', scopeId: run.agentId, result: a })
+        auditBudgetCrossing(db, { ...on, scope: 'mission', scopeId: missionId, result: m })
+        if (run.teamId)
+          auditBudgetCrossing(db, { ...on, scope: 'team', scopeId: run.teamId, result: t })
         if (a?.status === 'paused' && a.mode === 'cap') stopForBudget = 'agent'
         else if (m?.status === 'paused' && m.mode === 'cap') stopForBudget = 'mission'
         else if (t?.status === 'paused' && t.mode === 'cap') stopForBudget = 'team'

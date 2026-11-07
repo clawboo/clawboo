@@ -8,11 +8,12 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 import { ANNOUNCED_REASONS } from '@/features/alerts/alertRules'
 import { TeamAgentWakesToggle } from '@/features/group-chat/TeamAgentWakesToggle'
+import { PERSON_CHECK_REFUSED, resetPersonCheckNotices } from '@/lib/personCheckNotice'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
 
 import { AgentWakesCard } from '../AgentWakesCard'
-import { ATTENTION_META, attentionLabel, DASHBOARD_ONLY, taskAttentionOf } from '../boardStatus'
+import { ATTENTION_META, attentionLabel, taskAttentionOf } from '../boardStatus'
 import { pendingWakeText } from '../pendingWake'
 
 const server = setupServer()
@@ -24,6 +25,7 @@ const CARD = { jobTaskId: 'job1', kind: 'ask', fromAgentId: 'a1', toAgentId: 'a2
 
 beforeEach(() => {
   useToastStore.setState({ toasts: [] })
+  resetPersonCheckNotices()
   useFleetStore.setState({
     agents: [
       { id: 'a1', name: 'Ada' },
@@ -120,18 +122,19 @@ describe('AgentWakesCard', () => {
     expect(useToastStore.getState().toasts.at(-1)?.message).toMatch(/already been answered/)
   })
 
-  it('a refusal for not being the dashboard says why', async () => {
+  it('a refusal from the person check says why, once, and not to try again', async () => {
     server.use(
       http.post('/api/board/agent-wakes/job1', () =>
-        HttpResponse.json({ ok: false, error: 'dashboard_only' }, { status: 403 }),
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
       ),
     )
     const done = vi.fn()
     render(<AgentWakesCard card={CARD} teamId="T" onDecided={done} />)
     await userEvent.click(screen.getByRole('button', { name: 'Allow on this job' }))
     await waitFor(() =>
-      expect(useToastStore.getState().toasts.at(-1)?.message).toBe(DASHBOARD_ONLY),
+      expect(useToastStore.getState().toasts.at(-1)?.message).toBe(PERSON_CHECK_REFUSED),
     )
+    expect(useToastStore.getState().toasts).toHaveLength(1)
     expect(done).not.toHaveBeenCalled()
   })
 })
@@ -160,14 +163,34 @@ describe('the team’s setting', () => {
     server.use(
       http.get('/api/team-agent-wakes/T', () => HttpResponse.json({ always: true })),
       http.put('/api/team-agent-wakes/T', () =>
-        HttpResponse.json({ ok: false, error: 'dashboard_only' }, { status: 403 }),
+        HttpResponse.json({ error: 'boom' }, { status: 500 }),
       ),
     )
     render(<TeamAgentWakesToggle teamId="T" />)
     const toggle = await screen.findByRole('switch')
     await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
     await userEvent.click(toggle)
-    await waitFor(() => expect(useToastStore.getState().toasts.length).toBe(1))
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.at(-1)?.message).toMatch(/try again/),
+    )
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+  })
+
+  it('a refusal from the person check says why, once, and not to try again', async () => {
+    server.use(
+      http.get('/api/team-agent-wakes/T', () => HttpResponse.json({ always: true })),
+      http.put('/api/team-agent-wakes/T', () =>
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
+      ),
+    )
+    render(<TeamAgentWakesToggle teamId="T" />)
+    const toggle = await screen.findByRole('switch')
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
+    await userEvent.click(toggle)
+    await waitFor(() =>
+      expect(useToastStore.getState().toasts.at(-1)?.message).toBe(PERSON_CHECK_REFUSED),
+    )
+    expect(useToastStore.getState().toasts).toHaveLength(1)
     expect(toggle).toHaveAttribute('aria-checked', 'true')
   })
 })

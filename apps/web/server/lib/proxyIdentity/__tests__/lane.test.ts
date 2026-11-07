@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createAccessGate, isRuntimeControlRequest } from '@clawboo/gateway-proxy'
 
 import { accessIdentityGET } from '../../../api/access'
-import { attachIdentity } from '../../auth'
+import { actsAsPerson, attachIdentity } from '../../auth'
 import { createBasePathMiddleware } from '../../basePathMiddleware'
 import { resetOperatorSettings } from '../../operatorSettings'
 import type { ProxyIdentityConfig } from '../config'
@@ -88,6 +88,9 @@ async function start(opts: {
   app.get('/api/access/identity', accessIdentityGET)
   app.post('/api/mcp/tasks', (req, res) => {
     res.json({ runtime: true, person: req.person ?? null })
+  })
+  app.put('/api/team-verify-command/:teamId', (req, res) => {
+    res.json({ actsAsPerson: actsAsPerson(req), person: req.person ?? null })
   })
   // A wildcard route, which absorbs dot segments the way the board's preview
   // route does: the raw path stays under /api/ while a resolved one leaves it.
@@ -209,6 +212,65 @@ describe('on', () => {
     expect(await get('/api/access/identity', headers)).toMatchObject({
       status: 401,
       body: { reason: 'replayed' },
+    })
+  })
+})
+
+// What makes a person write real behind a sign-in proxy: in `required` mode, no
+// person-only route answers without a verified person, however its path is spelled,
+// and a runtime's attach credential opens none of them.
+describe('required: the person-only routes', () => {
+  const ROUTES: Array<[string, string]> = [
+    ['GET', '/api/settings'],
+    ['POST', '/api/settings'],
+    ['GET', '/api/governance/budgets'],
+    ['POST', '/api/governance/budgets'],
+    ['POST', '/api/governance/budgets/team/T/resume'],
+    ['GET', '/api/system/hold'],
+    ['POST', '/api/system/hold'],
+    ['DELETE', '/api/system/hold/me'],
+    ['PUT', '/api/team-verify-command/T'],
+    ['PATCH', '/api/board/t1'],
+    ['POST', '/api/board/t1/retry'],
+    ['POST', '/api/board/t1/assign'],
+    ['POST', '/api/tools/approvals/a1/resolve'],
+    ['POST', '/api/capabilities/approve'],
+  ]
+
+  it.each(ROUTES)('%s %s refuses a request with no verified person', async (method, route) => {
+    await start({ mode: 'required' })
+    const res = await get(route, {}, method)
+    expect(res).toMatchObject({ status: 401, body: { reason: 'missing' } })
+  })
+
+  it.each(ROUTES)('%s %s refuses a runtime attach credential', async (method, route) => {
+    await start({ mode: 'required' })
+    const res = await get(route, { 'x-test-attach': 'minted' }, method)
+    expect(res).toMatchObject({ status: 401, body: { reason: 'missing' } })
+  })
+
+  it('reads the path every way the router can', async () => {
+    await start({ mode: 'required' })
+    // A runtime's credential must not reach a route by a spelling that starts under
+    // the mounts it may use: every reading has to be under them.
+    for (const route of [
+      '/API/settings',
+      '/api/./settings',
+      '/api/mcp/../settings',
+      '/api/mcp/tasks/../../settings',
+    ]) {
+      const { status } = await raw(route, { 'x-test-attach': 'minted' })
+      expect(status, route).toBe(401)
+    }
+  })
+
+  it('lets a verified person through, who then counts as the person with no fetch metadata', async () => {
+    await start({ mode: 'required' })
+    const token = await assertion('PUT', '/api/team-verify-command/T')
+    const res = await get('/api/team-verify-command/T', { 'clawboo-identity': token }, 'PUT')
+    expect(res).toMatchObject({
+      status: 200,
+      body: { actsAsPerson: true, person: { id: 'user-42' } },
     })
   })
 })

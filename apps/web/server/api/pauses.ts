@@ -5,16 +5,16 @@
 //   DELETE /api/pauses/:kind/:id    resume it
 //
 // `task` names any task in a tree: the tree is paused or resumed from its root.
-// Writes are a person's: they come from the dashboard, never from an agent's own
-// call to the local API. See lib/pauseRuns for what a pause stops and what it does
-// not, and @clawboo/db's board/pauses for what it covers.
+// Writes are a person's, so they take the one person check (`refuseUnlessPerson`: a
+// speed bump locally, not a boundary), and the event says who did it. See lib/pauseRuns
+// for what a pause stops and what it does not, and @clawboo/db's board/pauses for what
+// it covers.
 
 import { taskTreeRootId, type ClawbooDb, type PauseKind } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
-import { personOf } from '../lib/auth'
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { ownWriterOf } from '../lib/boardReader'
-import { isDashboardRequest } from '../lib/dashboardRequest'
 import { getDb } from '../lib/db'
 import { pauseRuns, resumeRuns } from '../lib/pauseRuns'
 import { pauseTargetName, pauseViews } from '../lib/pauseViews'
@@ -45,10 +45,7 @@ export function pausesGET(_req: Request, res: Response): void {
 
 export function pausesPOST(req: Request, res: Response): void {
   try {
-    if (!isDashboardRequest(req)) {
-      res.status(403).json({ ok: false, error: 'person_only' })
-      return
-    }
+    if (refuseUnlessPerson(req, res)) return
     const body = (req.body ?? {}) as { kind?: unknown; id?: unknown; reason?: unknown }
     const db = getDb()
     const scope = scopeOf(db, body.kind, body.id)
@@ -75,7 +72,7 @@ export function pausesPOST(req: Request, res: Response): void {
     const { pause, created } = pauseRuns(db, {
       ...scope,
       reason,
-      person: personOf(req),
+      ...actorField(req),
       reader: ownWriterOf(req),
     })
     res.status(created ? 201 : 200).json({ ok: true, created, pause: { ...pause, name } })
@@ -86,17 +83,14 @@ export function pausesPOST(req: Request, res: Response): void {
 
 export function pausesDELETE(req: Request, res: Response): void {
   try {
-    if (!isDashboardRequest(req)) {
-      res.status(403).json({ ok: false, error: 'person_only' })
-      return
-    }
+    if (refuseUnlessPerson(req, res)) return
     const db = getDb()
     const scope = scopeOf(db, req.params['kind'], req.params['id'])
     if (!scope) {
       res.status(400).json({ ok: false, error: 'kind must be agent, team or task, with its id.' })
       return
     }
-    if (!resumeRuns(db, scope.kind, scope.id, personOf(req))) {
+    if (!resumeRuns(db, scope.kind, scope.id, actorField(req))) {
       res.status(404).json({ ok: false, error: 'not_paused' })
       return
     }

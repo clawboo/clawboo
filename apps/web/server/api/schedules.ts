@@ -40,7 +40,7 @@ import {
 
 import { eq } from 'drizzle-orm'
 
-import { isDashboardRequest } from '../lib/dashboardRequest'
+import { actsAsPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { pauseTargetName } from '../lib/pauseViews'
 import { getRoutinesTicker } from '../lib/routines/ticker'
@@ -345,11 +345,11 @@ export function schedulesTimeZonePUT(req: Request, res: Response): void {
 /**
  * A routine's task template as this caller may set it. A routine files its tasks with
  * the template's priority, so this is another way to set one, and Urgent is a person's
- * call: anything but the dashboard's own page stops at High. A speed bump, as on the
- * board's own routes (see isDashboardRequest).
+ * call: anything that fails the person check stops at High. A speed bump, as on the
+ * board's own routes (see actsAsPerson).
  */
 function templateFor(req: Request, template: unknown): unknown {
-  if (isDashboardRequest(req) || typeof template !== 'object' || template === null) return template
+  if (actsAsPerson(req) || typeof template !== 'object' || template === null) return template
   const priority = (template as { priority?: unknown }).priority
   return typeof priority === 'number'
     ? { ...template, priority: clampAgentTaskPriority(priority) }

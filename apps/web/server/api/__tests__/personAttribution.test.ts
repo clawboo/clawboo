@@ -48,7 +48,15 @@ const req = (
   body: unknown,
   params: Record<string, string> = {},
   person: typeof ADA | null = null,
-): Request => ({ body, params, query: {}, headers: {}, person }) as unknown as Request
+): Request =>
+  // The dashboard's own page: these are a person's writes (see personCheck.test.ts).
+  ({
+    body,
+    params,
+    query: {},
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    person,
+  }) as unknown as Request
 
 function eventData(kind: string): Record<string, unknown>[] {
   return listEvents(getDb(), { limit: 1000 })
@@ -91,14 +99,20 @@ describe('task edits', () => {
     const created = eventData('task_created')
     expect(created.find((d) => d['title'] === 'Root')).toMatchObject({ person: ADA })
     expect(created.find((d) => d['title'] === 'Child')).not.toHaveProperty('person')
-    expect(eventData('status_changed')).toEqual([{ to: 'in_progress', by: 'person', person: ADA }])
-    expect(eventData('dep_linked')).toEqual([{ dependsOnTaskId: a, person: ADA }])
+    expect(eventData('status_changed')).toEqual([
+      { to: 'in_progress', by: 'person', actor: { kind: 'person' }, person: ADA },
+    ])
+    expect(eventData('dep_linked')).toEqual([
+      { dependsOnTaskId: a, actor: { kind: 'person' }, person: ADA },
+    ])
   })
 
   it('records no one on a move nothing vouched for', () => {
     const a = createTask('Root', null)
     boardUpdatePATCH(req({ status: 'in_progress' }, { taskId: a }), mockRes().res)
-    expect(eventData('status_changed')).toEqual([{ to: 'in_progress', by: 'person' }])
+    expect(eventData('status_changed')).toEqual([
+      { to: 'in_progress', by: 'person', actor: { kind: 'person' } },
+    ])
   })
 })
 

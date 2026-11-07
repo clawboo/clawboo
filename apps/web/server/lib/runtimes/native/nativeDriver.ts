@@ -141,6 +141,9 @@ export function createNativeDriver(
               // The same team-run test as the `delegate` tool below.
               teamRun: isTeamSessionKey(opts.sessionKey),
               ...(ctx.memoryScope?.boundTaskId ? { boundTaskId: ctx.memoryScope.boundTaskId } : {}),
+              ...(ctx.memoryScope?.boundExecutionId
+                ? { boundExecutionId: ctx.memoryScope.boundExecutionId }
+                : {}),
               ...(ctx.memoryScope
                 ? {
                     memoryScope: ctx.memoryScope,
@@ -174,6 +177,7 @@ export function createNativeDriver(
             agentId: opts.agentId,
             cwd: ctx.cwd ?? null,
             enabled: config.tools.shell === true,
+            taskId: ctx.memoryScope?.boundTaskId ?? null,
           }),
           ...(isTeamSessionKey(opts.sessionKey) ? [buildDelegateTool()] : []),
         ],
