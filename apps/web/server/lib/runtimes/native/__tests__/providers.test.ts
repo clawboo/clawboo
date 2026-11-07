@@ -309,6 +309,17 @@ describe('provider error normalization', () => {
       'auth',
     )
     expect(normalizeProviderError({ status: 429 } as unknown as Error).code).toBe('rate_limit')
+    // A connection that dropped mid-reply: what Node's fetch throws, as the SDKs rethrow it.
+    const dropped = normalizeProviderError(new TypeError('terminated'))
+    expect(dropped.code).toBe('network')
+    expect(dropped.message).toMatch(/connection to the provider dropped/)
+    expect(
+      normalizeProviderError(
+        new Error(
+          'Client network socket disconnected before secure TLS connection was established',
+        ),
+      ).code,
+    ).toBe('network')
     expect(normalizeProviderError({ status: 529 } as unknown as Error).code).toBe('overloaded')
     expect(normalizeProviderError({ status: 503 } as unknown as Error).code).toBe('overloaded')
     expect(normalizeProviderError({ status: 400 } as unknown as Error).code).toBe('bad_request')

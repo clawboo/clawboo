@@ -237,7 +237,7 @@ describe('budget holds on the task runner', () => {
     expect(a.state.started).toBe(0)
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listExecutions(db, taskId).map((e) => [e.status, e.error, e.errorClass])).toEqual([
-      ['cancelled', 'budget_paused:team', 'BudgetRefused'],
+      ['budget_paused', 'budget_paused:team', 'BudgetRefused'],
     ])
     expect(getComments(db, taskId).map((c) => c.body)).toEqual([
       expect.stringContaining('The team budget is paused at its hard cap'),
@@ -270,7 +270,7 @@ describe('budget holds on the task runner', () => {
     expect(a.state.started).toBe(0)
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listExecutions(db, taskId).map((e) => [e.status, e.error])).toEqual([
-      ['cancelled', 'budget_held:team'],
+      ['budget_held', 'budget_held:team'],
     ])
     expect(getComments(db, taskId).map((c) => c.body)).toEqual([
       expect.stringContaining('runs already going have set aside the rest of it'),
@@ -320,7 +320,7 @@ describe('budget holds on the task runner', () => {
     expect(starts).toBe(1)
     expect(result).toMatchObject({ ok: true, doneReason: 'aborted', status: 'todo' })
     expect(listExecutions(db, taskId).map((e) => [e.status, e.error, e.errorClass])).toEqual([
-      ['cancelled', 'budget_paused:team', 'BudgetRefused'],
+      ['budget_paused', 'budget_paused:team', 'BudgetRefused'],
     ])
     expect(holds()).toEqual([])
   })

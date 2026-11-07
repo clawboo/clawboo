@@ -49,6 +49,11 @@ interface FolderState {
 
 const folders = new Map<string, FolderState>()
 
+/** Whether a teammate's run overlapped each agent's latest run in a folder. Outlives the
+ *  folder's state, since it is read after the run has ended. */
+const sharedRuns = new Map<string, boolean>()
+const sharedKey = (folder: string, agentId: string): string => `${folder}\u0000${agentId}`
+
 function stateOf(folder: string): FolderState {
   let state = folders.get(folder)
   if (!state) {
@@ -75,6 +80,9 @@ function settle(folder: string, state: FolderState): void {
 /** Report a run working in `folder`, until `release`. */
 export function startFolderRun(folder: string, agentId: string): FolderRun {
   const state = stateOf(folder)
+  const others = state.runs.filter((other) => other !== agentId)
+  sharedRuns.set(sharedKey(folder, agentId), others.length > 0)
+  for (const other of others) sharedRuns.set(sharedKey(folder, other), true)
   state.runs.push(agentId)
   for (const turn of state.checks) turn.sawRun = true
   let going = true
@@ -86,6 +94,12 @@ export function startFolderRun(folder: string, agentId: string): FolderRun {
       settle(folder, state)
     },
   }
+}
+
+/** Was a teammate working in `folder` at some point during this agent's latest run? If
+ *  so, what changed in the folder may not be this agent's doing. */
+export function lastRunWasShared(folder: string, agentId: string): boolean {
+  return sharedRuns.get(sharedKey(folder, agentId)) ?? false
 }
 
 /** The agents of the runs going in `folder` now, without repeats. */

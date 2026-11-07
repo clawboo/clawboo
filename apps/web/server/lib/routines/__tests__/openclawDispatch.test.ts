@@ -468,7 +468,7 @@ describe('dispatchConnectedSubstrate', () => {
     expect(outcome.error).toContain('budget')
     expect(aborted).toBe(1)
     expect(getTask(db, taskId)?.status).toBe('todo') // released
-    expect(listExecutions(db, taskId)[0]).toMatchObject({ status: 'cancelled' })
+    expect(listExecutions(db, taskId)[0]).toMatchObject({ status: 'budget_paused' })
     expect(getBudget(db, 'agent', agentRow.id)?.status).toBe('paused')
     const audit = listGovernanceAudit(db, { eventType: 'budget' }).map(
       (r) => JSON.parse(r.summary) as Record<string, unknown>,
@@ -1281,7 +1281,7 @@ describe('budget holds on a scheduled OpenClaw fire', () => {
     expect(adapter.started()).toBe(0)
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listExecutions(db, taskId)[0]).toMatchObject({
-      status: 'cancelled',
+      status: 'budget_paused',
       error: 'budget_paused:agent',
       errorClass: 'BudgetRefused',
     })
@@ -1320,7 +1320,7 @@ describe('budget holds on a scheduled OpenClaw fire', () => {
     expect(adapter.started()).toBe(0)
     expect(getTask(db, taskId)?.status).toBe('todo')
     expect(listExecutions(db, taskId)[0]).toMatchObject({
-      status: 'cancelled',
+      status: 'budget_held',
       error: 'budget_held:agent',
     })
     // Only the other run's hold is left.

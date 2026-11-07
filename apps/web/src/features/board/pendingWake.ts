@@ -44,6 +44,10 @@ export function pendingWakeText(
       return `Waiting: a budget cap would refuse the run. Raise it to send ${what} to ${name}`
     case 'braked':
       return `Waiting a few minutes: the last runs made no visible progress. A comment from you starts it now`
+    case 'retry_wait':
+      return `Waiting to try again after a provider failure. ${name} reads ${what} then`
+    case 'breaker':
+      return `The circuit breaker stopped this task. Retry it to send ${what} to ${name}`
     case 'agent_busy':
       return `${name} is busy with other work and reads ${what} next`
     case 'run_live':

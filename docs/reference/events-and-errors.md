@@ -83,12 +83,12 @@ Every failure an `error` event records is sorted into one class by matching its 
 | `Unknown`         | Nothing matched, or the error had no text                                           | Anything else                                                                                                                                                                                                                                        | Yes         |
 | `PolicyDenied`    | A guardrail refused a call (expected)                                               | Task-runner runs only; see [PolicyDenied](#policydenied)                                                                                                                                                                                             | No          |
 
-The classes are tried in the order of the table. `Billing` and `Auth` come first: a provider can send an empty balance as a 429 that names its quota, a revoked key as a 400, and an account on hold as a 403. A code in snake_case is also read word by word, so `rate_limit_error` matches `rate limit`. The runtimes put the cause they know on the error's code: Claude Code the SDK's (`authentication_failed`, `billing_error`, `rate_limit`, ...), Codex the app-server's, in the same words where they mean the same thing, and Hermes the `code` or `type` of the provider error it printed.
+An exact typed code decides first, before any number in the message can: `context_overflow`, `auth`, `authentication_failed`, `authentication_error`, `invalid_api_key`, `billing_error`, `rate_limit`, `rate_limit_error`, `overloaded`, `overloaded_error`, `server_overloaded`, `server_error`, `network` and `network_error`. A typed rate limit, or a message that opens with a 429, still reads as `Billing` when it names an empty balance in words. Otherwise the classes are tried in the order of the table. `Billing` and `Auth` come first: a provider can send an empty balance as a 429 that names its quota, a revoked key as a 400, and an account on hold as a 403. A code in snake_case is also read word by word, so `rate_limit_error` matches `rate limit`. The runtimes put the cause they know on the error's code: Claude Code the SDK's (`authentication_failed`, `billing_error`, `rate_limit`, ...), Codex the app-server's, in the same words where they mean the same thing, and Hermes the `code` or `type` of the provider error it printed.
 
 Two groups of classes change what happens next:
 
 - **Account failures** (`Auth`, `Billing`): a retry fails the same way until a person fixes the sign-in or the account. The task runner never refires the task, the team engine tells the delegator not to hand it out again, and the board shows **Fix sign-in** on the task in **Needs you**. The class is stored on the run's ledger row (`execution_processes.error_class`).
-- **Failures that may pass** (`RateLimited`, `Timeout`, `ProviderError`): a routine keeps its schedule through up to three of these in a row. See [Routines](/using/routines#when-a-routine-stops).
+- **Failures that may pass** (`RateLimited`, `Timeout`, `ProviderError`): a team chat task waits and runs again twice, after 30 and 60 seconds of awake time, then goes to **Needs you**. A task on the task runner waits the same before each automatic rerun. A routine keeps its schedule through up to three of these in a row. See [Routines](/using/routines#when-a-routine-stops).
 
 ### PolicyDenied
 
@@ -233,7 +233,7 @@ A run finished. The cost and token fields carry the run's final totals (see [Cos
 ```ts
 {
   execId: string
-  status: string // the run's final status, such as 'succeeded', 'failed' or 'cancelled'
+  status: string // the run's final status: 'succeeded', 'failed', 'timed_out', 'cancelled', 'budget_paused', 'budget_held' or 'breaker_tripped'
   costUsd?: number | null
   inputTokens?: number
   outputTokens?: number
@@ -246,12 +246,12 @@ On task-runner runs, `error` holds a code when Clawboo stopped or refused the ru
 | `error`                   | `status`                | Meaning                                                                                                              |
 | ------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `workspace_unavailable`   | `failed`                | A file-changing task had no repository, or its git worktree could not be created, so the run was refused             |
-| `budget_paused:<scope>`   | `cancelled`             | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap) |
-| `budget_held:<scope>`     | `cancelled`             | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start    |
-| `circuit_broken:<reason>` | `cancelled`             | A circuit breaker stopped the run; see the reasons below                                                             |
+| `budget_paused:<scope>`   | `budget_paused`         | A hard-cap budget stopped the run; `<scope>` is `agent`, `mission`, `team`, or `node` (a routine's per-run cost cap) |
+| `budget_held:<scope>`     | `budget_held`           | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start    |
+| `circuit_broken:<reason>` | `breaker_tripped`       | A circuit breaker stopped the run; see the reasons below                                                             |
 | Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                          |
 
-The two budget rows also carry `errorClass` `BudgetRefused`: their status is `cancelled`, but no person stopped them, and a raised cap lets a wake on the task go out.
+`cancelled` means a person. The two budget rows also carry `errorClass` `BudgetRefused`, and a raised cap lets a wake on the task go out. A held budget clears by itself, so that task runs again when it does.
 
 Breaker reasons, also posted on the task as a comment that begins `[stopped: <reason>]`:
 
@@ -619,7 +619,8 @@ A saved wake did not start a run. One event each time the reason changes, howeve
 | `paused`                   | A person resuming the pause that covers it                  |
 | `team_archived`            | A person bringing the team back                             |
 | `budget`                   | A person raising the hard cap                               |
-| `braked`                   | The wait running out, or a person's comment                 |
+| `braked`, `retry_wait`     | The wait running out, or a person's comment                 |
+| `breaker`                  | A person's Retry                                            |
 | `agent_busy`               | The agent's other work ending                               |
 | `run_live`                 | A run proven alive holds the task, and takes it             |
 | `run_unproven`             | The stale sweep ending a run nothing proves alive           |

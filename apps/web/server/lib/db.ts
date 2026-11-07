@@ -17,6 +17,7 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import {
+  backfillHostStopStatuses,
   backfillTaskIdentifiers,
   ensureSchema,
   openDb,
@@ -72,6 +73,11 @@ export function getDb(): ClawbooDb {
     const numbered = backfillTaskIdentifiers(db)
     if (numbered > 0) {
       log.info({ count: numbered }, 'Board: gave existing tasks their readable ids')
+    }
+    // Runs a budget cap or the breaker closed before they had their own statuses.
+    const refiled = backfillHostStopStatuses(db)
+    if (refiled > 0) {
+      log.info({ count: refiled }, 'Board: refiled budget and breaker stops off cancelled')
     }
     // A permission change is never silent. An older build granted every
     // connector to the whole fleet on connect; those rows still answer for every

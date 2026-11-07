@@ -88,6 +88,7 @@ const PINNED_FEATURES = [
   'board.inbox',
   'board.wakes',
   'board.agentWakes',
+  'board.endings',
   'board.reopen',
   'board.personAssignees',
   'board.questions',

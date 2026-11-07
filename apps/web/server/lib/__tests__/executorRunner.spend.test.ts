@@ -475,7 +475,7 @@ describe('executor runner: what a run is charged, and when a cap stops it', () =
     const result = await run(taskId, adapter)
     expect(result.ok && result.summary).toBe('auto-paused (budget)')
     expect(adapter.aborts).toBe(1)
-    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('cancelled')
+    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('budget_paused')
     expect(getComments(getDb(), taskId).map((c) => c.body)).not.toContain('should not be kept')
   })
 
@@ -486,7 +486,7 @@ describe('executor runner: what a run is charged, and when a cap stops it', () =
     const result = await run(taskId, adapter, 'codex-1')
     expect(result.ok && result.summary).toBe('auto-paused (budget)')
     expect(adapter.aborts).toBeGreaterThanOrEqual(1)
-    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('cancelled')
+    expect(listExecutions(getDb(), taskId)[0]?.status).toBe('budget_paused')
   })
 
   it('lists the run in Tokens Used', async () => {

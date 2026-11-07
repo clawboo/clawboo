@@ -9,6 +9,7 @@ import {
   agents,
   settings,
   teamAgentWakesSettingKey,
+  stopTasksWaitingToStart,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
@@ -16,6 +17,8 @@ import { eq, inArray, like, sql } from 'drizzle-orm'
 import { personOf } from '../lib/auth'
 import { ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
+import { emitEvent } from '../lib/obs'
+import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
 import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
 import { getRegistry } from '../lib/agentSource/registry'
@@ -586,6 +589,22 @@ export function teamChatStopPOST(req: Request, res: Response): void {
       stopAsOwnWrite(db, ownWriterOf(req), { teamId, roomId }, () => orchestrator.stop()).catch(
         (err: unknown) => log.error({ err, teamId, roomId }, 'stopping the room failed'),
       )
+    } else {
+      // No engine to tell, and no engine coming until their waits end: the tasks waiting
+      // to start by themselves would start anyway. Anything else in the room is as before.
+      for (const task of stopTasksWaitingToStart(db, { teamId, roomId })) {
+        emitEvent(db, {
+          kind: 'status_changed',
+          taskId: task.id,
+          teamId,
+          data: { to: 'todo', reason: 'stopped_while_waiting' },
+        })
+        publishBoardChangeWithAttention(db, teamId, {
+          id: task.id,
+          status: 'todo',
+          updatedAt: Date.now(),
+        })
+      }
     }
     res.json({ ok: true })
   } catch (err) {

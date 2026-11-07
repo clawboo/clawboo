@@ -57,6 +57,8 @@ export const ENGINE_FEATURES = [
   'board.inbox',
   'board.wakes',
   'board.agentWakes',
+  // Run endings told apart: empty replies, provider retries, budget and breaker stops.
+  'board.endings',
   // A person's writes on the board: Reopen, tasks assigned to a person, and questions
   // an agent asks a person.
   'board.reopen',

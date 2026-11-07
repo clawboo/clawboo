@@ -22,6 +22,71 @@ const view = (over: Partial<SubtaskView>): SubtaskView => ({
 })
 const blocked = (waitingOn: unknown): SubtaskView => view({ status: 'blocked', waitingOn })
 
+describe('subtaskStanding: how its last run ended', () => {
+  const failedOn = (errorClass: string): { status: string; errorClass: string } => ({
+    status: 'failed',
+    errorClass,
+  })
+  const retrying = failedOn('RateLimited')
+
+  it.each([
+    ['a provider failure waiting for its retry', [retrying]],
+    ['a provider failure with its wait over', [retrying, failedOn('ProviderError')]],
+    ['a retry whose run has not closed yet', [retrying, { status: 'running' }]],
+    ['room in a budget held by other runs', [{ status: 'budget_held' }]],
+    ['a retry a pause stopped', [retrying, { status: 'cancelled', errorClass: PAUSED_RUN_CLASS }]],
+  ])('%s: it comes back by itself, so it is still coming', (_name, execs) => {
+    const task = view({
+      status: 'todo',
+      execs,
+      waitingOn: { kind: 'retry', cause: 'rate_limited', attempt: 1 },
+    })
+    expect(subtaskStanding(task)).toBe('coming')
+    expect(subtaskWaitOver(tallySubtasks([task]))).toBe(false)
+  })
+
+  it.each([
+    ['a hard cap', { status: 'budget_paused' }],
+    [
+      'a hard cap, on a row from before its status',
+      { status: 'cancelled', errorClass: 'BudgetRefused' },
+    ],
+  ])('%s: a person raises it', (_name, last) => {
+    expect(subtaskStanding(view({ status: 'todo', execs: [last] }))).toBe('with_person')
+  })
+
+  it.each([
+    ['the breaker', [{ status: 'breaker_tripped' }]],
+    ['too many failures', [failedOn('Boom'), failedOn('Boom'), failedOn('Boom')]],
+    [
+      'a held budget past the failure limit',
+      [failedOn('Boom'), failedOn('Boom'), failedOn('Boom'), { status: 'budget_held' }],
+    ],
+  ])('%s: nothing more comes by itself', (_name, execs) => {
+    expect(subtaskStanding(view({ status: 'todo', execs }))).toBe('not_coming')
+  })
+
+  it('only a person’s Stop reads as stopped', () => {
+    expect(subtaskStanding(view({ status: 'todo', execs: [{ status: 'cancelled' }] }))).toBe(
+      'stopped',
+    )
+    for (const status of ['budget_paused', 'budget_held', 'breaker_tripped'])
+      expect(subtaskStanding(view({ status: 'todo', execs: [{ status }] }))).not.toBe('stopped')
+  })
+
+  it.each([
+    ['no result', { kind: 'no_result' }],
+    ['out of room', { kind: 'out_of_room' }],
+    ['the provider, retries used up', { kind: 'provider', cause: 'rate_limited' }],
+    ['a budget cap', { kind: 'budget' }],
+    ['the breaker', { kind: 'breaker' }],
+  ])('blocked on %s: closed, and not done', (_name, waitingOn) => {
+    const task = blocked(waitingOn)
+    expect(subtaskStanding(task)).toBe('not_coming')
+    expect(unfinishedSubtasks(tallySubtasks([task]))).toBe(1)
+  })
+})
+
 describe('subtaskStanding: what closed means', () => {
   it.each([
     ['done', view({ status: 'done' })],

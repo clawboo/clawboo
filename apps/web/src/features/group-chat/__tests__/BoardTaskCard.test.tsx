@@ -71,6 +71,35 @@ describe('the lazy report-up fetch', () => {
     expect(screen.queryByText('Output')).not.toBeInTheDocument()
   })
 
+  it('reads No result, with the reason, for a task whose agent finished twice with nothing', async () => {
+    reportUp('Worker finished twice with no reply and nothing else to show for it.')
+    render(
+      task({
+        status: 'blocked',
+        waitingOn: '{"kind":"no_result"}',
+        attention: { reason: 'no_result', failedRuns: 0 },
+      }),
+    )
+    expect(screen.getByText('No result')).toBeInTheDocument()
+    // The hint until the card has read its reason, which then takes its place.
+    expect(screen.getByTestId('board-task-attention')).toHaveTextContent(/finished twice/)
+    expect(await screen.findByText(/^Worker finished twice/)).toBeInTheDocument()
+  })
+
+  it('reads Waiting, and why, for a task waiting for its turn to try again', () => {
+    render(
+      task({
+        status: 'todo',
+        waitingOn: '{"kind":"retry","cause":"rate_limited","attempt":1}',
+        attention: null,
+      }),
+    )
+    expect(screen.getByText('Waiting')).toBeInTheDocument()
+    expect(screen.getByTestId('board-task-waiting')).toHaveTextContent(
+      'Retrying soon: rate limited',
+    )
+  })
+
   it('fetches the deliverable for a done task and labels it Output', async () => {
     reportUp('Shipped: 12 entries grouped by area.')
     render(task({ status: 'done' }))

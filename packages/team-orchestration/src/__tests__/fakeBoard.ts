@@ -10,9 +10,10 @@ import {
   delegatorOf,
   HAND_OFF_TITLE_CHARS,
   isTaskStatus,
-  ledgerAllowsAutoFire,
+  ledgerWillAutoFire,
   normalizeTaskTitle,
   parseResultClaim,
+  strongerWakeReason,
   subtaskWaitOver,
   tallySubtasks,
   unfinishedNeed,
@@ -36,6 +37,7 @@ import type {
   CompleteExecutionOutcome,
   CreateTaskInput,
   ExecutionRef,
+  ExecutionSummary,
   HandOffCapacity,
   HandOffInput,
   HandOffResult,
@@ -53,6 +55,7 @@ interface FakeRow {
   description: string
   sourceDelegationId: string | null
   assigneeAgentId: string | null
+  createdAt?: number
 }
 
 // The fake rejects an illegal transition exactly as the real repo's updateStatus
@@ -80,6 +83,28 @@ export class FakeBoard implements CascadeBoard {
   onClaim?: () => void
   private taskN = 0
   private execN = 0
+  /** Why each run started, and when it opened and closed, as the ledger records them. */
+  readonly execReasons = new Map<string, string | null>()
+  readonly execOpened = new Map<string, number>()
+  readonly execClosed = new Map<string, number>()
+  /** Comments as the board stores them: what the engine reads back on a task. */
+  readonly commentRows: Array<{ taskId: string; body: string; kind: string; createdAt: number }> =
+    []
+  /** A sub-task created under a task, on the board rather than through the engine. */
+  addSubTask(parentTaskId: string, title: string): string {
+    const id = `task-${++this.taskN}`
+    this.tasks.set(id, {
+      id,
+      status: 'todo',
+      parentTaskId,
+      title,
+      description: title,
+      sourceDelegationId: null,
+      assigneeAgentId: null,
+      createdAt: Date.now(),
+    })
+    return id
+  }
 
   /** Seeded rows are pre-existing state, not executions the ENGINE opened:
    *  `RealCascadeBoard` increments only in createExecution, and the contract's
@@ -94,6 +119,7 @@ export class FakeBoard implements CascadeBoard {
 
   /** Wakes the board saved for a task, handed to the next claim. */
   private savedWakes = new Map<string, ClaimedWake[]>()
+  private claimReasons = new Map<string, string>()
   private wakeN = 0
   /** Claims by execution, as `report_result` stores them. */
   private claimsByExec = new Map<string, ResultClaim>()
@@ -196,6 +222,7 @@ export class FakeBoard implements CascadeBoard {
       parentTaskId: t.parentTaskId,
       sourceDelegationId: t.sourceDelegationId,
       assigneeAgentId: t.assigneeAgentId,
+      ...(t.createdAt !== undefined ? { createdAt: t.createdAt } : {}),
       ...(this.waits.has(t.id) ? { waitingOn: JSON.stringify(this.waits.get(t.id)) } : {}),
     }
   }
@@ -252,7 +279,7 @@ export class FakeBoard implements CascadeBoard {
       )
         continue
       if (!t.assigneeAgentId && !delegationTargetOf(t.sourceDelegationId)) continue
-      if (t.status === 'todo' && !ledgerAllowsAutoFire(this.ledger(t.id))) continue
+      if (t.status === 'todo' && !ledgerWillAutoFire(this.ledger(t.id))) continue
       return t
     }
     return undefined
@@ -362,7 +389,12 @@ export class FakeBoard implements CascadeBoard {
     this.failures.delete(this.failureKey(teamId, target, task))
   }
 
-  async claim(taskId: string, assigneeAgentId?: string): Promise<ClaimResult> {
+  async claim(
+    taskId: string,
+    assigneeAgentId?: string,
+    _assigneeRuntime?: string,
+    run?: { runReason?: string | null },
+  ): Promise<ClaimResult> {
     this.onClaim?.()
     this.claims.push(taskId)
     if (this.forceClaimConflict) return { ok: false, reason: 'conflict' }
@@ -370,8 +402,15 @@ export class FakeBoard implements CascadeBoard {
     if (!t || t.status !== 'todo' || t.assigneeAgentId) return { ok: false, reason: 'conflict' }
     t.status = 'in_progress'
     t.assigneeAgentId = assigneeAgentId ?? 'someone'
+    this.waits.delete(taskId)
     const wakes = this.savedWakes.get(taskId)
     this.savedWakes.delete(taskId)
+    // The real claim opens the run, for the wake it took, unless it is a provider retry.
+    if (wakes?.length && run?.runReason !== 'provider_retry')
+      this.claimReasons.set(
+        taskId,
+        wakes.map((w) => w.reason as string).reduce((a, b) => strongerWakeReason(a, b)),
+      )
     return { ok: true, task: this.toBoardTask(t), ...(wakes ? { wakes } : {}) }
   }
   async updateStatus(
@@ -412,36 +451,34 @@ export class FakeBoard implements CascadeBoard {
       ancestors.push({ id: cur })
       cur = this.tasks.get(cur)?.parentTaskId ?? null
     }
-    return { task: this.toBoardTask(t), comments: [], ancestors }
+    return {
+      task: this.toBoardTask(t),
+      comments: this.commentRows.filter((c) => c.taskId === taskId),
+      ancestors,
+    }
   }
-  async createExecution(taskId: string): Promise<ExecutionRef | null> {
+  async createExecution(
+    taskId: string,
+    _executorType?: string,
+    opts?: { runReason?: string },
+  ): Promise<ExecutionRef | null> {
     const id = `exec-${++this.execN}`
     this.execs.set(id, taskId)
+    this.execReasons.set(id, this.claimReasons.get(taskId) ?? opts?.runReason ?? null)
+    this.claimReasons.delete(taskId)
+    this.execOpened.set(id, Date.now())
     return { id }
   }
   async completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void> {
     this.completed.push({ execId, outcome })
+    if (!this.execClosed.has(execId)) this.execClosed.set(execId, Date.now())
   }
-  async listExecutions(taskId: string): Promise<
-    Array<{
-      id: string
-      status: string
-      executorType?: string
-      engineRun?: number | null
-      errorClass?: string | null
-    }>
-  > {
+  async listExecutions(taskId: string): Promise<ExecutionSummary[] | null> {
     // Derive the ledger from the recorded calls: every exec opened for the task,
     // in id order; a completed one carries its outcome status, else 'running'.
     // Engine-created execs are 'openclaw' (fireTask/spawn) and marked as the engine's,
     // matching the real board: resume()'s ownership gate reads the marker.
-    const rows: Array<{
-      id: string
-      status: string
-      executorType?: string
-      engineRun?: number | null
-      errorClass?: string | null
-    }> = []
+    const rows: ExecutionSummary[] = []
     for (const [id, tid] of this.execs) {
       if (tid !== taskId) continue
       const done = this.completed.find((c) => c.execId === id)
@@ -451,6 +488,10 @@ export class FakeBoard implements CascadeBoard {
         executorType: this.execTypes.get(id) ?? 'openclaw',
         engineRun: this.execMarks.has(id) ? this.execMarks.get(id) : 1,
         ...(done?.outcome.errorClass ? { errorClass: done.outcome.errorClass } : {}),
+        ...(done?.outcome.error ? { error: done.outcome.error } : {}),
+        runReason: this.execReasons.get(id) ?? null,
+        ...(this.execOpened.has(id) ? { createdAt: this.execOpened.get(id)! } : {}),
+        ...(this.execClosed.has(id) ? { completedAt: this.execClosed.get(id)! } : {}),
       })
     }
     return rows

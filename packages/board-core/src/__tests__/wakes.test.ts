@@ -229,8 +229,8 @@ describe('the fire policy names why it refuses', () => {
     ).toBe(false)
   })
 
-  it('the budget refusal leaves the failure streak as it reads today', () => {
-    expect(trailingFailedRuns([failed(AT, { errorClass: BUDGET_REFUSED_CLASS })])).toBe(1)
+  it('a budget refusal is no failure: it leaves the streak out', () => {
+    expect(trailingFailedRuns([failed(AT, { errorClass: BUDGET_REFUSED_CLASS })])).toBe(0)
   })
 })
 

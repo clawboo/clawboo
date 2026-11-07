@@ -25,7 +25,19 @@ export type TaskWakeReason =
 
 /** Why a run on a task started, written to its `execution_processes.run_reason`
  *  and read back by the ticket block's "Why this run" line. */
-export type TaskRunReason = TaskWakeReason | 'delegation' | 'assignment' | 'fix_round'
+export type TaskRunReason =
+  | TaskWakeReason
+  | 'delegation'
+  | 'assignment'
+  | 'fix_round'
+  /** Its last run ended with nothing to show for it: one more turn to say what it did. */
+  | 'empty_reply'
+  /** Its last run ran out of room: one continuation. */
+  | 'max_turns'
+  /** Its last run hit a provider failure, and this is the automatic retry. */
+  | 'provider_retry'
+  /** A person asked for this run (Retry, or Run now). */
+  | 'person_retry'
 
 /**
  * What wrote a comment, set by the writer and never read from `authorType`: Retry
@@ -81,6 +93,10 @@ export type WakeSkipReason =
   | 'budget'
   /** The no-progress brake: ends when its wait runs out, or at a person's comment. */
   | 'braked'
+  /** A provider failure's retry wait: ends by itself, or at a person's comment. */
+  | 'retry_wait'
+  /** The circuit breaker stopped it: a person retries it. */
+  | 'breaker'
   /** The agent's session is on other work: ends when it frees up. */
   | 'agent_busy'
   /** A run proven alive holds the task, which also covers a run waiting for a
@@ -134,6 +150,8 @@ export const WAKE_SKIP_REASONS: readonly WakeSkipReason[] = [
   'team_archived',
   'budget',
   'braked',
+  'retry_wait',
+  'breaker',
   'agent_busy',
   'run_live',
   'run_unproven',
@@ -249,10 +267,13 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
   if (refusal === 'running') return wait('run_unproven')
   if (refusal === 'sign_in' || refusal === 'billing') return wait(refusal)
   // The last run was refused by a budget and the gate above says it would not be
-  // now: the cap was raised, so the wake goes out, past the ledger's old reading.
-  const capRaised = refusal === 'budget'
+  // now: the cap was raised, or the room was freed, so the wake goes out, past the
+  // ledger's old reading.
+  const capRaised = refusal === 'budget' || refusal === 'budget_held'
   if (!first && !capRaised) {
     if (refusal === 'braked') return wait('braked')
+    if (refusal === 'retry_wait') return wait('retry_wait')
+    if (refusal === 'breaker') return wait('breaker')
     if (refusal === 'stopped') return wait('stopped')
     if (refusal === 'failed_too_often') return wait('parked')
   }

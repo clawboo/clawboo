@@ -1141,9 +1141,10 @@ async function runTaskInner(
   const finalGate = hold.recheck()
   if (finalGate.blocked) {
     const error = `budget_${finalGate.reason}:${finalGate.scope}`
+    const refusedStatus = finalGate.reason === 'held' ? 'budget_held' : 'budget_paused'
     addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
-      status: 'cancelled',
+      status: refusedStatus,
       error,
       errorClass: BUDGET_REFUSED_CLASS,
     })
@@ -1156,7 +1157,7 @@ async function runTaskInner(
         teamId: task.teamId,
         agentId: assigneeAgentId,
         runtime: runtimeId,
-        data: { execId: exec.id, status: 'cancelled', error },
+        data: { execId: exec.id, status: refusedStatus, error },
       })
     releaseTask(db, taskId)
     return { ok: false, reason: finalGate.reason === 'held' ? 'budget_held' : 'budget_paused' }
@@ -1845,7 +1846,7 @@ async function runTaskInner(
   }
 
   // Auto-pause: a budget (or per-node cap) tripped mid-run. Record the forensic
-  // event, complete the execution as cancelled, and release the task to `todo`
+  // event, complete the execution as budget_paused, and release the task to `todo`
   // (retryable once a human raises the cap / resumes the budget).
   if (stopForBudget) {
     appendAudit(db, {
@@ -1865,7 +1866,7 @@ async function runTaskInner(
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
-      status: 'cancelled',
+      status: 'budget_paused',
       error: `budget_paused:${stopForBudget}`,
       errorClass: BUDGET_REFUSED_CLASS,
       costUsd,
@@ -1884,7 +1885,7 @@ async function runTaskInner(
         runtime: runtimeId,
         data: {
           execId: exec.id,
-          status: 'cancelled',
+          status: 'budget_paused',
           error: `budget_paused:${stopForBudget}`,
           costUsd,
           inputTokens: ledgerInputTokens,
@@ -1909,7 +1910,7 @@ async function runTaskInner(
   // exclusive: the loop breaks on the first trip, and the breaker feed is gated on
   // `!stopForBudget`). Mirror the budget teardown exactly: forensic audit + a typed
   // `[stopped]` comment for the leader to re-plan + complete the execution as
-  // cancelled + release the task to `todo`. The worktree is left intact, so the
+  // breaker_tripped + release the task to `todo`. The worktree is left intact, so the
   // handoff stays writable and a retry resumes from clean state.
   if (stopForBreaker) {
     const reason = stopForBreaker.reason
@@ -1936,7 +1937,7 @@ async function runTaskInner(
     // the row is already terminal — a stale sweep got there first. Emitting
     // regardless told obs 'succeeded' while the ledger said 'timed_out'.
     const ledgerClosed = completeExecutionProcess(db, exec.id, {
-      status: 'cancelled',
+      status: 'breaker_tripped',
       error: `circuit_broken:${reason}`,
       costUsd,
       costSource,
@@ -1954,7 +1955,7 @@ async function runTaskInner(
         runtime: runtimeId,
         data: {
           execId: exec.id,
-          status: 'cancelled',
+          status: 'breaker_tripped',
           error: `circuit_broken:${reason}`,
           costUsd,
           inputTokens: ledgerInputTokens,

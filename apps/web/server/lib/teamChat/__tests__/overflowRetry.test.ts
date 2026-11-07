@@ -197,10 +197,11 @@ describe('Retry after a Claude Code context overflow', () => {
     await rm(home, { recursive: true, force: true })
   })
 
-  it('the task blocks with no resume pointer left, and Retry runs it in a new session with a first run’s ticket block', async () => {
+  it('the run continues once in a new session, a second overflow blocks the task, and Retry runs it in a new session with a first run’s ticket block', async () => {
     expect(OVERFLOW.map((e) => e.kind)).toEqual(['cost', 'error', 'done'])
     const db = getDb()
     const worker = new ScriptedClaudeCode([
+      OVERFLOW,
       OVERFLOW,
       [{ kind: 'done', reason: 'success', summary: 'parser written' } as RuntimeEvent],
     ])
@@ -240,9 +241,15 @@ describe('Retry after a Claude Code context overflow', () => {
     })
     const pointerKey = taskSessionSettingKey(WORKER, TEAM, task.id)
 
-    // The first run overflows: the engine blocks the task as out of room.
+    // The first run overflows: it gets its one continuation, which starts fresh. That
+    // one overflows too, and the engine blocks the task as out of room.
     await engineRef.current.dispatchTask(task.id)
     await settle(() => getTask(db, task.id)?.status === 'blocked', 'the overflow block')
+    expect(worker.startOpts).toHaveLength(2)
+    expect(worker.startOpts[1]!.message).toContain('[Ran out of room]')
+    expect(worker.startOpts[1]!.context ?? '').not.toContain(
+      'You are continuing this task in the same session',
+    )
     expect(
       getComments(db, task.id)
         .map((c) => c.body)
@@ -257,8 +264,8 @@ describe('Retry after a Claude Code context overflow', () => {
     expect(r.statusCode()).toBe(202)
     await settle(() => getTask(db, task.id)?.status === 'done', 'the retried run')
 
-    expect(worker.startOpts).toHaveLength(2)
-    const retried = worker.startOpts[1]!
+    expect(worker.startOpts).toHaveLength(3)
+    const retried = worker.startOpts[2]!
     expect(retried.message).toContain('Move the CSV parser to the new reader.')
     // A fresh run's block: the newest comments on the task, not only the ones
     // since a last run.

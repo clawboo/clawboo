@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 
 import {
   HAND_OFF_TITLE_CHARS,
-  ledgerAllowsAutoFire,
+  ledgerWillAutoFire,
   normalizeTaskTitle,
   parseWaitingOn,
   waitsOnOtherWork,
@@ -165,7 +165,8 @@ function bySameTitle(tx: BoardTx, input: CreateIdentity, now: number): DbTask | 
   return tx.select().from(tasks).where(eq(tasks.id, match.id)).get() as DbTask
 }
 
-/** Would the pump run this To do task on its own? The same rule the pump reads. */
+/** Will the pump run this To do task on its own, now or when a wait ends? The same
+ *  rule the pump reads. */
 function startsByItself(tx: BoardTx, taskId: string): boolean {
   const runs = tx
     .select()
@@ -173,7 +174,7 @@ function startsByItself(tx: BoardTx, taskId: string): boolean {
     .where(eq(executionProcesses.taskId, taskId))
     .orderBy(asc(executionProcesses.createdAt))
     .all()
-  return ledgerAllowsAutoFire(runs)
+  return ledgerWillAutoFire(runs)
 }
 
 /** The task this create is a repeat of, marked, or null when it is a new one. */

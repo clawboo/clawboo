@@ -57,7 +57,6 @@ import type {
   HandOffLink,
   HandOffResult,
   TaskDetail,
-  WaitingOn,
 } from '@clawboo/team-orchestration'
 
 import { createServerBoardClient } from '../serverBoardClient'
@@ -159,7 +158,7 @@ class RealCascadeBoard implements CascadeBoard {
   async updateStatus(
     taskId: string,
     status: string,
-    opts?: { waitingOn?: WaitingOn },
+    opts?: Parameters<EngineBoardClient['updateStatus']>[2],
   ): Promise<boolean> {
     const ok = await this.real.updateStatus(taskId, status, opts)
     if (ok) this.statusUpdates.push({ taskId, status })
@@ -182,8 +181,12 @@ class RealCascadeBoard implements CascadeBoard {
   ): Promise<Array<{ id: string; status: string; executorType?: string }> | null> {
     return this.real.listExecutions(taskId)
   }
-  async createExecution(taskId: string, executorType: string): Promise<ExecutionRef | null> {
-    const ref = await this.real.createExecution(taskId, executorType)
+  async createExecution(
+    taskId: string,
+    executorType: string,
+    opts?: { runReason?: string },
+  ): Promise<ExecutionRef | null> {
+    const ref = await this.real.createExecution(taskId, executorType, opts)
     if (ref) this.execCount += 1
     return ref
   }

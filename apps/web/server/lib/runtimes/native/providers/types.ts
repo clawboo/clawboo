@@ -182,6 +182,11 @@ export function normalizeProviderError(err: unknown): ProviderError {
     return new ProviderError(message, 'overloaded', status)
   if (status === 400 || status === 404 || status === 422)
     return new ProviderError(message, 'bad_request', status)
+  // Node's fetch reports a connection that dropped mid-reply as a bare `TypeError:
+  // terminated`, which the SDKs rethrow as it is.
+  if (message.trim() === 'terminated') {
+    return new ProviderError('The connection to the provider dropped during the reply.', 'network')
+  }
   if (/fetch failed|econnrefused|enotfound|etimedout|network|socket/i.test(message)) {
     return new ProviderError(message, 'network')
   }

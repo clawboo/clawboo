@@ -7,10 +7,16 @@
 // board hands it to team chat as before. Which way a task goes is decided in
 // ./runnerRoute.
 
-import { delegationTargetOf, stoppedByPause } from '@clawboo/board-core'
+import {
+  delegationTargetOf,
+  ledgerWillAutoFire,
+  stoppedByPause,
+  type WaitingOn,
+} from '@clawboo/board-core'
 import {
   addComment,
   countRefusedWakeStart,
+  getComments,
   getReadyTasks,
   getTask,
   isLedgerAutoFireable,
@@ -78,10 +84,16 @@ function refusalWords(reason: Extract<RunTaskResult, { ok: false }>['reason']): 
  * it. Put it in Needs you with the reason, so the card says what happened. A task
  * that moved on meanwhile (a person, another run) is left alone.
  */
-function parkUnstarted(db: ClawbooDb, taskId: string, runtime: string, why: string): void {
+function parkUnstarted(
+  db: ClawbooDb,
+  taskId: string,
+  runtime: string,
+  why: string,
+  waitingOn: WaitingOn = { kind: 'failure' },
+): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
-    const moved = updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'failure' } })
+    const moved = updateStatus(db, taskId, 'blocked', { waitingOn })
     if (!moved.ok) return
     // The event log is what live views follow; the status write reaches only
     // the in-process bus.
@@ -99,6 +111,25 @@ function parkUnstarted(db: ClawbooDb, taskId: string, runtime: string, why: stri
     )
   } catch (err) {
     log.error({ err, taskId }, 'could not record a rerun that did not start')
+  }
+}
+
+/**
+ * A budget's room that runs already going have set aside clears when they end. A task
+ * the pump will start again stays in To do for that, and its card says so, once: the
+ * pump asks again on every pass. False when the pump never would (a person stopped it,
+ * or it failed too often), so a person has to hear it the other way.
+ */
+function waitForBudgetRoom(db: ClawbooDb, taskId: string, runtime: string): boolean {
+  try {
+    if (!ledgerWillAutoFire(listExecutions(db, taskId))) return false
+    const why = refusalWords('budget_held')
+    const note = `The rerun on ${getDescriptor(runtime as RunnerRerun['runtime']).name} is waiting: ${why}. It starts by itself once those runs have ended.`
+    if (getComments(db, taskId).at(-1)?.body !== note) addComment(db, taskId, note, 'system')
+    return true
+  } catch (err) {
+    log.error({ err, taskId }, 'could not note a rerun waiting for budget room')
+    return false
   }
 }
 
@@ -158,9 +189,16 @@ export function requestRunnerRerun(
         !result.ok &&
         result.reason !== 'conflict' &&
         result.reason !== 'not_found' &&
-        result.reason !== 'paused'
+        result.reason !== 'paused' &&
+        !(result.reason === 'budget_held' && waitForBudgetRoom(db, taskId, runtime))
       ) {
-        parkUnstarted(db, taskId, runtime, refusalWords(result.reason))
+        parkUnstarted(
+          db,
+          taskId,
+          runtime,
+          refusalWords(result.reason),
+          result.reason.startsWith('budget_') ? { kind: 'budget' } : { kind: 'failure' },
+        )
         // A budget refusal waits for the cap, and the wake pump asks the gate first.
         // Any other leaves no ledger row, so only this count can end its retries.
         if (!result.reason.startsWith('budget_')) countRefusedStart(db, taskId)

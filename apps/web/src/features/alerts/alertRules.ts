@@ -24,6 +24,12 @@ export const ANNOUNCED_REASONS = [
   'question',
   'assigned',
   'agent_wakes',
+  'no_result',
+  'rate_limited',
+  'provider_down',
+  'out_of_room',
+  'budget',
+  'breaker',
 ] as const
 export type AnnouncedReason = (typeof ANNOUNCED_REASONS)[number]
 
@@ -266,6 +272,12 @@ const WHAT_HAPPENED: Record<AnnouncedReason, string> = {
   question: 'has a question for you',
   assigned: 'was handed back to you',
   agent_wakes: 'needs your OK for agents to wake each other',
+  no_result: 'finished with no result',
+  rate_limited: 'is rate limited by its provider',
+  provider_down: 'could not reach its provider',
+  out_of_room: 'ran out of room',
+  budget: 'was stopped by a budget cap',
+  breaker: 'was stopped by the circuit breaker',
 }
 
 /** What an agent waiting on an approval wants to do, in plain words. */

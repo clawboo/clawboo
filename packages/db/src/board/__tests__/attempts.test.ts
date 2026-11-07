@@ -5,9 +5,22 @@
 // different treatment and different messages. Nothing stored says which is which;
 // it is derived from columns the recovery writers already set.
 
-import { describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 
+import { eq } from 'drizzle-orm'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { createDb, type ClawbooDb } from '../../db'
+import { executionProcesses } from '../../schema'
 import { classifyAttempts, type AttemptRow } from '../attempts'
+import {
+  backfillHostStopStatuses,
+  completeExecutionProcess,
+  createExecutionProcess,
+  createTask,
+} from '../repository'
 
 /** The row `reconcileOrphans` writes when a process died with the server. */
 const orphaned = (): AttemptRow => ({
@@ -25,6 +38,33 @@ const ok = (): AttemptRow => ({ status: 'succeeded' })
 const stopped = (): AttemptRow => ({ status: 'cancelled' })
 
 describe('classifyAttempts', () => {
+  it('a budget stop is its own ending: it neither counts in a streak nor ends one', () => {
+    expect(
+      classifyAttempts([failed(), { status: 'budget_paused', error: 'budget_paused:team' }]),
+    ).toMatchObject({ lastKind: 'budget', errorAttempts: 1, crashAttempts: 0 })
+    expect(classifyAttempts([orphaned(), { status: 'budget_held' }, failed()])).toMatchObject({
+      lastKind: 'error',
+      errorAttempts: 1,
+      crashAttempts: 1,
+    })
+  })
+
+  it('a breaker trip is its own ending, and ends a streak', () => {
+    expect(
+      classifyAttempts([
+        failed(),
+        failed(),
+        { status: 'breaker_tripped', error: 'circuit_broken:x' },
+      ]),
+    ).toMatchObject({ lastKind: 'breaker', errorAttempts: 0, lastReason: 'circuit_broken:x' })
+  })
+
+  it('reads a budget refusal from before the statuses existed as one', () => {
+    expect(classifyAttempts([{ status: 'cancelled', errorClass: 'BudgetRefused' }])).toMatchObject({
+      lastKind: 'budget',
+    })
+  })
+
   it('a task that has never run has nothing to say', () => {
     expect(classifyAttempts([])).toEqual({
       crashAttempts: 0,
@@ -181,5 +221,42 @@ describe('classifyAttempts on the team engine ledger (K17)', () => {
     })
     expect(classifyAttempts([ok()]).lastReason).toBeNull()
     expect(classifyAttempts([{ status: 'failed', error: '   ' }]).lastReason).toBeNull()
+  })
+})
+
+describe('backfillHostStopStatuses', () => {
+  let db: ClawbooDb
+  let dir: string
+  beforeEach(() => {
+    dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-backfill-'))
+    db = createDb(path.join(dir, 'b.db'))
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  const closed = (error: string | null) => {
+    const task = createTask(db, { title: 't' })
+    const exec = createExecutionProcess(db, { taskId: task.id, executorType: 'codex' })
+    completeExecutionProcess(db, exec.id, { status: 'cancelled', ...(error ? { error } : {}) })
+    return exec.id
+  }
+  const statusOf = (id: string) =>
+    db.select().from(executionProcesses).where(eq(executionProcesses.id, id)).get()?.status
+
+  it('refiles what a cap or the breaker closed `cancelled`, and leaves a person’s Stop', () => {
+    const paused = closed('budget_paused:team')
+    const held = closed('budget_held:agent')
+    const broke = closed('circuit_broken:no-progress')
+    const stop = closed(null)
+    const moved = closed('Stopped: a person moved the card to To do.')
+
+    expect(backfillHostStopStatuses(db)).toBe(3)
+    expect(statusOf(paused)).toBe('budget_paused')
+    expect(statusOf(held)).toBe('budget_held')
+    expect(statusOf(broke)).toBe('breaker_tripped')
+    expect(statusOf(stop)).toBe('cancelled')
+    expect(statusOf(moved)).toBe('cancelled')
+    expect(backfillHostStopStatuses(db)).toBe(0)
   })
 })

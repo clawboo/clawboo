@@ -101,10 +101,18 @@ export interface ExecutionSummary {
    *  reads both (see `brakeUntil`). */
   completedAt?: number | null
   madeProgress?: boolean | number | null
+  /** What it failed with, and whether its process died with the last server: how
+   *  the fire policy tells a crash from an error (see `runKindOf`). */
+  error?: string | null
+  recoveryTombstone?: number | null
+  /** Why it started (`TaskRunReason`), and when it opened. */
+  runReason?: string | null
+  createdAt?: number | null
 }
 
 export interface CompleteExecutionOutcome {
-  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
+  /** `budget_*`: a budget cap stopped it. `cancelled` is a person's word. */
+  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled' | 'budget_paused' | 'budget_held'
   summary?: string
   error?: string
   /** The class the run's failure was filed under (`classifyError`). */
@@ -126,7 +134,15 @@ export interface BoardClient {
   ): Promise<ClaimResult>
   /** `waitingOn` says what a task moved to Blocked or In review now waits for. A
    *  host that cannot store it (the browser's REST client) leaves it out. */
-  updateStatus(taskId: string, status: string, opts?: { waitingOn?: WaitingOn }): Promise<boolean>
+  updateStatus(
+    taskId: string,
+    status: string,
+    opts?: {
+      waitingOn?: WaitingOn
+      /** A move to To do keeps the stored verdict: the same work is coming back. */
+      keepVerdict?: boolean
+    },
+  ): Promise<boolean>
   /** Say what a task waits for without moving it (a check whose move to Blocked
    *  keeps failing). Best-effort; a host may not have it. */
   setWaitingOn?(taskId: string, waitingOn: WaitingOn | null): Promise<void>

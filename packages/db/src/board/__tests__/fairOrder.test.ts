@@ -36,7 +36,8 @@ function taskAt(title: string, createdAt: number, priority = 0): string {
 
 function ended(
   taskId: string,
-  status: 'failed' | 'timed_out' | 'cancelled',
+  status:
+    'failed' | 'timed_out' | 'cancelled' | 'budget_held' | 'budget_paused' | 'breaker_tripped',
   errorClass?: string,
 ): void {
   const exec = createExecutionProcess(db, { taskId, executorType: 'openclaw' })
@@ -97,6 +98,22 @@ describe('the ready list', () => {
     const stopped = taskAt('stopped by a person', NOW - 1_000)
     ended(stopped, 'cancelled')
     expect(order()).toEqual(['older', 'stopped by a person'])
+  })
+
+  it('does not count a start a budget refused as work to carry on first', () => {
+    const held = taskAt('budget held', NOW - 100)
+    ended(held, 'budget_held')
+    const capped = taskAt('budget capped', NOW - 200)
+    ended(capped, 'budget_paused')
+    taskAt('older fresh work', NOW - 3_000)
+    expect(order()[0]).toBe('older fresh work')
+  })
+
+  it('counts a run the breaker stopped as work that came back', () => {
+    const broke = taskAt('broke', NOW - 100)
+    ended(broke, 'breaker_tripped')
+    taskAt('older fresh work', NOW - 3_000)
+    expect(order()[0]).toBe('broke')
   })
 
   it('counts a run a pause stopped as work to carry on first', () => {

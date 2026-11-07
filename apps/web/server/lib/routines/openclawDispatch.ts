@@ -419,10 +419,11 @@ async function drainClaimedRoutineRun(
   const finalGate = hold.recheck()
   if (finalGate.blocked) {
     const error = `budget_${finalGate.reason}:${finalGate.scope}`
+    const refusedStatus = finalGate.reason === 'held' ? 'budget_held' : 'budget_paused'
     addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
     settleExec(
-      { status: 'cancelled', error, errorClass: BUDGET_REFUSED_CLASS },
-      { status: 'cancelled', error },
+      { status: refusedStatus, error, errorClass: BUDGET_REFUSED_CLASS },
+      { status: refusedStatus, error },
     )
     releaseTask(db, taskId)
     return { ok: false, taskId, error, ...(finalGate.reason === 'held' ? { transient: true } : {}) }
@@ -606,12 +607,12 @@ async function drainClaimedRoutineRun(
     )
     settleExec(
       {
-        status: 'cancelled',
+        status: 'budget_paused',
         error: `budget_paused:${stopForBudget}`,
         errorClass: BUDGET_REFUSED_CLASS,
         ...ledgerCost(),
       },
-      { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
+      { status: 'budget_paused', error: `budget_paused:${stopForBudget}` },
     )
     releaseTask(db, taskId)
     return { ok: false, taskId, error: `auto-paused (budget: ${stopForBudget})` }

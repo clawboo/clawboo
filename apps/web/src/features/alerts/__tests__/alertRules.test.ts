@@ -91,6 +91,18 @@ describe('collectAlertItems', () => {
     expect(items.map((i) => i.key)).toEqual(['task:agent:blocked:1'])
   })
 
+  it.each([
+    ['no_result', 'finished with no result'],
+    ['rate_limited', 'is rate limited by its provider'],
+    ['provider_down', 'could not reach its provider'],
+    ['out_of_room', 'ran out of room'],
+    ['budget', 'was stopped by a budget cap'],
+    ['breaker', 'was stopped by the circuit breaker'],
+  ] as const)('announces a task that ended as %s', (reason, words) => {
+    const [item] = collectAlertItems([task('t1', reason)], [])
+    expect(alertNotice([item!], agentOf)?.body).toContain(words)
+  })
+
   it('records when each item began waiting', () => {
     const [a, t] = collectAlertItems([task('f', 'failed', { updatedAt: 4000 })], [approval('a1')])
     expect(a).toMatchObject({ kind: 'approval', at: 1000 })

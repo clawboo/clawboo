@@ -48,7 +48,7 @@ Done and Cancelled stay put until you say otherwise: **Reopen** in the task's dr
 
 ## What a task waits on
 
-A task that waits says what for. Agents must give the reason when they block a task, and Clawboo's own parks give theirs: a failed run, a check that could not pass, a stop from a budget or the breaker, a restart. Needs you reads it:
+A task that waits says what for. Agents must give the reason when they block a task, and Clawboo's own parks give theirs: a failed run, a check that could not pass, a run with nothing to show for it, a provider that kept refusing, a stop from a budget or the breaker, a restart. Needs you reads it:
 
 | The task waits on                   | Where it shows                                                                 | What ends the wait                                                                                                                              |
 | ----------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -57,6 +57,8 @@ A task that waits says what for. Agents must give the reason when they block a t
 | Another task                        | In progress, saying **Waiting on** and the task's title                        | That task finishing. If it is cancelled instead, the task comes to Needs you to say so                                                          |
 | Its own sub-tasks                   | In progress, saying **Waiting on 3 sub-tasks**, and how many of those need you | The last one closing, which starts its agent once more. See [A task that hands out work waits for it](#a-task-that-hands-out-work-waits-for-it) |
 | A check, a failure, a stop          | Needs you, as before                                                           | **Retry** or **Assign**                                                                                                                         |
+| Its turn to try again               | To do, saying **Retrying soon**                                                | The wait running out, or a comment from you                                                                                                     |
+| Room in a budget                    | To do, saying **Waiting for room in a budget**                                 | Runs already going ending. If the cap fills instead, the task comes to Needs you to say so                                                      |
 
 ## A task that hands out work waits for it
 
@@ -64,16 +66,16 @@ On a team chat run, a task whose run ends with work it handed out still going do
 
 Closed means nothing more will come from a sub-task by itself:
 
-| The sub-task                                                                 | To the task waiting on it                                  |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| Done                                                                         | Closed                                                     |
-| Cancelled or removed                                                         | Closed, and not done                                       |
-| Ended badly: a failed run or check, a budget or breaker stop, parked         | Closed, and not done. Its failure reaches the agent's turn |
-| In Backlog                                                                   | Closed, and not done: nothing starts work from there       |
-| Waiting on you: a question, an approval, a hand-back, or held by a person    | Still open. The card says how many need you                |
-| Queued, running, being checked, waiting on other work, or stopped by a pause | Still open                                                 |
-| Nobody was given it, like a note an agent left itself                        | Not waited on                                              |
-| It needs this task to finish first                                           | Not waited on: this task's finishing is what frees it      |
+| The sub-task                                                                                                                                            | To the task waiting on it                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Done                                                                                                                                                    | Closed                                                     |
+| Cancelled or removed                                                                                                                                    | Closed, and not done                                       |
+| Ended badly: a failed run or check, a budget or breaker stop, parked                                                                                    | Closed, and not done. Its failure reaches the agent's turn |
+| In Backlog                                                                                                                                              | Closed, and not done: nothing starts work from there       |
+| Waiting on you: a question, an approval, a hand-back, or held by a person                                                                               | Still open. The card says how many need you                |
+| Queued, running, being checked, waiting on other work, waiting for its next try after a provider failure or for room in a budget, or stopped by a pause | Still open                                                 |
+| Nobody was given it, like a note an agent left itself                                                                                                   | Not waited on                                              |
+| It needs this task to finish first                                                                                                                      | Not waited on: this task's finishing is what frees it      |
 
 What comes after that turn:
 
@@ -172,17 +174,23 @@ A task has one live run at a time. A wake that arrives while a run is waiting fo
 
 **Needs you** is the board's first column. It holds everything that will not move without a person: pending approvals, and tasks that are stuck for one of these reasons.
 
-| Label                   | What happened                                                |
-| ----------------------- | ------------------------------------------------------------ |
-| Failed                  | The run ended with an error.                                 |
-| Timed out               | The agent stopped responding and the run was ended.          |
-| Stopped                 | You stopped the run. It will not restart on its own.         |
-| Needs review            | A check could not pass the work.                             |
-| Blocked                 | An agent marked it blocked, and says what it needs.          |
-| Waiting for your answer | An agent asked you a question and stopped.                   |
-| Assigned to you         | The task is yours, or an agent handed it back to you.        |
-| Unassigned              | No agent is bound to it, so no one will pick it up.          |
-| Not started             | It is in progress, but no agent and no run is working on it. |
+| Label                   | What happened                                                           |
+| ----------------------- | ----------------------------------------------------------------------- |
+| Failed                  | The run ended with an error.                                            |
+| No result               | The agent finished twice with nothing to show for it.                   |
+| Rate limited            | The provider kept refusing, and Clawboo stopped trying by itself.       |
+| Provider unavailable    | The provider stayed out of reach, and Clawboo stopped trying by itself. |
+| Out of room             | The agent ran out of room twice before finishing.                       |
+| Budget cap              | A hard budget cap stopped it.                                           |
+| Stopped by the breaker  | The circuit breaker stopped a run going wrong.                          |
+| Timed out               | The agent stopped responding and the run was ended.                     |
+| Stopped                 | You stopped the run. It will not restart on its own.                    |
+| Needs review            | A check could not pass the work.                                        |
+| Blocked                 | An agent marked it blocked, and says what it needs.                     |
+| Waiting for your answer | An agent asked you a question and stopped.                              |
+| Assigned to you         | The task is yours, or an agent handed it back to you.                   |
+| Unassigned              | No agent is bound to it, so no one will pick it up.                     |
+| Not started             | It is in progress, but no agent and no run is working on it.            |
 
 Each card leads with the one action that gets it going: **Retry** runs it again, **Assign** hands a task with no agent to one, and **Review** or **Open** opens the task. Its **More** menu holds the rest, including **Dismiss**, which moves the task to Cancelled for good. Failed and Timed out show a count, such as **Failed 3×**, when it has happened more than once in a row.
 
@@ -196,18 +204,30 @@ With no sign-in there is one built-in reader. Behind a [sign-in proxy](/guides/s
 
 ## When work restarts by itself
 
-Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, when its last 3 runs in a row failed or timed out, or while a [pause](#pause) covers it. A successful run, or a Stop, resets that count.
+Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, when a hard budget cap or the circuit breaker stopped it, when its last 3 runs in a row failed or timed out or 3 in a row were cut off because their process died, or while a [pause](#pause) covers it. Those two counts are kept apart. A successful run, a Stop or a breaker trip resets them.
 
 It also waits before starting a task that keeps coming back with nothing to show. After 2 runs in a row with no visible progress, the next automatic start waits 2 minutes, then 4, doubling up to 30. Your comment or a **Retry** starts it at once. The task stays in To do while it waits, with a note on its card saying how long.
 
-**Visible progress** means something you can see on the board that was not there when the run started: a sub-task it created, or a run that ended well with a result or moved the card forward. Comments do not count, because they are the one thing agents could trade forever; neither do tokens spent, tool calls or files touched, which the board cannot see as work done. A Stop, a refused sign-in or billing, and a run a hard budget cap refused say nothing either way: they are not counted as runs without progress. A start refused while Clawboo is holding new runs is not a run at all.
+**Visible progress** means something you can see on the board that was not there when the run started: a sub-task it created, or a run that ended well with a result or moved the card forward. Comments do not count, because they are the one thing agents could trade forever; neither do tokens spent, tool calls or files touched, which the board cannot see as work done. A Stop, a refused sign-in or billing, a provider failure and a run a hard budget cap refused say nothing either way: they are not counted as runs without progress. A start refused while Clawboo is holding new runs is not a run at all.
 
-| What happened                                                | Where the task goes                                        | Does it run again by itself?                                        |
-| ------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| A handed-off task failed or went quiet in team chat          | Blocked, shown in Needs you as **Failed** or **Timed out** | No. Whoever handed it off is told, and you can **Retry** it.        |
-| The process running it died, or the Clawboo server restarted | To do                                                      | Yes, until 3 runs in a row have failed. Then it waits in Needs you. |
-| You pressed **Stop**                                         | To do                                                      | No. It waits in Needs you as **Stopped**.                           |
-| A [pause](#pause) stopped its run                            | To do                                                      | Yes, when you resume. It does not show in Needs you.                |
+| What happened                                                                     | Where the task goes                                                                  | Does it run again by itself?                                                                                                                                                                                                                                                                                          |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A handed-off task failed or went quiet in team chat                               | Blocked, shown in Needs you as **Failed** or **Timed out**                           | No. Whoever handed it off is told, and you can **Retry** it.                                                                                                                                                                                                                                                          |
+| The process running it died, or the Clawboo server restarted                      | To do                                                                                | Yes, until 3 runs in a row have failed. Then it waits in Needs you.                                                                                                                                                                                                                                                   |
+| You pressed **Stop**                                                              | To do                                                                                | No. It waits in Needs you as **Stopped**.                                                                                                                                                                                                                                                                             |
+| The provider rate limited it, was overloaded, or could not be reached (team chat) | To do, saying so                                                                     | Yes, twice: after 30 seconds, then 60, of time the machine is awake, with a little added so tasks do not all come back at once. Then it goes to Needs you as **Rate limited** or **Provider unavailable**, and sooner if the task has already failed 3 times in a row. A refused sign-in or billing is never retried. |
+| The agent replied with nothing and has nothing else to show (team chat)           | Stays In progress                                                                    | One more turn, asked to say what it did. A second empty reply goes to Needs you as **No result**.                                                                                                                                                                                                                     |
+| The agent ran out of room (team chat)                                             | Stays In progress                                                                    | One continuation. A second time goes to Needs you as **Out of room**.                                                                                                                                                                                                                                                 |
+| A hard budget cap stopped it                                                      | To do on the task runner, Blocked in team chat, shown in Needs you as **Budget cap** | No. Raise the cap, then **Retry**.                                                                                                                                                                                                                                                                                    |
+| Runs already going have set aside the rest of a budget                            | To do, saying so                                                                     | Yes, once those runs have ended. If what they spent fills the cap, or the task has already failed 3 times in a row, it goes to Needs you as **Budget cap**.                                                                                                                                                           |
+| The circuit breaker stopped it                                                    | To do, shown in Needs you as **Stopped by the breaker**                              | No. Read its last comment, then **Retry**.                                                                                                                                                                                                                                                                            |
+| A [pause](#pause) stopped its run                                                 | To do                                                                                | Yes, when you resume. It does not show in Needs you.                                                                                                                                                                                                                                                                  |
+
+**What counts as an empty reply.** No text, or only a control token such as `__skipped__`, with no hand-off or sub-task from that work, no comment of its own on the task and no `report_result` on that run. A run with any of those reported some other way and finishes as usual, and a task with work it handed out still going waits for it instead. A task's turn after its sub-tasks close belongs to the same work, so sub-tasks it handed out count there too, and an extra turn it already had is not handed out again.
+
+An empty reply reaches Done in one case: the run changed the team's folder, the team has a work check, and the check passed it. The check is the evidence, so that run gets no extra turn, and a failed check sends the fix round it always did. When a teammate was working in the folder during the run, the change may not be this agent's, so the agent is asked first. Files are not counted anywhere else, because only a work check can see them. So on a team with no check, an agent that wrote a file and said nothing gets the one extra turn, which asks it to say what it did.
+
+Each kind of extra turn happens once, until something new starts the task again, such as your **Retry** or your comment. An empty reply and running out of room cannot hand each other more.
 
 Clawboo notices a dead run in two ways. A running task proves it is alive every 30 seconds; after 3 minutes with no sign of life, the run is timed out and the task returns to To do. When the server starts, runs left over from before that have shown no sign of life for 3 minutes are marked failed, and their tasks return to To do. The limits for a teammate that goes quiet in team chat are on [How work is delegated](/concepts/delegation-and-orchestration).
 

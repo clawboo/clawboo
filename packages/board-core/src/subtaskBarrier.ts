@@ -12,7 +12,9 @@
 //                          sub-task is still coming;
 //   · with a person        waiting on a person's answer or action, or held by one.
 //                          It starts again by itself when they act, so it is open;
-//   · coming               it reports by itself;
+//   · coming               it reports by itself. That includes a task waiting in To do
+//                          for its next try: a provider failure's wait, or room in a
+//                          budget that runs already going have set aside;
 //   · not handed out       nobody was given it. An agent's note to itself, or a
 //                          person's: no one is working on it, so nothing waits on it;
 //   · waits on this task   it needs this task to finish first. Waiting on it back
@@ -22,6 +24,7 @@
 // Import-free apart from its siblings, like the state machine.
 
 import {
+  BUDGET_HELD_STATUS,
   budgetRefusalOf,
   delegationTargetOf,
   ledgerWillAutoFire,
@@ -79,8 +82,12 @@ export function subtaskStanding(task: SubtaskView): SubtaskStanding {
       // Unread is not empty: nothing here may start a parent's follow-up early.
       if (task.execs === null) return 'coming'
       const last = task.execs[task.execs.length - 1]
-      // A budget refusal starts again by itself once a person raises the cap.
-      if (budgetRefusalOf(last)) return 'with_person'
+      // Its run is still closing: a task going back for a retry moves before its run
+      // closes, and whatever comes next, it has not ended yet.
+      if (last?.status === 'running') return 'coming'
+      // A hard cap's refusal goes again once a person raises it. Room runs already going
+      // set aside clears by itself, so that reads like any other wait for a next try.
+      if (last?.status !== BUDGET_HELD_STATUS && budgetRefusalOf(last)) return 'with_person'
       // A pause holds it back, and it fires again on resume: not a person's Stop.
       if (stoppedByPause(last)) return 'coming'
       if (last?.status === 'cancelled') return 'stopped'

@@ -83,6 +83,34 @@ const RULES: Rule[] = [
   },
 ]
 
+/** An exact typed code, which is the runtime's own word and decides. The rules below
+ *  read words and numbers out of the message too, so a token count ("Requested 403.")
+ *  would otherwise read as a status. Only the codes that say one thing are here. A
+ *  `bad_request` is not: an account refused for credit comes back as one. */
+const TYPED_CODES: Readonly<Record<string, RuntimeErrorClass>> = {
+  auth: 'Auth',
+  authentication_failed: 'Auth',
+  authentication_error: 'Auth',
+  invalid_api_key: 'Auth',
+  billing_error: 'Billing',
+  rate_limit: 'RateLimited',
+  rate_limit_error: 'RateLimited',
+  overloaded: 'ProviderError',
+  overloaded_error: 'ProviderError',
+  server_overloaded: 'ProviderError',
+  server_error: 'ProviderError',
+  network: 'ProviderError',
+  network_error: 'ProviderError',
+}
+
+/** An empty balance named in words, never by a number. A provider can send one as a 429,
+ *  and waiting does not fix it, so it outranks even a typed rate limit. */
+const BILLING_WORDS =
+  /\b(billing[\s_-]?error|account[\s_-]?on[\s_-]?hold|verification[\s_-]?required|credit balance|insufficient[\s_-]?(?:quota|credits?|funds|balance)|payment[\s_-]?required)\b/i
+
+/** A message that opens with the status 429, which any number after it does not change. */
+const OPENS_WITH_429 = /^\s*(?:(?:http|status|error(?: code)?:?)\s*)?429\b/i
+
 /**
  * Classify a runtime/tool failure from its (often null) error `code` plus its
  * free-form `message`. Returns `Unknown` when nothing matches — which `isHarnessBug`
@@ -92,6 +120,10 @@ export function classifyError(code?: string | null, message?: string | null): Ru
   // The runtime's own verdict on the run. The rules below also read the message, and a
   // token count in it ("201,402 tokens") would match a status number first.
   if (code === 'context_overflow') return 'ContextOverflow'
+  const typed = code ? TYPED_CODES[code] : undefined
+  if (typed === 'RateLimited' || (!typed && OPENS_WITH_429.test(message ?? '')))
+    return BILLING_WORDS.test(message ?? '') ? 'Billing' : 'RateLimited'
+  if (typed) return typed
   // A snake_case code is also read word by word, so `rate_limit_error` matches
   // the rate-limit rule the way "rate limit error" would.
   const words = code?.includes('_') ? code.replace(/_/g, ' ') : ''

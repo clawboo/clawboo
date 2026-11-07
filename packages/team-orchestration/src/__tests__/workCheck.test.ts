@@ -452,7 +452,7 @@ describe('team-chat work check', () => {
     expect(h.toWorker()).toHaveLength(1)
     expect(statusOf(h.board, id)).toBe('todo')
     expect(h.board.comments.some((c) => c.body.includes('What: tests failed.'))).toBe(true)
-    expect((await h.board.listExecutions(id)).at(-1)).toMatchObject({
+    expect((await h.board.listExecutions(id))!.at(-1)).toMatchObject({
       status: 'cancelled',
       errorClass: 'Paused',
     })

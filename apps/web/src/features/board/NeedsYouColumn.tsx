@@ -361,6 +361,12 @@ function primaryActionOf(
     case 'failed':
     case 'timed_out':
     case 'stopped':
+    case 'no_result':
+    case 'rate_limited':
+    case 'provider_down':
+    case 'out_of_room':
+    case 'budget':
+    case 'breaker':
       return canRetry ? 'retry' : canAssign ? 'assign' : 'open'
     case 'unassigned':
     case 'unstarted':

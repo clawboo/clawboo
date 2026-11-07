@@ -1,16 +1,13 @@
 // Attempt classification — reading the execution ledger back as a story.
 //
-// THE PROBLEM. Clawboo already caps re-fires: `isLedgerAutoFireable` counts the
-// trailing streak of non-succeeded runs against MAX_AUTO_FIRES, and crash-reaps
-// count because `reconcileOrphans` writes `status: 'failed'`. What it does NOT do
-// is distinguish two very different loops:
+// THE PROBLEM. Clawboo caps re-fires, and there are two very different loops:
 //
 //   - a task whose PROCESS keeps dying (an orphan reap, a stale sweep), and
 //   - a task that runs fine and keeps FAILING (a red gate, a thrown driver).
 //
-// Both currently look like the same streak, so a delegator is told the same thing
-// either way, and the next attempt is given the same (nonexistent) context. The
-// data to tell them apart is already on the ledger; only the reading was missing.
+// The fire policy counts them apart (`trailingRunFailures` in @clawboo/board-core).
+// This reads the same ledger back for whoever has to explain it: a delegator is told
+// which it was, and the next attempt gets the context that fits.
 //
 // DERIVED, NEVER STORED. There is no attempt-counter column and there should not
 // be: a stored count can drift from the rows it duplicates, and the ledger is
@@ -22,30 +19,28 @@
 // run that went silent while its process lived), so a `timed_out` row is a
 // crash only when the stale sweep wrote it.
 
-import { isFinishedRun } from '@clawboo/board-core'
+import {
+  isFinishedRun,
+  ORPHANED_RUN_ERROR,
+  runKindOf,
+  STALE_RUN_ERROR,
+  trailingRunFailures,
+  type RunKind,
+} from '@clawboo/board-core'
 
-/** The error `reconcileOrphans` writes on a run whose process died with the
- *  previous server. Its row also carries `recoveryTombstone`. */
-export const ORPHANED_RUN_ERROR = 'orphaned: process not alive on restart'
-
-/** The error the stale sweep writes on a run whose drain stopped beating. Its
- *  row is `timed_out`, the status the team engine's watchdog writes too, so this
- *  text is what tells a crash from a timeout. */
-export const STALE_RUN_ERROR = 'stale: no heartbeat within the watchdog window'
-
-/** The stale sweep's error before 86ea611f, still on rows in older databases. */
-const LEGACY_STALE_RUN_ERROR = 'stale: no progress within the watchdog window'
+export { ORPHANED_RUN_ERROR, STALE_RUN_ERROR }
 
 /** How the most recent attempt ended. `timeout`: a watchdog stopped a run that
  *  had gone silent while its process lived (the team engine's, or the OpenClaw
- *  routine dispatcher's). */
-export type AttemptKind = 'crash' | 'timeout' | 'error' | 'success' | 'cancelled'
+ *  routine dispatcher's). `budget`, `breaker`: the host stopped it. */
+export type AttemptKind = RunKind
 
 /** The shape this reads. A subset of `DbExecutionProcess`, so a caller can pass
  *  rows straight from `listExecutions` without mapping. */
 export interface AttemptRow {
   status: string
   error?: string | null
+  errorClass?: string | null
   recoveryTombstone?: number | null
   afterCommit?: string | null
   summary?: string | null
@@ -75,6 +70,9 @@ export interface AttemptSummary {
 }
 
 /**
+ * How a run ended is `runKindOf` in @clawboo/board-core, the rule the fire policy reads
+ * too, so the two never disagree.
+ *
  * A crash is a run that never got to report. Two writers produce one:
  * `reconcileOrphans` (the process died with the previous server) sets
  * `recoveryTombstone`, and `reconcileStaleInProgress` (the drain stopped beating)
@@ -83,6 +81,9 @@ export interface AttemptSummary {
  * Any other `timed_out` row is a watchdog's: the team engine's idle watchdog or
  * the OpenClaw routine dispatcher's stopped a run whose process was alive. That
  * is a timeout, not a crash.
+ *
+ * `budget` and `breaker` are the host stopping a run, each with its own status.
+ * A budget stop neither counts in a streak nor ends one, and a breaker trip ends one.
  *
  * Anything else that failed actually ran, which is an error attempt.
  *
@@ -93,16 +94,6 @@ export interface AttemptSummary {
  * finished, so it ends a failure streak as truly as a success would.
  * `lastReason` says which it was.
  */
-function kindOf(row: AttemptRow): AttemptKind {
-  if (row.status === 'succeeded') return 'success'
-  if (row.status === 'cancelled') return 'cancelled'
-  if (row.recoveryTombstone === 1) return 'crash'
-  if (row.status === 'timed_out')
-    return row.error === STALE_RUN_ERROR || row.error === LEGACY_STALE_RUN_ERROR
-      ? 'crash'
-      : 'timeout'
-  return 'error'
-}
 
 /**
  * Classify a task's ledger, oldest first (the order `listExecutions` returns).
@@ -130,20 +121,12 @@ export function classifyAttempts(execs: AttemptRow[]): AttemptSummary {
   if (terminal.length === 0) return empty
 
   const last = terminal[terminal.length - 1]!
-  const lastKind = kindOf(last)
-
-  let crashAttempts = 0
-  let errorAttempts = 0
-  for (let i = terminal.length - 1; i >= 0; i--) {
-    const k = kindOf(terminal[i]!)
-    if (k === 'success' || k === 'cancelled') break
-    if (k === 'crash') crashAttempts += 1
-    else errorAttempts += 1
-  }
+  const lastKind = runKindOf(last)
+  const { crashes, errors } = trailingRunFailures(terminal)
 
   return {
-    crashAttempts,
-    errorAttempts,
+    crashAttempts: crashes,
+    errorAttempts: errors,
     lastKind,
     // Evidence, not inference: a moved commit or a recorded summary means the
     // attempt got far enough to do something. Claiming work exists when it does

@@ -12,7 +12,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { ledgerAllowsAutoFire } from '@clawboo/board-core'
+import { ledgerAllowsAutoFire, ledgerWillAutoFire } from '@clawboo/board-core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
@@ -29,7 +29,7 @@ import {
   reconcileOrphans,
   updateStatus,
 } from '../repository'
-import { archiveRoom, createRoom, moveArchivedRoomTasks } from '../rooms'
+import { archiveRoom, createRoom, moveArchivedRoomTasks, stopTasksWaitingToStart } from '../rooms'
 import { listWaitingTaskWakes, recordTaskWake } from '../../taskWakes'
 
 let dir: string
@@ -90,6 +90,42 @@ describe('moveArchivedRoomTasks', () => {
     // It is in the team chat's ready list now, and the pump's policy holds it.
     expect(getReadyTasks(db, { teamId: 'T', roomId: null }).map((t) => t.id)).toEqual([queued])
     expect(ledgerAllowsAutoFire(listExecutions(db, queued))).toBe(false)
+  })
+
+  it('a task waiting to start by itself stops saying so', () => {
+    const waiting = roomTask('Waiting to retry')
+    updateStatus(db, waiting, 'backlog')
+    updateStatus(db, waiting, 'todo', {
+      waitingOn: { kind: 'retry', cause: 'rate_limited', attempt: 1 },
+    })
+    archiveRoom(db, roomId)
+    moveArchivedRoomTasks(db)
+    expect(lastRun(waiting)).toBe('cancelled')
+    expect(getTask(db, waiting)?.waitingOn).toBeNull()
+  })
+
+  it('a Stop with no engine stops only what waits to start by itself, and clears its card', () => {
+    const retry = roomTask('Waiting to retry')
+    const held = roomTask('Waiting for budget room')
+    const queued = roomTask('Queued')
+    updateStatus(db, retry, 'backlog')
+    updateStatus(db, retry, 'todo', {
+      waitingOn: { kind: 'retry', cause: 'rate_limited', attempt: 1 },
+    })
+    updateStatus(db, held, 'backlog')
+    updateStatus(db, held, 'todo', { waitingOn: { kind: 'budget', held: true } })
+
+    const stopped = stopTasksWaitingToStart(db, { teamId: 'T', roomId })
+
+    expect(stopped.map((t) => t.id).sort()).toEqual([retry, held].sort())
+    for (const id of [retry, held]) {
+      expect(getTask(db, id)?.waitingOn).toBeNull()
+      expect(lastRun(id)).toBe('cancelled')
+      // The engine's own mark: the same row an engine's Stop writes.
+      expect(listExecutions(db, id).at(-1)?.engineRun).toBe(1)
+      expect(ledgerWillAutoFire(listExecutions(db, id))).toBe(false)
+    }
+    expect(listExecutions(db, queued)).toEqual([])
   })
 
   it('leaves a waiting plan step unmarked, so it runs once the step before it is done', () => {
