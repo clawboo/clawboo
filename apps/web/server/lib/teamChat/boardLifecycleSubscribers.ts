@@ -62,7 +62,18 @@ const log = createLogger('board-lifecycle')
 /** Mirrors the engine's `:agent:` pump-fireable marker. */
 const SDID_AGENT_RE = /:agent:/
 
-const TERMINAL_EXEC_STATUSES = new Set(['succeeded', 'failed', 'timed_out'])
+/** How a run ended, for whoever handed the task out. The endings to tell them about: a
+ *  person's Stop (`cancelled`) is not, since a person did it, and `budget_held` is not,
+ *  since the task starts again by itself when the room is there, however many tries that
+ *  takes. A budget pause or a breaker trip is the delegator's to hear, like a failure. */
+const TERMINAL_EXEC_STATUS_WORDS: Readonly<Record<string, string>> = {
+  succeeded: 'succeeded',
+  failed: 'failed',
+  timed_out: 'timed_out',
+  budget_paused: 'stopped by a budget cap',
+  breaker_tripped: 'stopped by the circuit breaker',
+}
+const TERMINAL_EXEC_STATUSES = new Set(Object.keys(TERMINAL_EXEC_STATUS_WORDS))
 
 /** Debounce: at most one scheduled pump per team chat room per window. */
 const pendingPumps = new Map<string, ReturnType<typeof setTimeout>>()
@@ -284,7 +295,7 @@ export function registerBoardLifecycleSubscribers(opts: {
         )
           return
         // Cheap dedupe: don't stack an identical undelivered row per rotation.
-        const body = `“${task?.title ?? ev.taskId}” finished with ${ev.status}. Check the board for the result.`
+        const body = `“${task?.title ?? ev.taskId}” finished with ${TERMINAL_EXEC_STATUS_WORDS[ev.status]}. Check the board for the result.`
         const already = listUndeliveredInbox(db, recipient, { teamId: ev.teamId }).some(
           (r) => r.taskId === ev.taskId && r.body === body,
         )
@@ -303,7 +314,7 @@ export function registerBoardLifecycleSubscribers(opts: {
           // recipient delegated it there, so that is where it is listening.
           getTaskOrchestrator(ev.teamId, ev.taskId, { mcpBaseUrl: opts.mcpBaseUrl }).signalAgent(
             recipient,
-            `[team signal] A delegated task just finished (${ev.status}). Details follow at your next turn or tool call.`,
+            `[team signal] A delegated task just finished (${TERMINAL_EXEC_STATUS_WORDS[ev.status]}). Details follow at your next turn or tool call.`,
           )
         }
       } catch (err) {

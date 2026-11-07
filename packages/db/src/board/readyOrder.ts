@@ -4,6 +4,8 @@
 // the same agents, and whichever fires first takes the agent's session.
 
 import {
+  BUDGET_HELD_STATUS,
+  BUDGET_PAUSED_STATUS,
   MAX_TASK_PRIORITY,
   MIN_TASK_PRIORITY,
   PAUSED_RUN_CLASS,
@@ -15,7 +17,9 @@ import { asc, desc, sql, type SQL } from 'drizzle-orm'
 import { tasks } from '../schema'
 
 export function readyOrder(now: number): SQL[] {
-  const ranBefore = sql`EXISTS (SELECT 1 FROM execution_processes e WHERE e.task_id = ${tasks.id} AND (e.status != 'cancelled' OR e.error_class = ${PAUSED_RUN_CLASS}))`
+  // A person's Stop is a decision, and a budget's refusal is a run that did not start or
+  // was cut off by the host: neither is work that came back.
+  const ranBefore = sql`EXISTS (SELECT 1 FROM execution_processes e WHERE e.task_id = ${tasks.id} AND (e.status NOT IN ('cancelled', ${BUDGET_HELD_STATUS}, ${BUDGET_PAUSED_STATUS}) OR e.error_class = ${PAUSED_RUN_CLASS}))`
   const clamped = sql`max(${MIN_TASK_PRIORITY}, min(${MAX_TASK_PRIORITY}, ${tasks.priority}))`
   // CAST: a bound number is a float here, and the division must be a whole count.
   const stepsWaited = sql`max(0, CAST((${now} - ${tasks.createdAt}) / ${READY_AGING_STEP_MS} AS INTEGER))`

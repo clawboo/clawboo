@@ -150,6 +150,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.wakes': true,
     // Agents waking each other once a person said yes for the job.
     'board.agentWakes': true,
+    // How a run's ending is read: no route or switch of its own. A task's `waitingOn`
+    // and `attention` carry the new reasons, and a run's `status` the new endings.
+    'board.endings': true,
     'board.reopen': true,
     'board.personAssignees': true,
     'board.questions': true,

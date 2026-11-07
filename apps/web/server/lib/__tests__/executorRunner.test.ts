@@ -822,6 +822,8 @@ describe('executor runner — circuit breakers', () => {
     expect(getTask(db, taskId)?.status).toBe('todo') // released — clean resumable state
     expect(listGovernanceAudit(db, { eventType: 'circuit_break' }).length).toBe(1)
     expect(getComments(db, taskId).some((c) => c.body.includes(`[stopped: ${reason}]`))).toBe(true)
+    // Its own status, so nothing reads it as a person's Stop.
+    expect(listExecutions(db, taskId).at(-1)?.status).toBe('breaker_tripped')
     const completed = listEvents(db, { taskId, kinds: ['execution_completed'] })
     expect(
       completed.some(

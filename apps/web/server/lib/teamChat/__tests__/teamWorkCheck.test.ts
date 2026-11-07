@@ -40,6 +40,7 @@ import { execGit } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { getDb, getDbPath, resetDb } from '../../db'
+import { startFolderRun } from '../../runtimes/teamFolderActivity'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import { teamVerifyCommandSettingKey } from '../../verification/teamVerifyCommand'
 import { noteHumanMove } from '../humanMove'
@@ -162,6 +163,26 @@ describe('team chat work check', () => {
       else process.env[k] = v
     }
     await rm(home, { recursive: true, force: true })
+  })
+
+  it('says when a teammate worked in the folder during the run', async () => {
+    setCommand('true')
+    const wc = check()
+    const id = startTask()
+    await wc.begin(id, AGENT)
+    const mine = startFolderRun(folder, AGENT)
+    const theirs = startFolderRun(folder, 'teammate')
+    await writeFile(path.join(folder, 'notes.md'), '# notes\n')
+    theirs.release()
+    mine.release()
+    const shared = await wc.prepare(id, AGENT)
+    expect(shared?.sharedFolder).toBe(true)
+
+    const alone = startFolderRun(folder, AGENT)
+    await writeFile(path.join(folder, 'more.md'), '# more\n')
+    alone.release()
+    const quiet = await wc.prepare(id, AGENT)
+    expect(quiet?.sharedFolder).toBe(false)
   })
 
   it('checks nothing when the team has no verify command', async () => {

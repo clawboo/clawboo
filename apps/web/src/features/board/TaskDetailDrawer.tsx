@@ -201,6 +201,9 @@ const RUN_WORD: Record<string, string> = {
   failed: 'Failed',
   timed_out: 'Timed out',
   cancelled: 'Cancelled',
+  budget_paused: 'Stopped by a budget cap',
+  budget_held: 'Waited for budget room',
+  breaker_tripped: 'Stopped by the circuit breaker',
 }
 
 /** A section: a sentence-case heading that folds it, and its content. */

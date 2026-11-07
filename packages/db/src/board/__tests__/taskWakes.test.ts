@@ -200,10 +200,12 @@ describe('the run that carried a wake settles it when it ends', () => {
     expect(wakeCommentIds(rowOf(wake.id)).sort()).toEqual(['c1', 'c2'])
   })
 
-  it('a run cancelled for any other reason is not a Stop: back to waiting, counted, and not held', () => {
-    // The task runner closes `cancelled` for its breaker and for a runtime abort too.
+  it('a run the breaker stopped, or one cancelled by a runtime abort, is not a Stop: back to waiting, counted, and not held', () => {
     const { wake, exec } = carried()
-    completeExecutionProcess(db, exec.id, { status: 'cancelled', error: 'circuit_broken:loop' })
+    completeExecutionProcess(db, exec.id, {
+      status: 'breaker_tripped',
+      error: 'circuit_broken:loop',
+    })
     const row = rowOf(wake.id)
     expect(row.settledAt).toBeNull()
     expect(row.carriedExecId).toBeNull()
@@ -215,7 +217,7 @@ describe('the run that carried a wake settles it when it ends', () => {
   it('a run a budget cap killed goes back uncounted, and is not held', () => {
     const { wake, exec } = carried()
     completeExecutionProcess(db, exec.id, {
-      status: 'cancelled',
+      status: 'budget_paused',
       error: 'budget_paused:team',
       errorClass: 'BudgetRefused',
     })
@@ -223,6 +225,14 @@ describe('the run that carried a wake settles it when it ends', () => {
     expect(row.heldAt).toBeNull()
     expect(row.replays).toBe(0)
     expect(listWaitingTaskWakes(db).map((w) => w.id)).toEqual([wake.id])
+  })
+
+  it('a run a held budget refused goes back uncounted, and is not held', () => {
+    const { wake, exec } = carried()
+    completeExecutionProcess(db, exec.id, { status: 'budget_held', error: 'budget_held:team' })
+    const row = rowOf(wake.id)
+    expect(row.heldAt).toBeNull()
+    expect(row.replays).toBe(0)
   })
 
   it('back to waiting on any other end, counted', () => {

@@ -326,8 +326,8 @@ export function settleWakesOfClosedRunTx(
       // A person's Stop or move: it starts nothing, and rides the next run.
       returnToWaitingTx(tx, row, { replays: row.replays, heldAt: now }, now)
     } else {
-      // Any other ending. That includes the `cancelled` of a budget cap, the circuit
-      // breaker and a runtime abort, which no person asked for.
+      // Any other ending. That includes a budget cap, the circuit breaker and the
+      // `cancelled` of a runtime abort, which no person asked for.
       const refused = budgetRefusalOf({ status: outcome.status, errorClass: outcome.errorClass })
       returnToWaitingTx(
         tx,

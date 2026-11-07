@@ -147,6 +147,12 @@ describe('buildLastAttemptNote (the team engine)', () => {
   })
 
   it('tells a person’s stop, a person’s finish and a late result apart', () => {
+    expect(last([{ status: 'budget_paused', error: 'budget_paused:team' }])).toMatch(
+      /budget cap stopped the last attempt/i,
+    )
+    expect(last([{ status: 'breaker_tripped', error: 'circuit_broken:no-progress' }])).toMatch(
+      /circuit breaker stopped the last attempt \(circuit_broken:no-progress\)/i,
+    )
     expect(last([{ status: 'cancelled' }])).toBe(
       'A person stopped this task earlier; it is running again now.',
     )

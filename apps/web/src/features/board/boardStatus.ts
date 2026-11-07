@@ -127,6 +127,12 @@ const ATTENTION_REASONS = new Set<string>([
   'question',
   'assigned',
   'agent_wakes',
+  'no_result',
+  'rate_limited',
+  'provider_down',
+  'out_of_room',
+  'budget',
+  'breaker',
 ])
 
 /** How each reason reads on a card: a short badge and one line of guidance. */
@@ -183,6 +189,36 @@ export const ATTENTION_META: Record<
     label: 'Waiting for your OK',
     tone: 'warning',
     hint: 'An agent wants to start a teammate on this job. Say whether agents may wake each other.',
+  },
+  no_result: {
+    label: 'No result',
+    tone: 'warning',
+    hint: 'The agent finished twice with no reply and nothing else to show for it. Look in the team folder, then retry it or give it to someone else.',
+  },
+  rate_limited: {
+    label: 'Rate limited',
+    tone: 'warning',
+    hint: 'The provider kept rate limiting this run, and Clawboo stopped trying by itself. Retry it once the limit has passed.',
+  },
+  provider_down: {
+    label: 'Provider unavailable',
+    tone: 'warning',
+    hint: 'The provider stayed overloaded or out of reach, and Clawboo stopped trying by itself. Retry it once it is back.',
+  },
+  out_of_room: {
+    label: 'Out of room',
+    tone: 'warning',
+    hint: 'The agent ran out of room twice before finishing. Split the task, or retry it to carry on.',
+  },
+  budget: {
+    label: 'Budget cap',
+    tone: 'warning',
+    hint: 'A hard budget cap stopped this. Raise the cap, then retry it.',
+  },
+  breaker: {
+    label: 'Stopped by the breaker',
+    tone: 'warning',
+    hint: 'The circuit breaker stopped this run because it was going wrong in a way that repeats. Read its last comment, then retry it.',
   },
 }
 
@@ -368,17 +404,22 @@ export function otherAssigneeName(
 }
 
 /**
- * What a card says for a task waiting on other work, or null when it is not. The
- * server attaches `waitingOnDetail` to a row: the title of the task it waits on, or
- * how many of its sub-tasks are open and how many of those need a person.
+ * What a card says for a task waiting on other work, or waiting in To do for its turn
+ * to try again, or null when it is not. The server attaches `waitingOnDetail` to a row:
+ * the title of the task it waits on, or how many of its sub-tasks are open and how many
+ * of those need a person.
  */
 export function waitingWorkLabel(task: {
   status: string
   waitingOn?: unknown
   waitingOnDetail?: unknown
 }): string | null {
-  if (task.status !== 'blocked') return null
   const w = parseWaitingOn(task.waitingOn)
+  if (task.status === 'todo' && w?.kind === 'retry')
+    return `Retrying soon: ${w.cause === 'rate_limited' ? 'rate limited' : 'provider down'}`
+  if (task.status === 'todo' && w?.kind === 'budget' && w.held)
+    return 'Waiting for room in a budget'
+  if (task.status !== 'blocked') return null
   if (!w || !waitsOnOtherWork(w)) return null
   const detail = (task.waitingOnDetail ?? {}) as {
     taskTitle?: unknown

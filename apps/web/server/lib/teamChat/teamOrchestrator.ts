@@ -27,6 +27,7 @@ import {
   getActiveRoom,
   listHeldReportUps,
   listPendingReportUps,
+  getTask,
   listRoomsWithEngineTasksInReview,
   listRoomsWithPendingReportUps,
   reapReportUps,
@@ -52,6 +53,7 @@ import {
 import { resolveDelegationApproval } from '../../api/delegationApproval'
 import { getRegistry } from '../agentSource/registry'
 import { getDb } from '../db'
+import { engineHeld } from '../engineHold'
 import { PausedDeliveryError, pauseRefusalText, pauseTaskStopNote } from '../pauseBus'
 import { publishAgentStatus } from './agentStatusBus'
 import { booZeroForTeam, ensureNativeBooZero } from './booZero'
@@ -61,7 +63,7 @@ import { persistTeamChatEntry } from './persistTeamChatEntry'
 import { persistAssistantTurnWithAsk } from './persistTurnWithAsk'
 import { publishBoardChangeWithAttention } from './publishBoardChange'
 import { createReportUpOutbox } from './reportUpOutbox'
-import { createTaskWakeOutbox } from './taskWakes'
+import { budgetGateRefusal, createTaskWakeOutbox } from './taskWakes'
 import { isRiskyDelegation } from './riskyDelegation'
 import { createServerBoardClient } from './serverBoardClient'
 import {
@@ -455,6 +457,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     reportUps: createReportUpOutbox(db, teamId, roomId),
     // The saved wakes on this room's tasks (see ./taskWakes).
     taskWakes: createTaskWakeOutbox(db, teamId, roomId),
+    // A task whose last run a budget refused waits on the budget gate, not on a try.
+    budgetRefusal: (taskId, agentId) => {
+      const task = getTask(db, taskId)
+      return task ? budgetGateRefusal(db, task, agentId) : null
+    },
+    held: engineHeld,
     // The task runner's verification gate, run on the team folder: a task whose
     // run changed it is done only once the team's verify command (and, for a
     // large, risky or handed-down change, a reviewer) passes it.

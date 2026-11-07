@@ -545,7 +545,7 @@ describe('a run the host refused for a hard budget', () => {
     })
     await engine.dispatchTask(id)
     expect(board.completed.at(-1)?.outcome).toMatchObject({
-      status: 'failed',
+      status: 'budget_paused',
       errorClass: 'BudgetRefused',
     })
   })

@@ -9,16 +9,21 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { encodeHumanAssignment } from '@clawboo/board-core'
+import { encodeHumanAssignment, ledgerAllowsAutoFire } from '@clawboo/board-core'
 import {
   agents,
+  attentionForTask,
   boardActivityHead,
+  completeExecutionProcess,
+  createExecutionProcess,
   createTask,
   getTask,
+  listExecutions,
   LOCAL_READER,
   markAllTasksRead,
   teams,
   unreadTasks,
+  updateStatus,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
@@ -33,7 +38,8 @@ vi.mock('../serverDeliver', () => ({
 }))
 
 const { getDb, getDbPath, resetDb } = await import('../../db')
-const { getTeamOrchestrator, resetTeamOrchestrators } = await import('../teamOrchestrator')
+const { getTeamOrchestrator, hasTeamOrchestrator, resetTeamOrchestrators } =
+  await import('../teamOrchestrator')
 const { teamChatStopPOST } = await import('../../../api/teams')
 
 const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
@@ -109,6 +115,32 @@ describe('Stop with the real engine', () => {
     )
     expect(status).toBe(200)
   }
+
+  it('with no engine loaded, a task waiting to try again hears it', async () => {
+    const db = getDb()
+    const task = createTask(db, {
+      title: 'write the report',
+      status: 'backlog',
+      teamId: 'T',
+      sourceDelegationId: encodeHumanAssignment('lead', 'n1'),
+    })
+    updateStatus(db, task.id, 'todo', {
+      waitingOn: { kind: 'retry', cause: 'rate_limited', attempt: 1 },
+    })
+    const run = createExecutionProcess(db, { taskId: task.id, executorType: 'openclaw' })
+    completeExecutionProcess(db, run.id, { status: 'failed', errorClass: 'RateLimited' })
+    expect(hasTeamOrchestrator('T', null)).toBe(false)
+
+    await pressStop(DASHBOARD)
+
+    expect(getTask(db, task.id)?.waitingOn).toBeNull()
+    expect(listExecutions(db, task.id).at(-1)?.status).toBe('cancelled')
+    expect(attentionForTask(db, task.id)).toMatchObject({ reason: 'stopped' })
+    // The pump's scan reads it as stopped, so nothing starts it when the wait ends.
+    const later = Date.now() + 3_600_000
+    expect(ledgerAllowsAutoFire(listExecutions(db, task.id), later)).toBe(false)
+    expect(hasTeamOrchestrator('T', null)).toBe(false)
+  })
 
   it('releases the task, and it is not unread for the person who pressed', async () => {
     const id = await runningTask()

@@ -140,7 +140,7 @@ describe('pauseRuns', () => {
     const h = makeHarness()
     const { id } = await running(h)
     await h.engine.pauseRuns(everything, NOTE)
-    const ledger = await h.board.listExecutions(id)
+    const ledger = (await h.board.listExecutions(id))!
     expect(stoppedByPause(ledger.at(-1))).toBe(true)
     expect(ledgerAllowsAutoFire(ledger)).toBe(true)
   })

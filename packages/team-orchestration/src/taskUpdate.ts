@@ -47,6 +47,10 @@ export type TaskUpdateOutcome =
   | 'aborted'
   | 'timeout'
   | 'max_turns'
+  | 'no_result'
+  | 'rate_limited'
+  | 'provider_down'
+  | 'budget'
 
 export interface TaskUpdateItem {
   /** Resolved assignee name (agent or, later, a human). */
@@ -76,6 +80,10 @@ const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',
   max_turns: 'ran out of room before finishing',
+  no_result: 'finished without a result: it needs a person',
+  rate_limited: 'was rate limited by its provider, and Clawboo stopped trying: it needs a person',
+  provider_down: 'could not reach its provider, and Clawboo stopped trying: it needs a person',
+  budget: 'was stopped by a budget cap: it needs a person',
 }
 
 function isTaskFailure(outcome?: TaskUpdateOutcome): outcome is FailedOutcome {

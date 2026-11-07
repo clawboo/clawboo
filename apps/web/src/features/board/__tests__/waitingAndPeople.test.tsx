@@ -92,6 +92,23 @@ describe('the board reads waiting_on', () => {
       }),
     ).toBe('Waiting on 2 sub-tasks, 2 need you')
     expect(waitingWorkLabel({ status: 'todo', waitingOn: '{"kind":"subtasks"}' })).toBeNull()
+    expect(
+      waitingWorkLabel({
+        status: 'todo',
+        waitingOn: '{"kind":"retry","cause":"rate_limited","attempt":1}',
+      }),
+    ).toBe('Retrying soon: rate limited')
+    expect(
+      waitingWorkLabel({
+        status: 'todo',
+        waitingOn: '{"kind":"retry","cause":"unavailable","attempt":2}',
+      }),
+    ).toBe('Retrying soon: provider down')
+    expect(waitingWorkLabel({ status: 'todo', waitingOn: '{"kind":"budget","held":true}' })).toBe(
+      'Waiting for room in a budget',
+    )
+    // A paused cap waits for a person, in Needs you.
+    expect(waitingWorkLabel({ status: 'blocked', waitingOn: '{"kind":"budget"}' })).toBeNull()
     expect(waitingWorkLabel({ status: 'blocked', waitingOn: JSON.stringify(QUESTION) })).toBeNull()
   })
 

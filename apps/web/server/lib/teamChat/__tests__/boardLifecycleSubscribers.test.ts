@@ -330,6 +330,45 @@ describe('board lifecycle subscribers', () => {
     expect(mail[0]!.body).toContain('succeeded')
   })
 
+  it('tells the delegator about a budget pause or a breaker trip, in words', () => {
+    const db = getDb()
+    for (const [status, word] of [
+      ['budget_paused', 'stopped by a budget cap'],
+      ['breaker_tripped', 'stopped by the circuit breaker'],
+    ] as const) {
+      const t = createTask(db, {
+        title: `ship ${status}`,
+        teamId: TEAM,
+        sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+      })
+      claimTask(db, t.id, 'a2')
+      const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+      completeExecutionProcess(db, ex.id, { status })
+      const mail = listUndeliveredInbox(db, 'leader', { teamId: TEAM }).filter(
+        (m) => m.taskId === t.id,
+      )
+      expect(mail).toHaveLength(1)
+      expect(mail[0]!.body).toContain(word)
+    }
+  })
+
+  it('says nothing about a held budget or a person’s Stop', () => {
+    const db = getDb()
+    for (const status of ['budget_held', 'cancelled'] as const) {
+      const t = createTask(db, {
+        title: `ship ${status}`,
+        teamId: TEAM,
+        sourceDelegationId: 'r1:deleg:agent:a2:reflectTo:leader',
+      })
+      claimTask(db, t.id, 'a2')
+      const ex = createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+      completeExecutionProcess(db, ex.id, { status })
+      expect(
+        listUndeliveredInbox(db, 'leader', { teamId: TEAM }).filter((m) => m.taskId === t.id),
+      ).toEqual([])
+    }
+  })
+
   it('does not call a task runner run that left its task blocked "finished"', () => {
     // The task runner's own notice (the agent blocked it, or its check failed for
     // good) tells the delegator what actually happened.

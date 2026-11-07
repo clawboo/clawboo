@@ -198,6 +198,64 @@ describe('error taxonomy', () => {
     }
   })
 
+  it('lets an exact typed code decide, before a number in the message can', () => {
+    const cases: Array<[string, string, string]> = [
+      [
+        'rate_limit',
+        'Rate limit: Limit 400, Used 397, Requested 403. Please try again.',
+        'RateLimited',
+      ],
+      ['rate_limit', 'Requested 402 tokens over the limit', 'RateLimited'],
+      ['rate_limit_error', 'Used 401 of your requests', 'RateLimited'],
+      ['overloaded', 'Overloaded, request 403 dropped', 'ProviderError'],
+      ['server_error', 'Upstream said 401', 'ProviderError'],
+      [
+        'network',
+        'Client network socket disconnected before secure TLS connection was established',
+        'ProviderError',
+      ],
+      ['network', 'The connection dropped', 'ProviderError'],
+      ['auth', 'The key was refused', 'Auth'],
+      ['authentication_failed', 'Rate limit on sign-in (HTTP 429)', 'Auth'],
+      ['billing_error', 'Credit balance is too low (HTTP 400)', 'Billing'],
+    ]
+    for (const [code, message, cls] of cases)
+      expect(classifyError(code, message), message).toBe(cls)
+  })
+
+  it('keeps the three readings of too many tokens apart, typed or not', () => {
+    // A typed overflow decides, whatever the message says.
+    expect(classifyError('context_overflow', 'Rate limit: too many requests per minute')).toBe(
+      'ContextOverflow',
+    )
+    // So does a typed rate limit.
+    expect(classifyError('rate_limit', 'too many input tokens')).toBe('RateLimited')
+    expect(classifyError('rate_limit_error', 'context length exceeded')).toBe('RateLimited')
+    // With no code, the words decide: what it counts means an overflow, and a rate per
+    // minute means a limit, whatever else it counts.
+    expect(classifyError(null, 'too many input tokens')).toBe('ContextOverflow')
+    expect(classifyError(null, 'too many input tokens per minute')).toBe('RateLimited')
+    expect(classifyError(null, 'too many tokens, 40000 tpm')).toBe('RateLimited')
+    expect(isTransientError(classifyError(null, 'too many input tokens'))).toBe(false)
+    expect(isTransientError(classifyError(null, 'too many input tokens per minute'))).toBe(true)
+  })
+
+  it('still reads an empty balance sent as a rate limit as Billing: waiting does not fix it', () => {
+    for (const message of [
+      "Rate limit: 429 {'error': {'type': 'insufficient_quota'}}",
+      'Rate limit: Your credit balance is too low',
+    ])
+      expect(classifyError('rate_limit', message), message).toBe('Billing')
+  })
+
+  it('reads a message that opens with a 429 as a rate limit, whatever number follows', () => {
+    expect(classifyError(null, '429 Too many tokens: Used 400, Requested 403.')).toBe('RateLimited')
+    expect(classifyError(null, 'Error code: 429 - Requested 401 tokens')).toBe('RateLimited')
+    expect(classifyError(null, "Error code: 429 - {'error': {'code': 'insufficient_quota'}}")).toBe(
+      'Billing',
+    )
+  })
+
   it('does not read an ordinary failure as a refused sign-in', () => {
     // A local file permission error is the machine's, not the account's.
     expect(

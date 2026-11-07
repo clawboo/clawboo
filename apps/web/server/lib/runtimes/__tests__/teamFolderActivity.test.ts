@@ -3,7 +3,12 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { enterFolderCheckLine, folderRunners, startFolderRun } from '../teamFolderActivity'
+import {
+  enterFolderCheckLine,
+  folderRunners,
+  lastRunWasShared,
+  startFolderRun,
+} from '../teamFolderActivity'
 
 const FOLDER = '/tmp/clawboo-test/workspaces/T'
 
@@ -20,6 +25,35 @@ async function resolved(p: Promise<void>): Promise<boolean> {
 }
 
 describe('team folder activity', () => {
+  it('remembers whether a teammate worked in the folder during an agent’s latest run', () => {
+    const folder = '/shared-run-a'
+    const alone = startFolderRun(folder, 'ada')
+    alone.release()
+    expect(lastRunWasShared(folder, 'ada')).toBe(false)
+
+    // Whichever started first, and after both have ended.
+    const ada = startFolderRun(folder, 'ada')
+    const zed = startFolderRun(folder, 'zed')
+    zed.release()
+    ada.release()
+    expect(lastRunWasShared(folder, 'ada')).toBe(true)
+    expect(lastRunWasShared(folder, 'zed')).toBe(true)
+
+    // The next run starts clean.
+    startFolderRun(folder, 'ada').release()
+    expect(lastRunWasShared(folder, 'ada')).toBe(false)
+    expect(lastRunWasShared(folder, 'nobody')).toBe(false)
+  })
+
+  it('an agent’s own second run is not company', () => {
+    const folder = '/shared-run-b'
+    const first = startFolderRun(folder, 'ada')
+    const second = startFolderRun(folder, 'ada')
+    first.release()
+    second.release()
+    expect(lastRunWasShared(folder, 'ada')).toBe(false)
+  })
+
   it('a clear folder gives a check its turn at once', () => {
     const turn = enterFolderCheckLine(FOLDER)
     expect(turn.clear).toBe(true)

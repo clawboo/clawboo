@@ -179,8 +179,13 @@ const CARD_FOR_SKIP: Partial<Record<WakeSkipReason, AgentWakeCardKind>> = {
 }
 const STARTED_AGAIN_FOR_REPLY = 'Started again for a person’s reply.'
 
-/** Ask the budget gate, taking nothing: a hold it grants is released at once. */
-function budgetGateRefuses(db: ClawbooDb, task: DbTask, agentId: string): boolean {
+/** Ask the budget gate, taking nothing: a hold it grants is released at once. Says which
+ *  refusal: `paused` waits for a person, and `held` clears by itself when runs end. */
+export function budgetGateRefusal(
+  db: ClawbooDb,
+  task: DbTask,
+  agentId: string,
+): 'paused' | 'held' | null {
   try {
     const root = getAncestors(db, task.id).find((a) => a.parent_task_id == null)?.id ?? task.id
     const gate = reserveRunBudget(
@@ -188,14 +193,19 @@ function budgetGateRefuses(db: ClawbooDb, task: DbTask, agentId: string): boolea
       { agentId, missionId: root, teamId: task.teamId },
       { kind: 'team-chat', ref: `wake:${task.id}` },
     )
-    if (gate.blocked) return true
+    if (gate.blocked) return gate.reason
     gate.hold.release()
-    return false
+    return null
   } catch (err) {
     // Unread, as at a run's own gate: the run goes, and its own gate decides.
     log.error({ err, taskId: task.id }, 'budget gate could not be asked for a wake')
-    return false
+    return null
   }
+}
+
+/** Would a hard budget cap refuse a run of this task now, for either reason? */
+function budgetGateRefuses(db: ClawbooDb, task: DbTask, agentId: string): boolean {
+  return budgetGateRefusal(db, task, agentId) !== null
 }
 
 /** The task finished before the wake could go out. Nothing can run it now, so the

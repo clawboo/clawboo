@@ -115,6 +115,10 @@ export function buildLastAttemptNote(attempts: AttemptSummary): string | null {
     case 'error':
       line = `The last attempt failed: ${reason || 'no reason was recorded'}.`
       break
+    case 'budget':
+      return `A budget cap stopped the last attempt, or kept it from starting. ${checkFirst}`
+    case 'breaker':
+      return `The circuit breaker stopped the last attempt${reason ? ` (${reason})` : ''}: it was going wrong in a way that repeats. Try another approach. ${checkFirst}`
     case 'cancelled':
       if (attempts.lastReason === RUN_CLOSED_RESULT_AFTER_RELEASE)
         return 'The last attempt finished after the task had been taken back from it; its result is kept as a comment on this task.'

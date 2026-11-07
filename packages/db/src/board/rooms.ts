@@ -10,7 +10,12 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { delegationTargetOf, isEngineRun } from '@clawboo/board-core'
+import {
+  delegationTargetOf,
+  isEngineRun,
+  parseWaitingOn,
+  waitsToStartByItself,
+} from '@clawboo/board-core'
 import { and, asc, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
@@ -21,6 +26,7 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   getReadyTasks,
+  setTaskWaitingOn,
   listExecutions,
   updateStatus,
 } from './repository'
@@ -279,6 +285,38 @@ export interface MovedRoomTasks {
   closedRuns: ClosedRoomRun[]
 }
 
+/** A task stopped while it waited in To do to start by itself no longer waits. */
+function clearWaitToStart(db: ClawbooDb, task: DbTask): void {
+  if (waitsToStartByItself(parseWaitingOn(task.waitingOn))) setTaskWaitingOn(db, task.id, null)
+}
+
+/**
+ * A person's Stop in a room with no engine loaded: the tasks waiting in To do to start by
+ * themselves (their turn to try again, or room in a budget) still have to hear it. The
+ * dispatch pump builds no engine for them until their wait ends, so a Stop would find
+ * nothing to tell and they would start anyway. The same mark an engine's Stop writes, and
+ * the fire policy reads it the same way. Returns the tasks it stopped.
+ */
+export function stopTasksWaitingToStart(
+  db: ClawbooDb,
+  scope: { teamId: string; roomId: string | null },
+): DbTask[] {
+  const stoppedTasks: DbTask[] = []
+  for (const task of getReadyTasks(db, scope)) {
+    if (!waitsToStartByItself(parseWaitingOn(task.waitingOn))) continue
+    if (!delegationTargetOf(task.sourceDelegationId)) continue
+    const stop = createExecutionProcess(db, {
+      taskId: task.id,
+      executorType: 'openclaw',
+      engineRun: true,
+    })
+    completeExecutionProcess(db, stop.id, { status: 'cancelled', byPerson: true })
+    clearWaitToStart(db, task)
+    stoppedTasks.push(task)
+  }
+  return stoppedTasks
+}
+
 /**
  * Move the unfinished tasks of archived rooms to the team's own chat (room null),
  * stopped, and return them. Archiving a room only stamps the room, and the only
@@ -401,6 +439,7 @@ export function moveArchivedRoomTasks(
         engineRun: true,
       })
       completeExecutionProcess(db, stop.id, { status: 'cancelled', error: stopped, byPerson: true })
+      clearWaitToStart(db, task)
     }
     const rows = withWriteRetry(() =>
       db

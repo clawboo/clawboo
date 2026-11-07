@@ -37,8 +37,13 @@ vi.mock('../executorRunner', () => ({
 }))
 vi.mock('../runtimes/runKeyEnv', () => ({ runtimeKeyEnv: () => ({}) }))
 
-const { pumpRunnerReruns, requestRunnerRerun, resetRunnerRerunsForTests, runnerRerunFor } =
-  await import('../runnerRerun')
+const {
+  isRunnerRerunWaiting,
+  pumpRunnerReruns,
+  requestRunnerRerun,
+  resetRunnerRerunsForTests,
+  runnerRerunFor,
+} = await import('../runnerRerun')
 
 let db: ClawbooDb
 beforeEach(() => {
@@ -188,6 +193,43 @@ describe('a rerun that does not start', () => {
       requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
       await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
       expect(replaysOf(wake)).toBe(0)
+    })
+
+    it('a budget whose room is held leaves the task in To do: it starts again by itself', async () => {
+      const task = runnerTask()
+      const wake = wakeOn(task)
+      nextRun = async () => ({ ok: false, reason: 'budget_held' })
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(isRunnerRerunWaiting(task.id)).toBe(false))
+      expect(getTask(db, task.id)?.status).toBe('todo')
+      expect(replaysOf(wake)).toBe(0)
+      // It says so, and the pump asking again on its next pass does not say it twice.
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(isRunnerRerunWaiting(task.id)).toBe(false))
+      const notes = getComments(db, task.id).map((c) => c.body)
+      expect(notes).toHaveLength(1)
+      expect(notes[0]).toMatch(/starts by itself/)
+    })
+
+    it('a held budget on a task the pump would never start waits for a person', async () => {
+      const task = runnerTask()
+      const stopped = createExecutionProcess(db, { taskId: task.id, executorType: 'claude-code' })
+      completeExecutionProcess(db, stopped.id, { status: 'cancelled', byPerson: true })
+      nextRun = async () => ({ ok: false, reason: 'budget_held' })
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
+      expect(JSON.parse(getTask(db, task.id)!.waitingOn!)).toEqual({ kind: 'budget' })
+    })
+
+    it('a paused cap says what it waits on', async () => {
+      const task = runnerTask()
+      nextRun = async () => ({ ok: false, reason: 'budget_paused' })
+      const rerun = runnerRerunFor(db, task, 'coder')!
+      requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: 'coder', rerun, mcpBaseUrl: null })
+      await vi.waitFor(() => expect(getTask(db, task.id)?.status).toBe('blocked'))
+      expect(JSON.parse(getTask(db, task.id)!.waitingOn!)).toEqual({ kind: 'budget' })
     })
 
     it('a thrown run is counted', async () => {

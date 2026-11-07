@@ -2,8 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { accountFailureOf, encodeHumanAssignment, MAX_AUTO_FIRES } from '@clawboo/board-core'
-import { RUNTIME_ERROR_CLASSES, isAccountError } from '@clawboo/obs'
+import {
+  accountFailureOf,
+  encodeHumanAssignment,
+  MAX_AUTO_FIRES,
+  providerFailureOf,
+} from '@clawboo/board-core'
+import { RUNTIME_ERROR_CLASSES, isAccountError, isTransientError } from '@clawboo/obs'
 import { eq } from 'drizzle-orm'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -213,6 +218,13 @@ describe('board-core and the error taxonomy agree on the account classes', () =>
     for (const cls of RUNTIME_ERROR_CLASSES) {
       expect(accountFailureOf({ status: 'failed', errorClass: cls }) !== null, cls).toBe(
         isAccountError(cls),
+      )
+    }
+  })
+  it('names a provider failure for exactly the classes the taxonomy calls transient', () => {
+    for (const cls of RUNTIME_ERROR_CLASSES) {
+      expect(providerFailureOf({ status: 'failed', errorClass: cls }) !== null, cls).toBe(
+        isTransientError(cls),
       )
     }
   })

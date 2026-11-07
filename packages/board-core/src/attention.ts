@@ -5,8 +5,8 @@
 //   · it is `blocked`: a run failed or went silent, verification could not pass
 //     it, or an agent marked it blocked;
 //   · it is `todo` but the dispatcher will never fire it: no agent is bound to
-//     it, the user stopped its last run, or it failed MAX_AUTO_FIRES times in a
-//     row and was parked;
+//     it, the user stopped its last run, a budget cap or the circuit breaker stopped
+//     it, or it failed too many times in a row and was parked;
 //   · it is `in_progress` with no agent on it and no run going: moved there by
 //     hand, which starts nothing, so it would sit there looking worked on;
 //   · it waits on a person (`waiting_on`), which includes a question an agent
@@ -26,6 +26,9 @@
 import { teammateMayEndWait, type AgentWakeCard } from './agentWakes'
 import {
   accountFailureOf,
+  BREAKER_TRIPPED_STATUS,
+  BUDGET_HELD_STATUS,
+  budgetRefusalOf,
   delegationTargetOf,
   ledgerWillAutoFire,
   trailingFailedRuns,
@@ -57,6 +60,18 @@ export type AttentionReason =
   /** A person is asked whether agents may wake each other on this job, or has to lift a
    *  pause in those wakes. The task's own wait is untouched. */
   | 'agent_wakes'
+  /** Its agent finished twice with nothing to show for it. */
+  | 'no_result'
+  /** The provider kept rate limiting it, and the automatic retries are used up. */
+  | 'rate_limited'
+  /** The provider stayed overloaded or out of reach, and the retries are used up. */
+  | 'provider_down'
+  /** Its agent ran out of room twice. */
+  | 'out_of_room'
+  /** A hard budget cap stopped it. */
+  | 'budget'
+  /** The circuit breaker stopped it. */
+  | 'breaker'
 
 export interface TaskAttention {
   reason: AttentionReason
@@ -148,7 +163,8 @@ function movedByPerson(input: AttentionInput): boolean {
 /** Why a task needs a person, or null when the board will move it on its own. */
 export function taskAttention(input: AttentionInput): TaskAttention | null {
   const failedRuns = trailingFailedRuns(input.execs)
-  const last = input.execs.length > 0 ? input.execs[input.execs.length - 1]!.status : null
+  const lastRun = input.execs.length > 0 ? input.execs[input.execs.length - 1]! : undefined
+  const last = lastRun?.status ?? null
   const waiting = parseWaitingOn(input.waitingOn)
   const open = input.status !== 'done' && input.status !== 'cancelled'
 
@@ -177,11 +193,27 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
 
   if (input.status === 'blocked') {
     if (waitsOnOtherWork(waiting)) return null
+    // What it waits on now, ahead of a check that failed before it: the fix round that
+    // came next is what ended this way, and Retry is what gets it going.
+    if (waiting?.kind === 'no_result') return { reason: 'no_result', failedRuns }
+    if (waiting?.kind === 'out_of_room')
+      return { reason: 'out_of_room', failedRuns, ...failureDetail(input.execs) }
+    if (waiting?.kind === 'provider')
+      return {
+        reason: waiting.cause === 'rate_limited' ? 'rate_limited' : 'provider_down',
+        failedRuns,
+        ...failureDetail(input.execs),
+      }
+    // Its error column holds machine words, and a card's comment says the rest.
+    if (waiting?.kind === 'budget') return { reason: 'budget', failedRuns }
     if (input.verificationBlocked) return { reason: 'needs_review', failedRuns }
     // The agent said what a person must do, and its run failed afterwards. What they
     // must do is still the next step.
     if (waiting?.kind === 'person' && waiting.by === 'agent')
       return { reason: 'blocked', failedRuns, detail: waiting.need }
+    if (budgetRefusalOf(lastRun)) return { reason: 'budget', failedRuns }
+    if (waiting?.kind === 'breaker' || last === BREAKER_TRIPPED_STATUS)
+      return { reason: 'breaker', failedRuns }
     if (last === 'timed_out')
       return { reason: 'timed_out', failedRuns, ...failureDetail(input.execs) }
     if (last === 'failed') return { reason: 'failed', failedRuns, ...failureDetail(input.execs) }
@@ -211,9 +243,12 @@ export function taskAttention(input: AttentionInput): TaskAttention | null {
     // A live run owns it (a release racing a run's terminal): not stuck.
     if (last === 'running') return null
     if (pauseStopped) return null
+    if (budgetRefusalOf(lastRun) && last !== BUDGET_HELD_STATUS)
+      return { reason: 'budget', failedRuns }
+    if (last === BREAKER_TRIPPED_STATUS) return { reason: 'breaker', failedRuns }
     if (last === 'cancelled') return { reason: 'stopped', failedRuns: 0 }
-    // A task the no-progress brake is holding back fires by itself when the wait
-    // ends, so it does not need a person.
+    // A task the no-progress brake or a wait is holding back fires by itself when the
+    // wait ends, so it does not need a person.
     if (!ledgerWillAutoFire(input.execs)) {
       return {
         reason: last === 'timed_out' ? 'timed_out' : 'failed',

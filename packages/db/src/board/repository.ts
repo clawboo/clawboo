@@ -691,6 +691,8 @@ export function claimTask(
         status: 'in_progress',
         updatedAt: now,
         runExecutionId: execId,
+        // What it waited on in To do (a retry's turn, room in a budget) is over.
+        waitingOn: null,
       })
       .where(
         and(
@@ -726,7 +728,12 @@ export function claimTask(
         executorType: run.executorType,
         engineRun: run.engineRun ?? false,
         workspaceId: run.workspaceId ?? null,
-        runReason: strongest?.reason ?? run.runReason ?? null,
+        // A provider retry stays one whatever it carries, or a wake it took along would
+        // read as a person asking and start the retry count again.
+        runReason:
+          run.runReason === 'provider_retry'
+            ? run.runReason
+            : (strongest?.reason ?? run.runReason ?? null),
       },
       execId,
       now,
@@ -1023,6 +1030,9 @@ export interface UpdateStatusOptions {
    *  reason, and a repeat of the same status keeps it. Required at the agent
    *  surface, never here: system writers and a person's move may give none. */
   waitingOn?: WaitingOn | null
+  /** A move to To do keeps the stored verdict: the same agent is coming back to the same
+   *  work, its turn to try again, so a failed check still counts and its attempts go on. */
+  keepVerdict?: boolean
   /** Done or Cancelled back to To do. Only with `actor: 'person'`, and only the
    *  Reopen route passes it, which is why it is an option and not a table edge. */
   reopen?: boolean
@@ -1219,7 +1229,11 @@ export function updateStatus(
         // too (the cross-runtime rebind boundary): a prior runtime's failing verdict
         // must not gate a fresh runtime's legitimate completion.
         ...(to === 'todo'
-          ? { assigneeAgentId: null, assigneeRuntime: null, verification: null }
+          ? {
+              assigneeAgentId: null,
+              assigneeRuntime: null,
+              ...(opts.keepVerdict ? {} : { verification: null }),
+            }
           : {}),
         // Let go, so no run holds it. A run on a task moved anywhere else (In
         // review, Blocked) keeps the stamp until it closes.
@@ -1552,14 +1566,25 @@ export function waitingOnDetailOf(
 /**
  * Say what a task waits for without moving it: for a check whose move to Blocked
  * keeps failing, which would otherwise sit there with no reason. Only while it is
- * still In progress or In review; a task that moved on has its own reason.
+ * still In progress or In review; a task that moved on has its own reason. Clearing
+ * also works in To do, where a task can wait for its turn to try again.
  */
 export function setTaskWaitingOn(db: ClawbooDb, taskId: string, waitingOn: WaitingOn | null): void {
   withWriteRetry(() =>
     db
       .update(tasks)
       .set({ waitingOn: waitingOnJson(waitingOn) })
-      .where(and(eq(tasks.id, taskId), inArray(tasks.status, ['in_progress', 'in_review'])))
+      .where(
+        and(
+          eq(tasks.id, taskId),
+          inArray(
+            tasks.status,
+            waitingOn === null
+              ? ['in_progress', 'in_review', 'todo']
+              : ['in_progress', 'in_review'],
+          ),
+        ),
+      )
       .run(),
   )
 }
@@ -2322,14 +2347,23 @@ export function createExecutionProcess(db: ClawbooDb, input: CreateExecInput): D
 }
 
 export interface CompleteExecOutcome {
-  status: 'succeeded' | 'failed' | 'timed_out' | 'cancelled'
+  /** `cancelled` is a person's word (see `autoFireRefusal`). A budget cap or the
+   *  circuit breaker stopping a run has its own status. */
+  status:
+    | 'succeeded'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
+    | 'budget_paused'
+    | 'budget_held'
+    | 'breaker_tripped'
   summary?: string | null
   error?: string | null
   /** The class the failure was filed under (`classifyError` in @clawboo/obs). */
   errorClass?: string | null
   /** A person ended this run: their Stop, or moving its card. Not stored. It is how
-   *  the wakes the run carried tell that from the other `cancelled` closes (a budget
-   *  cap, the circuit breaker, a runtime abort), which give them back to the pump. */
+   *  the wakes the run carried tell that from the other `cancelled` closes (a runtime
+   *  abort, a result that came after a release), which give them back to the pump. */
   byPerson?: boolean
   afterCommit?: string | null
   inputTokens?: number | null
@@ -2433,6 +2467,31 @@ export function completeExecutionProcess(
     engineRun: row.engineRun,
   })
   return row
+}
+
+/**
+ * Rows a budget cap or the circuit breaker closed before they had statuses of their
+ * own, read back from the error each wrote. Left as `cancelled` they would go on reading
+ * as a person's Stop. Run at boot, and does nothing once done.
+ */
+export function backfillHostStopStatuses(db: ClawbooDb): number {
+  const moved = [
+    ['budget_held', 'budget_held:%'],
+    ['budget_paused', 'budget_paused:%'],
+    ['breaker_tripped', 'circuit_broken:%'],
+  ] as const
+  return immediateWrite(db, (tx) => {
+    let total = 0
+    for (const [status, error] of moved)
+      total += tx
+        .update(executionProcesses)
+        .set({ status })
+        .where(
+          and(eq(executionProcesses.status, 'cancelled'), like(executionProcesses.error, error)),
+        )
+        .run().changes
+    return total
+  })
 }
 
 /**

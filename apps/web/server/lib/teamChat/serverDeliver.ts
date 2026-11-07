@@ -58,6 +58,7 @@ import { classifyError, isHarnessBug } from '@clawboo/obs'
 import {
   buildTurnEnvelope,
   classifyTurn,
+  BUDGET_HELD_CODE,
   BUDGET_REFUSED_CODE,
   DeliveryRefusedError,
   isChatVisible,
@@ -642,6 +643,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     let overflowReason = ''
     /** False once a clear of an overflowed session has failed: its next run resumes it. */
     let overflowCleared = true
+    /** A hard cap's kill-switch ended this run, which every runtime reports as a plain
+     *  `done: aborted`. The engine files it under the budget, not as a failure. */
+    let killedByBudget = false
     /** The typed cause of the fatal error that ended the run. */
     let failureCode: string | null = null
     /**
@@ -747,6 +751,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // flows through this same loop (the engine fails the task).
           if (recordSpendForRun(sessionKey, agentId, ev.costUsd, obs.hold.id)) {
             markServerAbort('the run was stopped by a budget cap')
+            killedByBudget = true
             await adapter.abort(run).catch(() => undefined)
           }
         }
@@ -854,11 +859,23 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           // The engine records a failed `done`'s summary as its detail on the board.
           // An overflow's reason rode a non-fatal error and is no part of the agent's
           // reply, so it joins the detail here, after the chat commit above.
+          // A clean end whose text came only as deltas did reply, and the engine reads
+          // an empty summary as no reply at all.
           await onEvent(
             sessionKey,
-            ev.kind === 'done' && overflowed && ev.reason !== 'success'
-              ? { ...ev, summary: [overflowReason, ev.summary].filter(Boolean).join(' ') }
-              : ev,
+            ev.kind === 'done' && killedByBudget && ev.reason !== 'success'
+              ? {
+                  ...ev,
+                  kind: 'error',
+                  code: BUDGET_REFUSED_CODE,
+                  message: 'A hard budget cap stopped this run while it was going.',
+                  fatal: true,
+                }
+              : ev.kind === 'done' && overflowed && ev.reason !== 'success'
+                ? { ...ev, summary: [overflowReason, ev.summary].filter(Boolean).join(' ') }
+                : ev.kind === 'done' && ev.reason === 'success' && !ev.summary?.trim() && acc.trim()
+                  ? { ...ev, summary: acc }
+                  : ev,
             obs.stamp,
           )
         } catch (err) {
@@ -1470,7 +1487,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                     kind: 'error',
                     code:
                       outcome instanceof DeliveryRefusedError && outcome.budget
-                        ? BUDGET_REFUSED_CODE
+                        ? outcome.budgetReason === 'held'
+                          ? BUDGET_HELD_CODE
+                          : BUDGET_REFUSED_CODE
                         : null,
                     message: outcome.message,
                     fatal: true,
@@ -1563,7 +1582,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 budgetNoticeShown.add(targetAgentId)
                 deps.persistMeta?.(targetSessionKey, text)
               }
-              settleFailed(new DeliveryRefusedError(text, { budget: true }))
+              settleFailed(new DeliveryRefusedError(text, { budget: true, budgetReason: reason }))
             }
             if (budget.blocked) {
               refuseForBudget(budget.scope, budget.reason)

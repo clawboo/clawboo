@@ -682,7 +682,9 @@ export const executionProcesses = sqliteTable(
     // column, which only the engine labelled 'openclaw'. Read through `isEngineRun` in
     // board-core, never from the label.
     engineRun: integer('engine_run'),
-    // queued | running | succeeded | failed | timed_out | cancelled
+    // queued | running | succeeded | failed | timed_out | cancelled, or the host
+    // stopping it: budget_paused | budget_held | breaker_tripped. Free-form: a reader
+    // that switches on it must name these (see `runKindOf` in @clawboo/board-core).
     status: text('status').notNull().default('queued'),
     claimedAt: integer('claimed_at'),
     startedAt: integer('started_at'),

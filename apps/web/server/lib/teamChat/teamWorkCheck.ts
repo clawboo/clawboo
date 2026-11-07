@@ -62,6 +62,7 @@ import { sanitizeAgentId } from '../runtimes/identityHome'
 import {
   enterFolderCheckLine,
   folderRunners,
+  lastRunWasShared,
   type FolderCheckTurn,
 } from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, teamWorkdirFor, teamWorkdirPath } from '../runtimes/teamWorkdir'
@@ -489,6 +490,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
         return check(taskId, agentId, target, found.b, found.h, found.d, runId, wait)
       }
       prepared.hold = (signal) => holdCheck(taskId, target.folder, wait, signal)
+      prepared.sharedFolder = lastRunWasShared(target.folder, agentId)
       return prepared
     },
   }

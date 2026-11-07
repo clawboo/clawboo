@@ -603,7 +603,8 @@ describe('saved wakes, end to end', () => {
     })
 
     it('two wakes for one agent in one pump pass: each task gets its own run, brief and comment', async () => {
-      const a = newTask({ title: 'task a', description: 'task a' })
+      // Served first whichever millisecond each was created in: the scripts go in order.
+      const a = newTask({ title: 'task a', description: 'task a', priority: 1 })
       const b = newTask({ title: 'task b', description: 'task b' })
       updateStatus(db, a.id, 'blocked')
       updateStatus(db, b.id, 'blocked')
@@ -1152,7 +1153,7 @@ describe('saved wakes, end to end', () => {
         expect(run.ok).toBe(true)
         const execId = listExecutions(db, task.id).at(-1)!.id
         completeExecutionProcess(db, execId, {
-          status: 'cancelled',
+          status: 'budget_paused',
           error: 'budget_paused:team',
           errorClass: 'BudgetRefused',
         })

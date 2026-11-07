@@ -503,6 +503,14 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     why = 'a person reopened this task after it finished; anything they said is below.'
   } else if (reason === 'fix_round') {
     why = "the team's check did not pass your work on it yet."
+  } else if (reason === 'empty_reply') {
+    why = 'your last turn on it ended without a reply.'
+  } else if (reason === 'max_turns') {
+    why = 'your last run on it ran out of room before finishing.'
+  } else if (reason === 'provider_retry') {
+    why = 'your last run on it failed on the provider, not on the work, so it is trying again.'
+  } else if (reason === 'person_retry') {
+    why = 'a person asked for this task to run again.'
   } else if (
     run.origin.kind === 'assignment' ||
     (run.origin.kind === 'wake' && run.origin.assigned)

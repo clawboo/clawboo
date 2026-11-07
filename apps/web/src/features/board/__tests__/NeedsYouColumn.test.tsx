@@ -181,6 +181,25 @@ describe('NeedsYouColumn', () => {
     expect(within(card).getByText(/Coder/)).toBeInTheDocument()
   })
 
+  it.each([
+    ['no_result', 'No result'],
+    ['rate_limited', 'Rate limited'],
+    ['provider_down', 'Provider unavailable'],
+    ['out_of_room', 'Out of room'],
+    ['budget', 'Budget cap'],
+    ['breaker', 'Stopped by the breaker'],
+  ] as const)(
+    'a run that ended as %s says so and offers Retry, not "You stopped"',
+    async (reason, label) => {
+      renderColumn([failedTask({ attention: { reason, failedRuns: 1 } })])
+      const card = await screen.findByTestId('needs-you-task', {}, T)
+      expect(card).toHaveAttribute('data-attention', reason)
+      expect(within(card).getByText(label)).toBeInTheDocument()
+      expect(within(card).getByRole('button', { name: /^Retry$/ })).toBeInTheDocument()
+      expect(within(card).queryByText(/You stopped/)).toBeNull()
+    },
+  )
+
   it('Retry sends the task back to its agent and asks the board to refresh', async () => {
     let retried = ''
     server.use(

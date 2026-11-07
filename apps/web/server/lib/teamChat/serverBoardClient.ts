@@ -259,12 +259,10 @@ export function createServerBoardClient(
         // `→todo` clears the assignee + verification (re-claimable), and an
         // illegal/verification-gated transition returns `{ ok: false }` → false,
         // which the engine must NOT retry.
-        const result = updateStatus(
-          db,
-          taskId,
-          status as TaskStatus,
-          opts?.waitingOn ? { waitingOn: opts.waitingOn } : {},
-        )
+        const result = updateStatus(db, taskId, status as TaskStatus, {
+          ...(opts?.waitingOn ? { waitingOn: opts.waitingOn } : {}),
+          ...(opts?.keepVerdict ? { keepVerdict: true } : {}),
+        })
         if (result.ok && result.task) {
           const t = result.task
           emitEvent(db, {
@@ -437,6 +435,10 @@ export function createServerBoardClient(
           errorClass: e.errorClass,
           completedAt: e.completedAt,
           madeProgress: e.madeProgress,
+          error: e.error,
+          recoveryTombstone: e.recoveryTombstone,
+          runReason: e.runReason,
+          createdAt: e.createdAt,
         }))
       } catch {
         // NOT `[]` — see the interface note. An unreadable ledger must not read

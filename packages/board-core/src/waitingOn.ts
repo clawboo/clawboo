@@ -13,10 +13,20 @@
 //   · verification a check on the work: running, could not run, failed, cut
 //                  short by a restart, passed with Done refused, or waiting for
 //                  its move to Blocked to land;
-//   · budget, breaker  a budget cap or the circuit breaker stopped it;
-//   · recovery     a restart found it mid-review with no run behind it.
+//   · budget, breaker  a budget cap or the circuit breaker stopped it; `held` when
+//                  runs already going have set aside the cap's room, which clears
+//                  by itself, so such a task waits in To do;
+//   · recovery     a restart found it mid-review with no run behind it;
+//   · no_result    its agent finished twice with nothing to show for it;
+//   · out_of_room  its agent ran out of room twice;
+//   · provider     the provider kept refusing or could not be reached, and the
+//                  automatic retries are used up;
+//   · retry        the same, with a retry left: it waits in To do for its turn.
 //
-// Import-free, like the state machine, so the board UI reads it too.
+// Import-free apart from a sibling's type, like the state machine, so the board UI
+// reads it too.
+
+import type { ProviderFailure } from './dispatch'
 
 export type VerificationWait =
   'running' | 'could_not_run' | 'failed' | 'cut_short' | 'done_refused' | 'park_pending'
@@ -45,9 +55,13 @@ export type WaitingOn =
     }
   | { kind: 'failure' }
   | { kind: 'verification'; state: VerificationWait }
-  | { kind: 'budget' }
+  | { kind: 'budget'; held?: true }
   | { kind: 'breaker' }
   | { kind: 'recovery' }
+  | { kind: 'no_result' }
+  | { kind: 'out_of_room' }
+  | { kind: 'provider'; cause: ProviderFailure }
+  | { kind: 'retry'; cause: ProviderFailure; attempt: number }
 
 export type WaitingOnKind = WaitingOn['kind']
 
@@ -61,6 +75,9 @@ const VERIFICATION_WAITS: readonly VerificationWait[] = [
 ]
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
+
+const providerCause = (v: unknown): ProviderFailure | null =>
+  v === 'rate_limited' || v === 'unavailable' ? v : null
 
 /** The reason a column (or an already-parsed value) holds, or null for none and
  *  for anything it cannot read. A kind that names something must name it. */
@@ -108,12 +125,24 @@ export function parseWaitingOn(raw: unknown): WaitingOn | null {
         ? { kind: 'verification', state: state as VerificationWait }
         : null
     }
+    case 'budget':
+      return d['held'] === true ? { kind: 'budget', held: true } : { kind: 'budget' }
+    case 'provider': {
+      const cause = providerCause(d['cause'])
+      return cause ? { kind: 'provider', cause } : null
+    }
+    case 'retry': {
+      const cause = providerCause(d['cause'])
+      const attempt = d['attempt']
+      return cause && typeof attempt === 'number' ? { kind: 'retry', cause, attempt } : null
+    }
     case 'subtasks':
       return d['handedOut'] === true ? { kind: 'subtasks', handedOut: true } : { kind: 'subtasks' }
     case 'failure':
-    case 'budget':
     case 'breaker':
     case 'recovery':
+    case 'no_result':
+    case 'out_of_room':
       return { kind: d['kind'] }
     default:
       return null
@@ -123,6 +152,13 @@ export function parseWaitingOn(raw: unknown): WaitingOn | null {
 /** The column value for a reason, or null for none. */
 export function waitingOnJson(w: WaitingOn | null | undefined): string | null {
   return w ? JSON.stringify(w) : null
+}
+
+/** Waits in To do to start by itself (its turn to try again, or room in a budget). A
+ *  person's Stop ends the wait, so whatever writes a Stop clears this too, or the card
+ *  goes on promising a start that is not coming. */
+export function waitsToStartByItself(w: WaitingOn | null | undefined): boolean {
+  return w?.kind === 'retry' || (w?.kind === 'budget' && w.held === true)
 }
 
 /** Waits on other work (another task, or its own sub-tasks): the board moves it
