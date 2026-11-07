@@ -11,7 +11,6 @@ import {
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
-import { createLogger } from '@clawboo/logger'
 
 import { personOf } from '../lib/auth'
 import { ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
