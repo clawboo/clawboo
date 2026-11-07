@@ -44,7 +44,11 @@ import { getDb, resetDb } from '../../db'
 import { homeDispatchMutex } from '../../executorRunner'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import type { RuntimeRunContext } from '../../runtimes/types'
-import { parseTaskSessionPointer, taskSessionSettingKey } from '../nativeTeamSession'
+import {
+  nativeTeamSessionSettingKey,
+  parseTaskSessionPointer,
+  taskSessionSettingKey,
+} from '../nativeTeamSession'
 import { createServerDeliver } from '../serverDeliver'
 import { clearTaskSessionPointers, ticketHashOf } from '../taskSessionPointers'
 
@@ -57,8 +61,12 @@ interface Captured {
 const captured = vi.hoisted(() => [] as Captured[])
 /** How each next run ends, and the session id its codec reports. */
 const script = vi.hoisted(() => ({
-  /** A `done` reason, or 'stream-dies' for a stream that throws before any terminal. */
+  /** A `done` reason, 'stream-dies' for a stream that throws before any terminal,
+   *  or 'context_overflow' for a run that outgrew the model's context window. */
   reason: 'success' as string,
+  /** For 'context_overflow': whether the error is fatal. Claude Code's is not
+   *  (it ends `done: max_turns`); Codex's and Clawboo Native's are. */
+  overflowFatal: false,
   sessionIds: [] as string[],
   /** Thrown by `start`, as an adapter does when it cannot open the session. */
   startError: null as string | null,
@@ -93,6 +101,21 @@ function scriptedAdapter(
       // Every real adapter ends a failed run this way: a fatal error, then `done`.
       if (script.reason === 'error')
         yield { ...at, seq: 1, kind: 'error', code: null, message: 'boom', fatal: true }
+      if (script.reason === 'context_overflow') {
+        // The pair the adapters send: Claude Code's mapper a non-fatal error then
+        // `done: max_turns`; Codex and Native a fatal error then `done: error`.
+        const fatal = script.overflowFatal
+        yield {
+          ...at,
+          seq: 1,
+          kind: 'error',
+          code: 'context_overflow',
+          message: "The conversation outgrew the model's context window.",
+          fatal,
+        }
+        yield { ...at, seq: 2, kind: 'done', reason: fatal ? 'error' : 'max_turns', summary: '' }
+        return
+      }
       yield { ...at, seq: 2, kind: 'done', reason: script.reason, summary: 'ok' } as RuntimeEvent
     },
     abort: async () => {},
@@ -161,6 +184,7 @@ describe('serverDeliver: a board task run is bound to its task', () => {
     captured.length = 0
     ended = 0
     script.reason = 'success'
+    script.overflowFatal = false
     script.sessionIds = []
     script.startError = null
     script.beforeTerminal = null
@@ -255,6 +279,18 @@ describe('serverDeliver: a board task run is bound to its task', () => {
     else await delivery
     await vi.waitFor(() => expect(captured.length).toBe(before + 1), { timeout: 5000 })
     if (!failsToStart) await vi.waitFor(() => expect(ended).toBe(endedBefore + 1))
+    await settle()
+    return captured[captured.length - 1]!
+  }
+
+  /** A leader (user-facing) turn: no task on the session, the person's message. */
+  async function runLeaderTurn(agentId: string, message: string): Promise<Captured> {
+    const sk = `agent:${agentId}:team:T`
+    const before = captured.length
+    const endedBefore = ended
+    await deliver()(sk, agentId, message, { kind: 'human' })
+    await vi.waitFor(() => expect(captured.length).toBe(before + 1), { timeout: 5000 })
+    await vi.waitFor(() => expect(ended).toBe(endedBefore + 1))
     await settle()
     return captured[captured.length - 1]!
   }
@@ -368,6 +404,73 @@ describe('serverDeliver: a board task run is bound to its task', () => {
 
     script.reason = 'success'
     expect((await runTask('a1', taskId, 'Fragile')).ctx?.resume ?? null).toBeNull()
+  })
+
+  it('a Claude Code run that outgrew its context clears the pointer, so the next run starts fresh with a first run’s ticket block', async () => {
+    seedAgent('a1', 'claude-code')
+    const taskId = claimedTask('Huge task', 'a1')
+    const key = taskSessionSettingKey('a1', 'T', taskId)
+    script.sessionIds = ['sid-1', 'sid-2', 'sid-3', 'sid-4']
+    await runTask('a1', taskId, 'Huge task')
+    expect(getSetting(db, key)).toContain('sid-1')
+
+    // Resumed, it overflows: Claude Code reports that as out of room, which a
+    // turn ceiling also is, but this session cannot take another turn.
+    script.reason = 'context_overflow'
+    expect((await runTask('a1', taskId, 'Huge task')).ctx?.resume).toBe('sid-1')
+    expect(getSetting(db, key)).toBe('')
+
+    // A fresh run that overflows leaves none behind either.
+    expect((await runTask('a1', taskId, 'Huge task')).ctx?.resume ?? null).toBeNull()
+    expect(getSetting(db, key)).toBe('')
+
+    // The run after it (a Retry) starts a new session and is sent a first run's
+    // ticket block, not just what changed since.
+    script.reason = 'success'
+    const next = await runTask('a1', taskId, 'Huge task')
+    expect(next.ctx?.resume ?? null).toBeNull()
+    expect(next.opts.context).toContain('[Your task on the board]')
+    expect(next.opts.context).not.toContain('You are continuing this task in the same session')
+    expect(getSetting(db, key)).toContain('sid-4')
+
+    // A plain turn ceiling still keeps the session: only the overflow clears it.
+    script.reason = 'max_turns'
+    expect((await runTask('a1', taskId, 'Huge task')).ctx?.resume).toBe('sid-4')
+    expect(getSetting(db, key)).not.toBe('')
+  })
+
+  it('a fresh run whose fatal error is an overflow writes no pointer back', async () => {
+    seedAgent('a1', 'codex')
+    const taskId = claimedTask('Huge Codex task', 'a1')
+    const key = taskSessionSettingKey('a1', 'T', taskId)
+    script.sessionIds = ['sid-1', 'sid-2']
+    script.reason = 'context_overflow'
+    script.overflowFatal = true
+    expect((await runTask('a1', taskId, 'Huge Codex task')).ctx?.resume ?? null).toBeNull()
+    // Before, only a RESUMED failed run cleared, so this one wrote sid-1 and the
+    // next run failed once more resuming it.
+    expect(getSetting(db, key)).toBe('')
+    script.reason = 'success'
+    expect((await runTask('a1', taskId, 'Huge Codex task')).ctx?.resume ?? null).toBeNull()
+  })
+
+  it('a fresh leader turn that outgrew its context leaves no leader pointer behind', async () => {
+    seedAgent('c1', 'codex')
+    const key = nativeTeamSessionSettingKey('c1', 'T')
+    script.sessionIds = ['sid-1', 'sid-2']
+    script.reason = 'context_overflow'
+    script.overflowFatal = true
+    expect(
+      (await runLeaderTurn('c1', 'Summarize the whole repository.')).ctx?.resume ?? null,
+    ).toBeNull()
+    // Before, a leader pointer was written back after any end but a failed
+    // resume, so this wrote sid-1 and the next turn failed once more resuming it.
+    expect(getSetting(db, key) || null).toBeNull()
+
+    // The next turn starts fresh, and a sound turn still leaves its session.
+    script.reason = 'success'
+    expect((await runLeaderTurn('c1', 'Just the README, then.')).ctx?.resume ?? null).toBeNull()
+    expect(getSetting(db, key)).toBe('sid-2')
   })
 
   it('a resumed run that cannot start, or whose stream dies, clears the pointer', async () => {

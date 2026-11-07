@@ -131,7 +131,9 @@ interface ResumePointerWrite {
   encode: (sessionId: string) => string
   /** A failed run that tried to resume most likely holds a dead handle, so it
    *  clears the pointer. A task run that was stopped part way or ran out of
-   *  turns keeps it: its session is sound, the run was only cut short. */
+   *  turns keeps it: its session is sound, the run was only cut short. A run
+   *  that outgrew the model's context window always clears it (see
+   *  settleResumePointer). */
   keepUnlessError: boolean
   /** Asked before writing. A task finished or cancelled while its run went on
    *  has had its pointers cleared, and the stopped run must not write one back. */
@@ -591,6 +593,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const evictOwnEntry = (): void => {
       if (abortMap.get(sessionKey)?.run === run) abortMap.delete(sessionKey)
     }
+    /** The run reported a context overflow (fatal or not). */
+    let overflowed = false
     /**
      * Record the session this run ended with, so the next run resumes it, or
      * clear the pointer. Called once, on the run's first terminal and BEFORE
@@ -607,6 +611,16 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         reason === 'success' ||
         (pointer.keepUnlessError && (reason === 'aborted' || reason === 'max_turns'))
       try {
+        if (overflowed) {
+          // The session outgrew the model's context window, so the next run must
+          // not resume it, whether or not this run was itself a resume. Claude
+          // Code reports an overflow as out of room (`done: max_turns`), which
+          // would otherwise keep the pointer, and resuming such a session
+          // overflows again (seen with Claude Code 2.1.268 against a stand-in
+          // API that enforced a context limit).
+          setSetting(db, pointer.key, '')
+          return
+        }
         if (!sound && obs.resumeAttempted) {
           // Stale-pointer self-heal (mirrors executorRunner's clear-on-failed-
           // resume): a run that TRIED to resume and failed most likely holds a
@@ -651,6 +665,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
         },
       })) {
         costTally.observe(ev)
+        if (ev.kind === 'error' && ev.code === 'context_overflow') overflowed = true
         if (ev.kind === 'tool-call') openToolCalls.add(ev.toolCallId || ev.name)
         else if (ev.kind === 'tool-result') openToolCalls.delete(ev.toolCallId || ev.name)
         if (ev.kind === 'text-delta' && ev.channel !== 'reasoning') {
