@@ -16,7 +16,9 @@
 //                          for its next try: a provider failure's wait, or room in a
 //                          budget that runs already going have set aside;
 //   · not handed out       nobody was given it. An agent's note to itself, or a
-//                          person's: no one is working on it, so nothing waits on it;
+//                          person's: no one is working on it, so nothing waits on it.
+//                          So too a card that only holds a plan: it did no work and
+//                          reports nothing, and the plan's steps are the work, beside it;
 //   · waits on this task   it needs this task to finish first. Waiting on it back
 //                          would hold both for good, so this task does not wait, and
 //                          its finishing is what frees it.
@@ -31,6 +33,7 @@ import {
   stoppedByPause,
   type LedgerRun,
 } from './dispatch'
+import { isPlanHolder } from './plans'
 import { parseWaitingOn } from './waitingOn'
 
 export type SubtaskStanding =
@@ -63,6 +66,7 @@ export interface SubtaskView {
 export function subtaskStanding(task: SubtaskView): SubtaskStanding {
   if (task.status === 'done') return 'done'
   if (task.status === 'cancelled' || task.dropped) return 'cancelled'
+  if (isPlanHolder(task.sourceDelegationId)) return 'not_handed_out'
   if (task.waitsOnThisTask) return 'waits_on_this'
   if (task.assigneePersonId) return 'with_person'
   const given = !!task.assigneeAgentId || delegationTargetOf(task.sourceDelegationId) !== null

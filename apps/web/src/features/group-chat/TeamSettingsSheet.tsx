@@ -4,8 +4,9 @@
 // stacked vertically: `TeamBriefForm` (per-team brief, read by Boo Zero
 // when working in this team), `TeamRulesEditor` (durable user-set rules
 // injected into every team-agent preamble + every Boo Zero turn in this
-// team) and `TeamVerifyCommandEditor` (the check the verification gate runs
-// for the team's tasks).
+// team), `TeamVerifyCommandEditor` (the check the verification gate runs
+// for the team's tasks) and `TeamPlanApprovalSwitch` (whether a plan waits for
+// a person before its steps start).
 
 import { useCallback, useId, useState } from 'react'
 import { X } from 'lucide-react'
@@ -21,6 +22,7 @@ import { TeamIconPicker } from '@/features/teams/TeamIconPicker'
 import { TeamBriefForm } from './TeamBriefForm'
 import { TeamRulesEditor } from './TeamRulesEditor'
 import { TeamAgentWakesToggle } from './TeamAgentWakesToggle'
+import { TeamPlanApprovalSwitch } from './TeamPlanApprovalSwitch'
 import { TeamVerifyCommandEditor } from './TeamVerifyCommandEditor'
 import { TeamTaskPrefixEditor } from './TeamTaskPrefixEditor'
 import { TeamLabelsEditor } from './TeamLabelsEditor'
@@ -177,6 +179,13 @@ export function TeamSettingsSheet({ team, onClose }: TeamSettingsSheetProps) {
             Agents waking each other
           </h3>
           <TeamAgentWakesToggle teamId={team.id} />
+        </section>
+
+        <section className="flex flex-col gap-2">
+          <h3 className="m-0 font-mono text-[11px] uppercase tracking-[0.14em] text-muted-foreground">
+            Plans
+          </h3>
+          <TeamPlanApprovalSwitch teamId={team.id} />
         </section>
 
         <section className="flex flex-col gap-2">

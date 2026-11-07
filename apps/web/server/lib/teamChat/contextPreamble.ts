@@ -28,9 +28,12 @@ import {
   getDependencies,
   getSetting,
   getTask,
+  getTaskDocument,
   listExecutions,
   type ClawbooDb,
   type DbTaskComment,
+  planApprovalOn,
+  waitingPlanTitle,
 } from '@clawboo/db'
 import type { TurnFraming, TurnOrigin } from '@clawboo/team-orchestration'
 import { asc, eq } from 'drizzle-orm'
@@ -346,6 +349,25 @@ export function buildScheduledRoutineBlock(routineName: string): string {
  *  there is nothing to say (no rules, no intro, no other teammates). The rules
  *  and the user's intro are team-wide; the roster is the chat room's (`roomId`
  *  null = the team's default room, which is the whole team). */
+/** What a plan does on a team that asks first, and the plan this agent has waiting. */
+function buildPlanApprovalBlock(
+  db: ClawbooDb,
+  teamId: string,
+  agentId: string,
+  roomId: string | null,
+): string | null {
+  if (!planApprovalOn(db, teamId)) return null
+  const waiting = waitingPlanTitle(db, { teamId, agentId }, roomId)
+  return [
+    '[Plans on this team]',
+    'A person accepts work on this team before it is split up. When you have more than one task to hand out, write them together as one plan: <plan><step to="@Name">task</step><step to="@Name">task</step></plan>. It starts nothing: it waits for them, and they may change it. Two or more <delegate> in one reply wait the same way, as tasks that start together.',
+    'Say what you propose and stop. You hear their answer, either as a task update in this chat or as your task starting again. If they accept, its tasks are already on the board, so do not hand them out again. If they turn it down, do not propose the same steps again.',
+    'Put everything into one plan: a new plan while one waits takes its place, and the waiting one is dropped.',
+    ...(waiting ? [`Waiting for their answer now: "${oneLine(waiting, 200)}".`] : []),
+    '[End Plans on this team]',
+  ].join('\n')
+}
+
 export function buildServerTeamContext(
   db: ClawbooDb,
   teamId: string,
@@ -402,12 +424,17 @@ export function buildServerTeamContext(
     ? buildScheduledRoutineBlock(framing.scheduledRoutine)
     : null
 
+  // What a plan does on this team. The coordination rules say a plan's first step
+  // fires at once, which is not so here.
+  const planBlock = buildPlanApprovalBlock(db, teamId, selfAgentId, roomId)
+
   const composed = [
     personaBlock,
     rulesBlock,
     aboutUserBlock,
     rosterBlock,
     coordinationBlock,
+    planBlock,
     scheduledBlock,
     connectorsBlock,
   ]
@@ -602,6 +629,7 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
   const currentHash = ticketHashOf(task)
   const briefHash = run.briefHash ?? currentHash
 
+  const plan = getTaskDocument(db, task.id)
   return renderTicketBlock({
     taskId: task.id,
     identifier: task.identifier,
@@ -615,5 +643,8 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     dependencies,
     comments,
     lastAttempt: buildLastAttemptNote(attempts),
+    plan: plan
+      ? { revision: plan.revision, body: plan.body, by: nameOf(plan.authorAgentId) }
+      : null,
   })
 }

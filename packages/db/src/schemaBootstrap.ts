@@ -342,6 +342,29 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_task_questions_task ON task_questions (task_id, status);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_task_questions_idempotency ON task_questions (task_id, idempotency_key);
 
+    CREATE TABLE IF NOT EXISTS task_documents (
+      id              TEXT    PRIMARY KEY,
+      task_id         TEXT    NOT NULL REFERENCES tasks(id),
+      team_id         TEXT,
+      -- What the document is: only 'plan' today.
+      key             TEXT    NOT NULL,
+      -- 1, 2, 3 for a task and key. A new revision is a new row: none is overwritten.
+      revision        INTEGER NOT NULL,
+      body            TEXT    NOT NULL,
+      author_agent_id TEXT,
+      -- The run that wrote it, when an agent's run did.
+      execution_id    TEXT,
+      -- The question that asks a person about this revision, if one has.
+      question_id     TEXT,
+      -- accepted | declined, once a person answered: what makes an acceptance happen once.
+      decision        TEXT,
+      -- Who decided: a JSON {id, name, role}.
+      decided_by      TEXT,
+      decided_at      INTEGER,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_documents_revision ON task_documents (task_id, key, revision);
+
     CREATE TABLE IF NOT EXISTS task_comments (
       id              TEXT    PRIMARY KEY,
       task_id         TEXT    NOT NULL REFERENCES tasks(id),

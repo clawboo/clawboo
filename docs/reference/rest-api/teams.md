@@ -67,6 +67,8 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | PUT    | `/api/team-verify-command/:teamId` | Set or clear that command                                    | No      |
 | GET    | `/api/team-agent-wakes/:teamId`    | Read whether its agents may wake each other without asking   | No      |
 | PUT    | `/api/team-agent-wakes/:teamId`    | Set that. A person's route                                   | No      |
+| GET    | `/api/team-plan-approval/:teamId`  | Whether a plan waits for a person before its steps start     | No      |
+| PUT    | `/api/team-plan-approval/:teamId`  | Turn that on or off (a person's route)                       | No      |
 | GET    | `/api/team-chat`                   | Read the team's peer-chat room from a cursor                 | No      |
 | POST   | `/api/team-chat/exchange`          | Start one bounded peer-chat exchange                         | No      |
 
@@ -1363,6 +1365,21 @@ Reads the team's verify command: the check the [verification gate](/concepts/ver
 ```bash
 curl http://localhost:18790/api/team-verify-command/<team-id>
 ```
+
+## `GET /api/team-plan-approval/:teamId`
+
+Whether the team asks before a plan starts: `{ on: boolean }`. Off until a person turns it on. See [Plans](/concepts/the-board#plans).
+
+## `PUT /api/team-plan-approval/:teamId`
+
+Turns it on or off, and records the change in the governance audit. It changes what happens to the next plan. A plan already waiting keeps waiting for an answer, unless its agent starts a plan without asking, which closes it.
+
+**A person's route.** It takes [the person check](/operating/security#the-person-check): a caller nothing vouches for gets `403 { ok: false, error: 'person_only' }`. The audit row says who made the change.
+
+- **Path params**: `teamId` (team id).
+- **Request body**: `{ on: boolean }`.
+
+**`200 OK`**: `{ on: boolean }`. **`400 Bad Request`**: `on` is absent or not a boolean. **`404 Not Found`**: no team has this id.
 
 ## `PUT /api/team-verify-command/:teamId`
 

@@ -38,6 +38,9 @@ export const server = setupServer(
     HttpResponse.json({ stargazers_count: 0 }),
   ),
   http.get('/api/tools/approvals', () => HttpResponse.json({ ok: true, approvals: [] })),
+  // The drawer asks for a task's plan and Team settings for its switch.
+  http.get('/api/board/:taskId/plan', () => HttpResponse.json({ plan: null, revisions: [] })),
+  http.get('/api/team-plan-approval/:teamId', () => HttpResponse.json({ on: false })),
   // The Board's calendar reads upcoming routine runs for the range on screen,
   // and polls them, so every test that mounts the Board fetches this. Empty by
   // default; a test about routines overrides it.

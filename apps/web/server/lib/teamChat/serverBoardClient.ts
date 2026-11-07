@@ -17,6 +17,8 @@ import {
   cancelDependents,
   claimTask,
   clearDelegationFailure,
+  closeWaitingHolderWhenOff,
+  closeWaitingPlans,
   completeExecutionProcess,
   createCappedRootTask,
   createCappedSubtask,
@@ -36,6 +38,8 @@ import {
   setTaskWaitingOn,
   markDelegationFailureNotified,
   noteDelegationFailure,
+  planApprovalOn,
+  proposePlan,
   readDelegationFailure,
   readResultClaim,
   releaseOneSubtaskWait,
@@ -190,6 +194,65 @@ export function createServerBoardClient(
         clearDelegationFailure(db, teamId, targetAgentId, taskKey)
       } catch {
         // best-effort
+      }
+    },
+
+    async planApprovalOn(teamId) {
+      try {
+        return planApprovalOn(db, teamId)
+      } catch {
+        return false
+      }
+    },
+
+    // The plan's question, its revision and the wait land in one write. What the alerts
+    // follow is written with it, in the db layer, as for an agent's own `ask_person`.
+    async proposePlan(input) {
+      try {
+        // The run's own task's latest run is that run. A turn with no task has none.
+        const executionId = input.taskId
+          ? (listExecutions(db, input.taskId).at(-1)?.id ?? null)
+          : null
+        const result = proposePlan(db, { ...input, executionId, ...(scoped ? { roomId } : {}) })
+        if (result.status === 'off') return { status: 'off' }
+        if (result.status === 'refused') return { status: 'refused', reason: result.reason }
+        if (result.status !== 'proposed') return result
+        if (result.holderCreated)
+          emitEvent(db, {
+            kind: 'task_created',
+            taskId: result.task.id,
+            teamId: result.task.teamId,
+            data: {
+              title: result.task.title,
+              status: result.task.status,
+              parentTaskId: result.task.parentTaskId,
+              actor: { kind: 'agent', agentId: input.agentId, execId: executionId },
+            },
+          })
+        return {
+          status: 'proposed',
+          task: result.task as BoardTask,
+          holder: result.task.id !== input.taskId,
+          ...(result.replaced ? { replaced: { title: result.replaced.title } } : {}),
+        }
+      } catch {
+        return { status: 'error' }
+      }
+    },
+
+    async startingWithoutAsking(input) {
+      try {
+        closeWaitingHolderWhenOff(db, { ...input, ...(scoped ? { roomId } : {}) })
+      } catch {
+        // best-effort: a person can still turn it down
+      }
+    },
+
+    async closeWaitingPlans(teamId) {
+      try {
+        closeWaitingPlans(db, { teamId, ...(scoped ? { roomId } : {}) })
+      } catch {
+        // best-effort: a person can still turn it down
       }
     },
 

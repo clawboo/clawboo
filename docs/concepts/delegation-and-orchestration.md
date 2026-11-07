@@ -99,7 +99,7 @@ Each runtime hands work off in its own way. Clawboo reads only these structured 
 | Claude Code, Codex, Hermes | Calls the `team_delegate` tool, which Clawboo provides on team chat runs.                                         |
 | OpenClaw                   | Writes `<delegate to="@Name">the task</delegate>` in its reply. A `sessions_send` call to a teammate also counts. |
 
-Any agent's finished reply can also carry `<delegate>` lines, or a `<plan>` made of `<step>` blocks: an ordered plan in which each step waits for the one before it. Clawboo forgives small slips such as smart quotes or a missing `<`. Sometimes a reply looks like a hand-off but cannot be read, for example because it names no real teammate. Clawboo then tells the lead once to send it again in the right form.
+Any agent's finished reply can also carry `<delegate>` lines, or a `<plan>` made of `<step>` blocks: an ordered plan in which each step waits for the one before it. Clawboo forgives small slips such as smart quotes or a missing `<`. Sometimes a reply looks like a hand-off but cannot be read, for example because it names no real teammate. Clawboo then tells the lead once to send it again in the right form. On a team that asks first, a `<plan>`, or two or more `<delegate>` lines in one reply, waits for a person before anything starts: see [Plans](/concepts/the-board#plans).
 
 ## Busy teammates
 

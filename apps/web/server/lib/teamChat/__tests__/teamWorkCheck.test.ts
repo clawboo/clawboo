@@ -3,6 +3,7 @@
 // command runs through a shell). A temp clawboo home holds the database, the
 // folder and the history; a scripted reviewer stands in for the runtime.
 
+import { encodePlanHolder } from '@clawboo/board-core'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -193,6 +194,23 @@ describe('team chat work check', () => {
 
     expect(await wc.prepare(id, AGENT)).toBeNull()
     expect(existsSync(teamFolderHistoryDir(TEAM))).toBe(false)
+  })
+
+  it('never checks a card that only held a plan, whatever is in the folder', async () => {
+    setCommand('exit 1')
+    const wc = check()
+    const card = createTask(db, {
+      title: 'Plan: make the parser handle quotes',
+      teamId: TEAM,
+      sourceDelegationId: encodePlanHolder(AGENT, 'n1'),
+    })
+    claimTask(db, card.id, AGENT)
+    await wc.begin(card.id, AGENT)
+    // A teammate's step, started by that plan, writing in the same folder.
+    await writeFile(path.join(folder, 'step.md'), '# unfinished\n')
+
+    expect(await wc.prepare(card.id, AGENT)).toBeNull()
+    expect(getTask(db, card.id)?.status).toBe('in_progress')
   })
 
   it('checks nothing when the run changed nothing', async () => {

@@ -64,6 +64,8 @@ export const ENGINE_FEATURES = [
   'board.reopen',
   'board.personAssignees',
   'board.questions',
+  'board.planDocuments',
+  'board.planApproval',
   // The read-only view of a task's worktree, and its built-page preview.
   'workspace.view',
   'workspace.preview',

@@ -31,6 +31,7 @@ import { personJson, type PersonRecord } from '../person'
 import { taskQuestions, tasks, type DbTask, type DbTaskQuestion } from '../schema'
 import { immediateWrite } from './contention'
 import { emitBoardLifecycle } from './events'
+import { planAnswerRefusalTx, settlePlanAnswerTx, type PlanAcceptRefusal } from './plans'
 import { expirePendingQuestionsTx } from './questionExpiry'
 import { firedByRoutine, personMovedSinceLastRun } from './repository'
 
@@ -140,11 +141,20 @@ export function askQuestion(db: ClawbooDb, input: AskQuestionInput): AskQuestion
 }
 
 export type AnswerQuestionResult =
-  | { ok: true; question: DbTaskQuestion; task: DbTask }
+  | {
+      ok: true
+      question: DbTaskQuestion
+      task: DbTask
+      /** For a plan: the steps its acceptance made. */
+      created?: DbTask[]
+      /** For a plan: the open tasks that stood in for a step. */
+      linked?: DbTask[]
+    }
   | {
       ok: false
       reason: 'not_found' | 'invalid_answer' | 'answered' | 'expired' | 'cancelled'
     }
+  | ({ ok: false } & Exclude<PlanAcceptRefusal, { reason: 'answered' }>)
 
 /** Record a person's answer. `person` is who the route says answered: the verified
  *  person, or the built-in local one. Never taken from the request body. */
@@ -154,7 +164,7 @@ export function answerQuestion(
   rawAnswer: unknown,
   opts: { person: PersonRecord },
 ): AnswerQuestionResult {
-  return immediateWrite(db, (tx): AnswerQuestionResult => {
+  const result = immediateWrite(db, (tx): AnswerQuestionResult => {
     const q = tx.select().from(taskQuestions).where(eq(taskQuestions.id, questionId)).get() as
       DbTaskQuestion | undefined
     if (!q) return { ok: false, reason: 'not_found' }
@@ -170,6 +180,15 @@ export function answerQuestion(
     const payload = parseQuestionPayload(q.payload)
     const answer = payload ? normalizeAnswer(q.kind, payload, rawAnswer) : null
     if (!answer) return { ok: false, reason: 'invalid_answer' }
+    // A plan: an acceptance with nothing in it says nothing, and what cannot be created
+    // is refused whole, before any write, so the person can answer again.
+    const plan = answer.kind === 'suggest_tasks' ? (payload?.plan ?? null) : null
+    if (plan && answer.kind === 'suggest_tasks') {
+      if (answer.accepted && answer.tasks.length === 0)
+        return { ok: false, reason: 'invalid_answer' }
+      const refusal = planAnswerRefusalTx(tx, task, plan, answer)
+      if (refusal) return { ok: false, ...refusal }
+    }
     const changed = tx
       .update(taskQuestions)
       .set({
@@ -186,8 +205,21 @@ export function answerQuestion(
     if (waiting?.kind === 'question' && waiting.questionId === q.id) {
       tx.update(tasks).set({ waitingOn: null, updatedAt: now }).where(eq(tasks.id, task.id)).run()
     }
+    const settled =
+      plan && answer.kind === 'suggest_tasks'
+        ? settlePlanAnswerTx(db, tx, {
+            question: q,
+            task,
+            plan,
+            proposed: payload?.tasks ?? [],
+            answer,
+            person: opts.person,
+            now,
+          })
+        : null
     return {
       ok: true,
+      ...(settled ? settled : {}),
       question: tx
         .select()
         .from(taskQuestions)
@@ -196,6 +228,17 @@ export function answerQuestion(
       task: tx.select().from(tasks).where(eq(tasks.id, task.id)).get() as DbTask,
     }
   })
+  // After the write, as any create does: what wakes the pump for the first step.
+  if (result.ok)
+    for (const made of result.created ?? [])
+      emitBoardLifecycle({
+        kind: 'task_created',
+        taskId: made.id,
+        teamId: made.teamId ?? null,
+        status: made.status,
+        sourceDelegationId: made.sourceDelegationId ?? null,
+      })
+  return result
 }
 
 /** One question. */

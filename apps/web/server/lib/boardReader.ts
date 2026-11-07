@@ -6,8 +6,9 @@
 
 import type { Request } from 'express'
 
-import { parseWaitingOn } from '@clawboo/board-core'
+import { isPlanHolder, parseQuestionPayload, parseWaitingOn } from '@clawboo/board-core'
 import {
+  getQuestion,
   getTask,
   listTasks,
   markTaskRead,
@@ -27,6 +28,14 @@ const log = createLogger('board-reader')
 /** The statuses a chat room's engine can stop a task in, and where it puts them. */
 const RUNNING_STATUSES = ['in_progress', 'in_review'] as const
 const RELEASED_TO = 'todo'
+
+/** Is this a plan waiting for a person's answer? A Stop closes it. */
+function waitingOnPlan(db: ClawbooDb, t: DbTask): boolean {
+  const wait = parseWaitingOn(t.waitingOn)
+  if (wait?.kind !== 'question') return false
+  const question = getQuestion(db, wait.questionId)
+  return !!question && parseQuestionPayload(question.payload)?.plan !== undefined
+}
 
 /** Whose read state this request reads. */
 export function readerOf(req: Request): string {
@@ -64,11 +73,22 @@ export async function stopAsOwnWrite(
   const running = RUNNING_STATUSES.flatMap((status) =>
     listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status }).map((t) => t.id),
   )
-  // A task waiting on its sub-tasks has no run, and a Stop ends that wait the same way.
-  for (const t of listTasks(db, { teamId: scope.teamId, roomId: scope.roomId, status: 'blocked' }))
+  // A task waiting on its sub-tasks has no run, and a Stop ends that wait the same way. So
+  // does a plan waiting for an answer: its task goes back to To do, and a card that only
+  // held the plan is cancelled.
+  const holders: string[] = []
+  for (const t of listTasks(db, {
+    teamId: scope.teamId,
+    roomId: scope.roomId,
+    status: 'blocked',
+  })) {
     if (parseWaitingOn(t.waitingOn)?.kind === 'subtasks') running.push(t.id)
+    else if (waitingOnPlan(db, t))
+      (isPlanHolder(t.sourceDelegationId) ? holders : running).push(t.id)
+  }
   await stop()
   markReleasedTasksRead(db, reader, running)
+  markReleasedTasksRead(db, reader, holders, 'cancelled')
 }
 
 /** The tasks a person's pause would release, by the same reading as Stop: what is
@@ -81,14 +101,19 @@ export function runningTasksCovered(db: ClawbooDb, covers: (task: DbTask) => boo
   )
 }
 
-/** Mark read each of these that a person's own act released: back in To do, with that
- *  move as its newest change. Anything else that happened to it stays news. */
-export function markReleasedTasksRead(db: ClawbooDb, reader: string, ids: readonly string[]): void {
+/** Mark read each of these that a person's own act released: back in To do (or `to`),
+ *  with that move as its newest change. Anything else that happened to it stays news. */
+export function markReleasedTasksRead(
+  db: ClawbooDb,
+  reader: string,
+  ids: readonly string[],
+  to: string = RELEASED_TO,
+): void {
   try {
     const states = taskReadStates(db, reader)
     for (const id of ids) {
       const activity = states.get(id)?.activity
-      if (activity?.kind !== 'status' || getTask(db, id)?.status !== RELEASED_TO) continue
+      if (activity?.kind !== 'status' || getTask(db, id)?.status !== to) continue
       markTaskRead(db, reader, id, activity.seq)
     }
   } catch (err) {

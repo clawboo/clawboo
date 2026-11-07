@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { taskAttention } from '../attention'
+import { encodePlanHolder } from '../plans'
 
 const runs = (...statuses: string[]) => statuses.map((status) => ({ status }))
 const BOUND = 'run-1:deleg:agent:a2:reflectTo:leader'
@@ -161,5 +162,54 @@ describe('taskAttention: an agent said what it needs, then its run failed', () =
     expect(
       taskAttention({ status: 'blocked', execs: runs('failed'), waitingOn: { kind: 'failure' } }),
     ).toMatchObject({ reason: 'failed' })
+  })
+})
+
+describe('taskAttention: a plan waiting for a person', () => {
+  const holder = encodePlanHolder('lead', 'n')
+  const question = { kind: 'question', questionId: 'q1' }
+
+  it('a card that only holds a plan shows as a question, with no run behind it', () => {
+    expect(
+      taskAttention({
+        status: 'blocked',
+        sourceDelegationId: holder,
+        assigneeAgentId: 'lead',
+        execs: [],
+        waitingOn: question,
+      }),
+    ).toEqual({ reason: 'question', failedRuns: 0, questionId: 'q1' })
+  })
+
+  it('no card about agents waking each other stands in front of it', () => {
+    const agentWakes = {
+      kind: 'ask' as const,
+      jobTaskId: 'j',
+      fromAgentId: 'a',
+      toAgentId: 'b',
+    }
+    expect(
+      taskAttention({
+        status: 'blocked',
+        execs: runs('succeeded'),
+        waitingOn: question,
+        agentWakes,
+      })?.reason,
+    ).toBe('question')
+  })
+
+  it('it hides no ending: once the plan is answered, what the last run did shows again', () => {
+    const failed = { status: 'blocked', execs: runs('failed'), sourceDelegationId: BOUND }
+    expect(taskAttention({ ...failed, waitingOn: question })?.reason).toBe('question')
+    expect(taskAttention(failed)?.reason).toBe('failed')
+    expect(taskAttention({ ...failed, waitingOn: { kind: 'no_result' } })?.reason).toBe('no_result')
+    expect(taskAttention({ ...failed, waitingOn: { kind: 'out_of_room' } })?.reason).toBe(
+      'out_of_room',
+    )
+  })
+
+  it('answered, a card that only held a plan needs no one', () => {
+    for (const status of ['done', 'cancelled'])
+      expect(taskAttention({ status, sourceDelegationId: holder, execs: [] })).toBeNull()
   })
 })

@@ -11,6 +11,9 @@ import {
   listEvents,
   listTaskQuestions,
   listWaitingTaskWakes,
+  getTaskDocument,
+  planApprovalSettingKey,
+  setSetting,
   updateStatus,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -191,6 +194,83 @@ describe('a bound session records its agent and its run', () => {
       actor: { kind: 'agent', agentId: 'coder', execId },
     })
     expect(JSON.stringify(report?.data)).not.toContain('The words stay')
+  })
+
+  it('on write_plan, on the row and in the log: who wrote it, on which run, none of its words', async () => {
+    const task = createTask(db, { title: 'planned', teamId: TEAM })
+    claimTask(db, task.id, 'coder')
+    const client = await teamRunClient(task.id)
+    const res = await callText(client, 'write_plan', { body: 'The words stay on the row.' })
+    expect(res.isError).toBe(false)
+    expect(getTaskDocument(db, task.id)).toMatchObject({
+      authorAgentId: 'coder',
+      executionId: 'exec-1',
+    })
+    const [written] = events('status_changed')
+    expect(written?.taskId).toBe(task.id)
+    expect(written?.data).toMatchObject({
+      to: 'in_progress',
+      reason: 'plan_written',
+      revision: 1,
+      actor: AGENT,
+    })
+    expect(JSON.stringify(written?.data)).not.toContain('The words stay')
+  })
+
+  it('on write_plan, only the signed binding counts: what a call says about itself does not', async () => {
+    const task = createTask(db, { title: 'planned', teamId: TEAM })
+    claimTask(db, task.id, 'coder')
+    const other = createTask(db, { title: 'another', teamId: TEAM })
+    claimTask(db, other.id, 'someone-else')
+    const client = await teamRunClient(task.id)
+    await callText(client, 'write_plan', {
+      body: 'Mine.',
+      taskId: other.id,
+      agentId: 'someone-else',
+      authorAgentId: 'someone-else',
+      executionId: 'exec-forged',
+    })
+    expect(getTaskDocument(db, other.id)).toBeNull()
+    expect(getTaskDocument(db, task.id)).toMatchObject({
+      authorAgentId: 'coder',
+      executionId: 'exec-1',
+    })
+    expect(events('status_changed').at(-1)?.data['actor']).toEqual(AGENT)
+  })
+
+  it('on write_plan that changed nothing, or was refused: nothing is recorded', async () => {
+    const task = createTask(db, { title: 'planned', teamId: TEAM })
+    claimTask(db, task.id, 'coder')
+    const client = await teamRunClient(task.id)
+    await callText(client, 'write_plan', { body: 'Same.' })
+    await callText(client, 'write_plan', { body: 'Same.' })
+    expect(events('status_changed')).toHaveLength(1)
+    const theirs = createTask(db, { title: 'theirs', teamId: TEAM })
+    claimTask(db, theirs.id, 'someone-else')
+    const refused = await callText(await teamRunClient(theirs.id), 'write_plan', { body: 'No.' })
+    expect(refused.isError).toBe(true)
+    expect(events('status_changed')).toHaveLength(1)
+  })
+
+  it('on ask_person with a breakdown on a team that asks first, on the question, revision and log', async () => {
+    setSetting(db, planApprovalSettingKey(TEAM), JSON.stringify({ on: true }))
+    const task = createTask(db, { title: 'asks', teamId: TEAM })
+    claimTask(db, task.id, 'coder')
+    const client = await teamRunClient(task.id)
+    await callText(client, 'ask_person', {
+      kind: 'suggest_tasks',
+      question: 'Split it like this?',
+      tasks: ['One', 'Two'],
+    })
+    expect(listTaskQuestions(db, task.id)[0]?.executionId).toBe('exec-1')
+    expect(getTaskDocument(db, task.id)).toMatchObject({
+      authorAgentId: 'coder',
+      executionId: 'exec-1',
+    })
+    expect(events('status_changed').at(-1)).toMatchObject({
+      taskId: task.id,
+      data: { to: 'blocked', reason: 'question', plan: true, actor: AGENT },
+    })
   })
 
   it('on a report the board refused: nothing is recorded', async () => {

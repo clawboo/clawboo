@@ -15,6 +15,8 @@ export type QuestionCloseReason =
   | 'task_closed'
   /** The task left Blocked some other way: a Retry, a person's move, an Assign. */
   | 'moved'
+  /** A person pressed Stop while a plan waited on it. */
+  | 'stopped'
 
 /** Expire a task's open questions, inside the caller's transaction. Guarded on
  *  `status = 'pending'`, so an answer and an expiry never both land. The key is freed:

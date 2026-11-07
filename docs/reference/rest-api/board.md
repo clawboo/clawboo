@@ -39,6 +39,7 @@ A claim is how agents share work without doing it twice: `POST /api/board/:taskI
 | GET    | `/api/board/:taskId/questions`            | The questions agents asked on a task                          | No      |
 | POST   | `/api/board/questions/:questionId/answer` | A person answers a question                                   | No      |
 | POST   | `/api/board/agent-wakes/:jobTaskId`       | A person answers the card about agents waking each other      | No      |
+| GET    | `/api/board/:taskId/plan`                 | A task's plan: a revision, and the list of them               | No      |
 | GET    | `/api/board/inbox`                        | What is unread and what needs the person, for the badge       | No      |
 | POST   | `/api/board/inbox/read`                   | Mark everything read, or one team's tasks                     | No      |
 | POST   | `/api/board/:taskId/read`                 | Mark one task read, through the change the page showed        | No      |
@@ -438,13 +439,43 @@ A person answers an agent's question. The question goes on the task's comments u
     | { choice: string } // one of a question's options
     | { text: string } // free text, where the question takes it
     | { confirmed: boolean; note?: string } // a confirmation
-    | { accepted: boolean; tasks?: Array<{ title: string; description?: string }>; note?: string } // suggested tasks
+    | {
+        accepted: boolean
+        tasks?: Array<{ title: string; description?: string; agentId?: string }>
+        note?: string
+      } // suggested tasks, or a plan
 }
 ```
 
-An answer is judged against expiry inside its own write. A question closes unanswered when its task reaches `done` or `cancelled`, is dropped or moves on, or when a newer question replaces it, and an answer that loses that race changes nothing.
+An answer is judged against expiry inside its own write. A question closes unanswered when its task reaches `done` or `cancelled`, is dropped or moves on, when a newer question replaces it, or, for a plan, when a person presses Stop, and an answer that loses that race changes nothing.
 
 **`200 OK`**: `{ ok: true, question: DbTaskQuestion, task: DbTask, delivery: ReplyDelivery }`. The answer is saved even when `delivery.status` is `not-delivered`. The task then stays Blocked, and its `attention.detail` says the answer could not start the agent. Under a [pause](/using/board#pause-work), `delivery.reason` is `paused`, the task stays Blocked, and its `attention.detail` says the agent gets the answer after the resume. **`400 Bad Request`**: `invalid_answer`, an answer this question does not allow. **`403 Forbidden`**: `person_only`. **`404 Not Found`**: `not_found`. **`409 Conflict`**: `answered`, `expired` or `cancelled`.
+
+On a plan, a question whose `payload.plan` names a revision of the task's plan, the answer does more, in the same write. **Accepted**, it creates the steps once, chained in order, or all ready at once when `payload.plan.parallel` says the question came from a batch of hand-offs. What runs is what was sent: `description` when there is one, else `title`, with `title` only the start of it. Each step goes to the agent its entry names, if the plan named that agent, and otherwise to the agent that proposed it. A step an open task with the same words already covers is not created again, and that task holds its place. **Turned down**, it creates nothing. Either way the revision records the decision and who made it. The response adds `created` and `alreadyOpen`, the two counts.
+
+The proposing agent hears the answer. On the run's own task, as with any question, a saved wake starts that task again. On a card that only held the plan (`payload.plan.holder`), the same write closes the card, `done` or `cancelled`, and adds a `[Task Update]` to the outbox for the agent's chat. No run starts on the card, and `delivery` is `queued`.
+
+A plan's refusals leave the question open, so the person can answer again:
+
+| Status | `error`          | When                                                                      |
+| ------ | ---------------- | ------------------------------------------------------------------------- |
+| `400`  | `too_many_steps` | More than 25 steps. Refused whole. Also `max`                             |
+| `409`  | `no_room`        | The steps do not fit under the parent task. Also `room` and `max`         |
+| `409`  | `too_deep`       | The parent task is already as deep as tasks go. Also `max`                |
+| `409`  | `answered`       | This question, or this revision, was already answered. Nothing is created |
+
+## `GET /api/board/:taskId/plan`
+
+A task's plan document. `?revision=N` asks for that revision, and an older one stays readable after a newer one. Without it, the newest:
+
+```ts
+{
+  plan: DbTaskDocument | null // null: this task has no plan
+  revisions: Array<Omit<DbTaskDocument, 'body'> & { chars: number }> // newest first
+}
+```
+
+See [`task_documents`](/reference/database-schema#task_documents). **`400`** for a `revision` that is not a whole number from 1, **`404`** for a task or revision that is not there.
 
 ## `GET /api/board/:taskId`
 

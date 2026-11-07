@@ -219,6 +219,7 @@ These writes take the same check and answer the same `403`:
 - Creating a task for a named agent: `POST /api/board` with `assigneeAgentId`, or with a `sourceDelegationId` that names an agent or says a person chose. Both write what Assign writes. So does `assignToMe`, which makes the task the sender's. A task with none of them does not need the check.
 - Reopening a finished task, assigning a task to a person, answering a question an agent asked and answering the card about agents waking each other: see [What counts as a person](#what-counts-as-a-person).
 - A team's setting that lets its agents wake each other without asking: `PUT /api/team-agent-wakes/:teamId`.
+- A team's switch for asking before a plan starts: `PUT /api/team-plan-approval/:teamId`. Accepting or turning down a plan is answering a question, above.
 - A team's readable-id letters, its labels and a task's labels.
 - Marking a task or the inbox read.
 - Pausing and resuming an agent, a team or a task tree: `POST /api/pauses` and `DELETE /api/pauses/:kind/:id`.

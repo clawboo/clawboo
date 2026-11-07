@@ -86,6 +86,7 @@ import { teamActivitySummaryGET } from './teamActivity'
 import { teamMemberRolesGET } from './teamMemberRoles'
 import { teamRulesGET, teamRulesPUT } from './teamRules'
 import { teamAgentWakesGET, teamAgentWakesPUT } from './teamAgentWakes'
+import { teamPlanApprovalGET, teamPlanApprovalPUT } from './teamPlanApproval'
 import { teamVerifyCommandGET, teamVerifyCommandPUT } from './teamVerifyCommand'
 import {
   teamBriefGET,
@@ -132,6 +133,7 @@ import {
   boardQuestionsGET,
   boardReopenPOST,
 } from './boardPerson'
+import { boardPlanGET } from './boardPlan'
 import {
   memorySearchGET,
   memorySavePOST,
@@ -388,6 +390,8 @@ router.post('/api/team-chat/exchange', teamChatExchangePOST)
 // Source: maintenance panel textarea OR /rule slash command in the composer.
 router.get('/api/team-rules/:teamId', teamRulesGET)
 router.put('/api/team-rules/:teamId', teamRulesPUT)
+router.get('/api/team-plan-approval/:teamId', teamPlanApprovalGET)
+router.put('/api/team-plan-approval/:teamId', sensitiveLimiter, teamPlanApprovalPUT)
 router.get('/api/team-verify-command/:teamId', teamVerifyCommandGET)
 // Sets a shell command the verification gate later runs: rate-limited like the
 // other routes that change what runs.
@@ -461,6 +465,7 @@ router.post('/api/board/:taskId/assign-person', boardAssignPersonPOST)
 router.get('/api/board/:taskId/questions', boardQuestionsGET)
 router.post('/api/board/agent-wakes/:jobTaskId', boardAgentWakesPOST)
 router.post('/api/board/questions/:questionId/answer', boardQuestionAnswerPOST)
+router.get('/api/board/:taskId/plan', boardPlanGET)
 // Execution ledger (distinct two-segment paths — no collision with /:taskId).
 router.get('/api/board/:taskId/executions', boardExecutionsGET)
 router.post('/api/board/:taskId/executions', boardExecutionCreatePOST)

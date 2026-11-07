@@ -16,6 +16,21 @@ export type QuestionStatus = 'pending' | 'answered' | 'expired' | 'cancelled'
 export interface SuggestedTask {
   title: string
   description?: string
+  /** For a plan's step: the agent it goes to, and that agent's name when it was asked. */
+  agentId?: string
+  agentName?: string
+}
+
+/** What makes a `suggest_tasks` question a plan: accepting it creates the steps. */
+export interface PlanRef {
+  /** The revision of the task's plan document this asks about. */
+  revision: number
+  /** Where the steps go. Null: at the top of the board. */
+  parentTaskId: string | null
+  /** The task holds nothing but this plan, because the turn that wrote it had no task. */
+  holder: boolean
+  /** A batch of hand-offs, not an ordered plan: its steps all start at once. */
+  parallel?: boolean
 }
 
 export interface QuestionPayload {
@@ -26,6 +41,8 @@ export interface QuestionPayload {
   allowOther?: boolean
   /** For `suggest_tasks`: the proposed tasks. */
   tasks?: SuggestedTask[]
+  /** For `suggest_tasks` on a team that asks before a plan starts. */
+  plan?: PlanRef
 }
 
 export type QuestionAnswer =
@@ -50,9 +67,28 @@ function suggestedTasks(v: unknown): SuggestedTask[] | null {
     const title = text((raw as Record<string, unknown>)['title'])
     if (!title) return null
     const description = text((raw as Record<string, unknown>)['description'])
-    out.push({ title, ...(description ? { description } : {}) })
+    const agentId = text((raw as Record<string, unknown>)['agentId'])
+    const agentName = text((raw as Record<string, unknown>)['agentName'])
+    out.push({
+      title,
+      ...(description ? { description } : {}),
+      ...(agentId ? { agentId } : {}),
+      ...(agentName ? { agentName } : {}),
+    })
   }
   return out
+}
+
+function planRef(v: unknown): PlanRef | null {
+  if (!v || typeof v !== 'object') return null
+  const p = v as Record<string, unknown>
+  if (typeof p['revision'] !== 'number' || !Number.isInteger(p['revision'])) return null
+  return {
+    revision: p['revision'],
+    parentTaskId: typeof p['parentTaskId'] === 'string' ? p['parentTaskId'] : null,
+    holder: p['holder'] === true,
+    ...(p['parallel'] === true ? { parallel: true } : {}),
+  }
 }
 
 /** A question's stored payload, or null for anything it cannot read. */
@@ -73,11 +109,13 @@ export function parseQuestionPayload(raw: unknown): QuestionPayload | null {
     ? d['options'].filter((o): o is string => typeof o === 'string' && o !== '')
     : null
   const tasks = suggestedTasks(d['tasks'])
+  const plan = planRef(d['plan'])
   return {
     prompt,
     ...(options && options.length > 0 ? { options } : {}),
     ...(d['allowOther'] === true ? { allowOther: true } : {}),
     ...(tasks ? { tasks } : {}),
+    ...(plan ? { plan } : {}),
   }
 }
 
@@ -125,16 +163,23 @@ const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
 /** What a person said, for the task's thread under their name. The question is not in
  *  it: that is the agent's text, and on this line it would read as the person's. An
  *  option or a suggested task is the agent's wording too, but it is what they chose. */
-export function answerWords(answer: QuestionAnswer): string {
+export function answerWords(answer: QuestionAnswer, opts?: { planCreated?: boolean }): string {
   const noted = 'note' in answer && answer.note ? `\nNote: ${answer.note}` : ''
   if (answer.kind === 'confirm') return `${answer.confirmed ? 'Yes' : 'No'}.${noted}`
   if (answer.kind === 'question')
     return answer.choice ? oneLine(answer.choice) : (answer.text ?? '')
   if (!answer.accepted) return `Turned these tasks down.${noted}`
+  // The person's note comes first: a reader cuts from the end, and the list can be long.
+  // An accepted plan's tasks exist by now and hold their own words, so it names them, and
+  // the agent must not read this as an ask.
+  if (opts?.planCreated) {
+    const titles = answer.tasks.map((t) => `- ${oneLine(t.title)}`)
+    return `Accepted the plan.${noted}\nIts tasks are on the board:\n${titles.join('\n')}`
+  }
   const list = answer.tasks.map(
     (t) => `- ${oneLine(t.title)}${t.description ? `: ${oneLine(t.description)}` : ''}`,
   )
-  return `Accepted. Create these tasks:\n${list.join('\n')}${noted}`
+  return `Accepted.${noted ? `${noted}\n` : ' '}Create these tasks:\n${list.join('\n')}`
 }
 
 /** The question on the task's thread, under the agent that wrote it. */
@@ -144,6 +189,10 @@ export function askedWords(prompt: string): string {
 
 /** What the agent reads when an answer wakes it. The answer comes first, because a
  *  mailbox note is cut from the end and a question can be long. */
-export function answerForAgent(prompt: string, answer: QuestionAnswer): string {
-  return `${answerWords(answer)}\n\n(Your question, as you wrote it: ${oneLine(prompt)})`
+export function answerForAgent(
+  prompt: string,
+  answer: QuestionAnswer,
+  opts?: { planCreated?: boolean },
+): string {
+  return `${answerWords(answer, opts)}\n\n(Your question, as you wrote it: ${oneLine(prompt)})`
 }

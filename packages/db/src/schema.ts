@@ -555,7 +555,7 @@ export const taskQuestions = sqliteTable(
     answer: text('answer'),
     // Who answered: a JSON {id, name, role}.
     answeredBy: text('answered_by'),
-    // Why it closed unanswered: replaced | task_closed | moved.
+    // Why it closed unanswered: replaced | task_closed | moved | stopped.
     closeReason: text('close_reason'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
@@ -568,6 +568,37 @@ export const taskQuestions = sqliteTable(
 )
 
 export type DbTaskQuestion = typeof taskQuestions.$inferSelect
+
+// task_documents: documents on a task, in revisions. Today only its plan.
+export const taskDocuments = sqliteTable(
+  'task_documents',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    teamId: text('team_id'),
+    // What the document is: only 'plan' today.
+    key: text('key').notNull(),
+    // 1, 2, 3 for a task and key. A new revision is a new row: none is overwritten.
+    revision: integer('revision').notNull(),
+    body: text('body').notNull(),
+    authorAgentId: text('author_agent_id'),
+    // The run that wrote it, when an agent's run did.
+    executionId: text('execution_id'),
+    // The question that asks a person about this revision, if one has.
+    questionId: text('question_id'),
+    // accepted | declined, once a person answered: what makes an acceptance happen once.
+    decision: text('decision'),
+    // Who decided: a JSON {id, name, role}.
+    decidedBy: text('decided_by'),
+    decidedAt: integer('decided_at'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [uniqueIndex('idx_task_documents_revision').on(t.taskId, t.key, t.revision)],
+)
+
+export type DbTaskDocument = typeof taskDocuments.$inferSelect
 
 // task_comments — per-task discussion / system notes.
 export const taskComments = sqliteTable(

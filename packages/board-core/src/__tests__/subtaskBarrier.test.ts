@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { PAUSED_RUN_CLASS } from '../dispatch'
+import { encodePlanHolder } from '../plans'
 import {
   subtaskNames,
   subtasksStillOut,
@@ -277,5 +278,51 @@ describe('how a person reads them', () => {
     expect(unfinishedNeed(list)).toBe(
       '“image”, “video” did not finish. Retry them, or mark this task done.',
     )
+  })
+})
+
+describe('subtaskStanding: a card that only holds a plan', () => {
+  const holder = (over: Partial<SubtaskView> = {}): SubtaskView =>
+    view({
+      status: 'blocked',
+      assigneeAgentId: 'a2',
+      sourceDelegationId: encodePlanHolder('a2', 'n'),
+      waitingOn: { kind: 'question', questionId: 'q1' },
+      ...over,
+    })
+
+  it('waiting for its answer, it is not work handed out, though an agent holds it', () => {
+    expect(subtaskStanding(holder())).toBe('not_handed_out')
+  })
+
+  it('moved back to To do or running, it still reports nothing to its parent', () => {
+    expect(subtaskStanding(holder({ status: 'todo', waitingOn: null }))).toBe('not_handed_out')
+    expect(subtaskStanding(holder({ status: 'in_progress', waitingOn: null }))).toBe(
+      'not_handed_out',
+    )
+  })
+
+  it('closed by its answer, it reads as closed', () => {
+    expect(subtaskStanding(holder({ status: 'done', waitingOn: null }))).toBe('done')
+    expect(subtaskStanding(holder({ status: 'cancelled', waitingOn: null }))).toBe('cancelled')
+  })
+
+  it('a run that ended well does not wait for it, and it does not count against a Done', () => {
+    const t = tallySubtasks([holder()])
+    expect(subtasksStillOut(t)).toBe(false)
+    expect(unfinishedSubtasks(t)).toBe(0)
+    expect(unfinishedSubtasks(tallySubtasks([holder({ status: 'cancelled' })]))).toBe(0)
+  })
+
+  it('the engine’s wait ignores it, and an agent’s own wait on everything holds for it', () => {
+    const t = tallySubtasks([holder()])
+    expect(subtaskWaitOver(t, { handedOutOnly: true })).toBe(true)
+    expect(subtaskWaitOver(t)).toBe(false)
+  })
+
+  it('the steps beside it are what its parent waits on', () => {
+    const step = view({ id: 'step', status: 'todo', execs: [] })
+    expect(subtaskStanding(step)).toBe('coming')
+    expect(subtasksStillOut(tallySubtasks([holder({ status: 'done' }), step]))).toBe(true)
   })
 })

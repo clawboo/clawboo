@@ -207,9 +207,15 @@ describe('ask_person', () => {
     const id = claimedBy('coder')
     expect(await listToolNames(await connect(teamRun(id)))).toContain('ask_person')
     expect(await listToolNames(await connect({ ...teamRun(id), readOnly: true }))).toEqual(
-      expect.arrayContaining(['list_tasks', 'get_task', 'ask_person', 'report_result']),
+      expect.arrayContaining([
+        'list_tasks',
+        'get_task',
+        'ask_person',
+        'report_result',
+        'write_plan',
+      ]),
     )
-    expect(await listToolNames(await connect({ ...teamRun(id), readOnly: true }))).toHaveLength(4)
+    expect(await listToolNames(await connect({ ...teamRun(id), readOnly: true }))).toHaveLength(5)
   })
 
   it('is not served where nothing could wake the asker', async () => {

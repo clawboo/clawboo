@@ -79,6 +79,15 @@ export interface CascadeBoard extends EngineBoardClient {
   onClaim?: () => void
   /** Current status of a task, or undefined if unknown. */
   statusOf(taskId: string): string | undefined
+  /** Turn this team's "ask before a plan starts" switch on or off. */
+  setPlanApproval(on: boolean): void
+  /** The plans waiting for a person. */
+  waitingPlans(): Array<{ questionId: string; taskId: string; steps: string[] }>
+  /** A person answers a waiting plan. `created` counts the steps it made. */
+  answerPlan(
+    questionId: string,
+    answer: { accepted: boolean; note?: string },
+  ): { ok: boolean; created: number }
   /** Dependency task ids `taskId` waits on (recorded from `linkDep`). */
   depsOf(taskId: string): readonly string[]
   /** Live task count for the team. */
@@ -4748,6 +4757,496 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(before)
       expect(deliveredTo(delivered, 'a2')).toEqual([])
       expect(capHits.map((c) => c.kind)).toEqual(['root_rate_cap'])
+    })
+  })
+
+  describe('createBoardOrchestrator: a team that asks before a plan starts', () => {
+    const PLAN =
+      '<plan><step to="@Bug Boo">run the tests</step><step to="@Design Boo">fix what fails</step></plan>'
+    const asking = (opts?: HarnessOpts) => {
+      const h = makeHarness(opts)
+      h.board.setPlanApproval(true)
+      return h
+    }
+
+    it('switch off: a plan starts at once, as it always did', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      expect(board.taskCount()).toBe(2)
+      expect(board.waitingPlans()).toEqual([])
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+    })
+
+    it('switch on: a lead’s plan makes no step and starts nothing until a person says so', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const waiting = board.waitingPlans()
+      expect(waiting).toHaveLength(1)
+      expect(waiting[0]!.steps).toEqual(['run the tests', 'fix what fails'])
+      // Only the card holding the plan, and it is waiting.
+      expect(board.taskCount()).toBe(1)
+      expect(board.statusOf(waiting[0]!.taskId)).toBe('blocked')
+      expect(delivered).toEqual([])
+    })
+
+    it('tells the board the card holding the plan exists', async () => {
+      const { board, changes, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const taskId = board.waitingPlans()[0]!.taskId
+      expect(changes.some((c) => c.id === taskId && c.status === 'blocked')).toBe(true)
+    })
+
+    it('a plan re-issued while one waits stacks nothing', async () => {
+      const { board, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', PLAN))
+      expect(board.waitingPlans()).toHaveLength(1)
+      expect(board.taskCount()).toBe(1)
+    })
+
+    it('a changed plan while one waits takes its place, on the same card', async () => {
+      const { board, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const first = board.waitingPlans()[0]!
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<plan><step to="@Bug Boo">only this</step></plan>'),
+      )
+      const waiting = board.waitingPlans()
+      expect(waiting).toHaveLength(1)
+      expect(waiting[0]!.taskId).toBe(first.taskId)
+      expect(waiting[0]!.steps).toEqual(['only this'])
+      expect(board.answerPlan(first.questionId, { accepted: true }).ok).toBe(false)
+      expect(board.taskCount()).toBe(1)
+    })
+
+    it('accepting creates the steps once and fires the first, across a restart', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId } = board.waitingPlans()[0]!
+      const before = board.taskCount()
+      const accepted = board.answerPlan(questionId, { accepted: true })
+      expect(accepted).toMatchObject({ ok: true, created: 2 })
+      expect(board.taskCount()).toBe(before + 2)
+      const twice = board.answerPlan(questionId, { accepted: true })
+      expect(twice).toMatchObject({ ok: false, created: 0 })
+      expect(board.taskCount()).toBe(before + 2)
+
+      await orchestrator.resume()
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+      expect(deliveredTo(delivered, 'a2')[0]).toMatch(/run the tests/)
+      expect(deliveredTo(delivered, 'a3')).toEqual([])
+
+      // The next engine, after a restart, neither repeats the step nor loses the chain.
+      const next = makeHarness({ board })
+      await next.orchestrator.resume()
+      expect(deliveredTo(next.delivered, 'a2')).toEqual([])
+      await next.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'tests ran'))
+      expect(deliveredTo(next.delivered, 'a3')).toHaveLength(1)
+      expect(board.taskCount()).toBe(before + 2)
+    })
+
+    it('a replay of the accepted turn asks nothing new, on any engine', async () => {
+      const { board, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      board.answerPlan(board.waitingPlans()[0]!.questionId, { accepted: true })
+      const count = board.taskCount()
+      const next = makeHarness({ board })
+      await next.orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.taskCount()).toBe(count)
+    })
+
+    it('turning it down creates nothing', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId } = board.waitingPlans()[0]!
+      expect(board.answerPlan(questionId, { accepted: false, note: 'Too much' })).toMatchObject({
+        ok: true,
+        created: 0,
+      })
+      await orchestrator.resume()
+      expect(board.taskCount()).toBe(1)
+      expect(deliveredTo(delivered, 'a2')).toEqual([])
+      expect(deliveredTo(delivered, 'a3')).toEqual([])
+    })
+
+    it('more than the most steps is refused whole, and no one is asked', async () => {
+      const { board, delivered, orchestrator } = asking()
+      const steps = Array.from(
+        { length: MAX_PLAN_STEPS + 1 },
+        (_, i) => `<step to="@Bug Boo">step ${i}</step>`,
+      )
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', `<plan>${steps.join('')}</plan>`))
+      expect(board.taskCount()).toBe(0)
+      expect(board.waitingPlans()).toEqual([])
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).some((r) => /Plan not started/.test(r.task))).toBe(true)
+    })
+
+    it('a worker’s plan keeps its task open and waiting, and its delegator hears', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', `I propose this. ${PLAN.replace(/@Bug Boo/, '@Test Boo')}`),
+      )
+      expect(board.statusOf(parent)).toBe('blocked')
+      const waiting = board.waitingPlans()
+      expect(waiting.map((w) => w.taskId)).toEqual([parent])
+      expect(board.taskCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).filter((r) => r.sessionKey === sk('leader'))).toHaveLength(1)
+      // Accepted, the steps hang under the task, and go to the agents the plan named.
+      expect(board.answerPlan(waiting[0]!.questionId, { accepted: true }).created).toBe(2)
+      await orchestrator.resume()
+      expect(deliveredTo(delivered, 'a4')).toHaveLength(1)
+    })
+
+    it('switch off: a worker’s plan starts at once, and its task waits for the steps', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', PLAN.replace(/@Bug Boo/, '@Test Boo')))
+      expect(board.statusOf(parent)).toBe('blocked')
+      expect((await board.getTask(parent))!.task['waitingOn']).toContain('subtasks')
+      expect(deliveredTo(delivered, 'a4')).toHaveLength(1)
+      expect(board.waitingPlans()).toEqual([])
+    })
+
+    it('a plan on its own card under a waiting task does not keep that task waiting', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">part a</delegate>'),
+      )
+      expect(board.statusOf(parent)).toBe('blocked')
+      // A follow-up run about that task asks about a plan: it waits on a card of its own.
+      await orchestrator.onEvent(sk('a2'), doneEvent('r3', PLAN.replace(/@Bug Boo/, '@Test Boo')), {
+        reportForTaskId: parent,
+        stopGen: 0,
+      })
+      const [waiting] = board.waitingPlans()
+      expect(waiting!.taskId).not.toBe(parent)
+      expect(board.statusOf(waiting!.taskId)).toBe('blocked')
+      // The work it handed out finishes. The card is not work handed out, so the wait is over
+      // and its agent runs. It does not sit behind a person answering about something else.
+      await orchestrator.onEvent(sk('a3'), doneEvent('r4', 'part a result'))
+      await vi.advanceTimersByTimeAsync(0)
+      expect(deliveredTo(delivered, 'a2').length).toBeGreaterThan(1)
+      expect(board.statusOf(waiting!.taskId)).toBe('blocked')
+    })
+
+    it('a Stop closes the card and keeps the task waiting behind it from starting', async () => {
+      let gen = 0
+      const { board, delivered, orchestrator } = asking({ stopGen: () => gen })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', '<delegate to="@Design Boo">part a</delegate>'),
+      )
+      await orchestrator.onEvent(sk('a2'), doneEvent('r3', PLAN.replace(/@Bug Boo/, '@Test Boo')), {
+        reportForTaskId: parent,
+        stopGen: 0,
+      })
+      const card = board.waitingPlans()[0]!.taskId
+      const toWorker = deliveredTo(delivered, 'a2').length
+      gen = 1
+      await orchestrator.markStopped()
+      expect(board.statusOf(card)).toBe('cancelled')
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.statusOf(parent)).toBe('todo')
+      await orchestrator.resume()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(toWorker)
+    })
+
+    it('a run a Stop overtook proposes nothing', async () => {
+      let gen = 0
+      const { board, orchestrator } = asking({ stopGen: () => gen })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      gen = 1
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', PLAN.replace(/@Bug Boo/, '@Test Boo')), {
+        reportForTaskId: null,
+        stopGen: 0,
+      })
+      expect(board.waitingPlans()).toEqual([])
+    })
+
+    it('a card that only holds a plan closes with its answer, and nothing runs on it', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId, taskId } = board.waitingPlans()[0]!
+      board.answerPlan(questionId, { accepted: true })
+      expect(board.statusOf(taskId)).toBe('done')
+      await orchestrator.resume()
+      expect(deliveredTo(delivered, 'leader')).toEqual([])
+    })
+
+    it('turned down, its card is cancelled, and nothing runs on it', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId, taskId } = board.waitingPlans()[0]!
+      board.answerPlan(questionId, { accepted: false, note: 'Too much' })
+      expect(board.statusOf(taskId)).toBe('cancelled')
+      await orchestrator.resume()
+      expect(delivered).toEqual([])
+    })
+
+    it('the switch goes off and the plan starts anyway: the waiting one cannot run it twice', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId, taskId } = board.waitingPlans()[0]!
+      board.setPlanApproval(false)
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', PLAN))
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.statusOf(taskId)).toBe('cancelled')
+      const count = board.taskCount()
+      expect(board.answerPlan(questionId, { accepted: true })).toMatchObject({
+        ok: false,
+        created: 0,
+      })
+      expect(board.taskCount()).toBe(count)
+    })
+
+    it('the same plan from a later turn, once accepted, makes nothing and says so', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      board.answerPlan(board.waitingPlans()[0]!.questionId, { accepted: true })
+      const count = board.taskCount()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', PLAN))
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.taskCount()).toBe(count)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).some((r) => /already accepted/.test(r.task))).toBe(true)
+    })
+
+    it('the same plan from a later turn, once turned down, makes nothing and says so', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      board.answerPlan(board.waitingPlans()[0]!.questionId, { accepted: false })
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', PLAN))
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.taskCount()).toBe(1)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).some((r) => /turned these same steps down/.test(r.task))).toBe(
+        true,
+      )
+    })
+
+    it('a plan that takes another’s place is said in the chat, and starts no run', async () => {
+      const { board, delivered, narrations, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', '<plan><step to="@Bug Boo">only this</step></plan>'),
+      )
+      expect(board.waitingPlans()).toHaveLength(1)
+      expect(narrations.some((n) => /took the place/.test(n.text))).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(delivered).toEqual([])
+    })
+
+    it('a step too long to read is refused without pointing at a tool the run may not have', async () => {
+      const { board, delivered, orchestrator } = asking()
+      const long = 'x'.repeat(4_001)
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', `<plan><step to="@Bug Boo">${long}</step></plan>`),
+      )
+      expect(board.taskCount()).toBe(0)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const said = reflections(delivered)
+        .map((r) => r.task)
+        .join()
+      expect(said).toMatch(/too long/)
+      expect(said).not.toMatch(/write_plan/)
+    })
+
+    describe('a batch of hand-off tags', () => {
+      const BATCH =
+        '<delegate to="@Bug Boo">a</delegate><delegate to="@Design Boo">b</delegate><delegate to="@Test Boo">c</delegate>'
+
+      it('waits for a person as one question, and starts nothing', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        const waiting = board.waitingPlans()
+        expect(waiting).toHaveLength(1)
+        expect(waiting[0]!.steps).toEqual(['a', 'b', 'c'])
+        expect(board.taskCount()).toBe(1)
+        expect(delivered).toEqual([])
+      })
+
+      it('accepted, all of it starts at once', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        expect(
+          board.answerPlan(board.waitingPlans()[0]!.questionId, { accepted: true }).created,
+        ).toBe(3)
+        await orchestrator.resume()
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+        expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+        expect(deliveredTo(delivered, 'a4')).toHaveLength(1)
+      })
+
+      it('turned down, none of it starts', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        board.answerPlan(board.waitingPlans()[0]!.questionId, { accepted: false })
+        await orchestrator.resume()
+        expect(delivered).toEqual([])
+      })
+
+      it('seen again waits as it was', async () => {
+        const { board, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        await orchestrator.onEvent(sk('leader'), doneEvent('r2', BATCH))
+        expect(board.waitingPlans()).toHaveLength(1)
+        expect(board.taskCount()).toBe(1)
+      })
+
+      it('holds to the turn’s cap, and says what it left out', async () => {
+        const capHits: CapHit[] = []
+        const { board, delivered, orchestrator } = asking({
+          caps: { maxFanout: 2 },
+          onCapHit: (i) => capHits.push(i),
+        })
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        expect(board.waitingPlans()[0]!.steps).toEqual(['a', 'b'])
+        expect(capHits.map((c) => c.kind)).toEqual(['fanout'])
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(delivered).some((r) => /Fan-out cap/.test(r.task))).toBe(true)
+      })
+
+      it('from a worker keeps its task open and waiting', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+        )
+        const parent = idsOf(board)[0]!
+        delivered.length = 0
+        await orchestrator.onEvent(
+          sk('a2'),
+          doneEvent(
+            'r2',
+            '<delegate to="@Design Boo">x</delegate><delegate to="@Test Boo">y</delegate>',
+          ),
+        )
+        expect(board.statusOf(parent)).toBe('blocked')
+        expect(board.waitingPlans().map((w) => w.taskId)).toEqual([parent])
+        expect(deliveredTo(delivered, 'a3')).toEqual([])
+        expect(deliveredTo(delivered, 'a4')).toEqual([])
+      })
+
+      it('the switch goes off and the batch starts anyway: the waiting one cannot run it twice', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        const { questionId, taskId } = board.waitingPlans()[0]!
+        board.setPlanApproval(false)
+        await orchestrator.onEvent(sk('leader'), doneEvent('r2', BATCH))
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+        expect(board.waitingPlans()).toEqual([])
+        expect(board.statusOf(taskId)).toBe('cancelled')
+        expect(board.answerPlan(questionId, { accepted: true })).toMatchObject({
+          ok: false,
+          created: 0,
+        })
+      })
+
+      it('one hand-off tag still goes straight through', async () => {
+        const { board, delivered, orchestrator } = asking()
+        await orchestrator.onEvent(
+          sk('leader'),
+          doneEvent('r1', '<delegate to="@Bug Boo">one</delegate>'),
+        )
+        expect(board.waitingPlans()).toEqual([])
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+      })
+
+      it('hand-offs by tool call go out one at a time, as they arrive', async () => {
+        const { board, delivered, orchestrator } = asking()
+        const tool = (task: string, assignee: string): RuntimeEvent =>
+          toolCallEvent('r1', 'team_delegate', { assignee, task })
+        await orchestrator.onEvent(sk('leader'), tool('one', 'Bug Boo'))
+        await orchestrator.onEvent(sk('leader'), tool('two', 'Design Boo'))
+        expect(board.waitingPlans()).toEqual([])
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+        expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+      })
+
+      it('switch off: all of it starts at once, as it always did', async () => {
+        const { board, delivered, orchestrator } = makeHarness()
+        await orchestrator.onEvent(sk('leader'), doneEvent('r1', BATCH))
+        expect(board.waitingPlans()).toEqual([])
+        expect(board.taskCount()).toBe(3)
+        expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+        expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+      })
+    })
+
+    it('a Stop while the plan’s checks run proposes nothing', async () => {
+      let gen = 0
+      const { board, orchestrator } = asking({ stopGen: () => gen })
+      const room = board.handOffRoom.bind(board)
+      board.handOffRoom = async (...args) => {
+        gen = 1
+        return room(...args)
+      }
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.taskCount()).toBe(0)
+    })
+
+    it('a Stop closes what waits: nothing starts, and accepting it then does nothing', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', PLAN))
+      const { questionId, taskId } = board.waitingPlans()[0]!
+      await orchestrator.markStopped()
+      expect(board.waitingPlans()).toEqual([])
+      expect(board.statusOf(taskId)).toBe('cancelled')
+      expect(board.answerPlan(questionId, { accepted: true })).toMatchObject({
+        ok: false,
+        created: 0,
+      })
+      await orchestrator.resume()
+      expect(delivered).toEqual([])
+    })
+
+    it('a Stop sends a worker’s waiting task back as stopped, and the pump leaves it', async () => {
+      const { board, delivered, orchestrator } = asking()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(board)[0]!
+      await orchestrator.onEvent(sk('a2'), doneEvent('r2', PLAN.replace(/@Bug Boo/, '@Test Boo')))
+      delivered.length = 0
+      await orchestrator.markStopped()
+      expect(board.statusOf(parent)).toBe('todo')
+      await orchestrator.resume()
+      expect(deliveredTo(delivered, 'a2')).toEqual([])
     })
   })
 

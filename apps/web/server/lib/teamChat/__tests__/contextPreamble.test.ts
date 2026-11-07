@@ -16,7 +16,14 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { DEFAULT_AGENT_CONFIG } from '@clawboo/adapter-native'
-import { agents, setSetting, teams, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  planApprovalSettingKey,
+  proposePlan,
+  setSetting,
+  teams,
+  type ClawbooDb,
+} from '@clawboo/db'
 import type { TurnFraming } from '@clawboo/team-orchestration'
 
 import { getDb, getDbPath, resetDb } from '../../db'
@@ -472,6 +479,43 @@ describe('buildServerTeamContext coordination blocks', () => {
     const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
     expect(ctx).not.toContain('[Your persona')
     expect(ctx).not.toContain('should not be injected twice')
+  })
+
+  it('says what a plan does on a team that asks first, and nothing on any other', () => {
+    const db = getDb()
+    expect(buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? '').not.toContain(
+      '[Plans on this team]',
+    )
+    setSetting(db, planApprovalSettingKey('T'), JSON.stringify({ on: true }))
+    const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
+    expect(ctx).toContain('[Plans on this team]')
+    expect(ctx).toMatch(/do not hand them out again/)
+    expect(ctx).toMatch(/<plan><step to="@Name">/)
+  })
+
+  it('does not point a lead at the way round', () => {
+    const db = getDb()
+    setSetting(db, planApprovalSettingKey('T'), JSON.stringify({ on: true }))
+    const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
+    expect(ctx).not.toMatch(/straight through/)
+    expect(ctx).toMatch(/Two or more <delegate> in one reply wait/)
+  })
+
+  it('names the plan this agent has waiting, and says a new one takes its place', () => {
+    const db = getDb()
+    setSetting(db, planApprovalSettingKey('T'), JSON.stringify({ on: true }))
+    const r = proposePlan(db, {
+      teamId: 'T',
+      agentId: 'nlead',
+      prompt: 'A plan.',
+      steps: [{ title: 'Plan the release', agentId: 'other' }],
+      taskId: null,
+      parentTaskId: null,
+    })
+    expect(r.status).toBe('proposed')
+    const ctx = buildServerTeamContext(db, 'T', 'nlead', LEADER) ?? ''
+    expect(ctx).toContain('Waiting for their answer now: "Plan: Plan the release"')
+    expect(ctx).toMatch(/takes its place/)
   })
 
   it('a coding-runtime turn with no SOUL.md adds nothing', () => {

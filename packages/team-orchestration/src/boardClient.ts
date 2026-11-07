@@ -225,6 +225,44 @@ export interface HandOffCapacity {
   reason: 'child_cap' | 'root_rate_cap'
 }
 
+/** A plan the engine wants in front of a person. */
+export interface ProposePlanInput {
+  teamId: string
+  /** The agent proposing it: the one its answer goes back to. */
+  agentId: string
+  prompt: string
+  steps: Array<{ title: string; description?: string; agentId: string; agentName: string }>
+  /** The run's own task, when the plan comes from a run on one. */
+  taskId: string | null
+  /** Where the steps go when the plan has a card of its own. */
+  parentTaskId: string | null
+  /** The turn it came from: a replay of that turn finds its card. */
+  turnId: string
+  /** A batch of hand-offs rather than an ordered plan: accepted, its steps start at once. */
+  parallel?: boolean
+}
+
+export type PlanProposal =
+  /** This team's plans start at once. Nothing was written. */
+  | { status: 'off' }
+  | {
+      status: 'proposed'
+      /** The task the plan waits on. */
+      task: BoardTask
+      /** It waits on a card of its own, not on the run's task. */
+      holder: boolean
+      /** The plan that was waiting, which this one took the place of. */
+      replaced?: { title: string }
+    }
+  /** These same steps wait for a person already, or a person closed their card: nothing
+   *  new, and nothing to say. */
+  | { status: 'waiting' | 'closed'; taskId: string }
+  /** A person already answered these same steps. `replay`: this very turn, seen again,
+   *  so the agent has nothing new to hear. */
+  | { status: 'already_accepted' | 'already_declined'; taskId: string; replay?: boolean }
+  | { status: 'refused'; reason: string }
+  | { status: 'error' }
+
 /** What the team engine needs on top of the board: capped, repeat-safe creates, the
  *  chain the cycle guard reads, and the failure breaker. A browser has no use for
  *  these, so its client does not carry them. Same contract: never throws. */
@@ -257,4 +295,19 @@ export interface EngineBoardClient extends BoardClient {
   /** Does the task runner run this task, rather than team chat? A room's Stop leaves it
    *  alone. True when unread, for the same reason. */
   runsOnTaskRunner(taskId: string): Promise<boolean>
+  /** Does this team ask a person before a plan starts? False when unread: its plans run
+   *  as they always did. A host with no such switch leaves these three out. */
+  planApprovalOn?(teamId: string): Promise<boolean>
+  /** Put a plan in front of a person, if this team asks first. */
+  proposePlan?(input: ProposePlanInput): Promise<PlanProposal>
+  /** Work is starting without asking, because the switch went off: a plan this agent has
+   *  waiting is out of date. `proposePlan` does this itself when it answers `off`. Best-effort. */
+  startingWithoutAsking?(input: {
+    teamId: string
+    agentId: string
+    taskId: string | null
+    parentTaskId: string | null
+  }): Promise<void>
+  /** A Stop closes the plans waiting in this team. Best-effort. */
+  closeWaitingPlans?(teamId: string): Promise<void>
 }

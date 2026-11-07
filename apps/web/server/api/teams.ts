@@ -4,18 +4,20 @@ import type { Request, Response } from 'express'
 import {
   chatMessages,
   clearTeamDelegationFailures,
+  closeWaitingPlans,
   setSetting,
   teams,
   agents,
   settings,
   teamAgentWakesSettingKey,
   stopTasksWaitingToStart,
+  planApprovalSettingKey,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 
 import { personOf } from '../lib/auth'
-import { ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
+import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs'
 import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
@@ -307,6 +309,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
           `team-onboarding:${teamId}`,
           teamVerifyCommandSettingKey(teamId),
           teamAgentWakesSettingKey(teamId),
+          planApprovalSettingKey(teamId),
           chatClearedSettingKey(teamId),
         ]),
       )
@@ -590,6 +593,12 @@ export function teamChatStopPOST(req: Request, res: Response): void {
         (err: unknown) => log.error({ err, teamId, roomId }, 'stopping the room failed'),
       )
     } else {
+      // No engine up to stop anything, but a plan can still wait for a person. Before the
+      // waits below: a task it sends back must read as stopped too.
+      const closed = closeWaitingPlans(db, { teamId, roomId })
+      const writer = ownWriterOf(req)
+      if (writer)
+        for (const to of ['todo', 'cancelled']) markReleasedTasksRead(db, writer, closed, to)
       // No engine to tell, and no engine coming until their waits end: the tasks waiting
       // to start by themselves would start anyway. Anything else in the room is as before.
       for (const task of stopTasksWaitingToStart(db, { teamId, roomId })) {
