@@ -171,7 +171,11 @@ describe('on', () => {
     const res = await get('/api/access/identity', await signed('GET', '/api/access/identity'))
     expect(res).toEqual({
       status: 200,
-      body: { proxyIdentity: 'on', person: { id: 'user-42', name: 'Ada', role: 'admin' } },
+      body: {
+        proxyIdentity: 'on',
+        person: { id: 'user-42', name: 'Ada', role: 'admin' },
+        you: { id: 'user-42', name: 'Ada', role: 'admin' },
+      },
     })
   })
 
@@ -179,7 +183,7 @@ describe('on', () => {
     await start({ mode: 'on' })
     expect(await get('/api/access/identity')).toEqual({
       status: 200,
-      body: { proxyIdentity: 'on', person: null },
+      body: { proxyIdentity: 'on', person: null, you: { id: 'local', name: 'You', role: null } },
     })
   })
 

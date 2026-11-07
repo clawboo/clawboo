@@ -124,6 +124,12 @@ import {
 } from './board'
 import { boardInboxGET, boardInboxReadPOST, boardTaskReadPOST } from './boardInbox'
 import {
+  boardAssignPersonPOST,
+  boardQuestionAnswerPOST,
+  boardQuestionsGET,
+  boardReopenPOST,
+} from './boardPerson'
+import {
   memorySearchGET,
   memorySavePOST,
   memoryBrowseGET,
@@ -441,6 +447,11 @@ router.put('/api/board/:taskId/labels', boardTaskLabelsPUT)
 // A person's direct hand-off: run a stuck task again, or give it to one agent.
 router.post('/api/board/:taskId/retry', boardRetryPOST)
 router.post('/api/board/:taskId/assign', boardAssignPOST)
+// A person's own writes: the dashboard's page only, see ./boardPerson.
+router.post('/api/board/:taskId/reopen', boardReopenPOST)
+router.post('/api/board/:taskId/assign-person', boardAssignPersonPOST)
+router.get('/api/board/:taskId/questions', boardQuestionsGET)
+router.post('/api/board/questions/:questionId/answer', boardQuestionAnswerPOST)
 // Execution ledger (distinct two-segment paths — no collision with /:taskId).
 router.get('/api/board/:taskId/executions', boardExecutionsGET)
 router.post('/api/board/:taskId/executions', boardExecutionCreatePOST)

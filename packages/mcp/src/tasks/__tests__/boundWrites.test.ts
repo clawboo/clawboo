@@ -87,7 +87,11 @@ describe('Tasks MCP — a bound session cannot write across the boundary', () =>
   it('still permits the same writes INSIDE the bound team', async () => {
     const mine = createTask(db, { title: 'mine', status: 'todo', teamId: 'A' })
     const client = await connectInMemory(createTasksServer(db, { boundScope: { teamId: 'A' } }))
-    const res = await callText(client, 'block_task', { taskId: mine.id })
+    const res = await callText(client, 'block_task', {
+      taskId: mine.id,
+      waitingOn: 'person',
+      need: 'A person must decide',
+    })
     expect(res.text).not.toContain('not found')
     expect(getTask(db, mine.id)?.status).toBe('blocked')
   })

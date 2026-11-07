@@ -568,7 +568,7 @@ Something happened on a task and its agent is to hear it: a [saved wake](/intern
 }
 ```
 
-`reason` is `person_comment`, `dependency_done` or `question_answered`. A wake a stdio bin saved has no event: the bus is in-process.
+`reason` is `person_comment`, `dependency_done`, `question_answered` or `reopened`. A wake a stdio bin saved has no event: the bus is in-process.
 
 ### task_wake_skipped
 
@@ -598,6 +598,8 @@ A saved wake did not start a run. One event each time the reason changes, howeve
 | `parked`, `stopped`        | A person's Retry                                            |
 | `sign_in`, `billing`       | A person fixing it, then a Retry                            |
 | `blocked`                  | A person's Retry                                            |
+| `person_assigned`          | The person giving the task back to its agent                |
+| `question`                 | The person answering, or moving the task on                 |
 | `backlog`                  | A person moving the card to To do                           |
 | `no_agent`                 | A person assigning an agent                                 |
 | `room_archived`, `no_team` | The boot move, or nothing: the team is gone                 |

@@ -175,6 +175,14 @@ function tryRemoveColumn(db: ClawbooDb, table: string, column: string): boolean 
       /* an auto-index cannot be dropped; the column drop below will refuse too */
     }
   }
+  // A trigger naming the column blocks the drop too. The next bootstrap makes it again.
+  const triggers = db.$client
+    .prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND tbl_name = ?`)
+    .all(table) as Array<{ name: string; sql: string | null }>
+  for (const trigger of triggers) {
+    if (!trigger.sql || !new RegExp(`\\b${column}\\b`).test(trigger.sql)) continue
+    db.$client.prepare(`DROP TRIGGER "${trigger.name}"`).run()
+  }
   // A partial index names columns in its WHERE too, which index_info does not list.
   const partial = db.$client
     .prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`)

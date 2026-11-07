@@ -213,6 +213,60 @@ describe('NewTaskDialog', () => {
     expect(onClose).not.toHaveBeenCalled()
   })
 
+  describe('for You', () => {
+    function allTeams(): void {
+      useTeamStore.setState({
+        teams: [ALPHA, { ...ALPHA, id: 'team-2', name: 'Beta' }],
+        selectedTeamId: null,
+      })
+    }
+
+    it('files it under a team you can see and pick, which typing does not change', async () => {
+      allTeams()
+      const posted = serve({ coder: 'Writes code', critic: 'Reviews writing' })
+      const user = userEvent.setup()
+      const { dialog, field } = renderDialog()
+      await user.click(within(dialog).getByLabelText('Agent'))
+      await user.click(screen.getByRole('option', { name: 'You' }))
+      const team = within(dialog).getByLabelText('Team')
+      expect(team).toHaveTextContent('Alpha')
+      // Words that would suggest an agent on another team.
+      await user.type(field, 'Review the writing')
+      expect(team).toHaveTextContent('Alpha')
+      await user.click(team)
+      await user.click(screen.getByRole('option', { name: /Beta/ }))
+      await user.click(within(dialog).getByRole('button', { name: 'Add for you' }))
+      await waitFor(() => expect(posted).toHaveLength(1))
+      expect(posted[0]).toMatchObject({
+        title: 'Review the writing',
+        teamId: 'team-2',
+        assignToMe: true,
+      })
+      expect(posted[0]).not.toHaveProperty('assigneeAgentId')
+    })
+
+    it('says why a plain-http dashboard cannot, instead of "try again"', async () => {
+      allTeams()
+      serve()
+      server.use(
+        http.post('/api/board', () =>
+          HttpResponse.json({ error: 'dashboard_only' }, { status: 403 }),
+        ),
+      )
+      const user = userEvent.setup()
+      const { dialog, field } = renderDialog()
+      await user.click(within(dialog).getByLabelText('Agent'))
+      await user.click(screen.getByRole('option', { name: 'You' }))
+      await user.type(field, 'Call the printer')
+      await user.click(within(dialog).getByRole('button', { name: 'Add for you' }))
+      await waitFor(() => {
+        const message = useToastStore.getState().toasts.at(-1)?.message ?? ''
+        expect(message).toMatch(/localhost|https/i)
+        expect(message).not.toMatch(/try again/i)
+      })
+    })
+  })
+
   it('offers the same agent picker on a one-agent team', async () => {
     useTeamStore.setState({ teams: [ALPHA], selectedTeamId: null })
     useFleetStore.setState({ agents: [{ id: 'coder', name: 'Coder', teamId: 'team-1' }] as never })
@@ -224,7 +278,7 @@ describe('NewTaskDialog', () => {
     expect(agent).toHaveTextContent('Coder')
     expect(within(dialog).queryByTestId('new-task-suggestion')).toBeNull()
     await user.click(agent)
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Coder'])
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['You', 'Coder'])
   })
 
   it('sends one key per draft: a retry repeats it, and an edit makes a new one', async () => {

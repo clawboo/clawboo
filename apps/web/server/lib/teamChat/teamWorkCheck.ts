@@ -328,7 +328,12 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     if (turn.clear) return turn.leave
     try {
       // A task that cannot enter review was moved by a person: nothing to wait for.
-      if (!updateStatus(db, taskId, 'in_review').ok) return turn.leave
+      if (
+        !updateStatus(db, taskId, 'in_review', {
+          waitingOn: { kind: 'verification', state: 'running' },
+        }).ok
+      )
+        return turn.leave
       const since = Date.now()
       wait.since = since
       setTaskCheckHeld(db, taskId, since)
@@ -370,7 +375,9 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       const status = getTask(db, taskId)?.status
       if (status !== 'in_progress' && status !== 'in_review') return { verdict: 'decided' }
       note(taskId, reason)
-      updateStatus(db, taskId, 'blocked')
+      updateStatus(db, taskId, 'blocked', {
+        waitingOn: { kind: 'verification', state: 'could_not_run' },
+      })
       return { verdict: 'failed', reason }
     }
 
@@ -517,7 +524,12 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     // In review while it is checked, as on the task runner: the board shows the
     // check running, and the stale sweep (which watches `in_progress`) leaves it.
     // A task that cannot enter review was moved by a person meanwhile.
-    if (!updateStatus(db, taskId, 'in_review').ok) return { verdict: 'decided' }
+    if (
+      !updateStatus(db, taskId, 'in_review', {
+        waitingOn: { kind: 'verification', state: 'running' },
+      }).ok
+    )
+      return { verdict: 'decided' }
     endWait(taskId, target.folder, wait)
     // After a wait, what is checked and reviewed is the folder as it is now. The
     // snapshot from the run's end stands in if this one cannot be taken.
@@ -580,7 +592,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     ) {
       // The last attempt failed too: a person decides, as on the task runner. The
       // starting point stays, so a person's Retry is measured from it.
-      updateStatus(db, taskId, 'blocked')
+      updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'verification', state: 'failed' } })
       note(
         taskId,
         `Verification failed ${verdict.attempts.length} times and the fix loop is exhausted, so the task waits for a person. See the verification comments above for what failed.`,

@@ -1628,6 +1628,106 @@ describe('TaskDetailDrawer: replying', () => {
     expect(onChanged).toHaveBeenCalled()
   })
 
+  it('reopens a finished task, carrying what should change', async () => {
+    const posted: unknown[] = []
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'done', assigneeAgentId: 'agent-7' },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.post('/api/board/t1/reopen', async ({ request }) => {
+        posted.push(await request.json())
+        return HttpResponse.json({ ok: true })
+      }),
+    )
+    const onChanged = vi.fn()
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} onChanged={onChanged} />)
+    await userEvent.click(await screen.findByTestId('reopen-task'))
+    await userEvent.type(screen.getByLabelText('What should change?'), 'The logo is wrong')
+    await userEvent.click(
+      within(screen.getByTestId('reopen-form')).getByRole('button', { name: 'Reopen' }),
+    )
+    await waitFor(() => expect(posted).toEqual([{ comment: 'The logo is wrong' }]))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+  })
+
+  it('says who has a person’s parked task, not "Nobody yet"', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Parked',
+            status: 'backlog',
+            teamId: 'team-1',
+            assigneePersonId: 'local',
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'local', name: 'You', role: null } }),
+      ),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const picker = await screen.findByLabelText('Assign to a person or an agent')
+    expect(picker).toHaveTextContent('You')
+    expect(screen.queryByText('Nobody yet')).toBeNull()
+  })
+
+  it('an open task offers no Reopen', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: { id: 't1', title: 'Ship it', status: 'todo', assigneeAgentId: null },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByRole('textbox', { name: 'Reply' })
+    expect(screen.queryByTestId('reopen-task')).toBeNull()
+  })
+
+  it('shows a question’s controls, and a wait on other work, on the card’s top', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Ask',
+            status: 'blocked',
+            attention: { reason: 'question', failedRuns: 0, questionId: 'q1' },
+            openQuestion: { id: 'q1', kind: 'confirm', payload: '{"prompt":"Delete it?"}' },
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    expect(await screen.findByText('Delete it?')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Yes' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'No' })).toBeInTheDocument()
+  })
+
   it('says a finished task can take the reply as a follow-up', async () => {
     server.use(
       http.get('/api/board/t1', () =>
@@ -1644,7 +1744,7 @@ describe('TaskDetailDrawer: replying', () => {
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
     await screen.findByRole('textbox', { name: 'Reply' })
     expect(
-      screen.getByText('This task is finished. You can send your reply as a follow-up task.'),
+      screen.getByText('This task is finished. Reopen it, or send your reply as a follow-up task.'),
     ).toBeInTheDocument()
   })
 })

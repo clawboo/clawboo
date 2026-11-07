@@ -26,12 +26,16 @@ import { AgentBooAvatar, useTeamBooColor } from '@/components/AgentBooAvatar'
 import { TaskComments, type TaskComment } from '@/features/board/TaskComments'
 import {
   ATTENTION_META,
+  assigneePersonOf,
   attentionLabel,
   isTaskStatus,
+  otherAssigneeName,
   statusLabel,
   taskAttentionOf,
+  waitingWorkLabel,
   type TaskStatus,
 } from '@/features/board/boardStatus'
+import { useBoardPerson } from '@/features/board/useBoardPerson'
 import { formatTimestamp, MD_COMPONENTS } from '@/features/chat/chatComponents'
 import { ActivityTerminal } from '@/features/obs/ActivityTerminal'
 import { StatusPill, type StatusTone } from '@/features/shared/StatusPill'
@@ -59,12 +63,20 @@ const PILL: Record<TaskStatus, { tone: StatusTone; label: string }> = {
   cancelled: { tone: 'error', label: 'Cancelled' },
 }
 
-export function toneFor(task: BoardTaskView): { tone: StatusTone; label: string } {
+export function toneFor(
+  task: BoardTaskView,
+  me?: { id: string } | null,
+): { tone: StatusTone; label: string } {
   // A task that needs a person says WHY ("Failed", "Stopped", "Unassigned"),
   // rather than reading as queued or plain blocked work.
   const attention = taskAttentionOf(task)
   if (attention)
-    return { tone: ATTENTION_META[attention.reason].tone, label: attentionLabel(attention) }
+    return {
+      tone: ATTENTION_META[attention.reason].tone,
+      label: attentionLabel(attention, otherAssigneeName(task, me)),
+    }
+  // Blocked by name only: the board moves it on when the work it waits on finishes.
+  if (waitingWorkLabel(task)) return { tone: 'working', label: 'Waiting' }
   // A check waiting for teammates to finish in the team folder has not started.
   if (task.status === 'in_review' && task.checkHeldSince != null)
     return { tone: 'idle', label: 'Waiting to check' }
@@ -130,8 +142,12 @@ export const BoardTaskCard = memo(function BoardTaskCard({
   // 'blocked')` immediately followed by `addComment(...)`). Narrowing this to the
   // terminal pair would hide every failure reason from the chat card, which is the
   // opposite of the point: an error should be visible here, not buried in the drawer.
+  // A task waiting on other work has no failure to explain: it says what it waits on.
+  const waitingWork = waitingWorkLabel(task)
   const hasSettledOutput =
-    task.status === 'done' || task.status === 'blocked' || task.status === 'cancelled'
+    task.status === 'done' ||
+    (task.status === 'blocked' && !waitingWork) ||
+    task.status === 'cancelled'
   const [output, setOutput] = useState<string | null>(task.summary)
   useEffect(() => {
     if (task.summary) {
@@ -165,9 +181,12 @@ export const BoardTaskCard = memo(function BoardTaskCard({
     }
   }, [task.id, hasSettledOutput, output])
 
-  const { tone, label } = toneFor(task)
+  const person = assigneePersonOf(task)
+  const me = useBoardPerson(person !== null)
+  const personName = person ? (otherAssigneeName(task, me) ?? 'You') : null
+  const { tone, label } = toneFor(task, me)
   const attention = taskAttentionOf(task)
-  const showOutput = Boolean(output && output.trim().length > 0)
+  const showOutput = Boolean(!waitingWork && output && output.trim().length > 0)
 
   // The trail: the task's comment log and its live activity, folded away until
   // asked for. The comments are re-read whenever the card's status moves while
@@ -245,7 +264,7 @@ export const BoardTaskCard = memo(function BoardTaskCard({
                 style={{ background: dotTint }}
               />
               <span className="truncate font-mono text-[11.5px] font-semibold text-foreground">
-                {assigneeName ?? 'Unassigned'}
+                {assigneeName ?? personName ?? 'Unassigned'}
               </span>
             </span>
             <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
@@ -282,6 +301,15 @@ export const BoardTaskCard = memo(function BoardTaskCard({
         <p className="text-[12.5px] font-medium leading-relaxed tracking-[-0.005em] text-foreground/85">
           {task.title}
         </p>
+
+        {waitingWork && (
+          <p
+            className="mt-2 text-[12px] leading-relaxed text-foreground/60"
+            data-testid="board-task-waiting"
+          >
+            {waitingWork}
+          </p>
+        )}
 
         {/* Why a stuck task needs a person, when no reason comment is shown below. */}
         {attention && !showOutput && (

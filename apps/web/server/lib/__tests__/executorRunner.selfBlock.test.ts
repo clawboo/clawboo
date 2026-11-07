@@ -235,6 +235,31 @@ describe('task runner: a task its own agent blocked', () => {
     expect(mail[0]!.body).toContain(REPLY)
   })
 
+  it('a wait on other work says so, and does not ask the delegator to step in', async () => {
+    const taskId = task('Deploy to staging')
+    const first = task('Build the image')
+    const { adapter } = agentRun(
+      () => {
+        const r = blockTask(getDb(), taskId, {
+          unlessPersonMoved: true,
+          waitingOn: { kind: 'task', taskId: first },
+        })
+        expect(r.ok).toBe(true)
+      },
+      { caps: NO_WORKTREE },
+    )
+    await runTaskOnRuntime({
+      db: getDb(),
+      makeAdapter: () => adapter,
+      taskId,
+      assigneeAgentId: 'coder',
+    })
+    const [row] = listUndeliveredInbox(getDb(), 'lead', { teamId: 'team-1' })
+    expect(row!.body).toContain('waiting on other work')
+    expect(row!.body).toContain('Do not redo or reassign')
+    expect(row!.body).not.toContain('needs a person')
+  })
+
   it('says where the whole reply is before quoting it, since a digest cuts the row', async () => {
     const taskId = task('Deploy to staging')
     const long = 'x'.repeat(3_000)

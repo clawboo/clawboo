@@ -36,7 +36,9 @@ export function attentionForTasks(
         (t) =>
           t.status === 'todo' ||
           t.status === 'blocked' ||
-          (t.status === 'in_progress' && !t.assigneeAgentId),
+          (t.status === 'in_progress' && !t.assigneeAgentId) ||
+          // A reason can put an In progress or In review task here too.
+          t.waitingOn != null,
       )
       .map((t) => t.id),
   )
@@ -51,6 +53,8 @@ export function attentionForTasks(
         verificationBlocked: verificationBlocks(t.verification),
         assigneeAgentId: t.assigneeAgentId,
         personMovedAt: t.personMovedAt,
+        waitingOn: t.waitingOn,
+        assigneePersonId: t.assigneePersonId,
       }),
     )
   }

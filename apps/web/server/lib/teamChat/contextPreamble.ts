@@ -192,6 +192,17 @@ const USER_ASSIGNED_WORKER_BLOCK = `[Your task (read carefully)]
 You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. They cannot answer questions while you work, so do the work using your own knowledge and tools, and if a detail is missing, make a reasonable assumption and note it. Do not hand the task to a teammate. When you're done, report a short, concrete result, not a question.
 [End Your task]`
 
+// The same two guardrails where the run has `ask_person` attached: the agent can reach
+// a person now, by asking and stopping. Assuming stays the first choice, because a
+// question parks the task until someone answers.
+const WORKER_ASK_BLOCK = `[Your task (read carefully)]
+You are executing ONE scoped task delegated to you by your team lead. Your reply goes to your team lead, not the user. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only a person can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. When you're done, report a short, concrete result, not a question.
+[End Your task]`
+
+const USER_ASSIGNED_ASK_BLOCK = `[Your task (read carefully)]
+You are executing ONE scoped task the user assigned to you directly from the team board. Your final reply is posted on that task's card for the user to read. Do the work using your own knowledge and tools. If a detail is missing and you can reasonably assume it, make the assumption and note it. If only they can settle it (a decision, a login, a preference you cannot guess), call \`ask_person\` with one clear question, then stop: the task waits, and you are started again with the answer. Do not hand the task to a teammate. When you're done, report a short, concrete result, not a question.
+[End Your task]`
+
 // A FOLLOW-UP: results of work the agent handed out while on a task it has since
 // finished. The reply is recorded on that task and passed to whoever gave it the
 // task, so it must not be written for the user. Comes after the OpenClaw block and
@@ -256,6 +267,7 @@ function coordinationBlockFor(
     reportsForTask?: string
   },
   awareness: string | null,
+  canAsk: boolean,
 ): string | null {
   const blocks: string[] = []
   if (runtime === 'openclaw') blocks.push(OPENCLAW_COORDINATION_BLOCK)
@@ -263,8 +275,11 @@ function coordinationBlockFor(
     blocks.push(NATIVE_LEADER_COORDINATION_BLOCK)
   else if (runtime && CODING_RUNTIMES.has(runtime) && framing.isLeader)
     blocks.push(CODING_LEADER_COORDINATION_BLOCK)
-  if (framing.isWorker)
-    blocks.push(framing.isUserAssigned ? USER_ASSIGNED_WORKER_BLOCK : WORKER_COORDINATION_BLOCK)
+  if (framing.isWorker) {
+    if (canAsk) blocks.push(framing.isUserAssigned ? USER_ASSIGNED_ASK_BLOCK : WORKER_ASK_BLOCK)
+    else
+      blocks.push(framing.isUserAssigned ? USER_ASSIGNED_WORKER_BLOCK : WORKER_COORDINATION_BLOCK)
+  }
   if (framing.reportsForTask) blocks.push(FOLLOW_UP_BLOCK)
   if (awareness) blocks.push(awareness)
   return blocks.length > 0 ? blocks.join('\n\n') : null
@@ -299,6 +314,21 @@ function hasTeamRoom(db: ClawbooDb, agentId: string, runtime: string | null): bo
 function hasBoardRead(db: ClawbooDb, agentId: string, runtime: string | null): boolean {
   if (runtime !== 'clawboo-native') return true
   return loadAgentConfigOrDefault(db, agentId).tools.tasks !== false
+}
+
+/** Can this run ask a person (`ask_person`)? A worker's run on its task, where the
+ *  Tasks tools are attached and bound to it. OpenClaw's Tasks URL carries no identity,
+ *  so nothing could wake it. A routine's run may not: its person may be away, the
+ *  question would hold the task until they return, and the routine files a new task
+ *  on its next run anyway. The tool refuses a routine's task too. */
+function canAskPerson(
+  db: ClawbooDb,
+  agentId: string,
+  runtime: string | null,
+  framing: TurnFraming,
+): boolean {
+  if (runtime === 'openclaw' || framing.scheduledRoutine) return false
+  return hasBoardRead(db, agentId, runtime)
 }
 
 /** The note a turn carries when a scheduled routine sent it. The routine posted
@@ -351,6 +381,7 @@ export function buildServerTeamContext(
       hasTeamRoom(db, selfAgentId, runtime),
       hasBoardRead(db, selfAgentId, runtime),
     ),
+    canAskPerson(db, selfAgentId, runtime, framing),
   )
 
   // The persona goes FIRST: it frames who the agent is, and everything after it
@@ -464,6 +495,8 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     why = 'a task it was waiting on is finished; its result is below.'
   } else if (reason === 'question_answered') {
     why = 'a person answered your question; their answer is below.'
+  } else if (reason === 'reopened') {
+    why = 'a person reopened this task after it finished; anything they said is below.'
   } else if (reason === 'fix_round') {
     why = "the team's check did not pass your work on it yet."
   } else if (

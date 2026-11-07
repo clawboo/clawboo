@@ -279,6 +279,29 @@ export async function updateStatusResult(
 
 // ── A person's direct hand-off (the New task dialog, Retry, Assign) ─────────
 
+/** Create a task for the person using the board. Nothing starts it. */
+export async function createTaskForMe(input: {
+  title: string
+  description?: string
+  teamId: string
+}): Promise<{ ok: true; task: BoardTask } | { ok: false; reason: string }> {
+  try {
+    const r = await apiFetch('/api/board', {
+      method: 'POST',
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ ...input, assignToMe: true }),
+    })
+    const body = (await r.json().catch(() => null)) as {
+      task?: BoardTask
+      error?: string
+    } | null
+    if (r.ok && body?.task) return { ok: true, task: body.task }
+    return { ok: false, reason: body?.error ?? 'error' }
+  } catch {
+    return { ok: false, reason: 'error' }
+  }
+}
+
 export interface CreateTaskForAgentInput {
   title: string
   description?: string
@@ -339,8 +362,9 @@ export async function fetchMemberRoles(): Promise<Record<string, string>> {
   }
 }
 
-/** The outcome of a hand-off: ok, or the server's reason for refusing it. */
-export type HandOffResult = { ok: true } | { ok: false; reason: string }
+/** The outcome of a hand-off: ok, or the server's reason for refusing it. A write that
+ *  carries a person's words also says where they went: saved is not delivered. */
+export type HandOffResult = { ok: true; delivery?: ReplyDelivery } | { ok: false; reason: string }
 
 async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> {
   try {
@@ -349,7 +373,10 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
       headers: JSON_HEADERS,
       body: JSON.stringify(body ?? {}),
     })
-    if (r.ok) return { ok: true }
+    if (r.ok) {
+      const done = (await r.json().catch(() => null)) as { delivery?: ReplyDelivery } | null
+      return done?.delivery ? { ok: true, delivery: done.delivery } : { ok: true }
+    }
     const payload = (await r.json().catch(() => null)) as { error?: string } | null
     return { ok: false, reason: payload?.error ?? 'error' }
   } catch {
@@ -409,6 +436,70 @@ export async function postTaskComment(
  *  after failing repeatedly. It goes straight back to its agent. */
 export function retryTask(taskId: string): Promise<HandOffResult> {
   return postHandOff(`/api/board/${encodeURIComponent(taskId)}/retry`)
+}
+
+/** Reopen a finished task: back to To do, with an optional note for its agent. */
+export function reopenTask(
+  taskId: string,
+  comment?: string,
+  opts: { onThread?: boolean } = {},
+): Promise<HandOffResult> {
+  return postHandOff(
+    `/api/board/${encodeURIComponent(taskId)}/reopen`,
+    comment ? { comment, ...(opts.onThread ? { onThread: true } : {}) } : {},
+  )
+}
+
+/** Give a task to a person: the sender when `personId` is left out, or the person
+ *  who asked for it. Null takes the person off. */
+export function assignTaskToPerson(
+  taskId: string,
+  personId?: string | null,
+): Promise<HandOffResult> {
+  return postHandOff(
+    `/api/board/${encodeURIComponent(taskId)}/assign-person`,
+    personId === undefined ? {} : { personId },
+  )
+}
+
+/** A person's answer to an agent's question, as the server reads it. */
+export type QuestionAnswerInput =
+  | { choice: string }
+  | { text: string }
+  | { confirmed: boolean }
+  | { accepted: boolean; tasks?: Array<{ title: string; description?: string }> }
+
+/** Answer a question an agent asked. The answer starts the task again. */
+export function answerTaskQuestion(
+  questionId: string,
+  answer: QuestionAnswerInput,
+): Promise<HandOffResult> {
+  return postHandOff(`/api/board/questions/${encodeURIComponent(questionId)}/answer`, { answer })
+}
+
+/** Who "you" is: the verified person behind a sign-in proxy, else the install's
+ *  built-in person. Null when it could not be read. */
+export async function fetchBoardPerson(): Promise<{
+  id: string
+  name: string | null
+  role: string | null
+} | null> {
+  try {
+    const r = await apiFetch('/api/access/identity')
+    if (!r.ok) return null
+    const body = (await r.json()) as {
+      you?: { id?: unknown; name?: unknown; role?: unknown }
+    }
+    const id = body.you?.id
+    if (typeof id !== 'string' || !id) return null
+    return {
+      id,
+      name: typeof body.you?.name === 'string' ? body.you.name : null,
+      role: typeof body.you?.role === 'string' ? body.you.role : null,
+    }
+  } catch {
+    return null
+  }
 }
 
 /** Give a task nobody is working on to one agent on its team, and start it. */

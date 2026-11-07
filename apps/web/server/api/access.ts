@@ -15,7 +15,7 @@ import type { Request, Response } from 'express'
 
 import type { AccessGate } from '@clawboo/gateway-proxy'
 
-import { personOf } from '../lib/auth'
+import { actingPerson, personOf } from '../lib/auth'
 import { proxyIdentityMode } from '../lib/proxyIdentity/config'
 
 /** The gate ../index.ts publishes on `app.locals`. */
@@ -45,9 +45,11 @@ export function accessLaunchCodePOST(req: Request, res: Response): void {
 /**
  * The proxy identity lane's mode (`off`, `on` or `required`) and the person this
  * request's verified token names, or null. An administrator checks a new proxy
- * with it; the dashboard can say who is signed in.
+ * with it; the dashboard can say who is signed in, and whose tasks are its own.
  */
 export function accessIdentityGET(req: Request, res: Response): void {
   res.set('Cache-Control', 'no-store')
-  res.json({ proxyIdentity: proxyIdentityMode(), person: personOf(req) })
+  // `you` is who "Assigned to you" and the Mine filter mean: the verified person,
+  // else the install's built-in one.
+  res.json({ proxyIdentity: proxyIdentityMode(), person: personOf(req), you: actingPerson(req) })
 }

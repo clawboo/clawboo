@@ -529,7 +529,9 @@ export async function actOnTaskWorkspace(
   // on a task the exhaustion terminal already blocked would silently stay blocked
   // here and then burn another critic call and grow the attempts array while
   // returning ok. Refuse instead, and say why.
-  const enter = updateStatus(db, taskId, 'in_review')
+  const enter = updateStatus(db, taskId, 'in_review', {
+    waitingOn: { kind: 'verification', state: 'running' },
+  })
   if (!enter.ok) {
     const current = getTask(db, taskId)?.status ?? 'unknown'
     return {
@@ -616,7 +618,9 @@ export async function actOnTaskWorkspace(
     // in a column implying progress with no one told. `blocked` is the needs-human
     // terminal, and `blocked -> todo` is one legal move that clears the verdict
     // when a human re-queues it.
-    const r = updateStatus(db, taskId, 'blocked')
+    const r = updateStatus(db, taskId, 'blocked', {
+      waitingOn: { kind: 'verification', state: 'failed' },
+    })
     taskStatus = r.ok ? 'blocked' : (getTask(db, taskId)?.status ?? 'in_review')
     // On the event log too: it is what live views (the browser alerts among
     // them) follow, and the status write above reaches only the in-process bus.

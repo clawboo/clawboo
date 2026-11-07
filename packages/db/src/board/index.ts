@@ -13,6 +13,9 @@
 export {
   RUN_COST_SOURCES,
   TASK_STATUSES,
+  answerForAgent,
+  answerWords,
+  askedWords,
   canTransition,
   clampAgentTaskPriority,
   delegatorOf,
@@ -24,17 +27,28 @@ export {
   isTaskIdentifier,
   isTerminal,
   legalTargets,
+  LOCAL_PERSON,
+  normalizeAnswer,
+  parseQuestionPayload,
+  parseWaitingOn,
   summarizeRunCost,
+  waitingOnJson,
+  waitsOnOtherWork,
 } from '@clawboo/board-core'
 export type {
   HandOffLink,
   AttentionReason,
   InterSessionAttribution,
   PeerPostLike,
+  QuestionAnswer,
+  QuestionKind,
+  QuestionPayload,
   RunCostSource,
+  SuggestedTask,
   TaskAttention,
   TaskRunCost,
   TaskStatus,
+  WaitingOn,
 } from '@clawboo/board-core'
 export * from './attention'
 export * from './attempts'
@@ -43,6 +57,8 @@ export * from './delegationFailures'
 export * from './identifiers'
 export * from './labels'
 export * from './events'
+export * from './questionExpiry'
+export * from './questions'
 export * from './readState'
 export * from './repository'
 export * from './rooms'

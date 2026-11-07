@@ -375,6 +375,18 @@ export const tasks = sqliteTable(
     // `TaskRunnerInputs`, see board/runnerInputs.ts), so a person's Retry or
     // Assign runs it the same way again. NULL for a task the runner never ran.
     runnerInputs: text('runner_inputs'),
+    // What the task waits for, as a JSON `WaitingOn` (@clawboo/board-core): the
+    // reason a Blocked or In review task is not moving. NULL when it waits on
+    // nothing, or a bare move gave no reason.
+    waitingOn: text('waiting_on'),
+    // The person it is assigned to, beside `assigneeAgentId` and never with it. The
+    // id is a sign-in proxy's subject or the built-in local person; there is no
+    // people table, so it is plain text with the JSON {id, name, role} kept beside it.
+    assigneePersonId: text('assignee_person_id'),
+    assigneePerson: text('assignee_person'),
+    // The person who asked for it, as a JSON {id, name, role}: who a hand-back goes
+    // to. NULL for a task an agent or the engine made.
+    requestedBy: text('requested_by'),
     // The readable id, like `CLB-12` (see board/identifiers.ts), unique across the
     // workspace. NULL for a task with no team, or whose team is gone.
     identifier: text('identifier'),
@@ -409,6 +421,7 @@ export const tasks = sqliteTable(
     // writes on a board with a long history. `idx_tasks_parent` is kept: dropping it
     // from this DDL would not drop it from databases that already have it.
     index('idx_tasks_parent_dropped_created').on(t.parentTaskId, t.dropped, t.createdAt),
+    index('idx_tasks_assignee_person').on(t.assigneePersonId),
     uniqueIndex('idx_tasks_identifier').on(t.identifier),
   ],
 )
@@ -512,6 +525,47 @@ export const taskDeps = sqliteTable(
 
 export type DbTaskDep = typeof taskDeps.$inferSelect
 export type DbTaskDepInsert = typeof taskDeps.$inferInsert
+
+// task_questions: what an agent asked a person about a task, and the answer. The
+// answer and who gave it are written together, judged against expiry inside that
+// write. Expiry is on events (the task closing or moving on, a newer question).
+export const taskQuestions = sqliteTable(
+  'task_questions',
+  {
+    id: text('id').primaryKey(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id),
+    teamId: text('team_id'),
+    // The agent that asked.
+    agentId: text('agent_id'),
+    // question | confirm | suggest_tasks | agent_wakes
+    kind: text('kind').notNull(),
+    // JSON QuestionPayload (@clawboo/board-core).
+    payload: text('payload').notNull(),
+    // pending | answered | expired | cancelled
+    status: text('status').notNull().default('pending'),
+    // Set by the asker so a repeated call asks once; cleared when the question closes
+    // unanswered, so asking again really asks. A plain column with a separate
+    // unique index, per task.
+    idempotencyKey: text('idempotency_key'),
+    // JSON QuestionAnswer.
+    answer: text('answer'),
+    // Who answered: a JSON {id, name, role}.
+    answeredBy: text('answered_by'),
+    // Why it closed unanswered: replaced | task_closed | moved.
+    closeReason: text('close_reason'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    answeredAt: integer('answered_at'),
+  },
+  (t) => [
+    index('idx_task_questions_task').on(t.taskId, t.status),
+    uniqueIndex('idx_task_questions_idempotency').on(t.taskId, t.idempotencyKey),
+  ],
+)
+
+export type DbTaskQuestion = typeof taskQuestions.$inferSelect
 
 // task_comments — per-task discussion / system notes.
 export const taskComments = sqliteTable(

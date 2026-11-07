@@ -1,6 +1,8 @@
-// Hand a task to one member of its team. Picking a teammate binds the task to
-// them and starts it straight away (POST /api/board/:id/assign). Used by the task
-// drawer and by an unassigned card in the Needs you column.
+// Hand a task to one member of its team, or take it yourself. Picking a teammate
+// binds the task to them and starts it straight away (POST /api/board/:id/assign);
+// picking "You", or the person who asked for it, makes it that person's task, and
+// nothing starts it. There is no member list, so those are the people it can name.
+// Used by the task drawer.
 
 import { useMemo, useState } from 'react'
 
@@ -11,44 +13,50 @@ import { Spinner } from '@/features/shared/Spinner'
 import { useTaskActions } from './useTaskActions'
 
 const PLACEHOLDER = ''
+const ME = 'person:me'
+const ASKER = 'person:asker'
 
 export function AssignAgentSelect({
   taskId,
   teamId,
+  asker,
   onAssigned,
   label = 'Assign to…',
 }: {
   taskId: string
   teamId: string
+  /** The person who asked for the task, when that is someone else. */
+  asker?: { id: string; name: string | null } | null
   /** Fires after a successful hand-off so the host can refresh. */
   onAssigned?: (agentId: string) => void
   label?: string
 }) {
-  const { assign } = useTaskActions()
+  const { assign, assignToMe, assignToPerson } = useTaskActions()
   const agents = useFleetStore((s) => s.agents)
   // Filtered in a memo, not in the selector: a selector that builds a new array
   // on every call would never settle.
   const members = useMemo(() => agents.filter((a) => a.teamId === teamId), [agents, teamId])
   const [saving, setSaving] = useState(false)
 
-  if (members.length === 0) {
-    return <span className="text-xs text-muted-foreground">No agents on this team</span>
-  }
-
-  async function handleChange(agentId: string) {
-    if (!agentId) return
-    const name = members.find((a) => a.id === agentId)?.name ?? 'the agent'
+  async function handleChange(picked: string) {
+    if (!picked) return
+    const name = members.find((a) => a.id === picked)?.name ?? 'the agent'
     setSaving(true)
-    const ok = await assign(taskId, agentId, name)
+    const ok =
+      picked === ME
+        ? await assignToMe(taskId)
+        : picked === ASKER && asker
+          ? await assignToPerson(taskId, asker.id, asker.name ?? 'them')
+          : await assign(taskId, picked, name)
     setSaving(false)
-    if (ok) onAssigned?.(agentId)
+    if (ok) onAssigned?.(picked)
   }
 
   return (
     <span className="inline-flex items-center gap-2">
       <Select
         size="sm"
-        aria-label="Assign to an agent"
+        aria-label="Assign to a person or an agent"
         data-testid="assign-agent-select"
         value={PLACEHOLDER}
         onChange={(v) => void handleChange(v)}
@@ -58,6 +66,8 @@ export function AssignAgentSelect({
         <option value={PLACEHOLDER} disabled>
           {label}
         </option>
+        <option value={ME}>You</option>
+        {asker ? <option value={ASKER}>{asker.name ?? 'The person who asked'}</option> : null}
         {members.map((a) => (
           <option key={a.id} value={a.id}>
             {a.name}

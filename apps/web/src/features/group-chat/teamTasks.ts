@@ -27,6 +27,8 @@ export const TASK_SECTIONS: readonly TaskSection[] = [
 export interface GroupableTask {
   status: string
   attention?: TaskAttention | null
+  /** What it waits on: a Blocked task waiting on other work needs no person. */
+  waitingOn?: unknown
   updatedAt: number
 }
 
@@ -35,6 +37,9 @@ export function taskSectionOf(task: GroupableTask): TaskSectionId {
   switch (task.status) {
     case 'in_progress':
     case 'in_review':
+    case 'blocked':
+      // Blocked with no verdict against it waits on other work, and the board keeps it
+      // with the work in progress too.
       return 'in_progress'
     case 'done':
       return 'done'

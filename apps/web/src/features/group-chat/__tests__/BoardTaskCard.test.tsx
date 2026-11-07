@@ -321,3 +321,65 @@ describe('Open on board', () => {
     expect(screen.getByTestId('board-task-id')).toHaveTextContent('Task')
   })
 })
+
+describe('BoardTaskCard: waits and people', () => {
+  afterEach(() => cleanup())
+
+  it('a task waiting on sub-tasks says so, with no Blocked pill and no Reason', async () => {
+    server.use(
+      http.get('/api/board/:id', () =>
+        HttpResponse.json({
+          task: { id: 'task-1' },
+          comments: [{ authorType: 'agent', body: 'Waiting on the parts.' }],
+          ancestors: [],
+        }),
+      ),
+    )
+    render(
+      task({
+        status: 'blocked',
+        attention: null,
+        waitingOn: '{"kind":"subtasks"}',
+        waitingOnDetail: { openSubtasks: 2 },
+      }),
+    )
+    expect(screen.getByText('Waiting on 2 sub-tasks')).toBeInTheDocument()
+    expect(screen.queryByText('Blocked')).toBeNull()
+    await new Promise((r) => setTimeout(r, 30))
+    expect(screen.queryByText('Reason')).toBeNull()
+  })
+
+  it('shows who has a person’s task, not "Unassigned" and not the old agent', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'me', name: 'Me', role: null } }),
+      ),
+    )
+    render(
+      task({
+        status: 'blocked',
+        assigneeAgentId: null,
+        assigneePersonId: 'p-priya',
+        assigneePerson: '{"id":"p-priya","name":"Priya","role":null}',
+        attention: { reason: 'assigned', failedRuns: 0, personId: 'p-priya' },
+      }),
+    )
+    // Someone else's task: the pill and the header name them, once it knows who you are.
+    expect(await screen.findByText('Assigned to Priya')).toBeInTheDocument()
+    expect(screen.getByText('Priya')).toBeInTheDocument()
+    expect(screen.queryByText('Unassigned')).toBeNull()
+  })
+
+  it('says You on your own', async () => {
+    render(
+      task({
+        status: 'todo',
+        assigneeAgentId: null,
+        assigneePersonId: 'local',
+        attention: { reason: 'assigned', failedRuns: 0, personId: 'local' },
+      }),
+    )
+    expect(screen.getByText('Assigned to you')).toBeInTheDocument()
+    expect(screen.getByText('You')).toBeInTheDocument()
+  })
+})

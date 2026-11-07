@@ -6,13 +6,17 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import {
+  askQuestion,
+  claimTask,
   createApproval,
   createDb,
   createTask,
   getTask,
   getTaskVerification,
+  handBackTask,
   listEvents,
   listGovernanceAudit,
+  listTaskQuestions,
   setTaskVerification,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -131,6 +135,32 @@ describe('approval-TTL reaper — verification guard', () => {
     expect(r.unblocked).toEqual([]) // …but the task is not laundered
     expect(getTask(db, task.id)?.status).toBe('blocked')
     expect(getTaskVerification(db, task.id)?.status).toBe('fail') // verdict intact
+  })
+
+  it('leaves a task that says it waits on something else: a question, a hand-back', async () => {
+    const asking = createTask(db, { title: 'asks', status: 'todo' })
+    claimTask(db, asking.id, 'a1')
+    expect(
+      askQuestion(db, {
+        taskId: asking.id,
+        agentId: 'a1',
+        kind: 'confirm',
+        payload: { prompt: 'Go?' },
+      }).ok,
+    ).toBe(true)
+    const back = createTask(db, { title: 'back', status: 'todo' })
+    claimTask(db, back.id, 'a1')
+    expect(handBackTask(db, back.id, { agentId: 'a1', need: 'Look' }).ok).toBe(true)
+    for (const id of [asking.id, back.id]) {
+      createApproval(db, { toolName: 'delegate:code', agentId: 'a1', args: {}, taskId: id })
+    }
+    await sleep(20)
+
+    const r = reapStaleApprovals(db, { ttlMs: 5 })
+    expect(r.unblocked).toEqual([])
+    expect(getTask(db, asking.id)?.status).toBe('blocked')
+    expect(listTaskQuestions(db, asking.id)[0]?.status).toBe('pending')
+    expect(getTask(db, back.id)?.status).toBe('blocked')
   })
 
   it('still unblocks a task whose verdict is PROMOTABLE (not a verification block)', async () => {

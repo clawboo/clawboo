@@ -8,12 +8,18 @@
 
 import { useCallback } from 'react'
 
-import { assignTask, retryTask, updateStatusResult } from '@/lib/boardClient'
+import {
+  assignTask,
+  assignTaskToPerson,
+  reopenTask,
+  retryTask,
+  updateStatusResult,
+} from '@/lib/boardClient'
 import { confirm } from '@/stores/confirm'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useToastStore } from '@/stores/toast'
 
-import type { TaskAttention } from './boardStatus'
+import { DASHBOARD_ONLY, notDeliveredWhy, type TaskAttention } from './boardStatus'
 import { countLabel } from './calendar/calendarFormat'
 
 const NUMBER_WORDS = 'Zero One Two Three Four Five Six Seven Eight Nine'.split(' ')
@@ -62,11 +68,19 @@ const RETRY_REFUSED: Record<string, string> = {
   room_archived: ROOM_ARCHIVED,
 }
 
+const REOPEN_REFUSED: Record<string, string> = {
+  not_finished: 'This task is not finished, so there is nothing to reopen.',
+  blocker_cancelled:
+    'A task this one depends on was cancelled, so nothing would start it. Reopen that task first.',
+  dashboard_only: DASHBOARD_ONLY,
+}
+
 const ASSIGN_REFUSED: Record<string, string> = {
   agent_not_in_team: 'That agent is not on this task’s team.',
   not_assignable: 'This task is already being worked on or is finished.',
   no_team: 'This task has no team, so no agent can run it.',
   room_archived: ROOM_ARCHIVED,
+  dashboard_only: DASHBOARD_ONLY,
 }
 
 /** What has to be fixed before an account refusal can run, as the confirm says it. */
@@ -104,6 +118,15 @@ export interface TaskActions {
   /** Dismiss every task after one confirm naming the count, with one summary
    *  toast. Resolves to how many moved to Cancelled (0 when the person backs out). */
   dismissMany: (taskIds: readonly string[]) => Promise<number>
+  /** Give the task to the person using the board. */
+  assignToMe: (taskId: string) => Promise<boolean>
+  /** Give the task to the person who asked for it. */
+  assignToPerson: (taskId: string, personId: string, name: string) => Promise<boolean>
+  /** A person's own task is finished. */
+  markDone: (taskId: string) => Promise<boolean>
+  /** Reopen a finished task, with an optional note for its agent. `onThread`: the note
+   *  is a reply already saved on the task. */
+  reopen: (taskId: string, comment?: string, opts?: { onThread?: boolean }) => Promise<boolean>
 }
 
 export function useTaskActions(): TaskActions {
@@ -219,11 +242,103 @@ export function useTaskActions(): TaskActions {
     [addToast],
   )
 
+  const assignToMe = useCallback(
+    async (taskId: string) => {
+      const res = await assignTaskToPerson(taskId)
+      if (res.ok) {
+        addToast({ type: 'success', message: 'It’s yours now. Nothing will start it.' })
+        return true
+      }
+      addToast({
+        type: 'error',
+        message: ASSIGN_REFUSED[res.reason] ?? 'Couldn’t assign the task. Please try again.',
+      })
+      return false
+    },
+    [addToast],
+  )
+
+  const assignToPerson = useCallback(
+    async (taskId: string, personId: string, name: string) => {
+      const res = await assignTaskToPerson(taskId, personId)
+      if (res.ok) {
+        addToast({ type: 'success', message: `Assigned to ${name}. Nothing will start it.` })
+        return true
+      }
+      addToast({
+        type: 'error',
+        message: ASSIGN_REFUSED[res.reason] ?? 'Couldn’t assign the task. Please try again.',
+      })
+      return false
+    },
+    [addToast],
+  )
+
+  const markDone = useCallback(
+    async (taskId: string) => {
+      let res = await updateStatusResult(taskId, 'done')
+      // A check that did not pass holds Done, as in the status menu: a person may
+      // override it, on the record, and retrying would only be refused again.
+      if (!res.ok && res.reason === 'verification_required') {
+        const proceed = await confirm({
+          title: 'Complete anyway?',
+          message:
+            'This task hasn’t passed verification. Completing it is a manual override and will be recorded in the audit log.',
+          confirmLabel: 'Complete anyway',
+          tone: 'danger',
+        })
+        if (!proceed) return false
+        res = await updateStatusResult(taskId, 'done', { humanOverride: true })
+      }
+      if (res.ok) return true
+      addToast({ type: 'error', message: 'Couldn’t mark the task done. Please try again.' })
+      return false
+    },
+    [addToast],
+  )
+
+  const reopen = useCallback(
+    async (taskId: string, comment?: string, opts?: { onThread?: boolean }) => {
+      const res = await reopenTask(taskId, comment, opts)
+      if (res.ok) {
+        const missed = res.delivery?.status === 'not-delivered' ? res.delivery.reason : null
+        addToast(
+          missed
+            ? {
+                type: 'info',
+                message: `Reopened. It’s back in To do, but ${
+                  comment ? 'your note did not reach an agent' : 'it could not start'
+                }: ${notDeliveredWhy(missed)}`,
+              }
+            : { type: 'success', message: 'Reopened. The task is back in To do.' },
+        )
+        return true
+      }
+      addToast({
+        type: 'error',
+        message: REOPEN_REFUSED[res.reason] ?? 'Couldn’t reopen the task. Please try again.',
+      })
+      return false
+    },
+    [addToast],
+  )
+
   const openSettings = useSettingsModalStore((s) => s.openSettings)
   const fixSignIn = useCallback(
     (runtime?: string) => openSettings('runtimes', runtime ? { focusRuntime: runtime } : undefined),
     [openSettings],
   )
 
-  return { retry, assign, dismiss, retryMany, dismissMany, fixSignIn }
+  return {
+    retry,
+    assign,
+    dismiss,
+    retryMany,
+    dismissMany,
+    fixSignIn,
+    assignToMe,
+    assignToPerson,
+    markDone,
+    reopen,
+  }
 }

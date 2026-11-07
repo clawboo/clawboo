@@ -69,7 +69,7 @@ The teammate's final reply is added to the card, the card moves to Done, and the
 
 - **The task the lead wrote.** The teammate does not see your conversation with the lead, so a good hand-off is self-contained. Clawboo's delegate tools ask the lead for exactly that.
 - **The team rules and the list of teammates.**
-- **A note about its role.** It is told that it works on one task for its lead and cannot reach you: its reply goes back to the lead.
+- **A note about its role.** It is told that it works on one task for its lead, and that its reply goes back to the lead. It reaches you only by asking, with `ask_person`, where it has that tool; OpenClaw agents and scheduled routine runs do not, and are told to assume instead.
 - **What is waiting for it.** Results of work it handed out, your comments on its tasks, alerts, and new posts in the agents' peer room (see [Peer chat](/concepts/peer-chat)).
 - **Its usual tools**, including shared memory and the board.
 
@@ -136,7 +136,9 @@ If a hand-off cannot start at all, for example because of the depth limit or a d
 
 A hand-off tool call that names no teammate in the chat, or the agent itself, starts nothing either. The delegate tools answer that the work is queued before Clawboo has matched the name, so Clawboo then tells the agent the hand-off did not start and lists the teammates it can hand work to. It says so once for the same name and task, so an agent that repeats the mistake is not told again and again. No note is added to a card. For OpenClaw's `sessions_send`, which delivers messages itself, the note says only that no board task was made.
 
-A teammate on a team chat run can also mark its own task blocked when it cannot go on without you. The card waits in Needs you as **Blocked**, the teammate's reply is kept as its comment, and whoever handed it off is told the task needs a person. Steps waiting on it are not cancelled, so a **Retry** carries the plan on.
+A teammate on a team chat run can also mark its own task blocked, and must say what it waits on: a person and what they must do, another task, or its own sub-tasks. Waiting on a person, the card shows in Needs you as **Blocked** with what is needed. The teammate's reply is kept as its comment, and whoever handed it off is told the task needs a person. Steps waiting on it are not cancelled, so a **Retry** carries the plan on. A task waiting on other work stays out of Needs you, and goes back to the queue when that work is done, and whoever handed it off is told not to redo it. If that work is cancelled, it comes to Needs you instead. A wait that could not end, such as one on work in the Backlog or on a task that needs this one first, is refused when the teammate asks for it.
+
+A teammate that needs a person to settle something can ask them, with `ask_person`: a question, a yes or no, or a list of tasks to accept or edit. The task waits in Needs you as **Waiting for your answer**, and the run ends. Whoever handed it off is told it waits on an answer, so it is not redone or handed out again, and that stays true if the run then fails. Your answer starts the teammate again, with the answer on the task's thread. A teammate can also hand its task back to the person who asked for it, saying what they must do. A run from a scheduled routine does not ask: its person may be away, so it assumes and says so.
 
 ## Stop, and your own moves
 

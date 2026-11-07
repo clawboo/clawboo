@@ -8,7 +8,9 @@
 
 import {
   delegationTargetOf,
+  parseWaitingOn,
   wakeDecision,
+  type WakeDecision,
   type WakeDecisionInput,
   wakeFromPerson,
   type WakeSkipReason,
@@ -27,7 +29,6 @@ import {
   noteTaskWakeSkip,
   readTaskRunnerInputs,
   reapTaskWakes,
-  recordTaskWake,
   settleTaskWakes,
   TASK_HEARTBEAT_MS,
   taskDependenciesDone,
@@ -148,8 +149,16 @@ export interface TaskWakePumpDeps {
   /** Would a hard budget cap refuse a run of this task now? Asked of a wake about to
    *  go out, before anything on the card moves. */
   budgetRefuses?: (task: DbTask, agentId: string) => boolean
+  /** Runs the move it makes as part of a person's own write: see `runOwnWrite`. */
+  asOwnWrite?: <T>(write: () => T) => T
   now?: () => number
 }
+
+/** The note on a card a wake moved back to To do, by what is behind the wake. */
+const STARTED_AGAIN: Partial<Record<string, string>> = {
+  question_answered: 'Started again with a person’s answer.',
+}
+const STARTED_AGAIN_FOR_REPLY = 'Started again for a person’s reply.'
 
 /** Ask the budget gate, taking nothing: a hold it grants is released at once. */
 function budgetGateRefuses(db: ClawbooDb, task: DbTask, agentId: string): boolean {
@@ -218,17 +227,31 @@ export function pumpTaskWakes(db: ClawbooDb, deps: TaskWakePumpDeps): void {
   }
 }
 
+/**
+ * The same decision for one task's waiting wake, right now, for a person waiting to
+ * hear where their words went. Null when no wake waits on it any more: a run took it.
+ */
+export function pumpTaskWakeNow(
+  db: ClawbooDb,
+  taskId: string,
+  deps: TaskWakePumpDeps,
+): WakeDecision | null {
+  const row = listWaitingTaskWakes(db, { taskId })[0]
+  if (!row) return null
+  return pumpOne(db, row, deps, deps.held(), deps.now?.() ?? Date.now())
+}
+
 function pumpOne(
   db: ClawbooDb,
   row: DbTaskWake,
   deps: TaskWakePumpDeps,
   held: boolean,
   now: number,
-): void {
+): WakeDecision {
   const task = getTask(db, row.taskId)
   if (!task) {
     settleTaskWakes(db, [row.id], 'finished')
-    return
+    return { do: 'settle', how: 'finished' }
   }
   const execs = listExecutions(db, task.id)
   const runner = runnerTargetOf(db, task)
@@ -252,6 +275,8 @@ function pumpOne(
     held,
     refusal: runner ? null : task.teamId ? engineRefusal(db, task) : 'no_team',
     budgetRefused: false,
+    personAssigned: task.assigneePersonId !== null,
+    waitingOnQuestion: parseWaitingOn(task.waitingOn)?.kind === 'question',
     now,
   }
   let decision = wakeDecision(input)
@@ -269,38 +294,50 @@ function pumpOne(
   // never ride a next run.
   if (row.heldAt !== null) {
     if (decision.do === 'settle' && decision.how === 'finished') settleFinished(db, task, row)
-    return
+    return decision
   }
   if (decision.do === 'wait') {
     noteSkip(db, row, decision.skip)
-    return
+    return decision
   }
   if (decision.do === 'settle') {
     if (decision.how === 'finished') {
       settleFinished(db, task, row)
-      return
+      return decision
     }
     giveUp(db, task, row, agentId, deps)
-    return
+    return decision
   }
-  if (!agentId) return
+  if (!agentId) return decision
   if (decision.moveToTodo) {
-    const moved = updateStatus(db, task.id, 'todo')
-    if (!moved.ok) return
+    const move = (): boolean => {
+      const moved = updateStatus(db, task.id, 'todo')
+      if (!moved.ok) return false
+      addComment(
+        db,
+        task.id,
+        STARTED_AGAIN[row.reason] ?? STARTED_AGAIN_FOR_REPLY,
+        'system',
+        null,
+        { kind: 'note' },
+      )
+      return true
+    }
+    if (!(deps.asOwnWrite ? deps.asOwnWrite(move) : move())) return decision
     emitEvent(db, {
       kind: 'status_changed',
       taskId: task.id,
       teamId: task.teamId,
       data: { to: 'todo', reason: 'wake' },
     })
-    addComment(db, task.id, 'Started again for a person’s reply.', 'system', null, { kind: 'note' })
   }
   if (decision.force) {
     deps.startForPerson(getTask(db, task.id) ?? task, agentId)
-    return
+    return decision
   }
   // A task the runner runs is started by the same pass of the runner's own pump.
   if (!runner && task.teamId) deps.pumpRoom(task.teamId, roomIdForTask(db, task.id))
+  return decision
 }
 
 function giveUp(
@@ -327,26 +364,5 @@ function giveUp(
     teamId: task.teamId,
     agentId,
     data: { wakeId: row.id, wakeReason: row.reason, replays: row.replays },
-  })
-}
-
-/**
- * The hook for a question answered: a saved wake whose reason names it, so the next
- * run's "Why this run" line says so and its ticket block shows the answer. Nothing
- * calls it until questions exist. Null for a task no agent holds.
- */
-export function wakeForAnsweredQuestion(
-  db: ClawbooDb,
-  task: DbTask,
-  answerCommentId?: string,
-): { id: string; merged: boolean } | null {
-  const agentId = task.assigneeAgentId ?? delegationTargetOf(task.sourceDelegationId)
-  if (!agentId) return null
-  return recordTaskWake(db, {
-    teamId: task.teamId,
-    agentId,
-    taskId: task.id,
-    reason: 'question_answered',
-    ...(answerCommentId ? { commentIds: [answerCommentId] } : {}),
   })
 }

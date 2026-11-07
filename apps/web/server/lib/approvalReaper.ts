@@ -16,6 +16,7 @@ import {
   sweepExpiredGrants,
   getTask,
   getTaskVerification,
+  parseWaitingOn,
   unblockTask,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -91,7 +92,11 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
       // failing verdict and re-queue work a human was asked to look at.
       const verdict = getTaskVerification(db, row.taskId)
       const blockedByVerification = verdict !== null && !isVerdictPromotable(verdict)
-      if (task?.status === 'blocked' && !blockedByVerification) {
+      // Nor one that says it waits on something else: a question to a person, a
+      // hand-back, other tasks. Moving it would run it without what it waits for.
+      const waiting = parseWaitingOn(task?.waitingOn)
+      const waitsOnElse = waiting !== null && waiting.kind !== 'approval'
+      if (task?.status === 'blocked' && !blockedByVerification && !waitsOnElse) {
         unblockTask(db, row.taskId)
         unblocked.push(row.taskId)
       }

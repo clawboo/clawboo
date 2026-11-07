@@ -79,7 +79,7 @@ function refusalWords(reason: Extract<RunTaskResult, { ok: false }>['reason']): 
 function parkUnstarted(db: ClawbooDb, taskId: string, runtime: string, why: string): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
-    const moved = updateStatus(db, taskId, 'blocked')
+    const moved = updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'failure' } })
     if (!moved.ok) return
     // The event log is what live views follow; the status write reaches only
     // the in-process bus.

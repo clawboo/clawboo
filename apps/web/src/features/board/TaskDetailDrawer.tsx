@@ -17,6 +17,7 @@ import {
   FileText,
   KeyRound,
   RotateCcw,
+  UserRound,
   X,
 } from 'lucide-react'
 import { delegationTargetOf } from '@clawboo/board-core'
@@ -28,6 +29,7 @@ import {
   getTaskExecutions,
   getWorkspaceDetail,
   type BoardExecution,
+  type BoardTask,
   type ReplyDelivery,
   type TaskDetail,
   type WorkspaceDetail,
@@ -47,6 +49,8 @@ import { WorkspacePreview } from '@/features/workspace/WorkspacePreview'
 import { Modal } from '@/features/shared/Modal'
 
 import { AssignAgentSelect } from './AssignAgentSelect'
+import { QuestionAnswer, type OpenQuestion } from './QuestionAnswer'
+import { useBoardPerson } from './useBoardPerson'
 import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
 import { TaskLabelsSelect } from './TaskLabelsSelect'
@@ -60,10 +64,14 @@ import {
   ACCOUNT_FAILURE_META,
   ATTENTION_META,
   FIX_SIGN_IN,
+  assigneePersonOf,
   attentionLabel,
   boardColumnOf,
+  openQuestionOf,
+  otherAssigneeName,
   statusLabel,
   taskAttentionOf,
+  waitingWorkLabel,
   type TaskAttention,
 } from './boardStatus'
 import { timeOnDay } from './calendar/calendarFormat'
@@ -269,6 +277,9 @@ function NeedsYouBanner({
   teamId,
   attention,
   bound,
+  assignee,
+  asker,
+  question,
   onChanged,
 }: {
   taskId: string
@@ -276,12 +287,19 @@ function NeedsYouBanner({
   attention: TaskAttention
   /** The agent the task is bound to, if any. */
   bound: string | null
+  /** Who has a person's task, when that is not you. */
+  assignee: string | null
+  /** The person who asked for the task, when that is someone else. */
+  asker: { id: string; name: string | null } | null
+  /** The question waiting for an answer, if that is why it waits. */
+  question: OpenQuestion | null
   onChanged: () => void
 }) {
   // Retry hands it back to its agent; with no agent bound, someone has to be
   // picked. A bound task can also be handed to someone else.
   const canRetry = attention.reason !== 'unassigned' && !!teamId && !!bound
-  const { retry, dismiss, fixSignIn } = useTaskActions()
+  const { retry, dismiss, fixSignIn, markDone } = useTaskActions()
+  const assigned = attention.reason === 'assigned'
   const meta = ATTENTION_META[attention.reason]
   const broke = attention.reason === 'failed' || attention.reason === 'timed_out'
   const hint = attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint
@@ -296,13 +314,29 @@ function NeedsYouBanner({
         <span className="font-semibold text-foreground">Needs you</span>
         <span className="board-reason inline-flex items-center gap-1 font-medium">
           {broke ? <AlertTriangle size={12} strokeWidth={2} aria-hidden /> : null}
-          {attentionLabel(attention)}
+          {attentionLabel(attention, assignee)}
         </span>
       </div>
-      <p className="mt-1.5 whitespace-pre-wrap break-words text-compact text-foreground">
-        {attention.detail ?? hint}
-      </p>
+      {question ? (
+        <div className="mt-1.5">
+          <QuestionAnswer question={question} onAnswered={onChanged} />
+        </div>
+      ) : (
+        <p className="mt-1.5 whitespace-pre-wrap break-words text-compact text-foreground">
+          {attention.detail ?? hint}
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
+        {assigned && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => void markDone(taskId).then((ok) => ok && onChanged())}
+          >
+            <Check size={14} strokeWidth={2} aria-hidden />
+            Mark done
+          </Button>
+        )}
         {attention.cause && (
           <Button size="sm" variant="secondary" onClick={() => fixSignIn(attention.runtime)}>
             <KeyRound size={14} strokeWidth={2} />
@@ -316,13 +350,14 @@ function NeedsYouBanner({
             onClick={() => void retry(taskId, attention).then((ok) => ok && onChanged())}
           >
             <RotateCcw size={14} strokeWidth={2} />
-            Retry
+            {assigned ? 'Give back to its agent' : 'Retry'}
           </Button>
         )}
         {teamId && (
           <AssignAgentSelect
             taskId={taskId}
             teamId={teamId}
+            asker={asker}
             onAssigned={onChanged}
             label={bound ? 'Give to someone else…' : 'Assign to…'}
           />
@@ -333,6 +368,70 @@ function NeedsYouBanner({
           onClick={() => void dismiss(taskId).then((ok) => ok && onChanged())}
         >
           Dismiss
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** The person who asked for a task, as the row stores it, unless they already have
+ *  it. */
+function askerOf(
+  task: BoardTask,
+  person: { id: string } | null,
+): { id: string; name: string | null } | null {
+  const raw = task['requestedBy']
+  if (typeof raw !== 'string') return null
+  try {
+    const doc = JSON.parse(raw) as { id?: unknown; name?: unknown }
+    if (typeof doc.id !== 'string' || !doc.id || doc.id === person?.id) return null
+    return { id: doc.id, name: typeof doc.name === 'string' ? doc.name : null }
+  } catch {
+    return null
+  }
+}
+
+/** Reopen a finished task, with an optional note for its agent. The note is what the
+ *  agent wakes with; with none it starts again and reads the task's thread. */
+function ReopenTask({ taskId, onChanged }: { taskId: string; onChanged: () => void }) {
+  const { reopen } = useTaskActions()
+  const [open, setOpen] = useState(false)
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  if (!open) {
+    return (
+      <Button size="sm" variant="secondary" data-testid="reopen-task" onClick={() => setOpen(true)}>
+        <RotateCcw size={14} strokeWidth={2} aria-hidden />
+        Reopen
+      </Button>
+    )
+  }
+  const send = async (): Promise<void> => {
+    setBusy(true)
+    const ok = await reopen(taskId, note.trim() || undefined)
+    setBusy(false)
+    if (ok) {
+      setOpen(false)
+      setNote('')
+      onChanged()
+    }
+  }
+  return (
+    <div data-testid="reopen-form" className="flex w-full flex-col gap-2">
+      <textarea
+        aria-label="What should change?"
+        placeholder="What should change? (optional)"
+        value={note}
+        rows={2}
+        onChange={(e) => setNote(e.target.value)}
+        className="w-full resize-y rounded-lg border border-border bg-transparent px-2.5 py-1.5 text-compact text-foreground focus-visible:outline-2 focus-visible:outline-offset-2"
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => void send()}>
+          Reopen
+        </Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setOpen(false)}>
+          Cancel
         </Button>
       </div>
     </div>
@@ -499,6 +598,13 @@ export function TaskDetailDrawer({
   )
   const outputTitle = reporterName ? `${reporterName}'s report` : 'Report'
   const attention = task ? taskAttentionOf(task) : null
+  const person = task ? assigneePersonOf(task) : null
+  const asker = task ? askerOf(task, person) : null
+  const me = useBoardPerson(person !== null || asker !== null)
+  const otherPerson = task ? otherAssigneeName(task, me) : null
+  const shownAsker = asker && asker.id !== me.id ? asker : null
+  const question = task && attention?.reason === 'question' ? openQuestionOf(task) : null
+  const waitingWork = task ? waitingWorkLabel(task) : null
   // What the person asked for, when it says more than the title does.
   const brief =
     typeof task?.description === 'string' &&
@@ -623,10 +729,22 @@ export function TaskDetailDrawer({
                   <StatusGlyph kind={glyphKindOf(boardColumnOf(task))} />
                   {attention ? 'Needs you' : statusLabel(task.status)}
                 </Pill>
-                {ownerId ? (
+                {person ? (
+                  <Pill>
+                    <UserRound size={14} strokeWidth={2} aria-hidden />
+                    <span className="truncate">{otherPerson ?? 'You'}</span>
+                  </Pill>
+                ) : ownerId ? (
                   <Pill>
                     <AgentBooAvatar agentId={ownerId} size={16} />
                     <span className="truncate">{ownerName ?? ownerId}</span>
+                  </Pill>
+                ) : null}
+                {waitingWork ? (
+                  <Pill>
+                    <span data-testid="task-waiting-on" className="truncate">
+                      {waitingWork}
+                    </span>
                   </Pill>
                 ) : null}
                 {teamId ? (
@@ -642,8 +760,17 @@ export function TaskDetailDrawer({
                   teamId={teamId}
                   attention={attention}
                   bound={boundId}
+                  assignee={otherPerson}
+                  asker={shownAsker}
+                  question={question}
                   onChanged={refreshAfterAction}
                 />
+              )}
+
+              {(task.status === 'done' || task.status === 'cancelled') && (
+                <div className="mt-4 flex flex-wrap items-center gap-2">
+                  <ReopenTask taskId={task.id} onChanged={refreshAfterAction} />
+                </div>
               )}
 
               {agentOutputs.length > 0 && (
@@ -752,6 +879,17 @@ export function TaskDetailDrawer({
                           )
                           onChanged?.()
                         }}
+                      />
+                    </PropRow>
+                  ) : null}
+                  {teamId && !attention && (task.status === 'todo' || task.status === 'backlog') ? (
+                    <PropRow label="Assigned to">
+                      <AssignAgentSelect
+                        taskId={task.id}
+                        teamId={teamId}
+                        asker={shownAsker}
+                        onAssigned={refreshAfterAction}
+                        label={person ? (otherPerson ?? 'You') : (ownerName ?? 'Nobody yet')}
                       />
                     </PropRow>
                   ) : null}
@@ -1027,6 +1165,7 @@ export function TaskDetailDrawer({
                           task={task}
                           body={r.body}
                           onFollowUp={() => onChanged?.()}
+                          onReopened={refreshAfterAction}
                         />
                       ) : null
                     }}

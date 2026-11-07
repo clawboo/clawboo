@@ -25,6 +25,8 @@ import {
   ledgerAllowsAutoFire,
   ledgerWillAutoFire,
   MAX_AUTO_FIRES,
+  parseWaitingOn,
+  delegationFailureKey,
   normalizeTaskTitle,
   strongerWakeReason,
   type HandOffLink,
@@ -181,6 +183,16 @@ export const WORK_CHECK_HOLD_LIMIT_MS = 15 * 60_000
 const PROCESSED_TTL_MS = 2 * DELEGATION_IDLE_TIMEOUT_MS
 
 /** Why a delegated child failed — the comment + reflection prefix. */
+/** How a wait the agent chose for its own task is reported, or null for any other
+ *  reason: a person's wait (a hand-back, or what it said they must do) is a block, and
+ *  the board itself ends a wait on a question or on other work. */
+function chosenWaitOutcome(raw: unknown): 'asked' | 'waiting' | 'blocked' | null {
+  const wait = parseWaitingOn(raw)
+  if (wait?.kind === 'question') return 'asked'
+  if (wait?.kind === 'task' || wait?.kind === 'subtasks') return 'waiting'
+  return wait?.kind === 'person' ? 'blocked' : null
+}
+
 type FailReason = Extract<TaskUpdateOutcome, 'error' | 'aborted' | 'max_turns' | 'timeout'>
 
 /** What a rejected delivery tells `failForSession`: a budget refusal is filed as one. */
@@ -1068,8 +1080,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   }
 
   // ── failure loop breaker ────────────────────────────────────────────────────
-  const failKey = (targetAgentId: string, task: string): string =>
-    `${targetAgentId}:${task.slice(0, 80).toLowerCase().trim()}`
+  const failKey = delegationFailureKey
   const noteFailure = (targetAgentId: string, task: string): Promise<void> =>
     deps.board.noteDelegationFailure(deps.teamId, targetAgentId, failKey(targetAgentId, task))
   const clearFailure = (targetAgentId: string, task: string): Promise<void> =>
@@ -2609,6 +2620,10 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         await deps.board.addComment(taskId, result.reason, 'system').catch(() => undefined)
         if (!(await parkFailedCheck(taskId))) {
           pendingPark.set(sessionKey, { taskId, summary, reason: result.reason, checkId })
+          // Its reason, so it reaches Needs you even while the move keeps failing.
+          await deps.board
+            .setWaitingOn?.(taskId, { kind: 'verification', state: 'park_pending' })
+            ?.catch(() => undefined)
           waiting = true
           return
         }
@@ -2629,7 +2644,14 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
    *  and the task is still the check's (In progress or In review) or cannot be
    *  read; a task a person moved meanwhile needs no move. */
   async function parkFailedCheck(taskId: string): Promise<boolean> {
-    if (await deps.board.updateStatus(taskId, 'blocked').catch(() => false)) return true
+    if (
+      await deps.board
+        .updateStatus(taskId, 'blocked', {
+          waitingOn: { kind: 'verification', state: 'could_not_run' },
+        })
+        .catch(() => false)
+    )
+      return true
     // Unread: try again. The server's client answers a failed read with null, and
     // a task row is never deleted (only marked dropped), so null is never "gone".
     const detail = await deps.board.getTask(taskId).catch(() => null)
@@ -2905,7 +2927,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // on its last attempt parks the task the same way (`checkFailure`).
     const closeBlocked = async (
       failure: string | undefined,
-      outcome: 'check_failed' | 'blocked' | 'done_refused' = failure ? 'check_failed' : 'blocked',
+      outcome: 'check_failed' | 'blocked' | 'done_refused' | 'asked' | 'waiting' = failure
+        ? 'check_failed'
+        : 'blocked',
     ): Promise<void> => {
       const execId = taskToExec.get(taskId)
       if (execId) {
@@ -2923,7 +2947,15 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
             by,
             title,
             summary:
-              failure ?? (trimmed || (outcome === 'blocked' ? `${by} did not say why.` : '')),
+              failure ??
+              (trimmed ||
+                (outcome === 'blocked'
+                  ? `${by} did not say why.`
+                  : outcome === 'asked'
+                    ? `${by} asked a person a question.`
+                    : outcome === 'waiting'
+                      ? `${by} is waiting on other work.`
+                      : '')),
             outcome,
             taskId,
             ...(scope ? { forTaskId: scope } : {}),
@@ -2935,8 +2967,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       taskTitle.delete(taskId)
       if (!stopped) await pumpReady(sessionKey)
     }
-    if ((await deps.board.getTask(taskId))?.task.status === 'blocked') {
-      await closeBlocked(checkFailure)
+    const atEnd = (await deps.board.getTask(taskId))?.task
+    if (atEnd?.status === 'blocked') {
+      // A question open, or a wait on other work: its own report, because the delegator
+      // must not redo or reassign it. The answer, or that work ending, starts it again.
+      // No reason left, and a person's wake waiting: they answered while this run was
+      // still ending, so the task starts again by itself as soon as it closes.
+      const answered =
+        !atEnd['waitingOn'] && (deps.taskWakes?.fromPersonWaiting(taskId).length ?? 0) > 0
+      const wait = checkFailure
+        ? null
+        : answered
+          ? ('asked' as const)
+          : chosenWaitOutcome(atEnd['waitingOn'])
+      await closeBlocked(checkFailure, ...(wait ? ([wait] as const) : []))
       return
     }
     // Work that failed its check never ends in Done, even when the move to
@@ -2947,7 +2991,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // progress one. A task released meanwhile is handled as below.
     let ok = false
     if (checkFailure) {
-      if (await deps.board.updateStatus(taskId, 'blocked').catch(() => false)) {
+      if (
+        await deps.board
+          .updateStatus(taskId, 'blocked', { waitingOn: { kind: 'verification', state: 'failed' } })
+          .catch(() => false)
+      ) {
         await closeBlocked(checkFailure)
         return
       }
@@ -2967,7 +3015,9 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const held = (await deps.board.getTask(taskId))?.task.status
       if (
         (held === 'in_progress' || held === 'in_review') &&
-        (await deps.board.updateStatus(taskId, 'blocked'))
+        (await deps.board.updateStatus(taskId, 'blocked', {
+          waitingOn: { kind: 'verification', state: checkPassed ? 'done_refused' : 'failed' },
+        }))
       ) {
         const why = checkPassed
           ? "The team's check passed, but the board did not mark the task done, so it waits for a person."
@@ -3187,12 +3237,20 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     const errorClass = refused ? BUDGET_REFUSED_CLASS : runtimeClass
     const account =
       runtimeClass && isAccountError(runtimeClass) ? ACCOUNT_FAILURE[runtimeClass] : null
+    // The agent parked its task before the run ended: it asked a person, handed the
+    // task back, or waits on other work. That wait is still the truth about the task.
+    // Its reason stays, its plan stays queued, and the delegator hears about the wait,
+    // not a failure it might redo. The run's own row still says how it ended.
+    const parked = (await deps.board.getTask(taskId).catch(() => null))?.task
+    const wait = parked?.status === 'blocked' ? chosenWaitOutcome(parked['waitingOn']) : null
     // Loop breaker: record this (agent, task) failure so a persistently-failing
     // re-delegation is eventually refused in `spawn`. An account refusal counts the
     // same way: the report tells the delegator not to re-delegate, and a person who
     // fixed the sign-in can still say "try again" in chat.
-    if (agentId && title) await noteFailure(agentId, title)
-    await deps.board.updateStatus(taskId, 'blocked')
+    if (!wait) {
+      if (agentId && title) await noteFailure(agentId, title)
+      await deps.board.updateStatus(taskId, 'blocked', { waitingOn: { kind: 'failure' } })
+    }
     const execId = taskToExec.get(taskId)
     if (execId) {
       taskToExec.delete(taskId)
@@ -3212,7 +3270,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // would wait forever — cancel the pending dependents (else they ghost as
     // perpetual `todo` cards) and roll them into the failure so the delegator
     // learns the whole CHAIN stalled, not just this step.
-    const cancelled = keepPlan ? [] : await deps.board.cancelDependents(taskId)
+    const cancelled = keepPlan || wait ? [] : await deps.board.cancelDependents(taskId)
     for (const c of cancelled) {
       pendingTargets.delete(c.id)
       taskReflectTo.delete(c.id)
@@ -3233,10 +3291,11 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           by,
           title,
           summary:
+            (wait ? 'Its run then ended early: ' : '') +
             (detailTrim || FAIL_REASON_LABEL[reason]) +
             (account ? ` ${account.report}` : '') +
             chainNote,
-          outcome: reason,
+          outcome: wait ?? reason,
           taskId,
           ...(scope ? { forTaskId: scope } : {}),
         },
@@ -3431,7 +3490,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (last.executorType !== undefined && last.executorType !== 'openclaw') return
     // Parked first: until the move lands the run stays open, so the next
     // `resume()` finds the task the same way and tries again.
-    if (!(await deps.board.updateStatus(t.id, 'blocked').catch(() => false))) return
+    if (
+      !(await deps.board
+        .updateStatus(t.id, 'blocked', { waitingOn: { kind: 'verification', state: 'cut_short' } })
+        .catch(() => false))
+    )
+      return
     await deps.board
       .completeExecution(last.id, {
         status: 'failed',

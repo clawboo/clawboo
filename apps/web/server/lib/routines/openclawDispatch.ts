@@ -200,13 +200,14 @@ async function claimAndDrainRoutineRun(
   const { db, run, taskId } = input
 
   // Atomic claim — a lost claim means another worker owns the task; the work
-  // is happening, so the fire is satisfied (drop, never retry).
+  // is happening, so the fire is satisfied (drop, never retry). A person holding it is
+  // the same: the one-shot path treats it so, and it must not disarm the routine.
   // The run opens with the claim, in one write, so the task is stamped with it.
   const claim = claimTask(db, taskId, run.agentId, 'openclaw', {
     run: { executorType: ROUTINE_OPENCLAW_EXECUTOR, runReason: 'routine' },
   })
   if (!claim.ok || !claim.execution) {
-    return claim.reason === 'conflict'
+    return claim.reason === 'conflict' || claim.reason === 'person_assigned'
       ? { ok: true, taskId }
       : { ok: false, taskId, error: `claim failed: ${claim.reason ?? 'unknown'}` }
   }

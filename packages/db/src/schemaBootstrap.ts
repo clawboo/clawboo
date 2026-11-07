@@ -246,6 +246,10 @@ const SCHEMA_DDL = `
       room_id              TEXT,
       person_moved_at      INTEGER,
       runner_inputs        TEXT,
+      waiting_on           TEXT,
+      assignee_person_id   TEXT,
+      assignee_person      TEXT,
+      requested_by         TEXT,
       identifier           TEXT,
       delegated_by_agent_id TEXT,
       person_cancelled_at  INTEGER,
@@ -258,6 +262,19 @@ const SCHEMA_DDL = `
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);
+    CREATE INDEX IF NOT EXISTS idx_tasks_assignee_person ON tasks (assignee_person_id);
+    -- One assignee, agent or person, never both, for every writer. Other processes
+    -- write this file too, so the rule is here and not only in the repository.
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_one_assignee_insert BEFORE INSERT ON tasks
+    WHEN NEW.assignee_agent_id IS NOT NULL AND NEW.assignee_person_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'a task has one assignee: an agent or a person');
+    END;
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_one_assignee_update BEFORE UPDATE ON tasks
+    WHEN NEW.assignee_agent_id IS NOT NULL AND NEW.assignee_person_id IS NOT NULL
+    BEGIN
+      SELECT RAISE(ABORT, 'a task has one assignee: an agent or a person');
+    END;
     CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_identifier ON tasks (identifier);
 
     CREATE TABLE IF NOT EXISTS task_create_keys (
@@ -303,6 +320,25 @@ const SCHEMA_DDL = `
     );
     CREATE INDEX IF NOT EXISTS idx_task_deps_task    ON task_deps (task_id);
     CREATE INDEX IF NOT EXISTS idx_task_deps_depends ON task_deps (depends_on_task_id);
+
+    CREATE TABLE IF NOT EXISTS task_questions (
+      id              TEXT    PRIMARY KEY,
+      task_id         TEXT    NOT NULL REFERENCES tasks(id),
+      team_id         TEXT,
+      agent_id        TEXT,
+      kind            TEXT    NOT NULL,
+      payload         TEXT    NOT NULL,
+      status          TEXT    NOT NULL DEFAULT 'pending',
+      idempotency_key TEXT,
+      answer          TEXT,
+      answered_by     TEXT,
+      close_reason    TEXT,
+      created_at      INTEGER NOT NULL,
+      updated_at      INTEGER NOT NULL,
+      answered_at     INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_questions_task ON task_questions (task_id, status);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_task_questions_idempotency ON task_questions (task_id, idempotency_key);
 
     CREATE TABLE IF NOT EXISTS task_comments (
       id              TEXT    PRIMARY KEY,

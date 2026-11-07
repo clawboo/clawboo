@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from 'express'
 
+import { LOCAL_PERSON } from '@clawboo/board-core'
 import type { PersonRef } from '@clawboo/protocol'
 
 import { getTenantId } from './tenant'
@@ -37,6 +38,16 @@ export function getUserId(req: Request): string | null {
  */
 export function personOf(req: Request): PersonRef | null {
   return req.person ?? null
+}
+
+/**
+ * Who a person-only write acts as: the person a sign-in proxy vouched for, else the
+ * install's one built-in person. Only for a write that already passed the person
+ * check (`isDashboardRequest`), so locally this stays the speed bump that check is:
+ * it names who the dashboard stands for, and proves nothing about who sent it.
+ */
+export function actingPerson(req: Request): PersonRef {
+  return personOf(req) ?? { ...LOCAL_PERSON }
 }
 
 /** `{ person }` to spread into what a request records, or `{}` when nothing

@@ -16,7 +16,15 @@ import {
   useReducedMotion,
   type Transition,
 } from 'framer-motion'
-import { AlertTriangle, ChevronRight, KeyRound, RotateCcw, UserPlus } from 'lucide-react'
+import {
+  AlertTriangle,
+  Check,
+  ChevronRight,
+  KeyRound,
+  RotateCcw,
+  UserPlus,
+  UserRound,
+} from 'lucide-react'
 import { delegationTargetOf } from '@clawboo/board-core'
 import { BooAvatar } from '@clawboo/ui'
 
@@ -36,6 +44,8 @@ import {
   ATTENTION_META,
   FIX_SIGN_IN,
   attentionLabel,
+  openQuestionOf,
+  otherAssigneeName,
   taskAttentionOf,
   type AttentionReason,
   type TaskAttention,
@@ -43,6 +53,8 @@ import {
 import { countLabel, longDate, timeLabel } from './calendar/calendarFormat'
 import { StatusGlyph } from './StatusGlyph'
 import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
+import { QuestionAnswer } from './QuestionAnswer'
+import { useBoardPerson } from './useBoardPerson'
 import { useTaskActions } from './useTaskActions'
 
 // ─── NeedsYouColumn ────────────────────────────────────────────────────────
@@ -163,7 +175,8 @@ function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
   // the group's Retry all still asks first and its Fix sign-in opens that runtime.
   const keyOf = (s: StuckItem) => {
     const { reason, detail, cause, runtime } = s.attention
-    if (!detail) return null
+    // Each of these is one person's turn, with its own controls.
+    if (!detail || reason === 'question' || reason === 'assigned') return null
     return `${reason}:${causeOf(detail)}${cause ? `|${cause}:${runtime ?? ''}` : ''}`
   }
   const members = new Map<string, StuckItem[]>()
@@ -334,7 +347,7 @@ function returnFocus(trigger: HTMLElement | null) {
  *  to the drawer, where a check's findings or the story of a block are. A run the
  *  provider refused for the account leads with the fix, since a retry would fail
  *  the same way. */
-type PrimaryAction = 'retry' | 'assign' | 'review' | 'open' | 'fix'
+type PrimaryAction = 'retry' | 'assign' | 'review' | 'open' | 'fix' | 'done' | 'none'
 
 function primaryActionOf(
   attention: TaskAttention,
@@ -354,6 +367,11 @@ function primaryActionOf(
       return 'review'
     case 'blocked':
       return 'open'
+    // The answer controls are the action.
+    case 'question':
+      return 'none'
+    case 'assigned':
+      return 'done'
   }
 }
 
@@ -369,10 +387,12 @@ function AssignButton({
   members,
   busy,
   onPick,
+  onPickMe,
 }: {
   members: { id: string; name: string }[]
   busy: boolean
   onPick: (agent: { id: string; name: string }, opener: HTMLElement) => void
+  onPickMe?: (opener: HTMLElement) => void
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null)
   return (
@@ -398,13 +418,26 @@ function AssignButton({
           label="Assign to an agent"
           testId="assign-agent-menu"
           onClose={() => setAnchor(null)}
-          items={members.map((a, i) => ({
-            key: a.id,
-            label: a.name,
-            group: i === 0 ? 'Assign to' : undefined,
-            icon: <AgentBooAvatar agentId={a.id} size={16} />,
-            onSelect: () => onPick(a, anchor),
-          }))}
+          items={[
+            ...(onPickMe
+              ? [
+                  {
+                    key: 'me',
+                    label: 'You',
+                    group: 'Assign to',
+                    icon: <UserRound size={14} strokeWidth={2} aria-hidden />,
+                    onSelect: () => onPickMe(anchor),
+                  },
+                ]
+              : []),
+            ...members.map((a, i) => ({
+              key: a.id,
+              label: a.name,
+              group: i === 0 && !onPickMe ? 'Assign to' : undefined,
+              icon: <AgentBooAvatar agentId={a.id} size={16} />,
+              onSelect: () => onPick(a, anchor),
+            })),
+          ]}
         />
       ) : null}
     </>
@@ -424,7 +457,8 @@ function NeedsYouTaskCard({
   onOpen: () => void
   onChanged: () => void
 }) {
-  const { retry, dismiss, assign, fixSignIn } = useTaskActions()
+  const { retry, dismiss, assign, assignToMe, markDone, fixSignIn } = useTaskActions()
+  const me = useBoardPerson(attention.reason === 'assigned')
   // One action at a time: a second press while the first is still out would
   // only be refused.
   const [busy, setBusy] = useState(false)
@@ -444,9 +478,12 @@ function NeedsYouTaskCard({
   )
   const members = useTeamMembers(teamId)
   const unassigned = attention.reason === 'unassigned'
+  const assigned = attention.reason === 'assigned'
+  const question = attention.reason === 'question' ? openQuestionOf(task) : null
+  const handBackNeed = assigned ? (attention.detail ?? null) : null
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
-  const canAssign = !bound && members.length > 0
+  const canAssign = !bound && (members.length > 0 || !assigned)
   const primary = primaryActionOf(attention, canRetry, canAssign)
   const detail =
     attention.detail ?? (attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint)
@@ -468,15 +505,24 @@ function NeedsYouTaskCard({
   }
   const giveTo = (agent: { id: string; name: string }, opener: HTMLElement) =>
     act((id) => assign(id, agent.id, agent.name), opener)
+  const takeIt = (opener: HTMLElement) => act((id) => assignToMe(id), opener)
 
   const moreItems = (opener: HTMLElement): BoardMenuItem[] => {
     const items: BoardMenuItem[] = []
     if (canRetry && primary !== 'retry') {
       items.push({
         key: 'retry',
-        label: 'Retry',
+        label: assigned ? `Give back to ${agentName ?? 'its agent'}` : 'Retry',
         icon: <RotateCcw size={14} strokeWidth={2} />,
         onSelect: () => act(retryIt, opener),
+      })
+    }
+    if (!assigned && primary !== 'assign') {
+      items.push({
+        key: 'me',
+        label: 'Take it yourself',
+        icon: <UserRound size={14} strokeWidth={2} aria-hidden />,
+        onSelect: () => takeIt(opener),
       })
     }
     if (primary !== 'assign') {
@@ -501,7 +547,12 @@ function NeedsYouTaskCard({
     return items
   }
 
-  const who = agentId ? (
+  // It is a person's turn now, so the agent is who it came from, on the reason's line,
+  // and not who has it, which the last row would say.
+  const handedBy = assigned && attention.handedBack && agentId ? (agentName ?? 'an agent') : null
+  const who = assigned ? (
+    <span className="truncate">{teamName ?? ''}</span>
+  ) : agentId ? (
     <>
       <AgentBooAvatar agentId={agentId} size={16} />
       <span className="truncate">
@@ -541,14 +592,34 @@ function NeedsYouTaskCard({
           title={sinceTitle ?? undefined}
           className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"
         >
-          <ReasonLabel reason={attention.reason} label={attentionLabel(attention)} />
+          <ReasonLabel
+            reason={attention.reason}
+            label={attentionLabel(attention, otherAssigneeName(task, me))}
+          />
           <span className="sr-only">. </span>
-          <span className="min-w-0 truncate" title={detail}>
-            {detail}
-          </span>
+          {/* The question and what a hand-back asks for get their own lines below. */}
+          {handedBy ? (
+            <span className="min-w-0 truncate" title={`Handed back by ${handedBy}`}>
+              from {handedBy}
+            </span>
+          ) : question || handBackNeed ? null : (
+            <span className="min-w-0 truncate" title={detail}>
+              {detail}
+            </span>
+          )}
           {sinceTitle ? <span className="sr-only">. {sinceTitle}.</span> : null}
         </span>
+        {handBackNeed ? (
+          <span className="mt-1 block whitespace-pre-wrap break-words text-xs text-foreground">
+            {handBackNeed}
+          </span>
+        ) : null}
       </button>
+      {question ? (
+        <div className="mt-2">
+          <QuestionAnswer question={question} onAnswered={onChanged} />
+        </div>
+      ) : null}
       <div className="mt-2 flex min-h-7 items-center gap-1">
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-xs text-muted-foreground">
           {who}
@@ -573,8 +644,18 @@ function NeedsYouTaskCard({
             Retry
           </button>
         ) : primary === 'assign' ? (
-          <AssignButton members={members} busy={busy} onPick={giveTo} />
-        ) : (
+          <AssignButton members={members} busy={busy} onPick={giveTo} onPickMe={takeIt} />
+        ) : primary === 'done' ? (
+          <button
+            type="button"
+            className={CARD_ACTION}
+            aria-disabled={busy || undefined}
+            onClick={() => act(markDone)}
+          >
+            <Check size={12} strokeWidth={2} aria-hidden />
+            Mark done
+          </button>
+        ) : primary === 'none' ? null : (
           <button type="button" className={CARD_ACTION} onClick={onOpen}>
             {primary === 'review' ? 'Review' : 'Open'}
           </button>

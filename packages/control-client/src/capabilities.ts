@@ -49,6 +49,11 @@ export const ENGINE_FEATURES = [
   // the badge. The event stream says when to read it (`?activity=1`).
   'board.inbox',
   'board.wakes',
+  // A person's writes on the board: Reopen, tasks assigned to a person, and questions
+  // an agent asks a person.
+  'board.reopen',
+  'board.personAssignees',
+  'board.questions',
   // The read-only view of a task's worktree, and its built-page preview.
   'workspace.view',
   'workspace.preview',

@@ -25,11 +25,33 @@ export const createTaskBody = z.object({
   // Create the task FOR one agent on `teamId` (the board's New task dialog). The
   // server binds it to that agent and starts it; see POST /api/board.
   assigneeAgentId: z.string().min(1).optional(),
+  // Create the task for the person sending this, from the dashboard's own page. Never
+  // with `assigneeAgentId`: a task has one assignee.
+  assignToMe: z.boolean().optional(),
   // Makes the create safe to repeat: the same key returns the same task. The New task
   // dialog sends one per draft.
   idempotencyKey: z.string().min(1).max(200).optional(),
 })
 export type CreateTaskBody = z.infer<typeof createTaskBody>
+
+// A person reopening a finished task: what should change, passed to its agent.
+export const reopenTaskBody = z.object({
+  comment: z.string().min(1).max(20_000).optional(),
+  // The comment is a reply already saved on the task (the one a finished task would
+  // not take): pass it on without saving it twice.
+  onThread: z.boolean().optional(),
+})
+
+// Assign a task to a person: `personId` is the sender's own id or the person who
+// asked for the task. Null takes the person off. Absent means the sender.
+export const assignPersonBody = z.object({
+  personId: z.string().min(1).nullable().optional(),
+})
+
+// A person's answer to a question; its shape is checked against the question.
+export const answerQuestionBody = z.object({
+  answer: z.record(z.string(), z.unknown()),
+})
 
 export const taskLabelsBody = z.object({
   labelIds: z.array(z.string().min(1)).max(100),

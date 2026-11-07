@@ -9,17 +9,24 @@ import { randomUUID } from 'node:crypto'
 import {
   canTransition,
   clampTaskPriority,
+  delegationTargetOf,
+  delegationFailureKey,
   delegatorOf,
   isTerminal,
   ledgerAllowsAutoFire,
+  LOCAL_PERSON,
   MAX_TASK_PRIORITY,
   MIN_TASK_PRIORITY,
+  parseWaitingOn,
+  personMoveAllowed,
+  waitingOnJson,
   runMadeProgress,
   type CommentKind,
   type HandOffLink,
   type LedgerRun,
   type RunCostSource,
   type TaskStatus,
+  type WaitingOn,
 } from '@clawboo/board-core'
 import {
   checkDepthCap,
@@ -30,17 +37,25 @@ import {
   DEFAULT_ROOT_CREATE_WINDOW_MS,
   isVerdictPromotable,
 } from '@clawboo/governance'
-import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import { personJson, type PersonRecord } from '../person'
-import { adoptTaskWakesTx, recordDependencyWakesTx, settleWakesOfClosedRunTx } from '../taskWakes'
+import { appendEvent } from '../events/appendEvent'
+import { parsePersonJson, personJson, type PersonRecord } from '../person'
+import {
+  adoptTaskWakesTx,
+  recordDependencyWakesTx,
+  recordTaskWakeTx,
+  settleWakesOfClosedRunTx,
+} from '../taskWakes'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
 import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
 import {
+  delegationFailures,
   executionProcesses,
   taskComments,
+  taskCreateKeys,
   taskDeps,
   tasks,
   teams,
@@ -52,6 +67,7 @@ import {
   type DbWorkspace,
 } from '../schema'
 import { immediateWrite, withWriteRetry, type BoardTx } from './contention'
+import { expirePendingQuestionsTx } from './questionExpiry'
 import {
   existingTaskForCreate,
   rememberCreateKey,
@@ -87,6 +103,12 @@ export interface CreateTaskInput {
   /** The chat room the task belongs to. Null/absent = the team's default room. A
    *  subtask inherits its parent's room when none is given. */
   roomId?: string | null
+  /** What a task created Blocked or In review waits for. */
+  waitingOn?: WaitingOn | null
+  /** The person who asked for it: who a hand-back goes to. */
+  requestedBy?: PersonRecord | null
+  /** The person it is assigned to from the start. */
+  assigneePerson?: PersonRecord | null
   /** Makes the create safe to repeat: the same key returns the same task. */
   createKey?: TaskCreateKey | null
   /** An agent is creating it, not a person: the same-title check applies. */
@@ -135,6 +157,10 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     roomId: input.roomId ?? null,
     personMovedAt: null,
     runnerInputs: null,
+    waitingOn: waitingOnJson(input.waitingOn),
+    assigneePersonId: input.assigneePerson?.id ?? null,
+    assigneePerson: personJson(input.assigneePerson),
+    requestedBy: personJson(input.requestedBy),
     identifier: null,
     delegatedByAgentId: input.delegatedByAgentId ?? null,
     personCancelledAt: null,
@@ -537,7 +563,7 @@ export function listTasks(db: ClawbooDb, filter: ListTasksFilter = {}): DbTask[]
 
 // ─── Atomic claim (the mutex) ────────────────────────────────────────────────
 
-export type ClaimReason = 'conflict' | 'not_found'
+export type ClaimReason = 'conflict' | 'not_found' | 'person_assigned'
 export interface ClaimResult {
   ok: boolean
   task?: DbTask
@@ -638,6 +664,8 @@ export function claimTask(
           eq(tasks.id, taskId),
           eq(tasks.status, 'todo'),
           isNull(tasks.assigneeAgentId),
+          // A person's task is theirs: every claim, on every path, comes through here.
+          isNull(tasks.assigneePersonId),
           eq(tasks.dropped, 0),
         ),
       )
@@ -645,8 +673,13 @@ export function claimTask(
       .all() as DbTask[]
 
     if (claimed.length === 0) {
-      const exists = tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()
-      return { ok: false, reason: exists ? 'conflict' : 'not_found' }
+      const held = tx
+        .select({ person: tasks.assigneePersonId })
+        .from(tasks)
+        .where(eq(tasks.id, taskId))
+        .get()
+      if (!held) return { ok: false, reason: 'not_found' }
+      return { ok: false, reason: held.person ? 'person_assigned' : 'conflict' }
     }
     if (!run || !execId) return { ok: true, task: claimed[0] }
     const wakes = adoptTaskWakesTx(tx, taskId, execId, now)
@@ -881,11 +914,15 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
         assigneeAgentId: null,
         assigneeRuntime: null,
         verification: null,
+        waitingOn: null,
         runExecutionId: null,
         status: 'todo',
         updatedAt: Date.now(),
       })
-      .where(and(eq(tasks.id, taskId), eq(tasks.status, 'in_progress')))
+      // A person working their own task In progress has not left it to the queue.
+      .where(
+        and(eq(tasks.id, taskId), eq(tasks.status, 'in_progress'), isNull(tasks.assigneePersonId)),
+      )
       .returning({ teamId: tasks.teamId })
       .all(),
   ) as Array<{ teamId: string | null }>
@@ -906,6 +943,9 @@ export type UpdateStatusReason =
   | 'verification_required'
   | 'invalid_completed_at'
   | 'person_moved'
+  | 'person_assigned'
+  | 'awaiting_answer'
+  | 'blocker_cancelled'
 export interface UpdateStatusResult {
   ok: boolean
   task?: DbTask
@@ -936,8 +976,18 @@ export interface UpdateStatusOptions {
   /** An agent's own write (its task tools). Refused with `person_moved` when a
    *  person moved the card after the task's latest run started: that run was
    *  overruled, and its status write would put the card back where the person
-   *  took it from. A run started after the move writes as usual. */
+   *  took it from. A run started after the move writes as usual. Refused too while
+   *  the turn is a person's: `person_assigned` for a task they hold, and
+   *  `awaiting_answer` while it waits on their answer to a question. Here and not in
+   *  the tools, because every tool that moves a card comes through this write. */
   unlessPersonMoved?: boolean
+  /** What the task now waits for. Absent: a move to another status clears the old
+   *  reason, and a repeat of the same status keeps it. Required at the agent
+   *  surface, never here: system writers and a person's move may give none. */
+  waitingOn?: WaitingOn | null
+  /** Done or Cancelled back to To do. Only with `actor: 'person'`, and only the
+   *  Reopen route passes it, which is why it is an option and not a table edge. */
+  reopen?: boolean
   /** A cancel that follows from a person's cancel of the step this one waits on. It
    *  frees the task's slot under its parent as their own cancel does, without being
    *  a move of this card (see `personCancelledAt`). */
@@ -957,6 +1007,67 @@ function latestRunStart(tx: ClawbooDb | BoardTx, taskId: string): number | null 
     .where(eq(executionProcesses.taskId, taskId))
     .get()
   return row?.at ?? null
+}
+
+/** A person moved the card after this task's latest run started (or it never ran),
+ *  so that run, and any agent write from it, was overruled. */
+export function personMovedSinceLastRun(tx: ClawbooDb | BoardTx, row: DbTask): boolean {
+  if (row.personMovedAt == null) return false
+  const lastRun = latestRunStart(tx, row.id)
+  return lastRun == null || row.personMovedAt > lastRun
+}
+
+/** A routine fires this task, whoever owns the schedule. Its person may be away, and
+ *  its next fire needs the task back in To do, so it never waits on a person. */
+export function firedByRoutine(row: Pick<DbTask, 'scheduledBy'>): boolean {
+  return row.scheduledBy !== 'manual'
+}
+
+/** A task this one depends on will never finish: cancelled, or dropped before it was
+ *  done. `getReadyTasks` needs every dependency done, so nothing would start this one. */
+function hasCancelledBlocker(tx: BoardTx, taskId: string): boolean {
+  return (
+    tx
+      .select({ id: tasks.id })
+      .from(taskDeps)
+      .innerJoin(tasks, eq(tasks.id, taskDeps.dependsOnTaskId))
+      .where(
+        and(
+          eq(taskDeps.taskId, taskId),
+          sql`(${tasks.status} = 'cancelled' OR (${tasks.dropped} = 1 AND ${tasks.status} != 'done'))`,
+        ),
+      )
+      .get() !== undefined
+  )
+}
+
+/**
+ * A person reopened this task, so what its earlier runs did no longer speaks for it.
+ * The keys its runs made their sub-tasks under stop answering, or the next run's
+ * sub-tasks would come back as the old ones, finished. Its agent's failure count on it
+ * goes too, or the breaker would refuse handing it out again over failures a person
+ * has just looked past. A key that points at this task stays: the task is open again.
+ */
+function freshStartForReopenedTx(tx: BoardTx, row: DbTask): void {
+  tx.delete(taskCreateKeys)
+    .where(
+      or(
+        like(taskCreateKeys.key, `mcp-task:${row.id}:%`),
+        like(taskCreateKeys.key, `mcp:task:${row.id}:%`),
+      ),
+    )
+    .run()
+  const agentId = delegationTargetOf(row.sourceDelegationId) ?? row.assigneeAgentId
+  if (row.teamId && agentId)
+    tx.delete(delegationFailures)
+      .where(
+        and(
+          eq(delegationFailures.teamId, row.teamId),
+          eq(delegationFailures.targetAgentId, agentId),
+          eq(delegationFailures.taskKey, delegationFailureKey(agentId, row.title)),
+        ),
+      )
+      .run()
 }
 
 /** How far ahead of the server clock a person's finish time may be (clock skew
@@ -1001,17 +1112,30 @@ export function updateStatus(
   // Post-commit emission: the bus fires only after the BEGIN IMMEDIATE txn
   // returned, so a subscriber can never observe (or act on) an uncommitted
   // transition.
+  const waitersReleased: BoardLifecycleEvent[] = []
   const dependentsWoken: Array<{ taskId: string; teamId: string | null }> = []
   const result = immediateWrite(db, (tx): UpdateStatusResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
-    if (opts.unlessPersonMoved && row.personMovedAt != null) {
-      const lastRun = latestRunStart(tx, taskId)
-      if (lastRun == null || row.personMovedAt > lastRun)
-        return { ok: false, reason: 'person_moved', task: row }
+    if (opts.unlessPersonMoved) {
+      if (row.assigneePersonId) return { ok: false, reason: 'person_assigned', task: row }
+      if (parseWaitingOn(row.waitingOn)?.kind === 'question')
+        return { ok: false, reason: 'awaiting_answer', task: row }
+      if (personMovedSinceLastRun(tx, row)) return { ok: false, reason: 'person_moved', task: row }
     }
     const from = row.status as TaskStatus
-    if (!canTransition(from, to)) return { ok: false, reason: 'illegal_transition' }
+    const personMove =
+      opts.actor === 'person' &&
+      personMoveAllowed(from, to, {
+        ...(opts.reopen === true ? { reopen: true } : {}),
+        personAssigned: row.assigneePersonId != null,
+      })
+    if (!canTransition(from, to) && !personMove) return { ok: false, reason: 'illegal_transition' }
+    // Reopen is that one move: a task that is not finished has nothing to reopen.
+    if (opts.reopen === true && !personMove) return { ok: false, reason: 'illegal_transition' }
+    // Back in To do it would look queued, and nothing would ever start it.
+    if (opts.reopen === true && hasCancelledBlocker(tx, taskId))
+      return { ok: false, reason: 'blocker_cancelled', task: row }
     if (to === 'done' && !opts.humanOverride && !verdictCellPromotable(row.verification)) {
       return { ok: false, reason: 'verification_required' }
     }
@@ -1027,11 +1151,20 @@ export function updateStatus(
         return { ok: false, reason: 'invalid_completed_at' }
       completedAt = Math.min(at, now)
     }
+    const reopening = personMove && opts.reopen === true
     tx.update(tasks)
       .set({
         status: to,
         updatedAt: now,
         ...(finishing ? { completedAt } : {}),
+        // Finished again later, it records that finish: the calendar reads this. And
+        // it holds its slot under its parent again.
+        ...(reopening ? { completedAt: null, personCancelledAt: null } : {}),
+        ...(opts.waitingOn !== undefined
+          ? { waitingOn: waitingOnJson(opts.waitingOn) }
+          : from !== to
+            ? { waitingOn: null }
+            : {}),
         ...(opts.actor === 'person' ? { personMovedAt: now } : {}),
         // A person's cancel frees the task's slot under its parent. An agent's frees
         // nothing, and cancelled is terminal, so a slot never comes back.
@@ -1059,7 +1192,15 @@ export function updateStatus(
     // A dependency moving to done, on any path: its wakes commit with it.
     if (to === 'done' && from !== 'done')
       dependentsWoken.push(...recordDependencyWakesTx(tx, taskId, now))
+    if (reopening) freshStartForReopenedTx(tx, row)
     const updated = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
+    // A question lasts only while the task waits on it: any move ends it, and so does
+    // any other reason written over it. Else it stays open with nothing waiting on it,
+    // and shows up again under a later reason.
+    if (from !== to || (opts.waitingOn !== undefined && opts.waitingOn?.kind !== 'question'))
+      expirePendingQuestionsTx(tx, taskId, isTerminal(to) ? 'task_closed' : 'moved', now)
+    if (isTerminal(to) && from !== to)
+      waitersReleased.push(...releaseWaitersTx(tx, updated, to, now))
     return { ok: true, task: updated, from }
   })
   if (result.ok && result.task)
@@ -1070,9 +1211,228 @@ export function updateStatus(
       status: to,
       ...(opts.actor ? { actor: opts.actor } : {}),
     })
+  noteWaitersReleased(db, waitersReleased)
   for (const woken of dependentsWoken)
     emitBoardLifecycle({ kind: 'task_wake_recorded', ...woken, reason: 'dependency_done' })
   return result
+}
+
+/** Publish what a closing task freed, post-commit. The event log is what browser
+ *  alerts follow, and a task that came to a person must announce itself. */
+function noteWaitersReleased(db: ClawbooDb, events: BoardLifecycleEvent[]): void {
+  for (const ev of events) {
+    emitBoardLifecycle(ev)
+    if (ev.kind !== 'status_changed' && ev.kind !== 'task_released') continue
+    try {
+      appendEvent(db, {
+        kind: 'status_changed',
+        taskId: ev.taskId,
+        teamId: ev.teamId,
+        data: {
+          to: ev.kind === 'status_changed' ? ev.status : 'todo',
+          reason: 'wait_over',
+        },
+      })
+    } catch {
+      // Best-effort: the move stands, and the board shows it at its next read.
+    }
+  }
+}
+
+/**
+ * The way out for a task waiting on other work. `closed` just reached Done or
+ * Cancelled, or was dropped, inside this transaction: the tasks waiting on it, and a
+ * parent waiting on its sub-tasks once this was the last one open, stop waiting. In
+ * the write itself, not on the in-process bus, because an MCP stdio bin writes this
+ * file too and a crash right after the write must not leave them waiting forever.
+ *
+ * One bound to an agent goes back to To do, which is what wakes that agent: the
+ * dispatch pump fires it. Anything else goes to a person, who is told why: a blocker
+ * that was cancelled is a decision, a task nothing would start needs someone to start
+ * it, and a run still open on it would read a move to To do as being taken off the
+ * task. The single wiring point for waking on a cleared reason.
+ */
+function releaseWaitersTx(
+  tx: BoardTx,
+  closed: DbTask,
+  to: TaskStatus,
+  now: number,
+): BoardLifecycleEvent[] {
+  const events: BoardLifecycleEvent[] = []
+  const finished = to === 'done'
+  const name = `“${closed.title}”`
+  const release = (waiter: DbTask, ready: boolean, note: string, ifNot: string): void => {
+    const runOpen = tx
+      .select({ id: executionProcesses.id })
+      .from(executionProcesses)
+      .where(
+        and(eq(executionProcesses.taskId, waiter.id), eq(executionProcesses.status, 'running')),
+      )
+      .get()
+    const toQueue = ready && !runOpen && delegationTargetOf(waiter.sourceDelegationId) !== null
+    const moved = tx
+      .update(tasks)
+      .set(
+        toQueue
+          ? {
+              status: 'todo',
+              waitingOn: null,
+              assigneeAgentId: null,
+              assigneeRuntime: null,
+              verification: null,
+              updatedAt: now,
+            }
+          : { waitingOn: waitingOnJson({ kind: 'person', need: ifNot }), updatedAt: now },
+      )
+      .where(and(eq(tasks.id, waiter.id), eq(tasks.status, 'blocked')))
+      .run()
+    if (moved.changes === 0) return
+    // Saved in this write, so the pump's rules decide when it starts and the run's
+    // "Why this run" line says why, as for a dependency.
+    if (toQueue)
+      recordTaskWakeTx(
+        tx,
+        {
+          teamId: waiter.teamId ?? null,
+          agentId: delegationTargetOf(waiter.sourceDelegationId) as string,
+          taskId: waiter.id,
+          reason: 'dependency_done',
+        },
+        now,
+      )
+    tx.insert(taskComments)
+      .values({
+        id: randomUUID(),
+        taskId: waiter.id,
+        authorAgentId: null,
+        authorType: 'system',
+        body: toQueue ? note : ifNot,
+        tenantId: null,
+        createdAt: now,
+      })
+      .run()
+    const teamId = waiter.teamId ?? null
+    events.push(
+      toQueue
+        ? { kind: 'task_released', taskId: waiter.id, teamId, via: 'release' }
+        : { kind: 'status_changed', taskId: waiter.id, teamId, status: 'blocked' },
+      ...(toQueue
+        ? [
+            {
+              kind: 'task_wake_recorded' as const,
+              taskId: waiter.id,
+              teamId,
+              reason: 'dependency_done' as const,
+            },
+          ]
+        : []),
+      {
+        kind: 'comment_added',
+        taskId: waiter.id,
+        teamId,
+        authorType: 'system',
+        authorAgentId: null,
+      },
+    )
+  }
+
+  const waiting = tx
+    .select()
+    .from(tasks)
+    .where(
+      and(eq(tasks.status, 'blocked'), eq(tasks.dropped, 0), like(tasks.waitingOn, '%"task"%')),
+    )
+    .all() as DbTask[]
+  for (const waiter of waiting) {
+    const w = parseWaitingOn(waiter.waitingOn)
+    if (w?.kind !== 'task' || w.taskId !== closed.id) continue
+    release(
+      waiter,
+      finished,
+      `${name}, the task this waited on, is done.`,
+      finished
+        ? `${name}, the task this waited on, is done, and nothing started this one again. Retry it or decide what happens next.`
+        : `${name}, the task this waited on, was cancelled. Decide what happens next.`,
+    )
+  }
+
+  if (closed.parentTaskId) {
+    const parent = tx.select().from(tasks).where(eq(tasks.id, closed.parentTaskId)).get() as
+      DbTask | undefined
+    if (parent && parent.status === 'blocked' && !parent.dropped) {
+      if (parseWaitingOn(parent.waitingOn)?.kind === 'subtasks') {
+        const open = tx
+          .select({ n: count() })
+          .from(tasks)
+          .where(
+            and(
+              eq(tasks.parentTaskId, parent.id),
+              eq(tasks.dropped, 0),
+              sql`${tasks.status} NOT IN ('done', 'cancelled')`,
+            ),
+          )
+          .get()
+        if ((open?.n ?? 0) === 0) {
+          // Any that did not get done was a decision, as a cancelled blocker is. That
+          // takes in one dropped while open, and leaves out one dropped once done.
+          const unfinished = tx
+            .select({ n: count() })
+            .from(tasks)
+            .where(and(eq(tasks.parentTaskId, parent.id), sql`${tasks.status} != 'done'`))
+            .get()
+          const allDone = (unfinished?.n ?? 0) === 0
+          release(
+            parent,
+            allDone,
+            'All the sub-tasks this waited on are done.',
+            allDone
+              ? 'All the sub-tasks this waited on are done, and nothing started this one again. Retry it or decide what happens next.'
+              : 'A sub-task this waited on was cancelled or removed, and none is still open. Decide what happens next.',
+          )
+        }
+      }
+    }
+  }
+  return events
+}
+
+/** Say why a task that stayed Blocked is still here, when a person's action could not
+ *  move it. Only while it is Blocked: a task that moved on has its own reason. */
+export function noteBlockedReason(db: ClawbooDb, taskId: string, waitingOn: WaitingOn): void {
+  withWriteRetry(() =>
+    db
+      .update(tasks)
+      .set({ waitingOn: waitingOnJson(waitingOn), updatedAt: Date.now() })
+      .where(and(eq(tasks.id, taskId), eq(tasks.status, 'blocked')))
+      .run(),
+  )
+}
+
+/** What a task waiting on other work waits on, for its card to name: the task's
+ *  title, or how many of its sub-tasks are open. Undefined for any other wait. */
+export function waitingOnDetailOf(
+  db: ClawbooDb,
+  task: Pick<DbTask, 'id' | 'waitingOn'>,
+): { taskTitle?: string; openSubtasks?: number } | undefined {
+  const w = parseWaitingOn(task.waitingOn)
+  if (w?.kind === 'task') return { taskTitle: getTask(db, w.taskId)?.title ?? '' }
+  if (w?.kind === 'subtasks') return { openSubtasks: countOpenSubtasks(db, task.id) }
+  return undefined
+}
+
+/**
+ * Say what a task waits for without moving it: for a check whose move to Blocked
+ * keeps failing, which would otherwise sit there with no reason. Only while it is
+ * still In progress or In review; a task that moved on has its own reason.
+ */
+export function setTaskWaitingOn(db: ClawbooDb, taskId: string, waitingOn: WaitingOn | null): void {
+  withWriteRetry(() =>
+    db
+      .update(tasks)
+      .set({ waitingOn: waitingOnJson(waitingOn) })
+      .where(and(eq(tasks.id, taskId), inArray(tasks.status, ['in_progress', 'in_review'])))
+      .run(),
+  )
 }
 
 /** Update non-status metadata (priority / title / description). Status changes
@@ -1140,6 +1500,7 @@ export function assignTaskDelegation(
 ): AssignTaskResult {
   // Post-commit emission, as in `updateStatus`: a subscriber never observes an
   // uncommitted transition.
+  let hadPerson = false
   const result = immediateWrite(db, (tx): AssignTaskResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
@@ -1148,10 +1509,17 @@ export function assignTaskDelegation(
     if (row.dropped || !assignable || !canTransition(from, 'todo')) {
       return { ok: false, reason: 'not_assignable' }
     }
+    hadPerson = row.assigneePersonId != null
+    const now = Date.now()
     tx.update(tasks)
       .set({
         sourceDelegationId,
-        updatedAt: Date.now(),
+        updatedAt: now,
+        // One assignee: the person who had it no longer does, and whatever it waited
+        // on is over now that an agent will run it.
+        assigneePersonId: null,
+        assigneePerson: null,
+        waitingOn: null,
         // Released for a fresh run: the same fields `updateStatus(→todo)` clears.
         ...(from !== 'todo'
           ? {
@@ -1166,10 +1534,11 @@ export function assignTaskDelegation(
       })
       .where(eq(tasks.id, taskId))
       .run()
+    expirePendingQuestionsTx(tx, taskId, 'moved', now)
     const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
     return { ok: true, task, from }
   })
-  if (result.ok && result.from !== 'todo')
+  if (result.ok && (result.from !== 'todo' || hadPerson))
     emitBoardLifecycle({
       kind: 'status_changed',
       taskId,
@@ -1177,6 +1546,216 @@ export function assignTaskDelegation(
       status: 'todo',
     })
   return result
+}
+
+export type AssignPersonResult =
+  | { ok: true; task: DbTask; from: TaskStatus }
+  | { ok: false; reason: 'not_found' | 'not_assignable' }
+
+/** A delegation id with its agent taken off: who delegated it still reads, and the
+ *  dispatch pump and `delegationTargetOf` no longer see an agent. */
+function withoutAgentBinding(sdid: string | null | undefined): string | null {
+  if (!sdid) return null
+  return sdid.replace(/:agent:[^:]*/, '')
+}
+
+/**
+ * Give a task that is not running to a person, or with `null` take it off them. The
+ * agent binding comes off with it, so nothing starts it and a later comment reaches
+ * no agent: the person has taken the work. Refused while it is being worked,
+ * finished, cancelled or dropped, as a hand-over to an agent is.
+ */
+export function assignTaskToPerson(
+  db: ClawbooDb,
+  taskId: string,
+  person: PersonRecord | null,
+): AssignPersonResult {
+  const result = immediateWrite(db, (tx): AssignPersonResult => {
+    const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
+    if (!row) return { ok: false, reason: 'not_found' }
+    const from = row.status as TaskStatus
+    const assignable = ASSIGNABLE_STATUSES.has(from) || isStrandedInProgress(tx, row)
+    if (row.dropped || !assignable) return { ok: false, reason: 'not_assignable' }
+    const now = Date.now()
+    tx.update(tasks)
+      .set({
+        assigneePersonId: person?.id ?? null,
+        assigneePerson: personJson(person),
+        assigneeAgentId: null,
+        assigneeRuntime: null,
+        waitingOn: null,
+        // Released, as any move to To do is: an earlier run's failing verdict must not
+        // hold the person's Done, or the Done of an agent they give it to next.
+        verification: null,
+        // A person's move: a late write from the run it was taken from is overruled.
+        personMovedAt: now,
+        updatedAt: now,
+        ...(person ? { sourceDelegationId: withoutAgentBinding(row.sourceDelegationId) } : {}),
+        // Nothing runs a person's task, so it does not stay looking worked on, and a
+        // task someone stopped waiting on is ready for them.
+        ...(from === 'in_progress' || from === 'blocked' ? { status: 'todo' } : {}),
+      })
+      .where(eq(tasks.id, taskId))
+      .run()
+    expirePendingQuestionsTx(tx, taskId, 'moved', now)
+    const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
+    return { ok: true, task, from }
+  })
+  // Who has it changed whether or not the status did: open views read it from this.
+  if (result.ok)
+    emitBoardLifecycle({
+      kind: 'status_changed',
+      taskId,
+      teamId: result.task.teamId ?? null,
+      status: result.task.status,
+      actor: 'person',
+    })
+  return result
+}
+
+/**
+ * Take a person off a handed-back task so its agent can run it again: a person's
+ * Retry or reply gave the turn back. Its binding says which agent. A no-op when no
+ * person has it.
+ */
+export function clearPersonAssignee(db: ClawbooDb, taskId: string): void {
+  withWriteRetry(() =>
+    db
+      .update(tasks)
+      .set({ assigneePersonId: null, assigneePerson: null })
+      .where(eq(tasks.id, taskId))
+      .run(),
+  )
+}
+
+/** The person who asked for a task: on it, else on the nearest ancestor that says,
+ *  else the built-in local person. */
+function requesterOf(tx: BoardTx, task: DbTask): PersonRecord {
+  const seen = new Set<string>([task.id])
+  let at: DbTask | undefined = task
+  while (at) {
+    const asked = parsePersonJson(at.requestedBy)
+    if (asked) return asked
+    const parentId: string | null = at.parentTaskId
+    if (!parentId || seen.has(parentId)) break
+    seen.add(parentId)
+    at = tx.select().from(tasks).where(eq(tasks.id, parentId)).get() as DbTask | undefined
+  }
+  return { ...LOCAL_PERSON }
+}
+
+export type HandBackResult =
+  | { ok: true; task: DbTask; from: TaskStatus; person: PersonRecord }
+  | {
+      ok: false
+      reason: 'not_found' | 'not_yours' | 'routine' | 'person_moved' | 'illegal_transition'
+      task?: DbTask
+    }
+
+/**
+ * An agent hands its own task back to the person who asked for it, saying what they
+ * must do. Blocked, with the person as assignee and the agent's binding kept: the
+ * agent stays who a person's reply or Retry goes to. The engine's self-block ending
+ * then closes the run. One write, so the card never shows both assignees.
+ */
+export function handBackTask(
+  db: ClawbooDb,
+  taskId: string,
+  input: { agentId: string; need: string },
+): HandBackResult {
+  const result = immediateWrite(db, (tx): HandBackResult => {
+    const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
+    if (!row) return { ok: false, reason: 'not_found' }
+    if (row.assigneeAgentId !== input.agentId) return { ok: false, reason: 'not_yours', task: row }
+    if (firedByRoutine(row)) return { ok: false, reason: 'routine', task: row }
+    if (personMovedSinceLastRun(tx, row)) return { ok: false, reason: 'person_moved', task: row }
+    const from = row.status as TaskStatus
+    if (!canTransition(from, 'blocked')) return { ok: false, reason: 'illegal_transition' }
+    const person = requesterOf(tx, row)
+    const now = Date.now()
+    // What the person must do now takes the place of any question still open.
+    expirePendingQuestionsTx(tx, taskId, 'replaced', now)
+    tx.update(tasks)
+      .set({
+        status: 'blocked',
+        assigneePersonId: person.id,
+        assigneePerson: personJson(person),
+        assigneeAgentId: null,
+        assigneeRuntime: null,
+        waitingOn: waitingOnJson({
+          kind: 'person',
+          need: input.need,
+          personId: person.id,
+          by: 'agent',
+        }),
+        updatedAt: now,
+      })
+      .where(eq(tasks.id, taskId))
+      .run()
+    const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
+    return { ok: true, task, from, person }
+  })
+  if (result.ok) {
+    emitBoardLifecycle({
+      kind: 'status_changed',
+      taskId,
+      teamId: result.task.teamId ?? null,
+      status: 'blocked',
+    })
+    // What browser alerts follow; this write can come from any process.
+    try {
+      appendEvent(db, {
+        kind: 'status_changed',
+        taskId,
+        teamId: result.task.teamId ?? null,
+        agentId: input.agentId,
+        data: { to: 'blocked', reason: 'handed_back' },
+      })
+    } catch {
+      // The hand-back stands; the run's end announces it too.
+    }
+  }
+  return result
+}
+
+/** A task's sub-tasks still open. */
+export function openSubtasksOf(
+  tx: ClawbooDb | BoardTx,
+  taskId: string,
+): Array<{ id: string; status: string }> {
+  return tx
+    .select({ id: tasks.id, status: tasks.status })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.parentTaskId, taskId),
+        eq(tasks.dropped, 0),
+        sql`${tasks.status} NOT IN ('done', 'cancelled')`,
+      ),
+    )
+    .all()
+}
+
+/** How many of a task's sub-tasks are still open. */
+export function countOpenSubtasks(db: ClawbooDb, taskId: string): number {
+  const row = db
+    .select({ n: count() })
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.parentTaskId, taskId),
+        eq(tasks.dropped, 0),
+        sql`${tasks.status} NOT IN ('done', 'cancelled')`,
+      ),
+    )
+    .get()
+  return row?.n ?? 0
+}
+
+/** A person reopens a finished task: Done or Cancelled back to To do. Only the
+ *  person-only Reopen route calls this, and the finish time is cleared. */
+export function reopenTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
+  return updateStatus(db, taskId, 'todo', { actor: 'person', reopen: true })
 }
 
 export function blockTask(
@@ -1195,11 +1774,18 @@ export function unblockTask(
   return updateStatus(db, taskId, 'todo', opts)
 }
 
-/** Soft-delete (auditable / restorable) — never destructive. */
+/** Soft-delete (auditable / restorable), never destructive. Its open questions
+ *  close, and a task waiting on it stops waiting. */
 export function dropTask(db: ClawbooDb, taskId: string): void {
-  withWriteRetry(() =>
-    db.update(tasks).set({ dropped: 1, updatedAt: Date.now() }).where(eq(tasks.id, taskId)).run(),
-  )
+  const released: BoardLifecycleEvent[] = []
+  immediateWrite(db, (tx) => {
+    const now = Date.now()
+    tx.update(tasks).set({ dropped: 1, updatedAt: now }).where(eq(tasks.id, taskId)).run()
+    expirePendingQuestionsTx(tx, taskId, 'task_closed', now)
+    const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
+    if (row) released.push(...releaseWaitersTx(tx, row, 'cancelled', now))
+  })
+  noteWaitersReleased(db, released)
 }
 
 // ─── Dependencies (Beads-style blocks / blocked-by) ──────────────────────────
@@ -1211,6 +1797,43 @@ export class TaskDependencyCycleError extends Error {
     super(`linking ${taskId} to ${dependsOnTaskId} would create a dependency cycle`)
     this.name = 'TaskDependencyCycleError'
   }
+}
+
+/** Enough for any real board: a walk past this gives up and calls it no loop. */
+const WAIT_WALK_MAX = 1_000
+
+/**
+ * Does finishing any of `from` need `to` to finish first? It follows what each open
+ * task waits on (a task, or its open sub-tasks) and the dependencies it cannot start
+ * without. True means a wait on `from` by `to` could never end.
+ */
+export function waitReaches(tx: ClawbooDb | BoardTx, from: readonly string[], to: string): boolean {
+  const seen = new Set<string>()
+  const queue = [...from]
+  while (queue.length > 0 && seen.size < WAIT_WALK_MAX) {
+    const at = queue.pop()!
+    if (at === to) return true
+    if (seen.has(at)) continue
+    seen.add(at)
+    const row = tx
+      .select({ status: tasks.status, waitingOn: tasks.waitingOn })
+      .from(tasks)
+      .where(eq(tasks.id, at))
+      .get()
+    if (!row || isTerminal(row.status as TaskStatus)) continue
+    const wait = parseWaitingOn(row.waitingOn)
+    if (wait?.kind === 'task') queue.push(wait.taskId)
+    if (wait?.kind === 'subtasks') queue.push(...openSubtasksOf(tx, at).map((s) => s.id))
+    queue.push(
+      ...tx
+        .select({ id: taskDeps.dependsOnTaskId })
+        .from(taskDeps)
+        .where(eq(taskDeps.taskId, at))
+        .all()
+        .map((r) => r.id),
+    )
+  }
+  return false
 }
 
 export function linkDep(db: ClawbooDb, taskId: string, dependsOnTaskId: string): void {
@@ -1230,7 +1853,7 @@ export function linkDep(db: ClawbooDb, taskId: string, dependsOnTaskId: string):
         SELECT id FROM dependencies WHERE id = ${taskId} LIMIT 1
       `,
     ) as Array<{ id: string }>
-    if (reachable.length > 0) {
+    if (reachable.length > 0 || waitReaches(tx, [dependsOnTaskId], taskId)) {
       throw new TaskDependencyCycleError(taskId, dependsOnTaskId)
     }
     tx.insert(taskDeps)
@@ -1314,6 +1937,8 @@ export function getReadyTasks(
   const conds = [
     eq(tasks.status, 'todo'),
     eq(tasks.dropped, 0),
+    // A person's task is never an agent's next job, so no pump starts it.
+    isNull(tasks.assigneePersonId),
     sql`NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks dt ON dt.id = d.depends_on_task_id WHERE d.task_id = ${tasks.id} AND dt.status != 'done')`,
   ]
   if (filter.teamId) conds.push(eq(tasks.teamId, filter.teamId))
@@ -1859,6 +2484,7 @@ export function reconcileOrphans(
           assigneeAgentId: null,
           assigneeRuntime: null,
           verification: null,
+          waitingOn: null,
           status: 'todo',
           updatedAt: now,
         })
@@ -1881,7 +2507,12 @@ export function reconcileOrphans(
       // what any check found.
       const parked = tx
         .update(tasks)
-        .set({ status: 'blocked', updatedAt: now, checkHeldSince: null })
+        .set({
+          status: 'blocked',
+          waitingOn: waitingOnJson({ kind: 'recovery' }),
+          updatedAt: now,
+          checkHeldSince: null,
+        })
         .where(and(eq(tasks.id, ex.taskId), eq(tasks.status, 'in_review')))
         .returning({ teamId: tasks.teamId, assigneeAgentId: tasks.assigneeAgentId })
         .all() as Array<{ teamId: string | null; assigneeAgentId: string | null }>
@@ -1974,6 +2605,7 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
           assigneeAgentId: null,
           assigneeRuntime: null,
           verification: null,
+          waitingOn: null,
           runExecutionId: null,
           status: 'todo',
           updatedAt: now,
@@ -2060,7 +2692,12 @@ export function reconcileStaleInReview(db: ClawbooDb, olderThanMs: number): Park
         .run()
       for (const r of runnerRuns) settleWakesOfClosedRunTx(tx, r.id, { status: 'failed' }, now)
       tx.update(tasks)
-        .set({ status: 'blocked', runExecutionId: null, updatedAt: now })
+        .set({
+          status: 'blocked',
+          waitingOn: waitingOnJson({ kind: 'recovery' }),
+          runExecutionId: null,
+          updatedAt: now,
+        })
         .where(eq(tasks.id, t.id))
         .run()
       tx.insert(taskComments)

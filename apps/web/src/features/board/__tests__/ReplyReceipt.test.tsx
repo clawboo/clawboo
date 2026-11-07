@@ -116,3 +116,36 @@ describe('ReplyReceipt', () => {
     expect(screen.queryByRole('button', { name: 'Send as a follow-up task' })).toBeNull()
   })
 })
+
+describe('ReplyReceipt: Reopen', () => {
+  it('reopens with the reply, marked as already on the thread, so a run with no thread hears it', async () => {
+    let posted: unknown = null
+    server.use(
+      http.post('/api/board/t1/reopen', async ({ request }) => {
+        posted = await request.json()
+        return HttpResponse.json({ ok: true, delivery: { status: 'woke-agent', agentId: 'ada' } })
+      }),
+    )
+    const onReopened = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ReplyReceipt
+        delivery={{ status: 'not-delivered', agentId: 'ada', reason: 'finished' }}
+        task={TASK}
+        body="Use the new logo"
+        onReopened={onReopened}
+      />,
+    )
+    await user.click(screen.getByRole('button', { name: 'Reopen the task' }))
+    expect(await screen.findByText('Reopened')).toBeInTheDocument()
+    expect(posted).toEqual({ comment: 'Use the new logo', onThread: true })
+    expect(onReopened).toHaveBeenCalled()
+  })
+
+  it('is offered only for a finished task', () => {
+    render(
+      <ReplyReceipt delivery={{ status: 'woke-agent', agentId: 'ada' }} task={TASK} body="x" />,
+    )
+    expect(screen.queryByRole('button', { name: 'Reopen the task' })).toBeNull()
+  })
+})

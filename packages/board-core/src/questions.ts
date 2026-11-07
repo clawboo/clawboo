@@ -1,0 +1,149 @@
+// ─── Questions to a person ──────────────────────────────────────────────────
+// What an agent may ask (`ask_person`) and what counts as an answer. The rows live
+// in `task_questions` (@clawboo/db); these rules are import-free so the board's
+// answer controls and the server read one definition.
+
+export type QuestionKind =
+  /** A question, with options, free text, or both. */
+  | 'question'
+  /** A yes or no. */
+  | 'confirm'
+  /** A proposed breakdown the person accepts, edits or turns down. */
+  | 'suggest_tasks'
+
+export type QuestionStatus = 'pending' | 'answered' | 'expired' | 'cancelled'
+
+export interface SuggestedTask {
+  title: string
+  description?: string
+}
+
+export interface QuestionPayload {
+  prompt: string
+  /** For `question`: the choices offered. None means free text only. */
+  options?: string[]
+  /** For `question`: free text is accepted as well as the options. */
+  allowOther?: boolean
+  /** For `suggest_tasks`: the proposed tasks. */
+  tasks?: SuggestedTask[]
+}
+
+export type QuestionAnswer =
+  | { kind: 'question'; choice?: string; text?: string }
+  | { kind: 'confirm'; confirmed: boolean; note?: string }
+  | { kind: 'suggest_tasks'; accepted: boolean; tasks: SuggestedTask[]; note?: string }
+
+/** Longest free-text answer or note kept. */
+export const QUESTION_ANSWER_MAX_CHARS = 4_000
+
+const text = (v: unknown): string | null => {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t && t.length <= QUESTION_ANSWER_MAX_CHARS ? t : null
+}
+
+function suggestedTasks(v: unknown): SuggestedTask[] | null {
+  if (!Array.isArray(v)) return null
+  const out: SuggestedTask[] = []
+  for (const raw of v) {
+    if (!raw || typeof raw !== 'object') return null
+    const title = text((raw as Record<string, unknown>)['title'])
+    if (!title) return null
+    const description = text((raw as Record<string, unknown>)['description'])
+    out.push({ title, ...(description ? { description } : {}) })
+  }
+  return out
+}
+
+/** A question's stored payload, or null for anything it cannot read. */
+export function parseQuestionPayload(raw: unknown): QuestionPayload | null {
+  let doc: unknown = raw
+  if (typeof raw === 'string') {
+    try {
+      doc = JSON.parse(raw)
+    } catch {
+      return null
+    }
+  }
+  if (!doc || typeof doc !== 'object') return null
+  const d = doc as Record<string, unknown>
+  const prompt = typeof d['prompt'] === 'string' ? d['prompt'] : null
+  if (!prompt) return null
+  const options = Array.isArray(d['options'])
+    ? d['options'].filter((o): o is string => typeof o === 'string' && o !== '')
+    : null
+  const tasks = suggestedTasks(d['tasks'])
+  return {
+    prompt,
+    ...(options && options.length > 0 ? { options } : {}),
+    ...(d['allowOther'] === true ? { allowOther: true } : {}),
+    ...(tasks ? { tasks } : {}),
+  }
+}
+
+/**
+ * What a person sent, as an answer this question allows, or null when it allows
+ * no such thing. Free text counts for a `question` that offers no options or says
+ * it takes other answers; a choice must be one of the options.
+ */
+export function normalizeAnswer(
+  kind: string,
+  payload: QuestionPayload,
+  raw: unknown,
+): QuestionAnswer | null {
+  if (!raw || typeof raw !== 'object') return null
+  const a = raw as Record<string, unknown>
+  const note = text(a['note'])
+  if (kind === 'confirm') {
+    if (typeof a['confirmed'] !== 'boolean') return null
+    return { kind: 'confirm', confirmed: a['confirmed'], ...(note ? { note } : {}) }
+  }
+  if (kind === 'suggest_tasks') {
+    if (typeof a['accepted'] !== 'boolean') return null
+    const tasks = a['tasks'] === undefined ? (payload.tasks ?? []) : suggestedTasks(a['tasks'])
+    if (!tasks) return null
+    return { kind: 'suggest_tasks', accepted: a['accepted'], tasks, ...(note ? { note } : {}) }
+  }
+  if (kind !== 'question') return null
+  const options = payload.options ?? []
+  if (a['choice'] !== undefined) {
+    return typeof a['choice'] === 'string' && options.includes(a['choice'])
+      ? { kind: 'question', choice: a['choice'] }
+      : null
+  }
+  const free = text(a['text'])
+  if (!free) return null
+  return options.length === 0 || payload.allowOther === true
+    ? { kind: 'question', text: free }
+    : null
+}
+
+/** Text an agent wrote, on one line, so a line break in it cannot make it read as
+ *  something else where a person or a later run reads it. */
+const oneLine = (text: string): string => text.replace(/\s+/g, ' ').trim()
+
+/** What a person said, for the task's thread under their name. The question is not in
+ *  it: that is the agent's text, and on this line it would read as the person's. An
+ *  option or a suggested task is the agent's wording too, but it is what they chose. */
+export function answerWords(answer: QuestionAnswer): string {
+  const noted = 'note' in answer && answer.note ? `\nNote: ${answer.note}` : ''
+  if (answer.kind === 'confirm') return `${answer.confirmed ? 'Yes' : 'No'}.${noted}`
+  if (answer.kind === 'question')
+    return answer.choice ? oneLine(answer.choice) : (answer.text ?? '')
+  if (!answer.accepted) return `Turned these tasks down.${noted}`
+  const list = answer.tasks.map(
+    (t) => `- ${oneLine(t.title)}${t.description ? `: ${oneLine(t.description)}` : ''}`,
+  )
+  return `Accepted. Create these tasks:\n${list.join('\n')}${noted}`
+}
+
+/** The question on the task's thread, under the agent that wrote it. */
+export function askedWords(prompt: string): string {
+  return `Asked a person: ${oneLine(prompt)}`
+}
+
+/** What the agent reads when an answer wakes it. The answer comes first, because a
+ *  mailbox note is cut from the end and a question can be long. */
+export function answerForAgent(prompt: string, answer: QuestionAnswer): string {
+  return `${answerWords(answer)}\n\n(Your question, as you wrote it: ${oneLine(prompt)})`
+}

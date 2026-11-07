@@ -22,6 +22,7 @@ import {
   attentionForTask,
   attentionForTasks,
   claimBody,
+  clearPersonAssignee,
   claimTask,
   commentBody,
   completeExecutionBody,
@@ -56,8 +57,11 @@ import {
   setTaskLabels,
   taskLabelsBody,
   type ClawbooDb,
+  pendingQuestionsForTasks,
+  waitingOnDetailOf,
   wakeCommentIds,
   type DbTask,
+  type DbTaskQuestion,
   type TaskLabel,
   type TaskRunCost,
   type TaskStatus,
@@ -66,7 +70,7 @@ import { createLogger } from '@clawboo/logger'
 import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
-import { personField, personOf } from '../lib/auth'
+import { actingPerson, personField, personOf } from '../lib/auth'
 import { ownWriterOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { isDashboardRequest } from '../lib/dashboardRequest'
@@ -119,14 +123,17 @@ export function boardListGET(req: Request, res: Response): void {
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
     res.json({
-      tasks: withReadState(
+      tasks: withOpenQuestion(
         db,
-        req,
-        withLabels(
+        withReadState(
           db,
-          withRunningSince(
+          req,
+          withLabels(
             db,
-            withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+            withRunningSince(
+              db,
+              withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+            ),
           ),
         ),
       ),
@@ -147,9 +154,10 @@ export function boardGetGET(req: Request, res: Response): void {
       res.status(404).json({ error: 'task not found' })
       return
     }
+    const [withWaiting] = withOpenQuestion(db, [task])
     res.json({
       task: {
-        ...withReadState(db, req, [task])[0]!,
+        ...withReadState(db, req, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
@@ -191,6 +199,32 @@ function pendingWakeOf(
 function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
   const byId = attentionForTasks(db, rows)
   return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+}
+
+/** Each task with the question it has open (`openQuestion`, null when none), so a
+ *  card can show the answer controls without a request per card, and what a task
+ *  waiting on other work waits on (`waitingOnDetail`), so its card can name it. */
+function withOpenQuestion<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<
+  T & {
+    openQuestion: DbTaskQuestion | null
+    waitingOnDetail?: { taskTitle?: string; openSubtasks?: number }
+  }
+> {
+  const byId = pendingQuestionsForTasks(
+    db,
+    rows.filter((t) => t.waitingOn != null).map((t) => t.id),
+  )
+  return rows.map((t) => {
+    const waitingOnDetail = waitingOnDetailOf(db, t)
+    return {
+      ...t,
+      openQuestion: byId.get(t.id) ?? null,
+      ...(waitingOnDetail ? { waitingOnDetail } : {}),
+    }
+  })
 }
 
 /** What a task with no recorded run cost carries. */
@@ -273,7 +307,15 @@ export function boardCreatePOST(req: Request, res: Response): void {
       return
     }
     const db = getDb()
-    const { assigneeAgentId, idempotencyKey, priority, ...input } = parsed.data
+    const { assigneeAgentId, assignToMe, idempotencyKey, priority, ...input } = parsed.data
+    if (assigneeAgentId && assignToMe) {
+      res.status(400).json({ error: 'one_assignee' })
+      return
+    }
+    if (assignToMe && !isDashboardRequest(req)) {
+      res.status(403).json({ error: 'dashboard_only' })
+      return
+    }
     if (assigneeAgentId) {
       if (!input.teamId) {
         res.status(400).json({ error: 'team_required' })
@@ -288,6 +330,9 @@ export function boardCreatePOST(req: Request, res: Response): void {
         return
       }
     }
+    // Who asked for it, so a hand-back knows where to go. A verified person, or the
+    // dashboard's own page; any other caller is not a person asking.
+    const requestedBy = isDashboardRequest(req) ? actingPerson(req) : personOf(req)
     const allowedPriority = priorityFor(req, priority)
     const task = runOwnWrite(
       db,
@@ -296,6 +341,8 @@ export function boardCreatePOST(req: Request, res: Response): void {
       () =>
         createTask(db, {
           ...input,
+          ...(requestedBy ? { requestedBy } : {}),
+          ...(assignToMe ? { assigneePerson: actingPerson(req) } : {}),
           ...(allowedPriority !== undefined ? { priority: allowedPriority } : {}),
           // Kept to its team, so a key cannot fetch another team's task.
           ...(idempotencyKey
@@ -433,6 +480,8 @@ export function boardRetryPOST(req: Request, res: Response): void {
       res.status(409).json({ ok: false, error: refusal })
       return
     }
+    // A handed-back task's turn goes back to its agent: one assignee, never both.
+    if (task.assigneePersonId) clearPersonAssignee(db, taskId)
     if (task.status !== 'todo') {
       const moved = runOwnWrite(db, ownWriterOf(req), taskId, () =>
         updateStatus(db, taskId, 'todo'),
@@ -616,6 +665,16 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       const result = runOwnWrite(db, ownWriterOf(req), taskId, () =>
         updateStatus(db, taskId, status, {
           actor: 'person',
+          // A person's own move to Blocked: theirs to decide, so it reads back as that.
+          ...(status === 'blocked'
+            ? {
+                waitingOn: {
+                  kind: 'person' as const,
+                  need: 'A person moved it here.',
+                  by: 'person' as const,
+                },
+              }
+            : {}),
           ...(humanOverride ? { humanOverride: true } : {}),
           ...(completedAt !== undefined ? { completedAt } : {}),
         }),

@@ -1,15 +1,18 @@
 // What happened to a reply a person just sent on a task, said under it: sent to
 // the agent's run, the agent starting on it, waiting for the next run, or not
-// sent. A reply on a finished task cannot reach it (the task will not run
-// again), so the note offers to send the reply as a follow-up task for the same
-// agent instead.
+// sent. A reply on a finished task reaches no one until it runs again, so the note
+// offers to reopen it, which starts its agent with the reply, or to send the reply as
+// a follow-up task for the same agent.
 
 import { useState } from 'react'
-import { Check, Clock, CornerDownRight, Info } from 'lucide-react'
+import { Check, Clock, CornerDownRight, Info, RotateCcw } from 'lucide-react'
 
 import { createTaskForAgent, type ReplyDelivery } from '@/lib/boardClient'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
+
+import { notDeliveredWhy } from './boardStatus'
+import { useTaskActions } from './useTaskActions'
 
 /** The note's words for a delivery, with the agent's name. */
 export function receiptText(delivery: ReplyDelivery, name: string): string {
@@ -26,12 +29,7 @@ export function receiptText(delivery: ReplyDelivery, name: string): string {
         return `${name} will see this when the task it waits on is done`
       return `${name} will see this on the next run`
     case 'not-delivered':
-      if (delivery.reason === 'finished') return 'Not sent: the task is finished'
-      if (delivery.reason === 'unassigned') return 'Not sent: no agent has this task'
-      if (delivery.reason === 'room_archived')
-        return 'Not sent: this task’s chat room was archived. Restart Clawboo to move it to General.'
-      if (delivery.reason === 'no_team') return 'Not sent: this task’s team was deleted'
-      return 'Not sent: something went wrong'
+      return `Not sent: ${notDeliveredWhy(delivery.reason)}`
   }
 }
 
@@ -40,6 +38,7 @@ export function ReplyReceipt({
   task,
   body,
   onFollowUp,
+  onReopened,
 }: {
   delivery: ReplyDelivery
   /** The task replied on: the follow-up is filed under it, on its team. */
@@ -48,12 +47,16 @@ export function ReplyReceipt({
   body: string
   /** A follow-up task was made, with its id. */
   onFollowUp?: (taskId: string) => void
+  /** The task was reopened. */
+  onReopened?: () => void
 }) {
   const name = useFleetStore((s) =>
     delivery.agentId ? (s.agents.find((a) => a.id === delivery.agentId)?.name ?? null) : null,
   )
   const addToast = useToastStore((s) => s.addToast)
+  const { reopen } = useTaskActions()
   const [followUp, setFollowUp] = useState<'idle' | 'sending' | 'sent'>('idle')
+  const [reopened, setReopened] = useState<'idle' | 'sending' | 'sent'>('idle')
   const who = name ?? 'The agent'
   const sent = delivery.status === 'steered' || delivery.status === 'woke-agent'
   const Icon = sent ? Check : delivery.status === 'queued' ? Clock : Info
@@ -62,6 +65,16 @@ export function ReplyReceipt({
     delivery.reason === 'finished' &&
     !!delivery.agentId &&
     !!task.teamId
+
+  const canReopen = delivery.status === 'not-delivered' && delivery.reason === 'finished'
+  // The reply is saved on the task already, and nothing passed it on. Reopening with
+  // it passes it on: a run on the task runner has no thread to read it from.
+  const reopenIt = async (): Promise<void> => {
+    setReopened('sending')
+    const ok = await reopen(task.id, body, { onThread: true })
+    setReopened(ok ? 'sent' : 'idle')
+    if (ok) onReopened?.()
+  }
 
   const sendFollowUp = async (): Promise<void> => {
     if (!delivery.agentId || !task.teamId) return
@@ -90,9 +103,24 @@ export function ReplyReceipt({
     >
       <span className="inline-flex items-center gap-1">
         <Icon size={12} strokeWidth={2} aria-hidden className={sent ? 'text-mint' : undefined} />
-        {followUp === 'sent' ? `Sent as a follow-up task for ${who}` : receiptText(delivery, who)}
+        {reopened === 'sent'
+          ? 'Reopened'
+          : followUp === 'sent'
+            ? `Sent as a follow-up task for ${who}`
+            : receiptText(delivery, who)}
       </span>
-      {canFollowUp && followUp !== 'sent' ? (
+      {canReopen && reopened !== 'sent' && followUp !== 'sent' ? (
+        <button
+          type="button"
+          disabled={reopened === 'sending'}
+          onClick={() => void reopenIt()}
+          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1 font-medium text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground disabled:cursor-default disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          <RotateCcw size={12} strokeWidth={2} aria-hidden />
+          Reopen the task
+        </button>
+      ) : null}
+      {canFollowUp && followUp !== 'sent' && reopened !== 'sent' ? (
         <button
           type="button"
           disabled={followUp === 'sending'}

@@ -50,7 +50,7 @@ import express, { type Express } from 'express'
 import { afterAll, beforeAll, describe, expect, expectTypeOf, it } from 'vitest'
 
 import { agentChatSessionKey } from '../../lib/agentChat/driveAgentChat'
-import { getDb, resetDb } from '../../lib/db'
+import { getDb, getDbPath, resetDb } from '../../lib/db'
 import { persistNativeChatEntry } from '../../lib/runtimes/native/nativeDriver'
 import { FEATURE_ROUTES } from '../../lib/engineCapabilities'
 import { publishAgentStatus, type AgentStatusUpdate } from '../../lib/teamChat/agentStatusBus'
@@ -84,6 +84,9 @@ const PINNED_FEATURES = [
   'board.labels',
   'board.inbox',
   'board.wakes',
+  'board.reopen',
+  'board.personAssignees',
+  'board.questions',
   'workspace.view',
   'workspace.preview',
   'agent.nativeShell',
@@ -225,6 +228,10 @@ const PINNED_ROUTES = [
   'POST /api/board/:taskId/comments',
   'POST /api/board/:taskId/retry',
   'POST /api/board/:taskId/assign',
+  'POST /api/board/:taskId/reopen',
+  'POST /api/board/:taskId/assign-person',
+  'GET /api/board/:taskId/questions',
+  'POST /api/board/questions/:questionId/answer',
   'GET /api/board/:taskId/executions',
   'POST /api/board/:taskId/executions',
   'PATCH /api/board/executions/:execId',
@@ -374,6 +381,10 @@ const PINNED_STREAMS = {
         'summary',
         'attention',
         'roomId',
+        'waitingOn',
+        'waitingOnDetail',
+        'assigneePersonId',
+        'assigneePerson',
         'checkHeldSince',
       ],
       status: AGENT_STATUS_FIELDS,
@@ -541,13 +552,17 @@ function expectFramesMatch(stream: keyof typeof PINNED_STREAMS, frames: Frame[])
 
 let dir: string
 let prevHome: string | undefined
+let prevClawbooHome: string | undefined
 let server: http.Server
 let base: string
 
 beforeAll(async () => {
-  prevHome = process.env['CLAWBOO_HOME']
+  prevHome = process.env['HOME']
+  prevClawbooHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-client-contract-'))
+  process.env['HOME'] = dir
   process.env['CLAWBOO_HOME'] = dir
+  expect(getDbPath().startsWith(dir)).toBe(true)
   // Mounted as ../../index.ts mounts it.
   const app = express()
   app.set('case sensitive routing', true)
@@ -558,8 +573,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await close(server)
   resetDb()
-  if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
-  else process.env['CLAWBOO_HOME'] = prevHome
+  if (prevHome === undefined) delete process.env['HOME']
+  else process.env['HOME'] = prevHome
+  if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+  else process.env['CLAWBOO_HOME'] = prevClawbooHome
   rmSync(dir, { recursive: true, force: true })
 })
 

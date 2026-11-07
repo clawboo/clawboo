@@ -13,6 +13,7 @@ import {
   ledgerAllowsAutoFire,
   normalizeTaskTitle,
   type HandOffLink,
+  type WaitingOn,
 } from '@clawboo/board-core'
 import {
   DEFAULT_MAX_CHILDREN,
@@ -80,6 +81,13 @@ export class FakeBoard implements CascadeBoard {
     return n
   }
 
+  /** What each task waits on, as `updateStatus` said. */
+  readonly waits = new Map<string, WaitingOn>()
+  async setWaitingOn(taskId: string, waitingOn: WaitingOn | null): Promise<void> {
+    if (waitingOn) this.waits.set(taskId, waitingOn)
+    else this.waits.delete(taskId)
+  }
+
   private toBoardTask(t: FakeRow): BoardTask {
     return {
       id: t.id,
@@ -89,6 +97,7 @@ export class FakeBoard implements CascadeBoard {
       parentTaskId: t.parentTaskId,
       sourceDelegationId: t.sourceDelegationId,
       assigneeAgentId: t.assigneeAgentId,
+      ...(this.waits.has(t.id) ? { waitingOn: JSON.stringify(this.waits.get(t.id)) } : {}),
     }
   }
 
@@ -257,11 +266,17 @@ export class FakeBoard implements CascadeBoard {
     t.assigneeAgentId = assigneeAgentId ?? 'someone'
     return { ok: true, task: this.toBoardTask(t) }
   }
-  async updateStatus(taskId: string, status: string): Promise<boolean> {
+  async updateStatus(
+    taskId: string,
+    status: string,
+    opts?: { waitingOn?: WaitingOn },
+  ): Promise<boolean> {
     const t = this.tasks.get(taskId)
     if (!t) return false
     if (!canTx(t.status, status)) return false // 409 — illegal transition
     this.statusUpdates.push({ taskId, status })
+    if (opts?.waitingOn) this.waits.set(taskId, opts.waitingOn)
+    else if (t.status !== status) this.waits.delete(taskId)
     t.status = status
     if (status === 'todo') t.assigneeAgentId = null // released → re-claimable
     return true

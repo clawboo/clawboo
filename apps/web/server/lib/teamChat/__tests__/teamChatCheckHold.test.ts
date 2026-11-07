@@ -19,6 +19,7 @@ import {
   createRoom,
   getComments,
   getTaskVerification,
+  reopenTask,
   listExecutions,
   listHeldReportUps,
   listTasks,
@@ -573,6 +574,30 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
     expect(getTaskVerification(db, id)).toBeNull()
     expect(theTask()!.status).toBe('cancelled')
     expect(theTask()!['checkHeldSince']).toBeNull()
+  })
+
+  it('a Reopen during the hold wins too: no check runs, and the old one leaves it alone', async () => {
+    const { gate, room } = await workerFinishedBesideMate()
+    const id = theTask()!.id
+
+    expect(updateStatus(db, id, 'done', { actor: 'person', humanOverride: true }).ok).toBe(true)
+    await room.engine().personMovedTask(id, 'done')
+    expect(reopenTask(db, id).ok).toBe(true)
+    await room.engine().personMovedTask(id, 'todo')
+    expect(room.engine().checksInFlight()).toBe(0)
+    expect(theTask()!['checkHeldSince']).toBeNull()
+
+    gate.resolve()
+    await settleOn(
+      () => !existsSync(path.join(teamWorkdirPath(TEAM), 'half.txt')),
+      'the teammate to finish',
+    )
+    await vi.advanceTimersByTimeAsync(HOLD_LIMIT_MS + 60_000)
+
+    expect(verifyRuns()).toBe(0)
+    expect(getTaskVerification(db, id)).toBeNull()
+    expect(theTask()!.status).toBe('todo')
+    expect(theTask()!.completedAt).toBeNull()
   })
 
   it("a person's comment during the hold waits behind the run it holds, and gets its turn before Done", async () => {

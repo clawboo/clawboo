@@ -15,8 +15,9 @@
 //     reads it in its next turn, whether that is a fix round or a turn before Done.
 //   - backlog: no wake. The person parked the task on purpose, and the agent reads
 //     it in the ticket block when the task next runs.
-//   - done or cancelled: not delivered. The task cannot reopen, so the person is
-//     offered a follow-up task for the same agent instead.
+//   - done or cancelled: not delivered. A person reopens it first (the Reopen route
+//     takes their comment), or starts a follow-up task for the same agent.
+// A reply on a task an agent handed back gives the turn back to that agent.
 // While the engine is held, a reply that would start the task waits for the hold to
 // lift. A reply that would start the task again is refused instead, before anything
 // is written, when nothing could run the task (`startRefusal`), so it never says it
@@ -25,11 +26,13 @@
 // A task the task runner runs has no ticket block, so it also gets a mailbox note
 // (see ./taskSteer); there, a reply during a run is a note and a steer, as it was.
 
-import { delegationTargetOf } from '@clawboo/board-core'
+import { autoFireRefusal, delegationTargetOf } from '@clawboo/board-core'
 import {
   addComment,
+  clearPersonAssignee,
   getReadyTasks,
   isStrandedInProgress,
+  listExecutions,
   recordTaskWake,
   updateStatus,
   type ClawbooDb,
@@ -92,6 +95,7 @@ export async function deliverPersonReply(
   if (wakeable && task.teamId) {
     const refusal = deps.startRefusal?.(task) ?? null
     if (refusal) return { status: 'not-delivered', agentId, reason: refusal }
+    if (task.assigneePersonId) clearPersonAssignee(db, task.id)
   }
   // A wake is what makes a run come. A parked task waits for a person, and a run the
   // task runner is driving reads its mailbox instead.
@@ -155,6 +159,11 @@ function wake(
 ): ReplyDelivery {
   // The saved wake waits: the dispatch pump runs a pass when the hold lifts.
   if (deps.held?.()) return { status: 'queued', agentId, reason: 'held' }
+  // Its agent has not finished stopping (it asked, or handed back, and the run is still
+  // ending). A move to To do now would read as being taken off the task. The run's end
+  // brings the pump, and the wake goes then.
+  if (task.status === 'blocked' && autoFireRefusal(listExecutions(db, task.id)) === 'running')
+    return { status: 'queued', agentId, reason: 'next-run' }
   if (task.status !== 'todo') {
     const move = (): ReturnType<typeof updateStatus> => updateStatus(db, task.id, 'todo')
     const moved = deps.asOwnWrite ? deps.asOwnWrite(move) : move()

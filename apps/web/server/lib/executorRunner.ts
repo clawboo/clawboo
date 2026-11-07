@@ -626,7 +626,12 @@ async function runTaskOnRuntimeInner(
           current?.status === 'in_review' &&
           lastRun?.id === claimState.execId &&
           lastRun?.status === 'running'
-        if (!parkingCheck || updateStatus(input.db, input.taskId, 'blocked').ok) {
+        if (
+          !parkingCheck ||
+          updateStatus(input.db, input.taskId, 'blocked', {
+            waitingOn: { kind: 'verification', state: 'could_not_run' },
+          }).ok
+        ) {
           const closed = claimState.execId
             ? completeExecutionProcess(input.db, claimState.execId, {
                 status: 'failed',
@@ -904,7 +909,10 @@ async function runTaskInner(
       })
     // A checkout that could hold work waits in Needs you: a run released to To
     // do would start again and refuse the same way, comment after comment.
-    if (workspace.refusal !== 'unsafe_to_rebuild' || !updateStatus(db, taskId, 'blocked').ok) {
+    if (
+      workspace.refusal !== 'unsafe_to_rebuild' ||
+      !updateStatus(db, taskId, 'blocked', { waitingOn: { kind: 'failure' } }).ok
+    ) {
       releaseTask(db, taskId)
     }
     return { ok: false, reason: 'workspace_unavailable' }

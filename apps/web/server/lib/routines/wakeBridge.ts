@@ -29,6 +29,7 @@ import {
   type DbAgent,
   type DbScheduledRun,
   type DbTask,
+  type WaitingOn,
 } from '@clawboo/db'
 import { resolveRuntimeIntegration, type RuntimeAdapter } from '@clawboo/executor'
 import { classifyError, isTransientError, type RuntimeErrorClass } from '@clawboo/obs'
@@ -155,6 +156,14 @@ function materializeTask(
  * runs again. A task bound at registration is the board's own and is left
  * exactly as the runner left it.
  */
+/** Why a routine's fire failed, as a task's reason. A budget stop and a tripped
+ *  breaker say so in their error (`budget_paused:…`, `breaker…`). */
+function routineStopReason(error: string | undefined): WaitingOn {
+  if (error && /budget/i.test(error)) return { kind: 'budget' }
+  if (error && /breaker/i.test(error)) return { kind: 'breaker' }
+  return { kind: 'failure' }
+}
+
 function setAsideFailedFireTask(
   db: ClawbooDb,
   taskId: string,
@@ -164,7 +173,7 @@ function setAsideFailedFireTask(
 ): void {
   try {
     if (getTask(db, taskId)?.status !== 'todo') return
-    const moved = updateStatus(db, taskId, 'blocked')
+    const moved = updateStatus(db, taskId, 'blocked', { waitingOn: routineStopReason(error) })
     if (!moved.ok) return
     // The event log is what live views follow; the status write reaches only
     // the in-process bus.

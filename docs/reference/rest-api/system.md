@@ -722,6 +722,9 @@ The answer is built from the running process alone: no database read, no network
     "board.labels": true,
     "board.inbox": true,
     "board.wakes": true,
+    "board.reopen": true,
+    "board.personAssignees": true,
+    "board.questions": true,
     "workspace.view": true,
     "workspace.preview": true,
     "agent.nativeShell": true,
@@ -754,6 +757,9 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `chat.rooms`                                                                | Always. Chat rooms inside a team (`/api/teams/:id/rooms`).                                                                                                                                                                                                |
 | `chat.direct`                                                               | Always. The server runs 1:1 chats with Clawboo Native, Claude Code, Codex and Hermes agents itself (`/api/agents/:agentId/chat`).                                                                                                                         |
 | `board.verification`                                                        | Always. A task whose stored verification verdict fails cannot reach `done` without a person's override.                                                                                                                                                   |
+| `board.reopen`                                                              | Always. `POST /api/board/:taskId/reopen`.                                                                                                                                                                                                                 |
+| `board.personAssignees`                                                     | Always. A task can be assigned to a person: `POST /api/board/:taskId/assign-person`.                                                                                                                                                                      |
+| `board.questions`                                                           | Always. An agent can ask a person, and a person can answer: `GET /api/board/:taskId/questions`, `POST /api/board/questions/:questionId/answer`.                                                                                                           |
 | `board.checkHold`                                                           | Always. A team-chat work check waits while another run of the team is working in the team folder, and its task carries `checkHeldSince` meanwhile.                                                                                                        |
 | `board.steering`                                                            | Always. A comment on a running task reaches the run, and `POST /api/board/:taskId/comments` answers with how it was delivered.                                                                                                                            |
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                      |
