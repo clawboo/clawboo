@@ -248,7 +248,8 @@ const SCHEMA_DDL = `
       runner_inputs        TEXT,
       identifier           TEXT,
       delegated_by_agent_id TEXT,
-      person_cancelled_at  INTEGER
+      person_cancelled_at  INTEGER,
+      check_held_since     INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);

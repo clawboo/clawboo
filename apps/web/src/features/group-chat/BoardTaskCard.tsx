@@ -65,6 +65,9 @@ export function toneFor(task: BoardTaskView): { tone: StatusTone; label: string 
   const attention = taskAttentionOf(task)
   if (attention)
     return { tone: ATTENTION_META[attention.reason].tone, label: attentionLabel(attention) }
+  // A check waiting for teammates to finish in the team folder has not started.
+  if (task.status === 'in_review' && task.checkHeldSince != null)
+    return { tone: 'idle', label: 'Waiting to check' }
   // An off-list status (the board parks these in its catch-all "Other" column)
   // shows its raw name rather than being mislabelled as queued work.
   return isTaskStatus(task.status)

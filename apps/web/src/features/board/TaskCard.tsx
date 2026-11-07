@@ -135,24 +135,28 @@ function IconMark({
 }
 
 /**
- * The one status mark a calendar chip shows, or null. Verifying comes first, then
- * a verdict that did not pass, then a pass (only before Done, whose column already
- * says it). A subtask's mark names the subtask in its tooltip and for screen
- * readers, so the row has no separate subtask mark to fit.
+ * The one status mark a calendar chip shows, or null. Verifying comes first (or
+ * waiting to, while a teammate is still working in the team folder), then a verdict
+ * that did not pass, then a pass (only before Done, whose column already says it).
+ * A subtask's mark names the subtask in its tooltip and for screen readers, so the
+ * row has no separate subtask mark to fit.
  */
 function chipStatusMark(
   status: string,
   verdict: 'pass' | 'fail' | 'completed_with_debt' | null,
   subtask: boolean,
+  checkHeld: boolean,
 ): ReactNode {
   if (status === 'in_review') {
+    const label = checkHeld ? 'Waiting to check' : 'Verifying'
+    const tip = checkHeld ? 'Waiting for teammates to finish in the team folder' : label
     return (
       <span
-        title={subtask ? withSubtask('Verifying', true) : undefined}
+        title={checkHeld || subtask ? withSubtask(tip, subtask) : undefined}
         className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
       >
         <StatusGlyph kind="verifying" />
-        <span className="board-shimmer">Verifying</span>
+        <span className={checkHeld ? undefined : 'board-shimmer'}>{label}</span>
         {subtask ? <span className="sr-only">. Subtask</span> : null}
       </span>
     )
@@ -448,7 +452,12 @@ export function TaskCard({
   const cost = runCostOf(task)
   const verdict = verdictStatus(task)
   const stamped = stamp != null
-  const mark = chipStatusMark(task.status, verdict, Boolean(task['parentTaskId']))
+  const mark = chipStatusMark(
+    task.status,
+    verdict,
+    Boolean(task['parentTaskId']),
+    task['checkHeldSince'] != null,
+  )
   // A card shows one mark; when that mark takes the cost's place, the cost moves
   // into the card's tooltip.
   const costTip =

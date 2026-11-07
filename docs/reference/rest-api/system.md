@@ -716,6 +716,7 @@ The answer is built from the running process alone: no database read, no network
     "chat.rooms": true,
     "chat.direct": true,
     "board.verification": true,
+    "board.checkHold": true,
     "board.steering": true,
     "board.readableIds": true,
     "board.labels": true,
@@ -752,6 +753,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `chat.rooms`                                                                | Always. Chat rooms inside a team (`/api/teams/:id/rooms`).                                                                                                                                                                                                |
 | `chat.direct`                                                               | Always. The server runs 1:1 chats with Clawboo Native, Claude Code, Codex and Hermes agents itself (`/api/agents/:agentId/chat`).                                                                                                                         |
 | `board.verification`                                                        | Always. A task whose stored verification verdict fails cannot reach `done` without a person's override.                                                                                                                                                   |
+| `board.checkHold`                                                           | Always. A team-chat work check waits while another run of the team is working in the team folder, and its task carries `checkHeldSince` meanwhile.                                                                                                        |
 | `board.steering`                                                            | Always. A comment on a running task reaches the run, and `POST /api/board/:taskId/comments` answers with how it was delivered.                                                                                                                            |
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                      |
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                      |

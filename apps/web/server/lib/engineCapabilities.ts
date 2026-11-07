@@ -120,6 +120,9 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // and no switch: a task whose stored verdict fails cannot reach done
     // without a person's override. A task with no verdict can still be moved.
     'board.verification': true,
+    // Inside the team-chat work check too, so no route of its own: a waiting check
+    // marks its task with `checkHeldSince`.
+    'board.checkHold': true,
     'board.steering': true,
     'board.readableIds': true,
     'board.labels': true,

@@ -36,9 +36,11 @@ export const ENGINE_FEATURES = [
   // Chat: rooms inside a team, and 1:1 chats the engine runs itself.
   'chat.rooms',
   'chat.direct',
-  // Board: the check on finished worktree work, a comment reaching a live run,
+  // Board: the check on finished worktree work, a team-chat check waiting for the
+  // team folder (`checkHeldSince` on a task), a comment reaching a live run,
   // readable task ids, and team labels.
   'board.verification',
+  'board.checkHold',
   'board.steering',
   'board.readableIds',
   'board.labels',

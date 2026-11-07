@@ -95,6 +95,7 @@ import { estimateTokensFromChars } from '../runtimes/estimateCost'
 import { createRunCostTally } from '../runtimes/runCostTally'
 import { recordRunTokens } from '../runTokenLog'
 import { buildOpenClawServerAdapter } from '../runtimes/serverAdapter'
+import { startFolderRun, type FolderRun } from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, teamWorkdirFor } from '../runtimes/teamWorkdir'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { resolveRuntimeKeyForRuntime } from '../secretsVault'
@@ -470,7 +471,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       /** The agent's configured model, used to price an estimate when the run's cost
        *  events name none. */
       model: string | null
-      /** Give the run's slot back (see runSlots). Called once the run is over, before
+      /** Give the run's slot back (see runSlots) and end its report that it is
+       *  working in the team folder, so its own check does not wait on it. Called
+       *  once the run is over, before
        *  the session's next delivery flushes and before the engine reacts to the
        *  terminal, so whatever that starts can take the slot. */
       releaseRunSlot: () => void
@@ -1333,6 +1336,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           let queuedEntry: QueuedRun | null = null
           let keepBusy: ReturnType<typeof setInterval> | null = null
           let runSlot: RunSlot | null = null
+          // This run's report that it is working in the team folder, from just
+          // before its start to its end (see teamFolderActivity).
+          let folderRun: FolderRun | null = null
+          const runFolder = teamWorkdirFor(resolvedRuntime, teamId)
           // The run's budget hold, from the budget gate until its cost settles or the
           // run is refused; the job's `finally` releases it too, whatever ended it.
           let runHold: RunBudgetHold | null = null
@@ -1482,6 +1489,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               refuseForBudget(finalGate.scope, finalGate.reason)
               return
             }
+            if (runFolder) folderRun = startFolderRun(runFolder, targetAgentId)
             let run: RunHandle
             try {
               run = await adapter.start(
@@ -1600,7 +1608,10 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 stamp,
                 execId: runExecId,
                 model: configuredModel,
-                releaseRunSlot: () => runSlot?.release(),
+                releaseRunSlot: () => {
+                  runSlot?.release()
+                  folderRun?.release()
+                },
                 hold,
               })
             } finally {
@@ -1657,6 +1668,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
                 // Every way out of runJob releases its budget hold itself, before the
                 // agent's lock goes; this covers a throw that skipped them.
                 runHold?.release()
+                folderRun?.release()
                 slot.release()
                 leaveQueue()
                 stopBeat()

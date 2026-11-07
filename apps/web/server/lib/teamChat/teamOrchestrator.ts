@@ -419,7 +419,12 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // The task runner's verification gate, run on the team folder: a task whose
     // run changed it is done only once the team's verify command (and, for a
     // large, risky or handed-down change, a reviewer) passes it.
-    workCheck: createTeamWorkCheck({ db, teamId, mcpBaseUrl }),
+    workCheck: createTeamWorkCheck({
+      db,
+      teamId,
+      mcpBaseUrl,
+      onBoardChange: (change) => publishBoardChangeWithAttention(db, teamId, change),
+    }),
   })
   engineRef.current = engine
 

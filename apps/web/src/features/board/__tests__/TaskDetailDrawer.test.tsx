@@ -1382,6 +1382,74 @@ describe('TaskDetailDrawer: review fixes', () => {
     ).toEqual([TOKEN_LINE])
   })
 
+  it('says in plain words that a check is waiting for a teammate', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'in_review',
+        checkHeldSince: 1_700_000_000_000,
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    expect(await screen.findByTestId('task-check-held')).toHaveTextContent(
+      'Waiting for teammates to finish in the team folder',
+    )
+  })
+
+  it('says nothing about waiting on a task that is not', async () => {
+    server.use(...stubTask('t1', { title: 'Ship it', status: 'in_review', checkHeldSince: null }))
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    await screen.findByText('Ship it')
+    expect(screen.queryByTestId('task-check-held')).toBeNull()
+  })
+
+  it.each([
+    [
+      'a wait that ended well',
+      { waitedMs: 240_000, limitReached: false, runBeside: false },
+      'Waited 4 min for teammates to finish in the team folder',
+    ],
+    [
+      'a wait shorter than a minute',
+      { waitedMs: 20_000, limitReached: false, runBeside: false },
+      'Waited under a minute for teammates to finish in the team folder',
+    ],
+    [
+      'a wait that ran out',
+      { waitedMs: 900_000, limitReached: true, runBeside: true },
+      'Stopped waiting after 15 min, so this check ran with the team folder still in use',
+    ],
+    [
+      'a run that started during the check',
+      { waitedMs: 0, limitReached: false, runBeside: true },
+      'A teammate was also working in the team folder during this check',
+    ],
+  ])('records %s on the verdict', async (_what, hold, line) => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'done',
+        verification: JSON.stringify({ status: 'pass', attempts: [{ hold }] }),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).getByTestId('task-check-hold')).toHaveTextContent(line)
+  })
+
+  it('shows no hold line on a verdict that has none', async () => {
+    server.use(
+      ...stubTask('t1', {
+        title: 'Ship it',
+        status: 'done',
+        verification: JSON.stringify({ status: 'pass', attempts: [{}] }),
+      }),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    const verification = await screen.findByTestId('task-verification')
+    expect(within(verification).queryByTestId('task-check-hold')).toBeNull()
+  })
+
   it("keeps the failed command's item on a check whose command failed", async () => {
     server.use(
       ...stubTask('t1', {
