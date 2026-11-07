@@ -20,7 +20,17 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { encodeHumanAssignment } from '@clawboo/board-core'
-import { agents, createTask, getComments, listExecutions, listTasks, teams } from '@clawboo/db'
+import {
+  agents,
+  createTask,
+  getComments,
+  listChatHandOffTasks,
+  listExecutions,
+  listPendingChatReportUps,
+  listPendingReportUps,
+  listTasks,
+  teams,
+} from '@clawboo/db'
 import type { RuntimeEvent } from '@clawboo/executor'
 
 import type { TurnOrigin } from '@clawboo/team-orchestration'
@@ -40,9 +50,10 @@ vi.mock('../serverDeliver', () => ({
   },
 }))
 
-const { getDb, resetDb } = await import('../../db')
+const { getDb, getDbPath, resetDb } = await import('../../db')
 const { getTeamOrchestrator, resetTeamOrchestrators, taskForLiveSession } =
   await import('../teamOrchestrator')
+const { onChatReportUp } = await import('../../agentChat/chatReportUpOutbox')
 
 const done = (summary: string, runId: string): RuntimeEvent => ({
   kind: 'done',
@@ -59,14 +70,17 @@ const flush = async (): Promise<void> => {
 
 describe('team orchestrator: the run primitive wiring', () => {
   let home: string
-  let prevHome: string | undefined
+  const prev: Record<string, string | undefined> = {}
 
   beforeEach(async () => {
     captured.deps = null
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-deliver-wiring-'))
     await mkdir(path.join(home, '.clawboo'), { recursive: true })
-    prevHome = process.env['HOME']
+    for (const k of ['HOME', 'CLAWBOO_HOME']) prev[k] = process.env[k]
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    resetDb()
+    expect(getDbPath().startsWith(home)).toBe(true)
     const db = getDb()
     const now = Date.now()
     db.insert(teams)
@@ -111,8 +125,10 @@ describe('team orchestrator: the run primitive wiring', () => {
     // lead, which reads the board. Let it finish before the DB closes.
     await flush()
     resetDb()
-    if (prevHome === undefined) delete process.env['HOME']
-    else process.env['HOME'] = prevHome
+    for (const [k, v] of Object.entries(prev)) {
+      if (v === undefined) delete process.env[k]
+      else process.env[k] = v
+    }
     await rm(home, { recursive: true, force: true })
   })
 
@@ -198,6 +214,36 @@ describe('team orchestrator: the run primitive wiring', () => {
     })
     await flush()
     expect(listTasks(db, { teamId: 'T' })).toHaveLength(before + 1)
+  })
+
+  it('a hand-off from a one-to-one chat answers in that chat, not a team session', async () => {
+    const db = getDb()
+    const chat = 'agent:L:codex'
+    const told: string[] = []
+    const stop = onChatReportUp((key) => told.push(key))
+    const orchestrator = getTeamOrchestrator('T')
+
+    const { taskId } = await orchestrator.handOffFromChat({
+      fromAgentId: 'L',
+      targetAgentId: 'W',
+      targetAgentName: 'Coder',
+      task: 'Write the tests',
+      turnId: 'chat-turn',
+      chatSessionKey: chat,
+    })
+    await flush()
+
+    expect(listChatHandOffTasks(db, chat).map((t) => t.id)).toEqual([taskId])
+    await captured.deps!.onEvent('agent:W:team:T', done('tests written', 'run-1'), {
+      reportForTaskId: null,
+      stopGen: 0,
+    })
+    await flush()
+
+    expect(listPendingChatReportUps(db, chat).map((r) => r.taskId)).toEqual([taskId])
+    expect(listPendingReportUps(db, 'T', null)).toEqual([])
+    expect(told).toEqual([chat])
+    stop()
   })
 
   it("the run's execution row reaches the run primitive, which records its cost there", async () => {

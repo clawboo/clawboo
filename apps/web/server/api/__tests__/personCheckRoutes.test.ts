@@ -21,6 +21,8 @@ import {
   listEvents,
   listGovernanceAudit,
   listPauses,
+  listPendingChatReportUps,
+  listPendingReportUps,
   listTaskQuestions,
   openAgentWakeCard,
   placePause,
@@ -46,6 +48,7 @@ vi.mock('../../lib/runnerRerun', async (importOriginal) => ({
 }))
 
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+const { onChatReportUp } = await import('../../lib/agentChat/chatReportUpOutbox')
 const { boardCommentPOST, boardCreatePOST, boardTaskLabelsPUT } = await import('../board')
 const { boardAgentWakesPOST, boardAssignPersonPOST, boardQuestionAnswerPOST, boardReopenPOST } =
   await import('../boardPerson')
@@ -327,6 +330,47 @@ describe.each(ROUTES)('%s', (_name, call) => {
     const r = mockRes()
     await call({ headers: DASHBOARD }, r.res)
     expect(r.code()).toBeLessThan(300)
+  })
+})
+
+describe('an answer to a plan from a one-to-one chat', () => {
+  it('is that chat’s to send, at once, and no team session hears it', async () => {
+    const CHAT = 'agent:bz:codex'
+    const db = getDb()
+    setSetting(db, planApprovalSettingKey(TEAM), JSON.stringify({ on: true }))
+    const made = proposePlan(db, {
+      teamId: TEAM,
+      agentId: 'bz',
+      prompt: 'p',
+      steps: [
+        { title: 'one', agentId: 'coder', agentName: 'Coder' },
+        { title: 'two', agentId: 'coder', agentName: 'Coder' },
+      ],
+      taskId: null,
+      parentTaskId: null,
+      turnId: 'chat-turn',
+      parallel: true,
+      chatSessionKey: CHAT,
+    })
+    if (made.status !== 'proposed') throw new Error(made.status)
+    const told: string[] = []
+    const stop = onChatReportUp((key) => told.push(key))
+
+    const r = mockRes()
+    await boardQuestionAnswerPOST(
+      req({
+        params: { questionId: made.question.id },
+        body: { answer: { kind: 'suggest_tasks', accepted: false, tasks: [] } },
+        headers: DASHBOARD,
+      }),
+      r.res,
+    )
+    stop()
+
+    expect(r.code()).toBe(200)
+    expect(told).toEqual([CHAT])
+    expect(listPendingChatReportUps(db, CHAT)).toHaveLength(1)
+    expect(listPendingReportUps(db, TEAM, null)).toEqual([])
   })
 })
 

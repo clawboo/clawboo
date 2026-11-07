@@ -40,9 +40,40 @@ Boo Zero can change as your install grows. Say you use OpenClaw, then put a Claw
 
 Click the mascot at the top of the team rail. Boo Zero's page opens and works like any [agent's page](/using/agents); the agent column hides while you are there. The message box reads **Ask me anything… use @ to tag a team**.
 
-Use this chat to ask Boo Zero about your teams. Every message you send here carries a fixed set of rules that names Boo Zero and tells it that it cannot hand out work from this chat. You cannot edit them.
+Use this chat to ask Boo Zero about your teams, and to give a team work. Every message you send here carries a fixed set of rules that names Boo Zero. You cannot edit them.
 
-To give a team work, send the request in that team's chat instead. Boo Zero leads there, and its hand-offs become tasks on the board. Its own chat has no board and no team behind it, on every runtime, so Boo Zero tells you to ask in the team's chat. If a reply still contains a hand-off, it shows as a **Not handed off** note, not as a task.
+### Give a team work from this chat
+
+Start your message with @ and the team's name, or name the team in plain words:
+
+```text
+@Growth Write the launch post and have someone check the numbers.
+```
+
+Boo Zero hands the work to someone on that team, and it runs the way a hand-off in that team's chat does. Each hand-off becomes a task on that team's board, in **General**. Its card appears in this chat under **Handed to** and the team's name, and in the team's chat too. The card moves as the work does. When the task ends, the result comes back to Boo Zero in this chat, and Boo Zero tells you what came of it. If Clawboo restarts first, the result still arrives, once the server is back.
+
+Your message is a request, as it is in a team's chat. What it hands out to one team goes under one [main task](/concepts/the-board#your-request-is-one-main-task) on that team's board, holding your words, and a message to two teams makes one on each. Boo Zero looks after it from this chat: when the last of its work is in, Boo Zero's reply here is the summary, the reply goes on the main task, and the main task closes. Each request gets its own reply. A result Boo Zero reads while answering something else closes its request too, with a note saying the reply is in the chat.
+
+- **No team named.** Boo Zero asks which team. If a hand-off in a reply still names no team, nothing starts and the chat asks you. Pick a team above the message box, or say which in your next message.
+- **It never guesses a name.** A name two teams or two teammates could share asks you which one. With a team named, a whole team name still means that team, not a teammate whose name starts the same.
+- **It refuses plainly.** Whatever a reply asked for that did not start, the chat says so: a team or teammate that is not there, work that has failed too often, a paused team or teammate, or a hand-off while Clawboo is stopping or updating. Boo Zero hears the same on its next turn.
+- **Showing is not starting.** A hand-off inside code or a quote starts nothing and stays on screen as written, so Boo Zero can show you a draft.
+- **Results cannot start new teams.** While Boo Zero reads a result, it can go on only in the team that result came from, and anything else waits for you to ask. A result may quote a teammate, and only your message can reach a new team.
+- **The same fences as a team's chat.** A hand-off whose words look risky asks you first, in the tray above the message box. The caps on hand-offs apply, and one reply starts at most 8.
+- **A team that asks first asks here too.** On a team [that asks before a plan starts](/concepts/the-board#plans), several hand-offs in one reply wait for your answer on one card, in this chat and on the board, and nothing starts until then. Your answer reaches Boo Zero in this chat, and the results of what you accepted come back here. One hand-off goes straight out, as in the team's chat.
+- **A plan does not run here.** Boo Zero hands off each piece on its own. A `<plan>` in a reply starts nothing, and the chat says so. For a plan, ask in the team's chat.
+- **A pause holds results.** While a pause covers Boo Zero, or the team or request a result is on, the result waits and uses up no try. It goes out when the pause lifts.
+- **Stop stops Boo Zero's reply, not the team.** A reply you stop starts nothing, and one that ends early says its hand-offs did not start. Work already handed off keeps going: stop it in the team's chat or on its card. A result that arrives after you press Stop starts no reply until your next message, which carries it. Its card still moves in the meantime.
+
+This works when the Clawboo server runs Boo Zero: Clawboo Native, Claude Code, Codex or Hermes.
+
+<Note>
+
+**An OpenClaw Boo Zero cannot hand off from this chat.** Its chat goes from your browser straight to the OpenClaw Gateway, so the Clawboo server never sees the reply, and that chat is outside the run limit and outside a hold while Clawboo stops or updates. Starting team work from a reply the server never saw would bypass all of that, so nothing starts. Its rules tell Boo Zero to say so, and any hand-off in a reply shows as a **Not handed off** note. Ask in the team's chat instead.
+
+</Note>
+
+The chat with any other agent is a plain conversation too. A hand-off in its reply shows as a **Not handed off** note.
 
 ### Ask about one team with @TeamName
 
@@ -52,7 +83,7 @@ Start your message with @ and the team's name, or click the team in the **Teams*
 @Growth What is still open for Friday's review?
 ```
 
-Clawboo then adds a snapshot of that team to this one message: its brief (the first 900 characters), a summary of its board, a few facts from its memory, and its recent chat. Only a mention at the very start of the message counts.
+Clawboo then adds a snapshot of that team to this one message: its brief (the first 900 characters), a summary of its board, a few facts from its memory, and its recent chat. Only a mention at the very start of the message counts. The mention also tells Boo Zero which team you mean if it hands anything off.
 
 ## What Boo Zero reads
 

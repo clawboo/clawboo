@@ -255,13 +255,15 @@ const SCHEMA_DDL = `
       person_cancelled_at  INTEGER,
       check_held_since     INTEGER,
       run_execution_id     TEXT,
-      is_main_task         INTEGER NOT NULL DEFAULT 0
+      is_main_task         INTEGER NOT NULL DEFAULT 0,
+      chat_session_key     TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);
     CREATE INDEX IF NOT EXISTS idx_tasks_team_room   ON tasks (team_id, room_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee    ON tasks (assignee_agent_id);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent      ON tasks (parent_task_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_chat_session ON tasks (chat_session_key, updated_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_parent_dropped_created ON tasks (parent_task_id, dropped, created_at);
     CREATE INDEX IF NOT EXISTS idx_tasks_assignee_person ON tasks (assignee_person_id);
     -- One assignee, agent or person, never both, for every writer. Other processes
@@ -880,9 +882,11 @@ const SCHEMA_DDL = `
       created_at          INTEGER NOT NULL,
       settled_at          INTEGER,
       settled_how         TEXT,
-      held_at             INTEGER
+      held_at             INTEGER,
+      chat_session_key    TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_report_up_outbox_pending ON report_up_outbox (team_id, room_id, settled_at);
+    CREATE INDEX IF NOT EXISTS idx_report_up_outbox_chat ON report_up_outbox (chat_session_key, settled_at);
 
     CREATE TABLE IF NOT EXISTS task_wakes (
       id                TEXT    PRIMARY KEY,

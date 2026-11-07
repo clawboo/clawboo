@@ -932,6 +932,11 @@ Every turn starts in the agent's team folder, `<CLAWBOO_HOME>/workspaces/<teamId
   entryId?: string      // idempotency key for the persisted user turn; defaults to
                         // `user-<Date.now()>`. Re-posting one inserts nothing (the
                         // optimistic client bubble and the SSE replay share the id).
+                        // In Boo Zero's chat it also names the request: what the
+                        // message hands out goes under one main task per team.
+  teamId?: string       // Boo Zero's chat only: the team named with @Team at the start
+                        // of the message, which a hand-off in the reply may then leave
+                        // out. Ignored when it is not an active team.
 }
 ```
 
@@ -1014,7 +1019,7 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop
 
 ## `GET /api/agents/:agentId/chat/stream`
 
-A Server-Sent Events tail of the agent's 1:1 chat (`agent:<agentId>:native`, or `agent:<agentId>:<runtime>` for a Claude Code, Codex or Hermes agent). It only reads; it never starts a turn. It sends two kinds of frame: stored `chat_messages` rows, polled every 750 ms past a row-id cursor (each with an `id:` line, so they replay on resume), and live frames for streaming text and run state (no `id:` line, never replayed).
+A Server-Sent Events tail of the agent's 1:1 chat (`agent:<agentId>:native`, or `agent:<agentId>:<runtime>` for a Claude Code, Codex or Hermes agent). It only reads; it never starts a turn. It sends two kinds of frame: stored `chat_messages` rows, polled every 750 ms past a row-id cursor (each with an `id:` line, so they replay on resume), and live frames for streaming text, run state and the cards of tasks handed off from this chat (no `id:` line, never replayed).
 
 **Where it starts.** With no `Last-Event-ID` header and no `since`, the stream starts at the newest stored message and sends only what follows. Load the history first with `GET /api/chat-history` (see [Chat history API](/reference/rest-api/chat-history)). A supplied cursor resumes after that row id; `Last-Event-ID` wins over `since`, and an invalid or negative value resumes from `0` (the whole chat).
 
@@ -1048,16 +1053,18 @@ then sends a `: connected` comment, a `cursor` event with the row id it starts f
 
 ### Event catalog
 
-| Frame           | When                                    | Shape                                                             |
-| --------------- | --------------------------------------- | ----------------------------------------------------------------- |
-| `: connected`   | Immediately on open                     | SSE comment (ignored by `EventSource`)                            |
-| `event: cursor` | Once, right after `: connected`         | `id: <row id>` line + `{ cursor }`: where this connection starts  |
-| entry data      | Per new stored row (every 750 ms)       | `id: <row id>` line + `data: <json>` line (the stored chat entry) |
-| `event: delta`  | Per streamed piece of the reply         | `{ sessionKey, runId, text }`; `text` is the whole reply so far   |
-| `event: status` | When a turn starts or ends, and on open | `{ agentId, status: 'running' \| 'idle' \| 'error' }`             |
-| `: keepalive`   | Every 20 s while open                   | SSE comment (keeps the connection warm)                           |
+| Frame             | When                                    | Shape                                                                                               |
+| ----------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `: connected`     | Immediately on open                     | SSE comment (ignored by `EventSource`)                                                              |
+| `event: cursor`   | Once, right after `: connected`         | `id: <row id>` line + `{ cursor }`: where this connection starts                                    |
+| entry data        | Per new stored row (every 750 ms)       | `id: <row id>` line + `data: <json>` line (the stored chat entry)                                   |
+| `event: delta`    | Per streamed piece of the reply         | `{ sessionKey, runId, text }`; `text` is the whole reply so far                                     |
+| `event: status`   | When a turn starts or ends, and on open | `{ agentId, status: 'running' \| 'idle' \| 'error' }`                                               |
+| `event: board`    | On open, then when a card changes       | A task handed off from this chat: the fields of the team chat stream's `board` frame, plus `teamId` |
+| `event: handOffs` | On open, and when it changes            | `{ on }`: whether this chat acts on a hand-off in a reply                                           |
+| `: keepalive`     | Every 20 s while open                   | SSE comment (keeps the connection warm)                                                             |
 
-The `cursor` event gives an `EventSource` a resume point before any row arrives, so a connection that drops first still reconnects from where it started instead of the newest row at that moment. A client needs no listener for it. `delta` and `status` frames carry no `id:` line, so they never move the resume cursor. The stored rows are the record; the deltas only let a reply appear as it is written.
+The `cursor` event gives an `EventSource` a resume point before any row arrives, so a connection that drops first still reconnects from where it started instead of the newest row at that moment. A client needs no listener for it. `delta`, `status`, `board` and `handOffs` frames carry no `id:` line, so they never move the resume cursor. `board` frames are read from the task rows: every connection gets the chat's cards again, up to its newest 200, so one missed while no stream was open is right after a reconnect. The stored rows are the record; the deltas only let a reply appear as it is written.
 
 ### Example
 

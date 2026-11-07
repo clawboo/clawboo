@@ -39,9 +39,11 @@ import {
 import {
   agents,
   appendEvent,
+  createTask,
   latestChatMessageId,
   teams,
   type DbOrchestrationEvent,
+  updateStatus,
 } from '@clawboo/db'
 import { createAccessGate, createOriginGuard } from '@clawboo/gateway-proxy'
 import type { TranscriptEntry } from '@clawboo/protocol'
@@ -77,6 +79,7 @@ const PINNED_FEATURES = [
   'runtime.hermes',
   'chat.rooms',
   'chat.direct',
+  'chat.handOffs',
   'board.verification',
   'board.checkHold',
   'board.reportResult',
@@ -416,6 +419,28 @@ const PINNED_STREAMS = {
       cursor: CURSOR_FIELDS,
       message: CHAT_MESSAGE_FIELDS,
       delta: CHAT_DELTA_FIELDS,
+      board: [
+        'id',
+        'title',
+        'status',
+        'assigneeAgentId',
+        'parentTaskId',
+        'identifier',
+        'createdAt',
+        'updatedAt',
+        'summary',
+        'attention',
+        'roomId',
+        'waitingOn',
+        'waitingOnDetail',
+        'assigneePersonId',
+        'assigneePerson',
+        'checkHeldSince',
+        'isMainTask',
+        'planHolder',
+        'teamId',
+      ],
+      handOffs: ['on'],
       status: AGENT_STATUS_FIELDS,
     },
   },
@@ -833,17 +858,52 @@ describe('resumable streams', () => {
     const seen = latestChatMessageId(db, [sessionKey])
     persistNativeChatEntry(db, agentId, 'new reply', { sessionKey })
     const next = latestChatMessageId(db, [sessionKey])
+    // A task handed off from this chat: its card rides this stream.
+    const handedOff = createTask(db, {
+      title: 'A hand-off',
+      teamId: 'contract-team',
+      chatSessionKey: sessionKey,
+    })
 
     const frames = await readStream(`${base}/api/agents/${agentId}/chat/stream?since=${seen}`, {
       onOpen: () => {
         publishChatDelta(sessionKey, { sessionKey, runId: 'run-3', text: 'Typ' })
         publishAgentStatus(sessionKey, { agentId, status: 'idle' })
       },
-      done: (f) => ['delta', 'status'].every((e) => f.some((x) => x.event === e)),
+      done: (f) =>
+        ['delta', 'board', 'handOffs', 'status'].every((e) => f.some((x) => x.event === e)),
     })
 
     expect(frames.filter((f) => f.event === 'message').map((f) => f.id)).toEqual([String(next)])
     expectFramesMatch('agentChat', frames)
+    expect(JSON.parse(frames.find((f) => f.event === 'handOffs')!.data)).toEqual({ on: false })
+    const cards = frames.filter((f) => f.event === 'board').map((f) => JSON.parse(f.data))
+    expect(cards.map((c) => c.id)).toEqual([handedOff.id])
+    expect(cards[0].teamId).toBe('contract-team')
+  })
+
+  it('agent chat: a card that changes goes out again, and one that did not does not', async () => {
+    const db = getDb()
+    const agentId = 'contract-solo-2'
+    const sessionKey = agentChatSessionKey(db, agentId)
+    const task = createTask(db, { title: 'A hand-off', chatSessionKey: sessionKey })
+    let moved = false
+
+    const frames = await readStream(`${base}/api/agents/${agentId}/chat/stream`, {
+      done: (f) => {
+        const cards = f.filter((x) => x.event === 'board')
+        if (cards.length >= 1 && !moved) {
+          moved = true
+          updateStatus(db, task.id, 'in_progress')
+          // Past a few more polls with nothing new to say, then end the read.
+          setTimeout(() => publishAgentStatus(sessionKey, { agentId, status: 'idle' }), 2_000)
+        }
+        return f.some((x) => x.event === 'status')
+      },
+    })
+
+    const statuses = frames.filter((f) => f.event === 'board').map((f) => JSON.parse(f.data).status)
+    expect(statuses).toEqual(['todo', 'in_progress'])
   })
 
   it('event stream: resumes from Last-Event-ID with the row seq as the id', async () => {

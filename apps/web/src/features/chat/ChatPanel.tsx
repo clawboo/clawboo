@@ -7,7 +7,9 @@ import { useChatStore } from '@/stores/chat'
 import { PausedNotice } from '@/features/pause/PausedNotice'
 import { pauseOfAgent, usePauseStore } from '@/stores/pauses'
 import { isSessionLive, useConnectionStore } from '@/stores/connection'
+import type { BoardTaskView } from '@/stores/board'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useChatHandOffStore } from '@/stores/chatHandOffs'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useTeamStore } from '@/stores/team'
 import { sendChatMessage } from './chatSendOperation'
@@ -34,6 +36,8 @@ import { InlineApprovalTray } from '@/features/approvals/InlineApprovalTray'
 import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
 import { nextSeq } from '@/lib/sequenceKey'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
+import { BoardTaskCard } from '@/features/group-chat/BoardTaskCard'
+import { stripActionableHandOffs } from '@/features/group-chat/delegationTags'
 import { TeamChips } from './TeamChips'
 
 // A server-run 1:1 chat has no Gateway 'running' status pushed, so "busy" is the
@@ -41,6 +45,23 @@ import { TeamChips } from './TeamChips'
 // reply + a short grace after the last frame (which also covers the gap between the
 // send and the run's first frame).
 const NATIVE_BUSY_GRACE_MS = 6000
+
+// ─── HandOffCard ──────────────────────────────────────────────────────────────
+
+/** A task this chat handed off: the team chat's card, under the team it went to. */
+function HandOffCard({ task }: { task: BoardTaskView }) {
+  const teamName = useTeamStore((s) => s.teams.find((t) => t.id === task.teamId)?.name ?? null)
+  return (
+    <div data-testid="chat-hand-off">
+      {teamName && (
+        <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          Handed to {teamName}
+        </p>
+      )}
+      <BoardTaskCard task={task} teamId={task.teamId ?? null} />
+    </div>
+  )
+}
 
 // ─── ChatPanel ────────────────────────────────────────────────────────────────
 
@@ -220,6 +241,47 @@ export function ChatPanel({
   const booZeroAgentId = useBooZeroStore((s) => s.booZeroAgentId)
   const teams = useTeamStore((s) => s.teams)
   const isBooZeroChat = Boolean(agent && booZeroAgentId && agent.id === booZeroAgentId)
+  // Boo Zero's chat hands work to teams when the server runs it, since only then does
+  // the server see the reply. An OpenClaw Boo Zero's chat goes straight to the Gateway,
+  // and its reply can start nothing: its anchor and its notes say so. The stream says
+  // which this is: `booZeroAgentId` is this browser's idea, which falls back to the
+  // first teamless agent, and the server's is the one that acts.
+  const handOffsWork = useChatHandOffStore(
+    (s) => isServerChat && agent !== null && s.handsOffByAgent.get(agent.id) === true,
+  )
+
+  // Every turn that is not all hand-off tags: one that is has its cards to show for it,
+  // and its own bubble would be empty.
+  const shownBlocks = useMemo(
+    () =>
+      handOffsWork
+        ? blocks.filter(
+            (b) =>
+              b.kind !== 'assistant-turn' ||
+              b.thinking.length > 0 ||
+              b.tools.length > 0 ||
+              stripActionableHandOffs(b.assistant?.text ?? '').trim().length > 0,
+          )
+        : blocks,
+    [blocks, handOffsWork],
+  )
+  // The hand-offs' cards, the same card a team's chat shows.
+  const handOffTasks = useChatHandOffStore((s) =>
+    agent ? s.tasksByAgent.get(agent.id) : undefined,
+  )
+  const handOffCards = useMemo(
+    () =>
+      handOffsWork && handOffTasks
+        ? [...handOffTasks.values()]
+            .filter((t) => t.status !== 'cancelled')
+            .map((t) => ({
+              id: t.id,
+              at: t.createdAt,
+              node: <HandOffCard task={t} />,
+            }))
+        : [],
+    [handOffsWork, handOffTasks],
+  )
 
   // Composer ref — lets the TeamChips row insert `@TeamName` at the start of
   // the draft when the user clicks a chip. Only used in Boo Zero's chat (the
@@ -292,7 +354,11 @@ export function ChatPanel({
       // Transport: server-run agents run server-side + stream over SSE; OpenClaw agents
       // ride the Gateway. `outbound` is the (context-injected) text delivered to the
       // model; `display` is what shows in the transcript (undefined = same as outbound).
-      const deliver = async (outbound: string, display: string | undefined): Promise<void> => {
+      const deliver = async (
+        outbound: string,
+        display: string | undefined,
+        teamId?: string,
+      ): Promise<void> => {
         if (isServerChat) {
           bumpNativeActivity()
           await sendNativeAgentMessage({
@@ -300,6 +366,7 @@ export function ChatPanel({
             sessionKey,
             message: outbound,
             displayText: display ?? outbound,
+            ...(teamId ? { teamId } : {}),
           })
         } else if (client) {
           await sendChatMessage({
@@ -322,7 +389,10 @@ export function ChatPanel({
       if (isBooZeroChat) {
         // No teamName in the 1:1 chat path — Boo Zero coordinates across
         // every team here, not within any single team's scope.
-        const identityBlock = buildBooZeroRulesBlock({ displayName: agent.name })
+        const identityBlock = buildBooZeroRulesBlock({
+          displayName: agent.name,
+          handOffs: handOffsWork,
+        })
 
         const teamCandidates = teams.map((t) => ({ id: t.id, name: t.name }))
         const mention = parseTeamOrAgentMention(message, teamCandidates)
@@ -355,7 +425,7 @@ export function ChatPanel({
           const sections = [identityBlock, activityBlock, mention.cleanedMessage].filter(
             (s): s is string => Boolean(s),
           )
-          await deliver(sections.join('\n\n'), message)
+          await deliver(sections.join('\n\n'), message, mention.targetId)
           return
         }
 
@@ -367,7 +437,16 @@ export function ChatPanel({
 
       await deliver(message, undefined)
     },
-    [client, agent, sessionKey, isBooZeroChat, isServerChat, teams, bumpNativeActivity],
+    [
+      client,
+      agent,
+      sessionKey,
+      isBooZeroChat,
+      isServerChat,
+      handOffsWork,
+      teams,
+      bumpNativeActivity,
+    ],
   )
 
   // ── No agent selected ───────────────────────────────────────────────────────
@@ -446,7 +525,7 @@ export function ChatPanel({
 
       {/* Messages */}
       <MessageList
-        blocks={blocks}
+        blocks={shownBlocks}
         streamingText={streamingText}
         agentId={agent.id}
         agentName={agent.name}
@@ -454,6 +533,8 @@ export function ChatPanel({
         sessionKey={sessionKey}
         hasMoreEarlier={hasMoreEarlier}
         fetchEarlier={fetchEarlier}
+        handOffs={handOffsWork ? 'chat-card' : 'not-handed-off'}
+        cards={handOffCards}
       />
 
       {/* Inline approval cards for this agent */}

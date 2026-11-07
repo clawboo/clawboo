@@ -1,6 +1,7 @@
 import {
   createContext,
   forwardRef,
+  Fragment,
   memo,
   useCallback,
   useContext,
@@ -12,6 +13,7 @@ import {
   useState,
   type KeyboardEvent,
   type ChangeEvent,
+  type ReactNode,
   type RefObject,
 } from 'react'
 import ReactMarkdown from 'react-markdown'
@@ -60,7 +62,11 @@ import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
 import { shouldDropAssistantTurn } from '@/lib/teamProtocol'
 import { parseToolEntry } from './parseToolEntry'
 import { splitAssistantText } from './splitAssistantText'
-import { stripPlanBlocks, stripDelegationBlocks } from '@/features/group-chat/delegationTags'
+import {
+  stripActionableHandOffs,
+  stripPlanBlocks,
+  stripDelegationBlocks,
+} from '@/features/group-chat/delegationTags'
 import { MentionDropdown, type MentionCandidate } from './MentionDropdown'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -902,15 +908,23 @@ export const DelegationCard = memo(function DelegationCard({
 })
 
 // ─── NotHandedOffNote ─────────────────────────────────────────────────────────
-// What a `<delegate>` block becomes in a one-to-one chat. Nothing there acts on
-// the tag (no board, no team engine), so drawing it as "Delegated to @Name"
-// would promise work that never starts. The note says it was not handed off,
-// and where a hand-off does work.
+// What a `<delegate>` block becomes in a one-to-one chat where nothing acts on the
+// tag: any agent's but Boo Zero's, and an OpenClaw Boo Zero's, whose reply the server
+// never sees. Drawing it as "Delegated to @Name" would promise work that never
+// starts. The note says it was not handed off, and where a hand-off does work.
 
-/** How a reply's `<delegate>` blocks are drawn: as the "Delegated to" card in a
- *  team's chat, where each one starts a task, or as a not-handed-off note in a
- *  one-to-one chat, where nothing acts on them. */
-export type HandOffDisplay = 'card' | 'not-handed-off'
+/** How a reply's `<delegate>` blocks are drawn: `card` in a team's chat, where each one
+ *  starts a task; `chat-card` in a one-to-one chat that acts on them, where only a tag
+ *  outside code and quotes starts one and any other stays on screen as written; and
+ *  `not-handed-off`, a note in a one-to-one chat where nothing acts on them. */
+export type HandOffDisplay = 'card' | 'chat-card' | 'not-handed-off'
+
+/** A task card placed in a one-to-one chat's timeline by when it was made. */
+export interface ChatTimelineCard {
+  id: string
+  at: number
+  node: ReactNode
+}
 
 export const NotHandedOffNote = memo(function NotHandedOffNote({
   targetName,
@@ -938,7 +952,7 @@ export const NotHandedOffNote = memo(function NotHandedOffNote({
         </div>
       )}
       <p className="text-[11px] leading-relaxed text-foreground/50">
-        Hand-offs work only in a team’s chat. Ask there to give this to @{targetName}.
+        This chat cannot hand off work. Ask in a team’s chat to give this to @{targetName}.
       </p>
     </div>
   )
@@ -1067,7 +1081,9 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
             )
           ) : (
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>
-              {stripPlanBlocks(stripDelegationBlocks(shownText))}
+              {handOffs === 'chat-card'
+                ? stripActionableHandOffs(shownText)
+                : stripPlanBlocks(stripDelegationBlocks(shownText))}
             </ReactMarkdown>
           )}
         </div>
@@ -1108,7 +1124,10 @@ export const StreamingCard = memo(function StreamingCard({
   // half-streamed delegation tag won't match the regex (closing tag is
   // required), so it remains in the prose segment until it completes — at
   // which point the next render flips it into a card.
-  const segments = useMemo(() => splitAssistantText(text), [text])
+  const segments = useMemo(
+    () => splitAssistantText(text, { actionableOnly: handOffs === 'chat-card' }),
+    [text, handOffs],
+  )
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2.5">
@@ -1526,8 +1545,28 @@ export function LoadEarlierButton({
   )
 }
 
-/** The one-to-one chat's transcript. Nothing in a 1:1 chat acts on a
- *  `<delegate>` tag, so its blocks show as not-handed-off notes here. */
+const NO_CARDS: readonly ChatTimelineCard[] = []
+
+const blockTime = (block: RenderBlock): number =>
+  (block.kind === 'assistant-turn' ? block.timestampMs : block.entry.timestampMs) ?? 0
+
+/** Which block index each card goes before: the first message after it was made. A
+ *  card newer than every message goes at `blocks.length`, the end of the list. */
+function placeCards(
+  blocks: readonly RenderBlock[],
+  cards: readonly ChatTimelineCard[],
+): Map<number, ChatTimelineCard[]> {
+  const out = new Map<number, ChatTimelineCard[]>()
+  for (const card of [...cards].sort((a, b) => a.at - b.at)) {
+    const after = blocks.findIndex((b) => blockTime(b) > card.at)
+    const at = after === -1 ? blocks.length : after
+    out.set(at, [...(out.get(at) ?? []), card])
+  }
+  return out
+}
+
+/** The one-to-one chat's transcript. A `<delegate>` block shows as a not-handed-off
+ *  note unless this chat acts on it (`handOffs`), when its work shows in `cards`. */
 export const MessageList = memo(function MessageList({
   blocks,
   streamingText,
@@ -1537,6 +1576,8 @@ export const MessageList = memo(function MessageList({
   sessionKey,
   hasMoreEarlier,
   fetchEarlier,
+  handOffs = 'not-handed-off',
+  cards = NO_CARDS,
 }: {
   blocks: RenderBlock[]
   streamingText: string | null
@@ -1549,9 +1590,14 @@ export const MessageList = memo(function MessageList({
   hasMoreEarlier?: boolean
   /** Pull the next page of older messages into the store. */
   fetchEarlier?: () => void
+  /** How `<delegate>` blocks are drawn (see {@link HandOffDisplay}). */
+  handOffs?: HandOffDisplay
+  /** Task cards to place among the messages, by when each was made. */
+  cards?: readonly ChatTimelineCard[]
 }) {
   const { scrollRef, bottomRef, handleScroll, atBottom, hasNewBelow, jumpToBottom } =
-    useChatAutoScroll(`${blocks.length}|${streamingText ?? ''}`)
+    useChatAutoScroll(`${blocks.length}|${cards.length}|${streamingText ?? ''}`)
+  const cardsAt = useMemo(() => placeCards(blocks, cards), [blocks, cards])
 
   // Nothing needs hoisting into the window here (as `GroupChatPanel` does for a
   // long-running stream): the live StreamingCard is appended AFTER the mapped
@@ -1566,8 +1612,14 @@ export const MessageList = memo(function MessageList({
   })
   const visible = start === 0 ? blocks : blocks.slice(start)
 
-  const isEmpty = blocks.length === 0 && !streamingText
+  const isEmpty = blocks.length === 0 && cards.length === 0 && !streamingText
   const showLive = isRunning && streamingText !== null
+  const renderCards = (at: number): ReactNode =>
+    cardsAt.get(at)?.map((card) => (
+      <div key={card.id} className="mt-7">
+        {card.node}
+      </div>
+    ))
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
@@ -1616,31 +1668,41 @@ export const MessageList = memo(function MessageList({
 
               if (block.kind === 'meta') {
                 return (
-                  <div key={block.entry.entryId} className={margin}>
-                    <MetaMessageCard entry={block.entry} />
-                  </div>
+                  <Fragment key={block.entry.entryId}>
+                    {renderCards(i)}
+                    <div className={margin}>
+                      <MetaMessageCard entry={block.entry} />
+                    </div>
+                  </Fragment>
                 )
               }
               if (block.kind === 'user') {
                 return (
-                  <div key={block.entry.entryId} className={margin}>
-                    <UserMessageCard entry={block.entry} />
-                  </div>
+                  <Fragment key={block.entry.entryId}>
+                    {renderCards(i)}
+                    <div className={margin}>
+                      <UserMessageCard entry={block.entry} />
+                    </div>
+                  </Fragment>
                 )
               }
               return (
-                <div key={`turn-${block.anchorEntryId}`} className={margin}>
-                  <AssistantTurnCard
-                    block={block}
-                    agentId={agentId}
-                    agentName={agentName}
-                    streaming={isRunning && i === blocks.length - 1 && !showLive}
-                    isFollowup={isFollowup}
-                    handOffs="not-handed-off"
-                  />
-                </div>
+                <Fragment key={`turn-${block.anchorEntryId}`}>
+                  {renderCards(i)}
+                  <div className={margin}>
+                    <AssistantTurnCard
+                      block={block}
+                      agentId={agentId}
+                      agentName={agentName}
+                      streaming={isRunning && i === blocks.length - 1 && !showLive}
+                      isFollowup={isFollowup}
+                      handOffs={handOffs}
+                    />
+                  </div>
+                </Fragment>
               )
             })}
+            {renderCards(blocks.length)}
 
             {/* Live uncommitted stream — applies the same follow-up rule
               against the last committed block so a streaming continuation
@@ -1660,7 +1722,7 @@ export const MessageList = memo(function MessageList({
                       text={streamingText ?? ''}
                       agentId={agentId}
                       agentName={agentName}
-                      handOffs="not-handed-off"
+                      handOffs={handOffs}
                     />
                   </div>
                 )

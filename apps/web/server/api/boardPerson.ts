@@ -62,9 +62,10 @@ import {
   type SavedPersonWake,
   type SavePersonWakeDeps,
 } from '../lib/teamChat/personWake'
-import { persistTeamChatEntry } from '../lib/teamChat/persistTeamChatEntry'
+import { createChatReportUps, notifyChatReportUp } from '../lib/agentChat/chatReportUpOutbox'
 import { createReportUpOutbox } from '../lib/teamChat/reportUpOutbox'
 import { engineRefusal, roomIdForTask } from '../lib/teamChat/roomRoster'
+import { writeRequestNote } from '../lib/teamChat/requestNote'
 import { getTaskOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
 import { clearTaskSessionPointers } from '../lib/teamChat/taskSessionPointers'
@@ -150,13 +151,17 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
         else if (!comment)
           addComment(db, taskId, REOPENED_REQUEST, 'user', null, { person, kind: 'note' })
         const refusal = engineRefusal(db, result.task)
-        if (!refusal && before.teamId)
-          createReportUpOutbox(db, before.teamId as string, roomIdForTask(db, taskId)).record(
-            personCommentReport(
-              { id: taskId, title: before.title, leadAgentId: result.task.assigneeAgentId },
-              comment ?? REOPENED_REQUEST,
-            ),
+        if (!refusal && before.teamId) {
+          const report = personCommentReport(
+            { id: taskId, title: before.title, leadAgentId: result.task.assigneeAgentId },
+            comment ?? REOPENED_REQUEST,
           )
+          // A request from a one-to-one chat is answered there, not in a team session.
+          if (!createChatReportUps(db, before.teamId as string).take(report, { held: false }))
+            createReportUpOutbox(db, before.teamId as string, roomIdForTask(db, taskId)).record(
+              report,
+            )
+        }
         return { result, wake: null, requestRefusal: refusal }
       }
       const written =
@@ -212,14 +217,12 @@ export async function boardReopenPOST(req: Request, res: Response): Promise<void
       const refusal = reopened.requestRefusal ?? null
       // The lead's answer lands in the chat, which has to say what it answers.
       if (!refusal && before.teamId && lead)
-        persistTeamChatEntry(db, {
-          teamId: before.teamId,
-          roomId: roomIdForTask(db, taskId),
-          agentId: lead,
-          text: `A person reopened ${before.identifier ?? `“${before.title}”`}${comment ? `: ${comment}` : '.'}`,
-          role: 'system',
-          kind: 'meta',
-        })
+        writeRequestNote(
+          db,
+          result.task,
+          { teamId: before.teamId, roomId: roomIdForTask(db, taskId), agentId: lead },
+          `A person reopened ${before.identifier ?? `“${before.title}”`}${comment ? `: ${comment}` : '.'}`,
+        )
       if (!refusal && before.teamId)
         void getTaskOrchestrator(before.teamId, taskId, { mcpBaseUrl: loopbackMcpBaseUrl(req), db })
           .pump()
@@ -523,6 +526,8 @@ export async function boardQuestionAnswerPOST(req: Request, res: Response): Prom
       ? startWake(db, req, task.id, wake)
       : { status: 'queued', agentId: question.agentId ?? '', reason: 'next-run' }
     if (!wake && task.teamId) pumpRoomOfTask(task.teamId, task.id, loopbackMcpBaseUrl(req))
+    // A plan from a one-to-one chat: the answer's row is that chat's to send.
+    if (!wake && task.chatSessionKey) notifyChatReportUp(task.chatSessionKey)
     // The answer is saved. A task that stayed Blocked says so on its card, and the
     // person is never made to answer again. A run still ending starts it again in a
     // moment, so there is nothing to say.

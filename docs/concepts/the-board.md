@@ -17,7 +17,7 @@ keywords:
   ]
 ---
 
-The **board** is a team's task list. Every piece of work a teammate is asked to do becomes a task card on it. A card appears when Boo Zero hands work to a teammate, when you give an agent a task with **New task**, and when an agent Routine fires. The board is the record of who is doing what. The chat only describes it.
+The **board** is a team's task list. Every piece of work a teammate is asked to do becomes a task card on it. A card appears when Boo Zero hands work to a teammate, in a team's chat or from its own chat, when you give an agent a task with **New task**, and when an agent Routine fires. The board is the record of who is doing what. The chat only describes it.
 
 Use this page to understand what a card's status means, why a task is waiting, and when work restarts on its own. For the controls, see [Track work on the board](/using/board).
 
@@ -122,6 +122,8 @@ When you ask a team for something in chat and its lead hands out work, your mess
 - **Stop.** A Stop halts the helpers as it always did: their tasks wait in Needs you. The main task stays open and starts nothing. If its work had all closed, what came back waits for the lead's next run, and the request closes after that run. The lead's reply is in the chat, though that run may have been about something else.
 - **Cancel or Done.** Cancelling a main task, or marking it Done, cancels every sub-task still open and stops any run on them, all in one write. The board asks first. The lead is not started just to hear it. A closed request takes no more work from an agent. New work a person files under it opens it again, as does reopening one of its sub-tasks, so nothing runs hidden inside a finished card.
 - **Pause and budgets.** A main task is the top of its tree, so a pause or a mission budget on it covers the whole request. Under a pause its sub-tasks stop and wait in To do, nothing is reported to its lead, and anything you say on it waits too. The lead's update comes after you resume, and the request closes on its reply as usual. Spend still lands on each run's own task; the card adds it up.
+
+A request from [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) is a main task the same way, one per team per message. Its reports and your comments on it go to that chat, not the team's, and the reply there is what closes it. A `<plan>` does not run from that chat, and a batch of hand-offs on a team that asks first waits for your answer as it does from the team's chat.
 
 A task you create on the board is already its own main task: what its agent hands out is filed under it, and it runs itself, so it counts as a level. A team routine's message becomes a main task the same way a person's does, when its turn hands out work. An agent routine's card is its own. Tasks from before this stay as they are.
 
@@ -250,7 +252,7 @@ Clawboo notices a dead run in two ways. A running task proves it is alive every 
 
 ## The board and the chat
 
-The board is the record of the work. Chat messages describe it, but ordinary chat text does not change the board: only hand-offs (a delegate tool call, or a `<delegate>` or `<plan>` in a reply, see [How work is delegated](/concepts/delegation-and-orchestration)), Clawboo's own task handling, your moves on the board, and agents' task tools do.
+The board is the record of the work. Chat messages describe it, but ordinary chat text does not change the board: only hand-offs (a delegate tool call, or a `<delegate>` or `<plan>` in a reply, see [How work is delegated](/concepts/delegation-and-orchestration)), Clawboo's own task handling, your moves on the board, and agents' task tools do. A hand-off in [Boo Zero's own chat](/using/boo-zero#give-a-team-work-from-this-chat) counts too when the Clawboo server runs that chat, and its result goes back there rather than to the team's chat.
 
 When the board changes through Clawboo's board API, which includes your moves and comments in the dashboard, Clawboo also posts a short system line into the agents' peer room. The dashboard does not show that room; see [Peer chat](/concepts/peer-chat).
 

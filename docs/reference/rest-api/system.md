@@ -715,6 +715,7 @@ The answer is built from the running process alone: no database read, no network
     "runtime.hermes": true,
     "chat.rooms": true,
     "chat.direct": true,
+    "chat.handOffs": true,
     "board.verification": true,
     "board.checkHold": true,
     "board.reportResult": true,
@@ -763,6 +764,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `runtime.claude-code`, `runtime.codex`, `runtime.hermes`                    | The server can run that coding agent. Whether its CLI is installed and signed in is in [`GET /api/runtimes`](/reference/rest-api/runtimes).                                                                                                                                                                       |
 | `chat.rooms`                                                                | Always. Chat rooms inside a team (`/api/teams/:id/rooms`).                                                                                                                                                                                                                                                        |
 | `chat.direct`                                                               | Always. The server runs 1:1 chats with Clawboo Native, Claude Code, Codex and Hermes agents itself (`/api/agents/:agentId/chat`).                                                                                                                                                                                 |
+| `chat.handOffs`                                                             | Always. Boo Zero's 1:1 chat hands work to a team when the server runs it, and its stream sends `board` frames. It has no route of its own.                                                                                                                                                                        |
 | `board.verification`                                                        | Always. A task whose stored verification verdict fails cannot reach `done` without a person's override.                                                                                                                                                                                                           |
 | `board.reopen`                                                              | Always. `POST /api/board/:taskId/reopen`.                                                                                                                                                                                                                                                                         |
 | `board.personAssignees`                                                     | Always. A task can be assigned to a person: `POST /api/board/:taskId/assign-person`.                                                                                                                                                                                                                              |

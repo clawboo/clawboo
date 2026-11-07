@@ -47,7 +47,7 @@ import {
   DEFAULT_ROOT_CREATE_WINDOW_MS,
   isVerdictPromotable,
 } from '@clawboo/governance'
-import { and, count, desc, eq, gt, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
+import { and, count, desc, eq, gt, gte, inArray, isNull, like, lt, or, sql } from 'drizzle-orm'
 
 import { readyOrder } from './readyOrder'
 
@@ -141,6 +141,8 @@ export interface CreateTaskInput {
   mainTaskLead?: string | null
   /** See `CreateIdentity.titleMatchAnyRequest`. */
   titleMatchAnyRequest?: boolean
+  /** The one-to-one chat it was handed off from (see `tasks.chat_session_key`). */
+  chatSessionKey?: string | null
 }
 
 /** What an open main task says it waits for. */
@@ -191,6 +193,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     checkHeldSince: null,
     runExecutionId: null,
     isMainTask: input.mainTaskLead ? 1 : 0,
+    chatSessionKey: input.chatSessionKey ?? null,
   }
 }
 
@@ -530,6 +533,8 @@ export interface MainTaskRequest {
   requestedBy?: PersonRecord | null
   /** One per message: every hand-off of its turn finds the same main task. */
   key: string
+  /** The one-to-one chat the message came from: what reports on the request goes there. */
+  chatSessionKey?: string | null
 }
 
 export type HandOffUnderRequestResult =
@@ -560,6 +565,7 @@ export function insertMainTaskTx(
       requestedBy: request.requestedBy ?? null,
       mainTaskLead: request.leadAgentId,
       createKey: { key: request.key },
+      chatSessionKey: request.chatSessionKey ?? null,
     }),
   }
 }
@@ -685,6 +691,18 @@ function mainTaskStateOf(db: ClawbooDb, row: DbTask): MainTaskState {
 export function mainTaskState(db: ClawbooDb, taskId: string): MainTaskState | null {
   const row = getTask(db, taskId)
   return row?.isMainTask === 1 ? mainTaskStateOf(db, row) : null
+}
+
+/** The tasks a request still waits on, at any depth (`requestWaitsOn`), oldest first:
+ *  what its lead is told is outstanding, wherever its result will go. */
+export function requestOpenTasks(db: ClawbooDb, mainId: string): DbTask[] {
+  return subtreeOf(db, mainId)
+    .filter((t) => !isTerminal(t.status as TaskStatus))
+    .flatMap((t) => {
+      const row = getTask(db, t.id)
+      return row && requestWaitsOn(subtaskViewOf(db, row, mainId)) ? [row] : []
+    })
+    .sort((a, b) => a.createdAt - b.createdAt)
 }
 
 /** A room's open main tasks, oldest first. */
@@ -966,6 +984,34 @@ export function listTasks(db: ClawbooDb, filter: ListTasksFilter = {}): DbTask[]
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(tasks.updatedAt))
     .all() as DbTask[]
+}
+
+/** The most hand-off cards one one-to-one chat reads at a time: its newest. */
+const CHAT_HAND_OFF_READ_LIMIT = 200
+
+/** The tasks handed off from one one-to-one chat, oldest first: its cards. A request's
+ *  main task holds no work, so it has none. With `changedSince`, only those whose row
+ *  last changed at or after that time. */
+export function listChatHandOffTasks(
+  db: ClawbooDb,
+  sessionKey: string,
+  opts: { changedSince?: number } = {},
+): DbTask[] {
+  const rows = db
+    .select()
+    .from(tasks)
+    .where(
+      and(
+        eq(tasks.chatSessionKey, sessionKey),
+        eq(tasks.isMainTask, 0),
+        eq(tasks.dropped, 0),
+        opts.changedSince !== undefined ? gte(tasks.updatedAt, opts.changedSince) : undefined,
+      ),
+    )
+    .orderBy(desc(tasks.updatedAt))
+    .limit(CHAT_HAND_OFF_READ_LIMIT)
+    .all() as DbTask[]
+  return rows.sort((a, b) => a.createdAt - b.createdAt)
 }
 
 // ─── Atomic claim (the mutex) ────────────────────────────────────────────────

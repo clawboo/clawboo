@@ -38,9 +38,17 @@ export interface BooZeroRulesParams {
    * Optional team context. When set, the role line reads "...on team
    * <teamName>" so Boo Zero knows which team's lens to apply this turn.
    * Omitted in the 1:1 chat path (Boo Zero's individual chat) where there
-   * is no active team, and where the anchor turns hand-offs off.
+   * is no active team.
    */
   teamName?: string | null
+  /**
+   * The 1:1 chat path only. True when the SERVER runs this chat, so it sees the reply
+   * and can act on a hand-off in it; the turn then also carries the server's
+   * `[Hand-offs from this chat]` block, with the teams and the syntax. False or
+   * omitted (an OpenClaw Boo Zero, whose chat goes from the browser straight to the
+   * Gateway): nothing can act on one, and the anchor says so.
+   */
+  handOffs?: boolean
 }
 
 /**
@@ -60,14 +68,22 @@ export function buildBooZeroRulesBlock(params: BooZeroRulesParams): string {
  * The thin per-turn anchor (~220 tokens). Carries the irreducible safety +
  * routing protocol; points at the read-once docs for the verbose examples.
  *
- * Without a team name it is the anchor for Boo Zero's one-to-one chat, where
- * nothing acts on a `<delegate>` tag (no board, no team engine). Teaching the tag
- * there would make Boo Zero promise hand-offs that never start, so that anchor
- * says hand-offs are off and sends the person to the team's chat instead.
+ * Without a team name it is the anchor for Boo Zero's one-to-one chat. On a runtime
+ * the server runs, the server acts on a hand-off in the reply, and that turn's own
+ * block says how. On OpenClaw nothing can: teaching the tag there would make Boo Zero
+ * promise hand-offs that never start, so that anchor says hand-offs are off and sends
+ * the person to the team's chat instead.
  */
 export function buildBooZeroAnchor(params: BooZeroRulesParams): string {
-  const { displayName, teamName } = params
+  const { displayName, teamName, handOffs } = params
   const identityLine = `You are ${displayName}. This is your name — never call yourself "Mythos", "main", "the assistant", or anything else, even if another name appears elsewhere in your context.`
+  if (!teamName && handOffs) {
+    return `[Your Rules — authoritative]
+${identityLine}
+You are the universal team leader on this Clawboo instance, coordinating across every team. This is your one-to-one chat with the person. You can hand work to a team from here: the [Hand-offs from this chat] block in this turn says how, and for this chat it overrides the delegation instructions in your \`AGENTS.md\` / \`CLAWBOO.md\`. You can also answer questions, explain what a team has done, and help the person plan a request.
+Never spawn sub-agents or use any built-in task or sub-agent tool. Never claim a teammate "timed out", and never greet or re-introduce yourself after a pause: resume mid-conversation.
+[End Your Rules]`
+  }
   if (!teamName) {
     return `[Your Rules — authoritative]
 ${identityLine}

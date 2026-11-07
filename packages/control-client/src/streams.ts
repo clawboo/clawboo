@@ -112,6 +112,19 @@ export const boardChangeFrameSchema = z.object({
 })
 export type BoardChangeFrame = z.infer<typeof boardChangeFrameSchema>
 
+/** The card of a task handed off from a one-to-one chat: the `board` event on that
+ *  chat's stream. The team's frame, plus the team it went to, which that chat has no
+ *  other way to know. */
+export const chatHandOffFrameSchema = boardChangeFrameSchema.extend({
+  teamId: z.string().nullable().optional(),
+})
+export type ChatHandOffFrame = z.infer<typeof chatHandOffFrameSchema>
+
+/** Whether this one-to-one chat acts on a hand-off: the `handOffs` event on its stream,
+ *  on connect and when it changes. Absent means no. */
+export const chatHandsOffFrameSchema = z.object({ on: z.boolean() })
+export type ChatHandsOffFrame = z.infer<typeof chatHandsOffFrameSchema>
+
 /** One row of the event log: the default `message` event on the event stream.
  *  `data` stays a JSON string (redacted), so a client parses it itself. */
 export const orchestrationEventFrameSchema = z.object({
@@ -167,6 +180,8 @@ export const RESUMABLE_STREAMS = {
       cursor: streamCursorFrameSchema,
       message: chatMessageFrameSchema,
       delta: chatDeltaFrameSchema,
+      board: chatHandOffFrameSchema,
+      handOffs: chatHandsOffFrameSchema,
       status: agentStatusFrameSchema,
     },
   },

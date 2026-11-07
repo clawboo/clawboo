@@ -111,7 +111,10 @@ function stripTagBlocks(text: string, blocks: TagBlock[]): string {
 // The whitespace runs inside the opener are length-capped: a real tag carries a
 // space or two, and leaving them open-ended lets a long run of blanks be
 // re-measured from every offset inside it.
-const DELEGATE_OPEN_RE = /(?:<?\s{0,8}delegate\s{1,8})?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>/gi
+// A name may hold an apostrophe ("Founder's Office"), straight or curly, so the value
+// ends at a quote directly before `>`. It cannot hold a double quote, `=` or a line
+// break, so one value never runs on into the next attribute.
+const DELEGATE_OPEN_RE = /(?:<?\s{0,8}delegate\s{1,8})?to=["'“”‘’]([^"“”>\n=]+?)["'“”‘’]>/gi
 const DELEGATE_CLOSE_RE = /<\/delegate>/gi
 
 /**
@@ -251,7 +254,7 @@ const PLAN_CLOSE_RE = /<\/plan>/gi
 // `<step ` is optional, anchored on the closing `</step>` + the `to="…">`
 // attribute shape — recovers both `step to="@X">…</step>` (dropped `<`) and
 // `to="@X">…</step>` (dropped the whole `<step`).
-const STEP_OPEN_RE = /(?:<?\s{0,8}step\s{1,8})?to=["'“”‘’]([^"'“”‘’]+)["'“”‘’]>/gi
+const STEP_OPEN_RE = /(?:<?\s{0,8}step\s{1,8})?to=["'“”‘’]([^"“”>\n=]+?)["'“”‘’]>/gi
 const STEP_CLOSE_RE = /<\/step>/gi
 
 /**
@@ -288,6 +291,187 @@ export function findPlanBlocks(text: string): PlanBlock[] {
  */
 export function stripPlanBlocks(text: string): string {
   return stripTagBlocks(text, findTagBlocks(text, PLAN_OPEN_RE, PLAN_CLOSE_RE))
+}
+
+// ─── What a reply means, and what it only shows ──────────────────────────────
+//
+// A team's lead writes tags for the engine and nothing else, so the engine reads them
+// wherever they stand. In a one-to-one chat Boo Zero also talks about hand-offs with
+// the person, and shows drafts and quotes other people's text. A tag a reader sees as
+// code or a quote is something being shown, so it must not start paid work.
+
+type Span = readonly [start: number, end: number]
+
+const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
+const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})\s*$/
+const QUOTE_LINE_RE = /^ {0,3}>/
+const INDENTED_RE = /^(?: {4}|\t)/
+const BLANK_LINE_RE = /\n[ \t]*\r?\n/
+
+/** Fenced blocks (a fence never closed runs to the end, as markdown renders it), quote
+ *  lines, and indented blocks, which begin only after a blank line. One pass by line. */
+function blockSpans(text: string): Span[] {
+  const spans: Span[] = []
+  let at = 0
+  let fence: { char: string; length: number; start: number } | null = null
+  let blankBefore = true
+  let inIndented = false
+  for (const line of text.split(/(?<=\n)/)) {
+    const end = at + line.length
+    const body = line.replace(/\r?\n$/, '')
+    const blank = body.trim() === ''
+    if (fence) {
+      const close = FENCE_CLOSE_RE.exec(body)?.[1]
+      if (close && close[0] === fence.char && close.length >= fence.length) {
+        spans.push([fence.start, end])
+        fence = null
+      }
+    } else {
+      const open = FENCE_OPEN_RE.exec(body)?.[1]
+      if (open) {
+        fence = { char: open[0]!, length: open.length, start: at }
+      } else if (QUOTE_LINE_RE.test(body)) {
+        spans.push([at, end])
+      } else if (!blank && INDENTED_RE.test(body) && (blankBefore || inIndented)) {
+        spans.push([at, end])
+        inIndented = true
+      } else if (!blank) {
+        inIndented = false
+      }
+    }
+    blankBefore = blank
+    at = end
+  }
+  if (fence) spans.push([fence.start, text.length])
+  return spans
+}
+
+const inSpans = (spans: readonly Span[], offset: number): boolean =>
+  spans.some(([start, end]) => offset >= start && offset < end)
+
+/** Inline code: a run of backticks up to the next run of the same length, within one
+ *  paragraph. A run with no partner is plain text. Each run is looked at once. */
+function inlineCodeSpans(text: string, blocks: readonly Span[]): Span[] {
+  const runs = [...text.matchAll(/`+/g)]
+    .map((m) => ({ at: m.index ?? 0, length: m[0].length }))
+    .filter((r) => !inSpans(blocks, r.at))
+  const lastOfLength = new Map<number, number>()
+  runs.forEach((r, i) => lastOfLength.set(r.length, i))
+  const spans: Span[] = []
+  let i = 0
+  while (i < runs.length) {
+    const open = runs[i]!
+    if ((lastOfLength.get(open.length) ?? -1) <= i) {
+      i += 1
+      continue
+    }
+    let j = i + 1
+    while (runs[j]!.length !== open.length) j += 1
+    const close = runs[j]!
+    if (BLANK_LINE_RE.test(text.slice(open.at, close.at))) {
+      i += 1
+      continue
+    }
+    spans.push([open.at, close.at + close.length])
+    i = j + 1
+  }
+  return spans
+}
+
+/** Everything in `text` a reader sees as code or as a quote. */
+function shownSpans(text: string): Span[] {
+  const blocks = blockSpans(text)
+  return [...blocks, ...inlineCodeSpans(text, blocks)]
+}
+
+const OPENING_QUOTES = new Set(['"', "'", '“', '‘'])
+const CLOSING_QUOTES = new Set(['"', "'", '”', '’'])
+
+/** A tag standing directly between quotation marks is a tag being quoted. */
+const inQuotationMarks = (text: string, start: number, end: number): boolean =>
+  OPENING_QUOTES.has(text[start - 1] ?? '') && CLOSING_QUOTES.has(text[end] ?? '')
+
+/** `text` with these ranges blanked, so every other offset stays where it was. */
+function blanked(text: string, ranges: readonly Span[]): string {
+  const parts: string[] = []
+  let cursor = 0
+  for (const [start, end] of [...ranges].sort((a, b) => a[0] - b[0])) {
+    if (end <= cursor) continue
+    const from = Math.max(start, cursor)
+    parts.push(text.slice(cursor, from), ' '.repeat(end - from))
+    cursor = end
+  }
+  parts.push(text.slice(cursor))
+  return parts.join('')
+}
+
+/** A reply's tags, split by whether a reader sees them as tags. A tag counts by where
+ *  it opens, so a real one keeps a brief with code or a quote in it. */
+export interface ActionableHandOffs {
+  delegates: DelegationBlock[]
+  plans: PlanBlock[]
+  /** In code or a quote: shown, and acted on by nothing. */
+  shownDelegates: DelegationBlock[]
+  shownPlans: PlanBlock[]
+}
+
+export function findActionableHandOffs(text: string): ActionableHandOffs {
+  const spans = shownSpans(text)
+  const isShown = (start: number, end: number): boolean =>
+    inSpans(spans, start) || inQuotationMarks(text, start, end)
+  const allPlans = findPlanBlocks(text)
+  const plans = allPlans.filter((p) => !isShown(p.blockStart, p.blockEnd))
+  const shownPlans = allPlans.filter((p) => isShown(p.blockStart, p.blockEnd))
+  // A plan's steps have the same `to="…">` shape, so they are not read as delegates.
+  const withoutPlans = blanked(
+    text,
+    allPlans.map((p): Span => [p.blockStart, p.blockEnd]),
+  )
+  const allDelegates = findDelegationBlocks(withoutPlans)
+  return {
+    delegates: allDelegates.filter((d) => !isShown(d.blockStart, d.blockEnd)),
+    plans,
+    shownDelegates: allDelegates.filter((d) => isShown(d.blockStart, d.blockEnd)),
+    shownPlans,
+  }
+}
+
+/** Take out the tags that count, and leave those only shown. Text with neither comes
+ *  back untouched. */
+export function stripActionableHandOffs(text: string): string {
+  const { delegates, plans } = findActionableHandOffs(text)
+  const ranges = [
+    ...delegates.map((d): Span => [d.blockStart, d.blockEnd]),
+    ...plans.map((p): Span => [p.blockStart, p.blockEnd]),
+  ].sort((a, b) => a[0] - b[0])
+  if (ranges.length === 0) return text
+  let out = ''
+  let cursor = 0
+  for (const [start, end] of ranges) {
+    if (start > cursor) out += text.slice(cursor, start)
+    cursor = Math.max(cursor, end)
+  }
+  return (out + text.slice(cursor)).trim()
+}
+
+// Bounded before `to=`, so a long reply full of `<delegate ` stays linear.
+const BROKEN_HAND_OFF_RE =
+  /<\s*delegate\s[^>\n]{0,200}to\s*=|\bdelegate\s+to\s*=|<\/\s*delegate\s*>|<\s*step\s[^>\n]{0,200}to\s*=/i
+
+/**
+ * Does this reply try to hand off in a tag that could not be read? It takes a tag's
+ * shape, not its name: "a <plan> needs that team's own chat" is only a mention. Code
+ * and quotes do not count, and neither do tags that could be read.
+ */
+export function looksLikeBrokenHandOff(text: string): boolean {
+  const { delegates, plans } = findActionableHandOffs(text)
+  return BROKEN_HAND_OFF_RE.test(
+    blanked(text, [
+      ...shownSpans(text),
+      ...delegates.map((d): Span => [d.blockStart, d.blockEnd]),
+      ...plans.map((p): Span => [p.blockStart, p.blockEnd]),
+    ]),
+  )
 }
 
 // ─── sessions_send target resolution ─────────────────────────────────────────

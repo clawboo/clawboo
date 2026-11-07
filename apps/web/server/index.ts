@@ -44,6 +44,7 @@ import { startMemoryEmbedding } from './lib/memoryEmbedding'
 import { createStaleTaskSweep, reapOrphanedRuns, sweepStaleRuns } from './lib/staleTaskSweep'
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
+import { pumpChatReportUps, startChatReportUps } from './lib/agentChat/chatHandOffs'
 import { pumpTaskWakes, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
@@ -808,6 +809,8 @@ async function main() {
         // Tasks the task runner ran re-fire through the runner, not team chat
         // (team chat's ready list skips them; see lib/runnerRerun).
         pumpRunnerReruns(db, mcpBase)
+        // Results of work handed off from a one-to-one chat go back to that chat.
+        pumpChatReportUps(db, { mcpBaseUrl: mcpBase })
         // One orchestrator per team chat room, so the scan names the room too
         // (null = the team's own group chat).
         const wake = new Map<string, { teamId: string; roomId: string | null }>()
@@ -857,6 +860,7 @@ async function main() {
         log.error({ err }, 'Board: dispatch pump scan failed (non-fatal)')
       }
     }
+    startChatReportUps(getDb, { mcpBaseUrl: mcpBase })
     // First pass shortly after boot (let the registry / Boo Zero bootstrap land).
     setTimeout(pump, 10_000).unref()
     setInterval(pump, pumpMs).unref()

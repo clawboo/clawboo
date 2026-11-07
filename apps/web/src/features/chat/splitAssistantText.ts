@@ -3,7 +3,7 @@
 // emit a markdown block for prose and a styled card for each
 // `<delegate>` block.
 
-import { findDelegationBlocks } from '@/features/group-chat/delegationTags'
+import { findActionableHandOffs, findDelegationBlocks } from '@/features/group-chat/delegationTags'
 
 export type AssistantSegment =
   | { kind: 'prose'; text: string }
@@ -13,10 +13,18 @@ export type AssistantSegment =
  * Walk the assistant text and produce an ordered list of segments. Empty
  * prose ranges between consecutive delegation blocks are dropped to keep
  * the rendered output clean (no blank markdown blobs between cards).
+ *
+ * `actionableOnly` is for a chat where a tag in code or a quote starts nothing: such a
+ * tag stays in the prose, as written, and gets no card.
  */
-export function splitAssistantText(text: string): AssistantSegment[] {
+export function splitAssistantText(
+  text: string,
+  opts?: { actionableOnly?: boolean },
+): AssistantSegment[] {
   if (!text) return []
-  const blocks = findDelegationBlocks(text)
+  const blocks = opts?.actionableOnly
+    ? findActionableHandOffs(text).delegates
+    : findDelegationBlocks(text)
   if (blocks.length === 0) {
     const trimmed = text.trim()
     return trimmed ? [{ kind: 'prose', text }] : []

@@ -239,3 +239,16 @@ describe('the line that says every hand-off is in', () => {
     expect(text).toContain('Still outstanding: 1')
   })
 })
+
+describe('an update that waited for a run of a one-to-one chat', () => {
+  it('says it waited, whatever held it, and blames no Stop', () => {
+    const text = buildTaskUpdateMessage(
+      [{ by: 'Coder', summary: 'The engine was stopping.', outcome: 'not_started' }],
+      [],
+      { heldForThisRun: true },
+    )
+    expect(text).toContain('[Task Update] 1 earlier update about hand-offs from this chat.')
+    expect(text).toContain('they are not what this run is for')
+    expect(text).not.toContain('pressed Stop')
+  })
+})

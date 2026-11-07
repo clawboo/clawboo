@@ -36,6 +36,7 @@ import {
   nativeFileKey,
   saveAgentConfig,
 } from '../lib/runtimes/native/agentConfigStore'
+import { chatResultsHeldKey } from '../lib/agentChat/chatReportUpOutbox'
 import { nativeChatSessionSettingKey } from '../lib/agentChat/driveAgentChat'
 import { ensureNativeBooZero, resolveBooZero } from '../lib/teamChat/booZero'
 import { nativeTeamSessionKeysForAgentLike } from '../lib/teamChat/nativeTeamSession'
@@ -492,6 +493,8 @@ function perAgentSettingKeys(agentId: string): string[] {
     nativeConfigKey(agentId),
     // The native 1:1 chat's resume pointer (conversation continuity).
     nativeChatSessionSettingKey(agentId),
+    // What a person's Stop in that chat left in force.
+    chatResultsHeldKey(agentId),
     ...AGENT_FILE_NAMES.map((name) => nativeFileKey(agentId, name)),
     // The generic RuntimeAgentSource (claude-code / codex / hermes) file-KV rows.
     ...AGENT_FILE_NAMES.map((name) => runtimeAgentFileKey(agentId, name)),

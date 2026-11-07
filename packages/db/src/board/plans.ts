@@ -269,6 +269,9 @@ export interface ProposePlanInput {
   /** The person's message this answers, when no task holds it yet: its main task lands
    *  with the card, and the card and the accepted steps file under it. */
   mainTask?: MainTaskRequest
+  /** The one-to-one chat it came from: its card shows there, and the answer and the
+   *  accepted steps' results go back there. */
+  chatSessionKey?: string | null
 }
 
 export type ProposeRefusal =
@@ -328,10 +331,12 @@ function latestPlanQuestionTx(
   return null
 }
 
-/** The card already holding this agent's waiting plan in this room, if any. */
+/** The card already holding this agent's waiting plan in this room, if any. One from a
+ *  one-to-one chat and one from the team's chat are two plans: each answer goes back to
+ *  where it was asked, so neither takes the other's place. */
 function waitingHolderTx(
   tx: BoardTx | ClawbooDb,
-  input: { teamId: string; agentId: string },
+  input: { teamId: string; agentId: string; chatSessionKey?: string | null },
   roomId: string | null,
 ): DbTask | null {
   const rows = tx
@@ -349,7 +354,12 @@ function waitingHolderTx(
   for (const row of rows) {
     if (!parseQuestionPayload(row.payload)?.plan?.holder) continue
     const task = tx.select().from(tasks).where(eq(tasks.id, row.taskId)).get() as DbTask | undefined
-    if (task && (task.roomId ?? null) === roomId) return task
+    if (
+      task &&
+      (task.roomId ?? null) === roomId &&
+      (task.chatSessionKey ?? null) === (input.chatSessionKey ?? null)
+    )
+      return task
   }
   return null
 }
@@ -400,7 +410,10 @@ function answeredHolderPlanTx(
  */
 export function closeWaitingHolderWhenOff(
   db: ClawbooDb,
-  input: Pick<ProposePlanInput, 'teamId' | 'agentId' | 'taskId' | 'parentTaskId' | 'roomId'>,
+  input: Pick<
+    ProposePlanInput,
+    'teamId' | 'agentId' | 'taskId' | 'parentTaskId' | 'roomId' | 'chatSessionKey'
+  >,
 ): void {
   const scopeOf = (read: BoardTx | ClawbooDb): string | null => {
     const from = input.taskId ?? input.parentTaskId
@@ -628,6 +641,7 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
         // own session. No agent waits on this card, and it does no work to report.
         sourceDelegationId: encodePlanHolder(input.agentId, randomUUID()),
         createKey: holderKey,
+        chatSessionKey: input.chatSessionKey ?? null,
       })
 
     const newest = newestRevisionTx(tx, task.id, TASK_DOCUMENT_PLAN_KEY)
@@ -875,6 +889,8 @@ export function settlePlanAnswerTx(
       // What the pump fires it on after a restart, and who hears its result.
       sourceDelegationId: `${question.id}:plan:${index}:agent:${step.agentId}:reflectTo:${proposer}`,
       requestedBy: person,
+      // A plan from a one-to-one chat: its steps' results go back there.
+      chatSessionKey: task.chatSessionKey,
       agentCreated: true,
       titleMatchNeedsOwner: true,
       titleMatchExceptTurn: question.id,
@@ -950,6 +966,8 @@ function closeAnsweredHolderTx(
       settledAt: null,
       settledHow: null,
       heldAt: null,
+      // A plan from a one-to-one chat: that chat hears the answer, in a turn of its own.
+      chatSessionKey: task.chatSessionKey,
     })
     .run()
 }
