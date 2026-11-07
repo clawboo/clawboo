@@ -20,6 +20,8 @@ export function receiptText(delivery: ReplyDelivery, name: string): string {
       return `${name} is starting on this`
     case 'queued':
       if (delivery.reason === 'in-review') return `${name} will see this after the check`
+      if (delivery.reason === 'held')
+        return `Clawboo is holding new runs. ${name} will see this when it resumes`
       if (delivery.reason === 'waiting')
         return `${name} will see this when the task it waits on is done`
       return `${name} will see this on the next run`

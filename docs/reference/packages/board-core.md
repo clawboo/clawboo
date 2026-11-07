@@ -82,6 +82,8 @@ start it again. The team engine's pump and the server's scan both call it, so th
 | `MAX_AUTO_FIRES` unsuccessful runs in a row at the end            | park it for a person        |
 | anything else (timed out, failed, orphaned)                       | fire again                  |
 
+`autoFireRefusal(execs, now)` names why it refuses, including the no-progress brake (`brakeUntil`, over `trailingNoProgressRuns` and the verdict `runMadeProgress` leaves on each run). `ledgerWillAutoFire` asks whether the task will ever fire by itself: a braked one will. `wakes.ts` holds the rules for a saved wake: `commentMayWake`, the one function that decides which comment wakes anyone, and `wakeDecision`, what the pump does with a waiting wake.
+
 `trailingFailedRuns` counts the runs at the end of the ledger that ended neither `succeeded` nor `cancelled`. A
 task's `sourceDelegationId` records who it is bound to: `delegationTargetOf` reads the agent out of it, and
 `encodeHumanAssignment` writes the marker for a task a person assigned, which `isHumanAssignment` detects. A

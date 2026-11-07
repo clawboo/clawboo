@@ -54,6 +54,35 @@ async function main() {
     return
   }
 
+  // `wake` mode: race one saved wake per thread on the SAME task. Exactly one waiting
+  // row must come out, holding every comment.
+  // `claimrun` mode: race one claim that opens a run. Exactly one running execution.
+  if (mode === 'wake' || mode === 'claimrun') {
+    if (typeof startAtMs === 'number') {
+      const coarse = startAtMs - Date.now() - 20
+      if (coarse > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, coarse)
+      while (Date.now() < startAtMs) {
+        // final spin, as above
+      }
+    }
+    if (mode === 'wake') {
+      const r = db.recordTaskWake(conn, {
+        teamId: 'team1',
+        agentId: 'a1',
+        taskId,
+        reason: 'person_comment',
+        commentIds: [`c${id}`],
+      })
+      parentPort.postMessage({ id, merged: r.merged })
+      return
+    }
+    const r = db.claimTask(conn, taskId, `agent-w${id}`, 'openclaw', {
+      run: { executorType: 'openclaw' },
+    })
+    parentPort.postMessage({ id, claimed: Boolean(r.ok), reason: r.reason ?? null })
+    return
+  }
+
   // `claim` mode: race a SINGLE atomic claimTask on ONE task against the other
   // threads — the exactly-one-winner mutex under true OS-thread concurrency (the
   // `addComment` mode below only proves WAL write-survival, not the claim mutex).

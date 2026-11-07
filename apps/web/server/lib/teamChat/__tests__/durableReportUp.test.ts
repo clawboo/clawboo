@@ -459,6 +459,16 @@ describe('the report-up outbox', () => {
     expect(roomsWithUnheldReportUps(db)).toEqual([])
   })
 
+  it('archiving a room closes an update a Stop held too: no run of its recipient will come', async () => {
+    const room = createRoom(db, { teamId: TEAM, name: 'Held', memberIds: [] })
+    const outbox = createReportUpOutbox(db, TEAM, room.id)
+    const held = outbox.record({ toAgentId: null, by: 'W', summary: 's' }, { held: true })!
+    expect(outbox.held().map((r) => r.id)).toEqual([held])
+    await retireRoomOrchestrator(TEAM, room.id)
+    expect(outbox.held()).toEqual([])
+    expect(settleReportUps(db, [held], 'delivered')).toEqual([])
+  })
+
   it('archiving a room drops its updates as stopped, whether or not its engine is loaded', async () => {
     const loaded = createRoom(db, { teamId: TEAM, name: 'Loaded', memberIds: [] })
     const idle = createRoom(db, { teamId: TEAM, name: 'Idle', memberIds: [] })

@@ -53,6 +53,46 @@ describe('Tasks tools with the run bound to its task', () => {
     expect((JSON.parse(named.text) as { task: { id: string } }).task.id).toBe(other)
   })
 
+  describe('the kind a comment is labelled with, which is what may wake an agent', () => {
+    const kindOf = async (
+      opts: Parameters<typeof createTasksServer>[1],
+      args: Record<string, unknown> = {},
+    ): Promise<string | null> => {
+      const task = createTask(db, { title: 'A task', teamId: 'A' })
+      const client = await connectInMemory(createTasksServer(db, opts))
+      const res = await callText(client, 'add_comment', { taskId: task.id, body: 'hi', ...args })
+      expect(res.isError).toBe(false)
+      return (JSON.parse(res.text) as { kind: string | null }).kind
+    }
+
+    it("a session bound to an agent is that agent's own words, whatever the call claims", async () => {
+      expect(await kindOf({ boundScope: { teamId: 'A', agentId: 'coder' } })).toBe('agent')
+      expect(
+        await kindOf({ boundScope: { teamId: 'A', agentId: 'coder' } }, { authorType: 'user' }),
+      ).toBe('agent')
+    })
+
+    it('an unverified HTTP caller gets no kind, whatever it claims', async () => {
+      expect(await kindOf({ unverifiedCaller: true })).toBeNull()
+      expect(await kindOf({ unverifiedCaller: true }, { authorType: 'user' })).toBeNull()
+    })
+
+    it("a stdio bin claiming to be a person is not a person's comment", async () => {
+      expect(await kindOf({})).toBeNull()
+      expect(await kindOf({}, { authorType: 'user' })).toBeNull()
+    })
+
+    it('no caller of this tool can write the one kind that wakes anyone', async () => {
+      for (const opts of [
+        {},
+        { unverifiedCaller: true },
+        { boundScope: { teamId: 'A', agentId: 'coder' } },
+      ]) {
+        expect(await kindOf(opts, { authorType: 'user' })).not.toBe('person')
+      }
+    })
+  })
+
   it('add_comment and block_task act on the run’s own task when taskId is left out', async () => {
     const mine = claimed('Write the parser')
     const client = await connectInMemory(bound(mine))

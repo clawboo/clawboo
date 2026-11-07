@@ -13,6 +13,7 @@ import path from 'node:path'
 import { promisify } from 'node:util'
 
 import {
+  adoptTaskWakes,
   attentionForTasks,
   claimTask,
   completeExecutionProcess,
@@ -24,11 +25,14 @@ import {
   listEvents,
   listExecutions,
   listUndeliveredInbox,
+  listWaitingTaskWakes,
   ORPHANED_REVIEW_NOTE,
   reconcileStaleInProgress,
+  recordTaskWake,
   resetBoardLifecycleListeners,
   TASK_HEARTBEAT_MS,
   tasks,
+  taskWakes,
   updateStatus,
 } from '@clawboo/db'
 import type {
@@ -296,6 +300,62 @@ describe('task runner: a crash while the work is being checked', () => {
       expect(
         getComments(getDb(), taskId).filter((c) => c.body.includes('Verification failed')),
       ).toEqual([])
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'a saved wake stays with the run through its check, and settles when the run closes',
+    async () => {
+      const hold = holdCheck()
+      const { taskId, result } = start()
+      await hold.reached
+      const wake = recordTaskWake(getDb(), {
+        teamId: 'team-1',
+        agentId: 'coder',
+        taskId,
+        reason: 'person_comment',
+      })
+      const execId = listExecutions(getDb(), taskId).at(-1)!.id
+      expect(getTask(getDb(), taskId)?.runExecutionId).toBe(execId)
+      adoptTaskWakes(getDb(), taskId, execId)
+      expect(listWaitingTaskWakes(getDb(), { taskId })).toEqual([])
+
+      hold.release()
+      await expect(result).resolves.toMatchObject({ ok: true, status: 'done' })
+      const row = getDb().select().from(taskWakes).where(eq(taskWakes.id, wake.id)).get()
+      expect(row?.settledHow).toBe('delivered')
+      expect(getTask(getDb(), taskId)?.runExecutionId).toBeNull()
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it.each(['sweep', 'boot reap'] as const)(
+    'a crash during the check gives a carried wake back through the %s, once',
+    async (how) => {
+      const hold = holdCheck()
+      const { taskId, result } = start()
+      await hold.reached
+      const wake = recordTaskWake(getDb(), {
+        teamId: 'team-1',
+        agentId: 'coder',
+        taskId,
+        reason: 'person_comment',
+      })
+      adoptTaskWakes(getDb(), taskId, listExecutions(getDb(), taskId).at(-1)!.id)
+      getDb().update(tasks).set({ updatedAt: 1 }).where(eq(tasks.id, taskId)).run()
+
+      if (how === 'sweep') expect(sweepStaleRuns(getDb(), 180_000)).toBe(1)
+      else expect(reapOrphanedRuns(getDb(), 180_000)).toBe(1)
+      expect(getTask(getDb(), taskId)?.status).toBe('blocked')
+      expect(getTask(getDb(), taskId)?.runExecutionId).toBeNull()
+
+      // The run that lost the task still ends, and changes nothing (`runStillOpen`).
+      hold.release()
+      await expect(result).resolves.toMatchObject({ ok: true, status: 'blocked' })
+      const row = listWaitingTaskWakes(getDb(), { taskId }).find((w) => w.id === wake.id)
+      expect(row?.replays).toBe(1)
+      expect(row?.heldAt).toBeNull()
     },
     WORKTREE_TIMEOUT_MS,
   )

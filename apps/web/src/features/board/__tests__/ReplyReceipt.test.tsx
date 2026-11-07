@@ -33,6 +33,10 @@ describe('receiptText', () => {
       'Ada will see this after the check',
     ],
     [
+      { status: 'queued', agentId: 'ada', reason: 'held' },
+      'Clawboo is holding new runs. Ada will see this when it resumes',
+    ],
+    [
       { status: 'queued', agentId: 'ada', reason: 'waiting' },
       'Ada will see this when the task it waits on is done',
     ],

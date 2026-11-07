@@ -690,6 +690,9 @@ export function createTasksServer(db: ClawbooDb, opts?: TasksServerOptions): Ser
               : ((optStr(args['authorType']) as 'agent' | 'user' | 'system' | undefined) ??
                   'agent'),
             unverified ? undefined : (boundAgentId ?? optStr(args['authorAgentId'])),
+            // Written through a Tasks session bound to its agent. Only that may ever
+            // count as the agent's own words; no comment wakes anyone from here today.
+            boundAgentId !== undefined && !unverified ? { kind: 'agent' } : {},
           ),
         )
       },

@@ -7,7 +7,8 @@ import { describe, expect, it } from 'vitest'
 
 import { createDb } from '../../db'
 import { teams } from '../../schema'
-import { createTask, listTasks } from '../repository'
+import { listWaitingTaskWakes, wakeCommentIds } from '../../taskWakes'
+import { createTask, getTask, listExecutions, listTasks } from '../repository'
 
 // Gated: real OS-thread contention needs the BUILT dist (a Worker gets no TS
 // transform), so this is skipped in the default `pnpm test`. Run it with:
@@ -147,6 +148,39 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
     }
   }, 60_000)
 
+  it(`${WORKERS} processes saving a wake on one task leave one waiting row holding them all`, async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-wake-race-'))
+    const dbPath = path.join(dir, 'test.db')
+    try {
+      const db = createDb(dbPath)
+      const task = createTask(db, { title: 'wake me', teamId: 'team1' })
+      const startAtMs = Date.now() + 3000
+      const results = await Promise.all(
+        Array.from(
+          { length: WORKERS },
+          (_, i) =>
+            new Promise<{ merged?: boolean }>((resolve, reject) => {
+              const w = new Worker(workerPath, {
+                workerData: { dbPath, taskId: task.id, id: i, mode: 'wake', startAtMs },
+              })
+              w.once('message', (m: { merged?: boolean; error?: string }) =>
+                m.error ? reject(new Error(m.error)) : resolve(m),
+              )
+              w.once('error', reject)
+            }),
+        ),
+      )
+      expect(results.filter((r) => !r.merged)).toHaveLength(1)
+      const waiting = listWaitingTaskWakes(db)
+      expect(waiting).toHaveLength(1)
+      expect(waiting[0]!.mergeCount).toBe(WORKERS)
+      expect(wakeCommentIds(waiting[0]!)).toHaveLength(WORKERS)
+      db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
   it(`${WORKERS} concurrent creates with one key make one task, and same words as an agent make one`, async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-key-race-'))
     const dbPath = path.join(dir, 'test.db')
@@ -169,6 +203,38 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
         ),
       )
       expect(new Set(titled.map((r) => r.taskId)).size).toBe(1)
+      db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it(`exactly one of ${WORKERS} processes claiming with a run opens a run on the task`, async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-claim-run-race-'))
+    const dbPath = path.join(dir, 'test.db')
+    try {
+      const db = createDb(dbPath)
+      const task = createTask(db, { title: 'one live run', teamId: 'team1' })
+      const startAtMs = Date.now() + 3000
+      const results = await Promise.all(
+        Array.from(
+          { length: WORKERS },
+          (_, i) =>
+            new Promise<{ claimed?: boolean; reason?: string | null }>((resolve, reject) => {
+              const w = new Worker(workerPath, {
+                workerData: { dbPath, taskId: task.id, id: i, mode: 'claimrun', startAtMs },
+              })
+              w.once('message', (m: { claimed?: boolean; error?: string }) =>
+                m.error ? reject(new Error(m.error)) : resolve(m),
+              )
+              w.once('error', reject)
+            }),
+        ),
+      )
+      expect(results.filter((r) => r.claimed)).toHaveLength(1)
+      const runs = listExecutions(db, task.id)
+      expect(runs).toHaveLength(1)
+      expect(getTask(db, task.id)?.runExecutionId).toBe(runs[0]!.id)
       db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })

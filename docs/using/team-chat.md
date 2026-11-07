@@ -222,7 +222,7 @@ General's menu has only **Clear chat**: General cannot be renamed, unpinned or d
 
 To change a room's members, click the members' faces in the room's header (**Edit room members**). The dialog renames the room, changes its members, or deletes it. A member you remove finishes the turn it is taking, and the room's later turns go only to the members who remain.
 
-Deleting a room keeps its conversation, but the room leaves the sidebar and its running work stops, as with **Stop**: a task update still waiting for one of the room's agents is dropped. Its tasks stay on the board, with their results on their cards, where **Retry** or **Assign** runs them from General. If you were in the room, you land in General.
+Deleting a room keeps its conversation, but the room leaves the sidebar and its running work stops, as with **Stop**, and a task update still waiting for one of the room's agents is dropped, since none of them will run there again. Its tasks stay on the board, with their results on their cards, where **Retry** or **Assign** runs them from General. If you were in the room, you land in General.
 
 ## The cards beside the chat
 

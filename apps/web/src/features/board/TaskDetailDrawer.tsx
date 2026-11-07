@@ -53,6 +53,7 @@ import { TaskLabelsSelect } from './TaskLabelsSelect'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
 import { ReplyReceipt } from './ReplyReceipt'
+import { pendingWakeText, readPendingWake } from './pendingWake'
 import { TaskComments } from './TaskComments'
 import { TaskReplyBox } from './TaskReplyBox'
 import {
@@ -1031,6 +1032,17 @@ export function TaskDetailDrawer({
                     }}
                   />
                 ) : null}
+                {(() => {
+                  const wake = readPendingWake(task['pendingWake'])
+                  return wake ? (
+                    <p
+                      className="mb-2 text-xs text-muted-foreground"
+                      data-testid="task-pending-wake"
+                    >
+                      {pendingWakeText(wake, ownerId ? (ownerName ?? ownerId) : 'The agent')}
+                    </p>
+                  ) : null
+                })()}
                 <TaskReplyBox
                   taskId={task.id}
                   status={task.status}

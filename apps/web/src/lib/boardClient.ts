@@ -359,13 +359,13 @@ async function postHandOff(url: string, body?: unknown): Promise<HandOffResult> 
 
 /**
  * Where a person's reply on a task went (the server's `personReply`): into the
- * run working on it, the task started again for it, waiting in the agent's
- * mailbox for its next run, or not sent.
+ * run working on it, the task started again for it, waiting for the agent's
+ * next turn, or not sent.
  */
 export type ReplyDelivery =
   | { status: 'steered'; agentId: string }
   | { status: 'woke-agent'; agentId: string }
-  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' }
+  | { status: 'queued'; agentId: string; reason: 'next-run' | 'in-review' | 'waiting' | 'held' }
   | {
       status: 'not-delivered'
       agentId: string | null

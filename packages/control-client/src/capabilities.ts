@@ -38,7 +38,8 @@ export const ENGINE_FEATURES = [
   'chat.direct',
   // Board: the check on finished worktree work, a team-chat check waiting for the
   // team folder (`checkHeldSince` on a task), a comment reaching a live run,
-  // readable task ids, and team labels.
+  // readable task ids, team labels, and the agent waking when something happens on
+  // its task (a saved wake).
   'board.verification',
   'board.checkHold',
   'board.steering',
@@ -47,6 +48,7 @@ export const ENGINE_FEATURES = [
   // A person's inbox: read state per task on the server, and the small read behind
   // the badge. The event stream says when to read it (`?activity=1`).
   'board.inbox',
+  'board.wakes',
   // The read-only view of a task's worktree, and its built-page preview.
   'workspace.view',
   'workspace.preview',

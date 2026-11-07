@@ -333,6 +333,9 @@ export class FakeBoard implements CascadeBoard {
   async listTasks(): Promise<BoardTask[]> {
     return [...this.tasks.values()].map((t) => this.toBoardTask(t))
   }
+  async directDependents(taskId: string): Promise<string[]> {
+    return [...this.depMap].filter(([, blockers]) => blockers.includes(taskId)).map(([id]) => id)
+  }
   async cancelDependents(taskId: string): Promise<Array<{ id: string; title?: string }>> {
     const out: Array<{ id: string; title?: string }> = []
     const visit = (id: string): void => {

@@ -25,6 +25,7 @@ import {
   updateStatus,
 } from '../repository'
 import { setTaskRunnerInputs } from '../runnerInputs'
+import { adoptTaskWakes, listWaitingTaskWakes, recordTaskWake } from '../../taskWakes'
 import { eq } from 'drizzle-orm'
 
 let dir: string
@@ -62,6 +63,25 @@ const age = (id: string): void => {
 }
 
 describe('reconcileStaleInReview', () => {
+  it('gives back a saved wake the run carried, and lets go of the run stamp', () => {
+    const id = inReview('claude-code')
+    const exec = listExecutions(db, id).at(-1)!
+    db.update(tasks).set({ runExecutionId: exec.id }).where(eq(tasks.id, id)).run()
+    const wake = recordTaskWake(db, {
+      teamId: 'T',
+      agentId: 'coder',
+      taskId: id,
+      reason: 'person_comment',
+    })
+    adoptTaskWakes(db, id, exec.id)
+    age(id)
+    expect(reconcileStaleInReview(db, 1_000).reconciled).toBe(1)
+    expect(getTask(db, id)?.runExecutionId).toBeNull()
+    const row = listWaitingTaskWakes(db).find((w) => w.id === wake.id)
+    expect(row?.replays).toBe(1)
+    expect(row?.heldAt).toBeNull()
+  })
+
   it('parks a task whose open runner run stopped beating, and says which', () => {
     const id = inReview('claude-code')
     age(id)

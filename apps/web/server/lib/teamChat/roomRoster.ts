@@ -79,10 +79,16 @@ export function roomIdForTask(db: ClawbooDb, taskId: string): string | null {
  *  - `room_archived`: the room is archived. Archiving a room moves its unfinished
  *    tasks to the team's own chat (`moveArchivedRoomTasks`, also run at boot), so
  *    this holds only for a task that move missed.
- *  - `no_team`: the room is gone. Rooms are archived, never deleted, except with
- *    their team, so the team is gone too and there is no chat left to run it.
+ *  - `no_team`: the team is gone, which leaves its task rows behind, or the room is.
+ *    Rooms are archived, never deleted, except with their team, so a room that is
+ *    gone means the team is too, and there is no chat left to run it.
  */
 export function engineRefusal(db: ClawbooDb, task: DbTask): 'room_archived' | 'no_team' | null {
+  if (
+    task.teamId &&
+    !db.select({ id: teams.id }).from(teams).where(eq(teams.id, task.teamId)).get()
+  )
+    return 'no_team'
   if (task.roomId == null || roomIdForTask(db, task.id) !== null) return null
   return getRoom(db, task.roomId) ? 'room_archived' : 'no_team'
 }

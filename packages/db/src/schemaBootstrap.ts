@@ -249,7 +249,8 @@ const SCHEMA_DDL = `
       identifier           TEXT,
       delegated_by_agent_id TEXT,
       person_cancelled_at  INTEGER,
-      check_held_since     INTEGER
+      check_held_since     INTEGER,
+      run_execution_id     TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tasks_team_status ON tasks (team_id, status);
     CREATE INDEX IF NOT EXISTS idx_tasks_status      ON tasks (status);
@@ -313,6 +314,11 @@ const SCHEMA_DDL = `
       -- The person whose request added it, when a sign-in proxy vouched for
       -- them: a JSON {id, name, role}. NULL otherwise.
       person          TEXT,
+      -- What wrote it, as the writer labelled it: 'person' | 'agent' | 'note' |
+      -- 'result'. NULL for a caller that gave none, and such a comment wakes no one.
+      kind            TEXT,
+      -- When it was steered into a run that took it live.
+      steered_at      INTEGER,
       created_at      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id);
@@ -416,6 +422,7 @@ const SCHEMA_DDL = `
       run_reason         TEXT,
       error              TEXT,
       error_class        TEXT,
+      made_progress      INTEGER,
       recovery_tombstone INTEGER NOT NULL DEFAULT 0,
       tenant_id          TEXT,
       created_at         INTEGER NOT NULL
@@ -794,9 +801,31 @@ const SCHEMA_DDL = `
       replays             INTEGER NOT NULL DEFAULT 0,
       created_at          INTEGER NOT NULL,
       settled_at          INTEGER,
-      settled_how         TEXT
+      settled_how         TEXT,
+      held_at             INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_report_up_outbox_pending ON report_up_outbox (team_id, room_id, settled_at);
+
+    CREATE TABLE IF NOT EXISTS task_wakes (
+      id                TEXT    PRIMARY KEY,
+      team_id           TEXT,
+      agent_id          TEXT    NOT NULL,
+      task_id           TEXT    NOT NULL,
+      reason            TEXT    NOT NULL,
+      comment_ids       TEXT    NOT NULL DEFAULT '[]',
+      merge_count       INTEGER NOT NULL DEFAULT 1,
+      replays           INTEGER NOT NULL DEFAULT 0,
+      carried_exec_id   TEXT,
+      skip_reason       TEXT,
+      held_at           INTEGER,
+      created_at        INTEGER NOT NULL,
+      updated_at        INTEGER NOT NULL,
+      settled_at        INTEGER,
+      settled_how       TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uniq_task_wakes_waiting ON task_wakes (agent_id, task_id) WHERE settled_at IS NULL AND carried_exec_id IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_task_wakes_pending ON task_wakes (settled_at, carried_exec_id);
+    CREATE INDEX IF NOT EXISTS idx_task_wakes_task ON task_wakes (task_id);
 
     -- ── Connector INSTANCES: see src/grants/ ────────────────────────────────
     -- Three nouns kept apart on purpose. The catalog TYPE is committed TypeScript

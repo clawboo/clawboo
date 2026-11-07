@@ -57,6 +57,13 @@ export type BoardLifecycleEvent =
        *  the engine itself delivers; anything else = the executor runner). */
       executorType: string
     }
+  | {
+      /** A wake was saved for this task (see task_wakes). */
+      kind: 'task_wake_recorded'
+      taskId: string
+      teamId: string | null
+      reason: string
+    }
 
 type Listener = (ev: BoardLifecycleEvent) => void
 

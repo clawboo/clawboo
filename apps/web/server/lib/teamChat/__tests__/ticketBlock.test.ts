@@ -596,3 +596,134 @@ describe('buildTicketBlock: the first line', () => {
     expect(block).toContain(`Task id: ${task.id}.`)
   })
 })
+
+describe('buildTicketBlock: why this run', () => {
+  const blockFor = (
+    runReason: string | null,
+    origin: Parameters<typeof buildTicketBlock>[2]['origin'] = DELEGATED,
+  ) => {
+    const task = createTask(db, { title: 'Write the email', teamId: 'T' })
+    const exec = claimTask(db, task.id, 'coder', 'codex', {
+      run: { executorType: 'openclaw', runReason },
+    }).execution!
+    return buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId: exec.id,
+      origin,
+      resumed: null,
+    })!
+  }
+
+  it('reads the reason recorded on the run, not the origin', () => {
+    expect(blockFor('person_comment')).toContain(
+      'Why this run: a person commented on this task; what they wrote is below.',
+    )
+    expect(blockFor('dependency_done')).toContain(
+      'Why this run: a task it was waiting on is finished; its result is below.',
+    )
+    expect(blockFor('question_answered')).toContain(
+      'Why this run: a person answered your question; their answer is below.',
+    )
+    expect(blockFor('fix_round')).toContain(
+      "Why this run: the team's check did not pass your work on it yet.",
+    )
+  })
+
+  it('a delegation and an assignment read as they always did', () => {
+    expect(blockFor('delegation')).toContain('Why this run: Ada handed you this task.')
+    expect(blockFor('assignment', ASSIGNED)).toContain(
+      'Why this run: a person assigned you this task on the board.',
+    )
+  })
+
+  it('a row from before reasons were kept reads from the origin', () => {
+    expect(blockFor('team-orchestration')).toContain('Why this run: Ada handed you this task.')
+    expect(blockFor(null, ASSIGNED)).toContain('a person assigned you this task')
+  })
+
+  it('a wake origin with no reason on its row reads the reason it carries', () => {
+    const block = blockFor(null, {
+      kind: 'wake',
+      reason: 'dependency_done',
+      wakeIds: [],
+      fromAgentId: 'lead',
+    })
+    expect(block).toContain('a task it was waiting on is finished')
+  })
+})
+
+describe('buildTicketBlock: a comment reads once', () => {
+  it('a note Clawboo wrote as a `user` comment is not credited to a person', () => {
+    const { task, execId } = running('Write the email')
+    addComment(db, task.id, 'Retry requested.', 'user', null, { kind: 'note' })
+    addComment(db, task.id, 'Use the new logo.', 'user', null, { kind: 'person' })
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: null,
+    })!
+    expect(block).toMatch(/from=clawboo[^\n]*\n[^\n]*Retry requested\./)
+    expect(block).toMatch(/from=person[^\n]*\n[^\n]*Use the new logo\./)
+  })
+
+  it('a comment steered into a session is not shown to that session again', () => {
+    const { task, execId } = running('Write the email')
+    const seenAt = Date.now() - 600_000
+    const steered = addComment(db, task.id, 'Heard it live.', 'user', null, { kind: 'person' })
+    const missed = addComment(db, task.id, 'Missed it.', 'user', null, { kind: 'person' })
+    db.update(taskComments)
+      .set({ createdAt: seenAt + 1_000, steeredAt: seenAt + 2_000 })
+      .where(eq(taskComments.id, steered.id))
+      .run()
+    db.update(taskComments)
+      .set({ createdAt: seenAt + 1_000 })
+      .where(eq(taskComments.id, missed.id))
+      .run()
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: { ticketHash: ticketHashOf(task), seenAt, endedAt: seenAt + 10_000 },
+    })!
+    expect(block).toContain('Missed it.')
+    expect(block).not.toContain('Heard it live.')
+  })
+
+  it('a steer into a run that died before writing a pointer was never heard by this session', () => {
+    const { task, execId } = running('Write the email')
+    const seenAt = Date.now() - 600_000
+    const steered = addComment(db, task.id, 'Use the staging DB.', 'user', null, {
+      kind: 'person',
+    })
+    // The session's last pointer is from a run that ended BEFORE the steer: the run the
+    // steer went into died with no terminal, so it wrote none.
+    db.update(taskComments)
+      .set({ createdAt: seenAt + 60_000, steeredAt: seenAt + 60_000 })
+      .where(eq(taskComments.id, steered.id))
+      .run()
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: { ticketHash: ticketHashOf(task), seenAt, endedAt: seenAt + 10_000 },
+    })!
+    expect(block).toContain('Use the staging DB.')
+  })
+
+  it('a fresh session has heard nothing, so it is shown', () => {
+    const { task, execId } = running('Write the email')
+    const steered = addComment(db, task.id, 'Heard it live.', 'user', null, { kind: 'person' })
+    db.update(taskComments)
+      .set({ steeredAt: Date.now() })
+      .where(eq(taskComments.id, steered.id))
+      .run()
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId,
+      origin: DELEGATED,
+      resumed: null,
+    })!
+    expect(block).toContain('Heard it live.')
+  })
+})

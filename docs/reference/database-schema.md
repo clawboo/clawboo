@@ -59,6 +59,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`skills`](#skills)                             | Capabilities and skills  | Skills added to agents                           |
 | [`team_chat`](#team_chat)                       | Peer room and mailbox    | Posts in the agents' own peer room               |
 | [`agent_inbox`](#agent_inbox)                   | Peer room and mailbox    | Each agent's mailbox                             |
+| [`task_wakes`](#task_wakes)                     | Peer room and mailbox    | Wakes saved on tasks, until their run ends       |
 | [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient    |
 | [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                          |
 | [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                    |
@@ -287,6 +288,7 @@ The task cards.
 | `delegated_by_agent_id` | `TEXT`                                | The agent that handed the task out through the Tasks tools. The team engine records its delegator in `source_delegation_id`. The hand-off cycle guard reads both                                   |
 | `person_cancelled_at`   | `INTEGER`                             | When a person cancelled it, or cancelled the step it waited on. Only this frees its place under its parent                                                                                         |
 | `check_held_since`      | `INTEGER`                             | When the task's team-chat check began waiting for the team folder, or `NULL`. Read only while the task is `in_review`; any move out of review clears it                                            |
+| `run_execution_id`      | `TEXT`                                | The execution holding the task's claim, written with the claim and moved to a fix round's execution. Cleared when the run ends or the task is let go. Null for a claim that opened no run          |
 
 Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
 
@@ -359,16 +361,18 @@ Primary key: `task_id`, `depends_on_task_id`. Indexes: `idx_task_deps_task` (`ta
 
 Comments and system notes on a task, such as report-backs and verification results.
 
-| Column            | Type                            | Notes                                                                                                                      |
-| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `id`              | `TEXT`, PK                      |                                                                                                                            |
-| `task_id`         | `TEXT`, not null, FK `tasks.id` |                                                                                                                            |
-| `author_agent_id` | `TEXT`                          |                                                                                                                            |
-| `author_type`     | `TEXT`, not null                | `agent`, `user` or `system`                                                                                                |
-| `body`            | `TEXT`, not null                |                                                                                                                            |
-| `tenant_id`       | `TEXT`                          | Unused                                                                                                                     |
-| `person`          | `TEXT`                          | JSON `{ id, name, role }` of the person whose request added it, when a [sign-in proxy](/guides/sso-proxy) vouched for them |
-| `created_at`      | `INTEGER`, not null             |                                                                                                                            |
+| Column            | Type                            | Notes                                                                                                                                              |
+| ----------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`              | `TEXT`, PK                      |                                                                                                                                                    |
+| `task_id`         | `TEXT`, not null, FK `tasks.id` |                                                                                                                                                    |
+| `author_agent_id` | `TEXT`                          |                                                                                                                                                    |
+| `author_type`     | `TEXT`, not null                | `agent`, `user` or `system`                                                                                                                        |
+| `body`            | `TEXT`, not null                |                                                                                                                                                    |
+| `tenant_id`       | `TEXT`                          | Unused                                                                                                                                             |
+| `person`          | `TEXT`                          | JSON `{ id, name, role }` of the person whose request added it, when a [sign-in proxy](/guides/sso-proxy) vouched for them                         |
+| `kind`            | `TEXT`                          | What wrote it, as the writer labelled it: `person`, `agent`, `note` or `result`. Null for a caller that gave none, and such a comment wakes no one |
+| `steered_at`      | `INTEGER`                       | When it was steered into a run that took it live, so a session resumed from that run is not shown it again                                         |
+| `created_at`      | `INTEGER`, not null             |                                                                                                                                                    |
 
 Indexes: `idx_task_comments_task` (`task_id`).
 
@@ -430,32 +434,33 @@ Indexes: `idx_workspaces_task` (`task_id`).
 
 One row per run of a task, on any runtime: its status, git checkpoints, and token and cost totals.
 
-| Column               | Type                                 | Notes                                                                                                                                                                                              |
-| -------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                    |
-| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                    |
-| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                  |
-| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                    |
-| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                    |
-| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                             |
-| `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                    |
-| `started_at`         | `INTEGER`                            |                                                                                                                                                                                                    |
-| `completed_at`       | `INTEGER`                            |                                                                                                                                                                                                    |
-| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                                                                                                          |
-| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                                                                                                           |
-| `input_tokens`       | `INTEGER`                            |                                                                                                                                                                                                    |
-| `output_tokens`      | `INTEGER`                            |                                                                                                                                                                                                    |
-| `cache_read`         | `INTEGER`                            |                                                                                                                                                                                                    |
-| `cache_write`        | `INTEGER`                            |                                                                                                                                                                                                    |
-| `cost_usd`           | `REAL`                               |                                                                                                                                                                                                    |
-| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost                                                                                       |
-| `summary`            | `TEXT`                               | The run's result summary                                                                                                                                                                           |
-| `run_reason`         | `TEXT`                               | Why the run started                                                                                                                                                                                |
-| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                   |
-| `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one |
-| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                         |
-| `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                             |
-| `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                    |
+| Column               | Type                                 | Notes                                                                                                                                                                                                                  |
+| -------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                                        |
+| `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                                        |
+| `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                                      |
+| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                                        |
+| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                                        |
+| `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                                                 |
+| `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `started_at`         | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `completed_at`       | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `before_commit`      | `TEXT`                               | Git commit before the run                                                                                                                                                                                              |
+| `after_commit`       | `TEXT`                               | Git commit after the run                                                                                                                                                                                               |
+| `input_tokens`       | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `output_tokens`      | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `cache_read`         | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `cache_write`        | `INTEGER`                            |                                                                                                                                                                                                                        |
+| `cost_usd`           | `REAL`                               |                                                                                                                                                                                                                        |
+| `cost_source`        | `TEXT`                               | `reported`, `local` (a model your own Ollama served), `token-estimate` or `char-estimate`; null with no cost                                                                                                           |
+| `summary`            | `TEXT`                               | The run's result summary                                                                                                                                                                                               |
+| `run_reason`         | `TEXT`                               | Why the run started. Team chat: `delegation`, `assignment`, `fix_round`, `person_comment`, `dependency_done` or `question_answered`; older rows say `team-orchestration`. The task runner and routines write their own |
+| `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                                       |
+| `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one                     |
+| `made_progress`      | `INTEGER`                            | Whether the run made [visible progress](/internals/board-internals#the-no-progress-brake): `1` or `0`. Null for a run with no verdict (a Stop, an account or budget refusal) and for older rows                        |
+| `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                                             |
+| `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                                                 |
+| `created_at`         | `INTEGER`, not null                  |                                                                                                                                                                                                                        |
 
 Indexes: `idx_exec_task` (`task_id`), `idx_exec_status` (`status`).
 
@@ -831,20 +836,45 @@ Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
 
 The team chat engine's `[Task Update]` items, one row per result waiting to reach whoever handed the work off. A row is written when the engine queues it and settled when the recipient's run that carried it finishes, when a Stop drops it, or when it is given up. An unsettled row whose run never finished is sent again, by the running engine or, after a restart, by the chat's next engine. Settled rows are deleted after 7 days; unsettled rows are deleted after 30 days, or as soon as their team is gone.
 
-| Column               | Type                           | Notes                                             |
-| -------------------- | ------------------------------ | ------------------------------------------------- |
-| `id`                 | `TEXT`, PK                     |                                                   |
-| `team_id`            | `TEXT`, not null               |                                                   |
-| `room_id`            | `TEXT`                         | The chat room; null for the team's own chat       |
-| `recipient_agent_id` | `TEXT`                         | Null means the room's lead at the time it is sent |
-| `task_id`            | `TEXT`                         | The task the update reports on                    |
-| `payload`            | `TEXT`, not null               | The engine's item as JSON                         |
-| `replays`            | `INTEGER`, not null, default 0 | Times it was sent again; given up after 3         |
-| `created_at`         | `INTEGER`, not null            |                                                   |
-| `settled_at`         | `INTEGER`                      | Null while pending                                |
-| `settled_how`        | `TEXT`                         | `delivered`, `stopped` or `gave_up`               |
+| Column               | Type                           | Notes                                                                                  |
+| -------------------- | ------------------------------ | -------------------------------------------------------------------------------------- |
+| `id`                 | `TEXT`, PK                     |                                                                                        |
+| `team_id`            | `TEXT`, not null               |                                                                                        |
+| `room_id`            | `TEXT`                         | The chat room; null for the team's own chat                                            |
+| `recipient_agent_id` | `TEXT`                         | Null means the room's lead at the time it is sent                                      |
+| `task_id`            | `TEXT`                         | The task the update reports on                                                         |
+| `payload`            | `TEXT`, not null               | The engine's item as JSON                                                              |
+| `replays`            | `INTEGER`, not null, default 0 | Times it was sent again; given up after 3                                              |
+| `created_at`         | `INTEGER`, not null            |                                                                                        |
+| `settled_at`         | `INTEGER`                      | Null while pending                                                                     |
+| `settled_how`        | `TEXT`                         | `delivered`, `stopped` (its room was archived) or `gave_up`                            |
+| `held_at`            | `INTEGER`                      | Set when a person's Stop held it: it starts no run, and rides the recipient's next one |
 
 Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`).
+
+### task_wakes
+
+[Saved wakes](/internals/board-internals#saved-wakes): something happened on a task and its agent has not heard. A row is written when the wake happens, the run that starts the task takes it, and it is settled when that run ends. Deleted 7 days after it settles, or after 30 days still waiting.
+
+| Column            | Type                             | Notes                                                                                                        |
+| ----------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `id`              | `TEXT`, PK                       |                                                                                                              |
+| `team_id`         | `TEXT`                           | Null for a task with no team                                                                                 |
+| `agent_id`        | `TEXT`, not null                 | The agent the task belonged to when the wake happened                                                        |
+| `task_id`         | `TEXT`, not null                 |                                                                                                              |
+| `reason`          | `TEXT`, not null                 | `person_comment`, `dependency_done` or `question_answered`                                                   |
+| `comment_ids`     | `TEXT`, not null, default `'[]'` | JSON array of the comments it carries                                                                        |
+| `merge_count`     | `INTEGER`, not null, default 1   | How many wakes were folded into it                                                                           |
+| `replays`         | `INTEGER`, not null, default 0   | Times it was sent again; given up after 3                                                                    |
+| `carried_exec_id` | `TEXT`                           | The run carrying it; null while it waits                                                                     |
+| `skip_reason`     | `TEXT`                           | Why the pump last left it waiting; see [`task_wake_skipped`](/reference/events-and-errors#task_wake_skipped) |
+| `held_at`         | `INTEGER`                        | Set when a person's Stop held it: it rides the task's next run                                               |
+| `created_at`      | `INTEGER`, not null              |                                                                                                              |
+| `updated_at`      | `INTEGER`, not null              |                                                                                                              |
+| `settled_at`      | `INTEGER`                        | Null while open                                                                                              |
+| `settled_how`     | `TEXT`                           | `delivered`, `stopped`, `gave_up`, `finished` or `merged`                                                    |
+
+Indexes: `uniq_task_wakes_waiting`, unique on (`agent_id`, `task_id`) where `settled_at` and `carried_exec_id` are null; `idx_task_wakes_pending` (`settled_at`, `carried_exec_id`); `idx_task_wakes_task` (`task_id`).
 
 ## Spend, budgets and audit
 

@@ -11,6 +11,7 @@ keywords:
     'PolicyDenied',
     'grant_decision',
     'connector_health',
+    'task_wake_skipped',
     'traces',
     'fleet health',
   ]
@@ -50,6 +51,10 @@ There are 25 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                                                  | speaker selected   |
 | [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                                                  | turn bound hit     |
 | [`grant_decision`](#grant_decision)           | Connectors | A grant check allowed, paused or refused a connector tool call | Tool broker                                                                        | grant              |
+| [`task_wake_recorded`](#task_wake_recorded)   | Board      | A wake was saved on a task                                     | Board lifecycle subscriber                                                         |
+| [`task_wake_skipped`](#task_wake_skipped)     | Board      | A saved wake did not start a run, and why                      | Wake pump, team engine                                                             |
+| [`task_wake_given_up`](#task_wake_given_up)   | Board      | A saved wake was given up after its replays                    | Wake pump                                                                          |
+| [`task_braked`](#task_braked)                 | Board      | A released task waits under the no-progress brake              | Board lifecycle subscriber                                                         |
 | [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                                               | connector          |
 
 - **Board API** means the board routes the dashboard calls. Board changes made through the [Tasks MCP tools](/reference/mcp-tools) or by the task runner itself update the live board views but are not written to the log as board events.
@@ -230,6 +235,8 @@ On task-runner runs, `error` holds a code when Clawboo stopped or refused the ru
 | `budget_held:<scope>`     | `cancelled`             | Right before the model call, a hard cap's remaining room was held by runs already going, so the run did not start    |
 | `circuit_broken:<reason>` | `cancelled`             | A circuit breaker stopped the run; see the reasons below                                                             |
 | Anything else             | `failed` or `cancelled` | The run's own error summary                                                                                          |
+
+The two budget rows also carry `errorClass` `BudgetRefused`: their status is `cancelled`, but no person stopped them, and a raised cap lets a wake on the task go out.
 
 Breaker reasons, also posted on the task as a comment that begins `[stopped: <reason>]`:
 
@@ -550,6 +557,75 @@ A connector's health changed.
 ```
 
 `health` is one of `unknown`, `ok`, `needs-auth`, `degraded`, `error` or `drift`. The server writes this event with `health: 'error'` and `detail: 'the connector process exited'` when a connector's process stops; it writes no other value today. `drift` means the connector's tools no longer match what was approved, so review what changed before trusting it again.
+
+### task_wake_recorded
+
+Something happened on a task and its agent is to hear it: a [saved wake](/internals/board-internals#saved-wakes).
+
+```ts
+{
+  reason: string
+}
+```
+
+`reason` is `person_comment`, `dependency_done` or `question_answered`. A wake a stdio bin saved has no event: the bus is in-process.
+
+### task_wake_skipped
+
+A saved wake did not start a run. One event each time the reason changes, however many pump passes it spans.
+
+```ts
+{
+  wakeId: string
+  reason: string
+  wakeReason: string
+}
+```
+
+`wakeReason` is why it was saved. `reason` is what it waits for:
+
+| Reason                     | What ends it                                                |
+| -------------------------- | ----------------------------------------------------------- |
+| `held`                     | The engine hold lifting                                     |
+| `budget`                   | A person raising the hard cap                               |
+| `braked`                   | The wait running out, or a person's comment                 |
+| `agent_busy`               | The agent's other work ending                               |
+| `run_live`                 | A run proven alive holds the task, and takes it             |
+| `run_unproven`             | The stale sweep ending a run nothing proves alive           |
+| `no_run`                   | A person moving the card: in progress with no run behind it |
+| `under_check`              | The work check answering                                    |
+| `dependency`               | The dependency finishing                                    |
+| `parked`, `stopped`        | A person's Retry                                            |
+| `sign_in`, `billing`       | A person fixing it, then a Retry                            |
+| `blocked`                  | A person's Retry                                            |
+| `backlog`                  | A person moving the card to To do                           |
+| `no_agent`                 | A person assigning an agent                                 |
+| `room_archived`, `no_team` | The boot move, or nothing: the team is gone                 |
+
+`finished` means the task closed first, and the wake was settled. The task drawer shows the waiting reason beside the reply box.
+
+### task_wake_given_up
+
+A saved wake's run failed 3 times over, so it stopped being sent. The team's chat was told first; the comments and results stay on the task.
+
+```ts
+{
+  wakeId: string
+  wakeReason: string
+  replays: number
+}
+```
+
+### task_braked
+
+A task released with no visible progress on its last runs waits before it starts again by itself. See [the no-progress brake](/internals/board-internals#the-no-progress-brake).
+
+```ts
+{
+  runs: number
+  until: number
+}
+```
 
 ## Cost totals
 

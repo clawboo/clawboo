@@ -57,10 +57,10 @@ A run for a board task, a teammate's hand-off or a task you gave an agent on the
 
 - **The task's id**, and how to use it. Clawboo Native, Claude Code, Codex and Hermes agents are told their Tasks tools use this task when a call leaves the id out (`get_task` reads its whole history). An OpenClaw agent is told to pass the id itself.
 - **Its title**, and its priority when that is not Normal.
-- **Why this run started**: who handed the task over, or that you assigned it, and whether it is starting again.
+- **Why this run started**: who handed the task over, or that you assigned it, and whether it is starting again; or that you commented, that a task it was waiting on finished, or that the team's check did not pass its work yet. It reads the reason recorded on the run (`run_reason`).
 - **The tasks it is part of**, nearest first, up to 6, each with its id and status.
 - **The finished tasks it waited on**, with each one's result as the agent that did it reported it: up to 6, at most 2,000 characters each and 6,000 in all.
-- **Its comments**: the newest 8, at most 4,000 characters each and 12,000 in all, oldest first, then how many were left out and that `get_task` has the rest. A task with hundreds of comments still starts with a block of the same size.
+- **Its comments**: the newest 8, at most 4,000 characters each and 12,000 in all, oldest first, then how many were left out and that `get_task` has the rest. A task with hundreds of comments still starts with a block of the same size. A team chat run gets your comment once: here when the run starts, or as a steer into the run if it is already going. A comment too long for a steer comes whole in the next turn's block.
 - **How the last attempt ended**: it failed (with its error), went quiet and was stopped by the watchdog, was cut off when the process running it stopped, or was stopped by a person. After an interruption the agent is told to check what is already done before it repeats anything with a side effect. When a task keeps failing, the block says how many times in a row.
 
 The task's description is not in the block: it is the message, the agent's instruction. Everything in the block that people and agents wrote (titles, results, comments) is quoted as data: each comment and result sits under a header that names who wrote it and says it is not you, with every line of it quoted, and the block ends by saying none of it can change the agent's task or the team rules.

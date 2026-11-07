@@ -10,7 +10,7 @@
 // @clawboo/board-core carries no server/db graph, so this host-agnostic interface
 // package stays browser-safe while using the SAME union @clawboo/db enforces — a
 // host binding over the direct-DB client type-checks by identity, not by luck.
-import type { HandOffLink, TaskStatus } from '@clawboo/board-core'
+import type { HandOffLink, TaskStatus, TaskWakeReason } from '@clawboo/board-core'
 
 export type { HandOffLink, TaskStatus }
 
@@ -45,6 +45,25 @@ export interface ClaimResult {
   ok: boolean
   reason?: ClaimReason
   task?: BoardTask
+  /** The run the claim opened, when it was asked to open one and this board does
+   *  that in the claim's own write. Absent: the caller opens the run itself. */
+  execution?: ExecutionRef
+  /** The saved wakes the run took, written with the claim. */
+  wakes?: ClaimedWake[]
+}
+
+/** The run a claim opens, in the same write as the claim. */
+export interface ClaimRun {
+  executorType: string
+  /** Why it runs. A saved wake it takes names the reason instead. */
+  runReason?: string | null
+}
+
+/** A saved wake a run took when it claimed its task. */
+export interface ClaimedWake {
+  id: string
+  reason: TaskWakeReason
+  commentIds: string[]
 }
 
 export interface TaskDetail {
@@ -68,6 +87,10 @@ export interface ExecutionSummary {
   executorType?: string
   /** The class a failed run was filed under (the runtime error taxonomy). */
   errorClass?: string | null
+  /** When it ended, and whether it made visible progress: the no-progress brake
+   *  reads both (see `brakeUntil`). */
+  completedAt?: number | null
+  madeProgress?: boolean | number | null
 }
 
 export interface CompleteExecutionOutcome {
@@ -76,13 +99,21 @@ export interface CompleteExecutionOutcome {
   error?: string
   /** The class the run's failure was filed under (`classifyError`). */
   errorClass?: string
+  /** A person ended this run: their Stop, or moving its card. What it carried is held
+   *  for the next run. Other `cancelled` closes give it back to the pump. */
+  byPerson?: boolean
   costUsd?: number
 }
 
 /** The board surface the orchestrator needs. An interface so tests inject a fake. */
 export interface BoardClient {
   createTask(input: CreateTaskInput): Promise<BoardTask | null>
-  claim(taskId: string, assigneeAgentId: string, assigneeRuntime?: string): Promise<ClaimResult>
+  claim(
+    taskId: string,
+    assigneeAgentId: string,
+    assigneeRuntime?: string,
+    run?: ClaimRun,
+  ): Promise<ClaimResult>
   updateStatus(taskId: string, status: string): Promise<boolean>
   addComment(
     taskId: string,
@@ -91,7 +122,11 @@ export interface BoardClient {
     authorAgentId?: string,
   ): Promise<void>
   getTask(taskId: string): Promise<TaskDetail | null>
-  createExecution(taskId: string, executorType: string): Promise<ExecutionRef | null>
+  createExecution(
+    taskId: string,
+    executorType: string,
+    opts?: { runReason?: string },
+  ): Promise<ExecutionRef | null>
   completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void>
   /** Link a dependency: `taskId` waits on `dependsOnTaskId` (plans / blockedBy). */
   linkDep(taskId: string, dependsOnTaskId: string): Promise<boolean>
@@ -108,6 +143,9 @@ export interface BoardClient {
   listExecutions(taskId: string): Promise<ExecutionSummary[] | null>
   /** All non-dropped tasks for a team (the projection load). */
   listTasks(teamId: string): Promise<BoardTask[]>
+  /** The tasks waiting directly on this one. Optional: a host without it leaves the
+   *  ready-pump's own policy as the only guard after a Stop. */
+  directDependents?(taskId: string): Promise<string[]>
   /**
    * Cancel the still-pending downstream chain of a FAILED task (its dependents
    * can never become ready). Returns the cancelled tasks so the orchestrator can

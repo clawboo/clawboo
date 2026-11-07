@@ -9,6 +9,7 @@ import {
   uniqueIndex,
   type AnySQLiteColumn,
 } from 'drizzle-orm/sqlite-core'
+import { sql } from 'drizzle-orm'
 
 // ─── chat_messages ────────────────────────────────────────────────────────────
 // Persisted transcript entries so chat history survives page refresh.
@@ -389,6 +390,10 @@ export const tasks = sqliteTable(
     // it began waiting. NULL otherwise. Read only while the task is `in_review`,
     // and any move out of review clears it (see `updateStatus`).
     checkHeldSince: integer('check_held_since'),
+    // The execution holding this task's claim: written in the same transaction as
+    // the claim, moved to a fix round's execution, and cleared when the run ends or
+    // the task is let go. Null while no run holds it (a claim that opened no run).
+    runExecutionId: text('run_execution_id'),
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
@@ -523,6 +528,13 @@ export const taskComments = sqliteTable(
     /** The person whose request added it, when a sign-in proxy vouched for
      *  them: a JSON `{ id, name, role }`. Null otherwise. */
     person: text('person'),
+    /** What wrote it, as the writer labelled it (`CommentKind` in board-core):
+     *  'person' | 'agent' | 'note' | 'result'. Never read from `authorType`. Null
+     *  for a caller that gave none and for an older row: such a comment wakes no one. */
+    kind: text('kind'),
+    /** When it was steered into a run that took it live. A session resumed from that
+     *  run has heard it, so its next ticket block leaves it out. */
+    steeredAt: integer('steered_at'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [index('idx_task_comments_task').on(t.taskId)],
@@ -628,6 +640,11 @@ export const executionProcesses = sqliteTable(
     // The class the failure was filed under (`classifyError` in @clawboo/obs).
     // Null for a run that did not fail, or one closed without a class.
     errorClass: text('error_class'),
+    // Whether the run made visible progress (`runMadeProgress` in board-core), read
+    // when it closed: 1 or 0. Null for a run with no verdict (a Stop, an account or
+    // budget refusal) and for a row from before this column. The no-progress brake
+    // counts these, so they outlive a restart.
+    madeProgress: integer('made_progress'),
     recoveryTombstone: integer('recovery_tombstone').notNull().default(0),
     tenantId: text('tenant_id'),
     createdAt: integer('created_at').notNull(),
@@ -1276,11 +1293,63 @@ export const reportUpOutbox = sqliteTable(
     settledAt: integer('settled_at'),
     /** 'delivered' | 'stopped' | 'gave_up'. */
     settledHow: text('settled_how'),
+    /** Set when a person's Stop held it: it starts no run, and it rides the
+     *  recipient's next run instead. */
+    heldAt: integer('held_at'),
   },
   (t) => [index('idx_report_up_outbox_pending').on(t.teamId, t.roomId, t.settledAt)],
 )
 
 export type DbReportUpOutboxRow = typeof reportUpOutbox.$inferSelect
+
+// task_wakes: something happened on a task and its agent has not heard. A row is
+// written when the wake happens (a person's comment, a dependency moving to done),
+// and folded into the one that is already waiting for that agent and task, so every
+// kind of wake shares one slot. The run that starts the task takes the row
+// (`carried_exec_id`), and it is settled when that run ends. A sibling of
+// report_up_outbox, and apart from the agent_inbox mailbox, whose rows are spent
+// once rendered: a wake counts as heard only when its run ended. See src/taskWakes.ts.
+export const taskWakes = sqliteTable(
+  'task_wakes',
+  {
+    id: text('id').primaryKey(),
+    teamId: text('team_id'),
+    /** The agent the task belonged to when the wake happened. */
+    agentId: text('agent_id').notNull(),
+    taskId: text('task_id').notNull(),
+    /** `TaskWakeReason` in board-core. A merged row keeps the one a person is behind. */
+    reason: text('reason').notNull(),
+    /** The comments it carries, as a JSON array of ids. */
+    commentIds: text('comment_ids').notNull().default('[]'),
+    /** How many wakes were folded into this row. */
+    mergeCount: integer('merge_count').notNull().default(1),
+    /** Times it was sent again because the run carrying it did not finish. */
+    replays: integer('replays').notNull().default(0),
+    /** The run carrying it. Null while it waits for one. */
+    carriedExecId: text('carried_exec_id'),
+    /** Why the pump last left it waiting (`WakeSkipReason` in board-core). */
+    skipReason: text('skip_reason'),
+    /** Set when a person's Stop held it: it starts no run, and it rides the task's
+     *  next run instead. */
+    heldAt: integer('held_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    settledAt: integer('settled_at'),
+    /** `TaskWakeSettlement` in board-core. */
+    settledHow: text('settled_how'),
+  },
+  (t) => [
+    // One waiting row per (agent, task). Partial, so a comment during a run opens a
+    // new row beside the one that run already carries.
+    uniqueIndex('uniq_task_wakes_waiting')
+      .on(t.agentId, t.taskId)
+      .where(sql`settled_at IS NULL AND carried_exec_id IS NULL`),
+    index('idx_task_wakes_pending').on(t.settledAt, t.carriedExecId),
+    index('idx_task_wakes_task').on(t.taskId),
+  ],
+)
+
+export type DbTaskWake = typeof taskWakes.$inferSelect
 
 export const teamChat = sqliteTable(
   'team_chat',

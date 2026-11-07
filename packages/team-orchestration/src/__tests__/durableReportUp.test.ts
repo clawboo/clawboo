@@ -12,6 +12,7 @@ import type { RuntimeEvent } from '@clawboo/executor'
 
 import {
   createBoardOrchestrator,
+  HELD_REPORT_UPS_BUDGET_CHARS,
   MAX_REPORT_UP_REPLAYS,
   REFLECT_WINDOW_MS,
   type KnownAgent,
@@ -39,19 +40,40 @@ function endedEvent(runId: string, reason: 'aborted' | 'error'): RuntimeEvent {
 
 /** The durable store as the server keeps it, in memory: it outlives each engine. */
 class MemoryOutbox implements ReportUpOutbox {
-  rows = new Map<string, { item: ReportUp; replays: number; settled: ReportUpSettlement | null }>()
+  rows = new Map<
+    string,
+    { item: ReportUp; replays: number; settled: ReportUpSettlement | null; held: boolean }
+  >()
   private n = 0
   /** A broken database: every write after this is set fails. */
   failWrites = false
-  record(item: ReportUp): string {
+  record(item: ReportUp, opts: { held?: boolean } = {}): string {
     const id = `ru-${++this.n}`
-    this.rows.set(id, { item: structuredClone(item), replays: 0, settled: null })
+    this.rows.set(id, {
+      item: structuredClone(item),
+      replays: 0,
+      settled: null,
+      held: opts.held === true,
+    })
     return id
   }
   pending(): Array<{ id: string; item: ReportUp; replays: number }> {
     return [...this.rows]
-      .filter(([, r]) => r.settled === null)
+      .filter(([, r]) => r.settled === null && !r.held)
       .map(([id, r]) => ({ id, item: structuredClone(r.item), replays: r.replays }))
+  }
+  hold(ids: string[]): boolean {
+    if (this.failWrites) return false
+    for (const id of ids) {
+      const r = this.rows.get(id)
+      if (r && r.settled === null) r.held = true
+    }
+    return true
+  }
+  held(): Array<{ id: string; item: ReportUp }> {
+    return [...this.rows]
+      .filter(([, r]) => r.settled === null && r.held)
+      .map(([id, r]) => ({ id, item: structuredClone(r.item) }))
   }
   markReplayed(ids: string[]): boolean {
     if (this.failWrites) return false
@@ -264,6 +286,31 @@ describe('durable report-up', () => {
     expect(second.updates()).toHaveLength(1)
   })
 
+  it('an eviction bumps the stop generation, and that is not a Stop: the next engine still sends it', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    let gen = 0
+    const first = boot(board, outbox, { stopGen: () => gen })
+    await delegateAndFinish(first.engine)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    const update = first.updates()[0]!
+    // Teardown: the host bumps its generation, resets the engine and aborts the run,
+    // whose ending reaches an engine that no longer holds the row.
+    gen += 1
+    first.engine.reset()
+    await first.engine.onEvent(
+      sk('leader'),
+      { kind: 'done', reason: 'aborted', summary: '', runId: 'r3', sessionId: null, ts: 1, seq: 1 },
+      { ...stampFor(update.origin), stopGen: 0 },
+    )
+    kill()
+    expect(outbox.held()).toEqual([])
+    const second = boot(board, outbox)
+    await second.engine.resume()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(second.updates()).toHaveLength(1)
+  })
+
   it('a torn-down engine does not settle what its cancelled runs report, so the next engine sends it', async () => {
     const board = new FakeBoard()
     const outbox = new MemoryOutbox()
@@ -288,21 +335,109 @@ describe('durable report-up', () => {
     expect(second.updates()).toHaveLength(1)
   })
 
-  it('a Stop drops an update the lead had not heard yet, and a restart does not bring it back', async () => {
+  it("a Stop wakes no one and drops nothing: the update waits for the lead's next run, even across a restart", async () => {
     const board = new FakeBoard()
     const outbox = new MemoryOutbox()
     const first = boot(board, outbox)
     await delegateAndFinish(first.engine)
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(first.updates()).toHaveLength(1)
     await first.engine.markStopped()
+    expect(outbox.settledAs()).toEqual([null])
+    expect(outbox.pending()).toEqual([])
     kill()
 
     const second = boot(board, outbox)
     await second.engine.resume()
+    await second.engine.sweepStaleSessions()
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(second.updates()).toEqual([])
 
-    expect(second.updates()).toHaveLength(0)
-    expect(outbox.settledAs()).toEqual(['stopped'])
+    // The lead's next run, whatever started it, takes it, and it settles with that run.
+    const taken = second.engine.takeHeldReportUps(sk('leader'))
+    expect(taken?.text).toContain('fixed in parser.ts')
+    expect(taken?.text).toContain('after a person pressed Stop')
+    expect(second.engine.takeHeldReportUps(sk('leader'))).toBeNull()
+    await second.engine.onEvent(sk('leader'), doneEvent('r9', 'noted'), {
+      reportForTaskId: null,
+      stopGen: 0,
+      reportUpIds: taken!.ids,
+    })
+    expect(outbox.settledAs()).toEqual(['delivered'])
+  })
+
+  it('a run that carried it and failed leaves it held, for the run after', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const { engine } = boot(board, outbox)
+    await delegateAndFinish(engine)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    await engine.markStopped()
+    const taken = engine.takeHeldReportUps(sk('leader'))!
+    await engine.onEvent(sk('leader'), endedEvent('r9', 'error'), {
+      reportForTaskId: null,
+      stopGen: 0,
+      reportUpIds: taken.ids,
+    })
+    expect(outbox.settledAs()).toEqual([null])
+    expect(outbox.pending()).toEqual([])
+    await engine.sweepStaleSessions()
+    expect(engine.takeHeldReportUps(sk('leader'))?.ids).toEqual(taken.ids)
+  })
+
+  it('a task update still in the batch window when the Stop lands starts no run', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const { engine, updates } = boot(board, outbox)
+    await delegateAndFinish(engine)
+    await engine.markStopped()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS * 2)
+    expect(updates()).toEqual([])
+    expect(engine.takeHeldReportUps(sk('leader'))?.text).toContain('fixed in parser.ts')
+  })
+
+  it('a run delivered before the Stop that finishes after it still reports, on the next run', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    let gen = 0
+    const { engine, updates } = boot(board, outbox, { stopGen: () => gen })
+    await engine.onEvent(
+      sk('leader'),
+      doneEvent('r1', '<delegate to="@Bug Boo">fix the bug</delegate>'),
+    )
+    gen += 1 // the Stop; the delegate's run ended well before its abort landed
+    await engine.onEvent(sk('a2'), doneEvent('r2', 'fixed it just in time'))
+    await engine.markStopped()
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS * 2)
+    expect(updates()).toEqual([])
+    expect(engine.takeHeldReportUps(sk('leader'))?.text).toContain('fixed it just in time')
+  })
+
+  it('an update goes only to the run of the agent it reports to, and a null recipient to the lead', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const { engine } = boot(board, outbox)
+    outbox.record({ toAgentId: null, by: 'Bug Boo', summary: 'for the lead' }, { held: true })
+    outbox.record({ toAgentId: 'a2', by: 'Doc Boo', summary: 'for bug boo' }, { held: true })
+    expect(engine.takeHeldReportUps(sk('a2'))?.text).toContain('for bug boo')
+    expect(engine.takeHeldReportUps(sk('a2'))).toBeNull()
+    expect(engine.takeHeldReportUps(sk('leader'))?.text).toContain('for the lead')
+  })
+
+  it('long results wait their turn, and one too long for any run goes cut', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const { engine } = boot(board, outbox)
+    outbox.record(
+      { toAgentId: 'leader', by: 'A', summary: 'x'.repeat(HELD_REPORT_UPS_BUDGET_CHARS + 5_000) },
+      { held: true },
+    )
+    outbox.record({ toAgentId: 'leader', by: 'B', summary: 'second result' }, { held: true })
+    const first = engine.takeHeldReportUps(sk('leader'))!
+    expect(first.ids).toHaveLength(1)
+    expect(first.text).toContain('(cut: the whole result is on the task')
+    expect(first.text).not.toContain('second result')
+    expect(engine.takeHeldReportUps(sk('leader'))?.text).toContain('second result')
   })
 
   it(`gives up after ${MAX_REPORT_UP_REPLAYS} replays that never finished, and tells the lead's chat`, async () => {
@@ -421,7 +556,7 @@ describe('durable report-up', () => {
     expect(outbox.settledAs()).toEqual(['gave_up'])
   })
 
-  it('a lead run that a Stop cut short drops its update for good', async () => {
+  it('a lead run that a Stop cut short keeps its update for the next run', async () => {
     const board = new FakeBoard()
     const outbox = new MemoryOutbox()
     let gen = 0
@@ -429,22 +564,32 @@ describe('durable report-up', () => {
     await delegateAndFinish(first.engine)
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
     gen += 1 // the Stop; its abort reaches the engine before markStopped runs
-    await first.engine.onEvent(
-      sk('leader'),
-      endedEvent('r3', 'aborted'),
-      stampFor(first.updates()[0]!.origin),
-    )
-    await first.engine.sweepStaleSessions()
-    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    await first.engine.onEvent(sk('leader'), endedEvent('r3', 'aborted'), {
+      ...stampFor(first.updates()[0]!.origin),
+      stopGen: 0,
+    })
+    expect(outbox.settledAs()).toEqual([null])
+    expect(outbox.pending()).toEqual([])
     kill()
 
     const second = boot(board, outbox)
     await second.engine.resume()
     await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    expect(second.updates()).toEqual([])
+    expect(second.engine.takeHeldReportUps(sk('leader'))?.text).toContain('fixed in parser.ts')
+  })
 
-    expect(first.updates()).toHaveLength(1)
-    expect(second.updates()).toHaveLength(0)
-    expect(outbox.settledAs()).toEqual(['stopped'])
+  it('a lead run delivered before the Stop that finished anyway did hear it', async () => {
+    const board = new FakeBoard()
+    const outbox = new MemoryOutbox()
+    const { engine, updates } = boot(board, outbox)
+    await delegateAndFinish(engine)
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+    const stamp = stampFor(updates()[0]!.origin)
+    await engine.markStopped()
+    await engine.onEvent(sk('leader'), doneEvent('r3', 'synthesized'), stamp)
+    expect(outbox.settledAs()).toEqual(['delivered'])
+    expect(engine.takeHeldReportUps(sk('leader'))).toBeNull()
   })
 
   it('a teardown does not flush an update the outbox holds, so only the next engine sends it', async () => {

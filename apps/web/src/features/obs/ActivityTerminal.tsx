@@ -97,6 +97,24 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
         body: detail ? `${health}: ${detail}` : health,
       }
     }
+    case 'task_wake_recorded':
+      return { tone: 'idle', badge: 'wake', body: asStr(d['reason']) }
+    case 'task_wake_skipped':
+      // Why a wake did not start a run: the row an operator looks for.
+      return {
+        tone: asStr(d['reason']) === 'finished' ? 'idle' : 'warning',
+        badge: 'wake',
+        label: asStr(d['wakeReason']),
+        body: `waiting: ${asStr(d['reason'])}`,
+      }
+    case 'task_wake_given_up':
+      return { tone: 'error', badge: 'wake', label: asStr(d['wakeReason']), body: 'given up' }
+    case 'task_braked':
+      return {
+        tone: 'warning',
+        badge: 'brake',
+        body: `${String(d['runs'] ?? '')} runs with no progress`,
+      }
     case 'execution_started':
       return { tone: 'working', badge: 'run', body: 'started' }
     case 'execution_completed': {

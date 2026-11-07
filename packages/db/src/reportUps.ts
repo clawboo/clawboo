@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
 import { withWriteRetry } from './board/contention'
@@ -22,6 +22,9 @@ export interface RecordReportUpInput {
   recipientAgentId: string | null
   taskId: string | null
   payload: string
+  /** It came back after a person's Stop: it starts no run, and rides the
+   *  recipient's next one. */
+  held?: boolean
 }
 
 /** Store one report-up as the engine queues it. Returns its id. */
@@ -41,13 +44,15 @@ export function recordReportUp(db: ClawbooDb, input: RecordReportUpInput): strin
         createdAt: Date.now(),
         settledAt: null,
         settledHow: null,
+        heldAt: input.held ? Date.now() : null,
       })
       .run(),
   )
   return id
 }
 
-/** Unsettled report-ups for one chat room, oldest first. */
+/** Unsettled report-ups for one chat room that a Stop did not hold, oldest first:
+ *  the ones to send. */
 export function listPendingReportUps(
   db: ClawbooDb,
   teamId: string,
@@ -62,11 +67,48 @@ export function listPendingReportUps(
           eq(reportUpOutbox.teamId, teamId),
           roomId === null ? isNull(reportUpOutbox.roomId) : eq(reportUpOutbox.roomId, roomId),
           isNull(reportUpOutbox.settledAt),
+          isNull(reportUpOutbox.heldAt),
         ),
       )
       // rowid breaks a same-millisecond tie in insertion order, as the inbox does.
       .orderBy(asc(reportUpOutbox.createdAt), sql`rowid`)
       .all() as DbReportUpOutboxRow[]
+  )
+}
+
+/** Unsettled report-ups for one chat room that a Stop held, oldest first: the ones
+ *  that wait for the recipient's next run. */
+export function listHeldReportUps(
+  db: ClawbooDb,
+  teamId: string,
+  roomId: string | null,
+): DbReportUpOutboxRow[] {
+  return db
+    .select()
+    .from(reportUpOutbox)
+    .where(
+      and(
+        eq(reportUpOutbox.teamId, teamId),
+        roomId === null ? isNull(reportUpOutbox.roomId) : eq(reportUpOutbox.roomId, roomId),
+        isNull(reportUpOutbox.settledAt),
+        isNotNull(reportUpOutbox.heldAt),
+      ),
+    )
+    .orderBy(asc(reportUpOutbox.createdAt), sql`rowid`)
+    .all() as DbReportUpOutboxRow[]
+}
+
+/** A person's Stop: these rows start no run from now on, and ride the recipient's
+ *  next one. */
+export function holdReportUps(db: ClawbooDb, ids: string[]): void {
+  if (ids.length === 0) return
+  const now = Date.now()
+  withWriteRetry(() =>
+    db
+      .update(reportUpOutbox)
+      .set({ heldAt: now })
+      .where(and(inArray(reportUpOutbox.id, ids), isNull(reportUpOutbox.settledAt)))
+      .run(),
   )
 }
 
@@ -101,20 +143,22 @@ export function settleReportUps(db: ClawbooDb, ids: string[], how: ReportUpSettl
   return won.map((r) => r.id)
 }
 
-/** Chat rooms holding unsettled report-ups: the boot-resume scan. */
+/** Chat rooms holding unsettled report-ups to send: the boot-resume scan. One a Stop
+ *  held wakes no one, so it does not bring a room back. */
 export function listRoomsWithPendingReportUps(
   db: ClawbooDb,
 ): Array<{ teamId: string; roomId: string | null }> {
   return db
     .selectDistinct({ teamId: reportUpOutbox.teamId, roomId: reportUpOutbox.roomId })
     .from(reportUpOutbox)
-    .where(isNull(reportUpOutbox.settledAt))
+    .where(and(isNull(reportUpOutbox.settledAt), isNull(reportUpOutbox.heldAt)))
     .all() as Array<{ teamId: string; roomId: string | null }>
 }
 
 /** A settled row is kept this long, for debugging, then deleted. */
 export const REPORT_UP_SETTLED_RETENTION_MS = 7 * 24 * 60 * 60_000
-/** A pending row older than this is deleted unsent: its result is on the board. */
+/** A pending row older than this is deleted unsent, one a Stop held for a recipient
+ *  that never ran again included: its result is on the board. */
 export const REPORT_UP_PENDING_MAX_AGE_MS = 30 * 24 * 60 * 60_000
 
 /**

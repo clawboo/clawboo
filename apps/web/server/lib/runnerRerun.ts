@@ -10,6 +10,7 @@
 import { delegationTargetOf } from '@clawboo/board-core'
 import {
   addComment,
+  countRefusedWakeStart,
   getReadyTasks,
   getTask,
   isLedgerAutoFireable,
@@ -45,6 +46,11 @@ const waiting = new Map<string, AbortController>()
 export function cancelRunnerRerun(taskId: string): void {
   waiting.get(taskId)?.abort()
   waiting.delete(taskId)
+}
+
+/** Is a rerun of this task on its way: started here, and not settled yet? */
+export function isRunnerRerunWaiting(taskId: string): boolean {
+  return waiting.has(taskId)
 }
 
 /** Why a rerun did not start, in words for the task's trail. */
@@ -94,6 +100,14 @@ function parkUnstarted(db: ClawbooDb, taskId: string, runtime: string, why: stri
   }
 }
 
+function countRefusedStart(db: ClawbooDb, taskId: string): void {
+  try {
+    countRefusedWakeStart(db, taskId)
+  } catch (err) {
+    log.error({ err, taskId }, 'could not count a rerun that did not start')
+  }
+}
+
 /**
  * Start the run and return at once. The run can wait a long time behind another
  * one on the same agent, and an HTTP request must not hang on that; the board
@@ -139,6 +153,9 @@ export function requestRunnerRerun(
       // is gone. Neither is a rerun stuck in To do.
       if (!result.ok && result.reason !== 'conflict' && result.reason !== 'not_found') {
         parkUnstarted(db, taskId, runtime, refusalWords(result.reason))
+        // A budget refusal waits for the cap, and the wake pump asks the gate first.
+        // Any other leaves no ledger row, so only this count can end its retries.
+        if (!result.reason.startsWith('budget_')) countRefusedStart(db, taskId)
       }
     })
     .catch((err: unknown) => {
@@ -147,6 +164,7 @@ export function requestRunnerRerun(
       // Stopped on purpose by a newer rerun of the same task: that one owns it.
       if (controller.signal.aborted) return
       parkUnstarted(db, taskId, runtime, err instanceof Error ? err.message : String(err))
+      countRefusedStart(db, taskId)
     })
 }
 

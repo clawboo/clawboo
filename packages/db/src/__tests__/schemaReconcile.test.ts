@@ -175,6 +175,14 @@ function tryRemoveColumn(db: ClawbooDb, table: string, column: string): boolean 
       /* an auto-index cannot be dropped; the column drop below will refuse too */
     }
   }
+  // A partial index names columns in its WHERE too, which index_info does not list.
+  const partial = db.$client
+    .prepare(`SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`)
+    .all(table) as Array<{ name: string; sql: string | null }>
+  for (const idx of partial) {
+    if (!idx.sql || !new RegExp(`WHERE.*\\b${column}\\b`, 'i').test(idx.sql)) continue
+    db.$client.prepare(`DROP INDEX "${idx.name}"`).run()
+  }
   try {
     db.$client.prepare(`ALTER TABLE "${table}" DROP COLUMN "${column}"`).run()
     return true

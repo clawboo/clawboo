@@ -14,7 +14,10 @@ import {
   ledgerAllowsAutoFire,
   MAX_TASK_PRIORITY,
   MIN_TASK_PRIORITY,
+  runMadeProgress,
+  type CommentKind,
   type HandOffLink,
+  type LedgerRun,
   type RunCostSource,
   type TaskStatus,
 } from '@clawboo/board-core'
@@ -31,6 +34,7 @@ import { and, count, desc, eq, gt, inArray, isNull, like, lt, sql } from 'drizzl
 
 import type { ClawbooDb } from '../db'
 import { personJson, type PersonRecord } from '../person'
+import { adoptTaskWakesTx, recordDependencyWakesTx, settleWakesOfClosedRunTx } from '../taskWakes'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
 import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
@@ -44,6 +48,7 @@ import {
   type DbExecutionProcess,
   type DbTask,
   type DbTaskComment,
+  type DbTaskWake,
   type DbWorkspace,
 } from '../schema'
 import { immediateWrite, withWriteRetry, type BoardTx } from './contention'
@@ -134,6 +139,7 @@ function buildTaskRow(input: CreateTaskInput): DbTask {
     delegatedByAgentId: input.delegatedByAgentId ?? null,
     personCancelledAt: null,
     checkHeldSince: null,
+    runExecutionId: null,
   }
 }
 
@@ -536,6 +542,49 @@ export interface ClaimResult {
   ok: boolean
   task?: DbTask
   reason?: ClaimReason
+  /** The run the claim opened, when it was asked to open one. */
+  execution?: DbExecutionProcess
+  /** The saved wakes that run took. */
+  wakes?: DbTaskWake[]
+}
+
+/** The run a claim opens, written with the claim. */
+export interface ClaimRun {
+  executorType: string
+  /** Why it runs. A saved wake it takes names the reason instead. */
+  runReason?: string | null
+  workspaceId?: string | null
+}
+
+/** Build a new `running` execution row. */
+function buildExecutionRow(input: CreateExecInput, id: string, now: number): DbExecutionProcess {
+  return {
+    id,
+    taskId: input.taskId,
+    workspaceId: input.workspaceId ?? null,
+    executorType: input.executorType,
+    status: 'running',
+    claimedAt: now,
+    startedAt: now,
+    completedAt: null,
+    beforeCommit: input.beforeCommit ?? null,
+    afterCommit: null,
+    inputTokens: null,
+    outputTokens: null,
+    cacheRead: null,
+    cacheWrite: null,
+    costUsd: null,
+    costSource: null,
+    runtime: null,
+    summary: null,
+    runReason: input.runReason ?? null,
+    error: null,
+    errorClass: null,
+    madeProgress: null,
+    recoveryTombstone: 0,
+    tenantId: null,
+    createdAt: now,
+  }
 }
 
 /**
@@ -543,6 +592,14 @@ export interface ClaimResult {
  * `status='todo' AND assignee IS NULL AND dropped=0` means at most one caller
  * wins; the loser gets `{ ok:false, reason:'conflict' }` and MUST NOT retry
  * (the "never retry a 409" rule). Transient lock errors ARE retried inside.
+ *
+ * With `opts.run`, the claim opens the run in the same transaction: the execution
+ * row, the stamp on the task (`runExecutionId`) and the hand-over of the saved wakes
+ * waiting on it all commit together or not at all. It is also refused while a run is
+ * still open on the task, whoever released it: ONE LIVE RUN PER TASK, enforced here
+ * rather than in any one engine because other processes write this file too. Such a
+ * run ends on its own, or the stale sweep closes it. A claim with no `run` (the REST
+ * claim, MCP `claim_task`) starts nothing, so it has no stamp until a run is opened.
  *
  * Stale re-claim of a dead `in_progress` task is intentionally NOT handled here
  * — orphan reconciliation releases such a task back to `todo`, after which a
@@ -553,16 +610,28 @@ export function claimTask(
   taskId: string,
   assigneeAgentId: string,
   assigneeRuntime?: string | null,
+  opts: { run?: ClaimRun } = {},
 ): ClaimResult {
   const now = Date.now()
-  return withWriteRetry(() => {
-    const claimed = db
+  const result = immediateWrite(db, (tx): ClaimResult => {
+    const run = opts.run
+    if (run) {
+      const live = tx
+        .select({ id: executionProcesses.id })
+        .from(executionProcesses)
+        .where(and(eq(executionProcesses.taskId, taskId), eq(executionProcesses.status, 'running')))
+        .get()
+      if (live) return { ok: false, reason: 'conflict' }
+    }
+    const execId = run ? randomUUID() : null
+    const claimed = tx
       .update(tasks)
       .set({
         assigneeAgentId,
         assigneeRuntime: assigneeRuntime ?? null,
         status: 'in_progress',
         updatedAt: now,
+        runExecutionId: execId,
       })
       .where(
         and(
@@ -576,17 +645,33 @@ export function claimTask(
       .all() as DbTask[]
 
     if (claimed.length === 0) {
-      const exists = db.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()
+      const exists = tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, taskId)).get()
       return { ok: false, reason: exists ? 'conflict' : 'not_found' }
     }
+    if (!run || !execId) return { ok: true, task: claimed[0] }
+    const wakes = adoptTaskWakesTx(tx, taskId, execId, now)
+    const strongest = wakes.find((w) => w.reason === 'person_comment') ?? wakes[0]
+    const execution = buildExecutionRow(
+      {
+        taskId,
+        executorType: run.executorType,
+        workspaceId: run.workspaceId ?? null,
+        runReason: strongest?.reason ?? run.runReason ?? null,
+      },
+      execId,
+      now,
+    )
+    tx.insert(executionProcesses).values(execution).run()
+    return { ok: true, task: claimed[0], execution, wakes }
+  })
+  if (result.ok && result.task)
     emitBoardLifecycle({
       kind: 'task_claimed',
       taskId,
-      teamId: claimed[0]!.teamId ?? null,
+      teamId: result.task.teamId ?? null,
       assigneeAgentId,
     })
-    return { ok: true, task: claimed[0] }
-  })
+  return result
 }
 
 /** How often a drain loop beats a running task. A TIMER, not a throttle: the
@@ -597,12 +682,11 @@ export const TASK_HEARTBEAT_MS = 30_000
 /**
  * The ready-pump's fire policy over an execution ledger, as the server's pump
  * scan reads it: fireable unless the last run was `cancelled` (user Stop, never
- * auto-refired) or the trailing streak of unsuccessful runs reached the cap. The
- * rule itself lives in @clawboo/board-core, shared with the engine's own pump, so
+ * auto-refired), the trailing streak of unsuccessful runs reached the cap, or the
+ * no-progress brake is holding it back. The rule itself lives in @clawboo/board-core, shared with the engine's own pump, so
  * the scan and the engine cannot disagree about what will run.
  */
-export const isLedgerAutoFireable: (execs: ReadonlyArray<{ status: string }>) => boolean =
-  ledgerAllowsAutoFire
+export const isLedgerAutoFireable: (execs: readonly LedgerRun[]) => boolean = ledgerAllowsAutoFire
 
 /**
  * The (team, room) pairs that have at least one FIREABLE delegation: a READY
@@ -686,12 +770,13 @@ export function listRoomsWithEngineTasksInReview(
  * `in_progress` (a beat racing a release/completion no-ops, never resurrecting
  * freshness) and, when given, on the assignee — so a stale driver from a
  * PREVIOUS claim can't keep beating a task that was released and re-claimed by
- * someone else, masking the new run's death.
+ * someone else, masking the new run's death. With `execId`, only that run counts: a
+ * driver from an earlier run by the SAME agent cannot keep a newer run looking alive.
  */
 export function heartbeatTask(
   db: ClawbooDb,
   taskId: string,
-  opts?: { assigneeAgentId?: string },
+  opts?: { assigneeAgentId?: string; execId?: string | null },
 ): void {
   withWriteRetry(() =>
     db
@@ -702,6 +787,7 @@ export function heartbeatTask(
           eq(tasks.id, taskId),
           eq(tasks.status, 'in_progress'),
           ...(opts?.assigneeAgentId ? [eq(tasks.assigneeAgentId, opts.assigneeAgentId)] : []),
+          ...(opts?.execId ? [eq(tasks.runExecutionId, opts.execId)] : []),
         ),
       )
       .run(),
@@ -720,15 +806,21 @@ export function heartbeatTask(
  * engine grants an open tool call 24 min and the drain idle guard grants 30 min;
  * the sweep must never be stricter than either). If this process dies, the
  * interval dies with it and the beats stop — exactly the signal the sweep reads.
+ *
+ * `execId` names the run being driven. A function is read at each beat, for a driver
+ * whose run changes under it (the task runner's fix cycles) or that starts beating
+ * before its claim: while it answers null there is no run to prove, so nothing beats.
  */
 export function startTaskHeartbeat(
   db: ClawbooDb,
   taskId: string,
-  opts?: { assigneeAgentId?: string },
+  opts?: { assigneeAgentId?: string; execId?: string | null | (() => string | null) },
 ): () => void {
   const beat = (): void => {
     try {
-      heartbeatTask(db, taskId, opts)
+      const execId = typeof opts?.execId === 'function' ? opts.execId() : (opts?.execId ?? null)
+      if (typeof opts?.execId === 'function' && !execId) return
+      heartbeatTask(db, taskId, { assigneeAgentId: opts?.assigneeAgentId, execId })
     } catch {
       /* a missed beat must never break the owner */
     }
@@ -789,6 +881,7 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
         assigneeAgentId: null,
         assigneeRuntime: null,
         verification: null,
+        runExecutionId: null,
         status: 'todo',
         updatedAt: Date.now(),
       })
@@ -908,6 +1001,7 @@ export function updateStatus(
   // Post-commit emission: the bus fires only after the BEGIN IMMEDIATE txn
   // returned, so a subscriber can never observe (or act on) an uncommitted
   // transition.
+  const dependentsWoken: Array<{ taskId: string; teamId: string | null }> = []
   const result = immediateWrite(db, (tx): UpdateStatusResult => {
     const row = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!row) return { ok: false, reason: 'not_found' }
@@ -956,9 +1050,15 @@ export function updateStatus(
         ...(to === 'todo'
           ? { assigneeAgentId: null, assigneeRuntime: null, verification: null }
           : {}),
+        // Let go, so no run holds it. A run on a task moved anywhere else (In
+        // review, Blocked) keeps the stamp until it closes.
+        ...(to === 'todo' || isTerminal(to) ? { runExecutionId: null } : {}),
       })
       .where(eq(tasks.id, taskId))
       .run()
+    // A dependency moving to done, on any path: its wakes commit with it.
+    if (to === 'done' && from !== 'done')
+      dependentsWoken.push(...recordDependencyWakesTx(tx, taskId, now))
     const updated = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask
     return { ok: true, task: updated, from }
   })
@@ -970,6 +1070,8 @@ export function updateStatus(
       status: to,
       ...(opts.actor ? { actor: opts.actor } : {}),
     })
+  for (const woken of dependentsWoken)
+    emitBoardLifecycle({ kind: 'task_wake_recorded', ...woken, reason: 'dependency_done' })
   return result
 }
 
@@ -1058,6 +1160,7 @@ export function assignTaskDelegation(
               assigneeRuntime: null,
               verification: null,
               checkHeldSince: null,
+              runExecutionId: null,
             }
           : {}),
       })
@@ -1135,6 +1238,16 @@ export function linkDep(db: ClawbooDb, taskId: string, dependsOnTaskId: string):
       .onConflictDoNothing()
       .run()
   })
+}
+
+/** The tasks waiting directly on `taskId`. */
+export function listDirectDependentIds(db: ClawbooDb, taskId: string): string[] {
+  return db
+    .select({ id: taskDeps.taskId })
+    .from(taskDeps)
+    .where(eq(taskDeps.dependsOnTaskId, taskId))
+    .all()
+    .map((r) => r.id)
 }
 
 /**
@@ -1218,6 +1331,18 @@ export function getReadyTasks(
     .all() as DbTask[]
 }
 
+/** Is every dependency of this task done? */
+export function taskDependenciesDone(db: ClawbooDb, taskId: string): boolean {
+  return (
+    db
+      .select({ id: taskDeps.dependsOnTaskId })
+      .from(taskDeps)
+      .innerJoin(tasks, eq(tasks.id, taskDeps.dependsOnTaskId))
+      .where(and(eq(taskDeps.taskId, taskId), sql`${tasks.status} != 'done'`))
+      .get() === undefined
+  )
+}
+
 /**
  * Walk the parent chain via recursive CTE. Raw SQL → the result is validated
  * with zod (clawboo rule: never trust TS generics over raw-SQL output).
@@ -1256,8 +1381,9 @@ export function addComment(
   body: string,
   authorType: 'agent' | 'user' | 'system',
   authorAgentId?: string | null,
-  /** The person whose request added it, when a sign-in proxy vouched for them. */
-  opts: { person?: PersonRecord | null } = {},
+  /** The person whose request added it, when a sign-in proxy vouched for them, and
+   *  what wrote it (see `CommentKind`). No kind means it wakes no one. */
+  opts: { person?: PersonRecord | null; kind?: CommentKind | null } = {},
 ): DbTaskComment {
   const now = Date.now()
   const row: DbTaskComment = {
@@ -1268,6 +1394,8 @@ export function addComment(
     body,
     tenantId: null,
     person: personJson(opts.person),
+    kind: opts.kind ?? null,
+    steeredAt: null,
     createdAt: now,
   }
   withWriteRetry(() => db.insert(taskComments).values(row).run())
@@ -1399,35 +1527,24 @@ export interface CreateExecInput {
   beforeCommit?: string | null
 }
 
+/**
+ * Open a run on a task. A task being held (In progress, or In review under a check)
+ * is stamped with it in the same transaction, which is how a fix round moves the
+ * stamp to its own execution and how a claim made with no run gets one. A task
+ * nobody holds takes no stamp: that row is a Stop's tombstone or a ledger entry.
+ */
 export function createExecutionProcess(db: ClawbooDb, input: CreateExecInput): DbExecutionProcess {
   const now = Date.now()
-  const row: DbExecutionProcess = {
-    id: randomUUID(),
-    taskId: input.taskId,
-    workspaceId: input.workspaceId ?? null,
-    executorType: input.executorType,
-    status: 'running',
-    claimedAt: now,
-    startedAt: now,
-    completedAt: null,
-    beforeCommit: input.beforeCommit ?? null,
-    afterCommit: null,
-    inputTokens: null,
-    outputTokens: null,
-    cacheRead: null,
-    cacheWrite: null,
-    costUsd: null,
-    costSource: null,
-    runtime: null,
-    summary: null,
-    runReason: input.runReason ?? null,
-    error: null,
-    errorClass: null,
-    recoveryTombstone: 0,
-    tenantId: null,
-    createdAt: now,
-  }
-  withWriteRetry(() => db.insert(executionProcesses).values(row).run())
+  const row = buildExecutionRow(input, randomUUID(), now)
+  immediateWrite(db, (tx) => {
+    tx.insert(executionProcesses).values(row).run()
+    // A run opening is activity: its first beat may be half a minute off, and a task
+    // that sat waiting must not read as a dead run in between (a fix cycle's mutex wait).
+    tx.update(tasks)
+      .set({ runExecutionId: row.id, updatedAt: now })
+      .where(and(eq(tasks.id, input.taskId), inArray(tasks.status, ['in_progress', 'in_review'])))
+      .run()
+  })
   return row
 }
 
@@ -1437,6 +1554,10 @@ export interface CompleteExecOutcome {
   error?: string | null
   /** The class the failure was filed under (`classifyError` in @clawboo/obs). */
   errorClass?: string | null
+  /** A person ended this run: their Stop, or moving its card. Not stored. It is how
+   *  the wakes the run carried tell that from the other `cancelled` closes (a budget
+   *  cap, the circuit breaker, a runtime abort), which give them back to the pump. */
+  byPerson?: boolean
   afterCommit?: string | null
   inputTokens?: number | null
   outputTokens?: number | null
@@ -1459,18 +1580,35 @@ export function completeExecutionProcess(
   outcome: CompleteExecOutcome,
 ): DbExecutionProcess | null {
   const now = Date.now()
-  // An explicit null clears the run's cost, which changes the task total only if
-  // the run had a cost to clear. A close that never had one must not recompute the
-  // total: that would wipe a task's cost from before the run ledger carried it.
-  const clearsACost =
-    outcome.costUsd === null &&
-    db
-      .select({ costUsd: executionProcesses.costUsd })
+  const row = immediateWrite(db, (tx): DbExecutionProcess | null => {
+    // A terminal ledger row is IMMUTABLE: only a still-`running` exec can be
+    // completed. The ledger is the dispatch pump's fire-policy input, where
+    // `cancelled` means "user Stop" — a late abort terminal overwriting an
+    // already-swept (`timed_out`) row would reclassify infra death as user
+    // intent and permanently park refireable work. First terminal wins, and a
+    // loser closes nothing, so it returns null and its caller skips the
+    // duplicate `execution_completed` it would otherwise append.
+    const open = tx
+      .select()
       .from(executionProcesses)
-      .where(eq(executionProcesses.id, execId))
-      .get()?.costUsd != null
-  const completedRows = withWriteRetry(() =>
-    db
+      .where(and(eq(executionProcesses.id, execId), eq(executionProcesses.status, 'running')))
+      .get() as DbExecutionProcess | undefined
+    if (!open) return null
+    const task = tx.select().from(tasks).where(eq(tasks.id, open.taskId)).get() as
+      DbTask | undefined
+    const subTasks = tx
+      .select({ n: count() })
+      .from(tasks)
+      .where(and(eq(tasks.parentTaskId, open.taskId), sql`${tasks.createdAt} >= ${open.createdAt}`))
+      .get() as { n: number } | undefined
+    const progress = runMadeProgress({
+      status: outcome.status,
+      summary: outcome.summary ?? null,
+      taskStatus: task?.status ?? '',
+      subTasks: subTasks?.n ?? 0,
+      errorClass: outcome.errorClass ?? null,
+    })
+    const closed = tx
       .update(executionProcesses)
       .set({
         status: outcome.status,
@@ -1479,6 +1617,7 @@ export function completeExecutionProcess(
         error: outcome.error ?? null,
         errorClass: outcome.errorClass ?? null,
         afterCommit: outcome.afterCommit ?? null,
+        madeProgress: progress === null ? null : progress ? 1 : 0,
         // The engine closes its rows without a cost, and the drain records the cost
         // on the row separately (recordExecutionUsage), so a close must not erase
         // fields it was not given. An explicit null still clears.
@@ -1489,21 +1628,23 @@ export function completeExecutionProcess(
         ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
         ...(outcome.costSource !== undefined ? { costSource: outcome.costSource } : {}),
       })
-      // A terminal ledger row is IMMUTABLE: only a still-`running` exec can be
-      // completed. The ledger is the dispatch pump's fire-policy input, where
-      // `cancelled` means "user Stop" — a late abort terminal overwriting an
-      // already-swept (`timed_out`) row would reclassify infra death as user
-      // intent and permanently park refireable work. First terminal wins, and a
-      // loser closes nothing, so it returns null and its caller skips the
-      // duplicate `execution_completed` it would otherwise append.
-      .where(and(eq(executionProcesses.id, execId), eq(executionProcesses.status, 'running')))
+      .where(eq(executionProcesses.id, execId))
       .returning()
-      .all(),
-  ) as DbExecutionProcess[]
-  const row = completedRows[0]
+      .get() as DbExecutionProcess
+    // No run holds the task now. A later run's stamp is not this run's to clear.
+    tx.update(tasks)
+      .set({ runExecutionId: null })
+      .where(and(eq(tasks.id, open.taskId), eq(tasks.runExecutionId, execId)))
+      .run()
+    settleWakesOfClosedRunTx(tx, execId, outcome, now)
+    // An explicit null clears the run's cost, which changes the task total only if
+    // the run had a cost to clear. A close that never had one must not recompute the
+    // total: that would wipe a task's cost from before the run ledger carried it.
+    if (outcome.costUsd != null || (outcome.costUsd === null && open.costUsd != null))
+      refreshTaskCostTx(tx, closed.taskId)
+    return closed
+  })
   if (!row) return null
-  if (outcome.costUsd != null || clearsACost)
-    immediateWrite(db, (tx) => refreshTaskCostTx(tx, row.taskId))
   const t = db
     .select({ teamId: tasks.teamId })
     .from(tasks)
@@ -1706,6 +1847,12 @@ export function reconcileOrphans(
         })
         .where(eq(executionProcesses.id, ex.id))
         .run()
+      // Whatever it carried goes back for the next run.
+      settleWakesOfClosedRunTx(tx, ex.id, { status: 'failed' }, now)
+      tx.update(tasks)
+        .set({ runExecutionId: null })
+        .where(and(eq(tasks.id, ex.taskId), eq(tasks.runExecutionId, ex.id)))
+        .run()
       const released = tx
         .update(tasks)
         .set({
@@ -1786,6 +1933,12 @@ export function reconcileOrphans(
  * dragging a card to `in_progress`, or a claimed-but-not-yet-dispatched task —
  * the dispatch pump's concern, not this sweep's). Idempotent (a swept task is
  * no longer `in_progress`). Mirrors `reconcileOrphans` but on a TTL, not at boot.
+ *
+ * It also closes a run left open behind a task someone released (an operator's
+ * release, a move nothing observed): nothing beats a task in To do, so once such a
+ * row is older than the TTL nothing proves it alive, and it would keep the claim
+ * refusing and the fire policy reading "someone owns this". If the run does still
+ * end, its late result takes the path it always did.
  */
 export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): ReconcileResult {
   const releasedEvents: BoardLifecycleEvent[] = []
@@ -1815,11 +1968,13 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
         })
         .where(and(eq(executionProcesses.taskId, t.id), eq(executionProcesses.status, 'running')))
         .run()
+      for (const r of running) settleWakesOfClosedRunTx(tx, r.id, { status: 'timed_out' }, now)
       tx.update(tasks)
         .set({
           assigneeAgentId: null,
           assigneeRuntime: null,
           verification: null,
+          runExecutionId: null,
           status: 'todo',
           updatedAt: now,
         })
@@ -1832,6 +1987,25 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
         via: 'sweep',
       })
       reconciled += 1
+    }
+    const leaked = tx
+      .select({ id: executionProcesses.id })
+      .from(executionProcesses)
+      .innerJoin(tasks, eq(tasks.id, executionProcesses.taskId))
+      .where(
+        and(
+          eq(executionProcesses.status, 'running'),
+          eq(tasks.status, 'todo'),
+          lt(executionProcesses.createdAt, cutoff),
+        ),
+      )
+      .all() as Array<{ id: string }>
+    for (const r of leaked) {
+      tx.update(executionProcesses)
+        .set({ status: 'timed_out', completedAt: now, error: STALE_RUN_ERROR })
+        .where(eq(executionProcesses.id, r.id))
+        .run()
+      settleWakesOfClosedRunTx(tx, r.id, { status: 'timed_out' }, now)
     }
     return { reconciled }
   })
@@ -1884,7 +2058,11 @@ export function reconcileStaleInReview(db: ClawbooDb, olderThanMs: number): Park
           ),
         )
         .run()
-      tx.update(tasks).set({ status: 'blocked', updatedAt: now }).where(eq(tasks.id, t.id)).run()
+      for (const r of runnerRuns) settleWakesOfClosedRunTx(tx, r.id, { status: 'failed' }, now)
+      tx.update(tasks)
+        .set({ status: 'blocked', runExecutionId: null, updatedAt: now })
+        .where(eq(tasks.id, t.id))
+        .run()
       tx.insert(taskComments)
         .values({
           id: randomUUID(),

@@ -13,12 +13,12 @@
 // degradation when frames stop flowing.
 
 import { OpenClawAdapter, type OpenClawGatewayClient } from '@clawboo/adapter-openclaw'
+import { BUDGET_REFUSED_CLASS } from '@clawboo/board-core'
 import {
   addComment,
   appendAudit,
   claimTask,
   completeExecutionProcess,
-  createExecutionProcess,
   getAncestors,
   recordSpend,
   releaseTask,
@@ -26,6 +26,7 @@ import {
   updateStatus,
   type BudgetScope,
   type ClawbooDb,
+  type DbExecutionProcess,
   type CompleteExecOutcome,
   type DbAgent,
   type DbScheduledRun,
@@ -200,8 +201,11 @@ async function claimAndDrainRoutineRun(
 
   // Atomic claim — a lost claim means another worker owns the task; the work
   // is happening, so the fire is satisfied (drop, never retry).
-  const claim = claimTask(db, taskId, run.agentId, 'openclaw')
-  if (!claim.ok) {
+  // The run opens with the claim, in one write, so the task is stamped with it.
+  const claim = claimTask(db, taskId, run.agentId, 'openclaw', {
+    run: { executorType: ROUTINE_OPENCLAW_EXECUTOR, runReason: 'routine' },
+  })
+  if (!claim.ok || !claim.execution) {
     return claim.reason === 'conflict'
       ? { ok: true, taskId }
       : { ok: false, taskId, error: `claim failed: ${claim.reason ?? 'unknown'}` }
@@ -216,7 +220,8 @@ async function claimAndDrainRoutineRun(
   // — which `completeExecutionProcess` refuses, leaving the ledger, the obs stream
   // and the card disagreeing. This is the THIRD claiming drain; the executor
   // runner and the team orchestrator's serverDeliver already beat.
-  const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: run.agentId })
+  const exec = claim.execution
+  const stopBeat = startTaskHeartbeat(db, taskId, { assigneeAgentId: run.agentId, execId: exec.id })
   // A person moving the card stops the run (see runStops). The drain watches for
   // that beside the Gateway's events, so it ends at once rather than at the
   // watchdog.
@@ -226,7 +231,7 @@ async function claimAndDrainRoutineRun(
   })
   const stop = registerRunStop(taskId, () => wakeOnStop())
   try {
-    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, stop, stopped, hold)
+    return await drainClaimedRoutineRun(input, gatewayAgentId, missionId, exec, stop, stopped, hold)
   } catch (err) {
     // Whatever the drain did not settle itself. The claim is ours, so hand the
     // task back instead of leaving it in progress with nothing driving it.
@@ -252,17 +257,13 @@ async function drainClaimedRoutineRun(
   input: ConnectedDispatchInput,
   gatewayAgentId: string,
   missionId: string,
+  exec: DbExecutionProcess,
   stop: RunStopHandle,
   stopped: Promise<'stopped'>,
   hold: RunBudgetHold,
 ): Promise<RoutineDispatchOutcome> {
   const { db, run, template, taskId, client } = input
 
-  const exec = createExecutionProcess(db, {
-    taskId,
-    executorType: ROUTINE_OPENCLAW_EXECUTOR,
-    runReason: 'routine',
-  })
   emitEvent(db, {
     kind: 'execution_started',
     taskId,
@@ -394,7 +395,10 @@ async function drainClaimedRoutineRun(
   if (finalGate.blocked) {
     const error = `budget_${finalGate.reason}:${finalGate.scope}`
     addComment(db, taskId, budgetRefusalText(finalGate.scope, finalGate.reason), 'system')
-    settleExec({ status: 'cancelled', error }, { status: 'cancelled', error })
+    settleExec(
+      { status: 'cancelled', error, errorClass: BUDGET_REFUSED_CLASS },
+      { status: 'cancelled', error },
+    )
     releaseTask(db, taskId)
     return { ok: false, taskId, error, ...(finalGate.reason === 'held' ? { transient: true } : {}) }
   }
@@ -520,7 +524,7 @@ async function drainClaimedRoutineRun(
     await adapter.abort(runHandle).catch(() => undefined)
     noteCapReached(settleSpend(terminal?.summary || outputText))
     settleExec(
-      { status: 'cancelled', error: stop.note, ...ledgerCost() },
+      { status: 'cancelled', error: stop.note, byPerson: true, ...ledgerCost() },
       { status: 'cancelled', error: stop.note },
     )
     if (terminal?.reason === 'success' && terminal.summary)
@@ -556,7 +560,12 @@ async function drainClaimedRoutineRun(
       'system',
     )
     settleExec(
-      { status: 'cancelled', error: `budget_paused:${stopForBudget}`, ...ledgerCost() },
+      {
+        status: 'cancelled',
+        error: `budget_paused:${stopForBudget}`,
+        errorClass: BUDGET_REFUSED_CLASS,
+        ...ledgerCost(),
+      },
       { status: 'cancelled', error: `budget_paused:${stopForBudget}` },
     )
     releaseTask(db, taskId)

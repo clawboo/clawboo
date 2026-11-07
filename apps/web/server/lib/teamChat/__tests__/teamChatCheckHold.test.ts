@@ -14,18 +14,24 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  addComment,
   agents,
   createRoom,
   getComments,
   getTaskVerification,
   listExecutions,
+  listHeldReportUps,
   listTasks,
+  listWaitingTaskWakes,
   reconcileOrphans,
+  recordTaskWake,
   setSetting,
   tasks,
+  taskWakes,
   teams,
   updateStatus,
   type ClawbooDb,
+  type DbTask,
 } from '@clawboo/db'
 import type {
   Capabilities,
@@ -49,8 +55,10 @@ import { eq } from 'drizzle-orm'
 import { getDb, getDbPath, resetDb } from '../../db'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import { teamVerifyCommandSettingKey } from '../../verification/teamVerifyCommand'
+import { createReportUpOutbox } from '../reportUpOutbox'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
+import { createTaskWakeOutbox, pumpTaskWakes } from '../taskWakes'
 import { createTeamWorkCheck } from '../teamWorkCheck'
 import { settle } from './settleCascade'
 
@@ -173,6 +181,8 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
       abortMap,
       onEvent: (sk, ev, run) => engineRef.current!.onEvent(sk, ev, run),
       onSessionClosed: (sk, run) => engineRef.current!.onSessionClosed(sk, run),
+      onRunNotStarted: (run) => engineRef.current!.onRunNotStarted(run),
+      takeHeldReportUps: (sk) => engineRef.current!.takeHeldReportUps(sk),
       taskForSession: (sk) => engineRef.current!.taskForSession(sk),
       execForSession: (sk) => engineRef.current!.execForSession(sk),
       stopGen: () => gen,
@@ -192,6 +202,8 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
         stopGen: () => gen,
         isSessionBusy: (sk) => abortMap.has(sk),
         workCheck: createTeamWorkCheck({ db, teamId: TEAM, mcpBaseUrl: null }),
+        reportUps: createReportUpOutbox(db, TEAM, roomId),
+        taskWakes: createTaskWakeOutbox(db, TEAM, roomId),
       })
     engineRef.current = newEngine()
     return {
@@ -561,6 +573,101 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
     expect(getTaskVerification(db, id)).toBeNull()
     expect(theTask()!.status).toBe('cancelled')
     expect(theTask()!['checkHeldSince']).toBeNull()
+  })
+
+  it("a person's comment during the hold waits behind the run it holds, and gets its turn before Done", async () => {
+    const { gate } = await workerFinishedBesideMate()
+    const id = theTask()!.id
+    const comment = addComment(db, id, 'Use the new logo.', 'user', null, { kind: 'person' })
+    const wake = recordTaskWake(db, {
+      teamId: TEAM,
+      agentId: WORKER,
+      taskId: id,
+      reason: 'person_comment',
+      commentIds: [comment.id],
+    })
+    // A held check keeps its run open: one run on the claim, and nothing starts a second.
+    expect(listExecutions(db, id).filter((e) => e.status === 'running')).toHaveLength(1)
+    const starts: string[] = []
+    const pump = {
+      held: () => false,
+      startForPerson: (t: DbTask) => {
+        starts.push(t.id)
+      },
+      pumpRoom: () => undefined,
+      alert: () => true,
+    }
+    pumpTaskWakes(db, pump)
+    expect(starts).toEqual([])
+    expect(listWaitingTaskWakes(db)[0]!.skipReason).toBe('under_check')
+
+    const again = script(WORKER, [{ events: [done('used the new logo')] }])
+    gate.resolve()
+    await settleOn(() => again.startOpts.length === 1, 'the turn for the comment')
+    expect(again.startOpts[0]!.context).toContain('Use the new logo.')
+    await settleOn(() => theTask()!.status === 'done', 'the task to finish after that turn')
+    expect(commentsOf(id)).toContain('used the new logo')
+    const row = db.select().from(taskWakes).where(eq(taskWakes.id, wake.id)).get()
+    expect(row?.settledHow).toBe('delivered')
+    // The reply is work too: the check ran on it, from a starting point of its own.
+    expect(verifyRuns()).toBe(2)
+    expect(getTaskVerification(db, id)?.status).toBe('pass')
+  })
+
+  it('work done in a comment turn after a pass is checked, and a failure does not reach Done', async () => {
+    const { gate } = await workerFinishedBesideMate()
+    const id = theTask()!.id
+    const comment = addComment(db, id, 'Also add half.txt.', 'user', null, { kind: 'person' })
+    recordTaskWake(db, {
+      teamId: TEAM,
+      agentId: WORKER,
+      taskId: id,
+      reason: 'person_comment',
+      commentIds: [comment.id],
+    })
+    // The team's check fails while half.txt is in the folder.
+    script(WORKER, [{ write: { 'half.txt': 'as you asked\n' }, events: [done('added it')] }])
+    gate.resolve()
+    await settleOn(() => verifyRuns() === 2, 'the check of the turn')
+    await settleOn(() => theTask()!.status === 'blocked', 'the task to wait for a person')
+    expect(getTaskVerification(db, id)?.attempts.map((a) => a.status)).toEqual([
+      'pass',
+      'completed_with_debt',
+    ])
+  })
+
+  it("a Stop during the hold keeps the report for the delegator's next run, and wakes no one", async () => {
+    const { gate, room } = await workerFinishedBesideMate()
+    const id = theTask()!.id
+    const lead = adapters.get(LEAD)!
+    const leadRuns = lead.startOpts.length
+
+    gen += 1
+    await room.engine().markStopped()
+    gate.resolve()
+    await settleOn(
+      () => !existsSync(path.join(teamWorkdirPath(TEAM), 'half.txt')),
+      'the teammate to finish',
+    )
+    await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS + 1_000)
+
+    // Nothing started for it, and it is not lost.
+    expect(lead.startOpts).toHaveLength(leadRuns)
+    expect(
+      listHeldReportUps(db, TEAM, null).map((r) => [
+        r.taskId,
+        (JSON.parse(r.payload) as { outcome?: string }).outcome,
+      ]),
+    ).toEqual([[id, 'aborted']])
+
+    // The delegator's next run reads it, and says it did not finish.
+    await room.say(LEAD, 'where are we?')
+    await settleOn(() => lead.startOpts.length === leadRuns + 1, "the lead's next run")
+    const context = lead.startOpts.at(-1)!.context ?? ''
+    expect(context).toContain('after a person pressed Stop')
+    expect(context).toContain('DID NOT COMPLETE')
+    expect(context).toContain('wrote w.txt')
+    await settleOn(() => listHeldReportUps(db, TEAM, null).length === 0, 'the report to settle')
   })
 
   it('a Stop during the hold starts no check, and the task goes back to To do', async () => {

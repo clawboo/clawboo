@@ -81,12 +81,25 @@ An agent cannot hand work back to an agent that is waiting on it. If Ana hands a
 
 A comment you add to a task is a reply to the agent the task belongs to: the agent working on it, or the agent it is bound to while it waits. Write it in the board's task drawer, in a team chat's **Tasks** card, or in **Tasks & Routines** on the agent's page. What the reply does depends on where the task stands:
 
-- **In progress.** The reply goes into the running work. Clawboo Native, Claude Code, Codex and OpenClaw take it at their next step. Hermes pauses and resumes the same session with your reply as its next input. An older Codex CLI without `codex app-server` cannot take it mid-run, so it waits for the next run.
-- **Waiting on you, or in To do.** The reply starts the agent on the task again, as **Retry** does, so answering a blocked task needs no second click. Replies sent within 15 seconds of each other start one run. A plan step that still waits on an earlier task keeps the reply until it can start.
-- **Being checked, or in Backlog.** The reply waits in the agent's mailbox, which the agent reads when its next run starts.
+- **In progress.** The reply goes into the running work. Clawboo Native, Claude Code, Codex and OpenClaw take it at their next step. Hermes pauses and resumes the same session with your reply as its next input. Replies sent within a second of each other go in together. A reply the run could not take gets the next turn: on team chat work, the agent answers it before the task can count as Done. So does a reply too long to go in whole, and one that went into a run that then died.
+- **Waiting on you, or in To do.** The reply starts the agent on the task again, as **Retry** does, so answering a blocked task needs no second click. Replies that come while a run is already on its way for an earlier one start no second run. A plan step that still waits on an earlier task keeps the reply until it can start.
+- **Being checked.** The reply waits for the check's answer. If the check sends the work back, the fix round reads it. If the check passes, the agent answers it before the task counts as Done.
+- **In Backlog.** You parked the task, so nothing starts. The agent reads the reply when the task next runs.
 - **Done or Cancelled.** A finished task cannot run again, so the reply is saved but not sent. You can send it instead as a follow-up task for the same agent.
 
-Clawboo puts every reply it sends into the agent's mailbox first, so a reply that misses a run is read at the next one. Under each reply, a note says where it went. Clawboo passes on the first 1,000 characters. See [Steer a running task](/using/board#steer-a-running-task) for each case, and [Choose a runtime](/runtimes/index) for how each runtime takes a reply mid-run.
+Clawboo saves a reply as a wake on the task before it does anything else, so a restart cannot lose it, and the agent reads it once. Under each reply, a note says where it went. While a wake waits, the task drawer says what it is waiting for. A steered reply passes on the first 1,000 characters and says when it was cut; a run that reads it in its task block gets up to 4,000. See [Steer a running task](/using/board#steer-a-running-task) for each case, and [Choose a runtime](/runtimes/index) for how each runtime takes a reply mid-run.
+
+## What wakes an agent
+
+An agent starts on its task the moment something happens on it, rather than at the next scan:
+
+- **Your comment.** Only a comment from you, sent from the dashboard, wakes an agent. An agent's comment wakes no one, and neither do the notes Clawboo writes itself.
+- **A task it waits on finishing.** When a dependency moves to Done on any path, a task waiting on it that is bound to an agent starts within seconds. A task with no agent bound stays put. A Done written by a [stdio MCP bin](/operating/mcp-servers#the-stdio-bins) reaches the server at its next scan instead, up to a minute later, because a bin is a separate process.
+- **All of its hand-offs closing.** This is the [report](/concepts/delegation-and-orchestration) to whoever handed the work off: it says when everything they handed off is in and which of those need you, or, when a task they handed off will not start without you (stopped, parked after failing, moved to Backlog), that it is not all in.
+
+An `@` mention in a comment is text: it wakes no one, and the comment still goes only to the task's own agent.
+
+A task has one live run at a time. A wake that arrives while a run is waiting for a slot, while a check is under way, or while a fix round is about to go out joins that run instead of starting a second one. Until Clawboo can prove a run is alive, a wake does not count on it: it keeps waiting until the run is cleared, and then starts its own. Every wake that waits says why, in the task drawer and in the [activity log](/reference/events-and-errors#task_wake_skipped).
 
 ## Needs you
 
@@ -115,6 +128,10 @@ With no sign-in there is one built-in reader. Behind a [sign-in proxy](/guides/s
 ## When work restarts by itself
 
 Clawboo starts a task in To do on its own when it is ready and bound to an agent. It holds back when you stopped the task's last run, or when its last 3 runs in a row failed or timed out. A successful run, or a Stop, resets that count.
+
+It also waits before starting a task that keeps coming back with nothing to show. After 2 runs in a row with no visible progress, the next automatic start waits 2 minutes, then 4, doubling up to 30. Your comment or a **Retry** starts it at once. The task stays in To do while it waits, with a note on its card saying how long.
+
+**Visible progress** means something you can see on the board that was not there when the run started: a sub-task it created, or a run that ended well with a result or moved the card forward. Comments do not count, because they are the one thing agents could trade forever; neither do tokens spent, tool calls or files touched, which the board cannot see as work done. A Stop, a refused sign-in or billing, and a run a hard budget cap refused say nothing either way: they are not counted as runs without progress. A start refused while Clawboo is holding new runs is not a run at all.
 
 | What happened                                                | Where the task goes                                        | Does it run again by itself?                                        |
 | ------------------------------------------------------------ | ---------------------------------------------------------- | ------------------------------------------------------------------- |

@@ -43,11 +43,11 @@ import {
   type BoardOrchestrator,
 } from '@clawboo/team-orchestration'
 
-import { getDb, resetDb } from '../../db'
-import { hasRunForTask, resetRunSteers } from '../../runSteers'
+import { getDb, getDbPath, resetDb } from '../../db'
+import { hasRunForTask, resetRunSteers, registerRunSteer } from '../../runSteers'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type RunEntry } from '../serverDeliver'
-import { forwardPersonCommentToRun } from '../taskSteer'
+import { forwardPersonCommentToRun, STEER_BATCH_MS } from '../taskSteer'
 import { settle } from './settleCascade'
 
 const TEAM = 'T'
@@ -158,13 +158,17 @@ class SteeredWorkerAdapter implements RuntimeAdapter {
 describe('a person steering a running task', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
   beforeEach(async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'] })
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-task-steer-'))
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     db = getDb()
     resetRunSteers()
     const now = Date.now()
@@ -199,6 +203,8 @@ describe('a person steering a running task', () => {
     vi.useRealTimers()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -248,10 +254,11 @@ describe('a person steering a running task', () => {
 
     const outcome = forwardPersonCommentToRun(db, task, 'Keep it under 200 words.')
     expect(outcome.forwarded).toBe(true)
+    await vi.advanceTimersByTimeAsync(STEER_BATCH_MS)
     await expect(outcome.steer).resolves.toEqual({ delivered: true, mode: 'interrupt-resume' })
     expect(worker.steers).toHaveLength(1)
     expect(worker.steers[0]).toContain('Keep it under 200 words.')
-    // Delivered live, so the mailbox copy is marked delivered and won't be re-read.
+    // A team run reads comments from its ticket block, so nothing waits in the mailbox.
     expect(listUndeliveredInbox(db, WORKER, { teamId: TEAM })).toHaveLength(0)
 
     // Let the resumed run finish and the reflection reach the lead.
@@ -277,12 +284,101 @@ describe('a person steering a running task', () => {
     expect(hasRunForTask(after.id)).toBe(false)
   })
 
-  it('a comment with no run to steer stays in the mailbox for the next run', async () => {
+  it('comments in a burst go in as one steer', async () => {
+    const steers: string[] = []
     const { createTask, claimTask } = await import('@clawboo/db')
     const t = createTask(db, { title: 'Draft', teamId: TEAM, status: 'todo' })
     expect(claimTask(db, t.id, WORKER).ok).toBe(true)
     const task = listTasks(db, { teamId: TEAM }).find((x) => x.id === t.id)!
-    const outcome = forwardPersonCommentToRun(db, task, 'Use the new logo.')
+    const handle = registerRunSteer(
+      t.id,
+      {
+        capabilities: () => ({
+          streaming: true,
+          mcp: false,
+          worktrees: false,
+          resume: false,
+          toolApproval: false,
+          models: [],
+          steering: 'live',
+        }),
+        steer: async (_r, text) => {
+          steers.push(text)
+          return { delivered: true, mode: 'live' }
+        },
+      },
+      { adapterId: 'x', sessionKey: 'x', runId: null },
+    )
+    const first = forwardPersonCommentToRun(db, task, 'One.')
+    const second = forwardPersonCommentToRun(db, task, 'Two.')
+    await vi.advanceTimersByTimeAsync(STEER_BATCH_MS)
+    await expect(first.steer).resolves.toMatchObject({ delivered: true })
+    await expect(second.steer).resolves.toMatchObject({ delivered: true })
+    expect(steers).toHaveLength(1)
+    expect(steers[0]).toContain('1. One.')
+    expect(steers[0]).toContain('2. Two.')
+    // A later comment is the next batch.
+    const third = forwardPersonCommentToRun(db, task, 'Three.')
+    await vi.advanceTimersByTimeAsync(STEER_BATCH_MS)
+    await expect(third.steer).resolves.toMatchObject({ delivered: true })
+    expect(steers).toHaveLength(2)
+    handle.release()
+  })
+
+  it('a comment a run took when its context rendered is not steered as well', async () => {
+    const { createTask, claimTask, recordTaskWake, adoptTaskWakes, addComment } =
+      await import('@clawboo/db')
+    const t = createTask(db, { title: 'Draft', teamId: TEAM, status: 'todo' })
+    const exec = claimTask(db, t.id, WORKER, 'codex', {
+      run: { executorType: 'openclaw' },
+    }).execution!
+    const task = listTasks(db, { teamId: TEAM }).find((x) => x.id === t.id)!
+    const steers: string[] = []
+    const handle = registerRunSteer(
+      t.id,
+      {
+        capabilities: () => ({
+          streaming: true,
+          mcp: false,
+          worktrees: false,
+          resume: false,
+          toolApproval: false,
+          models: [],
+          steering: 'live',
+        }),
+        steer: async (_r, text) => {
+          steers.push(text)
+          return { delivered: true, mode: 'live' }
+        },
+      },
+      { adapterId: 'x', sessionKey: 'x', runId: null },
+    )
+    const comment = addComment(db, t.id, 'Use the new logo.', 'user', null, { kind: 'person' })
+    recordTaskWake(db, {
+      teamId: TEAM,
+      agentId: WORKER,
+      taskId: t.id,
+      reason: 'person_comment',
+      commentIds: [comment.id],
+    })
+    const outcome = forwardPersonCommentToRun(db, task, 'Use the new logo.', {
+      commentId: comment.id,
+    })
+    // While it waits for others to batch with, a run renders its context and takes it.
+    expect(adoptTaskWakes(db, t.id, exec.id)).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(STEER_BATCH_MS)
+    await expect(outcome.steer).resolves.toMatchObject({ delivered: true })
+    expect(steers).toEqual([])
+    handle.release()
+  })
+
+  it('a comment with no run to steer stays in the mailbox of a task the runner runs', async () => {
+    const { createTask, claimTask } = await import('@clawboo/db')
+    const t = createTask(db, { title: 'Draft', teamId: TEAM, status: 'todo' })
+    expect(claimTask(db, t.id, WORKER).ok).toBe(true)
+    const task = listTasks(db, { teamId: TEAM }).find((x) => x.id === t.id)!
+    const outcome = forwardPersonCommentToRun(db, task, 'Use the new logo.', { mailbox: true })
+    await vi.advanceTimersByTimeAsync(STEER_BATCH_MS)
     await expect(outcome.steer).resolves.toEqual({ delivered: false, reason: 'no-run' })
     const rows = listUndeliveredInbox(db, WORKER, { teamId: TEAM })
     expect(rows).toHaveLength(1)

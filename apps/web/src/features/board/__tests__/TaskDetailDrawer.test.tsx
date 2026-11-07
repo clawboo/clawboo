@@ -117,6 +117,36 @@ describe('TaskDetailDrawer', () => {
     expect(await screen.findByText('Report')).toBeInTheDocument()
   })
 
+  it('says what a wake that has not reached its agent is waiting for', async () => {
+    server.use(
+      http.get('/api/board/t1', () =>
+        HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Ship it',
+            status: 'in_review',
+            assigneeAgentId: 'gone',
+            pendingWake: {
+              reason: 'person_comment',
+              skipReason: 'under_check',
+              comments: 2,
+              held: false,
+            },
+          },
+          comments: [],
+          ancestors: [],
+        }),
+      ),
+      http.get('/api/board/t1/executions', () => HttpResponse.json({ executions: [] })),
+      http.get('/api/board/t1/workspace/detail', () => HttpResponse.json({ ok: false })),
+      http.get('/api/obs/events', () => HttpResponse.json({ events: [] })),
+    )
+    render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)
+    expect(await screen.findByTestId('task-pending-wake')).toHaveTextContent(
+      'reads 2 comments after the check',
+    )
+  })
+
   it('loads + renders task detail', async () => {
     server.use(...detailHandlers())
     render(<TaskDetailDrawer taskId="t1" onClose={() => {}} />)

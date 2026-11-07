@@ -404,7 +404,7 @@ export interface TicketRun {
   /** The run's own execution row: never counted as an earlier attempt. */
   execId: string | null
   /** Why the run was delivered. */
-  origin: Extract<TurnOrigin, { kind: 'delegation' } | { kind: 'assignment' }>
+  origin: Extract<TurnOrigin, { kind: 'delegation' } | { kind: 'assignment' } | { kind: 'wake' }>
   /** The hash of the title and description the run's brief carries, taken when
    *  the brief was written. Null or absent: the task as it is now. */
   briefHash?: string | null
@@ -438,17 +438,38 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
   )
   const nameOf = (id: string | null | undefined): string | null =>
     id ? (names.get(id) ?? id) : null
+  // The kind its writer gave it comes first: Retry and Assign write their notes as
+  // `user` comments, and those are clawboo's words.
   const authorOf = (c: DbTaskComment): string =>
-    c.authorType === 'user'
-      ? 'person'
-      : c.authorType === 'system'
-        ? 'clawboo'
-        : (nameOf(c.authorAgentId) ?? 'an agent')
+    c.kind === 'note'
+      ? 'clawboo'
+      : c.authorType === 'user'
+        ? 'person'
+        : c.authorType === 'system'
+          ? 'clawboo'
+          : (nameOf(c.authorAgentId) ?? 'an agent')
 
-  const attempts = classifyAttempts(listExecutions(db, task.id).filter((e) => e.id !== run.execId))
+  const ledger = listExecutions(db, task.id)
+  const attempts = classifyAttempts(ledger.filter((e) => e.id !== run.execId))
   const again = attempts.lastKind !== null
+  // Why it runs, as recorded on its execution, from a claim or from whoever opened
+  // it. A row that records none (from before reasons were kept) reads from the origin.
+  const reason =
+    ledger.find((e) => e.id === run.execId)?.runReason ??
+    (run.origin.kind === 'wake' ? run.origin.reason : null)
   let why: string
-  if (run.origin.kind === 'assignment') {
+  if (reason === 'person_comment') {
+    why = 'a person commented on this task; what they wrote is below.'
+  } else if (reason === 'dependency_done') {
+    why = 'a task it was waiting on is finished; its result is below.'
+  } else if (reason === 'question_answered') {
+    why = 'a person answered your question; their answer is below.'
+  } else if (reason === 'fix_round') {
+    why = "the team's check did not pass your work on it yet."
+  } else if (
+    run.origin.kind === 'assignment' ||
+    (run.origin.kind === 'wake' && run.origin.assigned)
+  ) {
     why = again
       ? 'this task is starting again; a person assigned it to you on the board.'
       : 'a person assigned you this task on the board.'
@@ -516,6 +537,16 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
     .filter((c) => {
       if (seenFrom === null || ownUntil === null) return true
       if (c.createdAt < seenFrom) return false
+      // Steered into the run this session was saved from, it has heard this one. Only
+      // a run that ended after the steer can be that run: one that died wrote no
+      // pointer, so what this session continues from never held it.
+      if (
+        c.steeredAt != null &&
+        c.steeredAt >= seenFrom &&
+        resumed?.endedAt != null &&
+        c.steeredAt <= resumed.endedAt
+      )
+        return false
       const own = c.authorType === 'agent' && c.authorAgentId === agentId
       return !(own && c.createdAt <= ownUntil)
     })

@@ -77,7 +77,7 @@ Claude Code, Codex and Hermes run with their own sandboxes and approval prompts 
 
 Steering means getting a message to an agent while it is still working on a task. Open the task in the board's task drawer, a team chat's **Tasks** card, or the agent's **Tasks & Routines** card. Type your comment and click **Send**. The line beside **Send** tells you what will happen for that task, and once you send, a note under your comment says where it went.
 
-Unless the task is finished, your comment goes into the agent's mailbox, which every run reads when it starts. If a run is working on the task right now, Clawboo also passes the comment into that run:
+Unless the task is finished, Clawboo saves your comment as a wake on the task, and the run it brings reads it in its task block. A task the task runner runs reads it from the agent's mailbox instead. If a run is working on the task right now, Clawboo also passes the comment into that run:
 
 | Runtime        | What happens to a comment on a running task                                                                                                                         | The line beside **Send** in the **Tasks** card                                                              |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -87,14 +87,14 @@ Unless the task is finished, your comment goes into the agent's mailbox, which e
 | Codex          | Joins the running turn at its next step.                                                                                                                            | "… gets this now, before its next step."                                                                    |
 | Hermes         | Joins the running turn after the tool call in progress. Without Hermes's `acp` extra, Clawboo stops the run and resumes the same session with your comment instead. | "… gets this now, before its next step." Without the `acp` extra: "… pauses to read this, then carries on." |
 
-If the comment can't get into the run (the run ended a moment earlier, or the runtime refused it), nothing is lost: the agent reads it from its mailbox at its next run, and the note under the comment says so. When it does land, the mailbox copy is marked as delivered, so the agent doesn't read it twice. A comment on a task that is not running behaves by the task's status: a task that waits on you, or waits in **To do**, starts again for it, and a finished task does not get it at all. Each case is in [Steer a running task](/using/board#steer-a-running-task).
+If the comment can't get into the run (the run ended a moment earlier, or the runtime refused it), nothing is lost: the agent reads it at its next turn, and the note under the comment says so. On team chat work that turn comes before the task can be Done. When it does land, it leaves the wake, so the agent doesn't read it twice. A comment on a task that is not running behaves by the task's status: a task that waits on you, or waits in **To do**, starts again for it, and a finished task does not get it at all. Each case is in [Steer a running task](/using/board#steer-a-running-task).
 
 <Accordion title="Under the hood: how each runtime takes a comment">
 
 A person's comment is posted with `POST /api/board/:taskId/comments` and `authorType: 'user'`, and the answer's `delivery` field says where it went (see the [Board API](/reference/rest-api/board)). Each runtime declares how it takes input mid-run in its `steering` capability: `live` (Clawboo Native, OpenClaw, Claude Code, Codex, and Hermes over ACP) or `interrupt-resume` (Hermes without ACP).
 
 - **Clawboo Native** queues the comment into the conversation as a user message for its next turn.
-- **OpenClaw** gets it through `chat.send` with `queueMode: 'steer'` over the server's own Gateway connection. If the run ends with the steer still unread, Clawboo cancels it (`chat.abort`) and the comment waits in the mailbox.
+- **OpenClaw** gets it through `chat.send` with `queueMode: 'steer'` over the server's own Gateway connection. If the run ends with the steer still unread, Clawboo cancels it (`chat.abort`) and the comment waits for the next turn.
 - **Claude Code** gets a user message pushed into the SDK's streaming input.
 - **Codex** gets `turn/steer` on the app-server's in-progress turn.
 - **Hermes** over ACP gets `/steer <comment>` as a prompt to its running session; Hermes adds it to the result of the tool call in progress. A comment that arrives while Hermes writes its final answer goes in as one more turn. A Hermes without ACP has no way in once a run starts, so Clawboo stops `hermes chat` and resumes the same session with the comment; the orchestrator sees one run that carries on.

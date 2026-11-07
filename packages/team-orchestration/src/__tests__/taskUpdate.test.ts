@@ -199,3 +199,43 @@ describe('buildTaskUpdateMessage: a hand-off that found its work on the board', 
     expect(msg).toMatch(/was not started/)
   })
 })
+
+describe('the line that says every hand-off is in', () => {
+  const item = { by: 'Bug Boo', title: 'fix it', summary: 'fixed' }
+
+  it('is absent unless asked for, so an existing call stays byte-identical', () => {
+    expect(buildTaskUpdateMessage([item])).not.toContain('All of the work')
+  })
+
+  it('names who needs a person, and the count', () => {
+    const text = buildTaskUpdateMessage([item], [], {
+      allIn: { needPerson: [{ by: 'Doc Boo', title: 'write docs' }], notStarted: [] },
+    })
+    expect(text).toContain('All of the work you handed off here is in: nothing is outstanding.')
+    expect(text).toContain('1 of it needs a person')
+    expect(text).toContain('Doc Boo ("write docs")')
+  })
+
+  it('has no person clause when nothing needs one', () => {
+    const text = buildTaskUpdateMessage([item], [], { allIn: { needPerson: [], notStarted: [] } })
+    expect(text).toContain('nothing is outstanding.')
+    expect(text).not.toContain('needs a person')
+  })
+
+  it('never says all of it is in while a hand-off will not start without a person', () => {
+    const text = buildTaskUpdateMessage([item], [], {
+      allIn: { needPerson: [], notStarted: [{ by: 'Doc Boo', title: 'write docs' }] },
+    })
+    expect(text).not.toContain('All of the work')
+    expect(text).toContain('not all in')
+    expect(text).toContain('Doc Boo ("write docs")')
+  })
+
+  it('is dropped if something is still outstanding', () => {
+    const text = buildTaskUpdateMessage([item], [{ by: 'Doc Boo' }], {
+      allIn: { needPerson: [], notStarted: [] },
+    })
+    expect(text).not.toContain('All of the work')
+    expect(text).toContain('Still outstanding: 1')
+  })
+})

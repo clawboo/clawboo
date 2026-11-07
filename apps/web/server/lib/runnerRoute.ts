@@ -50,6 +50,22 @@ export function runnerRerunFor(
 }
 
 /**
+ * The task-runner run that would start this task: named by its binding, or else by
+ * what the runner was last given. Null for a task team chat runs.
+ */
+export function runnerTargetOf(
+  db: ClawbooDb,
+  task: DbTask,
+): { agentId: string; rerun: RunnerRerun } | null {
+  const agentId =
+    delegationTargetOf(task.sourceDelegationId) ??
+    readTaskRunnerInputs(task)?.assigneeAgentId ??
+    null
+  const rerun = agentId ? runnerRerunFor(db, task, agentId) : null
+  return agentId && rerun ? { agentId, rerun } : null
+}
+
+/**
  * Does this task run on the task runner when its bound agent picks it up? Then
  * team chat must not fire it: the runner owns its reruns (see lib/runnerRerun).
  */
