@@ -6,7 +6,12 @@
 // "why did the previous agent stop / errors in the last 30 min" queries are these
 // same endpoints.
 
-import { listEvents, type DbOrchestrationEvent } from '@clawboo/db'
+import {
+  boardActivityHead,
+  listEvents,
+  readerLastRead,
+  type DbOrchestrationEvent,
+} from '@clawboo/db'
 import {
   projectFleetHealth,
   projectGraph,
@@ -16,6 +21,7 @@ import {
 } from '@clawboo/obs'
 import type { Request, Response } from 'express'
 
+import { readerOf } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { redactJsonString, redactObject, redactValue } from '../lib/redact'
 
@@ -140,6 +146,13 @@ function readRecentEvents(req: Request): OrchestrationEvent[] {
 // `kinds` filters in SQL, so a client following only approvals neither receives
 // every tool call and chat post nor waits behind them after a reconnect.
 // Redaction-on-display reuses the read-feed masker.
+//
+// `?activity=1` also sends an `activity` event when the board's record of task
+// changes moves, or when this person marks something read in another browser, and
+// once on connecting, so a client that reconnects after a long sleep catches up.
+// That record is written by triggers, so this covers the writes that leave no event
+// row (an agent's comment through its task tool). No `id:` line: it never moves the
+// resume cursor.
 const STREAM_POLL_MS = 750
 const STREAM_KEEPALIVE_MS = 20_000
 const STREAM_BATCH = 500
@@ -156,6 +169,9 @@ export function obsStreamGET(req: Request, res: Response): void {
     seqParam(req.query['afterSeq']) ??
     seqParam(req.query['since']) ??
     0
+  const wantsActivity = req.query['activity'] === '1'
+  const reader = readerOf(req)
+  let lastActivity = ''
 
   // Resolve the shared connection BEFORE advertising success: a failure here
   // must surface as a real error response, not a 200 plus a ': connected'
@@ -195,6 +211,16 @@ export function obsStreamGET(req: Request, res: Response): void {
       // head: move past it. Otherwise a scope that rarely matches (`kinds` within
       // a team, a quiet agent) rescans every row since its last match each poll.
       if (rows.length < STREAM_BATCH && head > cursor) cursor = head
+      if (wantsActivity) {
+        const activity = JSON.stringify({
+          seq: boardActivityHead(db),
+          read: readerLastRead(db, reader),
+        })
+        if (activity !== lastActivity) {
+          lastActivity = activity
+          res.write(`event: activity\ndata: ${activity}\n\n`)
+        }
+      }
     } catch {
       /* transient read error — keep the stream alive; retry next tick */
     }

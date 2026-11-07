@@ -719,6 +719,7 @@ The answer is built from the running process alone: no database read, no network
     "board.steering": true,
     "board.readableIds": true,
     "board.labels": true,
+    "board.inbox": true,
     "workspace.view": true,
     "workspace.preview": true,
     "agent.nativeShell": true,
@@ -754,6 +755,7 @@ A flag's name never changes. A feature that goes away reports `false` until the 
 | `board.steering`                                                            | Always. A comment on a running task reaches the run, and `POST /api/board/:taskId/comments` answers with how it was delivered.                                                                                                                            |
 | `board.readableIds`                                                         | Always. Tasks carry a readable id, and `/api/teams/:id/task-prefix` reads and sets a team's letters.                                                                                                                                                      |
 | `board.labels`                                                              | Always. Team labels (`/api/teams/:id/labels`) and a task's labels (`PUT /api/board/:taskId/labels`).                                                                                                                                                      |
+| `board.inbox`                                                               | Always. Read state per task on the server (`/api/board/inbox`, `POST /api/board/:taskId/read`). The event stream says when to read it.                                                                                                                    |
 | `workspace.view`                                                            | Always. The read-only view of a task's worktree: tree, file, diff and status.                                                                                                                                                                             |
 | `workspace.preview`                                                         | Always. The preview of a page a task built (`/api/board/:taskId/preview`).                                                                                                                                                                                |
 | `agent.nativeShell`                                                         | Always. The per-agent switch that lets a Clawboo Native agent ask to run shell commands.                                                                                                                                                                  |

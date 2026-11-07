@@ -22,6 +22,8 @@ keywords:
     'All view',
     'alerts',
     'notifications',
+    'Inbox',
+    'unread',
   ]
 ---
 
@@ -164,6 +166,22 @@ Clawboo can send a browser notification when something new needs you while its t
 Click an alert to bring the tab back. An alert about one task opens it in the drawer. Any other alert opens the board on **Needs you**, on the team it is about.
 
 Alerts cover only what arrives after the tab went to the background, so nothing you have already seen is announced again. A task you moved to Blocked yourself, a task you stopped, and a task with no agent are never announced. Turn alerts off, or send a test alert, in **Settings** > **System** > **Alerts**. In the Clawboo desktop app your computer's own notifications tell you instead, so the browser alerts stay off there. A tab your browser has put to sleep to save memory cannot send alerts.
+
+### See it all in the Inbox
+
+**Inbox** in the sidebar is the board from your side: what wants you, whichever view you are on. Its red badge counts what is unread and what needs you, each thing once, and goes up by itself as things change. While the sidebar is collapsed, or closed on a phone, a red dot on its button says there is something to see.
+
+| Tab           | What it lists                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------ |
+| **Needs you** | The same cards as the board's **Needs you** column, with the same actions                  |
+| **Unread**    | Tasks someone else changed or commented on since you last opened them, newest change first |
+| **All**       | Every task, newest change first, with the unread ones marked                               |
+
+Opening a task, from anywhere, is what reads it, and so is acting on it. A comment, a move, **Dismiss**, **Retry**, **Assign**, a task you create, and pressing **Stop** in a team chat all count, so what you do yourself never comes back to you as unread. That includes an agent's comment you had not opened when you dragged the card: it stops counting as unread, though it stays on the task. An agent's progress after that is unread again, including the run your **Retry** starts. The app's own notes, such as a run being stopped, do not count. **Mark all read** clears everything listed, for the team you have picked or for every team.
+
+Read state is kept on the server, so it is the same in every browser you open Clawboo in, and it survives a restart. With no sign-in, Clawboo has one built-in reader for everyone who opens the dashboard. Behind a [sign-in proxy](/guides/sso-proxy) each signed-in person has their own, and one person's comment is unread for the next.
+
+The badge updates while the app is open. An app installed on a phone gets nothing while it is closed, because it has no background worker; the badge catches up when you open it.
 
 ### When a task runs again by itself
 
@@ -436,6 +454,8 @@ The search button in the toolbar, **/** or **Cmd+K** opens **Find**. Type part o
 <Accordion title="Since you last looked">
 
 Come back to the board after being away, and a chip beside the team filter says what changed meanwhile, for example "Since 2:10 PM: 3 done, 2 started, 1 new". It shows only when something changed. Cards that changed carry a small dot until you look at them. **Show** brings the oldest change you have not seen into view, and **Mark seen** clears the chip and every dot. Changes that sent work to **Needs you** are counted but not dotted, because Needs you lists them already.
+
+This chip is kept in the browser, and compares where cards sit now with where they sat when this browser last looked, so another browser starts with no chip. What you have read is kept on the server and shown in the [Inbox](#see-it-all-in-the-inbox), so a task you open in one browser stops counting in this one too. **Mark seen** marks what the board is showing as read there as well.
 
 </Accordion>
 

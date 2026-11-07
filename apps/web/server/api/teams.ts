@@ -11,7 +11,9 @@ import {
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
+
 import { personOf } from '../lib/auth'
+import { ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
@@ -565,7 +567,12 @@ export function teamChatStopPOST(req: Request, res: Response): void {
       return
     }
     const roomId = requestedRoomId((req.body as { roomId?: unknown } | undefined)?.roomId)
-    if (hasTeamOrchestrator(teamId, roomId)) getTeamOrchestrator(teamId, { roomId }).stop()
+    if (hasTeamOrchestrator(teamId, roomId)) {
+      const orchestrator = getTeamOrchestrator(teamId, { roomId })
+      stopAsOwnWrite(db, ownWriterOf(req), { teamId, roomId }, () => orchestrator.stop()).catch(
+        (err: unknown) => log.error({ err, teamId, roomId }, 'stopping the room failed'),
+      )
+    }
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: String(err) })

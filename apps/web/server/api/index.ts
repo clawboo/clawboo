@@ -122,6 +122,7 @@ import {
   agentTeamFolderTreeGET,
   agentWorkspacesGET,
 } from './board'
+import { boardInboxGET, boardInboxReadPOST, boardTaskReadPOST } from './boardInbox'
 import {
   memorySearchGET,
   memorySavePOST,
@@ -428,7 +429,11 @@ router.post('/api/boo-zero/override', booZeroOverridePOST)
 // Durable board.
 router.get('/api/board', boardListGET)
 router.post('/api/board', boardCreatePOST)
+// A person's inbox. Before `/:taskId`, or `inbox` reads as a task id.
+router.get('/api/board/inbox', boardInboxGET)
+router.post('/api/board/inbox/read', boardInboxReadPOST)
 router.get('/api/board/:taskId', boardGetGET)
+router.post('/api/board/:taskId/read', boardTaskReadPOST)
 router.post('/api/board/:taskId/claim', boardClaimPOST)
 router.patch('/api/board/:taskId', boardUpdatePATCH)
 router.post('/api/board/:taskId/comments', boardCommentPOST)

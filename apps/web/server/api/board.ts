@@ -41,6 +41,7 @@ import {
   provisionWorkspaceBody,
   readTaskRunnerInputs,
   runCostForTasks,
+  runOwnWrite,
   runningSinceForTasks,
   TaskDependencyCycleError,
   updateStatus,
@@ -63,6 +64,7 @@ import { agentHandoffSchema } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { personField, personOf } from '../lib/auth'
+import { ownWriterOf, withReadState } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { isDashboardRequest } from '../lib/dashboardRequest'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -116,11 +118,15 @@ export function boardListGET(req: Request, res: Response): void {
       typeof req.query['status'] === 'string' ? (req.query['status'] as TaskStatus) : undefined
     const includeDropped = req.query['includeDropped'] === 'true'
     res.json({
-      tasks: withRunningSince(
+      tasks: withReadState(
         db,
+        req,
         withLabels(
           db,
-          withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+          withRunningSince(
+            db,
+            withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+          ),
         ),
       ),
     })
@@ -142,7 +148,7 @@ export function boardGetGET(req: Request, res: Response): void {
     }
     res.json({
       task: {
-        ...task,
+        ...withReadState(db, req, [task])[0]!,
         attention: attentionForTask(db, taskId),
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
@@ -262,20 +268,29 @@ export function boardCreatePOST(req: Request, res: Response): void {
       }
     }
     const allowedPriority = priorityFor(req, priority)
-    const task = createTask(db, {
-      ...input,
-      ...(allowedPriority !== undefined ? { priority: allowedPriority } : {}),
-      // Kept to its team, so a key cannot fetch another team's task.
-      ...(idempotencyKey
-        ? { createKey: { key: `rest:${input.teamId ?? ''}:${idempotencyKey}` } }
-        : {}),
-      ...(assigneeAgentId
-        ? {
-            status: input.status ?? 'todo',
-            sourceDelegationId: encodeHumanAssignment(assigneeAgentId, randomUUID().slice(0, 8)),
-          }
-        : {}),
-    })
+    const task = runOwnWrite(
+      db,
+      ownWriterOf(req),
+      (t: DbTask) => t.id,
+      () =>
+        createTask(db, {
+          ...input,
+          ...(allowedPriority !== undefined ? { priority: allowedPriority } : {}),
+          // Kept to its team, so a key cannot fetch another team's task.
+          ...(idempotencyKey
+            ? { createKey: { key: `rest:${input.teamId ?? ''}:${idempotencyKey}` } }
+            : {}),
+          ...(assigneeAgentId
+            ? {
+                status: input.status ?? 'todo',
+                sourceDelegationId: encodeHumanAssignment(
+                  assigneeAgentId,
+                  randomUUID().slice(0, 8),
+                ),
+              }
+            : {}),
+        }),
+    )
     // A retried draft: it was logged and started the first time.
     if (task.deduplicated) {
       res.json({
@@ -424,7 +439,9 @@ export function boardRetryPOST(req: Request, res: Response): void {
       return
     }
     if (task.status !== 'todo') {
-      const moved = updateStatus(db, taskId, 'todo')
+      const moved = runOwnWrite(db, ownWriterOf(req), taskId, () =>
+        updateStatus(db, taskId, 'todo'),
+      )
       if (!moved.ok) {
         res.status(409).json({ ok: false, error: moved.reason })
         return
@@ -436,7 +453,9 @@ export function boardRetryPOST(req: Request, res: Response): void {
         data: { to: 'todo', reason: 'retry', ...personField(req) },
       })
     }
-    addComment(db, taskId, 'Retry requested.', 'user')
+    runOwnWrite(db, ownWriterOf(req), taskId, () =>
+      addComment(db, taskId, 'Retry requested.', 'user'),
+    )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.status(202).json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
@@ -483,10 +502,8 @@ export function boardAssignPOST(req: Request, res: Response): void {
       return
     }
     // The new binding and the release to `todo` commit together or not at all.
-    const assigned = assignTaskDelegation(
-      db,
-      taskId,
-      encodeHumanAssignment(agentId, randomUUID().slice(0, 8)),
+    const assigned = runOwnWrite(db, ownWriterOf(req), taskId, () =>
+      assignTaskDelegation(db, taskId, encodeHumanAssignment(agentId, randomUUID().slice(0, 8))),
     )
     if (!assigned.ok) {
       if (assigned.reason === 'not_found') {
@@ -518,7 +535,9 @@ export function boardAssignPOST(req: Request, res: Response): void {
         log.error({ err, taskId }, 'clearing the task resume pointers failed')
       }
     }
-    addComment(db, taskId, `Assigned to ${member.name}.`, 'user')
+    runOwnWrite(db, ownWriterOf(req), taskId, () =>
+      addComment(db, taskId, `Assigned to ${member.name}.`, 'user'),
+    )
     startTask(db, taskId, task.teamId, rerun ? { agentId, rerun } : null, loopbackMcpBaseUrl(req))
     res.json({ ok: true, task: getTask(db, taskId) })
   } catch (err) {
@@ -599,11 +618,13 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       // (a human shipping despite a non-promotable verdict) is the only bypass —
       // record it in the audit log so the override is never silent.
       priorStatus = getTask(db, taskId)?.status ?? null
-      const result = updateStatus(db, taskId, status, {
-        actor: 'person',
-        ...(humanOverride ? { humanOverride: true } : {}),
-        ...(completedAt !== undefined ? { completedAt } : {}),
-      })
+      const result = runOwnWrite(db, ownWriterOf(req), taskId, () =>
+        updateStatus(db, taskId, status, {
+          actor: 'person',
+          ...(humanOverride ? { humanOverride: true } : {}),
+          ...(completedAt !== undefined ? { completedAt } : {}),
+        }),
+      )
       if (!result.ok) {
         res
           .status(
@@ -637,7 +658,9 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       }
     }
     const hasFields = Object.keys(fields).length > 0
-    const task = hasFields ? updateTaskFields(db, taskId, fields) : getTask(db, taskId)
+    const task = hasFields
+      ? runOwnWrite(db, ownWriterOf(req), taskId, () => updateTaskFields(db, taskId, fields))
+      : getTask(db, taskId)
     if (!task) {
       res.status(404).json({ error: 'task not found' })
       return
@@ -687,15 +710,11 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
       parsed.data.authorType === 'user' && !isDashboardRequest(req)
         ? 'agent'
         : parsed.data.authorType
-    const comment = addComment(
-      db,
-      taskId,
-      parsed.data.body,
-      authorType,
-      parsed.data.authorAgentId,
-      {
+    const ownWriter = ownWriterOf(req)
+    const comment = runOwnWrite(db, authorType === 'user' ? ownWriter : null, taskId, () =>
+      addComment(db, taskId, parsed.data.body, authorType, parsed.data.authorAgentId, {
         person: personOf(req),
-      },
+      }),
     )
     emitEvent(db, {
       kind: 'comment_added',
@@ -738,6 +757,8 @@ export async function boardCommentPOST(req: Request, res: Response): Promise<voi
             },
             // As Retry: team chat could not run a task its engine cannot see.
             startRefusal: (t) => (rerunOf(t) ? null : engineRefusal(db, t)),
+            // Restarting it for the reply is part of the person's own write.
+            asOwnWrite: (write) => runOwnWrite(db, ownWriter, taskId, write),
           })
         } catch (err) {
           // The comment is saved: say it was not delivered rather than fail the

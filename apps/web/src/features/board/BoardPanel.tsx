@@ -34,6 +34,8 @@ import { prefersReducedMotion } from '@/lib/prefersReducedMotion'
 import { useReadSequencer } from '@/lib/useReadSequencer'
 import { useVisiblePolling } from '@/lib/useVisiblePolling'
 import { AlertsOptIn } from '@/features/alerts/AlertsOptIn'
+import { useInboxStore } from '@/features/inbox/inboxStore'
+import { activityOf, newestSeq } from '@/features/inbox/inboxModel'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
 import { EmptyState } from '@/features/shared/EmptyState'
@@ -797,7 +799,13 @@ export function BoardPanel() {
         noteArrivals(res.tasks, teamFilter)
         noteBoardRead(
           teamFilter,
-          res.tasks.map((t) => ({ id: t.id, column: boardColumnOf(t), teamId: t.teamId })),
+          res.tasks.map((t) => ({
+            id: t.id,
+            column: boardColumnOf(t),
+            teamId: t.teamId,
+            // The server's word, when it has one: read here or in another browser.
+            ...(activityOf(t) && t['unread'] === false ? { read: true } : {}),
+          })),
         )
         setTasks(res.tasks)
         setFetchOk(true)
@@ -1818,11 +1826,30 @@ export function BoardPanel() {
   // the date title (or Find, in All) rather than falling to the page.
   const markEverythingSeen = useCallback(() => {
     markAllSeen()
+    // Says the same to the Inbox, for what this view shows.
+    const shown = tasksRef.current
+    const through = newestSeq(shown)
+    if (through > 0) {
+      void useInboxStore
+        .getState()
+        .markAllRead(
+          teamFilter === 'all'
+            ? { through }
+            : {
+                through,
+                teamId: teamFilter,
+                shown: shown.map((t) => ({ id: t.id, seq: activityOf(t)?.seq ?? 0 })),
+              },
+        )
+        .then((ok) => {
+          if (!ok) addToast({ type: 'error', message: 'Couldn’t mark these read in your Inbox.' })
+        })
+    }
     setAnnouncement('Everything marked seen.')
     rootRef.current
       ?.querySelector<HTMLElement>('[data-testid="board-range-title"], [data-testid="board-find"]')
       ?.focus()
-  }, [markAllSeen])
+  }, [markAllSeen, teamFilter, addToast])
 
   // ── Find ──
   const closeFind = useCallback(() => {

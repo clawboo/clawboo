@@ -34,6 +34,22 @@ export function latestAlertTrigger(events: ReadonlyArray<{ seq: number; kind: st
   return seq
 }
 
+/** The kinds after which the person's inbox may have changed: what the alerts
+ *  wake for, and an approval being answered, which takes one off the badge. A task
+ *  that merely changed reaches the inbox through the stream's `activity` event,
+ *  because not every write leaves an event row. */
+export const INBOX_TRIGGER_KINDS: ReadonlySet<string> = new Set([
+  ...ALERT_TRIGGER_KINDS,
+  'approval_resolved',
+])
+
+/** The newest `seq` among the inbox's trigger events, or 0 when there is none. */
+export function latestInboxTrigger(events: ReadonlyArray<{ seq: number; kind: string }>): number {
+  let seq = 0
+  for (const e of events) if (e.seq > seq && INBOX_TRIGGER_KINDS.has(e.kind)) seq = e.seq
+  return seq
+}
+
 /** The fields of a board task the alerts read (GET /api/board rows). */
 export interface AlertTaskInput {
   id: string

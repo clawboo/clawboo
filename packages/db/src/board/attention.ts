@@ -5,9 +5,10 @@
 
 import { taskAttention, type TaskAttention } from '@clawboo/board-core'
 import { isVerdictPromotable } from '@clawboo/governance'
+import { and, eq, inArray } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
-import type { DbTask } from '../schema'
+import { tasks, type DbTask } from '../schema'
 import { getTask, listExecutionsForTasks } from './repository'
 
 /** A stored verdict exists and cannot be promoted to done. An absent or
@@ -54,6 +55,18 @@ export function attentionForTasks(
     )
   }
   return out
+}
+
+/** The tasks that need a person, without reading the whole board: most of it is
+ *  finished work, which never can. The same statuses as the ledger read above. */
+export function taskIdsNeedingPerson(db: ClawbooDb): string[] {
+  const rows = db
+    .select()
+    .from(tasks)
+    .where(and(inArray(tasks.status, ['todo', 'blocked', 'in_progress']), eq(tasks.dropped, 0)))
+    .all() as DbTask[]
+  const attention = attentionForTasks(db, rows)
+  return rows.filter((t) => attention.get(t.id)).map((t) => t.id)
 }
 
 /** One task's needs-you state, or null when it does not need a person (or does

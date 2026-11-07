@@ -112,6 +112,22 @@ export const linkDepBody = z.object({
 })
 export type LinkDepBody = z.infer<typeof linkDepBody>
 
+// Marking a task read. `through` is the newest change the page actually showed
+// (`activity.seq` on the row it rendered), never "now": a change that landed after
+// the page read the task stays unread.
+export const markTaskReadBody = z.object({
+  through: z.number().int().nonnegative(),
+})
+export type MarkTaskReadBody = z.infer<typeof markTaskReadBody>
+
+// Marking everything read, or one team's tasks. `through` is the newest change the
+// page knew of, for the same reason.
+export const markAllReadBody = z.object({
+  through: z.number().int().nonnegative(),
+  teamId: z.string().min(1).max(200).optional(),
+})
+export type MarkAllReadBody = z.infer<typeof markAllReadBody>
+
 // Worktree provisioning body. `repoPath` is the git repo the worktree branches
 // from (the caller — a worktree-capable runtime — supplies it). `baseSha` pins
 // the branch point; otherwise `baseRef` (default HEAD) is resolved. `kind`

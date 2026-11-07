@@ -81,6 +81,7 @@ const PINNED_FEATURES = [
   'board.steering',
   'board.readableIds',
   'board.labels',
+  'board.inbox',
   'workspace.view',
   'workspace.preview',
   'agent.nativeShell',
@@ -213,7 +214,10 @@ const PINNED_ROUTES = [
   'PUT /api/board/:taskId/labels',
   'GET /api/board',
   'POST /api/board',
+  'GET /api/board/inbox',
+  'POST /api/board/inbox/read',
   'GET /api/board/:taskId',
+  'POST /api/board/:taskId/read',
   'POST /api/board/:taskId/claim',
   'PATCH /api/board/:taskId',
   'POST /api/board/:taskId/comments',
@@ -401,6 +405,7 @@ const PINNED_STREAMS = {
         'tenantId',
         'createdAt',
       ],
+      activity: ['seq', 'read'],
     },
   },
 } as const
@@ -807,13 +812,15 @@ describe('resumable streams', () => {
     const first = appendEvent(db, { kind: 'task_created', teamId, data: { title: 'one' } })
     const second = appendEvent(db, { kind: 'task_claimed', teamId, agentId: 'a1', data: {} })
 
-    const frames = await readStream(`${base}/api/obs/stream?teamId=${teamId}`, {
+    const frames = await readStream(`${base}/api/obs/stream?teamId=${teamId}&activity=1`, {
       headers: { 'last-event-id': String(first.seq) },
-      done: (f) => f.some((x) => x.id === String(second.seq)),
+      done: (f) =>
+        f.some((x) => x.id === String(second.seq)) && f.some((x) => x.event === 'activity'),
     })
 
-    expect(frames.map((f) => f.id)).toEqual([String(second.seq)])
-    expect((JSON.parse(frames[0]!.data) as { seq: number }).seq).toBe(second.seq)
+    const messages = frames.filter((f) => f.event === 'message')
+    expect(messages.map((f) => f.id)).toEqual([String(second.seq)])
+    expect((JSON.parse(messages[0]!.data) as { seq: number }).seq).toBe(second.seq)
     expectFramesMatch('events', frames)
   })
 })

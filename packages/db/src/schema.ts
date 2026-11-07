@@ -388,6 +388,7 @@ export const tasks = sqliteTable(
   },
   (t) => [
     index('idx_tasks_team_status').on(t.teamId, t.status),
+    index('idx_tasks_status').on(t.status),
     index('idx_tasks_team_room').on(t.teamId, t.roomId),
     index('idx_tasks_assignee').on(t.assigneeAgentId),
     index('idx_tasks_parent').on(t.parentTaskId),
@@ -525,6 +526,44 @@ export const taskComments = sqliteTable(
 
 export type DbTaskComment = typeof taskComments.$inferSelect
 export type DbTaskCommentInsert = typeof taskComments.$inferInsert
+
+// task_activity: each task's newest change a person could want to know about.
+// Written only by the triggers in schemaBootstrap.ts. See board/readState.ts.
+export const taskActivity = sqliteTable(
+  'task_activity',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    taskId: text('task_id').notNull(),
+    kind: text('kind').notNull(), // 'created' | 'status' | 'edited' | 'comment'
+    at: integer('at').notNull(),
+  },
+  (t) => [uniqueIndex('uniq_task_activity_task').on(t.taskId)],
+)
+
+export type DbTaskActivity = typeof taskActivity.$inferSelect
+
+// task_readers: how far each reader has read across the whole board.
+export const taskReaders = sqliteTable('task_readers', {
+  readerId: text('reader_id').primaryKey(), // 'local' | 'person:<id>'
+  baselineSeq: integer('baseline_seq').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+})
+
+export type DbTaskReader = typeof taskReaders.$inferSelect
+
+// task_reads: the newest change a reader has read on one task.
+export const taskReads = sqliteTable(
+  'task_reads',
+  {
+    readerId: text('reader_id').notNull(),
+    taskId: text('task_id').notNull(),
+    readSeq: integer('read_seq').notNull(),
+    readAt: integer('read_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.readerId, t.taskId] })],
+)
+
+export type DbTaskRead = typeof taskReads.$inferSelect
 
 // workspaces — per-task git worktree isolation.
 export const workspaces = sqliteTable(

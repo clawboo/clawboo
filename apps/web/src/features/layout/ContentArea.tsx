@@ -184,7 +184,7 @@ export function ContentArea() {
         const num = parseInt(e.key, 10)
         if (num >= 1 && num <= 4) {
           e.preventDefault()
-          // The first four sidebar rows: Org chart, Board, Connectors, Memory.
+          // The work surfaces: Org chart, Board, Connectors, Memory.
           const views: NavView[] = ['graph', 'board', 'connectors', 'memory']
           useViewStore.getState().navigateTo(views[num - 1]!)
         }

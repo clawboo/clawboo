@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 37 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 40 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
 
 To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
 
@@ -38,6 +38,9 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`task_labels`](#task_labels)                   | Board                    | Which task carries which label                   |
 | [`task_deps`](#task_deps)                       | Board                    | Which task waits for which                       |
 | [`task_comments`](#task_comments)               | Board                    | Comments and notes on tasks                      |
+| [`task_activity`](#task_activity)               | Board                    | Each task's newest change, for read state        |
+| [`task_readers`](#task_readers)                 | Board                    | How far each reader has read the whole board     |
+| [`task_reads`](#task_reads)                     | Board                    | How far each reader has read one task            |
 | [`workspaces`](#workspaces)                     | Board                    | The git worktree a task ran in                   |
 | [`execution_processes`](#execution_processes)   | Board                    | One row per run, with cost and status            |
 | [`scheduled_runs`](#scheduled_runs)             | Routines                 | Routines                                         |
@@ -284,7 +287,7 @@ The task cards.
 | `delegated_by_agent_id` | `TEXT`                                | The agent that handed the task out through the Tasks tools. The team engine records its delegator in `source_delegation_id`. The hand-off cycle guard reads both                                   |
 | `person_cancelled_at`   | `INTEGER`                             | When a person cancelled it, or cancelled the step it waited on. Only this frees its place under its parent                                                                                         |
 
-Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
+Indexes: `idx_tasks_team_status` (`team_id`, `status`), `idx_tasks_status` (`status`), `idx_tasks_team_room` (`team_id`, `room_id`), `idx_tasks_assignee` (`assignee_agent_id`), `idx_tasks_parent` (`parent_task_id`), `idx_tasks_parent_dropped_created` (`parent_task_id`, `dropped`, `created_at`), `idx_tasks_identifier` (`identifier`, unique).
 
 The `(parent_task_id, dropped, created_at)` index serves the Tasks MCP creation caps, which count live children per parent and new root tasks per 5 minutes.
 
@@ -367,6 +370,42 @@ Comments and system notes on a task, such as report-backs and verification resul
 | `created_at`      | `INTEGER`, not null             |                                                                                                                            |
 
 Indexes: `idx_task_comments_task` (`task_id`).
+
+### task_activity
+
+Each task's newest change a person could want to know about, one row per task. Only triggers write it, so no write path can forget, in any process: `task_activity_created` on a new task, `task_activity_changed` when `status`, `title`, `description`, `priority` or `assignee_agent_id` really changes, and `task_activity_comment` on a comment that is not from `system`. A change deletes the old row and inserts a new one, so each takes a `seq` no earlier change had. A task last changed before this table existed has no row, and is not unread.
+
+| Column    | Type                         | Notes                                                               |
+| --------- | ---------------------------- | ------------------------------------------------------------------- |
+| `seq`     | `INTEGER`, PK, autoincrement | A position in the board's history; what a reader marks read through |
+| `task_id` | `TEXT`, not null             | Not a foreign key                                                   |
+| `kind`    | `TEXT`, not null             | `created`, `status`, `edited` or `comment`                          |
+| `at`      | `INTEGER`, not null          | When                                                                |
+
+Indexes: `uniq_task_activity_task` (`task_id`, unique).
+
+### task_readers
+
+How far each reader has read across the whole board. A reader is `local` (the one built-in reader with no sign-in) or `person:<id>` (a person a [sign-in proxy](/guides/sso-proxy) vouched for).
+
+| Column         | Type                | Notes                                                                                    |
+| -------------- | ------------------- | ---------------------------------------------------------------------------------------- |
+| `reader_id`    | `TEXT`, PK          |                                                                                          |
+| `baseline_seq` | `INTEGER`, not null | Every change at or below it is read: where they started, raised by "mark all read"       |
+| `updated_at`   | `INTEGER`, not null | Goes up on every mark; the event stream's `read` value, which wakes their other browsers |
+
+### task_reads
+
+The newest change a reader has read on one task, past their baseline. A task is unread when its `task_activity.seq` is above both.
+
+| Column      | Type                | Notes             |
+| ----------- | ------------------- | ----------------- |
+| `reader_id` | `TEXT`, not null    |                   |
+| `task_id`   | `TEXT`, not null    | Not a foreign key |
+| `read_seq`  | `INTEGER`, not null | Never moves back  |
+| `read_at`   | `INTEGER`, not null |                   |
+
+Primary key: `reader_id`, `task_id`.
 
 ### workspaces
 
@@ -940,7 +979,7 @@ Indexes: `uniq_graph_layouts_name_url` (unique: `name`, `gateway_url`).
 
 ## Full-text search
 
-Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 35 tables. Three triggers keep it in step with `memory_facts`:
+Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 40 tables. Three triggers keep it in step with `memory_facts`:
 
 | Trigger           | Runs         | Does                                        |
 | ----------------- | ------------ | ------------------------------------------- |

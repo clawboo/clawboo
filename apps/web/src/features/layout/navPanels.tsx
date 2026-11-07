@@ -74,6 +74,9 @@ const PANEL_SOURCES: Record<NavView, RetryableLazy<ComponentType>> = {
   board: createRetryableLazy(() =>
     import('@/features/board/BoardPanel').then((m) => ({ default: m.BoardPanel })),
   ),
+  inbox: createRetryableLazy(() =>
+    import('@/features/inbox/InboxPanel').then((m) => ({ default: m.InboxPanel })),
+  ),
   runtimes: createRetryableLazy(() =>
     import('@/features/runtimes/RuntimesPanel').then((m) => ({ default: m.RuntimesPanel })),
   ),

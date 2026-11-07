@@ -149,6 +149,7 @@ The main area shows one `ViewMode` from `apps/web/src/stores/view.ts`: an agent 
 | -------------- | ------------- | ----------------------------------- |
 | `graph`        | Org chart     | Sidebar, `Cmd/Ctrl+1`               |
 | `board`        | Board         | Sidebar, `Cmd/Ctrl+2`               |
+| `inbox`        | Inbox         | Sidebar                             |
 | `connectors`   | Connectors    | Sidebar, `Cmd/Ctrl+3`               |
 | `memory`       | Memory        | Sidebar, `Cmd/Ctrl+4`, and Settings |
 | `marketplace`  | Marketplace   | Sidebar                             |

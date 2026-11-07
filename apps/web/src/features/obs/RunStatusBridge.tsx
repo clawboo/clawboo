@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react'
 
 import { useAlertSignal } from '@/features/alerts/alertSignal'
-import { latestAlertTrigger } from '@/features/alerts/alertRules'
+import { latestAlertTrigger, latestInboxTrigger } from '@/features/alerts/alertRules'
 import { useFleetStore } from '@/stores/fleet'
 import { useRunActivityStore } from '@/stores/runActivity'
 
@@ -33,7 +33,7 @@ function sameLines(a: Map<string, string>, b: Map<string, string>): boolean {
 }
 
 export function RunStatusBridge(): null {
-  const { events } = useObsStream({}, { limit: BACKFILL })
+  const { events, boardActivity } = useObsStream({}, { limit: BACKFILL, activity: true })
   // The fleet loads independently of the event tail, and either can win the
   // race. Without this key the effect runs once against an empty fleet, every
   // `agents.find` misses, and the statuses are never applied — the graph stays
@@ -68,7 +68,16 @@ export function RunStatusBridge(): null {
   useEffect(() => {
     const seq = latestAlertTrigger(events)
     if (seq > 0) useAlertSignal.getState().note(seq)
+    const inboxSeq = latestInboxTrigger(events)
+    if (inboxSeq > 0) useAlertSignal.getState().noteInboxEvent(inboxSeq)
   }, [events])
+
+  // So does the person's inbox.
+  useEffect(() => {
+    if (boardActivity) {
+      useAlertSignal.getState().noteBoardActivity(boardActivity.seq, boardActivity.read)
+    }
+  }, [boardActivity])
 
   useEffect(() => {
     if (events.length === 0 || agentIdKey === '') return

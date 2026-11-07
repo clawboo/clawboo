@@ -39,6 +39,7 @@ import { runsOnTaskRunner } from '../lib/runnerRoute'
 import { chatClearedAt } from '../lib/teamChat/chatCleared'
 import { queueGatewayAborts } from '../lib/teamChat/gatewayRunAborts'
 import { nativeTeamSessionKeysForRoomLike } from '../lib/teamChat/nativeTeamSession'
+import { ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { retireRoomOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { getTenantId } from '../lib/tenant'
 
@@ -270,7 +271,9 @@ export async function teamRoomDELETE(req: Request, res: Response): Promise<void>
     // Stop its engine, so nothing it is running outlives the room, and wait for
     // the Stop to be written: its running tasks released, its queued ones marked
     // stopped. Moved before that, the team chat's engine would start them.
-    await retireRoomOrchestrator(teamId, roomId)
+    await stopAsOwnWrite(db, ownWriterOf(req), { teamId, roomId }, () =>
+      retireRoomOrchestrator(teamId, roomId),
+    )
     // Its unfinished tasks go to the team's own chat, still stopped: the only
     // engine left reads tasks with no room, so where they are, Retry, Assign and
     // a reply would start nothing. The task runner's own tasks move unstopped,

@@ -42,6 +42,9 @@ export const ENGINE_FEATURES = [
   'board.steering',
   'board.readableIds',
   'board.labels',
+  // A person's inbox: read state per task on the server, and the small read behind
+  // the badge. The event stream says when to read it (`?activity=1`).
+  'board.inbox',
   // The read-only view of a task's worktree, and its built-page preview.
   'workspace.view',
   'workspace.preview',

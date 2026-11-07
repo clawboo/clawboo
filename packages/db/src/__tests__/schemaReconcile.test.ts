@@ -505,6 +505,15 @@ describe('reconcileSchema: an existing database is brought up to the current sch
     expect(seeded.length).toBeGreaterThan(20)
     const before = new Map(seeded.map((t) => [t, rowCount(db, t)]))
 
+    // SQLite refuses to drop a column a trigger reads, and an older release had
+    // neither the column nor these triggers. The bootstrap below brings them back.
+    const inboxTriggers = [
+      'task_activity_created',
+      'task_activity_changed',
+      'task_activity_comment',
+    ]
+    for (const name of inboxTriggers) db.$client.prepare(`DROP TRIGGER "${name}"`).run()
+
     const addable: string[] = []
     const removed: string[] = []
     for (const [table, columns] of declaredSchemaColumns()) {
@@ -524,6 +533,10 @@ describe('reconcileSchema: an existing database is brought up to the current sch
     const { added } = ensureSchema(db)
     expect(added.map((c) => `${c.table}.${c.column}`).sort()).toEqual(removed.sort())
     expect(missingSchemaColumns(db)).toEqual([])
+    const triggers = db.$client
+      .prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger'`)
+      .all() as Array<{ name: string }>
+    expect(triggers.map((t) => t.name)).toEqual(expect.arrayContaining(inboxTriggers))
 
     // A restored column must be DEFINED like a freshly created one, not merely
     // present. Comparing names only would bless an ADD COLUMN that dropped the

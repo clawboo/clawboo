@@ -33,6 +33,8 @@ import {
   type WorkspaceDetail,
 } from '@/lib/boardClient'
 import { labelsOfTask } from '@/lib/teamLabels'
+import { activityOf } from '@/features/inbox/inboxModel'
+import { useInboxStore } from '@/features/inbox/inboxStore'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
@@ -377,6 +379,13 @@ export function TaskDetailDrawer({
       setExecutions(ex)
       setWorkspace(ws)
       setLoadedFor(taskId)
+      // Opening a task is what reads it, through what this read shows: a change that
+      // landed since stays unread. Asking the server is the point of the check, so a
+      // task that was never unread writes nothing.
+      const seq = d ? activityOf(d.task)?.seq : undefined
+      if (d?.task['unread'] === true && seq !== undefined) {
+        void useInboxStore.getState().markRead(taskId, seq)
+      }
     },
     [taskId],
   )

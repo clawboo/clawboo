@@ -21,8 +21,10 @@ import { listAgents } from '@clawboo/control-client'
 import type { GatewayClient } from '@clawboo/gateway-client'
 
 import { server } from '@/__vitest__/mswServer'
+import { resetInboxStore, useInboxStore, type InboxSnapshot } from '@/features/inbox/inboxStore'
 import { ThemeProvider } from '@/features/theme/ThemeProvider'
 import { useBooZeroStore } from '@/stores/booZero'
+import { useApprovalsStore } from '@/stores/approvals'
 import { useChatStore } from '@/stores/chat'
 import { useConfirmStore } from '@/stores/confirm'
 import { useConnectionStore } from '@/stores/connection'
@@ -272,5 +274,67 @@ describe('AgentListColumn', () => {
     expect(
       await axe(container, { rules: { 'color-contrast': { enabled: false } } }),
     ).toHaveNoViolations()
+  })
+})
+
+describe('the Inbox row', () => {
+  beforeEach(() => {
+    resetInboxStore()
+    useApprovalsStore.setState({ pendingApprovals: new Map() })
+  })
+  const snapshot = (over: Partial<InboxSnapshot>): InboxSnapshot => ({
+    unread: [],
+    needsYou: [],
+    approvals: [],
+    through: 0,
+    ...over,
+  })
+
+  it('opens the Inbox', async () => {
+    renderColumn(<AgentListColumn />)
+    await userEvent.click(screen.getByTestId('nav-inbox'))
+    expect(useViewStore.getState().viewMode).toEqual({ type: 'nav', view: 'inbox' })
+  })
+
+  it('carries no badge when nothing wants the person', () => {
+    renderColumn(<AgentListColumn />)
+    expect(screen.getByTestId('nav-inbox')).toHaveTextContent(/^Inbox$/)
+  })
+
+  it('counts what is unread and what needs the person, each once', () => {
+    useInboxStore.getState().apply(
+      snapshot({
+        unread: [
+          { id: 'a', seq: 2 },
+          { id: 'b', seq: 1 },
+        ],
+        needsYou: ['b'],
+        approvals: ['x'],
+        through: 2,
+      }),
+    )
+    renderColumn(<AgentListColumn />)
+    expect(screen.getByTestId('nav-inbox')).toHaveTextContent('3')
+  })
+
+  it('updates as the store does, and clears when the person reads', () => {
+    renderColumn(<AgentListColumn />)
+    act(() =>
+      useInboxStore.getState().apply(snapshot({ unread: [{ id: 'a', seq: 2 }], through: 2 })),
+    )
+    expect(screen.getByTestId('nav-inbox')).toHaveTextContent('1')
+    act(() => useInboxStore.setState({ marks: { a: 2 } }))
+    expect(screen.getByTestId('nav-inbox')).toHaveTextContent(/^Inbox$/)
+  })
+
+  it('stops counting at 99+', () => {
+    useInboxStore.getState().apply(
+      snapshot({
+        unread: Array.from({ length: 120 }, (_, i) => ({ id: `t${i}`, seq: i + 1 })),
+        through: 120,
+      }),
+    )
+    renderColumn(<AgentListColumn />)
+    expect(screen.getByTestId('nav-inbox')).toHaveTextContent('99+')
   })
 })

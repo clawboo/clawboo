@@ -11,6 +11,7 @@ import {
   createAlertWatcher,
   foldAlertRead,
   latestAlertTrigger,
+  latestInboxTrigger,
   startAlertMemory,
   type AlertAgent,
   type AlertApprovalInput,
@@ -342,6 +343,20 @@ describe('approvalAsk', () => {
     expect(approvalAsk('delegate:code')).toBe('hand work to another agent')
     expect(approvalAsk('mcp__my_server__send_email')).toBe('use send email')
     expect(approvalAsk('web_search')).toBe('use web search')
+  })
+})
+
+describe('latestInboxTrigger', () => {
+  it('wakes for what changes the inbox: a run ending, a move, an approval opened or answered', () => {
+    expect(
+      latestInboxTrigger([
+        { seq: 1, kind: 'execution_completed' },
+        { seq: 4, kind: 'approval_resolved' },
+        { seq: 9, kind: 'tool_call' },
+        { seq: 7, kind: 'cost' },
+      ]),
+    ).toBe(4)
+    expect(latestInboxTrigger([{ seq: 3, kind: 'tool_result' }])).toBe(0)
   })
 })
 

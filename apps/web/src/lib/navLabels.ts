@@ -23,6 +23,7 @@ export const NAV_VIEW_LABELS: Record<NavView, string> = {
   system: 'System',
   obs: 'Observability',
   board: 'Board',
+  inbox: 'Inbox',
   runtimes: 'Runtimes',
   providers: 'Providers',
   memory: 'Memory',
