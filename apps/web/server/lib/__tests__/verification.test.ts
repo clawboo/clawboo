@@ -35,7 +35,7 @@ import type { DebtNote } from '@clawboo/governance'
 import type { DiffStat, Worktree } from '@clawboo/worktrees'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { getDb, resetDb } from '../db'
+import { getDb, getDbPath, resetDb } from '../db'
 import { verifyTask } from '../verification'
 import {
   readTeamVerifyCommand,
@@ -178,12 +178,16 @@ describe('verification gate (real board + real git worktree)', () => {
   let repo: string
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-verify-home-'))
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     repo = await initRepo()
   })
   afterEach(async () => {
@@ -192,6 +196,8 @@ describe('verification gate (real board + real git worktree)', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
     await rm(repo, { recursive: true, force: true }).catch(() => {})
   })
@@ -357,6 +363,52 @@ describe('verification gate (real board + real git worktree)', () => {
       expect(started).toBe(0)
       expect(verdict.attempts.at(-1)?.critic).toMatchObject({ ran: true, outcome: 'errored' })
       expect(verdict.attempts.at(-1)?.critic.findings[0]?.body).toContain('paused')
+    },
+    WORKTREE_TIMEOUT_MS,
+  )
+
+  it(
+    'asks its gate last: a refusal starts no reviewer and says why, and a yes is given back',
+    async () => {
+      const { taskId, worktree } = await provisionForTask(repo, 'exit 0')
+      let started = 0
+      const counting = () => {
+        const adapter = new FakeReviewerAdapter('{"findings":[]}')
+        const start = adapter.start.bind(adapter)
+        adapter.start = async (t, o) => {
+          started += 1
+          return start(t, o)
+        }
+        return adapter
+      }
+      const db = getDb()
+      const common = {
+        db,
+        taskId,
+        repoPath: repo,
+        worktree,
+        diffStat: DIRTY_SMALL,
+        reviewRootDir: path.join(home, 'reviews'),
+        riskFlag: true,
+        makeReviewerAdapter: counting,
+      }
+      const refused = await verifyTask({
+        ...common,
+        reviewGate: () => ({ refused: 'The team budget is paused at its hard cap.' }),
+      })
+      expect(started).toBe(0)
+      expect(refused.attempts.at(-1)?.critic).toMatchObject({ ran: true, outcome: 'errored' })
+      expect(refused.attempts.at(-1)?.critic.findings[0]?.body).toContain('hard cap')
+
+      const events: string[] = []
+      await verifyTask({
+        ...common,
+        reviewGate: async () => {
+          events.push('in')
+          return { release: () => events.push(`out after ${started}`) }
+        },
+      })
+      expect(events).toEqual(['in', 'out after 1'])
     },
     WORKTREE_TIMEOUT_MS,
   )

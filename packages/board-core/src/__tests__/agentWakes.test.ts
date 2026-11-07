@@ -3,9 +3,11 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  AGENT_WAKE_PATH_MAX,
   AGENT_WAKE_WINDOW_MS,
   afterAgentWakeChain,
   afterAgentWakeHour,
+  afterAgentWakePath,
   agentWakeVerdict,
   MAX_AGENT_WAKES_PER_HOUR,
   MAX_BACK_AND_FORTH,
@@ -104,13 +106,78 @@ describe('agentWakeVerdict', () => {
     ).toBe('allowed')
   })
 
-  it('a chain that went quiet for an hour is over', () => {
+  it('a chain at its limit waits for a person while the wake it stopped still waits', () => {
+    const chain: AgentWakeChain = {
+      lastFromAgentId: 'b',
+      chainCount: MAX_BACK_AND_FORTH,
+      updatedAt: NOW - 100 * AGENT_WAKE_WINDOW_MS,
+    }
+    expect(agentWakeVerdict(gate(), wake({ chain, stopWaiting: true }))).toBe('back_and_forth')
+  })
+
+  it('a chain at its limit that stopped nothing ends with an hour of quiet', () => {
     const chain: AgentWakeChain = {
       lastFromAgentId: 'b',
       chainCount: MAX_BACK_AND_FORTH,
       updatedAt: NOW - AGENT_WAKE_WINDOW_MS,
     }
     expect(agentWakeVerdict(gate(), wake({ chain }))).toBe('allowed')
+    expect(agentWakeVerdict(gate(), wake({ chain: { ...chain, updatedAt: NOW - 60_000 } }))).toBe(
+      'back_and_forth',
+    )
+  })
+
+  it('a ring that stopped nothing ends with an hour of quiet too', () => {
+    const ring = { fromAgentId: 'c', toAgentId: 'a', path: ['a', 'b', 'c'] }
+    expect(agentWakeVerdict(gate(), wake({ ...ring, pathAt: NOW - 60_000 }))).toBe('back_and_forth')
+    expect(agentWakeVerdict(gate(), wake({ ...ring, pathAt: NOW - AGENT_WAKE_WINDOW_MS }))).toBe(
+      'allowed',
+    )
+    expect(
+      agentWakeVerdict(
+        gate(),
+        wake({ ...ring, pathAt: NOW - AGENT_WAKE_WINDOW_MS, stopWaiting: true }),
+      ),
+    ).toBe('back_and_forth')
+  })
+
+  it('a chain under its limit starts over after an hour of quiet', () => {
+    const chain: AgentWakeChain = {
+      lastFromAgentId: 'b',
+      chainCount: MAX_BACK_AND_FORTH - 1,
+      updatedAt: NOW - AGENT_WAKE_WINDOW_MS,
+    }
+    expect(afterAgentWakeChain(chain, 'a', NOW)).toMatchObject({
+      lastFromAgentId: 'a',
+      chainCount: 1,
+    })
+  })
+
+  it('three agents in a ring are stopped as two are', () => {
+    // a woke b, b woke c, and now c would wake a.
+    const verdict = (path: string[], from: string, to: string) =>
+      agentWakeVerdict(gate(), wake({ fromAgentId: from, toAgentId: to, path }))
+    expect(verdict(['a', 'b', 'c'], 'c', 'a')).toBe('back_and_forth')
+    // Going on to someone new is no ring.
+    expect(verdict(['a', 'b', 'c'], 'c', 'd')).toBe('allowed')
+    // Nor is answering the one who just woke you: the chain counts that.
+    expect(verdict(['a', 'b', 'c'], 'c', 'b')).toBe('allowed')
+    // The wake that starts from someone else closes nothing.
+    expect(verdict(['a', 'b', 'c'], 'b', 'a')).toBe('allowed')
+  })
+
+  it('the path keeps who woke whom, and stays short', () => {
+    expect(afterAgentWakePath(null, 'a', 'b')).toEqual(['a', 'b'])
+    expect(afterAgentWakePath(['a', 'b'], 'b', 'c')).toEqual(['a', 'b', 'c'])
+    // A wake from someone not at the end of the path is another conversation.
+    expect(afterAgentWakePath(['a', 'b'], 'x', 'y')).toEqual(['x', 'y'])
+    const long = afterAgentWakePath(
+      Array.from({ length: AGENT_WAKE_PATH_MAX }, (_, i) => `n${i}`),
+      `n${AGENT_WAKE_PATH_MAX - 1}`,
+      'next',
+    )
+    expect(long).toHaveLength(AGENT_WAKE_PATH_MAX)
+    expect(long.at(-1)).toBe('next')
   })
 
   it('the chain holds under the team’s always, and with no row for the job yet', () => {
@@ -218,7 +285,12 @@ describe('an agent’s comment on the wake rules', () => {
   })
 
   it('moves a task its agent parked once a person has said yes, with nothing forced', () => {
-    expect(wakeDecision(base)).toEqual({ do: 'fire', force: false, moveToTodo: true })
+    expect(wakeDecision(base)).toEqual({
+      do: 'fire',
+      force: false,
+      byPerson: false,
+      moveToTodo: true,
+    })
   })
 
   it('waits for the person until then, and says which card', () => {
@@ -283,6 +355,7 @@ describe('an agent’s comment on the wake rules', () => {
     expect(wakeDecision({ ...base, status: 'todo', agentWakes: 'ask' })).toEqual({
       do: 'fire',
       force: false,
+      byPerson: false,
       moveToTodo: false,
     })
   })

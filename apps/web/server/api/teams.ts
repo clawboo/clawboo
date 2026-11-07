@@ -7,6 +7,7 @@ import {
   clearTeamDelegationFailures,
   closeRequestsOfTeam,
   closeWaitingPlans,
+  detachAgentRoutinesFromTeam,
   setSetting,
   teams,
   agents,
@@ -324,6 +325,8 @@ export function teamsPATCH(req: Request, res: Response): void {
 const TEAM_DELETED_NOTE = 'Stopped: its team was deleted.'
 
 export async function teamsDELETE(req: Request, res: Response): Promise<void> {
+  // A person's call: it stops the team's runs and closes its requests in their name.
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -342,8 +345,9 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
     for (const task of listTasks(db, { teamId })) stopTaskRuns(task.id, TEAM_DELETED_NOTE)
     closeRequestsOfTeam(db, teamId, TEAM_DELETED_NOTE)
 
-    // Orphan agents belonging to this team
+    // Orphan agents belonging to this team, and their routines with them
     db.update(agents).set({ teamId: null }).where(eq(agents.teamId, teamId)).run()
+    detachAgentRoutinesFromTeam(db, teamId)
 
     // Clean up team-scoped settings rows. Drizzle's `inArray` matches the
     // exact keys we wrote in `teamRules.ts` + `teamOnboarding.ts`. Safe to
@@ -380,6 +384,7 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
     clearTeamDelegationFailures(db, teamId)
 
     // Delete the team (boo_zero_team_briefs, rooms and labels FK-cascade).
+    const name = db.select({ name: teams.name }).from(teams).where(eq(teams.id, teamId)).get()?.name
     const existed = db.delete(teams).where(eq(teams.id, teamId)).run().changes > 0
 
     // After the row, so a failed delete never loses the files, and only for a
@@ -398,6 +403,11 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
       await rm(teamFolderHistoryDir(teamId), { recursive: true, force: true }).catch(
         () => undefined,
       )
+      appendAudit(db, {
+        eventType: 'board',
+        teamId,
+        summary: { action: 'delete_team', name, folderRemoved, ...actorField(req) },
+      })
     }
 
     res.json({ ok: true, folderRemoved })
@@ -411,6 +421,8 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
 // Assigns an agent to a team.
 
 export async function teamAgentPOST(req: Request, res: Response): Promise<void> {
+  // A person's call: who is on a team decides who leads it when its lead is gone.
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -485,6 +497,9 @@ export async function teamAgentPOST(req: Request, res: Response): Promise<void> 
 // Removes an agent from a team (sets teamId = null).
 
 export function teamAgentDELETE(req: Request, res: Response): void {
+  // A person's call: taking a team's lead off it hands the team to its first member.
+  if (refuseUnlessPerson(req, res)) return
+  const teamId = req.params['id'] as string | undefined
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })
@@ -493,6 +508,16 @@ export function teamAgentDELETE(req: Request, res: Response): void {
 
   try {
     const db = getDb()
+
+    const member = db
+      .select({ teamId: agents.teamId })
+      .from(agents)
+      .where(eq(agents.id, agentId))
+      .get()
+    if (!member || member.teamId !== teamId) {
+      res.status(404).json({ error: 'agent is not on this team' })
+      return
+    }
 
     db.update(agents).set({ teamId: null }).where(eq(agents.id, agentId)).run()
 

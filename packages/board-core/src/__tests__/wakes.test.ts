@@ -261,10 +261,16 @@ const base: WakeDecisionInput = {
 
 describe('what the pump does with a saved wake', () => {
   it('fires a ready To do task', () => {
-    expect(wakeDecision(base)).toEqual({ do: 'fire', force: true, moveToTodo: false })
+    expect(wakeDecision(base)).toEqual({
+      do: 'fire',
+      force: true,
+      byPerson: true,
+      moveToTodo: false,
+    })
     expect(wakeDecision({ ...base, reason: 'dependency_done' })).toEqual({
       do: 'fire',
       force: false,
+      byPerson: false,
       moveToTodo: false,
     })
   })
@@ -273,6 +279,7 @@ describe('what the pump does with a saved wake', () => {
     expect(wakeDecision({ ...base, status: 'blocked' })).toEqual({
       do: 'fire',
       force: true,
+      byPerson: true,
       moveToTodo: true,
     })
     expect(wakeDecision({ ...base, status: 'blocked', reason: 'dependency_done' })).toEqual({
@@ -309,9 +316,11 @@ describe('what the pump does with a saved wake', () => {
       do: 'wait',
       skip: 'budget',
     })
+    // The raised cap waives the policy, and the run is still the job's own: it counts.
     expect(wakeDecision({ ...base, execs, reason: 'dependency_done', replays: 1 })).toEqual({
       do: 'fire',
       force: true,
+      byPerson: false,
       moveToTodo: false,
     })
   })
@@ -345,7 +354,12 @@ describe('what the pump does with a saved wake', () => {
 
   it("a person's first start skips the brake; every automatic start honours it", () => {
     const execs = [failed(AT - 2), failed(AT - 1)]
-    expect(wakeDecision({ ...base, execs })).toEqual({ do: 'fire', force: true, moveToTodo: false })
+    expect(wakeDecision({ ...base, execs })).toEqual({
+      do: 'fire',
+      force: true,
+      byPerson: true,
+      moveToTodo: false,
+    })
     expect(wakeDecision({ ...base, execs, reason: 'dependency_done' })).toEqual({
       do: 'wait',
       skip: 'braked',
@@ -438,6 +452,7 @@ describe('a saved wake under a pause', () => {
     expect(wakeDecision({ ...base, reason: 'dependency_done', execs: [paused] })).toEqual({
       do: 'fire',
       force: false,
+      byPerson: false,
       moveToTodo: false,
     })
   })
@@ -475,5 +490,70 @@ describe('the brake and a run a pause stopped', () => {
   it('never holds a run a pause stopped back: that run was going', () => {
     const ledger = [noProgress(1_000), noProgress(2_000), paused(3_000)]
     expect(autoFireRefusal(ledger, 4_000)).toBeNull()
+  })
+
+  describe('what counts as progress', () => {
+    const run = (over: Partial<Parameters<typeof runMadeProgress>[0]>) =>
+      runMadeProgress({
+        status: 'succeeded',
+        summary: 'words',
+        taskStatus: 'todo',
+        subTasks: 0,
+        ...over,
+      })
+
+    it('a run that blocked with only words made none', () => {
+      expect(run({ taskStatus: 'blocked' })).toBe(false)
+    })
+    it('a run that handed out work made some, even if it blocked', () => {
+      expect(run({ taskStatus: 'blocked', subTasks: 2 })).toBe(true)
+    })
+    it('a run that finished made some, whatever it said', () => {
+      expect(run({ taskStatus: 'done', summary: '' })).toBe(true)
+      expect(run({ taskStatus: 'in_review', summary: '' })).toBe(true)
+    })
+  })
+
+  describe('a job at its limit', () => {
+    const at = {
+      reason: 'agent_comment',
+      replays: 0,
+      status: 'todo',
+      dropped: false,
+      hasAgent: true,
+      ready: true,
+      execs: [],
+      runProvenAlive: false,
+      held: false,
+      paused: false,
+      refusal: null,
+      budgetRefused: false,
+      now: 1,
+    } as const
+
+    it('holds what the board or a teammate would start', () => {
+      expect(wakeDecision({ ...at, jobLimited: true })).toMatchObject({
+        do: 'wait',
+        skip: 'job_limit',
+      })
+      expect(wakeDecision({ ...at, reason: 'subtasks_closed', jobLimited: true })).toMatchObject({
+        do: 'wait',
+        skip: 'job_limit',
+      })
+    })
+    it('says when a person stopped the job, and their own start still goes', () => {
+      const stopped = { ...at, jobLimited: true, jobStopped: true }
+      expect(wakeDecision(stopped)).toMatchObject({ do: 'wait', skip: 'job_stopped' })
+      expect(wakeDecision({ ...stopped, reason: 'person_comment' })).toMatchObject({
+        do: 'fire',
+        byPerson: true,
+      })
+    })
+    it('lets a person’s first start past it, not a replay of one', () => {
+      expect(wakeDecision({ ...at, reason: 'person_comment', jobLimited: true }).do).toBe('fire')
+      expect(
+        wakeDecision({ ...at, reason: 'person_comment', replays: 1, jobLimited: true }),
+      ).toMatchObject({ do: 'wait', skip: 'job_limit' })
+    })
   })
 })

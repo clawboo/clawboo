@@ -10,15 +10,17 @@ import {
   completeExecutionProcess,
   createExecutionProcess,
   createTask,
+  jobRuns,
   updateStatus,
 } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const started = vi.hoisted(() => ({ ids: [] as string[] }))
+const started = vi.hoisted(() => ({ ids: [] as string[], automatic: [] as boolean[] }))
 vi.mock('../../lib/executorRunner', () => ({
-  runTaskOnRuntime: vi.fn(async (input: { taskId: string }) => {
+  runTaskOnRuntime: vi.fn(async (input: { taskId: string; automaticStart?: boolean }) => {
     started.ids.push(input.taskId)
+    started.automatic.push(input.automaticStart === true)
     return { ok: true, taskId: input.taskId }
   }),
 }))
@@ -66,6 +68,7 @@ let home: string
 const prev: Record<string, string | undefined> = {}
 beforeEach(async () => {
   started.ids = []
+  started.automatic = []
   home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-run-person-'))
   await mkdir(path.join(home, '.clawboo'), { recursive: true })
   for (const name of ['HOME', 'CLAWBOO_HOME']) prev[name] = process.env[name]
@@ -124,6 +127,29 @@ describe('POST /api/runtimes/:id/run', () => {
     expect((await run(a, DASHBOARD)).code).toBe(200)
     expect((await run(b, DASHBOARD)).code).toBe(200)
     expect(started.ids).toEqual([a, b])
+  })
+
+  it('without a person, waits at the job’s limit, and a start counts toward it', async () => {
+    const db = getDb()
+    const t = createTask(db, { title: 'x', status: 'todo' })
+    const exec = createExecutionProcess(db, { taskId: t.id, executorType: 'codex' })
+    completeExecutionProcess(db, exec.id, { status: 'succeeded' })
+    expect((await run(t.id)).code).toBe(200)
+    expect(started.automatic.at(-1)).toBe(true)
+    db.insert(jobRuns)
+      .values({
+        jobTaskId: t.id,
+        runs: 5,
+        runLimit: 5,
+        updatedAt: Date.now(),
+      })
+      .onConflictDoUpdate({ target: jobRuns.jobTaskId, set: { runs: 5, runLimit: 5 } })
+      .run()
+    expect(await run(t.id)).toMatchObject({ code: 409, body: { ok: false, reason: 'job_limit' } })
+
+    // A person's start is free of it, and spends nothing.
+    expect((await run(t.id, DASHBOARD)).code).toBe(200)
+    expect(started.automatic.at(-1)).toBe(false)
   })
 
   it('refuses a task whose team is gone, for a person too', async () => {

@@ -41,6 +41,16 @@ export function budgetPreflight(
  *  hand-off carries it too, after the board's "Run failed:" prefix. `held`: the
  *  cap is not paused, but runs already going have set aside the rest of it (see
  *  budgetHold.ts). */
+/** The same refusal, about a reviewer: the check still stands without one. */
+export function reviewerBudgetRefusal(
+  scope: BudgetScope,
+  reason: BudgetRefusalReason = 'paused',
+): string {
+  return reason === 'held'
+    ? `The ${scope} budget is close to its hard cap, and runs already going have set aside the rest of it, so the reviewer did not run.`
+    : `The ${scope} budget is paused at its hard cap, so the reviewer did not run.`
+}
+
 export function budgetRefusalText(
   scope: BudgetScope,
   reason: BudgetRefusalReason = 'paused',

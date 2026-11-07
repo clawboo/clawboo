@@ -56,7 +56,16 @@ export interface CriticInput {
   onSpend?: (spend: ReviewerSpend) => void
   /** True while a pause covers the task: the reviewer does not start. */
   paused?: () => boolean
+  /** Asked last before the reviewer starts: a budget's say, and a run slot where the
+   *  caller is not already in one. */
+  gate?: ReviewerGate
 }
+
+/** Why a reviewer may not run, in a person's words, or what to give back when it ends. */
+export type ReviewerGate = () =>
+  | { refused: string }
+  | { release: () => void }
+  | Promise<{ refused: string } | { release: () => void }>
 
 /** What a reviewer run cost, as its runtime reported it. */
 export interface ReviewerSpend {
@@ -141,6 +150,7 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
     return errored(null, err instanceof Error ? err.message : String(err))
   }
   let reviewerRuntime: string | null = null
+  let leaveGate: (() => void) | null = null
   try {
     const ctx: RuntimeRunContext = {
       cwd: review.worktreePath,
@@ -152,6 +162,9 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
     if (input.paused?.()) {
       return errored(null, 'This task is paused, so the reviewer did not run.')
     }
+    const admitted = await input.gate?.()
+    if (admitted && 'refused' in admitted) return errored(null, admitted.refused)
+    leaveGate = admitted?.release ?? null
     const adapter = input.makeReviewerAdapter(ctx)
     const sessionKey = `review:${input.reviewSha.slice(0, 12)}`
     const message = 'Review the changes at this checkout.'
@@ -269,6 +282,7 @@ export async function runCritic(input: CriticInput): Promise<CriticVerdict> {
   } catch (err) {
     return errored(reviewerRuntime, err instanceof Error ? err.message : String(err))
   } finally {
+    leaveGate?.()
     await removeReviewWorktree(input.repoPath, review, input.reviewRootDir).catch(() => {})
   }
 }

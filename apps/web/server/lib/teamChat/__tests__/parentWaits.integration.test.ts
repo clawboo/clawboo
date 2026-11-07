@@ -544,6 +544,9 @@ describe('a task that hands out work waits for it, end to end', () => {
       startForPerson: (task) => {
         void engine.dispatchTask(task.id)
       },
+      startByItself: (task) => {
+        void engine.dispatchTask(task.id, { automatic: true })
+      },
       pumpRoom: () => {
         void engine.resume()
       },
@@ -745,6 +748,7 @@ describe('a task that hands out work waits for it, end to end', () => {
       pumpTaskWakes(db, {
         held: () => false,
         startForPerson: () => undefined,
+        startByItself: () => undefined,
         pumpRoom: () => undefined,
         alert: () => true,
       })

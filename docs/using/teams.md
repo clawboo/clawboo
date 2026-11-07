@@ -217,6 +217,8 @@ Both choices also delete the team's rules, its brief, its rooms and your introdu
 
 Both choices stop whatever the team is doing first. Its runs end, a person's request still open on its board is cancelled with the work under it, and its other tasks stay on the board, where nothing can start them again. A result still on its way to one of its agents is dropped. The result stays on its task.
 
+Its routines go different ways. An agent routine goes with its agent: with **Delete team only** it keeps its schedule and files its tasks with no team, in the shared `_no-team` folder, unless it runs one of the tasks the team left behind, and then its next run fails and stops it. With **Delete with agents** it is deleted with its agent. A team routine stays, and its next run fails with `The team this routine posts to no longer exists.`, which stops it until you delete it or point it at another team.
+
 **Delete with agents** works without the OpenClaw Gateway. An OpenClaw member leaves the Gateway at once if it is connected, otherwise the next time Clawboo connects to it. If some agents cannot be deleted, the team is still deleted, and a message says how many agents were removed.
 
 <Warning>

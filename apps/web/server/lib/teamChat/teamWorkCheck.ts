@@ -36,6 +36,7 @@ import {
   setTaskCheckHeld,
   startTaskHeartbeat,
   updateStatus,
+  jobRunStopped,
   startRefusedBy,
   type BudgetScope,
   type ClawbooDb,
@@ -45,6 +46,7 @@ import { usdToFractionalCents, type CheckHold } from '@clawboo/governance'
 import { createLogger } from '@clawboo/logger'
 import {
   WORK_CHECK_HOLD_LIMIT_MS,
+  WORK_CHECK_TIMEOUT_MS,
   type BoardChange,
   type PreparedWorkCheck,
   type WorkCheck,
@@ -54,8 +56,11 @@ import { assertSafeTaskId, execGit, KeyedMutex, type DiffStat } from '@clawboo/w
 import { eq } from 'drizzle-orm'
 
 import { auditBudgetCrossing } from '../budgetAudit'
+import { reserveRunBudget } from '../budgetHold'
+import { reviewerBudgetRefusal } from '../budgetPreflight'
 import { isLocalModel } from '../costUtils'
 import { emitEvent } from '../obs'
+import { runSlots, type RunSlot } from '../runSlots'
 import { adapterFactoryFor, type RuntimeRunContext } from '../runtimes'
 import { isOrchestratableRuntimeId } from '../runtimes/descriptor'
 import { estimateRunCostUsd, estimateTokensFromChars } from '../runtimes/estimateCost'
@@ -576,7 +581,9 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       reviewSha: head,
       evidence: false,
       ...(reviewer ? { makeReviewerAdapter: reviewer } : {}),
-      reviewPaused: () => startRefusedBy(db, { agentId, teamId, taskId }) !== null,
+      reviewPaused: () =>
+        startRefusedBy(db, { agentId, teamId, taskId }) !== null || jobRunStopped(db, taskId),
+      reviewGate: () => admitReviewer(taskId, agentId, stillMine),
       reviewerModel,
       mcpBaseUrl: opts.mcpBaseUrl,
       onReviewerSpend: (spend) => chargeReview(taskId, agentId, reviewerModel, spend),
@@ -621,6 +628,54 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
       fixNote: hadCompany()
         ? `${fixNote}\n\nSomething else was working in the team folder during this check, so this failure may come from its unfinished work rather than yours.`
         : fixNote,
+    }
+  }
+
+  /**
+   * A reviewer is a paid run: it takes a run slot, so the cap on runs and a drain both
+   * see it, and a held engine starts none. It waits for the slot holding only this team's
+   * place in the check line, which no run with a slot is waiting on, so it cannot
+   * deadlock. Then the same budgets answer as for any run of this task.
+   */
+  async function admitReviewer(
+    taskId: string,
+    agentId: string,
+    stillMine: () => boolean,
+  ): Promise<{ refused: string } | { release: () => void }> {
+    let slot: RunSlot
+    try {
+      slot = await runSlots().acquire({
+        signal: AbortSignal.timeout(WORK_CHECK_TIMEOUT_MS),
+        paused: () => startRefusedBy(db, { agentId, teamId, taskId }) !== null,
+      })
+    } catch {
+      return { refused: 'No run slot came free in time, so the reviewer did not run.' }
+    }
+    try {
+      // The wait may have been long.
+      if (!stillMine()) {
+        slot.release()
+        return { refused: 'This check was overtaken while it waited, so the reviewer did not run.' }
+      }
+      const mission = getAncestors(db, taskId).find((a) => a.parent_task_id == null)?.id ?? taskId
+      const gate = reserveRunBudget(
+        db,
+        { agentId, missionId: mission, teamId },
+        { kind: 'review', ref: taskId },
+      )
+      if (gate.blocked) {
+        slot.release()
+        return { refused: reviewerBudgetRefusal(gate.scope, gate.reason) }
+      }
+      return {
+        release: () => {
+          gate.hold.release()
+          slot.release()
+        },
+      }
+    } catch (err) {
+      slot.release()
+      throw err
     }
   }
 

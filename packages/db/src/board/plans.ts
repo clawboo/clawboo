@@ -60,6 +60,7 @@ import {
   type DbTaskQuestion,
 } from '../schema'
 import { immediateWrite, type BoardTx } from './contention'
+import { roomForAcceptedStepsTx } from './jobRuns'
 import {
   deriveCreateKey,
   existingTaskForCreate,
@@ -914,6 +915,8 @@ export function settlePlanAnswerTx(
     }
     previous = made.id
   })
+  if (plan.parentTaskId && settled.created.length > 0)
+    roomForAcceptedStepsTx(tx, plan.parentTaskId, settled.created.length, now)
   // Last in the write: the steps exist by the time anything hears the card closed.
   if (plan.holder) closeAnsweredHolderTx(db, tx, { question, task, answer, now })
   return settled

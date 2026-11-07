@@ -59,6 +59,8 @@ export type {
   WaitingOn,
 } from '@clawboo/board-core'
 export * from './agentWakes'
+export * from './jobRuns'
+export * from './jobStop'
 export * from './attention'
 export * from './attempts'
 export { deriveCreateKey } from './createDedupe'

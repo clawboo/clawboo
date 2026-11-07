@@ -51,8 +51,9 @@ function mockRes(): {
   return { res, done }
 }
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const req = (body?: unknown): Request =>
-  ({ params: { agentId: 'boo' }, query: {}, body }) as unknown as Request
+  ({ params: { agentId: 'boo' }, query: {}, body, headers: DASHBOARD }) as unknown as Request
 
 beforeEach(() => {
   runtime = 'clawboo-native'

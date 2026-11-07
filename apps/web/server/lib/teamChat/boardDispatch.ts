@@ -18,9 +18,10 @@ export function requestTaskDispatch(
   teamId: string,
   taskId: string,
   mcpBaseUrl: string | null,
+  opts: { automatic?: boolean } = {},
 ): void {
   getTaskOrchestrator(teamId, taskId, { mcpBaseUrl })
-    .dispatchTask(taskId)
+    .dispatchTask(taskId, opts)
     .then((outcome) => log.debug({ teamId, taskId, outcome }, 'board task dispatch'))
     .catch((err: unknown) => log.error({ err, teamId, taskId }, 'board task dispatch failed'))
 }

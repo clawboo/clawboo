@@ -21,7 +21,7 @@ Teams are stored in the SQLite `teams` table. An agent's team is the nullable `a
 
 <Note>
 
-`DELETE /api/teams/:id` first stops the team's chats and their runs, and cancels its open requests with the work under them. Its other tasks stay as rows no engine, wake or rerun will start. It keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, verify command, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
+`DELETE /api/teams/:id` first stops the team's chats and their runs, and cancels its open requests with the work under them. Its other tasks stay as rows no engine, wake, rerun or routine will start. An agent routine's `teamId` becomes `null` with its agent's, so it keeps its schedule and files its tasks with no team. A team routine keeps the team's id and fails on its next run. It keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, verify command, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
 
 </Note>
 
@@ -31,7 +31,7 @@ Two different things on this page are called rooms. A team's **chat rooms** (`/a
 
 </Note>
 
-Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work, except `PUT /api/team-verify-command/:teamId`, which is also on the sensitive tier (60 a minute). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules and team-verify-command routes name it `:teamId`. Both are the team id.
+Request bodies are JSON (up to 2 MB). Every route here is on the general [rate limit](/reference/rest-api/index#rate-limits) (3,000 requests a minute per client address), including the ones that start agent work, except `PUT /api/team-verify-command/:teamId`, `PUT /api/team-plan-approval/:teamId` and `PUT /api/team-agent-wakes/:teamId`, which are also on the sensitive tier (60 a minute). Add the access cookie to each `curl` example (see [Authentication](/reference/rest-api/index#authentication)). Most routes name the team `:id` (the single-room routes add `:roomId`); the team-rules and team-verify-command routes name it `:teamId`. Both are the team id.
 
 ## Routes
 
@@ -307,6 +307,10 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id> \
 
 ## `DELETE /api/teams/:id`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
+It stops the team's runs and closes its open requests in the person's name, so each delete goes in the audit log (`delete_team`, with who did it).
+
 Deletes the team and keeps its agents. In one call it (1) sets `teamId = null` on every agent in the team, (2) deletes these team-scoped `settings` rows: `team-rules:<teamId>`, `team-onboarding:<teamId>`, `team-verify-command:<teamId>`, General's clear time `team-chat-cleared:<teamId>`, and every member's native resume pointer for the team and for each of its rooms, (3) deletes the team row, and (4) when a team row was deleted, removes the team's folder, `<CLAWBOO_HOME>/workspaces/<teamId>`, with every file in it. The `boo_zero_team_briefs` and `rooms` tables FK-cascade on the team delete (room memberships go with their rooms), so per-team briefs and chat rooms clean themselves. The team's board tasks, chat messages and peer-chat posts are not deleted, and neither are the `team-server-orchestrated:<teamId>` setting and each room's clear time.
 
 - **Path params**: `id` (team id).
@@ -341,12 +345,15 @@ The route does not answer 404 for an unknown team id: the updates and the delete
 ### Example
 
 ```bash
-curl -X DELETE http://localhost:18790/api/teams/<team-id>
+curl -X DELETE http://localhost:18790/api/teams/<team-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
 
 ## `POST /api/teams/:id/agents`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Assigns an agent to the team. This is an **upsert**: if the agent row does not exist it is created (with `status: 'idle'` and `gatewayId = agentId`); if it exists, only its `teamId` and `updatedAt` are set. The optional `agentName` is used as the display name when creating a new row (it defaults to the `agentId`).
 
@@ -403,6 +410,7 @@ Two more behaviors:
 
 ```bash
 curl -X POST http://localhost:18790/api/teams/<team-id>/agents \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"agentId":"<agent-id>"}'
 ```
@@ -411,9 +419,11 @@ curl -X POST http://localhost:18790/api/teams/<team-id>/agents \
 
 ## `DELETE /api/teams/:id/agents/:agentId`
 
-Removes an agent from a team by setting its `teamId` to `null`; the `:id` (team) segment is not used in the predicate. The agent row is not deleted.
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
-- **Path params**: `id` (team id, unused in the query), `agentId` (the agent to orphan).
+Removes an agent from a team by setting its `teamId` to `null`. The agent row is not deleted.
+
+- **Path params**: `id` (team id), `agentId` (the agent to orphan).
 - **Request body**: none.
 
 ### Responses
@@ -422,6 +432,12 @@ Removes an agent from a team by setting its `teamId` to `null`; the `:id` (team)
 
 ```json
 { "error": "agentId required" }
+```
+
+**`404 Not Found`**: the agent is not on this team:
+
+```json
+{ "error": "agent is not on this team" }
 ```
 
 **`200 OK`**: the agent's `teamId` was cleared:
@@ -439,7 +455,8 @@ Removes an agent from a team by setting its `teamId` to `null`; the `:id` (team)
 ### Example
 
 ```bash
-curl -X DELETE http://localhost:18790/api/teams/<team-id>/agents/<agent-id>
+curl -X DELETE http://localhost:18790/api/teams/<team-id>/agents/<agent-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
@@ -678,6 +695,10 @@ curl -X PATCH http://localhost:18790/api/teams/<team-id>/rooms/<room-id> \
 
 ## `DELETE /api/teams/:id/rooms/:roomId`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
+It stops the room's runs, as the Stop button does, so archiving a room goes in the audit log (`archive_room`, with who did it).
+
 Archives the room; nothing is deleted. In one call it sets the room's `archived_at` (from then on nothing routes work to it), drops the room's resume pointers (`native-team-session:<agentId>:<teamId>:room:<roomId>`) so no agent resumes the archived conversation, stops the room's work and waits for that Stop to be written (a clean Stop, as `POST /api/teams/:id/chat/stop` does for this `roomId`: claimed tasks are released to `todo`, queued ones are marked stopped, and nothing is reported as a failure), and then moves the room's unfinished tasks to General. The conversation stays in `chat_messages` under the room's session keys and the room leaves `GET /api/teams/:id/rooms`.
 
 The moved tasks stay stopped, as a Stop leaves them. A task still running with no engine to stop it (after a restart the room's engine may not be running) has its run closed as `cancelled` and goes back to `todo`. A task that was ready for an agent gets a stopped (`cancelled`) run. Either way it waits in **Needs you** as **Stopped**, and General does not start it by itself. A plan step still waiting on another step in the room gets none, and runs once that step is retried and done. One waiting on a task outside the room is stopped like a ready one, since that task can finish without anyone retrying it. A task the task runner runs moves but is not stopped, so the runner can still rerun it. A retry or a reassignment runs them from General. Finished tasks keep the room. Clawboo runs the same move each time it starts, for rooms archived before it existed. No route removes a room row; deleting the team does (the `rooms` table cascades).
@@ -714,7 +735,8 @@ The moved tasks stay stopped, as a Stop leaves them. A task still running with n
 ### Example
 
 ```bash
-curl -X DELETE http://localhost:18790/api/teams/<team-id>/rooms/<room-id>
+curl -X DELETE http://localhost:18790/api/teams/<team-id>/rooms/<room-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---

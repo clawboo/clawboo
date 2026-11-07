@@ -52,7 +52,12 @@ function fakeRes(): { res: Response; body: () => unknown; status: () => number }
 }
 
 function req(params: Record<string, string>, body?: unknown): Request {
-  return { params, body, query: {}, headers: {} } as unknown as Request
+  return {
+    params,
+    body,
+    query: {},
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+  } as unknown as Request
 }
 
 interface RoomBody {

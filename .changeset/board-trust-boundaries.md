@@ -2,13 +2,17 @@
 'clawboo': patch
 ---
 
-Words that are not yours can no longer pass for you, and a script can no longer do what only you should.
+Words that are not yours now reach Boo Zero marked as someone else's, and a request that fails the person check no longer gets to do what only you should.
 
-**Boo Zero's chat.** What an `@Team` message pulls in, Boo Zero's saved notes and a result kept since a Stop now reach it quoted, under who wrote them, and a saved note the injection scan catches is left out. A turn carrying a team's activity or a kept result can hand work only to that team, or to a team you named in the words you typed. Boo Zero's session still holds what it read on earlier turns, so a later message can still be shaped by it.
+**Boo Zero's chat.** What an `@Team` message pulls in, Boo Zero's saved notes and a result kept since a Stop now reach it quoted, under who wrote them, and a saved note the injection scan catches is left out. A turn carrying a team's activity or a kept result can hand work only to that team, or to a team you picked above the box or named in the words you typed. Only those turns are held. Nothing holds a turn because of what Boo Zero recalled or read with its own tools, or it could never choose a team when you name none, and its session still holds what it read on earlier turns. You decide by reading the hand-off's card in the chat.
 
 **One-to-one chats have no write tools on the board.** On Claude Code, Codex, Hermes and Clawboo Native, a one-to-one chat now gets `get_task`, `list_tasks` and `add_comment`, limited to the agent's own team when it has one. A teamless Boo Zero reads every team and hands work out with its tags. Notices meant for an agent's team runs no longer arrive on your chat turn, and a comment from a chat wakes no one. Team runs no longer get `link_task`.
 
 **A request that fails the person check.** These now answer `403 person_only`, for anything but the dashboard or a person a sign-in proxy vouched for: a team's rules and what you tell it about yourself, which agent is Boo Zero (these three are now audited), Stop on a team's chat or a one-to-one chat, archiving or restoring a team, setting and resuming a budget, creating, changing, running or deleting a Routine or an OpenClaw cron job, and changing a task's title or description. Scripts that do these need the two `Sec-Fetch-` headers. Setting the Routines time zone stays open.
+
+The same goes for what decides whether anyone is asked, and for who is on a team. An agent's exec settings and shell switch. Creating, revoking or resuming a grant, revoking a standing exec grant, and approving a device. `PATCH /api/system/openclaw-config`, and configuring OpenClaw. Enabling or disabling a capability. Deleting a team (which also closes its open requests) or archiving a room, both now in the audit log. Adding an agent to a team, removing it (now a `404` for an agent not on that team), moving it, deleting it, and the two calls that drop agents from a list. Creating an agent with a team or with a say in how it is asked; a plain agent needs no check. Scripts that do these need the two `Sec-Fetch-` headers too.
+
+An MCP attach signature now names the server it is for, so a Memory URL's signature no longer opens the Tasks tools. Clawboo rewrites the URLs of its own runs each run. A signed URL you copied from `/api/mcp/config` for an external agent has to be copied again: until then it is served as an unverified caller.
 
 The chat message routes stay open without a person's authority. Such a message reads `Local API call` rather than `You`, records no one as asking, and does not reset a team's failure breaker. In a one-to-one chat it starts no work, does not end the hold a Stop left, and does not read results waiting for you.
 

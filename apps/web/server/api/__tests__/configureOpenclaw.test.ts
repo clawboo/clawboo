@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { __resetOllamaModelsCacheForTests } from '../../lib/runtimes/native/ollamaModels'
 import { configureOpenclawPOST } from '../system'
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+
 function mockRes(): { res: Response; statusCode: () => number; body: () => unknown } {
   let code = 200
   let payload: unknown
@@ -54,7 +56,10 @@ describe('POST /api/system/configure-openclaw — token not echoed', () => {
   it('persists the token to .env but omits it from the response', async () => {
     const r = mockRes()
     await configureOpenclawPOST(
-      { body: { provider: 'anthropic', apiKey: 'sk-test-key' } } as unknown as Request,
+      {
+        headers: DASHBOARD,
+        body: { provider: 'anthropic', apiKey: 'sk-test-key' },
+      } as unknown as Request,
       r.res,
     )
 
@@ -102,7 +107,10 @@ describe('POST /api/system/configure-openclaw: Google', () => {
   it('defaults a Google key to gemini-3.6-flash', async () => {
     const r = mockRes()
     await configureOpenclawPOST(
-      { body: { provider: 'google', apiKey: 'AIza-test-key' } } as unknown as Request,
+      {
+        headers: DASHBOARD,
+        body: { provider: 'google', apiKey: 'AIza-test-key' },
+      } as unknown as Request,
       r.res,
     )
 
@@ -140,7 +148,7 @@ describe('POST /api/system/configure-openclaw: Ollama', () => {
     env: string
   }> {
     const r = mockRes()
-    await configureOpenclawPOST({ body } as unknown as Request, r.res)
+    await configureOpenclawPOST({ headers: DASHBOARD, body } as unknown as Request, r.res)
     return {
       status: r.statusCode(),
       body: r.body() as Record<string, unknown>,

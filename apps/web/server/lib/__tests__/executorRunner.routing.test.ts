@@ -10,6 +10,7 @@
 // a cross-runtime pickup does not, and a rotation successor always starts fresh.
 
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -17,7 +18,7 @@ import { promisify } from 'node:util'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createTask, getTask, listEvents } from '@clawboo/db'
+import { claimTask, createTask, getTask, listEvents } from '@clawboo/db'
 import type {
   Capabilities,
   RunHandle,
@@ -29,9 +30,11 @@ import type {
 } from '@clawboo/executor'
 
 import { getDb, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime } from '../executorRunner'
 import { stopPausedTaskRuns } from '../runStops'
 import type { RuntimeRunContext } from '../runtimes'
+import { teamWorkdirPath } from '../runtimes/teamWorkdir'
 import { getTaskWorkspace } from '../worktrees'
 
 const execFileAsync = promisify(execFile)
@@ -157,6 +160,7 @@ describe('executor runner — native-preservation routing (by construction)', ()
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory
@@ -175,6 +179,45 @@ describe('executor runner — native-preservation routing (by construction)', ()
       teamId: 'team-1',
     }).id
   }
+
+  describe('a task whose team was deleted', () => {
+    const leftBehind = (): string =>
+      createTask(getDb(), { title: 'left behind', status: 'todo', teamId: 'gone' }).id
+
+    it('starts nothing: no claim, no run, no folder, no spend', async () => {
+      const taskId = leftBehind()
+      const fake = new SeamAdapter('claude-code', { ...FULL_CAPS, worktrees: false })
+      const result = await runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: () => fake,
+        taskId,
+        assigneeAgentId: 'agent-1',
+        disableMemoryAutoInject: true,
+        kind: 'research',
+      })
+      expect(result).toEqual({ ok: false, reason: 'no_team' })
+      expect(fake.startCount).toBe(0)
+      expect(getTask(getDb(), taskId)?.status).toBe('todo')
+      expect(listEvents(getDb(), { taskId, kinds: ['execution_started'] })).toHaveLength(0)
+      expect(existsSync(teamWorkdirPath('gone'))).toBe(false)
+    })
+
+    it('gives the task back when the team went between two fix cycles', async () => {
+      const taskId = leftBehind()
+      expect(claimTask(getDb(), taskId, 'agent-1').ok).toBe(true)
+      const result = await runTaskOnRuntime({
+        db: getDb(),
+        makeAdapter: () => new SeamAdapter('claude-code', { ...FULL_CAPS, worktrees: false }),
+        taskId,
+        assigneeAgentId: 'agent-1',
+        disableMemoryAutoInject: true,
+        kind: 'research',
+        fixCycle: 1,
+      })
+      expect(result).toEqual({ ok: false, reason: 'no_team' })
+      expect(getTask(getDb(), taskId)?.status).toBe('todo')
+    })
+  })
 
   it('refuses a connected-substrate runtime BEFORE claiming (never spawned one-shot)', async () => {
     const taskId = newTask()
@@ -281,6 +324,7 @@ describe('executor runner — native session resume across dispatches', () => {
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
   afterEach(async () => {

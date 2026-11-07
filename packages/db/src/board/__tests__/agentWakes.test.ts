@@ -369,13 +369,71 @@ describe('the back-and-forth brake', () => {
     expect(agentWakeVerdictFor(db, elsewhere.id, A_TO_B)).toBe('allowed')
   })
 
-  it('a chain that went quiet for an hour is over', () => {
+  it('a chain at its limit does not lift with the hour while its stop waits, and a yes does', () => {
     const one = parked({ title: 'One job' })
     allowTeam()
     const start = Date.now()
     for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
       noteAgentWakeStarted(db, one, i % 2 === 0 ? A_TO_B : B_TO_A, start)
-    expect(agentWakeVerdictFor(db, one, A_TO_B, start + 60 * 60_000)).toBe('allowed')
+    const later = start + 24 * 60 * 60_000
+    asking(one, 'back_and_forth')
+    expect(agentWakeVerdictFor(db, one, A_TO_B, later)).toBe('back_and_forth')
+    expect(decideAgentWakes(db, one, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(agentWakeVerdictFor(db, one, A_TO_B, later)).toBe('allowed')
+  })
+
+  it('a chain that stopped nothing ends with the hour, for a later job’s first reply', () => {
+    const one = parked({ title: 'One job' })
+    allowTeam()
+    const start = Date.now()
+    for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+      noteAgentWakeStarted(db, one, i % 2 === 0 ? A_TO_B : B_TO_A, start)
+    const later = parked({ title: 'A later job' })
+    // Within the hour it is one conversation, across the team's jobs.
+    expect(agentWakeVerdictFor(db, later, A_TO_B, start + 60_000)).toBe('back_and_forth')
+    // Long after, with no wake waiting on a stop, it is a new one.
+    expect(agentWakeVerdictFor(db, later, A_TO_B, start + 2 * 60 * 60_000)).toBe('allowed')
+  })
+
+  it('a wake the brake stopped keeps it stopped however long it waits, card or no card', () => {
+    const one = parked({ title: 'One job' })
+    allowTeam()
+    const start = Date.now()
+    for (let i = 0; i < MAX_BACK_AND_FORTH; i++)
+      noteAgentWakeStarted(db, one, i % 2 === 0 ? A_TO_B : B_TO_A, start)
+    saveAgentCommentWake(db, one, comment(one))
+    noteTaskWakeSkip(db, listWaitingTaskWakes(db, { taskId: one })[0]!.id, 'back_and_forth')
+    expect(agentWakeVerdictFor(db, one, A_TO_B, start + 2 * 60 * 60_000)).toBe('back_and_forth')
+  })
+
+  it('a ring that stopped nothing ends with the hour too', () => {
+    const one = parked({ title: 'One job' })
+    allowTeam()
+    const start = Date.now()
+    noteAgentWakeStarted(db, one, { fromAgentId: 'a', toAgentId: 'b' }, start)
+    noteAgentWakeStarted(db, one, { fromAgentId: 'b', toAgentId: 'c' }, start + 1)
+    const ring = { fromAgentId: 'c', toAgentId: 'a' }
+    expect(agentWakeVerdictFor(db, one, ring, start + 2)).toBe('back_and_forth')
+    expect(agentWakeVerdictFor(db, one, ring, Date.now() + 2 * 60 * 60_000)).toBe('allowed')
+  })
+
+  it('stops three agents in a ring, until a person answers', () => {
+    const one = parked({ title: 'One job' })
+    allowTeam()
+    const start = Date.now()
+    noteAgentWakeStarted(db, one, { fromAgentId: 'a', toAgentId: 'b' }, start)
+    noteAgentWakeStarted(db, one, { fromAgentId: 'b', toAgentId: 'c' }, start + 1)
+    expect(agentWakeVerdictFor(db, one, { fromAgentId: 'c', toAgentId: 'a' }, start + 2)).toBe(
+      'back_and_forth',
+    )
+    expect(agentWakeVerdictFor(db, one, { fromAgentId: 'c', toAgentId: 'd' }, start + 2)).toBe(
+      'allowed',
+    )
+    asking(one, 'back_and_forth')
+    expect(decideAgentWakes(db, one, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(agentWakeVerdictFor(db, one, { fromAgentId: 'c', toAgentId: 'a' }, start + 3)).toBe(
+      'allowed',
+    )
   })
 
   it('a yes on its card lets that pair carry on, and a person’s wake clears it too', () => {

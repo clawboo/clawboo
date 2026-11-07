@@ -151,6 +151,18 @@ export function presentEvent(
         badge: 'brake',
         body: `${String(d['runs'] ?? '')} runs with no progress`,
       }
+    case 'job_limit_reached':
+      return {
+        tone: 'warning',
+        badge: 'job',
+        body: `started ${String(d['runs'] ?? '')} runs by itself, and waits for a person`,
+      }
+    case 'job_limit_carried_on':
+      return {
+        tone: 'idle',
+        badge: 'job',
+        body: `carried on, up to ${String(d['limit'] ?? '')} runs`,
+      }
     case 'execution_started':
       return { tone: 'working', badge: 'run', body: 'started' }
     case 'execution_completed': {

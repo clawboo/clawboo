@@ -13,6 +13,8 @@ import path from 'node:path'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+
 const codexAuthState = vi.hoisted(() => ({ loggedIn: false }))
 vi.mock('../../lib/runtimes/codexAuth', () => ({
   isCodexLoggedIn: () => Promise.resolve(codexAuthState.loggedIn),
@@ -63,7 +65,7 @@ describe('POST /api/system/auto-configure-openclaw: the Ollama rung', () => {
 
   async function autoConfigure(): Promise<Record<string, unknown>> {
     const r = mockRes()
-    await autoConfigureOpenclawPOST({ body: {} } as unknown as Request, r.res)
+    await autoConfigureOpenclawPOST({ headers: DASHBOARD, body: {} } as unknown as Request, r.res)
     return r.body()
   }
 

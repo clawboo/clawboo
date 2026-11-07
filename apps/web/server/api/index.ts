@@ -128,6 +128,7 @@ import {
 import { boardInboxGET, boardInboxReadPOST, boardTaskReadPOST } from './boardInbox'
 import {
   boardAgentWakesPOST,
+  boardJobLimitPOST,
   boardAssignPersonPOST,
   boardQuestionAnswerPOST,
   boardQuestionsGET,
@@ -464,6 +465,7 @@ router.post('/api/board/:taskId/reopen', boardReopenPOST)
 router.post('/api/board/:taskId/assign-person', boardAssignPersonPOST)
 router.get('/api/board/:taskId/questions', boardQuestionsGET)
 router.post('/api/board/agent-wakes/:jobTaskId', boardAgentWakesPOST)
+router.post('/api/board/job-limit/:jobTaskId', boardJobLimitPOST)
 router.post('/api/board/questions/:questionId/answer', boardQuestionAnswerPOST)
 router.get('/api/board/:taskId/plan', boardPlanGET)
 // Execution ledger (distinct two-segment paths — no collision with /:taskId).

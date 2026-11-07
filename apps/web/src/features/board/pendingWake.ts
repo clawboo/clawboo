@@ -82,6 +82,10 @@ export function pendingWakeText(
       return `Agents on this job have started each other too often this hour. It goes when the hour is over, or when you let them carry on`
     case 'back_and_forth':
       return `${name} and a teammate keep waking each other. It goes when you let them carry on, or comment`
+    case 'job_limit':
+      return `This job has started as many runs by itself as it may. It goes when you say to carry on in Needs you`
+    case 'job_stopped':
+      return `A person stopped this job. ${name} reads ${what} when you start work in it again: a Retry, or a comment`
     case 'backlog':
       return `In Backlog. Move it to To do to send ${what} to ${name}`
     case 'no_agent':

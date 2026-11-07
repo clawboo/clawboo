@@ -41,6 +41,7 @@ import {
   readTaskRunnerInputs,
   setBudgetLimit,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -139,6 +140,7 @@ describe('executor runner (real board + real git worktree)', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home // → getDbPath() + worktree root land in the sandbox
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
 
@@ -822,6 +824,7 @@ describe('executor runner — circuit breakers', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
   afterEach(async () => {
@@ -1066,6 +1069,7 @@ describe('executor runner — per-identity home serialization + cancellation + 0
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     // Close BEFORE removing the dir: Windows refuses to remove a directory
@@ -1284,6 +1288,7 @@ describe('executor cost estimation across runtimes (the budget cap engages for e
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
   afterEach(async () => {

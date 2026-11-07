@@ -619,6 +619,9 @@ describe('a team-chat check holds while a teammate is working in the folder', ()
       startForPerson: (t: DbTask) => {
         starts.push(t.id)
       },
+      startByItself: (t: DbTask) => {
+        starts.push(t.id)
+      },
       pumpRoom: () => undefined,
       alert: () => true,
     }

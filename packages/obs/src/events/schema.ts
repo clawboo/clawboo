@@ -56,6 +56,9 @@ export const ORCHESTRATION_EVENT_KINDS = [
   'task_wake_skipped',
   'task_wake_given_up',
   'task_braked',
+  // A job has started all the runs it may by itself, and a person said to carry on.
+  'job_limit_reached',
+  'job_limit_carried_on',
 ] as const
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number]
@@ -379,6 +382,14 @@ export interface PauseEventData {
   actor?: EventActor
 }
 
+/** A job reached its limit of runs started by itself, or a person added more. */
+export interface JobLimitData {
+  runs: number
+  limit: number
+  person?: { id: string; name: string | null; role: string | null }
+  actor?: EventActor
+}
+
 export interface KindToData {
   task_created: TaskCreatedData
   task_claimed: TaskClaimedData
@@ -412,6 +423,8 @@ export interface KindToData {
   task_wake_skipped: TaskWakeSkippedData
   task_wake_given_up: TaskWakeGivenUpData
   task_braked: TaskBrakedData
+  job_limit_reached: JobLimitData
+  job_limit_carried_on: JobLimitData
 }
 
 /** A producer-side typed event: the envelope minus the server-assigned bits, plus

@@ -142,6 +142,23 @@ describe('Tasks over HTTP', () => {
     expect(await toolNames(url)).toEqual(['add_comment', 'get_task', 'list_tasks'])
   })
 
+  it('serves a chat’s Memory signature on Tasks as what it is: no one in particular', async () => {
+    const memory = new URL(
+      mcpHttpUrl(base, 'memory', {
+        teamId: null,
+        agentId: 'coder',
+        chatRun: true,
+        chatRunTeamId: 'team-A',
+        attachSecret: secret(),
+      }),
+    )
+    const replayed = new URL(`${base}/api/mcp/tasks`)
+    replayed.searchParams.set('scopeAgentId', 'coder')
+    replayed.searchParams.set('chatRun', '1')
+    replayed.searchParams.set('scopeSig', memory.searchParams.get('scopeSig')!)
+    expect(await toolNames(replayed.toString())).toEqual(await toolNames(`${base}/api/mcp/tasks`))
+  })
+
   it("never serves a chat every tool through its own Tools or Memory URL's signature", async () => {
     const scope = {
       teamId: null,

@@ -25,7 +25,8 @@ export interface NudgeQueue {
    * second `deliver` in the same tick queues instead of double-sending. An
    * immediate send REJECTS to the caller on failure (the session is un-busied).
    * A QUEUED send has no caller left to reject to, so its failure (a rejection,
-   * or a throw) goes to `onQueuedFailure` instead.
+   * or a throw) goes to `onQueuedFailure` instead. `ahead`: a person is waiting on this
+   * one, so it queues behind other people's and ahead of everything else.
    */
   deliver(
     sessionKey: string,
@@ -34,6 +35,7 @@ export interface NudgeQueue {
       onQueuedFailure?: (err: unknown) => void
       /** `reset()` dropped it before it started. */
       onDropped?: () => void
+      ahead?: boolean
     },
   ): Promise<void>
   /**
@@ -79,6 +81,7 @@ export function createNudgeQueue(opts?: {
     send: () => Promise<void>
     onQueuedFailure?: (err: unknown) => void
     onDropped?: () => void
+    ahead?: boolean
   }
   const queues = new Map<string, Queued[]>()
 
@@ -150,11 +153,15 @@ export function createNudgeQueue(opts?: {
     async deliver(sessionKey, send, deliverOpts) {
       if (busy.has(sessionKey)) {
         const q = queues.get(sessionKey) ?? []
-        q.push({
+        const queued: Queued = {
           send,
           ...(deliverOpts?.onQueuedFailure ? { onQueuedFailure: deliverOpts.onQueuedFailure } : {}),
           ...(deliverOpts?.onDropped ? { onDropped: deliverOpts.onDropped } : {}),
-        })
+          ...(deliverOpts?.ahead ? { ahead: true } : {}),
+        }
+        // Behind anyone else a person is waiting on, ahead of what nobody is.
+        const at = deliverOpts?.ahead ? q.filter((x) => x.ahead).length : q.length
+        q.splice(at, 0, queued)
         queues.set(sessionKey, q)
         return
       }

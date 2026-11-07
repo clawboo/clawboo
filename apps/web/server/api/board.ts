@@ -57,7 +57,9 @@ import {
   workspaceActionBody,
   getWorkspaceForTask,
   isStrandedInProgress,
+  jobStoppedTaskIds,
   labelsForTasks,
+  personStartedJob,
   pauseSubjectOfTask,
   setTaskLabels,
   startRefusedBy,
@@ -145,7 +147,10 @@ export function boardListGET(req: Request, res: Response): void {
                 db,
                 withRunCost(
                   db,
-                  withAttention(db, listTasks(db, { teamId, status, includeDropped })),
+                  withJobStopped(
+                    db,
+                    withAttention(db, listTasks(db, { teamId, status, includeDropped })),
+                  ),
                 ),
               ),
             ),
@@ -174,6 +179,7 @@ export function boardGetGET(req: Request, res: Response): void {
       task: {
         ...withReadState(db, req, [withWaiting!])[0]!,
         attention: attentionForTask(db, taskId),
+        jobStopped: jobStoppedTaskIds(db, [task]).has(taskId),
         pause: pauseViewOfTask(db, task),
         runCost: runCostOf(db, task),
         // Whether a run is going, so the drawer can say a move stops it.
@@ -237,6 +243,16 @@ function pendingWakeOf(
 function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attention: unknown }> {
   const byId = attentionForTasks(db, rows)
   return rows.map((t) => ({ ...t, attention: byId.get(t.id) ?? null }))
+}
+
+/** Each task with whether a person stopped its job on the job's card, so a card waiting
+ *  behind that can say so. */
+function withJobStopped<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<T & { jobStopped: boolean }> {
+  const stopped = jobStoppedTaskIds(db, rows)
+  return rows.map((t) => ({ ...t, jobStopped: stopped.has(t.id) }))
 }
 
 /** Each task with the question it has open (`openQuestion`, null when none), so a
@@ -857,6 +873,8 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
         `${byPerson ? 'A person' : 'A local API call'} moved "${task.title}" to ${statusWord(status)}.`,
       )
       if (byPerson && status !== priorStatus) {
+        // A person putting a card in the queue starts work in a job they may have stopped.
+        if (status === 'todo') personStartedJob(db, taskId)
         noteHumanMove(db, {
           taskId,
           teamId: task.teamId,

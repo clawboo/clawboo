@@ -54,6 +54,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { runtimesRunPOST } from '../../api/runtimes'
 import { getDb, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime } from '../executorRunner'
 import { createRunSlots, setRunSlotsForTests } from '../runSlots'
 import type { RuntimeRunContext } from '../runtimes'
@@ -183,6 +184,7 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     await mkdir(path.join(home, '.openclaw', 'clawboo'), { recursive: true })
     prevHome = process.env['HOME']
     process.env['HOME'] = home // → getDbPath() + the worktree root land in the sandbox
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
 
@@ -521,7 +523,6 @@ describe.skipIf(process.env['CLAWBOO_LIVE_ACCEPTANCE'] !== '1')(
         description:
           "Create a file `feature.txt` with a single line of text in the working directory, then set `VERIFY_CMD='test -f feature.txt'` inside init.sh. Report a one-line summary when done.",
         status: 'todo',
-        teamId: 'team-live',
       }).id
 
       const res = mockRes()

@@ -58,6 +58,7 @@ import { StatusGlyph } from './StatusGlyph'
 import { TaskIdentifier } from './TaskIdentifier'
 import { HEADER_H, LANE, LANE_RADIUS, NEEDS_YOU_W } from './calendar/CalendarGrid'
 import { AgentWakesCard } from './AgentWakesCard'
+import { JobLimitCard } from './JobLimitCard'
 import { QuestionAnswer } from './QuestionAnswer'
 import { useBoardPerson } from './useBoardPerson'
 import { useTaskActions } from './useTaskActions'
@@ -190,7 +191,13 @@ function stuckEntries(stuck: StuckItem[], group: boolean): StuckEntry[] {
   const keyOf = (s: StuckItem) => {
     const { reason, detail, cause, runtime } = s.attention
     // Each of these is one person's turn, with its own controls.
-    if (!detail || reason === 'question' || reason === 'assigned' || reason === 'agent_wakes')
+    if (
+      !detail ||
+      reason === 'question' ||
+      reason === 'assigned' ||
+      reason === 'agent_wakes' ||
+      reason === 'job_limit'
+    )
       return null
     // A person's request goes with the work under it, which a group's Dismiss cannot say.
     if (isMainTask(s.task)) return null
@@ -393,6 +400,7 @@ function primaryActionOf(
     // The answer controls are the action.
     case 'question':
     case 'agent_wakes':
+    case 'job_limit':
       return 'none'
     case 'assigned':
       return 'done'
@@ -504,6 +512,7 @@ function NeedsYouTaskCard({
   const assigned = attention.reason === 'assigned'
   const question = attention.reason === 'question' ? openQuestionOf(task) : null
   const agentWakes = attention.reason === 'agent_wakes' ? (attention.agentWakes ?? null) : null
+  const jobLimit = attention.reason === 'job_limit' ? (attention.jobLimit ?? null) : null
   const handBackNeed = assigned ? (attention.detail ?? null) : null
   const sinceTitle = waitingTitle(waitingSince(task))
   const canRetry = canRetryTask(task, attention)
@@ -640,7 +649,7 @@ function NeedsYouTaskCard({
             <span className="min-w-0 truncate" title={`Handed back by ${handedBy}`}>
               from {handedBy}
             </span>
-          ) : question || handBackNeed || agentWakes ? null : (
+          ) : question || handBackNeed || agentWakes || jobLimit ? null : (
             <span className="min-w-0 truncate" title={detail}>
               {detail}
             </span>
@@ -661,6 +670,11 @@ function NeedsYouTaskCard({
       {agentWakes ? (
         <div className="mt-2">
           <AgentWakesCard card={agentWakes} teamId={teamId} onDecided={onChanged} />
+        </div>
+      ) : null}
+      {jobLimit ? (
+        <div className="mt-2">
+          <JobLimitCard card={jobLimit} onDecided={onChanged} />
         </div>
       ) : null}
       <div className="mt-2 flex min-h-7 items-center gap-1">

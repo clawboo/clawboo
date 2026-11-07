@@ -82,7 +82,7 @@ Any other failure stops the routine at once. Its dialog shows **Stopped after a 
 - the runtime's sign-in or the provider account was refused, which shows as **Fix sign-in** on the set-aside task;
 - the run itself failed in a way that does not pass by waiting, or ran out of room;
 - the OpenClaw Gateway was not connected (OpenClaw agents only);
-- the agent was removed, or the team was deleted or archived.
+- the agent was removed, or the team was deleted or archived. An agent routine outlives its team's deletion: it files its tasks with no team from then on, unless it runs one of the tasks that team left behind.
 
 The task that a failed agent fire created is moved to Blocked, so it waits in **Needs you**, with a comment saying the scheduled run failed, whether the routine runs again, and that the task was set aside. The routine files a fresh task on its next run. A task the routine is bound to is left as the run left it.
 

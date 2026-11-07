@@ -38,7 +38,8 @@ describe('POST /api/system/auto-configure-openclaw: the Gateway port', () => {
         return this
       },
     } as unknown as Response
-    await autoConfigureOpenclawPOST({ body: {} } as unknown as Request, res)
+    const headers = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+    await autoConfigureOpenclawPOST({ headers, body: {} } as unknown as Request, res)
     return payload as Record<string, unknown>
   }
 

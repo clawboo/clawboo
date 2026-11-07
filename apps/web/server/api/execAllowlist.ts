@@ -18,6 +18,7 @@ import { revokeExecAllowlistEntries } from '@clawboo/gateway-client'
 import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
+import { refuseUnlessPerson } from '../lib/auth'
 import { getRegistry } from '../lib/agentSource'
 import { readOpenClawExecAllowlist } from '../lib/agentSource/openclawExecAllowlistRead'
 import { getDb } from '../lib/db'
@@ -100,6 +101,9 @@ function parseRevokeBody(raw: unknown): { agentId: string; keys: string[] } | nu
 
 // POST /api/exec-allowlist/revoke { agentId, keys }
 export async function execAllowlistRevokePOST(req: Request, res: Response): Promise<void> {
+  // A person's call: a standing grant is theirs to take back, and this rewrites the
+  // whole fleet's permissions document.
+  if (refuseUnlessPerson(req, res)) return
   try {
     const parsed = parseRevokeBody(req.body)
     if (!parsed) {

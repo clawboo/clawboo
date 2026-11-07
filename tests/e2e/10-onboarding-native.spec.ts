@@ -12,7 +12,14 @@
 // existing connected-dashboard e2e; their install-subprocess steps are fragile
 // to drive headlessly and are intentionally out of scope here.
 
-import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
+import {
+  test,
+  expect,
+  API_BASE,
+  assertSandboxed,
+  DASHBOARD_HEADERS,
+  stubNativeHealthcheck,
+} from './helpers/fixtures'
 
 test.describe('Native onboarding', () => {
   test('fresh install → paste key → skip runtimes → deploy a team → land in dashboard', async ({
@@ -25,7 +32,10 @@ test.describe('Native onboarding', () => {
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
-      for (const team of data.teams ?? []) await request.delete(`${API_BASE}/api/teams/${team.id}`)
+      for (const team of data.teams ?? [])
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
     }
     const agentsResp = await request.get(`${API_BASE}/api/agents`)
     if (agentsResp.ok()) {
@@ -38,7 +48,9 @@ test.describe('Native onboarding', () => {
           a.sourceId === 'clawboo-native' ||
           a.id.startsWith('native-')
         ) {
-          await request.delete(`${API_BASE}/api/agents/${a.id}`)
+          await request.delete(`${API_BASE}/api/agents/${a.id}`, {
+            headers: DASHBOARD_HEADERS,
+          })
         }
       }
     }

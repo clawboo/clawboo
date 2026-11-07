@@ -13,6 +13,8 @@ export const MAX_AGENT_WAKES_PER_HOUR = 12
 export const AGENT_WAKE_WINDOW_MS = 60 * 60_000
 /** Wakes in a row answering each other, between two agents, before the next is stopped. */
 export const MAX_BACK_AND_FORTH = 4
+/** How many agents a job's wake path keeps. */
+export const AGENT_WAKE_PATH_MAX = 16
 
 /** Why a person is being asked, on the card in Needs you. */
 export type AgentWakeCardKind = 'ask' | 'hourly_cap' | 'back_and_forth'
@@ -58,13 +60,55 @@ export interface AgentWakeAttempt {
   teamAlways?: boolean
   /** The pair's row, if they have one. */
   chain?: AgentWakeChain | null
+  /** Who has woken whom on this job, in order (see `afterAgentWakePath`). */
+  path?: readonly string[] | null
+  /** When the job's row last moved, which that path moves with. Left out: just now. */
+  pathAt?: number | null
+  /** A wake this brake stopped is still waiting on a person: its card stands. */
+  stopWaiting?: boolean
   now: number
 }
 
 const withinTheHour = (at: number, now: number): boolean => now - at < AGENT_WAKE_WINDOW_MS
 
+/**
+ * Would this wake close a ring of three or more agents on the job? A→B→C→A never trips the
+ * pair's count: each pair only ever sees one direction. It has to carry on from the last
+ * wake on the job, or it is another conversation, and answering whoever just woke you is
+ * a reply, which the pair's count watches.
+ */
+export function agentWakeClosesRing(
+  path: readonly string[] | null | undefined,
+  fromAgentId: string | null,
+  toAgentId: string | null,
+): boolean {
+  if (!path || !fromAgentId || !toAgentId || path.length < 3) return false
+  return (
+    path[path.length - 1] === fromAgentId &&
+    path[path.length - 2] !== toAgentId &&
+    path.includes(toAgentId)
+  )
+}
+
+/** The job's wake path after a wake really started a run. A wake that carries on from the
+ *  last one adds to it; any other starts it again. Bounded: a ring trips long before. */
+export function afterAgentWakePath(
+  path: readonly string[] | null | undefined,
+  fromAgentId: string | null,
+  toAgentId: string | null,
+): string[] {
+  if (!fromAgentId || !toAgentId) return []
+  if (!path || path[path.length - 1] !== fromAgentId || path.includes(toAgentId))
+    return [fromAgentId, toAgentId]
+  return [...path, toAgentId].slice(-AGENT_WAKE_PATH_MAX)
+}
+
 /** The decision comes first, then the brakes. A no on the job outranks the team's
- *  always, because it is the more particular thing a person said. */
+ *  always, because it is the more particular thing a person said. A stop for two agents
+ *  answering each other, or a ring of them, holds until a person answers while the wake
+ *  it stopped still waits: that hour of quiet is the brake working, not the talk being
+ *  over. With nothing stopped, an hour's quiet does end it, however long the chain got,
+ *  or an unrelated job's first reply would be stopped for a talk long finished. */
 export function agentWakeVerdict(
   gate: AgentWakeGateState | null,
   w: AgentWakeAttempt,
@@ -81,9 +125,14 @@ export function agentWakeVerdict(
   const chain = w.chain
   if (
     chain &&
-    withinTheHour(chain.updatedAt, w.now) &&
     chain.lastFromAgentId === w.toAgentId &&
-    chain.chainCount >= MAX_BACK_AND_FORTH
+    chain.chainCount >= MAX_BACK_AND_FORTH &&
+    (w.stopWaiting || withinTheHour(chain.updatedAt, w.now))
+  )
+    return 'back_and_forth'
+  if (
+    agentWakeClosesRing(w.path, w.fromAgentId, w.toAgentId) &&
+    (w.stopWaiting || w.pathAt == null || withinTheHour(w.pathAt, w.now))
   )
     return 'back_and_forth'
   return 'allowed'

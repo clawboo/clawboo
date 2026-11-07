@@ -37,6 +37,7 @@ import {
   teams,
   updateStatus,
 } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -140,6 +141,7 @@ describe('task runner: a task its own agent blocked', () => {
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
     expect(getDbPath().startsWith(home)).toBe(true)
+    seedSandboxTeam(home)
     repo = await initRepo()
   })
 
@@ -379,6 +381,7 @@ describe('task runner: a task its own agent blocked', () => {
         createdAt: now,
         updatedAt: now,
       })
+      .onConflictDoUpdate({ target: teams.id, set: { leaderAgentId: 'lead' } })
       .run()
     const taskId = task('Deploy to staging', encodeHumanAssignment('coder', 'n1'))
     const { adapter } = agentRun(block(taskId), { caps: NO_WORKTREE })

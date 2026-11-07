@@ -749,6 +749,9 @@ export const executionProcesses = sqliteTable(
     // budget refusal) and for a row from before this column. The no-progress brake
     // counts these, so they outlive a restart.
     madeProgress: integer('made_progress'),
+    /** 1: this run took one from its job's count. A run refused before it started gives
+     *  it back. */
+    jobCounted: integer('job_counted'),
     /** What the run's agent said about its task (`report_result`), as JSON. Evidence:
      *  `decideDone` in @clawboo/board-core reads it, and it moves nothing itself. */
     resultClaim: text('result_claim'),
@@ -1435,6 +1438,7 @@ export const reportUpOutbox = sqliteTable(
   (t) => [
     index('idx_report_up_outbox_pending').on(t.teamId, t.roomId, t.settledAt),
     index('idx_report_up_outbox_chat').on(t.chatSessionKey, t.settledAt),
+    index('idx_report_up_outbox_task').on(t.taskId, t.createdAt),
   ],
 )
 
@@ -1513,6 +1517,9 @@ export const agentWakeGates = sqliteTable(
     /** When this hour's count began, and how many wakes it has. */
     windowStartedAt: integer('window_started_at'),
     windowCount: integer('window_count').notNull().default(0),
+    /** Who woke whom on this job, in order, as a JSON array of agent ids: what the cycle
+     *  check reads (`agentWakeClosesRing` in board-core). */
+    wakePath: text('wake_path'),
     updatedAt: integer('updated_at').notNull(),
   },
   (t) => [
@@ -1542,6 +1549,37 @@ export const agentWakeChains = sqliteTable(
 )
 
 export type DbAgentWakeChain = typeof agentWakeChains.$inferSelect
+
+/** How many runs a job has started by itself. See `board/jobRuns.ts`. */
+export const jobRuns = sqliteTable(
+  'job_runs',
+  {
+    /** The job: a person's main task, or a top-level task. */
+    jobTaskId: text('job_task_id').primaryKey(),
+    teamId: text('team_id'),
+    runs: integer('runs').notNull().default(0),
+    /** Where it stops now. A person's "carry on" raises it. */
+    runLimit: integer('run_limit').notNull(),
+    /** When a start was first refused at the limit, since the last carry on. */
+    limitHitAt: integer('limit_hit_at'),
+    /** Who said to carry on last: a JSON {id, name, role}. */
+    carriedOnBy: text('carried_on_by'),
+    carriedOnAt: integer('carried_on_at'),
+    /** When a person stopped the job at its limit. Nothing under it starts by itself and
+     *  no card is up, until a person starts work in it again. */
+    stoppedAt: integer('stopped_at'),
+    /** Who stopped it: a JSON {id, name, role}. */
+    stoppedBy: text('stopped_by'),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [
+    index('idx_job_runs_hit').on(t.limitHitAt),
+    index('idx_job_runs_stopped').on(t.stoppedAt),
+    index('idx_job_runs_team').on(t.teamId),
+  ],
+)
+
+export type DbJobRuns = typeof jobRuns.$inferSelect
 
 export const teamChat = sqliteTable(
   'team_chat',

@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 import { getDb } from '../lib/db'
 import { getRegistry } from '../lib/agentSource'
 import { applyExecApprovalPolicy, isExecAsk } from '../lib/agentSource/execApprovalPolicy'
+import { refuseUnlessPerson } from '../lib/auth'
 
 // ─── GET /api/exec-settings?agentId=xxx ─────────────────────────────────────
 // Returns the stored execution permission values for an agent, or null if none.
@@ -73,6 +74,8 @@ type PostBody = {
 }
 
 export async function execSettingsPOST(req: Request, res: Response): Promise<void> {
+  // A person's call: this decides whether anyone is asked before a command runs.
+  if (refuseUnlessPerson(req, res)) return
   const body = req.body as PostBody | undefined
   if (!body || typeof body !== 'object') {
     res.status(400).json({ error: 'invalid JSON' })

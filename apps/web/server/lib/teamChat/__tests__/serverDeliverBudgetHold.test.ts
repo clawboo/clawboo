@@ -10,7 +10,10 @@ import path from 'node:path'
 
 import {
   budgetReservations,
+  claimTask,
+  createTask,
   getBudget,
+  jobRunState,
   recordSpend,
   listGovernanceAudit,
   setBudgetLimit,
@@ -29,6 +32,7 @@ import {
   DeliveryRefusedError,
   HUMAN_TURN,
   type RunStamp,
+  type TurnOrigin,
 } from '@clawboo/team-orchestration'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -123,8 +127,8 @@ describe('serverDeliver: budget holds', () => {
       prev[k] = process.env[k]
       process.env[k] = home
     }
-    db = getDb()
     expect(getDbPath().startsWith(home)).toBe(true)
+    db = getDb()
     beforeFinalGate.fn = null
   })
   afterEach(async () => {
@@ -191,6 +195,29 @@ describe('serverDeliver: budget holds', () => {
     await vi.waitFor(() => expect(holds()).toEqual([]))
   })
 
+  it('a task update refused the same way says it goes out by itself, and a person’s turn says try again', async () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+    recordSpend(db, 'team', 'T', 95)
+    const a1 = new HeldAdapter()
+    const a2 = new HeldAdapter()
+    const w = wire({ a1, a2 })
+    await w.deliver(sk('a1'), 'a1', 'first', HUMAN_TURN)
+    await vi.waitFor(() => expect(a1.release).not.toBeNull())
+
+    const update = await w
+      .deliver(sk('a2'), 'a2', '[Task Update]', { kind: 'system' })
+      .catch((e: unknown) => e)
+    expect(update).toBeInstanceOf(DeliveryRefusedError)
+    expect((update as Error).message).toMatch(/It goes out by itself/)
+    expect((update as Error).message).not.toMatch(/Try again/)
+
+    const person = await w.deliver(sk('a2'), 'a2', 'second', HUMAN_TURN).catch((e: unknown) => e)
+    expect((person as Error).message).toMatch(/Try again/)
+
+    a1.release!()
+    await vi.waitFor(() => expect(holds()).toEqual([]))
+  })
+
   it('a task update refused behind its recipient’s run hands back what it carried as no try', async () => {
     setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
     const a1 = new HeldAdapter()
@@ -224,6 +251,92 @@ describe('serverDeliver: budget holds', () => {
     )
     expect(a1.startCalls).toBe(0)
     expect(holds()).toEqual([])
+  })
+
+  describe('what a run takes from its job’s count', () => {
+    const claimed = (): { taskId: string; execId: string } => {
+      const task = createTask(db, {
+        title: 'Its work',
+        teamId: 'T',
+        status: 'todo',
+        sourceDelegationId: 'r:deleg:agent:a1:reflectTo:a1',
+      })
+      const claim = claimTask(db, task.id, 'a1', 'claude-code', {
+        run: { executorType: 'openclaw', runReason: 'delegation' },
+      })
+      expect(jobRunState(db, task.id).runs).toBe(1)
+      return { taskId: task.id, execId: claim.execution!.id }
+    }
+    const wireTask = (adapter: RuntimeAdapter, taskId: string, execId: string) =>
+      createServerDeliver({
+        db,
+        teamId: 'T',
+        mcpBaseUrl: null,
+        nudge: createNudgeQueue(),
+        abortMap: new Map<string, RunEntry>(),
+        onEvent: async () => undefined,
+        onSessionClosed: async () => undefined,
+        taskForSession: () => taskId,
+        execForSession: () => execId,
+        stopGen: () => 0,
+        leaderAgentId: () => 'a1',
+        persistTurn: () => true,
+        persistMeta: () => true,
+        makeAdapterForAgent: () => adapter,
+      })
+    const taskOrigin: TurnOrigin = { kind: 'delegation', fromAgentId: 'a1' }
+
+    it('goes back when the gate refuses the run before it starts', async () => {
+      const { taskId, execId } = claimed()
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, 'team', 'T', 150)
+      const a1 = new HeldAdapter()
+      await expect(wireTask(a1, taskId, execId)(sk('a1'), 'a1', 'hi', taskOrigin)).rejects.toThrow(
+        /budget is paused/,
+      )
+      expect(a1.startCalls).toBe(0)
+      expect(jobRunState(db, taskId).runs).toBe(0)
+    })
+
+    it('goes back when the final gate does', async () => {
+      const { taskId, execId } = claimed()
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+      beforeFinalGate.fn = () => recordSpend(db, 'team', 'T', 150)
+      const a1 = new HeldAdapter()
+      await expect(wireTask(a1, taskId, execId)(sk('a1'), 'a1', 'hi', taskOrigin)).rejects.toThrow(
+        /budget is paused/,
+      )
+      expect(a1.startCalls).toBe(0)
+      expect(jobRunState(db, taskId).runs).toBe(0)
+    })
+
+    it('stays for a run that started', async () => {
+      const { taskId, execId } = claimed()
+      const a1 = new HeldAdapter()
+      await wireTask(a1, taskId, execId)(sk('a1'), 'a1', 'hi', taskOrigin)
+      expect(a1.startCalls).toBe(1)
+      expect(jobRunState(db, taskId).runs).toBe(1)
+      a1.release?.()
+    })
+
+    it('an update turn counts toward its jobs when it starts, and not before', async () => {
+      const { taskId } = claimed()
+      const origin: TurnOrigin = { kind: 'system', countJobs: [taskId] }
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100, mode: 'cap' })
+      recordSpend(db, 'team', 'T', 150)
+      const refused = new HeldAdapter()
+      await expect(wire({ a1: refused }).deliver(sk('a1'), 'a1', 'hi', origin)).rejects.toThrow(
+        /budget is paused/,
+      )
+      expect(jobRunState(db, taskId).runs).toBe(1)
+
+      setBudgetLimit(db, { scope: 'team', scopeId: 'T', limitUsdCents: 100_000, mode: 'cap' })
+      const going = new HeldAdapter()
+      await wire({ a1: going }).deliver(sk('a1'), 'a1', 'hi', origin)
+      expect(going.startCalls).toBe(1)
+      expect(jobRunState(db, taskId).runs).toBe(2)
+      going.release?.()
+    })
   })
 
   it('settles the hold when the run ends', async () => {

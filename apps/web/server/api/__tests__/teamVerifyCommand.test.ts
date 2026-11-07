@@ -124,7 +124,13 @@ describe('team verify command API', () => {
 
   it('deleting the team removes its verify command', async () => {
     setSetting(getDb(), 'team-verify-command:team-1', JSON.stringify({ command: 'npm test' }))
-    await teamsDELETE({ params: { id: 'team-1' } } as unknown as Request, fakeRes().res)
+    await teamsDELETE(
+      {
+        params: { id: 'team-1' },
+        headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+      } as unknown as Request,
+      fakeRes().res,
+    )
     expect(
       getDb().select().from(settings).where(eq(settings.key, 'team-verify-command:team-1')).get(),
     ).toBeUndefined()

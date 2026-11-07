@@ -100,7 +100,7 @@ registered with a local OpenClaw Gateway, carries the token alone.
   access gate admits a request without the dashboard cookie only when it carries a valid token, targets one of the
   four server mounts, arrives on the loopback port directly and was not forwarded by a proxy.
   `GET /api/mcp/config` mints signed URLs, so it always needs the cookie when the gate is on.
-- **`scopeSig`**, when the URL claims a team, agent or tenant: an HMAC over those and the delegation privilege.
+- **`scopeSig`**, when the URL claims a team, agent or tenant: an HMAC over those, the delegation privilege and the server the URL is for, so a signature for one server opens no other.
 - **`provSig`**, on Memory URLs that carry provenance stamps (runtime, task, session): it signs the stamps recorded
   with saves and feedback.
 

@@ -133,6 +133,8 @@ curl 'http://localhost:18790/api/capabilities?runtime=hermes&kind=connector'
 
 ## `POST /api/capabilities/:action`
 
+`enable`, `disable` and `approve` take [the person check](/operating/security#the-person-check): anything else gets `403 { "ok": false, "error": "person_only" }`. `install` is open. Enabling and disabling decides what a runtime may use at all, such as OpenClaw's `tools.allow` and `tools.deny`.
+
 One route for four actions, chosen by the `:action` segment. `install` adds a curated skill or connector to an agent; `enable` and `disable` turn an existing manageable capability on or off by its `id`; `approve` answers a pending tool-call approval. `install`, `enable` and `disable` go to the source that owns the capability, which also writes the audit record. `approve` answers exactly as `POST /api/tools/approvals/:id/resolve` does.
 
 - **Path params**: `action` (one of `install` \| `enable` \| `disable` \| `approve`; any other value returns **400**).

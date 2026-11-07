@@ -21,6 +21,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { openclawConfigPATCH } from '../system'
 
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+
 function mockRes(): { res: Response; statusCode: () => number } {
   let code = 200
   const res = {
@@ -57,7 +59,7 @@ describe('PATCH /api/openclaw/config: agent roster shape', () => {
   const patchModel = async (agentId: string, model: string | null): Promise<void> => {
     const { res } = mockRes()
     await openclawConfigPATCH(
-      { body: { agentModel: { agentId, model } } } as unknown as Request,
+      { headers: DASHBOARD, body: { agentModel: { agentId, model } } } as unknown as Request,
       res,
     )
   }
@@ -150,7 +152,10 @@ describe('PATCH /api/openclaw/config: agent roster shape', () => {
     writeConfig({ ownership: 'explicit', entries: { main: {} } })
     const { res, statusCode } = mockRes()
     await openclawConfigPATCH(
-      { body: { agentModel: { agentId: '__proto__', model: 'pwned' } } } as unknown as Request,
+      {
+        headers: DASHBOARD,
+        body: { agentModel: { agentId: '__proto__', model: 'pwned' } },
+      } as unknown as Request,
       res,
     )
 
@@ -167,7 +172,10 @@ describe('PATCH /api/openclaw/config: agent roster shape', () => {
       writeConfig({ ownership: 'explicit', entries: { main: {} } })
       const { res, statusCode } = mockRes()
       await openclawConfigPATCH(
-        { body: { agentModel: { agentId: id, model: 'x' } } } as unknown as Request,
+        {
+          headers: DASHBOARD,
+          body: { agentModel: { agentId: id, model: 'x' } },
+        } as unknown as Request,
         res,
       )
       expect(statusCode()).toBe(400)

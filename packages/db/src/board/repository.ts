@@ -29,6 +29,8 @@ import {
   unfinishedSubtasks,
   waitingOnJson,
   runMadeProgress,
+  isAutomaticRunReason,
+  wakeFromPerson,
   type CommentKind,
   type HandOffLink,
   type LedgerRun,
@@ -61,6 +63,14 @@ import {
   settleWakesOfClosedRunTx,
 } from '../taskWakes'
 import { ORPHANED_RUN_ERROR, STALE_RUN_ERROR } from './attempts'
+import {
+  announceJobLimit,
+  countJobRunTx,
+  personStartedJob,
+  personStartedJobTx,
+  refuseAtJobLimitTx,
+  type JobRunRefusal,
+} from './jobRuns'
 import { activitySeqOf, readersBehindWakes, readLaterOwnChange } from './readState'
 import { isTaskRunnerRun } from './runnerInputs'
 import { emitBoardLifecycle, type BoardLifecycleEvent } from './events'
@@ -73,6 +83,7 @@ import {
   taskCreateKeys,
   taskDeps,
   tasks,
+  taskWakes,
   teams,
   workspaces,
   type DbExecutionProcess,
@@ -667,9 +678,34 @@ function openTreeViews(db: ClawbooDb, mainId: string, below: readonly SubtreeRow
     })
 }
 
-function mainTaskStateOf(db: ClawbooDb, row: DbTask): MainTaskState {
+/** The open requests one scan walks, newest first. A request stuck on a person stays
+ *  open for good, so without this a scan's cost only ever grows. An older one is still
+ *  closed by its own reports: a scan is the way out for one nothing else will move. */
+export const OPEN_REQUEST_WALK_LIMIT = 500
+
+/** Does the request wait on anything in its tree? Stops at the first. */
+function anyTreeTaskWaited(db: ClawbooDb, mainId: string, below: readonly SubtreeRow[]): boolean {
+  return below.some((t) => {
+    if (isTerminal(t.status as TaskStatus)) return false
+    const row = getTask(db, t.id)
+    return !!row && requestWaitsOn(subtaskViewOf(db, row, mainId))
+  })
+}
+
+function mainTaskStateOf(
+  db: ClawbooDb,
+  row: DbTask,
+  /** The caller only asks whether anything is still open, so the walk stops at the first
+   *  one, and `openSubtasks` then reads 1. */
+  opts: { anyOpen?: boolean } = {},
+): MainTaskState {
   const below = subtreeOf(db, row.id)
   const closedAt = below.map((t) => t.completed_at).filter((t): t is number => t !== null)
+  const stillOpen = opts.anyOpen
+    ? anyTreeTaskWaited(db, row.id, below)
+      ? 1
+      : 0
+    : openTreeViews(db, row.id, below).filter(requestWaitsOn).length
   return {
     id: row.id,
     title: row.title,
@@ -678,7 +714,7 @@ function mainTaskStateOf(db: ClawbooDb, row: DbTask): MainTaskState {
     leadAgentId: row.assigneeAgentId,
     open: !row.dropped && !isTerminal(row.status as TaskStatus),
     subtaskIds: below.map((t) => t.id),
-    openSubtasks: openTreeViews(db, row.id, below).filter(requestWaitsOn).length,
+    openSubtasks: stillOpen,
     // A card that only held a plan did none of the work.
     doneSubtasks: below.filter((t) => t.status === 'done' && !isPlanHolder(t.source_delegation_id))
       .length,
@@ -705,7 +741,8 @@ export function requestOpenTasks(db: ClawbooDb, mainId: string): DbTask[] {
     .sort((a, b) => a.createdAt - b.createdAt)
 }
 
-/** A room's open main tasks, oldest first. */
+/** A room's open main tasks that a sweep may have to settle: not one parked for a person,
+ *  which only a person moves. Oldest first, of the newest `OPEN_REQUEST_WALK_LIMIT`. */
 export function listOpenMainTasks(
   db: ClawbooDb,
   filter: { teamId: string; roomId?: RoomFilter },
@@ -719,13 +756,14 @@ export function listOpenMainTasks(
         eq(tasks.isMainTask, 1),
         eq(tasks.dropped, 0),
         eq(tasks.teamId, filter.teamId),
-        inArray(tasks.status, ['in_progress', 'blocked']),
+        eq(tasks.status, 'in_progress'),
         ...(room ? [room] : []),
       ),
     )
-    .orderBy(tasks.createdAt)
+    .orderBy(desc(tasks.createdAt))
+    .limit(OPEN_REQUEST_WALK_LIMIT)
     .all() as DbTask[]
-  return rows.map((row) => mainTaskStateOf(db, row))
+  return rows.reverse().map((row) => mainTaskStateOf(db, row, { anyOpen: true }))
 }
 
 /** The main task a task is filed under, itself if it is one, or null. */
@@ -865,11 +903,13 @@ export function listRoomsWithIdleMainTasks(
     .select()
     .from(tasks)
     .where(and(eq(tasks.isMainTask, 1), eq(tasks.status, 'in_progress'), eq(tasks.dropped, 0)))
+    .orderBy(desc(tasks.createdAt))
+    .limit(OPEN_REQUEST_WALK_LIMIT)
     .all() as DbTask[]
   const rooms = new Map<string, { teamId: string; roomId: string | null }>()
   for (const r of rows) {
     if (!r.teamId) continue
-    const state = mainTaskStateOf(db, r)
+    const state = mainTaskStateOf(db, r, { anyOpen: true })
     if (state.openSubtasks > 0) continue
     const ids = [r.id, ...state.subtaskIds]
     const waiting = db
@@ -1029,15 +1069,15 @@ export function listChatHandOffTasks(
         opts.changedSince !== undefined ? gte(tasks.updatedAt, opts.changedSince) : undefined,
       ),
     )
-    .orderBy(desc(tasks.updatedAt))
+    .orderBy(desc(tasks.updatedAt), sql`tasks.rowid DESC`)
     .limit(CHAT_HAND_OFF_READ_LIMIT)
     .all() as DbTask[]
-  return rows.sort((a, b) => a.createdAt - b.createdAt)
+  return rows.reverse().sort((a, b) => a.createdAt - b.createdAt)
 }
 
 // ─── Atomic claim (the mutex) ────────────────────────────────────────────────
 
-export type ClaimReason = 'conflict' | 'not_found' | 'paused' | 'person_assigned'
+export type ClaimReason = 'conflict' | 'not_found' | 'paused' | 'person_assigned' | 'job_limit'
 export interface ClaimResult {
   ok: boolean
   task?: DbTask
@@ -1056,6 +1096,9 @@ export interface ClaimRun {
   /** Why it runs. A saved wake it takes names the reason instead. */
   runReason?: string | null
   workspaceId?: string | null
+  /** Does this run spend from its job's count (see ./jobRuns), and wait at the limit?
+   *  Left out, its reason decides. False: a person asked for this run. */
+  automatic?: boolean
 }
 
 /** Build a new `running` execution row. */
@@ -1084,11 +1127,48 @@ function buildExecutionRow(input: CreateExecInput, id: string, now: number): DbE
     error: null,
     errorClass: null,
     madeProgress: null,
+    jobCounted: input.countJobRun ? 1 : null,
     resultClaim: null,
     recoveryTombstone: 0,
     tenantId: null,
     createdAt: now,
   }
+}
+
+/** Would a claim of this task land? Everything its write checks, read first. */
+function claimable(tx: BoardTx, taskId: string): boolean {
+  const row = tx
+    .select({
+      status: tasks.status,
+      assignee: tasks.assigneeAgentId,
+      person: tasks.assigneePersonId,
+      main: tasks.isMainTask,
+      dropped: tasks.dropped,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .get()
+  return !!row && row.status === 'todo' && !row.assignee && !row.person && !row.main && !row.dropped
+}
+
+/** Does this run spend from its job's count? What it was opened for, unless a wake waiting
+ *  on the task says a person is behind it. */
+function runIsAutomatic(tx: BoardTx, taskId: string, run: ClaimRun): boolean {
+  if (run.automatic === false) return false
+  const waiting = tx
+    .select({ reason: taskWakes.reason })
+    .from(taskWakes)
+    .where(
+      and(
+        eq(taskWakes.taskId, taskId),
+        isNull(taskWakes.settledAt),
+        isNull(taskWakes.carriedExecId),
+      ),
+    )
+    .all()
+  if (waiting.some((w) => wakeFromPerson(w.reason))) return false
+  if (run.automatic === true) return true
+  return isAutomaticRunReason(run.runReason) || waiting.some((w) => isAutomaticRunReason(w.reason))
 }
 
 /**
@@ -1117,6 +1197,7 @@ export function claimTask(
   opts: { run?: ClaimRun } = {},
 ): ClaimResult {
   const now = Date.now()
+  let limitHit: JobRunRefusal | null = null
   const result = immediateWrite(db, (tx): ClaimResult => {
     // Every claim passes here, so a paused agent, team or task tree (see ./pauses)
     // starts no work whichever path asked. The task stays in To do. Read inside the
@@ -1145,6 +1226,17 @@ export function claimTask(
     }
     const execId = run ? randomUUID() : null
     const activityBefore = run ? activitySeqOf(db, taskId) : 0
+    // The job's count, read in this write with everything that would refuse the claim
+    // anyway ruled out first: a conflict is no start, so it neither counts nor raises the
+    // card. A wake a person is behind makes it their run, whatever the run was opened as.
+    const counted = !!run && !!claimable(tx, taskId) && runIsAutomatic(tx, taskId, run)
+    if (counted) {
+      const refused = refuseAtJobLimitTx(tx, taskId, now)
+      if (refused) {
+        limitHit = refused
+        return { ok: false, reason: 'job_limit' }
+      }
+    }
     const claimed = tx
       .update(tasks)
       .set({
@@ -1181,6 +1273,9 @@ export function claimTask(
       return { ok: false, reason: held.person ? 'person_assigned' : 'conflict' }
     }
     if (!run || !execId) return { ok: true, task: claimed[0] }
+    if (counted) countJobRunTx(tx, taskId, now)
+    // Not counted is a person's start: their job is going again, if they had stopped it.
+    else personStartedJobTx(tx, taskId, now)
     const wakes = adoptTaskWakesTx(tx, taskId, execId, now)
     const strongest = wakes.reduce<(typeof wakes)[number] | undefined>(
       (best, w) => (best && strongerWakeReason(best.reason, w.reason) === best.reason ? best : w),
@@ -1192,6 +1287,7 @@ export function claimTask(
         executorType: run.executorType,
         engineRun: run.engineRun ?? false,
         workspaceId: run.workspaceId ?? null,
+        countJobRun: counted,
         // A provider retry stays one whatever it carries, or a wake it took along would
         // read as a person asking and start the retry count again.
         runReason:
@@ -1207,6 +1303,8 @@ export function claimTask(
     readLaterOwnChange(db, readersBehindWakes(db, wakes), taskId, activityBefore)
     return { ok: true, task: claimed[0], execution, wakes }
   })
+  const hit = limitHit as JobRunRefusal | null
+  if (hit?.firstHit) announceJobLimit(db, hit.jobTaskId)
   if (result.ok && result.task)
     emitBoardLifecycle({
       kind: 'task_claimed',
@@ -1869,6 +1967,7 @@ function releaseWaitersTx(
   for (const waiter of waiting) {
     const w = parseWaitingOn(waiter.waitingOn)
     if (w?.kind !== 'task' || w.taskId !== closed.id) continue
+    if (finished) noteWaitOutcomeTx(tx, waiter.id, { waitedTaskDone: true })
     releaseWaiterTx(tx, waiter, now, events, {
       ready: finished,
       note: `${name}, the task this waited on, is done.`,
@@ -1903,11 +2002,12 @@ function releaseWaiterTx(
     .set(
       toQueue
         ? {
+            // The same work coming back: a check it failed still stands, and so do the
+            // attempts that bound its fix rounds.
             status: 'todo',
             waitingOn: null,
             assigneeAgentId: null,
             assigneeRuntime: null,
-            verification: null,
             updatedAt: now,
           }
         : { waitingOn: waitingOnJson({ kind: 'person', need: ifNot }), updatedAt: now },
@@ -1958,6 +2058,58 @@ function releaseWaiterTx(
 }
 
 /**
+ * What a wait on other work comes to, on the run that parked there. Work it handed out
+ * that all closed with none done takes back the progress that run read as, on the strength
+ * of work still out: handing out work that keeps failing must not hold off the no-progress
+ * brake (see `runMadeProgress`). And a real sub-task that got done while it waited is the
+ * progress a run that only said "waiting" did not have, so a task that planned, parked and
+ * got its work done is not braked on its way back to read it.
+ */
+function noteWaitOutcomeTx(
+  tx: BoardTx,
+  taskId: string,
+  /** It waited on one other task, and that got done: the same thing, by another route. */
+  opts: { waitedTaskDone?: boolean } = {},
+): void {
+  const last = tx
+    .select({
+      id: executionProcesses.id,
+      createdAt: executionProcesses.createdAt,
+      madeProgress: executionProcesses.madeProgress,
+    })
+    .from(executionProcesses)
+    .where(eq(executionProcesses.taskId, taskId))
+    .orderBy(desc(executionProcesses.createdAt), sql`execution_processes.rowid DESC`)
+    .limit(1)
+    .get()
+  if (!last || last.madeProgress === null) return
+  const under = tx
+    .select({
+      status: tasks.status,
+      createdAt: tasks.createdAt,
+      completedAt: tasks.completedAt,
+      sourceDelegationId: tasks.sourceDelegationId,
+    })
+    .from(tasks)
+    .where(eq(tasks.parentTaskId, taskId))
+    .all()
+  const made = under.filter((t) => t.createdAt >= last.createdAt)
+  const failed = made.length > 0 && !made.some((t) => t.status === 'done')
+  const cameThrough = under.some(
+    (t) =>
+      t.status === 'done' &&
+      !isPlanHolder(t.sourceDelegationId) &&
+      (t.completedAt ?? 0) >= last.createdAt,
+  )
+  const progress = last.madeProgress === 1 ? !failed : cameThrough || !!opts.waitedTaskDone
+  if ((last.madeProgress === 1) === progress) return
+  tx.update(executionProcesses)
+    .set({ madeProgress: progress ? 1 : 0 })
+    .where(eq(executionProcesses.id, last.id))
+    .run()
+}
+
+/**
  * The way out for a task waiting on its sub-tasks: when none of them has anything more
  * to report, it gets its follow-up turn, the failed ones included. What closed means is
  * `subtaskStanding`'s, and it is read from the board in this write, so nothing has to
@@ -1995,6 +2147,7 @@ function releaseParentWaitTx(tx: BoardTx, parentId: string, now: number): BoardL
     .where(and(eq(executionProcesses.taskId, parent.id), eq(executionProcesses.status, 'running')))
     .get()
   if (runOpen) return events
+  noteWaitOutcomeTx(tx, parent.id)
   const allDone = tally.cancelled + tally.notComing === 0
   releaseWaiterTx(tx, parent, now, events, {
     ready: true,
@@ -2482,13 +2635,17 @@ export function countOpenSubtasks(db: ClawbooDb, taskId: string): number {
  *  person-only Reopen route calls this, and the finish time is cleared. */
 export function reopenTask(db: ClawbooDb, taskId: string): UpdateStatusResult {
   // A main task never runs, so it goes back to where it waits, not to the queue.
-  if (getTask(db, taskId)?.isMainTask === 1)
-    return updateStatus(db, taskId, 'in_progress', {
-      actor: 'person',
-      reopen: true,
-      waitingOn: MAIN_TASK_WAIT,
-    })
-  return updateStatus(db, taskId, 'todo', { actor: 'person', reopen: true })
+  const result =
+    getTask(db, taskId)?.isMainTask === 1
+      ? updateStatus(db, taskId, 'in_progress', {
+          actor: 'person',
+          reopen: true,
+          waitingOn: MAIN_TASK_WAIT,
+        })
+      : updateStatus(db, taskId, 'todo', { actor: 'person', reopen: true })
+  // A person starting work in a job they had stopped.
+  if (result.ok) personStartedJob(db, taskId)
+  return result
 }
 
 export function blockTask(
@@ -2733,7 +2890,8 @@ export function getAncestors(db: ClawbooDb, taskId: string): AncestorRow[] {
         UNION
         SELECT t.parent_task_id FROM tasks t JOIN ancestors a ON t.id = a.id WHERE t.parent_task_id IS NOT NULL
       )
-      SELECT id, parent_task_id, title, status, is_main_task FROM tasks WHERE id IN (SELECT id FROM ancestors)
+      SELECT id, parent_task_id, title, status, is_main_task, assignee_agent_id, source_delegation_id
+      FROM tasks WHERE id IN (SELECT id FROM ancestors)
     `,
   )
   return ancestorRowsSchema.parse(rows)
@@ -2906,6 +3064,9 @@ export interface CreateExecInput {
   workspaceId?: string | null
   runReason?: string | null
   beforeCommit?: string | null
+  /** This run is one its job counts (see ./jobRuns). Written with the row, so a refusal
+   *  before it starts can give exactly that back. Ask `jobRunRefused` first. */
+  countJobRun?: boolean
 }
 
 /**
@@ -2919,6 +3080,7 @@ export function createExecutionProcess(db: ClawbooDb, input: CreateExecInput): D
   const row = buildExecutionRow(input, randomUUID(), now)
   immediateWrite(db, (tx) => {
     tx.insert(executionProcesses).values(row).run()
+    if (input.countJobRun) countJobRunTx(tx, input.taskId, now)
     // A run opening is activity: its first beat may be half a minute off, and a task
     // that sat waiting must not read as a dead run in between (a fix cycle's mutex wait).
     tx.update(tasks)
@@ -3272,9 +3434,9 @@ export function reconcileOrphans(
       const released = tx
         .update(tasks)
         .set({
+          // The same work coming back by itself: a check it failed still stands.
           assigneeAgentId: null,
           assigneeRuntime: null,
-          verification: null,
           waitingOn: null,
           status: 'todo',
           updatedAt: now,
@@ -3398,9 +3560,9 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
       for (const r of running) settleWakesOfClosedRunTx(tx, r.id, { status: 'timed_out' }, now)
       tx.update(tasks)
         .set({
+          // The same work coming back by itself: a check it failed still stands.
           assigneeAgentId: null,
           assigneeRuntime: null,
-          verification: null,
           waitingOn: null,
           runExecutionId: null,
           status: 'todo',

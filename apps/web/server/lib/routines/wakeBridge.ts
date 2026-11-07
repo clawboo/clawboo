@@ -22,10 +22,12 @@ import {
   agents,
   createTask,
   getTask,
+  jobRunStopped,
   routineSurvivesFailure,
   teams,
   updateStatus,
   startRefusedBy,
+  teamExists,
   type ClawbooDb,
   type DbAgent,
   type DbScheduledRun,
@@ -132,6 +134,14 @@ function materializeTask(
   if (template.teamTaskId) {
     const bound = getTask(db, template.teamTaskId)
     if (!bound) return { ok: false, error: `bound team task ${template.teamTaskId} not found` }
+    // Deleting a team leaves its task rows behind, and nothing may start them.
+    if (bound.teamId && !teamExists(db, bound.teamId)) {
+      return { ok: false, error: 'The team of the task this routine runs no longer exists.' }
+    }
+    // A routine's fire is no person starting the work now, whoever scheduled it.
+    if (jobRunStopped(db, bound.id)) {
+      return { ok: false, error: 'A person stopped the job this routine’s task is in.' }
+    }
     if (bound.status !== 'todo') {
       return {
         ok: false,
@@ -145,7 +155,8 @@ function materializeTask(
     description: template.description ?? null,
     status: 'todo',
     priority: template.priority,
-    teamId: run.teamId,
+    // A row from before a team's delete moved its routines still names the team.
+    teamId: run.teamId && teamExists(db, run.teamId) ? run.teamId : null,
     assigneeRuntime: runtime,
     scheduledBy: 'clawboo',
     tenantId: run.tenantId,

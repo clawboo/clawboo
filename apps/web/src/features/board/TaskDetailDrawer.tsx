@@ -61,6 +61,7 @@ import type { PauseView } from '@/stores/pauses'
 
 import { AssignAgentSelect } from './AssignAgentSelect'
 import { AgentWakesCard } from './AgentWakesCard'
+import { JobLimitCard } from './JobLimitCard'
 import { isFinishedStatus } from './calendar/calendarModel'
 import { isMainTask, progressLabel, requestCost, type RequestProgress } from './mainTasks'
 import { QuestionAnswer, type OpenQuestion } from './QuestionAnswer'
@@ -357,6 +358,10 @@ function NeedsYouBanner({
       ) : attention.agentWakes ? (
         <div className="mt-1.5">
           <AgentWakesCard card={attention.agentWakes} teamId={teamId} onDecided={onChanged} />
+        </div>
+      ) : attention.jobLimit ? (
+        <div className="mt-1.5">
+          <JobLimitCard card={attention.jobLimit} onDecided={onChanged} />
         </div>
       ) : (
         <p className="mt-1.5 whitespace-pre-wrap break-words text-compact text-foreground">

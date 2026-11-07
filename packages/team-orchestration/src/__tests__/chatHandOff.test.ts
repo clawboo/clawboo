@@ -198,6 +198,28 @@ describe('a hand-off from a one-to-one chat', () => {
     expect(taken[0]!.item.summary).toContain('not approved')
   })
 
+  it('a refusal starts no paid turn: it is kept for the next one, and said now', async () => {
+    const board = new FakeBoard()
+    const { engine, delivered, taken } = boot(board, { risky: true })
+    const said: string[] = []
+
+    for (let i = 0; i < 6; i += 1) {
+      await engine.handOffFromChat({
+        ...handOff,
+        task: `reworded ${i}`,
+        turnId: `chat-turn-${i}`,
+        onTold: (words) => said.push(words),
+      })
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS * 2)
+    }
+
+    expect(delivered).toEqual([])
+    expect(taken).toHaveLength(6)
+    expect(taken.every((t) => t.held)).toBe(true)
+    expect(said).toHaveLength(6)
+    expect(said[0]).toContain('not approved')
+  })
+
   it("does not count a chat's work as outstanding in a team session's update", async () => {
     const board = new FakeBoard()
     const { engine, delivered } = boot(board)

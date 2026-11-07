@@ -131,6 +131,8 @@ curl 'http://localhost:18790/api/agents?teamId=<team-uuid>&includeArchived=true'
 
 ## `POST /api/agents`
 
+Only part of this takes [the person check](/operating/security#the-person-check). A caller that does not pass it gets `403 { "ok": false, "error": "person_only" }` when the body names a `teamId`, carries any `execConfig` on the `openclaw` source, or on another source sets `execConfig.execAsk` or `execConfig.tools.shell`. Those choose who is on a team and whether anyone is asked before a command runs. A script can pass it with the two `Sec-Fetch-` headers.
+
 Creates an agent through a source. `sourceId` picks it: `openclaw` (the default), `clawboo-native`, `claude-code`, `codex` or `hermes`. An OpenClaw create makes the agent in the Gateway, writes its files there and mirrors it into SQLite, so it answers **503** while the Gateway connection is down. The other four write only to SQLite and work offline.
 
 `name` and every entry in `files` are scanned for prompt injection before anything is written. Instruction-override phrasing and hidden Unicode characters block the create with **422** and an `install` audit row. Text aimed at machines rather than the model (a `DROP TABLE` inside a code reviewer's worked example) passes and comes back as `findings`.
@@ -206,6 +208,7 @@ Side effects of a successful create:
 ```bash
 # OpenClaw agent (the default source): needs a live Gateway
 curl -X POST http://localhost:18790/api/agents \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"name":"Research Boo","teamId":"<team-uuid>"}'
 
@@ -218,6 +221,8 @@ curl -X POST http://localhost:18790/api/agents \
 ---
 
 ## `POST /api/agents/sync`
+
+A body with an `agents` list takes [the person check](/operating/security#the-person-check), because a list archives every OpenClaw agent it leaves out: anything else gets `403 { "ok": false, "error": "person_only" }`. A sync with no body is open.
 
 Brings the OpenClaw agent list into SQLite. With a body that carries an `agents` array, it stores that list (the browser's own `agents.list` result, sent while the server has no Gateway connection of its own). With no body, the server reads the list from the Gateway itself, which needs the connection and answers **503** while it is down.
 
@@ -271,6 +276,7 @@ curl -X POST http://localhost:18790/api/agents/sync
 
 # Browser-fallback upsert
 curl -X POST http://localhost:18790/api/agents/sync \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"defaultId":"a1","mainKey":"main","agents":[{"id":"a1","name":"Boo"}]}'
 ```
@@ -312,6 +318,8 @@ curl http://localhost:18790/api/agents/registry/health
 ---
 
 ## `POST /api/agents/cleanup-ghosts`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 A cleanup for scripts and manual recovery. The dashboard does not call it: it pushes the Gateway's list to `POST /api/agents/sync`, which archives agents missing from the list and deletes nothing. Send the ids of every agent the Gateway has; the route deletes each local OpenClaw agent row that is not in the list, with its cost and approval-history rows, its per-agent settings and the routines that target it. Running it again changes nothing. Only rows with `sourceId = 'openclaw'` are compared, so agents on other runtimes are never removed.
 
@@ -364,6 +372,7 @@ A cleanup for scripts and manual recovery. The dashboard does not call it: it pu
 
 ```bash
 curl -X POST http://localhost:18790/api/agents/cleanup-ghosts \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"liveAgentIds":["a1","a2"]}'
 ```
@@ -415,6 +424,8 @@ curl http://localhost:18790/api/agents/<agent-id>
 
 ## `DELETE /api/agents/:agentId`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Deletes the agent. The owning source deletes it upstream first (for OpenClaw, the Gateway's `agents.delete`), then removes the local agent row along with the `cost_records` and `approval_history` rows that reference it, and deletes every routine that targets the agent (team routines target no agent and stay). If the Gateway connection is down, the local rows are removed anyway, but an OpenClaw agent's routines stay until its Gateway delete settles (see the note below): the Gateway can refuse the delete and bring the agent back.
 
 <Note>
@@ -455,12 +466,15 @@ An OpenClaw agent deleted while the Gateway is down is recorded as a pending del
 ### Example
 
 ```bash
-curl -X DELETE http://localhost:18790/api/agents/<agent-id>
+curl -X DELETE http://localhost:18790/api/agents/<agent-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---
 
 ## `POST /api/agents/:agentId/move`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Moves the agent to another team. It is what **Move to team** on the Org chart and team graphs sends. Everything below changes together in one transaction, or nothing does:
 
@@ -520,6 +534,7 @@ Not moved: the files it saved in the old team's folder (from its next run it wor
 
 ```bash
 curl -X POST http://localhost:18790/api/agents/<agent-id>/move \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"teamId":"<team-id>"}'
 ```
@@ -1131,6 +1146,8 @@ curl http://localhost:18790/api/agents/<agent-id>/shell
 
 ## `POST /api/agents/:agentId/shell`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Turns the switch on or off.
 
 **Rate tier: sensitive.** Changing what an agent may ask to run is a permissions change, so this route shares the 60-requests-a-minute sensitive budget (see [rate limits](/reference/rest-api/index#rate-limits)).
@@ -1196,6 +1213,7 @@ Switching this on is necessary for `run_command` to exist, but not enough. The t
 
 ```bash
 curl -X POST http://localhost:18790/api/agents/<agent-id>/shell \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"enabled":true}'
 ```

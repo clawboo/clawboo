@@ -10,6 +10,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import type { ClawbooDb } from '../db'
 import { tasks, type DbTask } from '../schema'
 import { agentWakeCardsForTasks } from './agentWakes'
+import { jobLimitCardsForTasks, jobLimitedTaskIds } from './jobRuns'
 import { getTask, listExecutionsForTasks } from './repository'
 
 /** A stored verdict exists and cannot be promoted to done. An absent or
@@ -44,6 +45,7 @@ export function attentionForTasks(
       .map((t) => t.id),
   )
   const cards = agentWakeCardsForTasks(db, rows)
+  const jobLimits = jobLimitCardsForTasks(db, rows)
   const out = new Map<string, TaskAttention | null>()
   for (const t of rows) {
     out.set(
@@ -59,6 +61,7 @@ export function attentionForTasks(
         waitingOn: t.waitingOn,
         assigneePersonId: t.assigneePersonId,
         agentWakes: cards.get(t.id) ?? null,
+        jobLimit: jobLimits.get(t.id) ?? null,
       }),
     )
   }
@@ -66,7 +69,8 @@ export function attentionForTasks(
 }
 
 /** The tasks that need a person, without reading the whole board: most of it is
- *  finished work, which never can. The same statuses as the ledger read above. */
+ *  finished work, which never can. The same statuses as the ledger read above, and the
+ *  jobs stopped at their limit, whose top may have finished with work still under it. */
 export function taskIdsNeedingPerson(db: ClawbooDb): string[] {
   const rows = db
     .select()
@@ -74,7 +78,8 @@ export function taskIdsNeedingPerson(db: ClawbooDb): string[] {
     .where(and(inArray(tasks.status, ['todo', 'blocked', 'in_progress']), eq(tasks.dropped, 0)))
     .all() as DbTask[]
   const attention = attentionForTasks(db, rows)
-  return rows.filter((t) => attention.get(t.id)).map((t) => t.id)
+  const ids = rows.filter((t) => attention.get(t.id)).map((t) => t.id)
+  return [...new Set([...ids, ...jobLimitedTaskIds(db)])]
 }
 
 /** One task's needs-you state, or null when it does not need a person (or does

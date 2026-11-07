@@ -47,7 +47,10 @@ async function connectWithTeam(
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
-      for (const team of data.teams ?? []) await request.delete(`${API_BASE}/api/teams/${team.id}`)
+      for (const team of data.teams ?? [])
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
     }
   } catch {
     /* best-effort */
@@ -60,6 +63,7 @@ async function connectWithTeam(
   // Assign Research Boo (a2) to the team — the upsert creates it (runtime openclaw by
   // default) so the server team has an OpenClaw member the leader can delegate to.
   await request.post(`${API_BASE}/api/teams/${team.id}/agents`, {
+    headers: DASHBOARD_HEADERS,
     data: { agentId: 'a2', agentName: 'Research Boo' },
   })
   await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {

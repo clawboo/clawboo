@@ -209,6 +209,7 @@ describe('a team that asks before a plan starts', () => {
       pump: {
         held: () => false,
         startForPerson: (t) => void engine.dispatchTask(t.id),
+        startByItself: (t) => void engine.dispatchTask(t.id, { automatic: true }),
         pumpRoom: () => undefined,
         alert: () => false,
       },

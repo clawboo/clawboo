@@ -70,7 +70,9 @@ function mockRes(): {
 
 const getReq = (agentId: string): Request =>
   ({ params: {}, query: { agentId }, body: {} }) as unknown as Request
-const postReq = (body: unknown): Request => ({ params: {}, query: {}, body }) as unknown as Request
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+const postReq = (body: unknown): Request =>
+  ({ params: {}, query: {}, body, headers: DASHBOARD }) as unknown as Request
 
 function seedAgent(id: string, runtime: string, sourceAgentId: string | null) {
   db.insert(agents)

@@ -55,7 +55,9 @@ export interface BoardTask {
   [k: string]: unknown
 }
 
-export type ClaimReason = 'conflict' | 'not_found' | 'error' | 'paused'
+/** `job_limit`: the job has started all the runs it may by itself. The task stays in To
+ *  do, and a person says to carry on. */
+export type ClaimReason = 'conflict' | 'not_found' | 'error' | 'paused' | 'job_limit'
 export interface ClaimResult {
   ok: boolean
   reason?: ClaimReason
@@ -72,6 +74,9 @@ export interface ClaimRun {
   executorType: string
   /** Why it runs. A saved wake it takes names the reason instead. */
   runReason?: string | null
+  /** False: a person asked for this run, so it neither spends from its job's count nor
+   *  waits at the limit. Left out, its reason decides. */
+  automatic?: boolean
 }
 
 /** A saved wake a run took when it claimed its task. */
@@ -84,8 +89,9 @@ export interface ClaimedWake {
 export interface TaskDetail {
   task: BoardTask
   comments: unknown[]
-  /** `isMainTask`: a person's main task, which is not a level for the depth caps. */
-  ancestors: { id: string; isMainTask?: boolean }[]
+  /** `isMainTask`: a person's main task, which is not a level for the depth caps.
+   *  `agentId`: who was given that task, when the host knows. */
+  ancestors: { id: string; isMainTask?: boolean; agentId?: string | null }[]
 }
 
 export interface ExecutionRef {
@@ -155,17 +161,19 @@ export interface BoardClient {
   /** Say what a task waits for without moving it (a check whose move to Blocked
    *  keeps failing). Best-effort; a host may not have it. */
   setWaitingOn?(taskId: string, waitingOn: WaitingOn | null): Promise<void>
+  /** True once the comment is written. False when the write failed: never throws. */
   addComment(
     taskId: string,
     body: string,
     authorType?: 'agent' | 'user' | 'system',
     authorAgentId?: string,
-  ): Promise<void>
+  ): Promise<boolean>
   getTask(taskId: string): Promise<TaskDetail | null>
   createExecution(
     taskId: string,
     executorType: string,
-    opts?: { runReason?: string },
+    /** `countJobRun`: this run is one its job counts, in the write that opens it. */
+    opts?: { runReason?: string; countJobRun?: boolean },
   ): Promise<ExecutionRef | null>
   completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void>
   /** Link a dependency: `taskId` waits on `dependsOnTaskId` (plans / blockedBy). */
@@ -325,6 +333,12 @@ export type PlanProposal =
  *  these, so its client does not carry them. Same contract: never throws. */
 export interface EngineBoardClient extends BoardClient {
   createHandOff(input: HandOffInput): Promise<HandOffResult>
+  /** Would an automatic start of this task be refused at its job's limit? Ask this before
+   *  a start with no claim: the start itself counts (`countJobRun`, `TurnOrigin.countJobs`).
+   *  A refusal raises the job's card. */
+  jobRunRefused(taskId: string): Promise<boolean>
+  /** A person started work in this task's job, so it is no longer stopped. */
+  personStartedJob(taskId: string): Promise<void>
   /** How many more of this team's tasks fit under this parent (null: at the root).
    *  `newRequest`: they go under a main task the first of them would make. Null when
    *  unread. */

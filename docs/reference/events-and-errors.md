@@ -23,7 +23,7 @@ These are the orchestration events defined in `@clawboo/obs`. The OpenClaw Gatew
 
 ## Event kinds
 
-There are 32 kinds. New kinds are only ever added, so older logs keep parsing.
+There are 34 kinds. New kinds are only ever added, so older logs keep parsing.
 
 | Kind                                          | Group      | Records                                                        | Written by                                                                         | Activity badge     |
 | --------------------------------------------- | ---------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------ |
@@ -54,10 +54,12 @@ There are 32 kinds. New kinds are only ever added, so older logs keep parsing.
 | [`speaker_selected`](#speaker_selected)       | Peer room  | The agents' exchange picked the next speaker                   | Team exchange API                                                                  | speaker selected   |
 | [`turn_bound_hit`](#turn_bound_hit)           | Peer room  | An agents' exchange ended                                      | Team exchange API                                                                  | turn bound hit     |
 | [`grant_decision`](#grant_decision)           | Connectors | A grant check allowed, paused or refused a connector tool call | Tool broker                                                                        | grant              |
-| [`task_wake_recorded`](#task_wake_recorded)   | Board      | A wake was saved on a task                                     | Board lifecycle subscriber                                                         | wake               |
-| [`task_wake_skipped`](#task_wake_skipped)     | Board      | A saved wake did not start a run, and why                      | Wake pump, team engine                                                             | wake               |
-| [`task_wake_given_up`](#task_wake_given_up)   | Board      | A saved wake was given up after its replays                    | Wake pump                                                                          | wake               |
-| [`task_braked`](#task_braked)                 | Board      | A released task waits under the no-progress brake              | Board lifecycle subscriber                                                         | brake              |
+| [`task_wake_recorded`](#task_wake_recorded)   | Board      | A wake was saved on a task                                     | Board lifecycle subscriber                                                         |
+| [`task_wake_skipped`](#task_wake_skipped)     | Board      | A saved wake did not start a run, and why                      | Wake pump, team engine                                                             |
+| [`task_wake_given_up`](#task_wake_given_up)   | Board      | A saved wake was given up after its replays                    | Wake pump                                                                          |
+| [`task_braked`](#task_braked)                 | Board      | A released task waits under the no-progress brake              | Board lifecycle subscriber                                                         |
+| [`job_limit_reached`](#job_limit_reached)     | Board      | A job reached its limit of runs started by itself              | Board writes and the board route                                                   |
+| [`job_limit_carried_on`](#job_limit_reached)  | Board      | A person said a job at its limit may carry on                  | Board writes and the board route                                                   |
 | [`connector_health`](#connector_health)       | Connectors | A connector's health changed                                   | Connector supervisor                                                               | connector          |
 
 - **Board API** means the board routes the dashboard calls. Tasks MCP tools write the same board events, with an `actor`.
@@ -123,7 +125,7 @@ Every event has the same envelope, whatever its kind:
   id: string // a UUID
   seq?: number // assigned by SQLite when the row is written
   ts: number // when the event happened, epoch milliseconds
-  kind: OrchestrationEventKind // one of the 32 kinds
+  kind: OrchestrationEventKind // one of the 34 kinds
   teamId?: string | null
   taskId?: string | null
   agentId?: string | null
@@ -635,6 +637,8 @@ A saved wake did not start a run. One event each time the reason changes, howeve
 | `ask_once`                 | A person answering the card about agents waking each other  |
 | `hourly_cap`               | The hour ending, or a person letting them carry on          |
 | `back_and_forth`           | A person letting them carry on, or commenting on the job    |
+| `job_limit`                | A person answering the card on a job at its limit of runs   |
+| `job_stopped`              | A person starting work in a job they stopped at its limit   |
 | `backlog`                  | A person moving the card to To do                           |
 | `no_agent`                 | A person assigning an agent                                 |
 | `room_archived`, `no_team` | The boot move, or nothing: the team is gone                 |
@@ -661,6 +665,17 @@ A task released with no visible progress on its last runs waits before it starts
 {
   runs: number
   until: number
+}
+```
+
+### job_limit_reached
+
+A job has started as many runs by itself as it may, and something was refused. Written once until a person carries on. `job_limit_carried_on` has the same shape, with the new limit and who said so. See [the job's count](/internals/board-internals#the-count-for-each-job).
+
+```ts
+{
+  runs: number
+  limit: number
 }
 ```
 

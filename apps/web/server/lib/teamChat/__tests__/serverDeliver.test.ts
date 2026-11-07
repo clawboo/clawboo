@@ -48,7 +48,7 @@ import {
   type RunStamp,
 } from '@clawboo/team-orchestration'
 
-import { getDb, resetDb } from '../../db'
+import { getDb, getDbPath, resetDb } from '../../db'
 import { homeDispatchMutex } from '../../executorRunner'
 import { estimateRunCostUsd, estimateRunCostUsdFromUsage } from '../../runtimes/estimateCost'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
@@ -135,12 +135,16 @@ class FakeAdapter implements RuntimeAdapter {
 describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', () => {
   let home: string
   let prevHome: string | undefined
+  let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-deliver-home-'))
     prevHome = process.env['HOME']
+    prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
+    process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    expect(getDbPath().startsWith(home)).toBe(true)
     db = getDb()
   })
   afterEach(async () => {
@@ -149,6 +153,8 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
+    else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true })
   })
 
@@ -189,7 +195,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const wedges: Array<number | null> = []
     // Wrap markBusy/markIdle to record ordering vs onEvent.
     const nudge: NudgeQueue = {
-      deliver: (sk, send) => real.deliver(sk, send),
+      deliver: (sk, send, deliverOpts) => real.deliver(sk, send, deliverOpts),
       markBusy: (sk, wedgeTimeoutMs) => {
         order.push('busy')
         wedges.push(wedgeTimeoutMs ?? null)
@@ -293,6 +299,30 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const doneIdx = w.order.indexOf('event:done')
     expect(idleIdx).toBeGreaterThanOrEqual(0)
     expect(idleIdx).toBeLessThan(doneIdx)
+  })
+
+  it('a person’s message goes ahead of what is queued on the session, whatever came first', async () => {
+    const gate = deferred()
+    const adapter = new FakeAdapter((run) =>
+      (async function* () {
+        if (adapter.startCalls === 1) await gate.promise
+        yield { ...base(run.sessionKey, 1), kind: 'done', reason: 'success', summary: 'ok' }
+      })(),
+    )
+    const w = wire(adapter)
+
+    await w.deliver(SK, 'a1', 'the first turn', HUMAN_TURN)
+    await w.deliver(SK, 'a1', '[Task Update] one', SYSTEM_TURN)
+    await w.deliver(SK, 'a1', 'a person writes', HUMAN_TURN)
+    expect(adapter.startCalls).toBe(1)
+
+    gate.resolve()
+    await vi.waitFor(() => expect(adapter.startCalls).toBe(3))
+    expect(adapter.startOptsLog.map((o) => o.message)).toEqual([
+      'the first turn',
+      'a person writes',
+      '[Task Update] one',
+    ])
   })
 
   it("holds the wedge open for the engine's tool-call allowance while the run is inside a tool call", async () => {

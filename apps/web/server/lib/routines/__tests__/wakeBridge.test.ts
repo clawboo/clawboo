@@ -141,6 +141,7 @@ afterEach(() => {
 
 describe('dispatchRoutine', () => {
   it('WRAPPED-ONESHOT: routes through the one-shot runner with the mirrored input', async () => {
+    seedTeam('team-1')
     seedAgent('agent-cc', 'claude-code')
     const run = seedRoutine('agent-cc', { repoPath: '/tmp/repo', model: 'haiku', maxNodeCents: 50 })
     const calls: RunTaskInput[] = []
@@ -341,6 +342,49 @@ describe('dispatchRoutine', () => {
     await expect(dispatchRoutine(run, { db, mcpBaseUrl: null })).rejects.toBeInstanceOf(
       NotImplementedError,
     )
+  })
+
+  it('a routine bound to a task its deleted team left behind refuses, and runs nothing', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const left = createTask(db, {
+      title: 'Left behind',
+      status: 'todo',
+      teamId: 'gone',
+      scheduledBy: 'clawboo',
+    })
+    const run = seedRoutine('agent-cc', { teamTaskId: left.id })
+    const calls: RunTaskInput[] = []
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async (input) => {
+        calls.push(input)
+        return SUCCESS
+      },
+    })
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: 'The team of the task this routine runs no longer exists.',
+    })
+    expect(calls).toEqual([])
+    expect(getTask(db, left.id)?.status).toBe('todo')
+  })
+
+  it('a row still naming a team that is gone files its task with no team', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    // `seedRoutine` names team-1, and no such team exists here.
+    const run = seedRoutine('agent-cc')
+    const calls: RunTaskInput[] = []
+    const outcome = await dispatchRoutine(run, {
+      db,
+      mcpBaseUrl: null,
+      runTask: async (input) => {
+        calls.push(input)
+        return SUCCESS
+      },
+    })
+    expect(outcome.ok).toBe(true)
+    expect(getTask(db, calls[0]!.taskId)?.teamId).toBeNull()
   })
 
   it('a BOUND team task is dispatched as-is when claimable, refused when not', async () => {

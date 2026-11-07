@@ -435,7 +435,7 @@ describe('durable report-up', () => {
     outbox.record({ toAgentId: 'leader', by: 'B', summary: 'second result' }, { held: true })
     const first = engine.takeHeldReportUps(sk('leader'))!
     expect(first.ids).toHaveLength(1)
-    expect(first.text).toContain('(cut: the whole result is on the task')
+    expect(first.text).toContain('(cut: get_task reads the whole result')
     expect(first.text).not.toContain('second result')
     expect(engine.takeHeldReportUps(sk('leader'))?.text).toContain('second result')
   })

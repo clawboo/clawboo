@@ -10,7 +10,7 @@ import type { Request, Response } from 'express'
 
 import { envVarForProvider } from '@clawboo/adapter-native'
 import { autoFireRefusal } from '@clawboo/board-core'
-import { getTask, listExecutions, personMovedSinceLastRun } from '@clawboo/db'
+import { getTask, jobRunRefused, listExecutions, personMovedSinceLastRun } from '@clawboo/db'
 import { breakerConfigSchema } from '@clawboo/governance'
 
 import { actsAsPerson } from '../lib/auth'
@@ -992,7 +992,8 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
     if (task) {
       const refusal = personMovedSinceLastRun(db, task)
         ? 'person_moved'
-        : autoFireRefusal(listExecutions(db, taskId))
+        : (autoFireRefusal(listExecutions(db, taskId)) ??
+          (jobRunRefused(db, taskId) ? 'job_limit' : null))
       if (refusal) {
         res.status(409).json({ ok: false, reason: refusal })
         return
@@ -1047,6 +1048,8 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
       model: typeof body['model'] === 'string' ? body['model'] : null,
       keepForResume: body['keepForResume'] === true,
       disableMemoryAutoInject: body['disableMemoryAutoInject'] === true,
+      // Only a person's start is free of the job's limit.
+      automaticStart: !actsAsPerson(req),
       ...(typeof body['maxRotations'] === 'number' ? { maxRotations: body['maxRotations'] } : {}),
       ...(breaker?.success ? { breakerConfig: breaker.data } : {}),
       parentTraceparent:

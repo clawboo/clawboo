@@ -15,6 +15,7 @@ import {
   getBudget,
   getComments,
   getTask,
+  jobRunState,
   listExecutions,
   recordSpend,
   reserveBudgets,
@@ -31,6 +32,7 @@ import type {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getDb, getDbPath, resetDb } from '../db'
+import { seedSandboxTeam } from './seedTeam'
 import { runTaskOnRuntime, type RunTaskResult } from '../executorRunner'
 import type { RuntimeRunContext } from '../runtimes/types'
 import { createRunSlots, setRunSlotsForTests } from '../runSlots'
@@ -119,6 +121,7 @@ describe('budget holds on the task runner', () => {
       process.env[k] = v
     }
     expect(getDbPath().startsWith(home)).toBe(true)
+    seedSandboxTeam(home)
     setRunSlotsForTests(createRunSlots(4))
   })
   afterEach(async () => {
@@ -277,6 +280,37 @@ describe('budget holds on the task runner', () => {
     ])
     // Only the other run's hold is left.
     expect(holds()).toHaveLength(1)
+  })
+
+  it('the final gate gives back what the run took from its job’s count', async () => {
+    const db = getDb()
+    setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 10_000, mode: 'cap' })
+    const a = heldAdapter()
+    const taskId = newTask('by itself')
+    const result = await runTaskOnRuntime({
+      db,
+      makeAdapter: (ctx) => {
+        if (ctx.memoryScope) {
+          expect(
+            reserveBudgets(db, {
+              scopes: [{ scope: 'team', scopeId: 'team-1' }],
+              estimateCents: 5_000,
+              runKind: 'team-chat',
+            }).ok,
+          ).toBe(true)
+          setBudgetLimit(db, { scope: 'team', scopeId: 'team-1', limitUsdCents: 1_000 })
+        }
+        return a.adapter
+      },
+      taskId,
+      assigneeAgentId: 'agent-a',
+      kind: 'research',
+      disableMemoryAutoInject: true,
+      automaticStart: true,
+    })
+    expect(result).toEqual({ ok: false, reason: 'budget_held' })
+    expect(a.state.started).toBe(0)
+    expect(jobRunState(db, taskId).runs).toBe(0)
   })
 
   it('a run that would go on in a fresh session stops when another run paused its cap', async () => {

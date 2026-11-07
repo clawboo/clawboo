@@ -20,6 +20,7 @@ import {
   getReadyTasks,
   getTask,
   isLedgerAutoFireable,
+  jobRunRefused,
   listExecutions,
   readTaskRunnerInputs,
   updateStatus,
@@ -75,6 +76,8 @@ function refusalWords(reason: Extract<RunTaskResult, { ok: false }>['reason']): 
       return 'that runtime does not run through the task runner'
     case 'workspace_unavailable':
       return 'its worktree could not be set up'
+    case 'no_team':
+      return 'its team no longer exists'
     default:
       return reason
   }
@@ -154,6 +157,8 @@ export function requestRunnerRerun(
     assigneeAgentId: string
     rerun: RunnerRerun
     mcpBaseUrl: string | null
+    /** The pump started this, not a person: it spends from the job's count. */
+    automaticStart?: boolean
   },
 ): void {
   const { taskId } = input
@@ -179,6 +184,7 @@ export function requestRunnerRerun(
     ...(inputs.maxNodeCents != null ? { maxNodeCents: inputs.maxNodeCents } : {}),
     ...(Object.keys(apiKeyEnv).length > 0 ? { apiKeyEnv } : {}),
     abortSignal: controller.signal,
+    ...(input.automaticStart ? { automaticStart: true } : {}),
   })
     .then((result) => {
       settle()
@@ -236,9 +242,17 @@ export function pumpRunnerReruns(db: ClawbooDb, mcpBaseUrl: string | null): void
     if (!agentId) continue
     if (!isLedgerAutoFireable(execs)) continue
     if (startRefusedByTask(db, task) !== null) continue
+    // Its job has started all the runs it may by itself: a person says when it goes on.
+    if (jobRunRefused(db, task.id)) continue
     const rerun = runnerRerunFor(db, task, agentId)
     if (!rerun) continue
-    requestRunnerRerun(db, { taskId: task.id, assigneeAgentId: agentId, rerun, mcpBaseUrl })
+    requestRunnerRerun(db, {
+      taskId: task.id,
+      assigneeAgentId: agentId,
+      rerun,
+      mcpBaseUrl,
+      automaticStart: true,
+    })
   }
 }
 

@@ -49,6 +49,7 @@ export const FEATURE_ROUTES = {
     'GET /api/team-agent-wakes/:teamId',
     'PUT /api/team-agent-wakes/:teamId',
   ],
+  'board.jobLimit': ['POST /api/board/job-limit/:jobTaskId'],
   'board.planDocuments': ['GET /api/board/:taskId/plan'],
   'board.planApproval': [
     'GET /api/team-plan-approval/:teamId',
@@ -160,6 +161,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     'board.wakes': true,
     // Agents waking each other once a person said yes for the job.
     'board.agentWakes': true,
+    // The count of runs a job starts by itself, and a person's answer at its limit.
+    'board.jobLimit': true,
     // How a run's ending is read: no route or switch of its own. A task's `waitingOn`
     // and `attention` carry the new reasons, and a run's `status` the new endings.
     'board.endings': true,

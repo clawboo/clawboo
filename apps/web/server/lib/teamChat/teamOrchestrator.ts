@@ -170,13 +170,17 @@ export interface TeamOrchestrator {
   detachTask(taskId: string): boolean
   /** A person asked for this task to run now (created for an agent from the
    *  board, retried, or just assigned). See the engine's `dispatchTask`. */
-  dispatchTask(taskId: string): Promise<DispatchOutcome>
+  dispatchTask(taskId: string, opts?: { automatic?: boolean }): Promise<DispatchOutcome>
   /** A pause covers these runs: stop them, within seconds. A task run goes through
    *  the engine's `pauseRuns`. A live turn with no task (a lead's reply) is aborted
    *  with the note in the chat. A queued task update or follow-up goes back to the
    *  outbox. A person's queued message stays queued, held by the queue's own read of
    *  the pause, and starts on resume. */
   pauseRuns(covers: (run: PausedRunQuery) => boolean, notes: PauseStopNotes): Promise<string[]>
+  /** A person's Stop on one job's card: only the runs under these tasks stop, in this
+   *  room. See the engine's `stopJobRuns`. A live turn about the job (its lead reading a
+   *  result) is aborted too, with `notes.turn`. Resolves with the tasks stopped. */
+  stopJobRuns(taskIds: ReadonlySet<string>, notes: PauseStopNotes): Promise<string[]>
   /** Start work handed off from a one-to-one chat. See the engine's `handOffFromChat`. */
   handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome>
   /** Two or more from one reply: a team that asks first asks here too. */
@@ -692,13 +696,16 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     detachTask(taskId: string): boolean {
       return engine.detachTask(taskId)
     },
-    async dispatchTask(taskId: string): Promise<DispatchOutcome> {
+    async dispatchTask(taskId, opts): Promise<DispatchOutcome> {
       touch()
       await ready // the Boo-Zero bootstrap and the first resume come first
-      return engine.dispatchTask(taskId)
+      return engine.dispatchTask(taskId, opts)
     },
     pauseRuns(covers, notes): Promise<string[]> {
       return stopPausedRunsOf({ engine, abortMap, queuedRuns, teamId }, covers, notes)
+    },
+    stopJobRuns(taskIds, notes): Promise<string[]> {
+      return stopJobRunsOf({ engine, abortMap, queuedRuns }, taskIds, notes)
     },
     async handOffFromChat(input: ChatHandOff): Promise<ChatHandOffOutcome> {
       touch()
@@ -1096,6 +1103,54 @@ export async function stopPausedRunsOf(
   )
   for (const [, e] of liveTurns) stopRunForPause(e, notes.turn)
   return stopped
+}
+
+/** One engine's part of a person's Stop on a job's card. Only what is about these tasks:
+ *  anything else the room is doing goes on. */
+export async function stopJobRunsOf(
+  host: {
+    engine: Pick<BoardOrchestrator, 'stopJobRuns' | 'taskForSession'>
+    abortMap: Map<string, RunEntry>
+    queuedRuns: Map<string, QueuedRun>
+  },
+  taskIds: ReadonlySet<string>,
+  notes: PauseStopNotes,
+): Promise<string[]> {
+  const { engine, abortMap, queuedRuns } = host
+  const inJob = (id: string | null | undefined): boolean => id != null && taskIds.has(id)
+  // Turns with no task, read first, as for a pause.
+  const liveTurns = [...abortMap].filter(
+    ([sk, e]) =>
+      engine.taskForSession(sk) === null &&
+      (inJob(e.stamp?.reportForTaskId) || inJob(e.stamp?.mainTaskId) || inJob(e.stamp?.jobTaskId)),
+  )
+  for (const [, q] of [...queuedRuns]) {
+    if (q.report && inJob(q.report.taskId)) {
+      q.report.stamp.stoppedByPause = true
+      q.cancel()
+    }
+  }
+  const stopped = await engine.stopJobRuns(taskIds, notes.task)
+  for (const [, e] of liveTurns) stopRunForPause(e, notes.turn)
+  return stopped
+}
+
+/** Every resident team engine stops what it runs under this job. One that is not loaded
+ *  has no runs. Resolves with the tasks stopped; one engine's failure is logged and the
+ *  others still stop. */
+export async function stopJobTeamRuns(
+  taskIds: ReadonlySet<string>,
+  notes: PauseStopNotes,
+): Promise<string[]> {
+  const stopped = await Promise.all(
+    [...instances.values()].map((inst) =>
+      inst.orchestrator.stopJobRuns(taskIds, notes).catch((err: unknown): string[] => {
+        log.error({ err, teamId: inst.orchestrator.teamId }, 'stopping a job’s runs failed')
+        return []
+      }),
+    ),
+  )
+  return stopped.flat()
 }
 
 /** Every resident team engine stops the runs a pause covers. An engine that is not

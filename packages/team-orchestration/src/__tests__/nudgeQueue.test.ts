@@ -208,4 +208,19 @@ describe('createNudgeQueue', () => {
       vi.useRealTimers()
     }
   })
+
+  it('puts a person ahead of what is queued, and behind anyone else a person is waiting on', async () => {
+    const q = createNudgeQueue()
+    const order: string[] = []
+    const send = (name: string) => async (): Promise<void> => {
+      order.push(name)
+    }
+    await q.deliver('s', send('running'))
+    await q.deliver('s', send('update 1'))
+    await q.deliver('s', send('update 2'))
+    await q.deliver('s', send('person 1'), { ahead: true })
+    await q.deliver('s', send('person 2'), { ahead: true })
+    for (let i = 0; i < 4; i += 1) await q.markIdle('s')
+    expect(order).toEqual(['running', 'person 1', 'person 2', 'update 1', 'update 2'])
+  })
 })

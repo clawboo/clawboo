@@ -15,7 +15,7 @@ keywords:
   ]
 ---
 
-This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 40 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
+This page is for developers and operators who query or back up Clawboo's database directly. Clawboo keeps its durable state in one SQLite file, `clawboo.db`: 51 tables, plus a full-text search table for memory. Every column and index below comes from the schema definition in `packages/db/src/schemaBootstrap.ts`.
 
 To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI reference](/reference/cli)). Where the file lives and how to reset it are in [Data and state](/operating/data-and-state).
 
@@ -64,6 +64,7 @@ To copy the database while Clawboo runs, use `clawboo backup` (see the [CLI refe
 | [`task_wakes`](#task_wakes)                     | Peer room and mailbox    | Wakes saved on tasks, until their run ends                        |
 | [`agent_wake_gates`](#agent_wake_gates)         | Peer room and mailbox    | Whether a job's agents may wake each other, and this hour's count |
 | [`agent_wake_chains`](#agent_wake_chains)       | Peer room and mailbox    | Two agents in a team waking each other in a row                   |
+| [`job_runs`](#job_runs)                         | Peer room and mailbox    | How many runs each job has started by itself                      |
 | [`report_up_outbox`](#report_up_outbox)         | Peer room and mailbox    | Task updates not yet heard by their recipient                     |
 | [`cost_records`](#cost_records)                 | Spend, budgets and audit | Token and spend records                                           |
 | [`budgets`](#budgets)                           | Spend, budgets and audit | Spend budgets                                                     |
@@ -537,6 +538,7 @@ One row per run of a task, on any runtime: its status, git checkpoints, and toke
 | `error`              | `TEXT`                               | Error summary or code; see [Events and errors](/reference/events-and-errors#execution_completed)                                                                                                                                                                       |
 | `error_class`        | `TEXT`                               | The class a failed run was filed under, such as `Auth` or `RateLimited`; see [Error classes](/reference/events-and-errors#error-classes). Null when the run did not fail or was closed without one                                                                     |
 | `made_progress`      | `INTEGER`                            | Whether the run made [visible progress](/internals/board-internals#the-no-progress-brake): `1` or `0`. Null for a run with no verdict (a Stop, an account or budget refusal) and for older rows                                                                        |
+| `job_counted`        | `INTEGER`                            | `1` when this run took one from its [job's count](/internals/board-internals#the-count-for-each-job). A run refused before it starts gives it back and reads `0`                                                                                                       |
 | `result_claim`       | `TEXT`                               | What the run's agent said about its task with [`report_result`](/reference/mcp-tools#report_result), as JSON. Moves nothing: the server reads it when the run ends. Null when it said nothing                                                                          |
 | `recovery_tombstone` | `INTEGER`, not null, default `0`     | `1` once startup recovery has reaped the run, so it is never resumed twice                                                                                                                                                                                             |
 | `tenant_id`          | `TEXT`                               | Unused                                                                                                                                                                                                                                                                 |
@@ -933,7 +935,7 @@ A row with `chat_session_key` set belongs to that one-to-one chat: work handed o
 | `held_at`            | `INTEGER`                      | Set when a person's Stop held it: it starts no run, and rides the recipient's next one |
 | `chat_session_key`   | `TEXT`                         | The one-to-one chat it goes to. Null for a team or room                                |
 
-Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`), `idx_report_up_outbox_chat` (`chat_session_key`, `settled_at`).
+Indexes: `idx_report_up_outbox_pending` (`team_id`, `room_id`, `settled_at`), `idx_report_up_outbox_chat` (`chat_session_key`, `settled_at`), `idx_report_up_outbox_task` (`task_id`, `created_at`).
 
 ### task_wakes
 
@@ -977,9 +979,29 @@ One row per job, the task's top-level ancestor: what a person said about its age
 | `card_at`            | `INTEGER`           |                                                                        |
 | `window_started_at`  | `INTEGER`           | When this hour's count began                                           |
 | `window_count`       | `INTEGER`, not null | Wakes that started a run in this hour                                  |
+| `wake_path`          | `TEXT`              | JSON list of who woke whom on this job, for finding a ring             |
 | `updated_at`         | `INTEGER`, not null |                                                                        |
 
 Indexes: `idx_agent_wake_gates_card` (`card_task_id`), `idx_agent_wake_gates_team` (`team_id`).
+
+### job_runs
+
+One row per job, the task at the top of its tree: how many runs it has started by itself. Written in the transaction that opens the run, so a restart loses none of it.
+
+| Column          | Type                | Notes                                                  |
+| --------------- | ------------------- | ------------------------------------------------------ |
+| `job_task_id`   | `TEXT`, PK          | The job's task                                         |
+| `team_id`       | `TEXT`              | Plain reference to `teams.id`                          |
+| `runs`          | `INTEGER`, not null | Runs started by itself so far                          |
+| `run_limit`     | `INTEGER`, not null | Where it stops. A person's carry on raises it          |
+| `limit_hit_at`  | `INTEGER`           | When a start was first refused since the last carry on |
+| `carried_on_by` | `TEXT`              | JSON `{ id, name, role }` of who last said to carry on |
+| `carried_on_at` | `INTEGER`           |                                                        |
+| `stopped_at`    | `INTEGER`           | When a person stopped the job, until they start work   |
+| `stopped_by`    | `TEXT`              | JSON `{ id, name, role }` of who stopped it            |
+| `updated_at`    | `INTEGER`, not null |                                                        |
+
+Indexes: `idx_job_runs_hit` (`limit_hit_at`), `idx_job_runs_stopped` (`stopped_at`), `idx_job_runs_team` (`team_id`).
 
 ### agent_wake_chains
 
@@ -1082,7 +1104,7 @@ The append-only event log that observability reads. Kinds and their data are in 
 | `seq`            | `INTEGER`, PK, autoincrement | Increases with every row and is never reused, across processes   |
 | `id`             | `TEXT`, not null             | Event UUID                                                       |
 | `ts`             | `INTEGER`, not null          | When the event happened                                          |
-| `kind`           | `TEXT`, not null             | One of the 32 event kinds                                        |
+| `kind`           | `TEXT`, not null             | One of the 34 event kinds                                        |
 | `team_id`        | `TEXT`                       |                                                                  |
 | `task_id`        | `TEXT`                       |                                                                  |
 | `agent_id`       | `TEXT`                       |                                                                  |
@@ -1128,7 +1150,7 @@ Indexes: `uniq_graph_layouts_name_url` (unique: `name`, `gateway_url`).
 
 ## Full-text search
 
-Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 40 tables. Three triggers keep it in step with `memory_facts`:
+Keyword search over facts uses `memory_facts_fts`, an FTS5 virtual table with the columns `title`, `content` and `fact_id` (`fact_id` is stored but not indexed). The same schema definition creates it, and it is not counted among the 41 tables. Three triggers keep it in step with `memory_facts`:
 
 | Trigger           | Runs         | Does                                        |
 | ----------------- | ------------ | ------------------------------------------- |

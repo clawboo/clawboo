@@ -19,6 +19,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  BRAKE_FIRST_WAIT_MS,
   BRAKE_MAX_WAIT_MS,
   encodeHumanAssignment,
   isPlanHolder,
@@ -32,6 +33,7 @@ import {
   MAX_AUTO_FIRES,
   MAX_DELEGATION_FAILURES,
   MAX_PLAN_STEPS,
+  HELD_REPORT_UPS_BUDGET_CHARS,
   MAX_REFUSAL_TURNS,
   MAX_SPAWN_DEPTH,
   OPEN_TOOL_CALL_TIMEOUT_MS,
@@ -102,6 +104,8 @@ export interface CascadeBoard extends EngineBoardClient {
   /** Simulate an EXTERNAL release (server stale-sweep): → todo + unassigned, NOT
    *  recorded as an engine status update. */
   forceRelease(taskId: string): void
+  /** Make every comment write fail, as a busy database does, or stop doing so. */
+  failComments(on: boolean): void
   /** Give the task a stored verdict, as a failed check leaves it. */
   seedVerdict(taskId: string): void
   /** Does the task still hold its stored verdict? */
@@ -131,6 +135,21 @@ export interface CascadeBoard extends EngineBoardClient {
      */
     exec?: SeedExecState
   }): string
+  /** Put a job's count where a scenario needs it. Takes any task of the job. `limit`
+   *  defaults to `runs`: the job has just reached its limit. */
+  seedJobRuns(taskId: string, runs: number, limit?: number): void
+  /** Runs this task's job has started by itself. */
+  jobRunsOf(taskId: string): number
+  /** A person says to carry on. */
+  carryOnJobRuns(taskId: string): void
+  /** Count a run that has started (the host does it for `TurnOrigin.countJobs`). */
+  noteJobRun(taskId: string): void
+  /** Mark the job stopped, and read it back: `stopJob` has its own tests with a real outbox. */
+  seedJobStopped(taskId: string): void
+  jobIsStopped(taskId: string): boolean
+  /** Leave a failed check on a task, and read whether it is still there. */
+  seedFailedCheck(taskId: string): void
+  hasFailedCheck(taskId: string): boolean
   /** Release any held resource (temp DB). */
   dispose?(): void | Promise<void>
 }
@@ -396,6 +415,8 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
                 : undefined,
             )
           : null
+        // Its run has started, as far as this host goes.
+        if (origin.kind === 'system') for (const id of origin.countJobs ?? []) board.noteJobRun(id)
         delivered.push({
           sessionKey,
           agentId,
@@ -789,7 +810,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
       await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'A is done'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(reflections(delivered)[0]!.origin).toEqual({ kind: 'system' })
+      expect(reflections(delivered)[0]!.origin).toMatchObject({ kind: 'system' })
     })
 
     it('a leader done emits no board mutation and no reflection (echo-loop guard)', async () => {
@@ -1320,25 +1341,48 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(reflections(delivered)[0]!.task).toMatch(/cancelled/i)
     })
 
-    it('nudges the leader once per run when a delegation tag did not parse (loop-safe, but re-nudges a NEW run)', async () => {
-      const { board, delivered, orchestrator } = makeHarness()
+    it('a hand-off nobody could read wakes no one, and rides that agent’s next run', async () => {
+      const outbox = new MemoryReportUps()
+      const { board, delivered, narrations, orchestrator } = makeHarness({ reportUps: outbox })
       const malformed = doneEvent('r1', 'On it. <delegate to="@Bug Boo">do the thing (never closed')
       await orchestrator.onEvent(sk('a2'), malformed)
       expect(board.taskCount()).toBe(0)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      const first = reflections(delivered)
-      expect(first).toHaveLength(1)
-      expect(first[0]!.sessionKey).toBe(sk('leader'))
-      expect(first[0]!.task).toMatch(/didn't parse|re-issue/i)
+      // No turn: a reply answering a note about tags tends to have tags in it.
+      expect(delivered).toEqual([])
+      expect(narrations.some((n) => /could not be started/.test(n.text))).toBe(true)
+      const held = outbox.held()
+      expect(held).toHaveLength(1)
+      expect(held[0]!.item.toAgentId).toBe('a2')
+      // The same run seen again says nothing twice.
       await orchestrator.onEvent(sk('a2'), malformed)
-      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(reflections(delivered)).toHaveLength(1)
+      expect(outbox.held()).toHaveLength(1)
+      // A new run that tries again keeps it to one note a run, and starts nothing either.
       await orchestrator.onEvent(
         sk('a2'),
         doneEvent('r2', 'Trying again <delegate to="@Bug Boo">still broken'),
       )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(reflections(delivered)).toHaveLength(2)
+      expect(delivered).toEqual([])
+      expect(outbox.held()).toHaveLength(2)
+      // What the sample showed them is not sent back as a tag to copy.
+      const sent = orchestrator.takeHeldReportUps(sk('a2'))!
+      expect(sent.text).not.toMatch(/<delegate/)
+      expect(sent.text).toMatch(/could not be started/)
+    })
+
+    it('ignores a hand-off shown in code or quotes', async () => {
+      const outbox = new MemoryReportUps()
+      const { board, delivered, narrations, orchestrator } = makeHarness({ reportUps: outbox })
+      await orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r1', 'You write it like `<delegate to="@Bug Boo">` and it goes.'),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(board.taskCount()).toBe(0)
+      expect(delivered).toEqual([])
+      expect(narrations).toEqual([])
+      expect(outbox.held()).toEqual([])
     })
 
     it('fails the task immediately when delivery is rejected (no 8-minute wait)', async () => {
@@ -2191,7 +2235,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const refl = reflections(h.delivered)
       const toA2 = refl.find((r) => r.sessionKey === sk('a2'))!
-      expect(toA2.origin).toEqual({ kind: 'system', forTaskId: top })
+      expect(toA2.origin).toMatchObject({ kind: 'system', forTaskId: top })
       expect(toA2.task).toMatch(/not shown to the user/)
       expect(toA2.task).toContain('"top task"')
     })
@@ -2217,7 +2261,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         (r) => r.sessionKey === sk('leader') && r.task.includes('combined: top + sub'),
       )
       expect(toLeader).toBeDefined()
-      expect(toLeader!.origin).toEqual({ kind: 'system' })
+      expect(toLeader!.origin).toMatchObject({ kind: 'system' })
     })
 
     it('work a follow-up delegates is parented under the task it follows up on', async () => {
@@ -2254,7 +2298,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const toA2 = reflections(delivered).filter((r) => r.sessionKey === sk('a2'))
       expect(toA2).toHaveLength(1)
-      expect(toA2[0]!.origin).toEqual({ kind: 'system', forTaskId: task!.id })
+      expect(toA2[0]!.origin).toMatchObject({ kind: 'system', forTaskId: task!.id })
 
       await orchestrator.onEvent(
         sk('a2'),
@@ -2359,7 +2403,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.onEvent(sk('a3'), doneEvent('r3', 'sketched'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const toA2 = reflections(delivered).find((r) => r.sessionKey === sk('a2'))!
-      expect(toA2.origin).toEqual({ kind: 'system' })
+      expect(toA2.origin).toMatchObject({ kind: 'system' })
       expect(toA2.origin).not.toHaveProperty('forTaskId')
     })
 
@@ -2379,7 +2423,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       await orchestrator.onEvent(sk('a3'), doneEvent('r3', 'banner made'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const toLeader = reflections(delivered).find((r) => r.sessionKey === sk('leader'))!
-      expect(toLeader.origin).toEqual({ kind: 'system' })
+      expect(toLeader.origin).toMatchObject({ kind: 'system' })
       expect(toLeader.origin).not.toHaveProperty('forTaskId')
     })
 
@@ -2408,7 +2452,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const refl = reflections(delivered)
       expect(refl).toHaveLength(1)
       expect(refl[0]!.sessionKey).toBe(sk('a2'))
-      expect(refl[0]!.origin).toEqual({ kind: 'system', forTaskId: top })
+      expect(refl[0]!.origin).toMatchObject({ kind: 'system', forTaskId: top })
     })
 
     /** Holds the first delivery to `agentId` until `release()`, as a run waiting
@@ -2584,7 +2628,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       const top = await closeTopWith(h, '<delegate to="@Design Boo">sub task</delegate>')
       await h.orchestrator.onEvent(sk('a3'), failedDoneEvent('r3', 'error', 'boom'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /boom/)).toEqual({ kind: 'system', forTaskId: top })
+      expect(followUpTo(h.delivered, 'a2', /boom/)).toMatchObject({
+        kind: 'system',
+        forTaskId: top,
+      })
     })
 
     it('a sub-task that times out under a finished task reports to its delegator as a follow-up', async () => {
@@ -2596,7 +2643,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(h.aborted).toEqual([sk('a3')])
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       const toA2 = reflections(h.delivered).filter((r) => r.sessionKey === sk('a2'))
-      expect(toA2.map((r) => r.origin)).toEqual([{ kind: 'system', forTaskId: top }])
+      expect(toA2.map((r) => r.origin)).toMatchObject([{ kind: 'system', forTaskId: top }])
     })
 
     /** Three levels, each task closed before the next reports: Bug Boo hands
@@ -2620,21 +2667,23 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     it('a follow-up climbs a chain of delegators until it reaches the lead', async () => {
       const h = makeHarness()
       const { top, mid } = await chainOfThree(h)
-      expect(followUpTo(h.delivered, 'a3', /leaf result/)).toEqual({
+      expect(followUpTo(h.delivered, 'a3', /leaf result/)).toMatchObject({
         kind: 'system',
         forTaskId: mid,
       })
 
       await h.orchestrator.onEvent(sk('a3'), doneEvent('rF3', 'mid plus leaf'), stamp(mid))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /mid plus leaf/)).toEqual({
+      expect(followUpTo(h.delivered, 'a2', /mid plus leaf/)).toMatchObject({
         kind: 'system',
         forTaskId: top,
       })
 
       await h.orchestrator.onEvent(sk('a2'), doneEvent('rF2', 'all three levels'), stamp(top))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'leader', /all three levels/)).toEqual({ kind: 'system' })
+      const toLead = followUpTo(h.delivered, 'leader', /all three levels/)
+      expect(toLead).toMatchObject({ kind: 'system' })
+      expect(toLead).not.toHaveProperty('forTaskId')
     })
 
     it('a failed follow-up mid-chain still reaches its delegator as a follow-up', async () => {
@@ -2646,7 +2695,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         stamp(mid),
       )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /provider down/)).toEqual({
+      expect(followUpTo(h.delivered, 'a2', /provider down/)).toMatchObject({
         kind: 'system',
         forTaskId: top,
       })
@@ -2663,7 +2712,10 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         const h = makeHarness({ sessionKeyForAgent: (id) => (id === 'a3' ? null : sk(id)) })
         const top = await closeTopWith(h, body)
         await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-        expect(followUpTo(h.delivered, 'a2', said)).toEqual({ kind: 'system', forTaskId: top })
+        expect(followUpTo(h.delivered, 'a2', said)).toMatchObject({
+          kind: 'system',
+          forTaskId: top,
+        })
       }
     })
 
@@ -2677,7 +2729,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       offline.add('a4')
       await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 's1 done'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /could not be delivered/)).toEqual({
+      expect(followUpTo(h.delivered, 'a2', /could not be delivered/)).toMatchObject({
         kind: 'system',
         forTaskId: top,
       })
@@ -2690,7 +2742,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         input.title === 's1' ? { ok: false, reason: 'error' } : create(input)
       const top = await closeTopWith(h, '<plan><step to="@Design Boo">s1</step></plan>')
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /Could not create the board task/)).toEqual({
+      expect(followUpTo(h.delivered, 'a2', /Could not create the board task/)).toMatchObject({
         kind: 'system',
         forTaskId: top,
       })
@@ -2719,7 +2771,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         ),
       )
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(delivered, 'a4', /Plan not started/)).toEqual({
+      expect(followUpTo(delivered, 'a4', /Plan not started/)).toMatchObject({
         kind: 'system',
         forTaskId: t3,
       })
@@ -2731,7 +2783,7 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       h.board.forceRelease(h.board.created.find((t) => t.title === 'sub task')!.id)
       await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'sub result here'))
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
-      expect(followUpTo(h.delivered, 'a2', /arrived after the task was released/)).toEqual({
+      expect(followUpTo(h.delivered, 'a2', /arrived after the task was released/)).toMatchObject({
         kind: 'system',
         forTaskId: top,
       })
@@ -3878,7 +3930,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         const { h, deepest } = await atDepthLimit({ reportUps: outbox })
         await h.orchestrator.onEvent(sk('a4'), doneEvent('r4', toLead('words 0')))
         for (let i = 1; i <= 6 && statusOf(h, deepest) !== 'done'; i++) {
-          await vi.advanceTimersByTimeAsync(0)
+          // Runs with nothing to show, so the no-progress brake spaces them out.
+          await vi.advanceTimersByTimeAsync(BRAKE_FIRST_WAIT_MS + 1)
+          await h.orchestrator.resume()
           const turn = followUps(h, 'a4').at(-1)!
           await h.orchestrator.onEvent(sk('a4'), doneEvent(`r${i + 4}`, toLead(`words ${i}`)), {
             ...stampOf(turn),
@@ -5734,6 +5788,53 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.statusOf(mainId)).toBe('in_progress')
     })
 
+    it("a person's comment goes at the job's limit, and counts nothing", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      const count = board.jobRunsOf(mainId)
+      board.seedJobRuns(mainId, count)
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'Add a logo too')).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(lastUpdate(delivered).task).toContain('Add a logo too')
+      expect(board.jobRunsOf(mainId)).toBe(count)
+    })
+
+    it("a person's comment counts nothing with room left either", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      const count = board.jobRunsOf(mainId)
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'Add a logo too')).toBe(true)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(lastUpdate(delivered).task).toContain('Add a logo too')
+      expect(lastUpdate(delivered).origin).not.toHaveProperty('countJobs')
+      expect(board.jobRunsOf(mainId)).toBe(count)
+    })
+
+    it("a person's comment starts work again in a job they stopped", async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">a</delegate>'),
+        asked('d1'),
+      )
+      const mainId = await parentOf(board, idsOf(board)[0]!)
+      board.seedJobRuns(mainId, board.jobRunsOf(mainId))
+      board.seedJobStopped(mainId)
+      expect(board.jobIsStopped(mainId)).toBe(true)
+      expect(await orchestrator.personCommentedOnMainTask(mainId, 'Go on')).toBe(true)
+      expect(board.jobIsStopped(mainId)).toBe(false)
+    })
+
     it('a comment on a closed request goes nowhere', async () => {
       const { board, delivered, orchestrator } = makeHarness()
       await orchestrator.onEvent(
@@ -6595,6 +6696,25 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
         expect(repliesOn(board, id!, 'second try')).toBe(1)
       })
 
+      it('a write that fails at the start of the check is left to what follows it', async () => {
+        const board = harness.makeBoard()
+        openBoards.push(board)
+        const { orchestrator } = makeHarness({
+          board,
+          workCheck: answering(board, async () => {
+            board.failComments(false)
+            return { verdict: 'pass' }
+          }),
+        })
+        await orchestrator.onEvent(sk('leader'), handOff)
+        const [id] = idsOf(board)
+        board.failComments(true)
+        await orchestrator.onEvent(sk('a2'), doneEvent('r2', 'I changed parser.ts'))
+        await vi.advanceTimersByTimeAsync(0)
+        expect(board.statusOf(id!)).toBe('done')
+        expect(repliesOn(board, id!, 'I changed parser.ts')).toBe(1)
+      })
+
       it('stays on the card once when a Stop ends the wait for its check', async () => {
         const board = harness.makeBoard()
         openBoards.push(board)
@@ -6739,6 +6859,598 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(narrations.some((n) => /This request has closed/.test(n.text))).toBe(true)
       // It starts no run: the note waits in the mailbox for the sender's next turn.
       expect(reflections(delivered)).toHaveLength(before)
+    })
+  })
+
+  describe('createBoardOrchestrator: a job starts only so many runs by itself', () => {
+    const stampFor = (d: Delivered): RunStamp => ({
+      reportForTaskId: null,
+      stopGen: 0,
+      ...(d.reportUpIds?.length ? { reportUpIds: d.reportUpIds } : {}),
+    })
+
+    it('counts the runs it starts, across the whole job', async () => {
+      const h = makeHarness()
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      expect(h.board.jobRunsOf(top)).toBe(1)
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', 'more. <delegate to="@Design Boo">sub</delegate>'),
+      )
+      // The sub-task's run counts toward the job at the top of the tree.
+      const sub = h.board.created.find((t) => t.title === 'sub')!.id
+      expect(h.board.jobRunsOf(sub)).toBe(2)
+      expect(h.board.jobRunsOf(top)).toBe(2)
+    })
+
+    it('a hand-off at the limit waits in To do, starts nothing, and its parent waits on it', async () => {
+      const h = makeHarness({ reportUps: new MemoryReportUps() })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      h.board.seedJobRuns(top, 7)
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', 'more. <delegate to="@Design Boo">sub</delegate>'),
+      )
+      const sub = h.board.created.find((t) => t.title === 'sub')!.id
+      expect(h.board.statusOf(sub)).toBe('todo')
+      expect(h.delivered.filter((d) => d.agentId === 'a3')).toEqual([])
+      expect(h.board.jobRunsOf(sub)).toBe(7)
+      expect(h.board.statusOf(top)).toBe('blocked')
+
+      // Pumps change nothing however often they run.
+      await h.orchestrator.sweepStaleSessions()
+      await h.orchestrator.sweepStaleSessions()
+      expect(h.delivered.filter((d) => d.agentId === 'a3')).toEqual([])
+      expect(h.board.jobRunsOf(sub)).toBe(7)
+
+      // A person says to carry on, and the waiting work starts.
+      h.board.carryOnJobRuns(top)
+      await h.orchestrator.resume()
+      expect(h.delivered.filter((d) => d.agentId === 'a3')).toHaveLength(1)
+      expect(h.board.statusOf(sub)).toBe('in_progress')
+      expect(h.board.jobRunsOf(sub)).toBe(8)
+    })
+
+    it('a chain of follow-ups stops at the limit, then goes on when a person says so', async () => {
+      const h = makeHarness({ reportUps: new MemoryReportUps() })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r2', 'part one. <delegate to="@Design Boo">sub</delegate>'),
+      )
+      const before = h.delivered.filter((d) => d.agentId === 'a2').length
+      const count = h.board.jobRunsOf(top)
+      h.board.seedJobRuns(top, count)
+
+      // The sub-task ends. The parent would follow up on it, and has no room to.
+      await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'sub done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await h.orchestrator.resume()
+      expect(h.board.statusOf(top)).toBe('todo')
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before)
+      expect(h.board.jobRunsOf(top)).toBe(count)
+
+      h.board.carryOnJobRuns(top)
+      await h.orchestrator.resume()
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before + 1)
+      expect(h.board.statusOf(top)).toBe('in_progress')
+    })
+
+    it('a person’s dispatch goes at the limit, and spends nothing', async () => {
+      const h = makeHarness()
+      const task = await h.board.createTask({
+        teamId: 't1',
+        title: 'theirs',
+        sourceDelegationId: 'human:1:agent:a2:origin:human',
+      })
+      h.board.seedJobRuns(task!.id, 5)
+      expect(await h.orchestrator.dispatchTask(task!.id)).toBe('started')
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(1)
+      expect(h.board.jobRunsOf(task!.id)).toBe(5)
+    })
+
+    it('an empty reply’s second turn waits at the limit', async () => {
+      const h = makeHarness({ reportUps: new MemoryReportUps() })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      const before = h.delivered.filter((d) => d.agentId === 'a2').length
+      h.board.seedJobRuns(top, h.board.jobRunsOf(top))
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', ''))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before)
+      expect(h.board.statusOf(top)).toBe('todo')
+      expect(h.board.comments.some((c) => /as many runs by itself/.test(c.body))).toBe(true)
+    })
+
+    it('a fix round waits at the limit, and the check it failed stays on the task', async () => {
+      const workCheck: WorkCheck = {
+        async begin() {},
+        async prepare() {
+          return async () => ({ verdict: 'retry', fixNote: 'the tests fail' })
+        },
+      }
+      const h = makeHarness({ reportUps: new MemoryReportUps(), workCheck })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      const before = h.delivered.filter((d) => d.agentId === 'a2').length
+      h.board.seedJobRuns(top, h.board.jobRunsOf(top))
+      h.board.seedFailedCheck(top)
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'done, I think'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before)
+      expect(h.board.statusOf(top)).toBe('todo')
+      expect(h.board.comments.some((c) => /as many runs by itself/.test(c.body))).toBe(true)
+      expect(h.board.hasFailedCheck(top)).toBe(true)
+
+      // A person says to carry on, and the round it was to have goes.
+      h.board.carryOnJobRuns(top)
+      await h.orchestrator.resume()
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before + 1)
+    })
+
+    it('an update turn waits at the limit, uncounted, and goes when a person says so', async () => {
+      const outbox = new MemoryReportUps()
+      const h = makeHarness({ reportUps: outbox })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      const count = h.board.jobRunsOf(top)
+      h.board.seedJobRuns(top, count)
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'all done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toEqual([])
+      expect(outbox.pending().map((r) => r.item.taskId)).toEqual([top])
+      expect(outbox.pending()[0]!.replays).toBe(0)
+      // A sweep finds it pending and leaves it, whatever else it does.
+      await h.orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toEqual([])
+      expect(h.board.jobRunsOf(top)).toBe(count)
+
+      h.board.carryOnJobRuns(top)
+      await h.orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toHaveLength(1)
+      expect(h.board.jobRunsOf(top)).toBe(count + 1)
+    })
+
+    it('a budget refusing an update turn counts nothing, however often it tries', async () => {
+      let room = false
+      const h = makeHarness({
+        reportUps: new MemoryReportUps(),
+        deliverThrows: (agentId) =>
+          agentId === 'leader' && !room
+            ? new DeliveryRefusedError('Runs already going set aside the room.', {
+                budget: true,
+                budgetReason: 'held',
+              })
+            : null,
+      })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'all done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const count = h.board.jobRunsOf(top)
+      for (let i = 0; i < 5; i += 1) {
+        await h.orchestrator.sweepStaleSessions()
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      }
+      expect(reflections(h.delivered)).toEqual([])
+      expect(h.board.jobRunsOf(top)).toBe(count)
+
+      room = true
+      await h.orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toHaveLength(1)
+      expect(h.board.jobRunsOf(top)).toBe(count + 1)
+    })
+
+    it('an update reading two jobs counts toward both, once it has started', async () => {
+      const h = makeHarness()
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          'go. <delegate to="@Bug Boo">a</delegate> <delegate to="@Design Boo">b</delegate>',
+        ),
+      )
+      const [a, b] = idsOf(h.board)
+      const before = [h.board.jobRunsOf(a!), h.board.jobRunsOf(b!)]
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a is done'))
+      await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'b is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toHaveLength(1)
+      expect(h.board.jobRunsOf(a!)).toBe(before[0]! + 1)
+      expect(h.board.jobRunsOf(b!)).toBe(before[1]! + 1)
+    })
+
+    it('a note that only names a task is held at the limit, so it waits on no card', async () => {
+      const outbox = new MemoryReportUps()
+      const h = makeHarness({ reportUps: outbox })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      h.orchestrator.detachTask(top)
+      await h.board.updateStatus(top, 'done')
+      h.board.seedJobRuns(top, h.board.jobRunsOf(top))
+      outbox.record({
+        toAgentId: 'a2',
+        by: 'Design Boo',
+        title: 'more',
+        summary: 'Not handed off.',
+        outcome: 'not_started',
+        forTaskId: top,
+      })
+      await h.orchestrator.sweepStaleSessions()
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toEqual([])
+      expect(outbox.pending()).toEqual([])
+      expect(outbox.held().map((r) => r.item.forTaskId)).toEqual([top])
+    })
+
+    it('and one the limit reached while it waited to go out', async () => {
+      const outbox = new MemoryReportUps()
+      const h = makeHarness({ reportUps: outbox })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      h.orchestrator.detachTask(top)
+      await h.board.updateStatus(top, 'done')
+      outbox.record({
+        toAgentId: 'a2',
+        by: 'Design Boo',
+        title: 'more',
+        summary: 'Not handed off.',
+        outcome: 'not_started',
+        forTaskId: top,
+      })
+      await h.orchestrator.sweepStaleSessions()
+      h.board.seedJobRuns(top, h.board.jobRunsOf(top))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toEqual([])
+      expect(outbox.pending()).toEqual([])
+      expect(outbox.held().map((r) => r.item.forTaskId)).toEqual([top])
+    })
+
+    it('a person’s ask left for a busy agent goes when the agent frees up', async () => {
+      const occupied = new Set<string>()
+      const h = makeHarness({ occupiedSessions: occupied })
+      const task = await h.board.createTask({
+        teamId: 't1',
+        title: 'theirs',
+        sourceDelegationId: 'run-1:deleg:agent:a2:reflectTo:leader',
+      })
+      h.board.seedJobRuns(task!.id, 5)
+      occupied.add(sk('a2'))
+      expect(await h.orchestrator.dispatchTask(task!.id)).toBe('queued')
+      occupied.delete(sk('a2'))
+      await h.orchestrator.resume()
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(1)
+      expect(h.board.jobRunsOf(task!.id)).toBe(5)
+    })
+
+    it('that ask does not outlast a run on another path', async () => {
+      const occupied = new Set<string>()
+      const h = makeHarness({ occupiedSessions: occupied })
+      const task = await h.board.createTask({
+        teamId: 't1',
+        title: 'theirs',
+        sourceDelegationId: 'run-1:deleg:agent:a2:reflectTo:leader',
+      })
+      occupied.add(sk('a2'))
+      expect(await h.orchestrator.dispatchTask(task!.id)).toBe('queued')
+      // It ran some other way, came back to To do, and the job has reached its limit since.
+      const exec = await h.board.createExecution(task!.id, 'openclaw')
+      await h.board.completeExecution(exec!.id, { status: 'succeeded' })
+      h.board.seedJobRuns(task!.id, 5)
+      occupied.delete(sk('a2'))
+      await h.orchestrator.resume()
+      await h.orchestrator.sweepStaleSessions()
+      expect(h.delivered.filter((d) => d.agentId === 'a2')).toEqual([])
+      expect(h.board.jobRunsOf(task!.id)).toBe(5)
+      expect(h.board.statusOf(task!.id)).toBe('todo')
+    })
+
+    it('an automatic start counts, reads as no person’s, and the limit refuses it', async () => {
+      const h = makeHarness()
+      const task = await h.board.createTask({
+        teamId: 't1',
+        title: 'by itself',
+        sourceDelegationId: 'run-1:deleg:agent:a2:reflectTo:leader',
+      })
+      const stale = await h.board.createExecution(task!.id, 'openclaw')
+      await h.board.completeExecution(stale!.id, { status: 'failed', error: 'over the cap' })
+      expect(await h.orchestrator.dispatchTask(task!.id, { automatic: true })).toBe('started')
+      expect(h.board.jobRunsOf(task!.id)).toBe(1)
+
+      const next = await h.board.createTask({
+        teamId: 't1',
+        title: 'at the limit',
+        sourceDelegationId: 'run-2:deleg:agent:a3:reflectTo:leader',
+      })
+      h.board.seedJobRuns(next!.id, 5)
+      expect(await h.orchestrator.dispatchTask(next!.id, { automatic: true })).toBe('not_ready')
+      expect(h.delivered.filter((d) => d.agentId === 'a3')).toEqual([])
+      expect(h.board.jobRunsOf(next!.id)).toBe(5)
+    })
+
+    describe('Stop on the card', () => {
+      const NOTE = 'A person stopped this job.'
+      const twoJobs = async (reportUps?: MemoryReportUps) => {
+        const h = makeHarness(reportUps ? { reportUps } : {})
+        await h.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(
+            'r1',
+            'go. <delegate to="@Bug Boo">a</delegate> <delegate to="@Design Boo">b</delegate>',
+          ),
+        )
+        const [a, b] = idsOf(h.board)
+        return { h, a: a!, b: b! }
+      }
+
+      it('ends that job’s runs, and the other job goes on', async () => {
+        const { h, a, b } = await twoJobs()
+        expect(await h.orchestrator.stopJobRuns(new Set([a]), NOTE)).toEqual([a])
+        expect(h.abortedTasks).toEqual([a])
+        expect(h.board.statusOf(a)).toBe('todo')
+        expect(h.board.statusOf(b)).toBe('in_progress')
+        const last = (await ledgerOf(h.board, a)).at(-1)!
+        expect(last.status).toBe('cancelled')
+        expect(last.errorClass ?? null).toBeNull()
+        expect(h.board.comments.some((c) => c.taskId === a && c.body === NOTE)).toBe(true)
+
+        // It reads as a person's Stop, so no pump starts it.
+        const before = h.delivered.filter((d) => d.agentId === 'a2').length
+        await h.orchestrator.resume()
+        await h.orchestrator.sweepStaleSessions()
+        expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(before)
+
+        // The other job is untouched, and reports as it would have.
+        await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'b is done'))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        expect(reflections(h.delivered)).toHaveLength(1)
+        expect(reflections(h.delivered)[0]!.task).toContain('b is done')
+      })
+
+      it('holds what it had on its way about that job, and sends the other’s', async () => {
+        const outbox = new MemoryReportUps()
+        const { h, a, b } = await twoJobs(outbox)
+        await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a is done'))
+        await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'b is done'))
+        expect(await h.orchestrator.stopJobRuns(new Set([a]), NOTE)).toEqual([])
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const sent = reflections(h.delivered)
+        expect(sent).toHaveLength(1)
+        expect(sent[0]!.task).toContain('b is done')
+        expect(sent[0]!.task).not.toContain('a is done')
+        expect(outbox.held().map((r) => r.item.taskId)).toEqual([a])
+        expect(outbox.pending().map((r) => r.item.taskId)).toEqual([b])
+      })
+
+      it('a plan stops at its running step, and the steps behind it stay put', async () => {
+        const h = makeHarness()
+        await h.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(
+            'r1',
+            '<plan><step to="@Bug Boo">first</step><step to="@Design Boo">second</step></plan>',
+          ),
+        )
+        const [first, second] = idsOf(h.board)
+        expect(h.board.statusOf(first!)).toBe('in_progress')
+        expect(await h.orchestrator.stopJobRuns(new Set([first!, second!]), NOTE)).toEqual([first])
+        expect(h.board.statusOf(first!)).toBe('todo')
+        expect(h.board.statusOf(second!)).toBe('todo')
+        await h.orchestrator.resume()
+        await h.orchestrator.sweepStaleSessions()
+        expect(h.delivered.filter((d) => d.agentId === 'a2')).toHaveLength(1)
+        expect(h.delivered.filter((d) => d.agentId === 'a3')).toEqual([])
+        // A person's Retry of the first carries it on, at the limit and all.
+        h.board.seedJobRuns(first!, 5)
+        h.board.seedJobStopped(first!)
+        expect(await h.orchestrator.dispatchTask(first!)).toBe('started')
+        expect(h.board.jobIsStopped(first!)).toBe(false)
+        expect(h.board.jobRunsOf(first!)).toBe(5)
+      })
+
+      it('takes back a person’s earlier ask on that job', async () => {
+        const occupied = new Set<string>()
+        const h = makeHarness({ occupiedSessions: occupied })
+        const task = await h.board.createTask({
+          teamId: 't1',
+          title: 'theirs',
+          sourceDelegationId: 'run-1:deleg:agent:a2:reflectTo:leader',
+        })
+        h.board.seedJobRuns(task!.id, 5)
+        occupied.add(sk('a2'))
+        expect(await h.orchestrator.dispatchTask(task!.id)).toBe('queued')
+        await h.orchestrator.stopJobRuns(new Set([task!.id]), NOTE)
+        occupied.delete(sk('a2'))
+        await h.orchestrator.resume()
+        expect(h.delivered.filter((d) => d.agentId === 'a2')).toEqual([])
+      })
+    })
+
+    it('a turn reading a result with no request nests what it hands out under that job', async () => {
+      const h = makeHarness()
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'all done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const update = reflections(h.delivered)[0]!
+      expect(update.origin).toMatchObject({ kind: 'system', jobTaskId: top })
+      // Its reply hands out the next piece: it is not a new job with a new count.
+      const count = h.board.jobRunsOf(top)
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r3', 'next. <delegate to="@Design Boo">next piece</delegate>'),
+        { ...stampFor(update), jobTaskId: top },
+      )
+      const next = h.board.created.find((t) => t.title === 'next piece')!
+      expect(next.parentTaskId).toBe(top)
+      expect(h.board.jobRunsOf(next.id)).toBe(count + 1)
+    })
+
+    it('so an endless chain of update turns stops at the limit', async () => {
+      const h = makeHarness()
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r0', '<delegate to="@Bug Boo">piece 0</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      // Each piece is two runs: its own, and the update turn that reads it.
+      const limit = 7
+      h.board.seedJobRuns(top, 1, limit)
+      let pieces = 1
+      for (let i = 1; i < 20; i += 1) {
+        await h.orchestrator.onEvent(sk('a2'), doneEvent(`w${i}`, `piece ${i - 1} done`))
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+        const update = reflections(h.delivered).find((d) => d.task.includes(`piece ${i - 1} done`))
+        if (!update) break
+        await h.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(`l${i}`, `next. <delegate to="@Bug Boo">piece ${i}</delegate>`),
+          { ...stampFor(update), jobTaskId: top },
+        )
+        pieces += 1
+      }
+      expect(h.board.jobRunsOf(top)).toBe(limit)
+      expect(pieces).toBeLessThan(6)
+    })
+
+    it('updates for a busy session wait, and go as one when its turn ends', async () => {
+      const occupied = new Set<string>()
+      const h = makeHarness({ occupiedSessions: occupied })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          'go. <delegate to="@Bug Boo">a</delegate> <delegate to="@Design Boo">b</delegate>',
+        ),
+      )
+      occupied.add(sk('leader'))
+      await h.orchestrator.onEvent(sk('a2'), doneEvent('r2', 'a is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered)).toEqual([])
+      // Something else comes in while the turn goes on.
+      await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'b is done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS * 2)
+      expect(reflections(h.delivered)).toEqual([])
+
+      occupied.delete(sk('leader'))
+      await h.orchestrator.onEvent(sk('leader'), doneEvent('rP', 'answered the person'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const sent = reflections(h.delivered)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]!.task).toContain('a is done')
+      expect(sent[0]!.task).toContain('b is done')
+    })
+
+    it('a note with no task stops waking its agent after a few', async () => {
+      // Nothing can take these, so each hand-off comes back as a note with no task.
+      const h = makeHarness({ sessionKeyForAgent: (id) => (id === 'a2' ? null : sk(id)) })
+      for (let i = 0; i < MAX_REFUSAL_TURNS + 3; i += 1) {
+        await h.orchestrator.onEvent(
+          sk('leader'),
+          doneEvent(`r${i}`, `<delegate to="@Bug Boo">flaky ${i}</delegate>`),
+        )
+        await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      }
+      expect(reflections(h.delivered)).toHaveLength(MAX_REFUSAL_TURNS)
+      expect(h.narrations.some((x) => /not being told again/.test(x.text))).toBe(true)
+    })
+
+    it('one follow-up takes every result, however long, and is not asked for again', async () => {
+      const outbox = new MemoryReportUps()
+      const h = makeHarness({ reportUps: outbox })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      const top = idsOf(h.board)[0]!
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent(
+          'r2',
+          'split. <delegate to="@Design Boo">a</delegate> <delegate to="@Test Boo">b</delegate>',
+        ),
+      )
+      const long = (c: string): string => c.repeat(HELD_REPORT_UPS_BUDGET_CHARS)
+      await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', long('A')))
+      await h.orchestrator.onEvent(sk('a4'), doneEvent('r4', long('B')))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await h.orchestrator.resume()
+
+      const followUps = h.delivered.filter((d) => d.agentId === 'a2' && d.context)
+      expect(followUps).toHaveLength(1)
+      const context = followUps[0]!.context!
+      expect(context).toContain('AAA')
+      expect(context).toContain('BBB')
+      expect(context).toContain('get_task')
+      expect(followUps[0]!.reportUpIds).toHaveLength(2)
+      expect(context.length).toBeLessThan(HELD_REPORT_UPS_BUDGET_CHARS + 2_000)
+      expect(h.board.statusOf(top)).toBe('in_progress')
+
+      // It ends, and nothing it already covered parks the task again.
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent('r5', 'both in, and here is what they add up to'),
+        stampFor(followUps[0]!),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(h.board.statusOf(top)).toBe('done')
+      expect(outbox.unsettledFor('a2')).toEqual([])
+    })
+
+    it('a follow-up is shown what it reported before, since its reply replaces it', async () => {
+      const h = makeHarness({ reportUps: new MemoryReportUps() })
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">top</delegate>'),
+      )
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent(
+          'r2',
+          'The first half is the part that matters. <delegate to="@Design Boo">sub</delegate>',
+        ),
+      )
+      await h.orchestrator.onEvent(sk('a3'), doneEvent('r3', 'sub done'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await h.orchestrator.resume()
+      const followUp = h.delivered.filter((d) => d.agentId === 'a2').at(-1)!
+      expect(followUp.task).toContain('The first half is the part that matters')
     })
   })
 }

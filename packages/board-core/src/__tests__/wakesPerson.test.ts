@@ -51,7 +51,12 @@ describe('a wake on a task whose turn is a person’s', () => {
 describe('the wakes a person is behind', () => {
   it.each(['question_answered', 'reopened'])('%s moves a Blocked task and is forced', (reason) => {
     expect(wakeFromPerson(reason)).toBe(true)
-    expect(wakeDecision({ ...base, reason })).toEqual({ do: 'fire', force: true, moveToTodo: true })
+    expect(wakeDecision({ ...base, reason })).toEqual({
+      do: 'fire',
+      force: true,
+      byPerson: true,
+      moveToTodo: true,
+    })
   })
 
   const stoppedRun = { status: 'cancelled' }

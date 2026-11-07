@@ -37,12 +37,12 @@ import { commitWorktreeWork } from '@clawboo/worktrees'
 
 import type { RuntimeRunContext } from '../runtimes'
 import { isRiskyDelegation } from '../teamChat/riskyDelegation'
-import { criticErrored, runCritic, type ReviewerSpend } from './critic'
+import { criticErrored, runCritic, type ReviewerGate, type ReviewerSpend } from './critic'
 import { runDeterministicGate } from './deterministicGate'
 
 export { runDeterministicGate } from './deterministicGate'
 export { runCritic } from './critic'
-export type { ReviewerSpend } from './critic'
+export type { ReviewerGate, ReviewerSpend } from './critic'
 
 const CRITIC_NOT_RUN: CriticVerdict = {
   ran: false,
@@ -76,6 +76,8 @@ export interface VerifyTaskInput {
   /** True while a pause covers the task: the reviewer does not start, and the verdict
    *  records that the review did not run. */
   reviewPaused?: () => boolean
+  /** What a reviewer asks before it spends (see {@link ReviewerGate}). */
+  reviewGate?: ReviewerGate
   /** The commit holding the work, for a checkout that is not a task worktree
    *  (a team folder, whose history clawboo commits itself). Absent, the worktree's
    *  work is committed here first. */
@@ -190,6 +192,7 @@ export async function verifyTask(input: VerifyTaskInput): Promise<VerificationRe
         reviewRootDir: input.reviewRootDir,
         onSpend: input.onReviewerSpend,
         ...(input.reviewPaused ? { paused: input.reviewPaused } : {}),
+        ...(input.reviewGate ? { gate: input.reviewGate } : {}),
       })
     } catch (err) {
       // A critic failure must never block (or crash) the deterministic verdict,

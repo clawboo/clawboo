@@ -132,9 +132,14 @@ export type WakeSkipReason =
   /** The job's agents woke each other too often this hour: ends when the hour is over,
    *  or when a person lets them carry on. */
   | 'hourly_cap'
-  /** Two agents keep waking each other: ends when a person lets them carry on, or
-   *  comments on the job. */
+  /** Two agents keep waking each other, or three or more in a ring: ends when a person
+   *  lets them carry on, or comments on the job. Never by itself. */
   | 'back_and_forth'
+  /** The job has started as many runs by itself as it may: ends when a person says to
+   *  carry on. */
+  | 'job_limit'
+  /** A person stopped the job at that limit: ends when a person starts work in it. */
+  | 'job_stopped'
   /** A person parked it in Backlog. */
   | 'backlog'
   /** No agent is bound to it: a person assigns one. */
@@ -169,6 +174,8 @@ export const WAKE_SKIP_REASONS: readonly WakeSkipReason[] = [
   'ask_once',
   'hourly_cap',
   'back_and_forth',
+  'job_limit',
+  'job_stopped',
   'backlog',
   'no_agent',
   'room_archived',
@@ -206,6 +213,11 @@ export interface WakeDecisionInput {
   refusal: 'room_archived' | 'no_team' | 'team_archived' | null
   /** A hard budget cap would refuse a run now. */
   budgetRefused: boolean
+  /** The job has started all the runs it may by itself. Only a person's first start goes
+   *  past it. */
+  jobLimited?: boolean
+  /** That is because a person stopped the job, and no card is up to answer. */
+  jobStopped?: boolean
   /** A person holds the task. No wake starts it: it is their turn. */
   personAssigned?: boolean
   /** It waits on a question still open, so a comment from before the agent asked
@@ -222,8 +234,12 @@ export interface WakeDecisionInput {
 export type WakeDecision =
   | {
       do: 'fire'
-      /** A person is behind this start: the automatic pump's policy is waived. */
+      /** The automatic pump's policy is waived: a person is behind it, or a raised budget
+       *  cap has let the task go again. */
       force: boolean
+      /** A person is behind this start, so it neither counts toward the job's limit nor is
+       *  refused by it. A cap raised is not: that start is the run's own. */
+      byPerson: boolean
       /** The task is Blocked and goes back to To do first. */
       moveToTodo: boolean
     }
@@ -265,6 +281,7 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
   // waive: a run still on the ledger, and an account refusal that would fail the
   // same way. A replay is automatic again: it honours all of them.
   const first = fromPerson && input.replays === 0
+  if (input.jobLimited && !first) return wait(input.jobStopped ? 'job_stopped' : 'job_limit')
   const refusal = autoFireRefusal(input.execs, input.now)
   if (refusal === 'running') return wait('run_unproven')
   if (refusal === 'sign_in' || refusal === 'billing') return wait(refusal)
@@ -286,5 +303,10 @@ export function wakeDecision(input: WakeDecisionInput): WakeDecision {
     if (input.agentWakes === 'hourly_cap' || input.agentWakes === 'back_and_forth')
       return wait(input.agentWakes)
   }
-  return { do: 'fire', force: first || capRaised, moveToTodo: status === 'blocked' }
+  return {
+    do: 'fire',
+    force: first || capRaised,
+    byPerson: first,
+    moveToTodo: status === 'blocked',
+  }
 }

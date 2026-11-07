@@ -44,7 +44,7 @@ import { createStaleTaskSweep, reapOrphanedRuns, sweepStaleRuns } from './lib/st
 import { upgradeFrozenToolsets } from './lib/runtimes/native/agentConfigStore'
 import { registerBoardLifecycleSubscribers } from './lib/teamChat/boardLifecycleSubscribers'
 import { pumpChatReportUps, startChatReportUps } from './lib/agentChat/chatHandOffs'
-import { pumpTaskWakes, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
+import { pumpTaskWakes, pumpTaskWakesByRoom, type TaskWakePumpDeps } from './lib/teamChat/taskWakes'
 import { ensureNativeBooZero } from './lib/teamChat/booZero'
 import { queueGatewayAborts } from './lib/teamChat/gatewayRunAborts'
 import { sweepTaskSessionPointers } from './lib/teamChat/taskSessionPointers'
@@ -769,6 +769,12 @@ async function main() {
         if (isRunnerRerunWaiting(task.id)) return
         startTask(getDb(), task.id, task.teamId, runnerTargetOf(getDb(), task), mcpBase)
       },
+      startByItself: (task) => {
+        if (isRunnerRerunWaiting(task.id)) return
+        startTask(getDb(), task.id, task.teamId, runnerTargetOf(getDb(), task), mcpBase, {
+          automatic: true,
+        })
+      },
       pumpRoom,
       alert: (alert) => writeTeamAlert(getDb(), alert),
     })
@@ -782,7 +788,7 @@ async function main() {
       mcpBaseUrl: mcpBase,
       pumpWakes: () => {
         try {
-          pumpTaskWakes(getDb(), wakeDeps(pumpRoomNow))
+          pumpTaskWakesByRoom(getDb(), wakeDeps, pumpRoomNow)
           // A woken task the runner runs goes through the runner's own pump.
           if (!engineHeld()) pumpRunnerReruns(getDb(), mcpBase)
         } catch (err) {

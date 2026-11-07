@@ -18,12 +18,12 @@ const SECRET = 'a'.repeat(64)
 
 describe('signAttachScope / verifyAttachScope', () => {
   it('round-trips the scope it signed', () => {
-    const scope = { teamId: 'T', agentId: 'A', delegate: true }
+    const scope = { server: 'tasks', teamId: 'T', agentId: 'A', delegate: true } as const
     expect(verifyAttachScope(SECRET, scope, signAttachScope(SECRET, scope))).toBe(true)
   })
 
   it('any changed field breaks verification — including the delegate PRIVILEGE', () => {
-    const scope = { teamId: 'T', agentId: 'A', delegate: false }
+    const scope = { server: 'tasks', teamId: 'T', agentId: 'A', delegate: false } as const
     const sig = signAttachScope(SECRET, scope)
     expect(verifyAttachScope(SECRET, { ...scope, agentId: 'victim' }, sig)).toBe(false)
     expect(verifyAttachScope(SECRET, { ...scope, teamId: 'other' }, sig)).toBe(false)
@@ -33,17 +33,19 @@ describe('signAttachScope / verifyAttachScope', () => {
   it('fields cannot BLEED into each other', () => {
     // Without a separator, {teamId:'ab', agentId:'c'} and {teamId:'a', agentId:'bc'}
     // would canonicalise identically and one signature would cover both identities.
-    const sig = signAttachScope(SECRET, { teamId: 'ab', agentId: 'c' })
-    expect(verifyAttachScope(SECRET, { teamId: 'a', agentId: 'bc' }, sig)).toBe(false)
+    const sig = signAttachScope(SECRET, { server: 'tasks', teamId: 'ab', agentId: 'c' })
+    expect(verifyAttachScope(SECRET, { server: 'tasks', teamId: 'a', agentId: 'bc' }, sig)).toBe(
+      false,
+    )
   })
 
   it('a different secret verifies nothing', () => {
-    const scope = { teamId: 'T', agentId: 'A' }
+    const scope = { server: 'tasks', teamId: 'T', agentId: 'A' } as const
     expect(verifyAttachScope('b'.repeat(64), scope, signAttachScope(SECRET, scope))).toBe(false)
   })
 
   it('malformed signatures are false, never a throw', () => {
-    const scope = { teamId: 'T' }
+    const scope = { server: 'tasks', teamId: 'T' } as const
     for (const bad of ['', 'zz', 'deadbeef', 'not hex', signAttachScope(SECRET, scope).slice(2)]) {
       expect(verifyAttachScope(SECRET, scope, bad)).toBe(false)
     }
@@ -52,7 +54,7 @@ describe('signAttachScope / verifyAttachScope', () => {
   it('is deterministic, so attach configs stay byte-stable across rewrites', () => {
     // The codex driver's auth-seeding uses mtime freshness on files in the run
     // home; a signature that changed per write would churn every config.
-    const scope = { teamId: 'T', agentId: 'A' }
+    const scope = { server: 'tasks', teamId: 'T', agentId: 'A' } as const
     expect(signAttachScope(SECRET, scope)).toBe(signAttachScope(SECRET, scope))
   })
 })
@@ -67,9 +69,13 @@ describe('mcpHttpUrl signing', () => {
     )
     const sig = url.searchParams.get('scopeSig')!
     expect(sig).toBeTruthy()
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: true }, sig)).toBe(
-      false,
-    )
+    expect(
+      verifyAttachScope(
+        SECRET,
+        { server: 'teamchat', teamId: 'T', agentId: 'A', delegate: true },
+        sig,
+      ),
+    ).toBe(false)
   })
 
   it('never leaks the secret into the URL', () => {
@@ -91,6 +97,55 @@ describe('mcpHttpUrl signing', () => {
   })
 })
 
+describe('the server a signature is for', () => {
+  const scopes = [
+    ['a person’s chat', { teamId: null, agentId: 'A', chatRun: true, chatRunTeamId: 'T' }],
+    ['a team run', { teamId: 'T', agentId: 'A', delegate: true }],
+    ['a board task run', { teamId: 'T', agentId: 'A' }],
+  ] as const
+
+  it.each(scopes)('%s: a URL signs for its own server and no other', (_name, scope) => {
+    const signed = { ...scope, attachSecret: SECRET }
+    const sigs = MCP_SERVER_NAMES.map(
+      (server) =>
+        new URL(mcpHttpUrl('http://x', server, signed)).searchParams.get('scopeSig') as string,
+    )
+    // No two URLs of one run carry the same signature, so none can stand in for another.
+    expect(new Set(sigs).size).toBe(MCP_SERVER_NAMES.length)
+  })
+
+  it('the same claim, signed for one server, does not verify for another', () => {
+    const claim = { agentId: 'A', chatRun: true, delegate: false } as const
+    for (const server of MCP_SERVER_NAMES) {
+      const sig = signAttachScope(SECRET, { ...claim, server })
+      for (const other of MCP_SERVER_NAMES)
+        expect(verifyAttachScope(SECRET, { ...claim, server: other }, sig), server + other).toBe(
+          other === server,
+        )
+    }
+  })
+
+  it('a chat’s Memory signature does not open Tasks with no team hold', () => {
+    const memorySig = new URL(
+      mcpHttpUrl('http://x', 'memory', {
+        teamId: null,
+        agentId: 'A',
+        chatRun: true,
+        chatRunTeamId: 'T',
+        attachSecret: SECRET,
+      }),
+    ).searchParams.get('scopeSig') as string
+    // What the Tasks mount reads off `scopeAgentId=A&chatRun=1`.
+    expect(
+      verifyAttachScope(
+        SECRET,
+        { server: 'tasks', teamId: null, agentId: 'A', tenantId: null, chatRun: true },
+        memorySig,
+      ),
+    ).toBe(false)
+  })
+})
+
 describe('the chat-run claim', () => {
   const chatScope = {
     teamId: null,
@@ -105,9 +160,10 @@ describe('the chat-run claim', () => {
     expect(url.searchParams.get('chatRun')).toBe('1')
     expect(url.searchParams.get('scopeTeamId')).toBe('T')
     const sig = url.searchParams.get('scopeSig')!
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', chatRun: true }, sig)).toBe(true)
+    const claim = { server: 'tasks', teamId: 'T', agentId: 'A' } as const
+    expect(verifyAttachScope(SECRET, { ...claim, chatRun: true }, sig)).toBe(true)
     // Stripped of the claim, it does not read as an agent with the writes back.
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A' }, sig)).toBe(false)
+    expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
   })
 
   it('leaves the chat’s Memory scope with no team', () => {
@@ -121,7 +177,7 @@ describe('the chat-run claim', () => {
       const sig = new URL(
         mcpHttpUrl('http://x', server, { ...chatScope, chatRunTeamId: null }),
       ).searchParams.get('scopeSig')!
-      expect(verifyAttachScope(SECRET, { agentId: 'A' }, sig), server).toBe(false)
+      expect(verifyAttachScope(SECRET, { server, agentId: 'A' }, sig), server).toBe(false)
     }
   })
 })
@@ -133,9 +189,10 @@ describe('the team-run claim on the Tasks URL', () => {
     const url = new URL(mcpHttpUrl('http://x', 'tasks', teamRunScope))
     expect(url.searchParams.get('teamRun')).toBe('1')
     const sig = url.searchParams.get('scopeSig')!
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', teamRun: true }, sig)).toBe(true)
+    const claim = { server: 'tasks', teamId: 'T', agentId: 'A' } as const
+    expect(verifyAttachScope(SECRET, { ...claim, teamRun: true }, sig)).toBe(true)
     // Stripped of the claim, the signature no longer matches what the URL says.
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A' }, sig)).toBe(false)
+    expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
   })
 
   it('is absent from every other run, whose signature is unchanged', () => {
@@ -144,7 +201,7 @@ describe('the team-run claim on the Tasks URL', () => {
     )
     expect(url.searchParams.has('teamRun')).toBe(false)
     expect(url.searchParams.get('scopeSig')).toBe(
-      signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false }),
+      signAttachScope(SECRET, { server: 'tasks', teamId: 'T', agentId: 'A', delegate: false }),
     )
   })
 
@@ -156,17 +213,18 @@ describe('the team-run claim on the Tasks URL', () => {
       'scopeSig',
     )!
     expect(tasksSig).not.toBe(teamchatSig)
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: true }, tasksSig)).toBe(
-      false,
-    )
+    const claim = { teamId: 'T', agentId: 'A' } as const
     expect(
-      verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', teamRun: true }, teamchatSig),
+      verifyAttachScope(SECRET, { ...claim, server: 'teamchat', delegate: true }, tasksSig),
+    ).toBe(false)
+    expect(
+      verifyAttachScope(SECRET, { ...claim, server: 'tasks', teamRun: true }, teamchatSig),
     ).toBe(false)
   })
 
   it('rides the Memory and Tools URLs too, so no URL a team run holds signs a plain scope', () => {
-    const plain = signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false })
     for (const server of ['memory', 'tools'] as const) {
+      const plain = signAttachScope(SECRET, { server, teamId: 'T', agentId: 'A', delegate: false })
       const url = new URL(mcpHttpUrl('http://x', server, teamRunScope))
       expect(url.searchParams.get('teamRun')).toBe('1')
       expect(url.searchParams.get('scopeSig')).not.toBe(plain)
@@ -191,23 +249,23 @@ describe("the run's own task on the Tasks URL", () => {
     const url = new URL(mcpHttpUrl('http://x', 'tasks', onTask))
     expect(url.searchParams.get('scopeTaskId')).toBe('task-1')
     const sig = url.searchParams.get('scopeSig')!
-    const claim = { teamId: 'T', agentId: 'A', teamRun: true }
+    const claim = { server: 'tasks', teamId: 'T', agentId: 'A', teamRun: true } as const
     expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-1' }, sig)).toBe(true)
     expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-2' }, sig)).toBe(false)
     expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
   })
 
-  /** What the code before the bound task (c7d062ce) minted for the same run:
-   *  pinned, so "unchanged" is checked against the old code, not the new. */
+  /** What a run with no bound task mints. Worked out from the canonical form and pinned,
+   *  so "unchanged" is checked against the form, not against the code. */
   const BEFORE = {
     tasks:
-      'http://x/api/mcp/tasks?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+      'http://x/api/mcp/tasks?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=b8f4f4e56e9b4bdb6cbf61fdcbb582acfb8501e41753383c2e664e755dcf5aba&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
     memory:
-      'http://x/api/mcp/memory?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+      'http://x/api/mcp/memory?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=49476de4fdd5d6f04b30a8f699a7b297e0188840a2cc96803736ba79a1864c41&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
     tools:
-      'http://x/api/mcp/tools?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+      'http://x/api/mcp/tools?scopeTeamId=T&scopeAgentId=A&teamRun=1&scopeSig=4e2a1051e06f75a4b7cc64cc893a22db89cfd71d39d023965bd5d33aec33cdd7&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
     teamchat:
-      'http://x/api/mcp/teamchat?roomTeamId=T&postAuthorAgentId=A&delegate=1&scopeSig=4c83478a053c745ca5d1027514a5a843698b4a42b894903bfc03cfa7da7a7113&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
+      'http://x/api/mcp/teamchat?roomTeamId=T&postAuthorAgentId=A&delegate=1&scopeSig=91ba41c0979e5378a3d11f4eb376c28ca2c9dfe73746cc875fb3ef7d18a958f0&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
   }
 
   it('stays off the Memory and TeamChat URLs, whose bytes are what they were before it', () => {
@@ -219,7 +277,7 @@ describe("the run's own task on the Tasks URL", () => {
     const url = new URL(mcpHttpUrl('http://x', 'tools', onTask))
     expect(url.searchParams.get('scopeTaskId')).toBe('task-1')
     const sig = url.searchParams.get('scopeSig')!
-    const claim = { teamId: 'T', agentId: 'A', teamRun: true }
+    const claim = { server: 'tools', teamId: 'T', agentId: 'A', teamRun: true } as const
     expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-1' }, sig)).toBe(true)
     expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-2' }, sig)).toBe(false)
     expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
@@ -240,7 +298,7 @@ describe("the run's own task on the Tasks URL", () => {
     )
     expect(stamped.searchParams.has('scopeTaskId')).toBe(false)
     expect(stamped.searchParams.get('scopeSig')).toBe(
-      signAttachScope(SECRET, { teamId: 'T', agentId: 'A', delegate: false }),
+      signAttachScope(SECRET, { server: 'tasks', teamId: 'T', agentId: 'A', delegate: false }),
     )
   })
 
@@ -260,26 +318,32 @@ describe("the run's id on the Tasks URL", () => {
     boundExecutionId: 'exec-1',
     attachSecret: SECRET,
   }
-  const claim = { teamId: 'T', agentId: 'A', teamRun: true, boundTaskId: 'task-1' }
+  const claim = {
+    server: 'tasks',
+    teamId: 'T',
+    agentId: 'A',
+    teamRun: true,
+    boundTaskId: 'task-1',
+  } as const
 
-  /** What the code before the run id signed. Worked out by hand from the old
-   *  canonical form and pinned, so a change to how old scopes sign fails here. */
+  /** Worked out by hand from the canonical form and pinned, so a change to how a scope
+   *  signs fails here. */
   const SIGNED_BEFORE = [
     [
-      { teamId: 'T', agentId: 'A' },
-      '37eb9cbeb4aef4e197d0e301f4d3cca919df1ae54d18439ad3ede7d29091de99',
+      { server: 'tasks', teamId: 'T', agentId: 'A' },
+      '5d21ee0edfeeb84fbc52946fbe0955c8230a5e7edab9f1253da0abb0385527ee',
     ],
     [
-      { teamId: 'T', agentId: 'A', delegate: true },
-      '4c83478a053c745ca5d1027514a5a843698b4a42b894903bfc03cfa7da7a7113',
+      { server: 'teamchat', teamId: 'T', agentId: 'A', delegate: true },
+      '91ba41c0979e5378a3d11f4eb376c28ca2c9dfe73746cc875fb3ef7d18a958f0',
     ],
     [
-      { teamId: 'T', agentId: 'A', teamRun: true },
-      '76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5',
+      { server: 'tasks', teamId: 'T', agentId: 'A', teamRun: true },
+      'b8f4f4e56e9b4bdb6cbf61fdcbb582acfb8501e41753383c2e664e755dcf5aba',
     ],
     [
-      { teamId: 'T', agentId: 'A', teamRun: true, boundTaskId: 'task-1' },
-      '22b37d9836b591df636d63c019c82672423994ac1db91c8549cac33c7572246e',
+      { server: 'tasks', teamId: 'T', agentId: 'A', teamRun: true, boundTaskId: 'task-1' },
+      '7bde63c764b8544125b91168c9e89864217d48d94ab29f2ea4424ccfb85eb800',
     ],
   ] as const
 
@@ -297,10 +361,9 @@ describe("the run's id on the Tasks URL", () => {
   })
 
   it('cannot pass for a bound task, or the reverse', () => {
-    const sig = signAttachScope(SECRET, { teamId: 'T', agentId: 'A', boundExecutionId: 'x' })
-    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', boundTaskId: 'x' }, sig)).toBe(
-      false,
-    )
+    const scope = { server: 'tasks', teamId: 'T', agentId: 'A' } as const
+    const sig = signAttachScope(SECRET, { ...scope, boundExecutionId: 'x' })
+    expect(verifyAttachScope(SECRET, { ...scope, boundTaskId: 'x' }, sig)).toBe(false)
   })
 
   it('rides no other URL, so their bytes do not change from run to run', () => {
@@ -337,11 +400,11 @@ describe('signAttachAccess / verifyAttachAccess (the control-plane access token)
   it('is its own domain: never a scope or provenance signature, nor the reverse', () => {
     // The empty scope is the closest a scope signature gets to "no fields", so it
     // is the one that would collide if the domains were shared.
-    const emptyScopeSig = signAttachScope(SECRET, {})
+    const emptyScopeSig = signAttachScope(SECRET, { server: 'tasks' })
     const emptyProvSig = signAttachProvenance(SECRET, {})
     expect(verifyAttachAccess(SECRET, emptyScopeSig)).toBe(false)
     expect(verifyAttachAccess(SECRET, emptyProvSig)).toBe(false)
-    expect(verifyAttachScope(SECRET, {}, signAttachAccess(SECRET))).toBe(false)
+    expect(verifyAttachScope(SECRET, { server: 'tasks' }, signAttachAccess(SECRET))).toBe(false)
     expect(verifyAttachProvenance(SECRET, {}, signAttachAccess(SECRET))).toBe(false)
   })
 })
@@ -367,11 +430,11 @@ describe('mcpHttpUrl access token', () => {
     }
   })
 
-  it('a scoped URL keeps its scope signature exactly as before', () => {
+  it('a scoped URL keeps its scope signature beside the token', () => {
     const scope = { teamId: 'T', agentId: 'A', attachSecret: SECRET }
     const url = new URL(mcpHttpUrl('http://x', 'tasks', scope))
     expect(url.searchParams.get('scopeSig')).toBe(
-      signAttachScope(SECRET, { ...scope, delegate: false }),
+      signAttachScope(SECRET, { teamId: 'T', agentId: 'A', server: 'tasks', delegate: false }),
     )
   })
 
@@ -419,11 +482,12 @@ describe('signAttachProvenance / verifyAttachProvenance', () => {
 
   it('is a different domain from the scope signature', () => {
     // Same id in the same position must not produce the same bytes.
-    const scopeSig = signAttachScope(SECRET, { agentId: 'A' })
+    const scope = { server: 'memory', agentId: 'A' } as const
+    const scopeSig = signAttachScope(SECRET, scope)
     expect(verifyAttachProvenance(SECRET, { agentId: 'A' }, scopeSig)).toBe(false)
-    expect(
-      verifyAttachScope(SECRET, { agentId: 'A' }, signAttachProvenance(SECRET, { agentId: 'A' })),
-    ).toBe(false)
+    expect(verifyAttachScope(SECRET, scope, signAttachProvenance(SECRET, { agentId: 'A' }))).toBe(
+      false,
+    )
   })
 
   it('the Memory URL signs its stamps only when there are stamps and a secret', () => {

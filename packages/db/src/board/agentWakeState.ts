@@ -100,6 +100,25 @@ export function dropChainOfPairTx(
     .run()
 }
 
+/** A person spoke on this job: who woke whom on it starts again from here. */
+export function clearJobWakePathTx(tx: BoardTx, taskId: string, now: number): void {
+  tx.update(agentWakeGates)
+    .set({ wakePath: null, updatedAt: now })
+    .where(eq(agentWakeGates.jobTaskId, jobTaskIdOf(tx, taskId)))
+    .run()
+}
+
+/** The job's wake path, as the cycle check reads it. Unreadable reads as none. */
+export function parseWakePath(raw: string | null | undefined): string[] {
+  if (!raw) return []
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.filter((a): a is string => typeof a === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 /** A person stepped in for this agent, so it and whoever it was answering are no longer
  *  running unattended. The hourly count stays: it is about how much ran. */
 export function clearAgentWakeChainsTx(

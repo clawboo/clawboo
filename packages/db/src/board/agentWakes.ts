@@ -16,6 +16,7 @@
 import {
   afterAgentWakeChain,
   afterAgentWakeHour,
+  afterAgentWakePath,
   agentWakeVerdict,
   AGENT_WAKE_WINDOW_MS,
   commentMayWake,
@@ -60,6 +61,7 @@ import {
   gateOfJob,
   jobTaskIdOf,
   NO_CARD,
+  parseWakePath,
   writeChainOfPairTx,
 } from './agentWakeState'
 import { immediateWrite, type BoardTx } from './contention'
@@ -108,15 +110,67 @@ export function agentWakeVerdictFor(
   const teamId =
     db.select({ teamId: tasks.teamId }).from(tasks).where(eq(tasks.id, taskId)).get()?.teamId ??
     null
-  return agentWakeVerdict(readAgentWakeGate(db, taskId), {
+  const gate = readAgentWakeGate(db, taskId)
+  return agentWakeVerdict(gate, {
     ...pair,
     teamAlways: readTeamAlwaysAllow(db, teamId),
+    path: parseWakePath(gate?.wakePath),
+    pathAt: gate?.updatedAt ?? null,
+    stopWaiting: stopStillWaiting(db, taskId, teamId, pair, now),
     chain:
       pair.fromAgentId && pair.toAgentId
         ? chainOfPair(db, teamId, pair.fromAgentId, pair.toAgentId)
         : null,
     now,
   })
+}
+
+/**
+ * Is a wake the back-and-forth brake stopped still waiting on a person? This task's own,
+ * or one behind a card naming these two either way round. While it is, an hour of quiet
+ * is the brake working. With none, it is a conversation that ended.
+ */
+function stopStillWaiting(
+  db: ClawbooDb,
+  taskId: string,
+  teamId: string | null,
+  pair: AgentWakePair,
+  now: number,
+): boolean {
+  const own = db
+    .select({ id: taskWakes.id })
+    .from(taskWakes)
+    .where(
+      and(
+        eq(taskWakes.taskId, taskId),
+        eq(taskWakes.reason, 'agent_comment'),
+        eq(taskWakes.skipReason, 'back_and_forth'),
+        isNull(taskWakes.settledAt),
+        isNull(taskWakes.carriedExecId),
+        isNull(taskWakes.heldAt),
+      ),
+    )
+    .get()
+  if (own) return true
+  if (!pair.fromAgentId || !pair.toAgentId) return false
+  const cards = db
+    .select()
+    .from(agentWakeGates)
+    .where(
+      and(
+        eq(agentWakeGates.cardKind, 'back_and_forth'),
+        teamId
+          ? eq(agentWakeGates.teamId, teamId)
+          : eq(agentWakeGates.jobTaskId, jobTaskIdOf(db, taskId)),
+      ),
+    )
+    .all() as DbAgentWakeGate[]
+  return cards.some(
+    (card) =>
+      ((card.cardFromAgentId === pair.fromAgentId && card.cardToAgentId === pair.toAgentId) ||
+        (card.cardFromAgentId === pair.toAgentId && card.cardToAgentId === pair.fromAgentId)) &&
+      cardStands(db, card, now),
+  )
 }
 
 /** Who wrote the last comment this wake carries: the agent doing the waking. */
@@ -410,7 +464,7 @@ export function decideAgentWakes(
         .onConflictDoUpdate({ target: agentWakeGates.jobTaskId, set: decided })
         .run()
     tx.update(agentWakeGates)
-      .set({ ...NO_CARD, windowStartedAt: null, windowCount: 0, updatedAt: now })
+      .set({ ...NO_CARD, windowStartedAt: null, windowCount: 0, wakePath: null, updatedAt: now })
       .where(eq(agentWakeGates.jobTaskId, jobTaskId))
       .run()
     if (gate.cardFromAgentId && gate.cardToAgentId)
@@ -459,8 +513,16 @@ export function noteAgentWakeStarted(
     const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get() as DbTask | undefined
     if (!task) return
     const jobTaskId = ensureGateTx(tx, task, now)
+    const gate = gateOfJob(tx, jobTaskId)
     tx.update(agentWakeGates)
-      .set({ ...afterAgentWakeHour(gateOfJob(tx, jobTaskId), now), ...NO_CARD, updatedAt: now })
+      .set({
+        ...afterAgentWakeHour(gate, now),
+        ...NO_CARD,
+        wakePath: JSON.stringify(
+          afterAgentWakePath(parseWakePath(gate?.wakePath), pair.fromAgentId, pair.toAgentId),
+        ),
+        updatedAt: now,
+      })
       .where(eq(agentWakeGates.jobTaskId, jobTaskId))
       .run()
     if (pair.fromAgentId && pair.toAgentId)

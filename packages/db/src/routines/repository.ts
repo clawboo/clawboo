@@ -8,7 +8,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { and, asc, desc, eq, gt, inArray, isNotNull, lte, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
 import { scheduledRuns, settings, tasks, type DbScheduledRun, type DbTask } from '../schema'
@@ -448,6 +448,27 @@ export function deleteScheduledRunsForAgent(db: ClawbooDb, agentId: string): num
   if (!agentId) return 0
   return withWriteRetry(
     () => db.delete(scheduledRuns).where(eq(scheduledRuns.agentId, agentId)).run().changes,
+  )
+}
+
+/**
+ * A team is going, and its agents stay on with no team. An agent routine goes with its
+ * agent: it keeps its schedule and files its tasks with no team. A team routine keeps
+ * no agent (its `agent_id` is empty), so it is not matched here: it keeps its team's
+ * id, and says the team no longer exists when it next fires. Returns the count moved.
+ */
+export function detachAgentRoutinesFromTeam(
+  db: ClawbooDb,
+  teamId: string,
+  now = Date.now(),
+): number {
+  return withWriteRetry(
+    () =>
+      db
+        .update(scheduledRuns)
+        .set({ teamId: null, updatedAt: now })
+        .where(and(eq(scheduledRuns.teamId, teamId), ne(scheduledRuns.agentId, '')))
+        .run().changes,
   )
 }
 

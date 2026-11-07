@@ -64,7 +64,12 @@ import {
 import { getDb } from './db'
 import { emitEvent } from './obs'
 import type { RuntimeRunContext } from './runtimes'
-import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from './verification'
+import {
+  verifyMaxAttempts,
+  verifyTask,
+  type ReviewerGate,
+  type ReviewerSpend,
+} from './verification'
 import { readTeamVerifyCommand } from './verification/teamVerifyCommand'
 import { notifyVerificationParked } from './teamChat/inboxNotices'
 import { realPathOf, workDirSpellings } from './workDir'
@@ -412,6 +417,8 @@ export interface CompleteWorkspaceOpts {
   onReviewerSpend?: (spend: ReviewerSpend) => void
   /** True while a pause covers the task: the reviewer does not start. */
   reviewPaused?: () => boolean
+  /** What the reviewer asks before it spends. */
+  reviewGate?: ReviewerGate
   /**
    * The run this check belongs to, still open: the task runner closes its run only
    * after the verdict, so a crash during the check leaves a `running` row the boot
@@ -558,6 +565,7 @@ export async function actOnTaskWorkspace(
     mcpBaseUrl: opts.mcpBaseUrl,
     onReviewerSpend: opts.onReviewerSpend,
     ...(opts.reviewPaused ? { reviewPaused: opts.reviewPaused } : {}),
+    ...(opts.reviewGate ? { reviewGate: opts.reviewGate } : {}),
     shouldRecord: runStillOpen,
   })
   // A run's check has a limit, as the team chat's has: the verify command has its own,

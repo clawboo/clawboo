@@ -27,6 +27,7 @@ import {
   updateStatus,
   placePause,
   type ClawbooDb,
+  recordSpend,
 } from '@clawboo/db'
 import type {
   Capabilities,
@@ -41,6 +42,8 @@ import { execGit } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { getDb, getDbPath, resetDb } from '../../db'
+import { engineHold } from '../../engineHold'
+import { runSlots } from '../../runSlots'
 import { startFolderRun } from '../../runtimes/teamFolderActivity'
 import { teamWorkdirPath } from '../../runtimes/teamWorkdir'
 import { teamVerifyCommandSettingKey } from '../../verification/teamVerifyCommand'
@@ -341,6 +344,59 @@ describe('team chat work check', () => {
     expect(critic?.ran).toBe(true)
     expect(critic?.outcome).toBe('reviewed')
     expect(critic?.reviewedSha).toMatch(/^[0-9a-f]{40}$/)
+  })
+
+  describe('a reviewer is a paid run', () => {
+    /** A task with a change large enough for a reviewer, ready to check. */
+    async function largeChange(): Promise<{ wc: ReturnType<typeof check>; id: string }> {
+      setCommand('true')
+      const wc = check()
+      const id = startTask()
+      await wc.begin(id, AGENT)
+      for (let i = 0; i < 6; i++)
+        await writeFile(path.join(folder, `f${i}.ts`), `export const v = ${i}\n`)
+      return { wc, id }
+    }
+
+    it('the team’s budget answers first, and a cap keeps it from starting', async () => {
+      const { wc, id } = await largeChange()
+      setBudgetLimit(db, { scope: 'team', scopeId: TEAM, limitUsdCents: 1, mode: 'cap' })
+      recordSpend(db, 'team', TEAM, 1000)
+      expect(await runCheck(wc, id)).toEqual({ verdict: 'pass' })
+      expect(reviewer.started).toHaveLength(0)
+      const critic = getTaskVerification(db, id)?.attempts[0]?.critic
+      expect(critic?.outcome).toBe('errored')
+      expect(critic?.findings[0]?.body).toContain('hard cap')
+    })
+
+    it('takes a run slot while it reads, so the cap and a drain both see it', async () => {
+      const { wc, id } = await largeChange()
+      let during = -1
+      const start = reviewer.start.bind(reviewer)
+      reviewer.start = async (t, o) => {
+        during = runSlots().stats().running
+        return start(t, o)
+      }
+      expect(await runCheck(wc, id)).toEqual({ verdict: 'pass' })
+      expect(reviewer.started).toHaveLength(1)
+      expect(during).toBe(1)
+      expect(runSlots().stats().running).toBe(0)
+    })
+
+    it('starts none while the engine is held', async () => {
+      const { wc, id } = await largeChange()
+      engineHold().place('test-hold')
+      try {
+        const pending = runCheck(wc, id)
+        await vi.waitFor(() => expect(runSlots().stats().queued).toBe(1))
+        expect(reviewer.started).toHaveLength(0)
+        engineHold().release('test-hold')
+        expect(await pending).toEqual({ verdict: 'pass' })
+        expect(reviewer.started).toHaveLength(1)
+      } finally {
+        engineHold().release('test-hold')
+      }
+    })
   })
 
   it('writes the audit row when what its reviewer cost crosses a budget', async () => {

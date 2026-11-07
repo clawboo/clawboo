@@ -11,6 +11,7 @@ import os from 'node:os'
 import path from 'node:path'
 
 import { createTask, getComments, getTask, listExecutions } from '@clawboo/db'
+import { seedSandboxTeam } from './seedTeam'
 import type {
   Capabilities,
   RunHandle,
@@ -106,6 +107,7 @@ describe('steerTaskRun on the executor path', () => {
     prevClawbooHome = process.env['CLAWBOO_HOME']
     process.env['HOME'] = home
     process.env['CLAWBOO_HOME'] = path.join(home, '.clawboo')
+    seedSandboxTeam(home)
   })
   afterEach(async () => {
     resetDb()

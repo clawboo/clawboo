@@ -4,7 +4,14 @@
 // the reload is the DEPLOYED native team (GET /api/agents → a clawboo-native
 // agent exists → decideOnboardingView returns 'native'), persisted in SQLite.
 
-import { test, expect, API_BASE, assertSandboxed, stubNativeHealthcheck } from './helpers/fixtures'
+import {
+  test,
+  expect,
+  API_BASE,
+  assertSandboxed,
+  DASHBOARD_HEADERS,
+  stubNativeHealthcheck,
+} from './helpers/fixtures'
 
 test.describe('Native onboarding — reload stays on the dashboard', () => {
   test('complete native onboarding → dashboard → reload → still dashboard (no wizard)', async ({
@@ -17,7 +24,10 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
     const teamsResp = await request.get(`${API_BASE}/api/teams`)
     if (teamsResp.ok()) {
       const data = (await teamsResp.json()) as { teams?: { id: string }[] }
-      for (const team of data.teams ?? []) await request.delete(`${API_BASE}/api/teams/${team.id}`)
+      for (const team of data.teams ?? [])
+        await request.delete(`${API_BASE}/api/teams/${team.id}`, {
+          headers: DASHBOARD_HEADERS,
+        })
     }
     const agentsResp = await request.get(`${API_BASE}/api/agents`)
     if (agentsResp.ok()) {
@@ -30,7 +40,9 @@ test.describe('Native onboarding — reload stays on the dashboard', () => {
           a.sourceId === 'clawboo-native' ||
           a.id.startsWith('native-')
         ) {
-          await request.delete(`${API_BASE}/api/agents/${a.id}`)
+          await request.delete(`${API_BASE}/api/agents/${a.id}`, {
+            headers: DASHBOARD_HEADERS,
+          })
         }
       }
     }

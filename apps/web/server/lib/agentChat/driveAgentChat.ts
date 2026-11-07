@@ -16,7 +16,17 @@
 
 import { mkdir } from 'node:fs/promises'
 
-import { agents, getSetting, recordSpend, setSetting, pauseFor, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  getSetting,
+  noteJobRun,
+  recordSpend,
+  setSetting,
+  pauseFor,
+  type BudgetRefusalReason,
+  type BudgetScope,
+  type ClawbooDb,
+} from '@clawboo/db'
 import {
   DEFAULT_RUN_SILENT_TIMEOUT_MS,
   resolveRuntimeIntegration,
@@ -139,6 +149,14 @@ const abortMap = new Map<string, { adapter: RuntimeAdapter; run: RunHandle }>()
  *  out of the queue too. */
 const queuedTurns = new Map<string, Set<AbortController>>()
 
+/** agentId → its 1:1 turns from the moment they are asked for until they end. */
+const turnsUnderWay = new Map<string, number>()
+
+/** Is a 1:1 turn running or waiting to, for this agent? */
+export function chatTurnUnderWay(agentId: string): boolean {
+  return turnsUnderWay.has(agentId)
+}
+
 /** Vault → spawned-run env (mirrors serverDeliver.buildApiKeyEnv). */
 function buildApiKeyEnv(runtime: string): Record<string, string> {
   const env: Record<string, string> = {}
@@ -231,6 +249,12 @@ export interface DriveAgentChatParams {
   /** This turn carries results a person has not read and goes out again by itself, so a
    *  held budget's note must not ask them to try again. */
   retriesWhileBudgetHeld?: boolean
+  /** This turn reads a team's results: that team and job are asked and charged as well. */
+  budgetScopes?: { teamId?: string | null; missionId?: string | null }
+  /** Nobody is waiting at the keyboard: it queues like any task, behind a person's turn. */
+  background?: boolean
+  /** A turn nobody asked for: these jobs count it, once its run has started. */
+  countJobs?: string[]
 }
 
 /** How a 1:1 turn ended. `reply` is the text it produced, for a turn that ended
@@ -264,9 +288,13 @@ export interface ChatTurnEnding {
  */
 export async function driveAgentChat(params: DriveAgentChatParams): Promise<void> {
   const ending: ChatTurnEnding = { how: 'failed', reply: '' }
+  turnsUnderWay.set(params.agentId, (turnsUnderWay.get(params.agentId) ?? 0) + 1)
   try {
     await driveTurn(params, ending)
   } finally {
+    const left = (turnsUnderWay.get(params.agentId) ?? 1) - 1
+    if (left > 0) turnsUnderWay.set(params.agentId, left)
+    else turnsUnderWay.delete(params.agentId)
     // However the turn ended, with its slot and its lock given back.
     try {
       if (ending.how !== 'finished' && pausedNow(params.db, params.agentId)) ending.paused = true
@@ -349,21 +377,47 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
     // The budget gate, as in team chat and the task runner: a paused hard cap on
     // the agent refuses the turn before it starts, and so does one whose remaining
     // room runs already going have set aside. Otherwise the turn holds its estimate
-    // on the budget until it ends. Only the agent's budget: it is the only one a
-    // 1:1 turn is charged to. Taken holding the lock, so a cap the turn ahead of
-    // this one paused is seen. A ledger read that fails lets the turn go, as a
-    // failed spend write does below.
-    const gate: RunBudgetGate = reserveRunBudget(db, { agentId }, { kind: 'chat', ref: sessionKey })
-    if (gate.blocked) {
-      if (gate.reason === 'held') ending.budgetHeld = true
-      if (!(gate.reason === 'held' && params.quietWhileBudgetHeld))
-        persist(budgetRefusalText(gate.scope, gate.reason, params.retriesWhileBudgetHeld), true)
+    // on the budget until it ends. The agent's budget, and the team and job whose
+    // results this turn reads, when it reads some: those are what it is charged to.
+    // Taken holding the lock, so a cap the turn ahead of this one paused is seen. A
+    // ledger read that fails lets the turn go, as a failed spend write does below.
+    const gate: RunBudgetGate = reserveRunBudget(
+      db,
+      { agentId, ...params.budgetScopes },
+      { kind: 'chat', ref: sessionKey },
+    )
+    const refuseForBudget = (scope: BudgetScope, reason: BudgetRefusalReason): void => {
+      if (reason === 'held') ending.budgetHeld = true
+      if (!(reason === 'held' && params.quietWhileBudgetHeld))
+        persist(budgetRefusalText(scope, reason, params.retriesWhileBudgetHeld), true)
       ending.how = 'refused'
+    }
+    if (gate.blocked) {
+      refuseForBudget(gate.scope, gate.reason)
       return
     }
     const turnHold = gate.hold
     hold = turnHold
     const holdId = turnHold.id
+    /** Charge what this turn cost. True when a hard cap has now paused it. */
+    const charge = (usd: number): boolean => {
+      const cents = usdToFractionalCents(usd)
+      const teamId = params.budgetScopes?.teamId ?? null
+      const missionId = params.budgetScopes?.missionId ?? null
+      const on = { runKind: 'chat', agentId, ...(teamId ? { teamId } : {}) } as const
+      let paused = false
+      for (const [scope, scopeId] of [
+        ['agent', agentId],
+        ['mission', missionId],
+        ['team', teamId],
+      ] as const) {
+        if (!scopeId) continue
+        const result = recordSpend(db, scope, scopeId, cents, { holdId })
+        auditBudgetCrossing(db, { ...on, scope, scopeId, result })
+        if (result?.status === 'paused' && result.mode === 'cap') paused = true
+      }
+      return paused
+    }
     if (homeDir) await mkdir(homeDir, { recursive: true, mode: 0o700 }).catch(() => undefined)
     // CONTINUATION, read while holding the lock: a message queued behind a running
     // turn must resume the session that turn just saved, not the one both turns saw
@@ -432,8 +486,7 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
     // got ready (its folder, its memory) refuses it now, before anything is spent.
     const finalGate = turnHold.recheck()
     if (finalGate.blocked) {
-      persist(budgetRefusalText(finalGate.scope, finalGate.reason), true)
-      ending.how = 'refused'
+      refuseForBudget(finalGate.scope, finalGate.reason)
       return
     }
 
@@ -453,6 +506,13 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
       return
     }
     abortMap.set(agentId, { adapter, run })
+    for (const job of params.countJobs ?? []) {
+      try {
+        noteJobRun(db, job)
+      } catch (err) {
+        log.error({ err, job }, 'counting a chat update toward its job failed')
+      }
+    }
     // It reads the pause itself, now that it is in the map: one placed while it was
     // starting saw nothing to stop, and one placed from here on finds it there.
     const pausedInStart = pauseFor(db, pauseSubject)
@@ -507,17 +567,7 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
         if (ev.kind === 'cost' && ev.costUsd != null && ev.costUsd > 0) {
           let paused = false
           try {
-            const r = recordSpend(db, 'agent', agentId, usdToFractionalCents(ev.costUsd), {
-              holdId,
-            })
-            auditBudgetCrossing(db, {
-              scope: 'agent',
-              scopeId: agentId,
-              result: r,
-              runKind: 'chat',
-              agentId,
-            })
-            paused = r?.status === 'paused' && r.mode === 'cap'
+            paused = charge(ev.costUsd)
           } catch {
             // A ledger failure must never end the run without its reply.
           }
@@ -663,16 +713,7 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
         inputChars,
         outputChars: (replyText || acc).length,
       })
-      if (cost.unbilledUsd > 0)
-        auditBudgetCrossing(db, {
-          scope: 'agent',
-          scopeId: agentId,
-          result: recordSpend(db, 'agent', agentId, usdToFractionalCents(cost.unbilledUsd), {
-            holdId,
-          }),
-          runKind: 'chat',
-          agentId,
-        })
+      if (cost.unbilledUsd > 0) charge(cost.unbilledUsd)
       recordRunTokens(db, {
         agentId,
         runtime,
@@ -760,7 +801,7 @@ async function driveTurn(params: DriveAgentChatParams, ending: ChatTurnEnding): 
     {
       key: lockKey,
       signal: queue.signal,
-      rank: PERSON_TURN,
+      rank: params.background ? { priority: 0 } : PERSON_TURN,
       paused: () => pauseFor(db, pauseSubject) !== null,
     },
   )
