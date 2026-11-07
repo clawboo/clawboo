@@ -26,6 +26,7 @@ vi.mock('@clawboo/team-orchestration', async (importOriginal) => {
   }
 })
 
+const { engineHoldState } = await import('../../../api/systemHold')
 const { getDb, resetDb } = await import('../../db')
 const { evictIdleOrchestrators, getTeamOrchestrator, hasTeamOrchestrator, resetTeamOrchestrators } =
   await import('../teamOrchestrator')
@@ -76,6 +77,15 @@ describe('eviction scan: a work check in flight', () => {
       else process.env[k] = v
     }
     await rm(home, { recursive: true, force: true })
+  })
+
+  it('counts as background work, so a drain waits for it', () => {
+    getTeamOrchestrator('T')
+    expect(engineHoldState().backgroundWork).toBe('none')
+    checks.inFlight = 1
+    expect(engineHoldState().backgroundWork).toBe('present')
+    checks.inFlight = 0
+    expect(engineHoldState().backgroundWork).toBe('none')
   })
 
   it('spares an instance checking work past the idle TTL, and unloads it once the check is over', () => {

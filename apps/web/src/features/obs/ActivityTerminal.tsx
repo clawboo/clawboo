@@ -14,6 +14,10 @@ import { useEffect, useMemo, useRef } from 'react'
 import { motion } from 'framer-motion'
 import { Terminal, ChevronRight } from 'lucide-react'
 
+import type { TaskWakeReason } from '@clawboo/board-core'
+
+import { RUN_WORD, statusLabel } from '@/features/board/boardStatus'
+import { pendingWakeText } from '@/features/board/pendingWake'
 import { useFleetStore } from '@/stores/fleet'
 import { EmptyState } from '@/features/shared/EmptyState'
 import { Skeleton } from '@/features/shared/Skeleton'
@@ -44,8 +48,24 @@ function asStr(v: unknown): string {
   }
 }
 
-/** Map a log event to its terminal row, or null when it is trace bookkeeping. */
-export function presentEvent(e: ObsLogEvent): ActivityRow | null {
+/** What started a wake, as a person says it. */
+const WAKE_WORD: Record<TaskWakeReason, string> = {
+  person_comment: 'A person commented',
+  agent_comment: 'A teammate commented',
+  dependency_done: 'The task it waits on is done',
+  subtasks_closed: 'Its sub-tasks closed',
+  question_answered: 'A question was answered',
+  reopened: 'It was reopened',
+}
+
+const wakeWord = (reason: string): string => WAKE_WORD[reason as TaskWakeReason] ?? reason
+
+/** Map a log event to its terminal row, or null when it is trace bookkeeping. `nameOf`
+ *  turns an agent's id into what the viewer calls it. */
+export function presentEvent(
+  e: ObsLogEvent,
+  nameOf: (id: string | null) => string = (id) => id ?? '',
+): ActivityRow | null {
   const d = e.data
   switch (e.kind) {
     case 'span_start':
@@ -100,17 +120,31 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
       }
     }
     case 'task_wake_recorded':
-      return { tone: 'idle', badge: 'wake', body: asStr(d['reason']) }
-    case 'task_wake_skipped':
+      return { tone: 'idle', badge: 'wake', body: wakeWord(asStr(d['reason'])) }
+    case 'task_wake_skipped': {
       // Why a wake did not start a run: the row an operator looks for.
+      const skip = asStr(d['reason'])
+      const wakeReason = asStr(d['wakeReason'])
       return {
-        tone: asStr(d['reason']) === 'finished' ? 'idle' : 'warning',
+        tone: skip === 'finished' ? 'idle' : 'warning',
         badge: 'wake',
-        label: asStr(d['wakeReason']),
-        body: `waiting: ${asStr(d['reason'])}`,
+        label: wakeWord(wakeReason),
+        body:
+          skip === 'finished'
+            ? 'The task had already finished'
+            : pendingWakeText(
+                { reason: wakeReason, skipReason: skip, comments: 1, held: false },
+                nameOf(e.agentId) || 'The agent',
+              ),
       }
+    }
     case 'task_wake_given_up':
-      return { tone: 'error', badge: 'wake', label: asStr(d['wakeReason']), body: 'given up' }
+      return {
+        tone: 'error',
+        badge: 'wake',
+        label: wakeWord(asStr(d['wakeReason'])),
+        body: 'Given up',
+      }
     case 'task_braked':
       return {
         tone: 'warning',
@@ -122,9 +156,19 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
     case 'execution_completed': {
       const s = asStr(d['status'])
       const tone: StatusTone = s === 'succeeded' ? 'done' : s === 'failed' ? 'error' : 'warning'
-      return { tone, badge: 'run', label: s, body: asStr(d['error']) }
+      return { tone, badge: 'run', label: RUN_WORD[s] ?? s, body: asStr(d['error']) }
     }
     case 'status_changed': {
+      // A report and a plan move nothing, so the status would only repeat itself.
+      const why = asStr(d['reason'])
+      if (why === 'result_reported')
+        return {
+          tone: 'idle',
+          badge: 'report',
+          body: d['outcome'] === 'not_done' ? 'Not done' : 'Done',
+        }
+      if (why === 'plan_written')
+        return { tone: 'idle', badge: 'plan', body: `Revision ${asStr(d['revision'])}` }
       const to = asStr(d['to'] ?? d['status'])
       const tone: StatusTone =
         to === 'done'
@@ -134,12 +178,12 @@ export function presentEvent(e: ObsLogEvent): ActivityRow | null {
             : to === 'in_progress'
               ? 'working'
               : 'idle'
-      return { tone, badge: 'status', body: to }
+      return { tone, badge: 'status', body: statusLabel(to) }
     }
     case 'task_created':
       return { tone: 'idle', badge: 'task', body: asStr(d['title']) }
     case 'task_claimed':
-      return { tone: 'working', badge: 'claim', body: asStr(d['assigneeAgentId']) }
+      return { tone: 'working', badge: 'claim', body: nameOf(asStr(d['assigneeAgentId'])) }
     case 'comment_added':
       return { tone: 'idle', badge: 'note', body: asStr(d['body'] ?? d['summary']) }
     case 'cost': {
@@ -213,8 +257,8 @@ export function ActivityTerminal({
   const showAgent = !scope.agentId
 
   const rows = useMemo(
-    () => events.map((e) => ({ e, view: presentEvent(e) })).filter((r) => r.view != null),
-    [events],
+    () => events.map((e) => ({ e, view: presentEvent(e, nameOf) })).filter((r) => r.view != null),
+    [events, nameOf],
   )
   const empty = !loading && rows.length === 0
 

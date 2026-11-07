@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { listGovernanceAudit, recordSpend, setBudgetLimit } from '@clawboo/db'
+import { getBudget, listGovernanceAudit, recordSpend, setBudgetLimit } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -97,9 +97,12 @@ describe('POST /api/governance/budgets', () => {
     })
   })
 
-  it('says when the request came from a caller the person check did not let through', () => {
-    budgetsSetPOST(req({ scope: 'team', scopeId: 'T', limitUsdCents: 500 }, {}, {}), mockRes().res)
-    expect(rows()[0]?.summary['actor']).toEqual({ kind: 'caller' })
+  it('refuses a caller the person check does not let through, and writes nothing', () => {
+    const r = mockRes()
+    budgetsSetPOST(req({ scope: 'team', scopeId: 'T', limitUsdCents: 500 }, {}, {}), r.res)
+    expect(r.code()).toBe(403)
+    expect(rows()).toEqual([])
+    expect(getBudget(getDb(), 'team', 'T')).toBeNull()
   })
 
   it('records nothing for a body it refused', () => {

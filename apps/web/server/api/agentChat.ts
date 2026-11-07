@@ -22,10 +22,11 @@ import {
   stopChatTurn,
 } from '../lib/agentChat/chatHandOffs'
 import { agentChatSessionKey, isServerChatAgent } from '../lib/agentChat/driveAgentChat'
-import { actingPerson, actsAsPerson, personOf } from '../lib/auth'
+import { actingPerson, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { getAgentStatusSnapshot, subscribeAgentStatus } from '../lib/teamChat/agentStatusBus'
+import { TEAM_ACTIVITY_OPENER } from '../lib/teamChat/teamActivitySummary'
 import { subscribeChatDelta } from '../lib/teamChat/chatDeltaBus'
 
 const STREAM_POLL_MS = 750
@@ -40,6 +41,7 @@ function persistUserEntry(
   text: string,
   entryId: string,
   person: PersonRef | null,
+  byPerson: boolean,
 ): void {
   const now = Date.now()
   try {
@@ -63,6 +65,8 @@ function persistUserEntry(
           fingerprint: entryId,
           // Who sent it, when a sign-in proxy vouched for them.
           ...(person ? { person } : {}),
+          // It failed the person check, so it must not read as a live "You".
+          ...(byPerson ? {} : { fromCaller: true }),
         }),
       })
       .onConflictDoNothing()
@@ -100,7 +104,15 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'agent does not chat through the server' })
       return
     }
-    persistUserEntry(db, agentChatSessionKey(db, agentId), displayText, entryId, personOf(req))
+    const byPerson = actsAsPerson(req)
+    persistUserEntry(
+      db,
+      agentChatSessionKey(db, agentId),
+      displayText,
+      entryId,
+      personOf(req),
+      byPerson,
+    )
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Detached (the 202 returns now): the reply streams via the SSE + is persisted
     // server-side. Not aborted on client disconnect (a slow reply survives).
@@ -115,7 +127,13 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
       // The message's own id: what it hands out goes under one main task per team, across
       // a retry of this request too.
       messageId: entryId,
-      requestedBy: actsAsPerson(req) ? actingPerson(req) : null,
+      requestedBy: byPerson ? actingPerson(req) : null,
+      // A caller that failed the person check keeps its chat and can start no work from
+      // it. A person's message that carries what a team has been doing runs under the
+      // fence, since those words are not theirs (see chatHandOffs).
+      ...(byPerson
+        ? { carriesTeamActivity: message.includes(TEAM_ACTIVITY_OPENER) }
+        : { readingResultsFrom: [] }),
     })
     res.status(202).json({ ok: true })
   } catch (err) {
@@ -125,6 +143,8 @@ export function agentChatIngestPOST(req: Request, res: Response): void {
 
 // POST /api/agents/:agentId/chat/stop
 export async function agentChatStopPOST(req: Request, res: Response): Promise<void> {
+  // A person's request only: what it leaves behind holds results until their next message.
+  if (refuseUnlessPerson(req, res)) return
   const agentId = req.params['agentId'] as string | undefined
   if (!agentId) {
     res.status(400).json({ error: 'agentId required' })

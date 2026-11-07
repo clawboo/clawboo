@@ -216,6 +216,7 @@ describe('board: a person commenting on a task', () => {
     const rows = listUndeliveredInbox(db, 'runner-agent', { teamId: TEAM })
     expect(rows.map((r) => r.taskId)).toEqual([task.id])
     expect(rows[0]?.body).toContain('Use the new logo.')
+    expect(rows[0]?.source).toBe('person')
     // It reads that at its next run: no wake is left to start a second one.
     expect(listWaitingTaskWakes(db)).toEqual([])
   })
@@ -330,6 +331,24 @@ describe('board: a person commenting on a task', () => {
       ((await comment(taskId, 'Done step 1', 'agent')).body() as { forwarded: boolean }).forwarded,
     ).toBe(false)
     expect(listUndeliveredInbox(db, 'coder', { teamId: TEAM })).toHaveLength(0)
+  })
+
+  it('takes no author id from a caller nothing vouches for', async () => {
+    const taskId = runningTask()
+    const r = mockRes()
+    await boardCommentPOST(
+      {
+        params: { taskId },
+        body: { body: 'Ship it.', authorType: 'agent', authorAgentId: 'coder' },
+        headers: {},
+      } as unknown as Request,
+      r.res,
+    )
+    expect(r.statusCode()).toBe(200)
+    expect(getComments(getDb(), taskId).at(-1)).toMatchObject({
+      body: 'Ship it.',
+      authorAgentId: null,
+    })
   })
 
   it('records a person comment from outside the dashboard as an agent comment', async () => {

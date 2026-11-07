@@ -140,6 +140,9 @@ export function createNativeDriver(
               },
               // The same team-run test as the `delegate` tool below.
               teamRun: isTeamSessionKey(opts.sessionKey),
+              ...(ctx.memoryScope?.chatRun
+                ? { chatRun: true, chatRunTeamId: ctx.memoryScope.chatRunTeamId ?? null }
+                : {}),
               ...(ctx.memoryScope?.boundTaskId ? { boundTaskId: ctx.memoryScope.boundTaskId } : {}),
               ...(ctx.memoryScope?.boundExecutionId
                 ? { boundExecutionId: ctx.memoryScope.boundExecutionId }

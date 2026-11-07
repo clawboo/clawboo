@@ -14,6 +14,8 @@ export function replyHint(
   agentName: string | null,
   paused = false,
   request = false,
+  /** The card only holds a plan, which has its own way to answer. */
+  planHolder = false,
 ): string {
   if (request)
     return status === 'done' || status === 'cancelled'
@@ -25,6 +27,8 @@ export function replyHint(
     return 'This task is finished. Reopen it, or send your reply as a follow-up task.'
   if (!agentName) return 'No agent has this task. Your reply is saved on it.'
   if (paused) return `This is paused. ${agentName} starts on your reply after the resume.`
+  if (planHolder)
+    return `This card only holds a plan. A reply closes the plan and starts ${agentName} on the card. Use Accept or Turn down to answer it.`
   if (status === 'in_progress') return `${agentName} gets this in the current run.`
   if (status === 'blocked' || status === 'todo') return `Sending starts ${agentName} on this again.`
   if (status === 'in_review') return `${agentName} reads this after the check.`
@@ -37,6 +41,7 @@ export function TaskReplyBox({
   agentName,
   paused = false,
   request,
+  planHolder,
   onSent,
 }: {
   taskId: string
@@ -47,6 +52,8 @@ export function TaskReplyBox({
   agentName: string | null
   /** It is a person's main task: the words go to the agent looking after it. */
   request?: boolean
+  /** The card only holds a plan. */
+  planHolder?: boolean
   onSent: (sent: { commentId: string | null; delivery: ReplyDelivery | null; body: string }) => void
 }) {
   const [draft, setDraft] = useState('')
@@ -93,7 +100,7 @@ export function TaskReplyBox({
         />
         <div className="flex items-center gap-2 px-2 pb-2">
           <span className="min-w-0 flex-1 px-1 text-xs text-muted-foreground">
-            {replyHint(status, agentName, paused, request)}
+            {replyHint(status, agentName, paused, request, planHolder)}
           </span>
           <Button type="submit" size="sm" variant="primary" disabled={!draft.trim() || sending}>
             Send

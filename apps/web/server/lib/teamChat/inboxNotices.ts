@@ -3,7 +3,7 @@
 // (executorRunner → subscribers → teamOrchestrator → serverDeliver →
 // executorRunner). Imports only @clawboo/db and @clawboo/board-core.
 
-import { isHumanAssignment, parseWaitingOn, waitsOnOtherWork } from '@clawboo/board-core'
+import { isHumanAssignment, oneLine, parseWaitingOn, waitsOnOtherWork } from '@clawboo/board-core'
 import { enqueueInbox, getTask, teams, type ClawbooDb } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq } from 'drizzle-orm'
@@ -89,7 +89,7 @@ export function notifyBlockedByAgent(
       ? `Its whole reply is on the task. It said: ${reply.slice(0, NOTICE_REPLY_MAX_CHARS)}`
       : 'It did not say why.'
     const task = getTask(db, taskId)
-    const title = task?.title ?? taskId
+    const title = oneLine(task?.title ?? taskId)
     // Waiting on other work, the board moves it on: telling a delegator it needs a
     // person would have them redo it while it queues itself again.
     const state = waitsOnOtherWork(parseWaitingOn(task?.waitingOn))
@@ -100,6 +100,8 @@ export function notifyBlockedByAgent(
       teamId,
       kind: 'task_update',
       taskId,
+      // Its reply is the agent's words.
+      source: agentId,
       body: `“${title}” ${state} ${why}`,
     })
   } catch (err) {
@@ -118,7 +120,7 @@ export function notifyCheckInterrupted(db: ClawbooDb, taskId: string, teamId: st
       teamId,
       kind: 'alert',
       taskId,
-      body: `The check on “${getTask(db, taskId)?.title ?? taskId}” did not finish, so the task waits for a person.`,
+      body: `The check on “${oneLine(getTask(db, taskId)?.title ?? taskId)}” did not finish, so the task waits for a person.`,
     })
   } catch (err) {
     log.error({ err, taskId }, 'check-interrupted notice failed')

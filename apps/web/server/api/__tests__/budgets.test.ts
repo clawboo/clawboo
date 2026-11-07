@@ -30,8 +30,9 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   } as unknown as Response
   return { res, statusCode: () => code, body: () => payload }
 }
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({ params: {}, query: {}, body: {}, headers: DASHBOARD, ...over }) as unknown as Request
 
 describe('governance REST', () => {
   let home: string

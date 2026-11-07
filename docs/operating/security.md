@@ -212,7 +212,7 @@ Any other caller, such as `curl`, a script or an agent's command, does not get t
 | Answering an approval                      | `403` `person_only`, on `POST /api/tools/approvals/:id/resolve`, `POST /api/capabilities/approve` and `POST /api/approvals`                              |
 | A team's work check                        | `403` `person_only` on `PUT /api/team-verify-command/:teamId`                                                                                            |
 | Moving a card (`PATCH /api/board/:taskId`) | The move happens, as an agent's own move does: it stops no run, cannot undo a person's move, cannot use `humanOverride`, and is not recorded as a person |
-| A comment                                  | Saved as an `agent` comment, whatever `authorType` it named, and delivered to no run                                                                     |
+| A comment                                  | Saved as an `agent` comment, whatever `authorType` it named, with no `authorAgentId`, and delivered to no run                                            |
 
 These writes take the same check and answer the same `403`:
 
@@ -224,16 +224,25 @@ These writes take the same check and answer the same `403`:
 - Marking a task or the inbox read.
 - Pausing and resuming an agent, a team or a task tree: `POST /api/pauses` and `DELETE /api/pauses/:kind/:id`.
 - Completing a worktree: `PATCH /api/board/:taskId/workspace` with `{"action":"complete"}`, which moves the card and, on an empty diff, can pass a failing check. `pause` moves no card and stays open.
+- A team's rules (`PUT /api/team-rules/:teamId`) and what you tell a team about yourself (`PATCH /api/teams/:id/onboarding`). A team's agents read both as yours on every turn. Each change goes in the audit log.
+- Which agent is Boo Zero: `POST /api/boo-zero/override`, also audited.
+- Archiving or restoring a team, or changing who leads it: `PATCH /api/teams/:id` when it changes `isArchived` or `leaderAgentId`. A change of lead also goes in the audit log.
+- Pressing Stop: `POST /api/teams/:id/chat/stop` and `POST /api/agents/:agentId/chat/stop`.
+- Budgets: `POST /api/governance/budgets` and `POST /api/governance/budgets/:scope/:scopeId/resume`.
+- Routines and OpenClaw's cron jobs: `POST /api/schedules`, `PATCH` and `DELETE /api/schedules/:id`, and `POST /api/schedules/:id/run`. Setting the time zone (`PUT /api/schedules/time-zone`) stays open.
+- A task's brief: `PATCH /api/board/:taskId` when it changes `title` or `description`. The next run follows them.
 
-And `POST /api/board/:taskId/executions` answers `409 person_moved` while a person's move stands, because a new run is what ends one.
+`POST /api/board/:taskId/executions` answers `409 person_moved` while a person's move stands, because a new run is what ends one. `POST /api/runtimes/:id/run` does too, and also answers `409` with the reason when the board would not start the task by itself, such as `stopped` after a Stop. With the check, it runs anyway.
 
-Two things a person can set are quietly limited rather than refused. A priority of Urgent stops at High without the check, on a new task, on a move and in a routine's task template. And `POST /api/board` records who asked for a task (`requested_by`) only with the check. No request body can name the person who asked or the person a task is for: the fields are not read, and the person comes from the check.
+The chat message routes stay open, without a person's authority, so a script can still talk to an agent. A message through `POST /api/teams/:id/chat` or `POST /api/agents/:agentId/chat` without the check reads `Local API call` in the chat rather than `You`, and records no one as asking. To a team, it leaves the failure breaker as it is, and the lead can still hand work out. To Boo Zero in its one-to-one chat, it starts no work, does not end the hold a Stop left, and does not read results waiting for you.
+
+Two things a person can set are quietly limited rather than refused. A priority of Urgent stops at High without the check, on a new task and on a move. And `POST /api/board` records who asked for a task (`requested_by`) only with the check. No request body can name the person who asked or the person a task is for: the fields are not read, and the person comes from the check.
 
 A script you run yourself can say it acts for you by sending the two `Sec-Fetch-` headers above.
 
 ### Plain http to another machine
 
-Browsers send `Sec-Fetch-` headers only to a secure address: localhost, or `https`. A dashboard opened at, say, `http://192.168.1.20:18789` sends none, and the check would refuse its own page. So for a request over plain `http` to an address that is not loopback, and only when it carries no fetch metadata at all, an `Origin` header that names the same host and port as the `Host` header counts as the page's.
+Browsers send `Sec-Fetch-` headers only to a secure address: localhost, or `https`. A dashboard opened at, say, `http://192.168.1.20:18790` sends none, and the check would refuse its own page. So for a request over plain `http` to an address that is not loopback, and only when it carries no fetch metadata at all, an `Origin` header that names the same host and port as the `Host` header counts as the page's.
 
 What that means in practice:
 
@@ -245,7 +254,7 @@ The check sits on Clawboo's REST routes. A dashboard tab with its own Gateway co
 
 <Warning>
 
-On your own computer this is a speed bump, not a security boundary. Agents run as your user account, so an agent can send the same headers, read `~/.clawboo/access-token`, or change Clawboo's database directly. The check stops a confused or prompt-injected agent from passing for you by accident or by setting one field. Behind a sign-in proxy in `required` mode, every API request has to name a verified person, so an agent that holds the access token still cannot use these routes. An agent running as the same user as Clawboo can still change the database directly, for example to answer an approval, until agent mode keeps it out.
+On your own computer this is a speed bump, not a security boundary. Agents run as your user account, so an agent can send the same headers, read `~/.clawboo/access-token`, or change Clawboo's database directly. The check stops a confused or prompt-injected agent from passing for you by accident or by setting one field. Behind a sign-in proxy in `required` mode, every API request has to name a verified person, so an agent that holds the access token still cannot use these routes. An agent running as the same user as Clawboo can still change the database directly, for example to answer an approval. Nothing keeps it out today.
 
 </Warning>
 

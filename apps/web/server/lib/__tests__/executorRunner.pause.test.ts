@@ -13,8 +13,10 @@ import {
   getComments,
   getTask,
   liftPause,
+  getTaskVerification,
   listExecutions,
   placePause,
+  setTaskVerification,
 } from '@clawboo/db'
 import type {
   Capabilities,
@@ -166,6 +168,49 @@ describe('a pause on the task runner', () => {
     await until(() => second.state.finish !== null)
     second.state.finish!()
     expect((await waiting).ok).toBe(true)
+  })
+
+  it('keeps what the task’s check found: its fix rounds do not start over on resume', async () => {
+    const { adapter, state } = heldAdapter()
+    const task = newTask('running')
+    const going = run(task, adapter, 'a1')
+    await until(() => state.finish !== null)
+    setTaskVerification(getDb(), task, {
+      status: 'fail',
+      attempts: [
+        {
+          attempt: 1,
+          at: Date.now(),
+          deterministic: {
+            command: 'test',
+            exitCode: 1,
+            passed: false,
+            stdoutTail: '',
+            stderrTail: 'it failed',
+            durationMs: 1,
+            timedOut: false,
+          },
+          critic: {
+            ran: false,
+            findings: [],
+            reviewerRuntime: null,
+            reviewerModel: null,
+            reviewedSha: null,
+          },
+          status: 'fail',
+          structuredError: null,
+        },
+      ],
+      debtNotes: [],
+      updatedAt: Date.now(),
+    })
+    placePause(getDb(), { kind: 'agent', id: 'a1' })
+
+    expect(stopPausedTaskRuns(({ agentId }) => agentId === 'a1', NOTE)).toEqual([task])
+    await going
+
+    expect(getTask(getDb(), task)!.status).toBe('todo')
+    expect(getTaskVerification(getDb(), task)?.attempts).toHaveLength(1)
   })
 
   it('stops a run going, back in To do, with a ledger row that fires again on resume', async () => {

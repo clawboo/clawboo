@@ -9,8 +9,11 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { Request, Response } from 'express'
 
 import { envVarForProvider } from '@clawboo/adapter-native'
+import { autoFireRefusal } from '@clawboo/board-core'
+import { getTask, listExecutions, personMovedSinceLastRun } from '@clawboo/db'
 import { breakerConfigSchema } from '@clawboo/governance'
 
+import { actsAsPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -47,6 +50,7 @@ import {
   parseOllamaTags,
 } from '../lib/runtimes/native/ollamaModels'
 import { adapterFactoryFor, enabledRuntimeIds } from '../lib/runtimes'
+import { startRefusal } from '../lib/teamChat/roomRoster'
 import {
   deriveConnectionState,
   disconnectPlanFor,
@@ -977,6 +981,33 @@ export async function runtimesRunPOST(req: Request, res: Response): Promise<void
   if (!/^[A-Za-z0-9_-]+$/.test(assigneeAgentId)) {
     res.status(400).json({ error: 'invalid assigneeAgentId' })
     return
+  }
+  // A run started here is a person's Retry in all but name, so without a person's
+  // authority it answers to what the automatic pump answers to: a person's move stands
+  // (a new run is what ends one), and so does a Stop, a park or a wait. The runner's own
+  // reruns start from the board and the dispatch pump, not from this route.
+  if (!actsAsPerson(req)) {
+    const db = getDb()
+    const task = getTask(db, taskId)
+    if (task) {
+      const refusal = personMovedSinceLastRun(db, task)
+        ? 'person_moved'
+        : autoFireRefusal(listExecutions(db, taskId))
+      if (refusal) {
+        res.status(409).json({ ok: false, reason: refusal })
+        return
+      }
+    }
+  }
+  // A task whose team is gone has nowhere to run: starting it would bring the team's
+  // folder back. That holds for a person too, since there is no team to run it for.
+  {
+    const db = getDb()
+    const task = getTask(db, taskId)
+    if (task && startRefusal(db, task, true) === 'no_team') {
+      res.status(409).json({ ok: false, reason: 'no_team' })
+      return
+    }
   }
   // The runtime's MCP client attaches to THIS server's /api/mcp/* endpoints —
   // a server-trusted loopback URL, never the client-supplied Host header.

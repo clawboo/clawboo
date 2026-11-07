@@ -26,6 +26,9 @@ import { compactToolResultMarkdown } from '@clawboo/compaction'
 import {
   enqueueInbox,
   getActiveRoom,
+  isTeamArchived,
+  listRoomIdsForTeam,
+  teamExists,
   getTask,
   listHeldReportUps,
   listPendingReportUps,
@@ -116,6 +119,9 @@ export interface EnqueueUserMessageInput {
   routine?: { id: string; name: string }
   /** The person who sent it, when a sign-in proxy vouched for them. */
   person?: PersonRef | null
+  /** It failed the person check: a script, an agent's command. It runs, but no person
+   *  asked for it, so its bubble says so and what it hands out names no one. */
+  notFromPerson?: boolean
 }
 
 /** What became of an ingested message. `ok` means the target's turn started, or
@@ -205,6 +211,8 @@ interface Instance {
   isQuiescent(): boolean
   /** A run is going, waiting for a slot, or bound to its task on this session. */
   ownsSession(sessionKey: string): boolean
+  /** Tasks whose finished work this engine is checking, or holding for a check. */
+  checksInFlight(): number
   dispose(): void
 }
 
@@ -452,11 +460,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // Failed-delegation runs are ABORTED, not just board-failed: the watchdog /
     // session-close path kills the live process so a failed task never leaves a
     // zombie run behind it.
-    abortSession: (sk) => {
-      const e = abortMap.get(sk)
-      if (e) void e.adapter.abort(e.run).catch(() => undefined)
-      else queuedRuns.get(sk)?.cancel()
-    },
+    abortSession: (sk, taskId) => abortTaskRun({ abortMap, queuedRuns }, sk, taskId),
     // Risky-delegation approval gate (parity with the retired browser binding): a
     // destructive/secret-touching delegation is surfaced on the leader's approval
     // queue (the DB-mediated `tool_call_approvals` handshake) before it runs; on
@@ -501,7 +505,8 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
   // consumers), so a restart / team re-open resumes a stalled cascade.
   const ready = ensureNativeBooZero(db, getRegistry().nativeSource)
     .catch((err: unknown) => log.error({ err, teamId }, 'team-orchestrator ensure Boo Zero failed'))
-    .then(() => engine.resume())
+    // An engine some path built for a team that was deleted runs nothing it left behind.
+    .then(() => (teamExists(db, teamId) ? engine.resume() : undefined))
     .catch((err: unknown) => log.error({ err, teamId }, 'team-orchestrator resume failed'))
 
   // Idle watchdog: fail a delegate gone silent past the engine's
@@ -555,7 +560,10 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
           }
         : {
             kind: 'human',
-            request: { words: stimulus, requestedBy: input.person ?? { ...LOCAL_PERSON } },
+            request: {
+              words: stimulus,
+              requestedBy: input.notFromPerson ? null : (input.person ?? { ...LOCAL_PERSON }),
+            },
           }
       // Persist the user message under the target's team key (observability seed).
       persistTeamChatEntry(db, {
@@ -576,6 +584,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
               },
             }
           : {}),
+        ...(input.notFromPerson ? { fromCaller: true } : {}),
       })
       // Run the target's turn through the SAME deliver primitive: it streams the
       // agent's events into the engine, which reacts to any `<delegate>`/`<plan>`.
@@ -678,7 +687,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     },
     async pump(): Promise<void> {
       await ready // never race the Boo-Zero bootstrap / initial resume
-      await engine.resume()
+      if (teamExists(db, teamId)) await engine.resume()
     },
     detachTask(taskId: string): boolean {
       return engine.detachTask(taskId)
@@ -803,6 +812,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // ended, so the engine counts those itself.
     taskForSession: (sk) => engine.taskForSession(sk),
     isQuiescent: () => abortMap.size === 0 && engine.checksInFlight() === 0,
+    checksInFlight: () => engine.checksInFlight(),
     ownsSession: (sk) =>
       abortMap.has(sk) ||
       queuedRuns.has(sk) ||
@@ -870,6 +880,33 @@ export function teamMessageTarget(
     resolveLeaderId(db, teamId, roomId) ??
     roster[0]!.id
   )
+}
+
+/** Work checks under way or holding across every engine. No run slot covers them, and
+ *  what a check is about to do (a reviewer, a verdict) dies with this process. */
+export function teamChecksInFlight(): number {
+  let checks = 0
+  for (const inst of instances.values()) checks += inst.checksInFlight()
+  return checks
+}
+
+/**
+ * Abort a task's own run, when a task fails or a person takes it back. The session may be
+ * on something else by then: a person's message, or a routine's turn. Those are not the
+ * task's to stop, whether running or waiting for a slot.
+ */
+export function abortTaskRun(
+  host: { abortMap: Map<string, RunEntry>; queuedRuns: Map<string, QueuedRun> },
+  sessionKey: string,
+  taskId: string,
+): void {
+  const running = host.abortMap.get(sessionKey)
+  if (running) {
+    if (running.taskId === taskId) void running.adapter.abort(running.run).catch(() => undefined)
+    return
+  }
+  const queued = host.queuedRuns.get(sessionKey)
+  if (queued?.taskId === taskId) queued.cancel()
 }
 
 /** True when a resident engine has work going on this session, so nothing else may
@@ -958,7 +995,7 @@ export function hasTaskOrchestrator(teamId: string, taskId: string, db?: Clawboo
  *  Resolves once the Stop is written. The teardown forgets every task the engine
  *  was tracking, so it waits for the Stop: a teardown before the Stop lands leaves
  *  all but the first running task In progress, with an execution nothing closes. */
-export async function retireRoomOrchestrator(teamId: string, roomId: string): Promise<void> {
+export async function retireRoomOrchestrator(teamId: string, roomId: string | null): Promise<void> {
   const key = orchestratorKey(teamId, roomId)
   const inst = instances.get(key)
   if (inst) {
@@ -990,6 +1027,16 @@ export async function retireRoomOrchestrator(teamId: string, roomId: string): Pr
   }
 }
 
+/** A team is being deleted: every engine it has stops and goes, its own chat's and each
+ *  room's, as `retireRoomOrchestrator` does for one. Resolves once their Stops are
+ *  written, so nothing is running when the team's row and folder go. */
+export async function retireTeamOrchestrators(teamId: string): Promise<void> {
+  const rooms = new Set<string | null>([null, ...listRoomIdsForTeam(getDb(), teamId)])
+  for (const inst of instances.values())
+    if (inst.orchestrator.teamId === teamId) rooms.add(inst.orchestrator.roomId)
+  await Promise.all([...rooms].map((roomId) => retireRoomOrchestrator(teamId, roomId)))
+}
+
 /** True when `roomId` is one of the team's active rooms (null = the default room,
  *  always valid). */
 export function isActiveTeamRoom(teamId: string, roomId: string | null): boolean {
@@ -999,6 +1046,12 @@ export function isActiveTeamRoom(teamId: string, roomId: string | null): boolean
   } catch {
     return false
   }
+}
+
+/** May the dispatch pump build or wake this room's engine? Not one of a team that was
+ *  deleted or archived, or of a room that is no longer active, whatever it left behind. */
+export function roomCanRun(db: ClawbooDb, teamId: string, roomId: string | null): boolean {
+  return teamExists(db, teamId) && !isTeamArchived(db, teamId) && isActiveTeamRoom(teamId, roomId)
 }
 
 /** What a stopped run says: a task run comes back by itself, a turn with no task does not. */

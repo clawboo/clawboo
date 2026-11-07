@@ -196,10 +196,10 @@ describe('plans on the board', () => {
       expect(m.statusCode()).toBe(404)
     })
 
-    it('goes when its team goes', () => {
+    it('goes when its team goes', async () => {
       put({ on: true })
       const m = mockRes()
-      teamsDELETE(req({ params: { id: TEAM } }), m.res)
+      await teamsDELETE(req({ params: { id: TEAM } }), m.res)
       const db = getDb()
       expect(
         db

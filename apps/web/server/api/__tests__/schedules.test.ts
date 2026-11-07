@@ -47,8 +47,9 @@ function mockRes(): { res: Response; status: () => number; body: () => unknown }
   } as unknown as Response
   return { res, status: () => code, body: () => payload }
 }
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, ...over }) as unknown as Request
+  ({ params: {}, query: {}, body: {}, headers: DASHBOARD, ...over }) as unknown as Request
 
 const CREATE_BODY = {
   source: 'clawboo-routine',
@@ -147,16 +148,15 @@ describe('schedules REST (gateway disconnected)', () => {
   })
 
   describe('a routine that files Urgent tasks', () => {
-    const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
     const urgent = { ...CREATE_BODY, taskTemplate: { title: 'Daily report', priority: 2 } }
     const storedPriority = (): number =>
       (JSON.parse(listScheduledRuns(getDb())[0]!.taskTemplate) as { priority: number }).priority
 
-    it('keeps Urgent from the dashboard, and stops anything else at High, on create', async () => {
+    it('refuses anything but a person on create, and files nothing', async () => {
       const other = mockRes()
       await schedulesCreatePOST(req({ body: urgent, headers: {} }), other.res)
-      expect(other.status()).toBe(201)
-      expect(storedPriority()).toBe(1)
+      expect(other.status()).toBe(403)
+      expect(listScheduledRuns(getDb())).toEqual([])
     })
 
     it('keeps Urgent from the dashboard on create', async () => {
@@ -179,11 +179,14 @@ describe('schedules REST (gateway disconnected)', () => {
     it('holds a change to Urgent to the same rule', async () => {
       const made = mockRes()
       await schedulesCreatePOST(req({ body: CREATE_BODY, headers: DASHBOARD }), made.res)
+      const before = storedPriority()
       const id = (made.body() as { schedule: { id: string } }).schedule.id
       const params = { id } as never
       const patch = { patch: { taskTemplate: { title: 'Daily report', priority: 2 } } }
-      await schedulesUpdatePATCH(req({ params, body: patch, headers: {} }), mockRes().res)
-      expect(storedPriority()).toBe(1)
+      const refused = mockRes()
+      await schedulesUpdatePATCH(req({ params, body: patch, headers: {} }), refused.res)
+      expect(refused.status()).toBe(403)
+      expect(storedPriority()).toBe(before)
       await schedulesUpdatePATCH(req({ params, body: patch, headers: DASHBOARD }), mockRes().res)
       expect(storedPriority()).toBe(2)
     })

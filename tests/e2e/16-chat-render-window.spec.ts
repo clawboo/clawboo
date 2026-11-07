@@ -16,7 +16,7 @@
 // Runs last in file order and wipes teams on entry, so it cannot disturb the
 // specs that share this suite's single server and SQLite file.
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, DASHBOARD_HEADERS } from './helpers/fixtures'
 
 const TOTAL = 320 // > RENDER_WINDOW_INITIAL (150) + one STEP (100)
 
@@ -55,6 +55,7 @@ test('bounded render window: real-layout scroll anchoring', async ({ page, reque
     data: { agentId: 'a2', agentName: 'Window Boo' },
   })
   await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {
+    headers: DASHBOARD_HEADERS,
     data: { agentsIntroduced: true, userIntroduced: true },
   })
 

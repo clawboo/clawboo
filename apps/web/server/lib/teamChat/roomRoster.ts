@@ -12,6 +12,7 @@ import {
   getActiveRoom,
   getRoom,
   getTask,
+  teamExists,
   teams,
   type ClawbooDb,
   type DbTask,
@@ -84,13 +85,23 @@ export function roomIdForTask(db: ClawbooDb, taskId: string): string | null {
  *    gone means the team is too, and there is no chat left to run it.
  */
 export function engineRefusal(db: ClawbooDb, task: DbTask): 'room_archived' | 'no_team' | null {
-  if (
-    task.teamId &&
-    !db.select({ id: teams.id }).from(teams).where(eq(teams.id, task.teamId)).get()
-  )
-    return 'no_team'
+  if (task.teamId && !teamExists(db, task.teamId)) return 'no_team'
   if (task.roomId == null || roomIdForTask(db, task.id) !== null) return null
   return getRoom(db, task.roomId) ? 'room_archived' : 'no_team'
+}
+
+/**
+ * Why a person's Retry, Assign or reply cannot start this task, or null when it can. The
+ * task runner needs no chat engine, only a team still there: a run under one that was
+ * deleted would bring its folder back.
+ */
+export function startRefusal(
+  db: ClawbooDb,
+  task: DbTask,
+  onRunner: boolean,
+): 'room_archived' | 'no_team' | null {
+  if (!onRunner) return engineRefusal(db, task)
+  return task.teamId && !teamExists(db, task.teamId) ? 'no_team' : null
 }
 
 /**

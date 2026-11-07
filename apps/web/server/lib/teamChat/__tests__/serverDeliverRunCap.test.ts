@@ -54,6 +54,7 @@ import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlo
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type QueuedRun, type RunEntry } from '../serverDeliver'
+import { abortTaskRun } from '../teamOrchestrator'
 
 const TEAM = 'T'
 const LEAD = 'lead'
@@ -287,11 +288,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
       isSessionBusy: (sk) => abortMap.has(sk),
       isSessionOccupied: (sk) => nudge.isBusy(sk) || abortMap.has(sk),
       isRunQueued: (sk) => queuedRuns.has(sk),
-      abortSession: (sk) => {
-        const e = abortMap.get(sk)
-        if (e) void e.adapter.abort(e.run).catch(() => undefined)
-        else queuedRuns.get(sk)?.cancel()
-      },
+      abortSession: (sk, taskId) => abortTaskRun({ abortMap, queuedRuns }, sk, taskId),
       caps: { maxFanout: 8 },
       ...(opts?.now ? { now: opts.now } : {}),
     })
@@ -477,6 +474,57 @@ describe('the run cap in team chat (cap of one slot)', () => {
     expect(lead.starts).toHaveLength(1)
     await settle(() => h.persisted.some((p) => p.text.includes('hello back')))
     expect(order).toEqual(['other:start', 'other:end', 'lead:start', 'lead:end'])
+  })
+
+  describe("a person's message that never starts says so", () => {
+    const NOT_STARTED = /stopped before it started/
+
+    it('when a Stop takes it out of the queue for a slot', async () => {
+      const order: string[] = []
+      const other = new ScriptedAdapter('other', [['hold', done('other done')]], order)
+      const lead = new ScriptedAdapter('lead', [[done('hello back')]], order)
+      const h = harness(
+        new Map([
+          [OTHER, other],
+          [LEAD, lead],
+        ]),
+      )
+      await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
+      await settle(() => other.release !== null)
+      const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN)
+      await settle(() => h.queuedRuns.has(skFor(LEAD)))
+
+      h.stop()
+      await delivery
+      expect(lead.starts).toHaveLength(0)
+      expect(h.persisted.filter((p) => p.sk === skFor(LEAD)).map((p) => p.text)).toEqual([
+        expect.stringMatching(NOT_STARTED),
+      ])
+    })
+
+    it('when a Stop drops it from behind the run on its session', async () => {
+      const order: string[] = []
+      const lead = new ScriptedAdapter('lead', [['hold', done('first')]], order)
+      const h = harness(new Map([[LEAD, lead]]))
+      await h.deliver(skFor(LEAD), LEAD, 'first', HUMAN_TURN)
+      await settle(() => lead.release !== null)
+      await h.deliver(skFor(LEAD), LEAD, 'second', HUMAN_TURN)
+
+      h.stop()
+      expect(h.persisted.filter((p) => NOT_STARTED.test(p.text))).toHaveLength(1)
+    })
+
+    it('but a task update dropped the same way waits for its next run, with no note', async () => {
+      const order: string[] = []
+      const lead = new ScriptedAdapter('lead', [['hold', done('first')]], order)
+      const h = harness(new Map([[LEAD, lead]]))
+      await h.deliver(skFor(LEAD), LEAD, 'first', HUMAN_TURN)
+      await settle(() => lead.release !== null)
+      await h.deliver(skFor(LEAD), LEAD, '[Task Update]', { kind: 'system' })
+
+      h.stop()
+      expect(h.persisted.filter((p) => NOT_STARTED.test(p.text))).toEqual([])
+    })
   })
 
   it('a turn that waited for a slot starts with what reached its agent while it waited', async () => {

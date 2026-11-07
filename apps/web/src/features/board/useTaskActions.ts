@@ -117,7 +117,8 @@ export interface TaskActions {
    *  account, asks first (`attention` is the card's needs-you state). */
   retry: (taskId: string, attention?: TaskAttention) => Promise<boolean>
   assign: (taskId: string, agentId: string, agentName: string) => Promise<boolean>
-  dismiss: (taskId: string) => Promise<boolean>
+  /** `request`: it is a person's main task, so the work under it goes with it. */
+  dismiss: (taskId: string, opts?: { request?: boolean }) => Promise<boolean>
   /** Retry every task at once, with one summary toast. Resolves to how many
    *  went back to their agents. Asks first, like `retry`, for an account refusal. */
   retryMany: (taskIds: readonly string[], attention?: TaskAttention) => Promise<number>
@@ -152,10 +153,7 @@ export function useTaskActions(): TaskActions {
         addToast({ type: 'success', message: 'Retrying. The task is back with its agent.' })
         return true
       }
-      addToast({
-        type: 'error',
-        message: RETRY_REFUSED[res.reason] ?? 'Couldn’t retry the task. Please try again.',
-      })
+      sayRefused(res.reason, RETRY_REFUSED, 'Couldn’t retry the task. Please try again.')
       return false
     },
     [addToast],
@@ -175,10 +173,13 @@ export function useTaskActions(): TaskActions {
   )
 
   const dismiss = useCallback(
-    async (taskId: string) => {
+    async (taskId: string, opts?: { request?: boolean }) => {
+      const request = opts?.request === true
       const proceed = await confirm({
-        title: 'Dismiss this task?',
-        message: 'It moves to Cancelled and will not run again.',
+        title: request ? 'Dismiss this request?' : 'Dismiss this task?',
+        message: request
+          ? 'It moves to Cancelled, and every sub-task still open is cancelled with it, stopping any run on them.'
+          : 'It moves to Cancelled and will not run again.',
         confirmLabel: 'Dismiss',
         tone: 'danger',
       })
@@ -187,6 +188,11 @@ export function useTaskActions(): TaskActions {
       if (res.ok) {
         // A cancelled task takes the plan steps that waited on it with it.
         const n = res.cancelledDependents?.length ?? 0
+        if (request) {
+          const under = n > 0 ? ` ${countLabel(n, 'sub-task')} cancelled.` : ''
+          addToast({ type: 'success', message: `Request dismissed.${under}` })
+          return true
+        }
         const chain =
           n > 0
             ? ` ${n === 1 ? 'One later step' : `${n} later steps`} waiting on it ${n === 1 ? 'was' : 'were'} cancelled too.`
@@ -213,6 +219,8 @@ export function useTaskActions(): TaskActions {
       } else if (reasons.every((r) => r === 'room_archived')) {
         // Trying again changes nothing until Clawboo restarts: say what does.
         addToast({ type: 'error', message: n === 1 ? ROOM_ARCHIVED : ROOMS_ARCHIVED })
+      } else if (reasons.every((r) => r === 'person_only')) {
+        notePersonCheck(PERSON_CHECK_REFUSED)
       } else {
         addToast({
           type: 'error',

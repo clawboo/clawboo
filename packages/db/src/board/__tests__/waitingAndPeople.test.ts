@@ -4,6 +4,7 @@ import { LOCAL_PERSON, parseWaitingOn } from '@clawboo/board-core'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type ClawbooDb } from '../../db'
+import { teams } from '../../schema'
 import { attentionForTask } from '../attention'
 import { onBoardLifecycle } from '../events'
 import {
@@ -126,6 +127,10 @@ describe('every waiting task has a way out', () => {
     expect(after?.waitingOn).toBeNull()
     // The dispatch pump finds it, bound to its agent.
     expect(getReadyTasks(db, { teamId: 'T' }).map((t) => t.id)).toContain(waiter)
+    const now = Date.now()
+    db.insert(teams)
+      .values({ id: 'T', name: 'T', icon: 'T', color: '#e94560', createdAt: now, updatedAt: now })
+      .run()
     expect(listTeamsWithFireableDelegations(db)).toContain('T')
     expect(getComments(db, waiter).at(-1)?.body).toContain('First')
   })

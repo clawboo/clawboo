@@ -270,7 +270,7 @@ const WHAT_HAPPENED: Record<AnnouncedReason, string> = {
   blocked: 'is blocked',
   needs_review: 'did not pass its checks',
   question: 'has a question for you',
-  assigned: 'was handed back to you',
+  assigned: 'was handed back to a person',
   agent_wakes: 'needs your OK for agents to wake each other',
   no_result: 'finished with no result',
   rate_limited: 'is rate limited by its provider',

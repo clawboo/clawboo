@@ -334,6 +334,9 @@ export type TranscriptEntry = {
   fingerprint: string
   /** Set when something posted this entry on the person's behalf (a routine). */
   origin?: TranscriptEntryOrigin
+  /** A caller the person check did not let through sent this: a script, an agent's
+   *  command. It is not the person's message, so it must not read as a live "You". */
+  fromCaller?: boolean
   /** Who sent a user-role entry, when a sign-in proxy vouched for them. */
   person?: PersonRef
 }

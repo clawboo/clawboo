@@ -22,6 +22,8 @@ import {
   agentWakeFromOf,
   agentWakeVerdictFor,
   getAncestors,
+  getComments,
+  getQuestion,
   getTask,
   holdTaskWakes,
   immediateWrite,
@@ -42,6 +44,7 @@ import {
   startRefusedByTask,
   TASK_HEARTBEAT_MS,
   taskDependenciesDone,
+  teamExists,
   updateStatus,
   wakeCommentIds,
   type ClawbooDb,
@@ -272,6 +275,22 @@ export function pumpTaskWakeNow(
   return pumpOne(db, row, deps, deps.held(), deps.now?.() ?? Date.now())
 }
 
+/**
+ * A person wrote on the task after its agent asked. With nothing in the way that starts
+ * the task at once, as a reply does (see personReply), and its question goes with the
+ * move. Only a pause, a hold or a run still ending can put that off to here. A comment
+ * from before the question does not count: the agent asked knowing it.
+ */
+function commentedSinceAsking(db: ClawbooDb, row: DbTaskWake, questionId: string): boolean {
+  if (row.reason !== 'person_comment') return false
+  const asked = getQuestion(db, questionId)
+  if (!asked) return false
+  const carried = new Set(wakeCommentIds(row))
+  return getComments(db, row.taskId).some(
+    (c) => carried.has(c.id) && c.authorType === 'user' && c.createdAt >= asked.createdAt,
+  )
+}
+
 function pumpOne(
   db: ClawbooDb,
   row: DbTaskWake,
@@ -299,6 +318,9 @@ function pumpOne(
       ? { fromAgentId: agentWakeFromOf(db, row), toAgentId: agentId }
       : null
   const startRefusal = startRefusedByTask(db, task)
+  // A team that was deleted runs nothing, on the engine or the task runner, and a run
+  // would bring its folder back.
+  const teamGone = task.teamId !== null && !teamExists(db, task.teamId)
   const input: WakeDecisionInput = {
     reason: row.reason,
     replays: row.replays,
@@ -316,14 +338,17 @@ function pumpOne(
     refusal:
       startRefusal?.kind === 'archived_team'
         ? 'team_archived'
-        : runner
-          ? null
-          : task.teamId
-            ? engineRefusal(db, task)
-            : 'no_team',
+        : teamGone
+          ? 'no_team'
+          : runner
+            ? null
+            : task.teamId
+              ? engineRefusal(db, task)
+              : 'no_team',
     budgetRefused: false,
     personAssigned: task.assigneePersonId !== null,
-    waitingOnQuestion: waiting?.kind === 'question',
+    waitingOnQuestion:
+      waiting?.kind === 'question' && !commentedSinceAsking(db, row, waiting.questionId),
     teammateMayEndWait: teammateMayEndWait(waiting),
     ...(pair ? { agentWakes: agentWakeVerdictFor(db, task.id, pair, now) } : {}),
     now,

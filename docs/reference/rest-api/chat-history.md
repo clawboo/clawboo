@@ -47,6 +47,7 @@ interface TranscriptEntry {
   confirmed: boolean
   fingerprint: string // an opaque id, not a content hash
   origin?: { kind: 'routine'; routineId: string; routineName: string } // posted by a routine
+  fromCaller?: boolean // sent by a caller that did not pass the person check
   person?: { id: string; name: string | null; role: string | null } // who sent a user entry, through a verified sign-in proxy
 }
 ```

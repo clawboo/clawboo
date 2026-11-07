@@ -13,7 +13,7 @@
 // when `GET /api/agents` `defaultId` resolves — which on a pure-codex install
 // (no native key path exercised, no Gateway) happens ONLY via that override.
 
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, DASHBOARD_HEADERS } from './helpers/fixtures'
 
 test.describe('Codex onboarding', () => {
   test('fresh install → Sign in with ChatGPT → deploy team → Codex-led dashboard', async ({
@@ -53,7 +53,10 @@ test.describe('Codex onboarding', () => {
         }
       }
     }
-    await request.post(`${API_BASE}/api/boo-zero/override`, { data: { agentId: null } })
+    await request.post(`${API_BASE}/api/boo-zero/override`, {
+      headers: DASHBOARD_HEADERS,
+      data: { agentId: null },
+    })
 
     await page.addInitScript(() => {
       localStorage.removeItem('clawboo.onboarded')

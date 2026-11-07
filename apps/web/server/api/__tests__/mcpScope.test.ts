@@ -167,9 +167,11 @@ describe('parseBoundProvenance', () => {
 
 /** A Tasks URL as serverDeliver (a team run) or the task runner writes it. */
 const signedTasksUrl = (scope: {
-  teamId: string
+  teamId: string | null
   agentId: string
   delegate?: boolean
+  chatRun?: boolean
+  chatRunTeamId?: string
   boundTaskId?: string
   boundExecutionId?: string
 }): string =>
@@ -199,11 +201,31 @@ describe('parseBoundScope on a team run', () => {
 })
 
 describe('parseTasksBinding', () => {
+  it('reads a person’s one-to-one chat, held to the agent’s team, from its signed URL', () => {
+    const url = signedTasksUrl({
+      teamId: null,
+      agentId: 'coder',
+      chatRun: true,
+      chatRunTeamId: 'team-A',
+    })
+    expect(parseTasksBinding(req(url))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      teamRun: false,
+      chatRun: true,
+    })
+  })
+
+  it('a chat URL stripped of its mark is no bound run at all', () => {
+    const url = signedTasksUrl({ teamId: null, agentId: 'coder', chatRun: true })
+    expect(parseTasksBinding(req(url.replace(/&?chatRun=1/, '')))).toBeUndefined()
+  })
+
   it('reads a team run from the signed Tasks URL a team run is given', () => {
     const url = signedTasksUrl({ teamId: 'team-A', agentId: 'coder', delegate: true })
     expect(parseTasksBinding(req(url))).toEqual({
       scope: { teamId: 'team-A', agentId: 'coder' },
       teamRun: true,
+      chatRun: false,
     })
   })
 
@@ -212,6 +234,7 @@ describe('parseTasksBinding', () => {
     expect(parseTasksBinding(req(url))).toEqual({
       scope: { teamId: 'team-A', agentId: 'coder' },
       teamRun: false,
+      chatRun: false,
     })
   })
 
@@ -243,6 +266,7 @@ describe('parseTasksBinding: the run’s own task', () => {
     expect(parseTasksBinding(req(signedTasksUrl(onTask)))).toEqual({
       scope: { teamId: 'team-A', agentId: 'coder' },
       teamRun: true,
+      chatRun: false,
       taskId: 'task-1',
     })
   })
@@ -282,6 +306,7 @@ describe('parseTasksBinding: the run’s id', () => {
     expect(parseTasksBinding(req(signedTasksUrl(onRun)))).toEqual({
       scope: { teamId: 'team-A', agentId: 'coder' },
       teamRun: true,
+      chatRun: false,
       taskId: 'task-1',
       executionId: 'exec-1',
     })

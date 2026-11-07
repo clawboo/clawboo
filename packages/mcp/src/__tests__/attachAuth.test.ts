@@ -91,6 +91,41 @@ describe('mcpHttpUrl signing', () => {
   })
 })
 
+describe('the chat-run claim', () => {
+  const chatScope = {
+    teamId: null,
+    agentId: 'A',
+    chatRun: true,
+    chatRunTeamId: 'T',
+    attachSecret: SECRET,
+  }
+
+  it('holds the Tasks URL to the agent’s team, inside the signature', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'tasks', chatScope))
+    expect(url.searchParams.get('chatRun')).toBe('1')
+    expect(url.searchParams.get('scopeTeamId')).toBe('T')
+    const sig = url.searchParams.get('scopeSig')!
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', chatRun: true }, sig)).toBe(true)
+    // Stripped of the claim, it does not read as an agent with the writes back.
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A' }, sig)).toBe(false)
+  })
+
+  it('leaves the chat’s Memory scope with no team', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'memory', chatScope))
+    expect(url.searchParams.has('scopeTeamId')).toBe(false)
+    expect(url.searchParams.get('chatRun')).toBe('1')
+  })
+
+  it('signs no URL a chat run holds as a plain agent scope', () => {
+    for (const server of MCP_SERVER_NAMES) {
+      const sig = new URL(
+        mcpHttpUrl('http://x', server, { ...chatScope, chatRunTeamId: null }),
+      ).searchParams.get('scopeSig')!
+      expect(verifyAttachScope(SECRET, { agentId: 'A' }, sig), server).toBe(false)
+    }
+  })
+})
+
 describe('the team-run claim on the Tasks URL', () => {
   const teamRunScope = { teamId: 'T', agentId: 'A', delegate: true, attachSecret: SECRET }
 

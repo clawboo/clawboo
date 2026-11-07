@@ -2,21 +2,25 @@ import crypto from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { Request, Response } from 'express'
 import {
+  appendAudit,
   chatMessages,
   clearTeamDelegationFailures,
+  closeRequestsOfTeam,
   closeWaitingPlans,
   setSetting,
   teams,
   agents,
+  listTasks,
   settings,
   teamAgentWakesSettingKey,
   stopTasksWaitingToStart,
+  teamExists,
   planApprovalSettingKey,
 } from '@clawboo/db'
 import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 
-import { personOf } from '../lib/auth'
+import { actorField, actsAsPerson, personOf, refuseUnlessPerson } from '../lib/auth'
 import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/boardReader'
 import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs'
@@ -35,6 +39,8 @@ import {
 import { resolveTeamSessionKeys } from './teamChatStream'
 import { chatClearedAt, chatClearedSettingKey } from '../lib/teamChat/chatCleared'
 import { notifyPauseLifted } from '../lib/pauseBus'
+import { stopTaskRuns } from '../lib/runStops'
+import { stopPausedExchanges } from '../lib/teamChat/runTeamExchange'
 import { stopPausedRuns } from '../lib/pauseRuns'
 import { getTenantId } from '../lib/tenant'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
@@ -47,6 +53,7 @@ import {
   getTeamOrchestrator,
   hasTeamOrchestrator,
   isActiveTeamRoom,
+  retireTeamOrchestrators,
 } from '../lib/teamChat/teamOrchestrator'
 
 const log = createLogger('teams-api')
@@ -224,6 +231,22 @@ export function teamsPATCH(req: Request, res: Response): void {
       return
     }
 
+    // Archiving stops the team's runs, as a pause does, and bringing it back starts its
+    // work again. Those are a person's to do.
+    if (
+      body.isArchived !== undefined &&
+      !!body.isArchived !== !!existing.isArchived &&
+      refuseUnlessPerson(req, res)
+    )
+      return
+
+    // Who leads a team decides whose turn takes its work when Boo Zero does not, the same
+    // authority `POST /api/boo-zero/override` guards. Sending the lead it already has is
+    // not a change.
+    const nextLead = body.leaderAgentId === undefined ? undefined : (body.leaderAgentId ?? null)
+    const leadChanged = nextLead !== undefined && nextLead !== (existing.leaderAgentId ?? null)
+    if (leadChanged && refuseUnlessPerson(req, res)) return
+
     const now = Date.now()
     const patch: Record<string, unknown> = { updatedAt: now }
     if (body.name !== undefined) patch['name'] = body.name
@@ -234,6 +257,19 @@ export function teamsPATCH(req: Request, res: Response): void {
     if (body.leaderAgentId !== undefined) patch['leaderAgentId'] = body.leaderAgentId
 
     db.update(teams).set(patch).where(eq(teams.id, teamId)).run()
+
+    if (leadChanged)
+      appendAudit(db, {
+        eventType: 'board',
+        teamId,
+        ...(nextLead ? { agentId: nextLead } : {}),
+        summary: {
+          action: 'set_team_lead',
+          previous: existing.leaderAgentId ?? null,
+          next: nextLead,
+          ...actorField(req),
+        },
+      })
 
     // An archived team's agents do no more work, and nothing wakes them: its board
     // keeps its tasks. Its runs stop the way a pause stops them, and its work starts
@@ -285,6 +321,8 @@ export function teamsPATCH(req: Request, res: Response): void {
 // agents' runs start) is removed with it, files included.
 // Archiving a team keeps it.
 
+const TEAM_DELETED_NOTE = 'Stopped: its team was deleted.'
+
 export async function teamsDELETE(req: Request, res: Response): Promise<void> {
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
@@ -294,6 +332,15 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
 
   try {
     const db = getDb()
+
+    // Its engines and their runs stop first: a run going on would write into a folder
+    // about to go, and bring it back. A person deleted the team, so its open requests
+    // close with their work, and nobody is left waiting on them. Its other task rows stay,
+    // and nothing can start them (see `engineRefusal`, `teamExists`).
+    await retireTeamOrchestrators(teamId)
+    stopPausedExchanges((run) => run.teamId === teamId)
+    for (const task of listTasks(db, { teamId })) stopTaskRuns(task.id, TEAM_DELETED_NOTE)
+    closeRequestsOfTeam(db, teamId, TEAM_DELETED_NOTE)
 
     // Orphan agents belonging to this team
     db.update(agents).set({ teamId: null }).where(eq(agents.teamId, teamId)).run()
@@ -488,6 +535,12 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
       res.status(404).json({ error: 'team is not server-orchestrated' })
       return
     }
+    // An open tab on a team that was deleted: an engine built for it would run what it
+    // left behind.
+    if (!teamExists(db, teamId)) {
+      res.status(404).json({ error: 'team not found' })
+      return
+    }
     const roomId = requestedRoomId(body?.roomId)
     if (!isActiveTeamRoom(teamId, roomId)) {
       res.status(404).json({ error: 'room not found' })
@@ -495,10 +548,12 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     }
     // A person has spoken to the team, so the failure breaker starts over: "try
     // again" must work once they have fixed what was wrong. A loop no person is in
-    // sends no message here, and that loop is what the breaker is for. Best-effort: a
-    // person's message must not fail on this bookkeeping.
+    // does not get to reset it, by sending a message here or any other way, and that
+    // loop is what the breaker is for. Best-effort: a person's message must not fail on
+    // this bookkeeping.
+    const byPerson = actsAsPerson(req)
     try {
-      clearTeamDelegationFailures(db, teamId)
+      if (byPerson) clearTeamDelegationFailures(db, teamId)
     } catch (err) {
       log.warn({ err, teamId }, 'could not clear the failure breaker')
     }
@@ -510,6 +565,8 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
       targetAgentId,
       userEntryId,
       person: personOf(req),
+      // It still runs, with no person's name on it or on what it hands out.
+      ...(byPerson ? {} : { notFromPerson: true }),
     })
     res.status(202).json({ ok: true })
   } catch (err) {
@@ -572,9 +629,12 @@ export function teamChatClearPOST(req: Request, res: Response): void {
 // Body: { roomId? }. User Stop for one chat room (the team's own group chat when
 // absent): bump that orchestrator's stop generation + abort its in-flight runs (a
 // clean release to `todo`, never a failure reflection). Other rooms keep going.
-// A no-op when no orchestrator is live (idle-evicted / never started).
+// A no-op when no orchestrator is live (idle-evicted / never started). A person's
+// request only: a Stop holds their work and closes the plans waiting for their answer,
+// and the ledger reads it as theirs.
 
 export function teamChatStopPOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['id'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })

@@ -1742,6 +1742,54 @@ describe('saved wakes, end to end', () => {
         expect(getTask(db, task.id)?.assigneePersonId).not.toBeNull()
       })
 
+      it('a comment written after its agent asked starts the task on resume, as it does with no pause', async () => {
+        const { task } = asking()
+        pause()
+        expect(await reply(task.id, 'Skip the deploy, ship it Friday.')).toEqual({
+          status: 'queued',
+          agentId: WORKER,
+          reason: 'paused',
+        })
+        pumpTaskWakes(db, pumpDeps())
+        expect(getTask(db, task.id)?.status).toBe('blocked')
+        expect(started()).toEqual([])
+
+        script([done('shipped it')])
+        resume()
+        pumpTaskWakes(db, pumpDeps())
+        await settle(() => getTask(db, task.id)?.status === 'done', 'the run the comment started')
+        expect(started()).toHaveLength(1)
+        expect(listTaskQuestions(db, task.id).map((q) => q.status)).not.toContain('pending')
+      })
+
+      it('a comment from before its agent asked still waits for the answer', async () => {
+        const task = newTask()
+        claimTask(db, task.id, WORKER, 'codex', { run: { executorType: 'openclaw' } })
+        const exec = listExecutions(db, task.id).at(-1)!
+        const comment = personComment(task.id, 'Use the staging database.')
+        recordTaskWake(db, {
+          teamId: TEAM,
+          agentId: WORKER,
+          taskId: task.id,
+          reason: 'person_comment',
+          commentIds: [comment.id],
+        })
+        await vi.advanceTimersByTimeAsync(1_000)
+        const asked = askQuestion(db, {
+          taskId: task.id,
+          agentId: WORKER,
+          kind: 'confirm',
+          payload: { prompt: 'Deploy?' },
+        })
+        if (!asked.ok) throw new Error(`ask refused: ${asked.reason}`)
+        completeExecutionProcess(db, exec.id, { status: 'succeeded' })
+
+        pumpTaskWakes(db, pumpDeps())
+        expect(getTask(db, task.id)?.status).toBe('blocked')
+        expect(started()).toEqual([])
+        expect(listWaitingTaskWakes(db)[0]).toMatchObject({ skipReason: 'question' })
+      })
+
       it('a run it stops keeps the question its agent asked: no failure, no note, no restart', async () => {
         const task = newTask()
         let questionId = ''

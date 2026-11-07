@@ -200,6 +200,9 @@ export interface RunStamp {
   wakeIds?: string[]
   /** A pause stopped this run. It is no failure, and what it carried comes back. */
   stoppedByPause?: boolean
+  /** A budget's held room refused this run. That clears by itself, and what it carried
+   *  goes out once there is room, having spent no try. */
+  budgetHeld?: boolean
   /** A person's or a routine's message: `TurnOrigin.request`. */
   request?: TurnRequest
   /** An update about one request: `TurnOrigin.mainTaskId`. */

@@ -19,6 +19,7 @@ import { NeedsYouItems, useNeedsYou } from '@/features/board/NeedsYouColumn'
 import { StatusGlyph, glyphKindOf } from '@/features/board/StatusGlyph'
 import { TaskDetailDrawer, type DrawerPosition } from '@/features/board/TaskDetailDrawer'
 import { taskOwnerOf } from '@/features/board/TaskCard'
+import { TaskIdentifier } from '@/features/board/TaskIdentifier'
 import { boardColumnOf, isMyTask } from '@/features/board/boardStatus'
 import { agoLabel } from '@/features/board/calendar/calendarFormat'
 import { useBoardPerson } from '@/features/board/useBoardPerson'
@@ -98,7 +99,10 @@ function InboxRow({
           >
             {title}
           </span>
-          <span className="block truncate text-xs text-muted-foreground">{detail}</span>
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <TaskIdentifier task={task} testId="inbox-row-identifier" />
+            <span className="min-w-0 truncate">{detail}</span>
+          </span>
         </span>
         <span className="flex h-[18px] shrink-0 items-center gap-2 text-xs tabular-nums text-muted-foreground">
           {at !== null ? agoLabel(at, Date.now()) : null}

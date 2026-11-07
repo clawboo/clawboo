@@ -216,6 +216,14 @@ export class FakeBoard implements CascadeBoard {
     return this.runnerTasks.has(taskId)
   }
 
+  /** Tasks holding what a check found (the real board's `verification`). */
+  verdicts = new Set<string>()
+  seedVerdict(taskId: string): void {
+    this.verdicts.add(taskId)
+  }
+  hasVerdict(taskId: string): boolean {
+    return this.verdicts.has(taskId)
+  }
   /** What each task waits on, as `updateStatus` said. */
   readonly waits = new Map<string, WaitingOn>()
   async setWaitingOn(taskId: string, waitingOn: WaitingOn | null): Promise<void> {
@@ -776,7 +784,7 @@ export class FakeBoard implements CascadeBoard {
   async updateStatus(
     taskId: string,
     status: string,
-    opts?: { waitingOn?: WaitingOn },
+    opts?: { waitingOn?: WaitingOn; keepVerdict?: boolean },
   ): Promise<boolean> {
     const t = this.tasks.get(taskId)
     if (!t) return false
@@ -788,7 +796,10 @@ export class FakeBoard implements CascadeBoard {
     if (opts?.waitingOn) this.waits.set(taskId, opts.waitingOn)
     else if (t.status !== status) this.waits.delete(taskId)
     t.status = status
-    if (status === 'todo') t.assigneeAgentId = null // released → re-claimable
+    if (status === 'todo') {
+      t.assigneeAgentId = null // released → re-claimable
+      if (!opts?.keepVerdict) this.verdicts.delete(taskId)
+    }
     if (['done', 'cancelled', 'blocked', 'backlog'].includes(status))
       this.releaseParent(t.parentTaskId)
     // The real board's wait on one task: its finishing sends the waiter back to the queue.
@@ -802,8 +813,15 @@ export class FakeBoard implements CascadeBoard {
       }
     return true
   }
-  async addComment(taskId: string, body: string): Promise<void> {
+  async addComment(
+    taskId: string,
+    body: string,
+    authorType?: 'agent' | 'user' | 'system',
+  ): Promise<void> {
     this.comments.push({ taskId, body })
+    // A run's report, in the shape the real board stores it.
+    if (authorType === 'agent')
+      this.commentRows.push({ taskId, body, kind: 'result', createdAt: Date.now() })
   }
   async getTask(taskId: string): Promise<TaskDetail | null> {
     const t = this.tasks.get(taskId)

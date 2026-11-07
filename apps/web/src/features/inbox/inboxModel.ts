@@ -5,7 +5,12 @@
 import type { TaskActivity } from '@clawboo/db'
 
 import type { BoardTask } from '@/lib/boardClient'
-import { statusLabel } from '@/features/board/boardStatus'
+import {
+  attentionLabel,
+  statusLabel,
+  taskAttentionOf,
+  waitingWorkLabel,
+} from '@/features/board/boardStatus'
 
 /** The tabs, in order. */
 export type InboxTab = 'needs-you' | 'unread' | 'mine' | 'all'
@@ -50,8 +55,15 @@ export function changeLabel(task: BoardTask): string {
       return 'New task'
     case 'edited':
       return 'Edited'
-    case 'status':
+    case 'status': {
+      // Why it moved is what a person can act on: "Failed", not "Moved to Blocked".
+      const attention = taskAttentionOf(task)
+      if (attention) return attentionLabel(attention)
+      const waiting = waitingWorkLabel(task)
+      if (waiting) return waiting
+      if (task.status === 'in_review') return 'Being checked'
       return `Moved to ${statusLabel(task.status)}`
+    }
     default:
       return statusLabel(task.status)
   }

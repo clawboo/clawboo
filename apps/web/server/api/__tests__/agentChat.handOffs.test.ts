@@ -9,7 +9,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { agents, LOCAL_PERSON } from '@clawboo/db'
+import { agents, chatMessages, LOCAL_PERSON } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 const { runChatTurn, stopChatTurn } = vi.hoisted(() => ({
@@ -26,6 +26,8 @@ vi.mock('../../lib/agentChat/chatHandOffs', () => ({
 
 const { agentChatIngestPOST, agentChatStopPOST } = await import('../agentChat')
 const { getDb, getDbPath, resetDb } = await import('../../lib/db')
+
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 
 /** What each turn was handed, without the database, which is too big to print. */
 function turns(): Array<Record<string, unknown>> {
@@ -158,12 +160,58 @@ describe('POST /api/agents/:agentId/chat hands the turn what hand-offs need', ()
   })
 
   it("Stop goes through the chat's own stop, which holds what comes after it", async () => {
+    stopChatTurn.mockClear()
     const res = { status: vi.fn().mockReturnThis(), json: vi.fn() }
     await agentChatStopPOST(
-      { params: { agentId: 'bz' } } as unknown as Request,
+      { params: { agentId: 'bz' }, headers: DASHBOARD, socket: {} } as unknown as Request,
       res as unknown as Response,
     )
     expect(stopChatTurn).toHaveBeenCalledTimes(1)
     expect((stopChatTurn.mock.calls as unknown as Array<[unknown, string]>)[0]![1]).toBe('bz')
+  })
+
+  it('Stop is a person’s: it holds results until their next message, so a caller gets a no', async () => {
+    stopChatTurn.mockClear()
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() }
+    await agentChatStopPOST(
+      { params: { agentId: 'bz' }, headers: {}, socket: {} } as unknown as Request,
+      res as unknown as Response,
+    )
+    expect(res.status).toHaveBeenCalledWith(403)
+    expect(stopChatTurn).not.toHaveBeenCalled()
+  })
+
+  describe('a message the person check did not let through', () => {
+    const raw = (): Record<string, unknown> =>
+      (runChatTurn.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]![0]
+    const saved = (): Record<string, unknown> => {
+      const row = getDb().select().from(chatMessages).all()[0] as { data: string }
+      return JSON.parse(row.data) as Record<string, unknown>
+    }
+
+    it('still gets its reply, and starts no work from it', () => {
+      const res = post({ message: 'fix it', teamId: 'team-1' })
+      expect(res.status).toHaveBeenCalledWith(202)
+      expect(raw()['readingResultsFrom']).toEqual([])
+      expect(raw()['requestedBy']).toBeNull()
+    })
+
+    it('does not read as the person in the chat', () => {
+      post({ message: 'fix it' })
+      expect(saved()['fromCaller']).toBe(true)
+    })
+
+    it('a person’s own message has no such limit, and no such mark', () => {
+      post({ message: 'fix it' }, DASHBOARD)
+      expect(raw()).not.toHaveProperty('readingResultsFrom')
+      expect(saved()).not.toHaveProperty('fromCaller')
+    })
+  })
+
+  it('a person’s message carrying what a team has been doing says so to the turn', () => {
+    post({ message: '[Team Activity: Growth]\nsome of it\n\nnext?' }, DASHBOARD)
+    post({ message: 'next?' }, DASHBOARD)
+    const calls = runChatTurn.mock.calls as unknown as Array<[Record<string, unknown>]>
+    expect(calls.map(([p]) => p['carriesTeamActivity'])).toEqual([true, false])
   })
 })

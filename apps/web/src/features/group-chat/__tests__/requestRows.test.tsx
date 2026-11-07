@@ -74,12 +74,12 @@ describe('the Tasks card', () => {
 })
 
 describe('the timeline card', () => {
-  const card = (over: Partial<BoardTaskView>, open = 1, done = 0) =>
+  const card = (over: Partial<BoardTaskView>, open = 1, done = 0, subtasks = [running]) =>
     render(
       <ThemeProvider>
         <RequestCard
           task={{ ...main, identifier: 'CLB-1', ...over }}
-          subtasks={[running]}
+          subtasks={subtasks}
           progress={{ total: open + done, done, cancelled: 0, open }}
           teamId="team-1"
         />
@@ -100,9 +100,43 @@ describe('the timeline card', () => {
     expect(screen.getByTestId('request-card')).toHaveTextContent('Summing up')
   })
 
+  it('says Paused while a pause covers it, not Working', () => {
+    card({ pause: { kind: 'team', id: 'T', name: 'Team' } } as Partial<BoardTaskView>)
+    const pill = within(screen.getByTestId('request-card')).getAllByText(/^(Paused|Working)$/)[0]
+    expect(pill).toHaveTextContent('Paused')
+  })
+
+  it('says it needs you when a sub-task does', () => {
+    card({}, 1, 0, [
+      { ...running, attention: { reason: 'failed', failedRuns: 1 } } as BoardTaskView,
+    ])
+    expect(within(screen.getByTestId('request-card')).getAllByText('Needs you')).toHaveLength(1)
+  })
+
   it('says Done when it is', () => {
     card({ status: 'done' }, 0, 1)
     expect(screen.getByTestId('request-card')).toHaveTextContent('Done')
+  })
+})
+
+describe('the Tasks card’s composer on a task', () => {
+  it('says a pause holds it, whatever the task’s status would say', () => {
+    const paused = { pause: { kind: 'team', id: 'T', name: 'Team' } } as Partial<BoardTaskView>
+    const said = 'This is paused. Worker starts on your comment after the resume.'
+    expect(composerHint({ ...running, ...paused }, 'Worker', 'live', true)).toBe(said)
+    expect(composerHint({ ...running, ...paused, status: 'todo' }, 'Worker', 'live', true)).toBe(
+      said,
+    )
+    expect(composerHint({ ...main, ...paused }, 'Lead', 'live', true)).toMatch(/after the resume/)
+    expect(composerHint({ ...running, ...paused, status: 'done' }, 'Worker', 'live', true)).toMatch(
+      /finished/,
+    )
+  })
+
+  it('says the check goes first on work being checked', () => {
+    expect(composerHint({ ...running, status: 'in_review' }, 'Worker', 'live', true)).toBe(
+      'Worker reads this after the check.',
+    )
   })
 })
 

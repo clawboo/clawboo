@@ -187,6 +187,8 @@ curl http://localhost:18790/api/boo-zero/override
 
 ### `POST /api/boo-zero/override`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Sets or clears the override. Any runtime is allowed. The agent must exist and not be archived; clearing restores the order above.
 
 - **Request body**: `{ "agentId": string | null }` (required: a non-empty string to set, `null` to clear).

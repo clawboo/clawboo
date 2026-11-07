@@ -30,7 +30,11 @@ export interface NudgeQueue {
   deliver(
     sessionKey: string,
     send: () => Promise<void>,
-    opts?: { onQueuedFailure?: (err: unknown) => void },
+    opts?: {
+      onQueuedFailure?: (err: unknown) => void
+      /** `reset()` dropped it before it started. */
+      onDropped?: () => void
+    },
   ): Promise<void>
   /**
    * Mark a session busy (call on any non-terminal event of a run). Re-arms the
@@ -74,6 +78,7 @@ export function createNudgeQueue(opts?: {
   interface Queued {
     send: () => Promise<void>
     onQueuedFailure?: (err: unknown) => void
+    onDropped?: () => void
   }
   const queues = new Map<string, Queued[]>()
 
@@ -145,11 +150,11 @@ export function createNudgeQueue(opts?: {
     async deliver(sessionKey, send, deliverOpts) {
       if (busy.has(sessionKey)) {
         const q = queues.get(sessionKey) ?? []
-        q.push(
-          deliverOpts?.onQueuedFailure
-            ? { send, onQueuedFailure: deliverOpts.onQueuedFailure }
-            : { send },
-        )
+        q.push({
+          send,
+          ...(deliverOpts?.onQueuedFailure ? { onQueuedFailure: deliverOpts.onQueuedFailure } : {}),
+          ...(deliverOpts?.onDropped ? { onDropped: deliverOpts.onDropped } : {}),
+        })
         queues.set(sessionKey, q)
         return
       }
@@ -191,7 +196,15 @@ export function createNudgeQueue(opts?: {
       for (const t of wedgeTimers.values()) t.clear()
       wedgeTimers.clear()
       busy.clear()
+      const dropped = [...queues.values()].flat()
       queues.clear()
+      for (const queued of dropped) {
+        try {
+          queued.onDropped?.()
+        } catch {
+          /* the hook is best-effort */
+        }
+      }
     },
   }
 }

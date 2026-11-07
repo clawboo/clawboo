@@ -31,7 +31,9 @@ function mockRes(): { res: Response; status: () => number; body: () => unknown }
   } as unknown as Response
   return { res, status: () => code, body: () => payload }
 }
-const req = (body: unknown): Request => ({ params: {}, query: {}, body }) as unknown as Request
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
+const req = (body: unknown): Request =>
+  ({ params: {}, query: {}, body, headers: DASHBOARD }) as unknown as Request
 
 describe('Boo Zero override (runtime-neutral leader designation)', () => {
   let home: string

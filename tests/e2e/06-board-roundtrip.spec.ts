@@ -1,4 +1,4 @@
-import { test, expect, API_BASE, assertSandboxed } from './helpers/fixtures'
+import { test, expect, API_BASE, assertSandboxed, DASHBOARD_HEADERS } from './helpers/fixtures'
 
 // Proves the OpenClaw team round-trip runs entirely on the SERVER engine (no browser
 // orchestration) after the cutover: a user message → the server orchestrator delivers
@@ -63,6 +63,7 @@ async function connectWithTeam(
     data: { agentId: 'a2', agentName: 'Research Boo' },
   })
   await request.patch(`${API_BASE}/api/teams/${team.id}/onboarding`, {
+    headers: DASHBOARD_HEADERS,
     data: { agentsIntroduced: true, userIntroduced: true },
   })
   // Point the server's OpenClawAgentSource at the mock gateway (triggers reconnect + sync).

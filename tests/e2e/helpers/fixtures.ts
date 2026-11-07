@@ -8,6 +8,9 @@ import { startMockGateway, type MockGateway } from './mockGateway'
 const API_PORT = parseInt(process.env.CLAWBOO_API_PORT ?? '19999', 10)
 export const API_BASE = `http://127.0.0.1:${API_PORT}`
 
+/** What a browser marks the dashboard's own requests with: a person's write takes it. */
+export const DASHBOARD_HEADERS = { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors' }
+
 const SETTINGS_URL = `${API_BASE}/api/settings`
 
 /**

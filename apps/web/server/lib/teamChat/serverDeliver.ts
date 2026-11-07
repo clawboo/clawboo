@@ -174,6 +174,8 @@ export interface RunEntry {
   /** A pause stopped this run: what the chat says. Not a failure, so not one of the
    *  reasons above, which read as a run that failed. */
   pauseNote?: string | null
+  /** The board task this run works on, when it is a task's run. */
+  taskId?: string | null
 }
 
 /** Stop this run for a pause. The engine reads it as a stop from the stamp, and the
@@ -189,11 +191,17 @@ export function stopRunForPause(entry: RunEntry, note: string): void {
 export interface QueuedRun {
   /** Take it out of the queue (Stop, teardown). It never starts. */
   cancel(): void
+  /** The board task this delivery runs, when it is a task's run. */
+  taskId?: string | null
   /** It is a task update or a follow-up, about this task when it names one. A pause
    *  takes it out of the queue, since it would hold its agent's session for the whole
    *  pause. Its report-ups go back to the outbox and wait there. */
   report?: { taskId: string | null; stamp: RunStamp }
 }
+
+/** What the chat says for a person's message that was taken back before its run began. */
+const MESSAGE_NOT_STARTED =
+  'This message was stopped before it started. Send it again if you still want it.'
 
 /** How often a queued delivery re-marks its session busy, well inside the nudge
  *  queue's 10-minute wedge timer, which would otherwise force-idle the session and
@@ -1018,6 +1026,12 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     // A follow-up holds work too: it neither resumes the agent's user-facing
     // session nor overwrites its pointer.
     const holdsWork = isTaskRun || reportForTaskId !== null
+    // A person's message that will never start says so where they wrote it, whatever
+    // stopped it, or they would wait for a reply. Only theirs: nothing else is watched.
+    const noteMessageNotStarted = (): void => {
+      if (origin.kind === 'human' || origin.kind === 'schedule')
+        deps.persistMeta?.(targetSessionKey, MESSAGE_NOT_STARTED)
+    }
     // The start gate. A delivery may start only while the stop generation has not
     // moved and, for a task run, the engine still maps the session to that task.
     // A refused start settles as delivered to nobody, never as a failure, because
@@ -1521,6 +1535,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           const settleRefused = (why: 'stopped' | 'released'): void => {
             // It never started, so whatever it carried goes back to the outbox.
             if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+            noteMessageNotStarted()
             if (settledEarly) {
               void endQueued(why)
               return
@@ -1585,6 +1600,8 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             }
             const refuseForBudget = (scope: BudgetScope, reason: BudgetRefusalReason): void => {
               const text = budgetRefusalText(scope, reason)
+              // What it carries waits for the room to come back, having spent no try.
+              if (reason === 'held') stamp.budgetHeld = true
               const personAsked = origin.kind === 'human' || origin.kind === 'schedule'
               if (chatVisible && (personAsked || !budgetNoticeShown.has(targetAgentId))) {
                 budgetNoticeShown.add(targetAgentId)
@@ -1685,6 +1702,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             if (after) {
               hold.release()
               giveBackHeldReportUps()
+              noteMessageNotStarted()
               // A delivery settled early has to tell the engine itself that a Stop
               // ended it.
               if (!settledEarly) started()
@@ -1697,7 +1715,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
               }
               return
             }
-            const entry: RunEntry = { adapter, run, stamp }
+            const entry: RunEntry = { adapter, run, stamp, taskId: runTaskId }
             abortMap.set(targetSessionKey, entry)
             // A turn with no task reads the pause itself, now that it is in the map. One
             // placed while it was starting saw nothing to stop, and one placed from here
@@ -1855,6 +1873,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
           const cancel = new AbortController()
           queuedEntry = {
             cancel: () => cancel.abort(),
+            taskId: runTaskId,
             ...(origin.kind === 'system' ? { report: { taskId: queueTaskId, stamp } } : {}),
           }
           queuedRuns.set(targetSessionKey, queuedEntry)
@@ -1888,9 +1907,13 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
       // setting the run up included) never reaches the engine's retry. The
       // report-ups it carries are handed back instead (see `onRunNotStarted`).
       {
-        onQueuedFailure: () => {
+        onQueuedFailure: (err) => {
           if (stamp.reportUpIds) deps.onRunNotStarted?.(stamp)
+          // A refusal has already put its reason in the chat.
+          if (!(err instanceof DeliveryRefusedError)) noteMessageNotStarted()
         },
+        // A Stop dropped it from the queue behind the session's run.
+        onDropped: noteMessageNotStarted,
       },
     )
   }

@@ -45,6 +45,11 @@ export interface RuntimeRunContext {
     agentId?: string | null
     tenantId?: string | null
     delegate?: boolean
+    /** A run of a person's one-to-one chat: its Tasks tools are the reads and
+     *  `add_comment`, and no mailbox rows ride them (see `AttachScope.chatRun`). */
+    chatRun?: boolean
+    /** The team those tools are held to: the agent's own. Null: it has none. */
+    chatRunTeamId?: string | null
     /** Signs the attach URL's scope (never serialized itself) — see
      *  `@clawboo/mcp` attachAuth. Without it the server refuses the claimed
      *  identity and serves the session unbound. */

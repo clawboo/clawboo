@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { boardClient } from '@/lib/boardClient'
 
 import { useBoardStore } from '../board'
 
@@ -170,5 +172,35 @@ describe('useBoardStore: person tasks, waits and Reopen', () => {
     s.applyChange('t1', { id: 'task-1', status: 'cancelled', summary: 'dropped', updatedAt: 100 })
     s.applyChange('t1', { id: 'task-1', status: 'todo', summary: 'fresh', updatedAt: 200 })
     expect(task().summary).toBe('fresh')
+  })
+})
+
+describe('board store: who a loaded task is with', () => {
+  beforeEach(() => useBoardStore.getState().reset('t1'))
+
+  const load = async (row: Record<string, unknown>) => {
+    vi.spyOn(boardClient, 'listTasks').mockResolvedValue([
+      { id: 'task-1', title: 'Work', status: 'todo', updatedAt: 100, ...row },
+    ] as never)
+    await useBoardStore.getState().load('t1')
+    vi.restoreAllMocks()
+    return useBoardStore.getState().tasksByTeam.get('t1')!.get('task-1')!
+  }
+
+  it('names the agent a task is bound to, as the board does', async () => {
+    const task = await load({ sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:lead' })
+    expect(task.assigneeAgentId).toBe('a1')
+  })
+
+  it('leaves a task nobody is bound to unassigned', async () => {
+    expect((await load({})).assigneeAgentId).toBeNull()
+  })
+
+  it('never names an agent on a task a person has', async () => {
+    const task = await load({
+      sourceDelegationId: 'r1:deleg:agent:a1:reflectTo:lead',
+      assigneePersonId: 'p1',
+    })
+    expect(task.assigneeAgentId).toBeNull()
   })
 })

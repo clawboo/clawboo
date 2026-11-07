@@ -592,6 +592,8 @@ How each runtime's cost is reported or estimated is in [Budgets and spend](/usin
 { "ok": false, "reason": "conflict" }
 ```
 
+Without [the person check](/operating/security#the-person-check), a `409` also says this run would undo something: `person_moved` while a person's move of the card stands, or why the board would not start the task by itself, such as `stopped` after a Stop, `failed_too_often` or `budget`. A person can run it anyway.
+
 **`422 Unprocessable Entity`**: the run was refused before it started:
 
 ```ts

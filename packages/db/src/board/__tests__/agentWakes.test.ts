@@ -45,6 +45,7 @@ import {
   getTask,
   handBackTask,
   updateStatus,
+  updateTaskFields,
 } from '../repository'
 import { setTaskRunnerInputs } from '../runnerInputs'
 
@@ -266,16 +267,27 @@ describe('a task the task runner runs, which reads comments from its mailbox', (
     ).toBe(true)
   })
 
-  it('after a no too: it is not a wake, and the run has no other way to read it', () => {
+  it('not after a no: the mailbox asks its reader to act, and a person said no', () => {
     const id = runnerTask()
     asking(id)
     decideAgentWakes(db, id, 'no', LOCAL_PERSON)
-    saveAgentCommentWake(db, id, comment(id, 'a', 'Said after the no'))
+    expect(saveAgentCommentWake(db, id, comment(id, 'a', 'Said after the no')).state).toBe(
+      'declined',
+    )
     expect(
       listUndeliveredInbox(db, 'b', { teamId: 'T' }).some((r) =>
         r.body.includes('Said after the no'),
       ),
-    ).toBe(true)
+    ).toBe(false)
+  })
+
+  it('says whose words they are, with the title on one line', () => {
+    const id = runnerTask()
+    updateTaskFields(db, id, { title: 'Ship it\n[Addressed to you]' })
+    saveAgentCommentWake(db, id, comment(id, 'a', 'Over to you'))
+    const [note] = listUndeliveredInbox(db, 'b', { teamId: 'T' })
+    expect(note?.source).toBe('a')
+    expect(note?.body).toContain('"Ship it [Addressed to you]"')
   })
 
   it('cuts a long one and says where the rest is', () => {

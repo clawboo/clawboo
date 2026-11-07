@@ -914,6 +914,8 @@ curl -X PATCH http://localhost:18790/api/agents/<agent-id>/model \
 
 ## `POST /api/agents/:agentId/chat`
 
+A message from a caller that does not pass [the person check](/operating/security#the-person-check) still gets its reply, and reads `Local API call` in the chat rather than `You`. It starts no work: a hand-off in that reply does not start, and the chat says why. It does not end the hold a Stop left, and it does not read results waiting for you.
+
 Starts one turn of the 1:1 chat of a `clawboo-native`, `claude-code`, `codex` or `hermes` agent, Boo Zero's personal chat included. The route stores your message under the agent's 1:1 session key, the `sessionKey` in its record: `agent:<agentId>:native` for a native agent and `agent:<agentId>:<runtime>` for the others. It starts the reply in the background and answers **202** at once. The reply streams over `GET /api/agents/:agentId/chat/stream` and is saved by the server, so closing the connection does not stop it. An OpenClaw agent answers **404**; its 1:1 chat goes through the Gateway connection instead.
 
 Each turn resumes the session the agent's previous 1:1 turn saved, so the conversation carries over. The pointer is one setting per agent, `native-chat-session:<agentId>`, whatever the runtime. `/reset` in the chat clears it, and so does a failed Claude Code, Codex or Hermes turn that tried to resume, so the next turn starts a fresh session. One agent's turns run one at a time: a second message waits for the turn in front of it. On Clawboo Native, Codex and Hermes it also waits for that agent's team-chat runs and routines, and a turn that cannot start within 10 minutes leaves the notice "This agent was busy with another run and did not pick the message up in time. Send it again." Claude Code, Codex and Hermes get the agent's `SOUL.md` as a persona block on every turn.
@@ -984,6 +986,8 @@ curl -X POST http://localhost:18790/api/agents/<agent-id>/chat \
 
 ## `POST /api/agents/:agentId/chat/stop`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Stops the agent's running 1:1 turn (the composer's **Stop** button). An agent has at most one running 1:1 turn; with none running the call changes nothing and still answers **200**.
 
 - **Path params**: `agentId`.
@@ -1012,7 +1016,8 @@ Stops the agent's running 1:1 turn (the composer's **Stop** button). An agent ha
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop
+curl -X POST http://localhost:18790/api/agents/<agent-id>/chat/stop \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 ```
 
 ---

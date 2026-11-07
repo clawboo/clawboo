@@ -101,7 +101,7 @@ describe('buildResumeNote — the two honest variants', () => {
 })
 
 describe('buildResumeNote: a watchdog timeout on the executor path', () => {
-  it('still reads as an interrupted attempt with nothing recorded, as before K17', () => {
+  it('still reads as an interrupted attempt with nothing recorded, as before', () => {
     // The team engine stopped the run, so whatever it was doing is unfinished.
     const text = note([
       { status: 'timed_out', error: 'No response from the delegate for 8 minutes.' },
@@ -123,7 +123,7 @@ describe('buildLastAttemptNote (the team engine)', () => {
     expect(last([{ status: 'succeeded' }])).toBeNull()
   })
 
-  it('does not call a watchdog timeout a crash (K17)', () => {
+  it('does not call a watchdog timeout a crash', () => {
     const text = last([
       { status: 'timed_out', error: 'No response from the delegate for 8 minutes.' },
     ])!

@@ -4,7 +4,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { defangInterSessionHeaders } from '@clawboo/board-core'
+import { formatInterSessionMessage } from '@clawboo/board-core'
 import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from './db'
@@ -21,6 +21,13 @@ export interface EnqueueInboxInput {
   kind: InboxKind
   body: string
   taskId?: string | null
+  /** Whose words the body quotes: an agent's id, or `person`. Omit for clawboo's own. */
+  source?: string | null
+}
+
+/** The `from` a row is framed with when it reaches a model. */
+export function inboxRowSource(row: Pick<DbAgentInboxRow, 'source'>): string {
+  return row.source ?? 'clawboo'
 }
 
 /** Append a notification to an agent's durable mailbox. */
@@ -36,6 +43,7 @@ export function enqueueInbox(db: ClawbooDb, input: EnqueueInboxInput): DbAgentIn
     deliveredAt: null,
     deliveredVia: null,
     tenantId: null,
+    source: input.source ?? null,
   }
   withWriteRetry(() => db.insert(agentInbox).values(row).run())
   return row
@@ -118,12 +126,13 @@ export function packInboxRows(
   const includedIds: string[] = []
   let used = 0
   for (const r of rows) {
-    // Rows render unquoted, and some carry text a person or an agent wrote (a
-    // forwarded comment), so a header forged there must not read as a real one.
-    const text = defangInterSessionHeaders(r.body)
+    // Some rows carry text a person or an agent wrote (a forwarded comment), and they
+    // land in a section that asks the agent to act. So each is framed as data under the
+    // name of whoever wrote it: every line quoted, so a body cannot pass for a second
+    // row, or for a person's words.
     const body =
-      text.length > DIGEST_ROW_MAX_CHARS ? `${text.slice(0, DIGEST_ROW_MAX_CHARS)}…` : text
-    const line = `- ${body}`
+      r.body.length > DIGEST_ROW_MAX_CHARS ? `${r.body.slice(0, DIGEST_ROW_MAX_CHARS)}…` : r.body
+    const line = formatInterSessionMessage({ from: inboxRowSource(r), kind: r.kind }, body)
     if (used + line.length + 1 > budgetChars) break
     bodies.push(line)
     includedIds.push(r.id)

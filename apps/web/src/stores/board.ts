@@ -11,7 +11,7 @@
 
 import { create } from 'zustand'
 
-import { isPlanHolder } from '@clawboo/board-core'
+import { delegationTargetOf, isPlanHolder } from '@clawboo/board-core'
 
 import { isTerminalStatus, taskAttentionOf, type TaskAttention } from '@/features/board/boardStatus'
 import type { BoardChange } from '@/features/group-chat/boardOrchestration'
@@ -40,7 +40,12 @@ export interface BoardTaskView {
   /** What it waits on (the JSON reason), as the server last said for this status. */
   waitingOn?: string | null
   /** For a wait on other work, what its card names. */
-  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
+  waitingOnDetail?: {
+    taskTitle?: string
+    openSubtasks?: number
+    needPerson?: number
+    openUnder?: number
+  } | null
   /** The person it is assigned to. Never with `assigneeAgentId`. */
   assigneePersonId?: string | null
   assigneePerson?: string | null
@@ -60,7 +65,12 @@ export interface BoardTaskView {
 export type BoardChangeFrame = BoardChange & {
   roomId?: string | null
   waitingOn?: string | null
-  waitingOnDetail?: { taskTitle?: string; openSubtasks?: number; needPerson?: number } | null
+  waitingOnDetail?: {
+    taskTitle?: string
+    openSubtasks?: number
+    needPerson?: number
+    openUnder?: number
+  } | null
   assigneePersonId?: string | null
   assigneePerson?: string | null
   planHolder?: boolean
@@ -167,7 +177,13 @@ export const useBoardStore = create<BoardStoreState>((set) => ({
             identifier: r.identifier ?? null,
             title: r.title,
             status: r.status,
-            assigneeAgentId: r.assigneeAgentId ?? null,
+            // A task waiting in To do or needs you has lost its assignee and kept its
+            // binding, and the board names that agent.
+            assigneeAgentId:
+              r.assigneeAgentId ??
+              delegationTargetOf(
+                typeof r['sourceDelegationId'] === 'string' ? r['sourceDelegationId'] : null,
+              ),
             parentTaskId: r.parentTaskId ?? null,
             attention: taskAttentionOf(r),
             pause: (r['pause'] as BoardChange['pause']) ?? null,

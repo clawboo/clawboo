@@ -833,6 +833,27 @@ export function closeMainTaskByPerson(
 }
 
 /**
+ * A team is going, so its open requests close: each main task and the open work under
+ * it, as a person closing them would. Nobody is left waiting on one, and no engine is
+ * left to answer it. Returns how many closed.
+ */
+export function closeRequestsOfTeam(db: ClawbooDb, teamId: string, note: string): number {
+  const open = db
+    .select()
+    .from(tasks)
+    .where(and(eq(tasks.teamId, teamId), eq(tasks.isMainTask, 1), eq(tasks.dropped, 0)))
+    .all() as DbTask[]
+  let closed = 0
+  for (const row of open) {
+    if (isTerminal(row.status as TaskStatus)) continue
+    if (!closeMainTaskByPerson(db, row.id, 'cancelled').result.ok) continue
+    addComment(db, row.id, note, 'system', null, { kind: 'note' })
+    closed += 1
+  }
+  return closed
+}
+
+/**
  * Rooms holding a request with nothing left open and no report on its way, so its
  * lead is next to act and may have no engine loaded. Only `in_progress`: a parked one
  * waits on a person. The dispatch pump builds these rooms' engines.
@@ -1220,9 +1241,15 @@ export const isLedgerAutoFireable: (execs: readonly LedgerRun[]) => boolean = le
  * without the ledger filter one permanently-parked task would rebuild its
  * orchestrator every tick forever, without the readiness filter a dep-blocked
  * plan tail would do the same, and without the pause check so would paused work
- * or a task left on an archived team. The engine's own policy remains the final
- * arbiter of what runs.
+ * or a task left on an archived team. Deleting a team leaves its task rows behind, and
+ * an engine built for one would run them with no team to run under. The engine's own
+ * policy remains the final arbiter of what runs.
  */
+/** Is this team still on the board? Deleting a team leaves its task rows behind. */
+export function teamExists(db: ClawbooDb, teamId: string): boolean {
+  return db.select({ id: teams.id }).from(teams).where(eq(teams.id, teamId)).get() !== undefined
+}
+
 export function listRoomsWithFireableDelegations(
   db: ClawbooDb,
 ): Array<{ teamId: string; roomId: string | null }> {
@@ -1239,7 +1266,7 @@ export function listRoomsWithFireableDelegations(
     .all() as Array<{ teamId: string | null; roomId: string | null }>
   const out: Array<{ teamId: string; roomId: string | null }> = []
   for (const c of candidates) {
-    if (!c.teamId) continue
+    if (!c.teamId || !teamExists(db, c.teamId)) continue
     // Readiness (deps satisfied) comes from the same query the engine's pump
     // uses, so the two views can't drift.
     const ready = getReadyTasks(db, { teamId: c.teamId, roomId: c.roomId })
@@ -1390,7 +1417,13 @@ export function startReviewHeartbeat(
 }
 
 /** Release an `in_progress` task back to `todo` (clears the assignee). */
-export function releaseTask(db: ClawbooDb, taskId: string): void {
+export function releaseTask(
+  db: ClawbooDb,
+  taskId: string,
+  /** `keepVerdict`: the same work comes back, as after a pause, so what its check found
+   *  and the attempts that bound its fix rounds still count. */
+  opts: { keepVerdict?: boolean } = {},
+): void {
   const released = withWriteRetry(() =>
     db
       .update(tasks)
@@ -1401,7 +1434,7 @@ export function releaseTask(db: ClawbooDb, taskId: string): void {
       .set({
         assigneeAgentId: null,
         assigneeRuntime: null,
-        verification: null,
+        ...(opts.keepVerdict ? {} : { verification: null }),
         waitingOn: null,
         runExecutionId: null,
         status: 'todo',
@@ -2060,23 +2093,33 @@ const needsPersonFromWaiter = (v: SubtaskView): boolean =>
 
 /** What a task waiting on other work waits on, for its card to name: the task's
  *  title, or how many of its sub-tasks are open and how many of those need a person.
- *  Undefined for any other wait. */
+ *  A person's request says this whatever it waits on, because closing it cancels all
+ *  of it, and `openUnder` is that count when it differs from what it waits on: an
+ *  agent's own note holds nothing, yet goes with it. Undefined for any other wait. */
 export function waitingOnDetailOf(
   db: ClawbooDb,
   task: Pick<DbTask, 'id' | 'waitingOn'> & { isMainTask?: number },
-): { taskTitle?: string; openSubtasks?: number; needPerson?: number } | undefined {
+):
+  | { taskTitle?: string; openSubtasks?: number; needPerson?: number; openUnder?: number }
+  | undefined {
   const w = parseWaitingOn(task.waitingOn)
   if (w?.kind === 'task') return { taskTitle: getTask(db, w.taskId)?.title ?? '' }
-  if (w?.kind !== 'subtasks') return undefined
   // A person's request waits on its whole tree, not only what is directly under it.
   if (task.isMainTask === 1) {
-    const held = openTreeViews(db, task.id, subtreeOf(db, task.id)).filter(requestWaitsOn)
+    const open = openTreeViews(db, task.id, subtreeOf(db, task.id))
+    if (open.length === 0 && w?.kind !== 'subtasks') return undefined
+    const held = open.filter(requestWaitsOn)
     // What holds the request and will not move by itself: Needs you shows each of these.
     const needPerson = held.filter(
       (v) => v.status !== 'backlog' && subtaskStanding(v) !== 'coming',
     ).length
-    return { openSubtasks: held.length, ...(needPerson > 0 ? { needPerson } : {}) }
+    return {
+      openSubtasks: held.length,
+      ...(needPerson > 0 ? { needPerson } : {}),
+      ...(open.length !== held.length ? { openUnder: open.length } : {}),
+    }
   }
+  if (w?.kind !== 'subtasks') return undefined
   const views = subtaskViewsOf(db, task.id)
   const t = tallySubtasks(views)
   // Open, as the wait counts them: what is coming, and what needs someone to act.
@@ -3318,6 +3361,11 @@ export function reconcileOrphans(
  * row is older than the TTL nothing proves it alive, and it would keep the claim
  * refusing and the fire policy reading "someone owns this". If the run does still
  * end, its late result takes the path it always did.
+ *
+ * And a run left open on a Blocked task, whose agent blocked it and whose process then
+ * died. Nothing beats a Blocked task either, and the open row keeps saving wakes from
+ * starting it (`run_unproven`) and a parent from taking back its turn. The task keeps
+ * its card and its reason: only the run closes.
  */
 export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): ReconcileResult {
   const releasedEvents: BoardLifecycleEvent[] = []
@@ -3386,6 +3434,28 @@ export function reconcileStaleInProgress(db: ClawbooDb, olderThanMs: number): Re
         .where(eq(executionProcesses.id, r.id))
         .run()
       settleWakesOfClosedRunTx(tx, r.id, { status: 'timed_out' }, now)
+    }
+    const ended = tx
+      .select({ id: executionProcesses.id, taskId: tasks.id })
+      .from(executionProcesses)
+      .innerJoin(tasks, eq(tasks.id, executionProcesses.taskId))
+      .where(
+        and(
+          eq(executionProcesses.status, 'running'),
+          eq(tasks.status, 'blocked'),
+          eq(tasks.dropped, 0),
+          lt(tasks.updatedAt, cutoff),
+          lt(executionProcesses.createdAt, cutoff),
+        ),
+      )
+      .all() as Array<{ id: string; taskId: string }>
+    for (const r of ended) {
+      tx.update(executionProcesses)
+        .set({ status: 'timed_out', completedAt: now, error: STALE_RUN_ERROR })
+        .where(eq(executionProcesses.id, r.id))
+        .run()
+      settleWakesOfClosedRunTx(tx, r.id, { status: 'timed_out' }, now)
+      tx.update(tasks).set({ runExecutionId: null }).where(eq(tasks.id, r.taskId)).run()
     }
     return { reconciled }
   })

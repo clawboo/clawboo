@@ -172,7 +172,7 @@ What a team-chat check cannot see:
 
 When a team-chat check cannot finish, the task waits in **Needs you** with a comment, and whoever handed it out is told:
 
-- **Clawboo restarts, or the chat is closed,** while the check runs or waits. The task moves once Clawboo is running again.
+- **Clawboo restarts, or the chat is closed,** while the check runs or waits. The task moves once Clawboo is running again. The agent's reply went on the task when the check started, so it is still there, and whoever handed out the task is told it was not checked.
 - **The check does not answer within 30 minutes.** That clock starts when the check does, after any wait. The verify command itself is stopped after 10.
 - **The check cannot run**, for example because the folder's history is missing, or a fix round can no longer be checked after an earlier attempt failed.
 - **A fix round cannot be started**, for example because the board could not record its run. The comment says why.

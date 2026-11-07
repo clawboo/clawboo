@@ -528,7 +528,7 @@ describe('board: handing a task to one agent', () => {
     })
   })
 
-  // K2. A task still filed under an archived chat room is outside every engine:
+  // A task still filed under an archived chat room is outside every engine:
   // the team's own chat reads only tasks with no room, and the archived room has
   // no engine at all. Retry answered 202, Assign 200 and a reply "Started again"
   // while nothing ever ran. Archiving now moves such tasks to the team's own

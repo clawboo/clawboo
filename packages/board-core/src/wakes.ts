@@ -103,7 +103,8 @@ export type WakeSkipReason =
    *  slot and a fix round about to go out. It takes the wake when it renders its
    *  context, or at its next turn. */
   | 'run_live'
-  /** A run is on the ledger but nothing proves it alive: the stale sweep ends it. */
+  /** A run is on the ledger but nothing proves it alive. The stale sweep ends it, on a
+   *  task In progress, Blocked or back in To do alike. */
   | 'run_unproven'
   /** In progress with no run behind it. A person moves the card or retries it. */
   | 'no_run'
@@ -123,7 +124,7 @@ export type WakeSkipReason =
   | 'blocked'
   /** A person holds it: ends when they give it back to its agent. */
   | 'person_assigned'
-  /** It waits on a person's answer: ends when they answer, or move it on. */
+  /** It waits on a person's answer: ends when they answer, comment, or move it on. */
   | 'question'
   /** A teammate's comment would start it, and a person has not said yes for this job:
    *  ends at their answer on the card. */
@@ -208,7 +209,8 @@ export interface WakeDecisionInput {
   /** A person holds the task. No wake starts it: it is their turn. */
   personAssigned?: boolean
   /** It waits on a question still open, so a comment from before the agent asked
-   *  does not end that wait. A person's reply does, through its own path. */
+   *  does not end that wait. A person's reply does, through its own path, or here when
+   *  a pause, a hold or a run still ending put it off: the host then says false. */
   waitingOnQuestion?: boolean
   /** A Blocked task: is the wait one a teammate's comment could end? */
   teammateMayEndWait?: boolean

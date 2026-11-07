@@ -162,9 +162,15 @@ export function parseBoundScope(req?: IncomingMessage): MemoryScope | undefined 
  *  signature covers all of these claims, so a runtime can neither strip, add nor
  *  move them. Undefined when the URL carries no valid signed scope. Exported for
  *  unit testing. */
-export function parseTasksBinding(
-  req?: IncomingMessage,
-): { scope: MemoryScope; teamRun: boolean; taskId?: string; executionId?: string } | undefined {
+export function parseTasksBinding(req?: IncomingMessage):
+  | {
+      scope: MemoryScope
+      teamRun: boolean
+      chatRun: boolean
+      taskId?: string
+      executionId?: string
+    }
+  | undefined {
   const params = attachParams(req)
   if (!params) return undefined
   const teamRun = params.get('teamRun') === '1'
@@ -175,6 +181,7 @@ export function parseTasksBinding(
     ? {
         scope,
         teamRun,
+        chatRun: params.get('chatRun') === '1',
         ...(taskId ? { taskId } : {}),
         ...(executionId ? { executionId } : {}),
       }
@@ -224,6 +231,7 @@ function signedScope(
       tenantId,
       delegate: false,
       teamRun,
+      chatRun: params.get('chatRun') === '1',
       boundTaskId,
       boundExecutionId,
     })
@@ -350,6 +358,7 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
           : {}),
         unverifiedCaller: binding === undefined,
         ...(binding?.teamRun ? { teamRun: true } : {}),
+        ...(binding?.chatRun ? { chatRun: true } : {}),
       })
     }),
     memory: createStreamableHttpHandlers((req) => {

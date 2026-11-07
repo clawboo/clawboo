@@ -13,9 +13,10 @@
 // refusing it at write time surfaces the mistake to the caller).
 
 import type { Request, Response } from 'express'
-import { agents, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, appendAudit, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import {
   resolveBooZero,
@@ -60,9 +61,11 @@ export function booZeroOverrideGET(_req: Request, res: Response): void {
 }
 
 // ─── POST /api/boo-zero/override ─────────────────────────────────────────────
-// Body: { agentId: string | null } — null clears the override.
+// Body: { agentId: string | null }, where null clears the override. A person's request only:
+// Boo Zero leads every team, and its one-to-one chat can start work in any of them.
 
 export function booZeroOverridePOST(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const body = req.body as { agentId?: unknown } | undefined
   if (!body || typeof body !== 'object' || !('agentId' in body)) {
     res.status(400).json({ error: 'agentId is required (string to set, null to clear)' })
@@ -76,8 +79,18 @@ export function booZeroOverridePOST(req: Request, res: Response): void {
 
   try {
     const db = getDb()
+    const previous = getSetting(db, SETTING_BOO_ZERO_OVERRIDE) || null
+    const audit = (next: string | null): void => {
+      if (next !== previous)
+        appendAudit(db, {
+          eventType: 'board',
+          ...(next ? { agentId: next } : {}),
+          summary: { action: 'set_boo_zero_override', previous, next, ...actorField(req) },
+        })
+    }
     if (agentId === null) {
       setSetting(db, SETTING_BOO_ZERO_OVERRIDE, '')
+      audit(null)
       res.json({ ok: true, overrideAgentId: null, effective: resolveBooZero(db) })
       return
     }
@@ -93,6 +106,7 @@ export function booZeroOverridePOST(req: Request, res: Response): void {
     }
 
     setSetting(db, SETTING_BOO_ZERO_OVERRIDE, row.id)
+    audit(row.id)
     res.json({ ok: true, overrideAgentId: row.id, effective: resolveBooZero(db) })
   } catch (err) {
     res.status(500).json({ error: String(err) })

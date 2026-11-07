@@ -9,7 +9,6 @@ import type { Request, Response } from 'express'
 
 import {
   agents,
-  clampAgentTaskPriority,
   getScheduledRun,
   getTask,
   listRoutineFires,
@@ -40,7 +39,7 @@ import {
 
 import { eq } from 'drizzle-orm'
 
-import { actsAsPerson } from '../lib/auth'
+import { refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { pauseTargetName } from '../lib/pauseViews'
 import { getRoutinesTicker } from '../lib/routines/ticker'
@@ -341,22 +340,11 @@ export function schedulesTimeZonePUT(req: Request, res: Response): void {
 
 // POST /api/schedules — body = ScheduleCreateSpec; routed by spec.source
 // A team routine (`target: 'team'`) names a team instead of an agent; every other
-// create names the agent it runs on.
-/**
- * A routine's task template as this caller may set it. A routine files its tasks with
- * the template's priority, so this is another way to set one, and Urgent is a person's
- * call: anything that fails the person check stops at High. A speed bump, as on the
- * board's own routes (see actsAsPerson).
- */
-function templateFor(req: Request, template: unknown): unknown {
-  if (actsAsPerson(req) || typeof template !== 'object' || template === null) return template
-  const priority = (template as { priority?: unknown }).priority
-  return typeof priority === 'number'
-    ? { ...template, priority: clampAgentTaskPriority(priority) }
-    : template
-}
-
+// create names the agent it runs on. Writing, running and removing a routine is a
+// person's request only: a routine's message reaches its team as one the user scheduled,
+// and its task template sets the priority of what it files.
 export async function schedulesCreatePOST(req: Request, res: Response): Promise<void> {
+  if (refuseUnlessPerson(req, res)) return
   const body = (req.body ?? {}) as Partial<ScheduleCreateSpec>
   const teamRoutine = body.source === 'clawboo-routine' && body.target === 'team'
   if (
@@ -379,10 +367,7 @@ export async function schedulesCreatePOST(req: Request, res: Response): Promise<
   try {
     const schedule = await getScheduleMultiplexer().write({
       kind: 'create',
-      spec: {
-        ...(body as ScheduleCreateSpec),
-        ...('taskTemplate' in body ? { taskTemplate: templateFor(req, body.taskTemplate) } : {}),
-      },
+      spec: body as ScheduleCreateSpec,
     })
     res.status(201).json({ schedule: withName(schedule) })
   } catch (err) {
@@ -392,6 +377,7 @@ export async function schedulesCreatePOST(req: Request, res: Response): Promise<
 
 // PATCH /api/schedules/:id — { action: 'pause' | 'resume' } | { patch: ScheduleUpdatePatch }
 export async function schedulesUpdatePATCH(req: Request, res: Response): Promise<void> {
+  if (refuseUnlessPerson(req, res)) return
   const id = scheduleId(req)
   const body = (req.body ?? {}) as { action?: string; patch?: ScheduleUpdatePatch }
   try {
@@ -404,12 +390,7 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
       const schedule = await getScheduleMultiplexer().write({
         kind: 'update',
         id,
-        patch: {
-          ...body.patch,
-          ...('taskTemplate' in body.patch
-            ? { taskTemplate: templateFor(req, body.patch.taskTemplate) }
-            : {}),
-        },
+        patch: body.patch,
       })
       res.json({ schedule: withName(schedule) })
       return
@@ -425,6 +406,7 @@ export async function schedulesUpdatePATCH(req: Request, res: Response): Promise
 
 // DELETE /api/schedules/:id
 export async function schedulesDELETE(req: Request, res: Response): Promise<void> {
+  if (refuseUnlessPerson(req, res)) return
   try {
     await getScheduleMultiplexer().write({ kind: 'remove', id: scheduleId(req) })
     res.json({ ok: true })
@@ -435,6 +417,7 @@ export async function schedulesDELETE(req: Request, res: Response): Promise<void
 
 // POST /api/schedules/:id/run — force-fire now (enqueue-style ack)
 export async function schedulesRunPOST(req: Request, res: Response): Promise<void> {
+  if (refuseUnlessPerson(req, res)) return
   try {
     await getScheduleMultiplexer().write({ kind: 'run', id: scheduleId(req) })
     res.status(202).json({ ok: true })

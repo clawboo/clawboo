@@ -87,6 +87,8 @@ curl http://localhost:18790/api/governance/budgets
 
 ## `POST /api/governance/budgets`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Creates a budget for a scope, or changes the limit and mode of an existing one. A new budget starts at 0 spent and `active`. Changing the limit recomputes `status` from the spend so far, so raising the limit above the current spend un-pauses a `cap` budget.
 
 - **Path/query params**: none.
@@ -148,6 +150,8 @@ curl -X POST http://localhost:18790/api/governance/budgets \
 ---
 
 ## `POST /api/governance/budgets/:scope/:scopeId/resume`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Sets a paused budget back to `active`. If the spend has already reached the limit, the next recorded cost pauses it again; send `graceUsdCents` to raise the limit to the current spend plus that amount, so work can continue. A resume with grace keeps the budget's mode. The response carries `willRepause: true` when you resume a budget at or over its limit without grace.
 

@@ -26,6 +26,7 @@ import {
   waitingCommentIds,
   type ClawbooDb,
 } from '@clawboo/db'
+import { oneLine } from '@clawboo/board-core'
 import type { SteerResult } from '@clawboo/executor'
 import { createLogger } from '@clawboo/logger'
 
@@ -81,7 +82,7 @@ interface SteerBatch {
 const batches = new Map<string, SteerBatch>()
 
 function steerText(title: string, comments: readonly PendingSteer[]): string {
-  const head = `A person commented on your task "${title}"`
+  const head = `A person commented on your task "${oneLine(title)}"`
   if (comments.length === 1) return `[person steering your task] ${head}: ${comments[0]!.body}`
   const lines = comments.map((c, i) => `${i + 1}. ${c.body}`).join('\n')
   return `[person steering your task] ${head}, ${comments.length} times:\n${lines}`
@@ -183,7 +184,8 @@ export function forwardPersonCommentToRun(
         teamId: task.teamId,
         kind: 'alert',
         taskId: task.id,
-        body: `A person commented on your task "${task.title}": ${text}`,
+        source: 'person',
+        body: `A person commented on your task "${oneLine(task.title)}": ${text}`,
       }).id
     } catch (err) {
       log.error({ err, taskId: task.id }, 'forwarding a person comment failed')

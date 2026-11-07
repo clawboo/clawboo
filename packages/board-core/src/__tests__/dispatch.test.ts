@@ -79,7 +79,7 @@ describe('trailingFailedRuns', () => {
     expect(trailingFailedRuns(runs('failed', 'cancelled', 'failed'))).toBe(1)
   })
 
-  it('skips a run that never finished, as the attempt reader does (K17)', () => {
+  it('skips a run that never finished, as the attempt reader does', () => {
     // A leaked `running` row behind a newer run is not an outcome anyone saw.
     expect(trailingFailedRuns(runs('failed', 'running', 'failed'))).toBe(2)
     expect(trailingFailedRuns(runs('succeeded', 'running', 'failed'))).toBe(1)

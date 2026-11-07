@@ -21,6 +21,7 @@ import {
   commentMayWake,
   delegationTargetOf,
   isTerminal,
+  oneLine,
   parseWaitingOn,
   teammateMayEndWait,
   waitEndsWithOtherWork,
@@ -158,9 +159,9 @@ const MAILBOX_COMMENT_CHARS = 1_000
  * author is whatever its caller sent.
  *
  * A wait on other work ends when that work does, so a comment there wakes nothing. A run
- * on the task runner has no ticket block, so its comment also goes in the mailbox whatever
- * happens next, which is what it reads. That is not a wake: a yes or a no decides whether
- * one starts.
+ * on the task runner has no ticket block, so its comment also goes in the mailbox, which
+ * is what it reads. That is not a wake: a yes decides whether one starts. A job a person
+ * said no on gets no mailbox row: the mailbox asks the agent to act, and they said no.
  */
 export function saveAgentCommentWake(
   db: ClawbooDb,
@@ -177,14 +178,16 @@ export function saveAgentCommentWake(
       if (!agentId || agentId === comment.authorAgentId) return null
       const now = Date.now()
       const teamId = task.teamId ?? null
-      if (task.runnerInputs) {
+      const denied = gateOfJob(tx, jobTaskIdOf(tx, taskId))?.decision === 'deny'
+      if (task.runnerInputs && !denied) {
         const cut = comment.body.length > MAILBOX_COMMENT_CHARS
         enqueueInbox(db, {
           agentId,
           teamId,
           kind: 'task_update',
           taskId,
-          body: `A teammate commented on your task "${task.title}": ${
+          source: comment.authorAgentId,
+          body: `A teammate commented on your task "${oneLine(task.title)}": ${
             cut
               ? `${comment.body.slice(0, MAILBOX_COMMENT_CHARS)}\n… (cut: the whole comment is on the task)`
               : comment.body
@@ -195,7 +198,6 @@ export function saveAgentCommentWake(
       // person's main task has no turn to give.
       if (task.assigneePersonId || task.status === 'backlog' || task.isMainTask === 1) return null
       if (waitEndsWithOtherWork(parseWaitingOn(task.waitingOn))) return null
-      const denied = gateOfJob(tx, jobTaskIdOf(tx, taskId))?.decision === 'deny'
       if (!commentMayWake(comment, { agentWakes: !denied }))
         return { result: { state: 'declined', agentId }, teamId }
       recordTaskWakeTx(

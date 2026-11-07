@@ -193,6 +193,7 @@ Where a run refused this way goes next:
 - **An agent routine** keeps its schedule: the refusal is a failure that may pass by itself, and three in a row stop the routine, as with a rate limit. See [When a routine stops](/using/routines#when-a-routine-stops).
 - **A team routine** whose message is refused counts as a failed run and stops until you resume it, as with a paused cap.
 - **Team chat and one-to-one chat**: send the message again once the other runs finish. A handed-off task waits in **Needs you**.
+- **A task update** on its way to a lead or a chat waits, with no try counted against it, and goes out by itself within about 30 seconds of the room coming back. The chat says why once. A paused cap is different, since only you can raise that one: team chat says the update could not be delivered, a one-to-one chat keeps it for your next message, and the result stays on its card either way.
 
 ## Resume or raise a budget
 

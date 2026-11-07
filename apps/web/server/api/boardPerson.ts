@@ -64,7 +64,7 @@ import {
 } from '../lib/teamChat/personWake'
 import { createChatReportUps, notifyChatReportUp } from '../lib/agentChat/chatReportUpOutbox'
 import { createReportUpOutbox } from '../lib/teamChat/reportUpOutbox'
-import { engineRefusal, roomIdForTask } from '../lib/teamChat/roomRoster'
+import { engineRefusal, roomIdForTask, startRefusal } from '../lib/teamChat/roomRoster'
 import { writeRequestNote } from '../lib/teamChat/requestNote'
 import { getTaskOrchestrator } from '../lib/teamChat/teamOrchestrator'
 import { pumpTaskWakeNow, type TaskWakePumpDeps } from '../lib/teamChat/taskWakes'
@@ -78,7 +78,7 @@ const REOPENED_REQUEST = 'A person reopened this request.'
 /** What saving a person's wake needs: as Retry, team chat could not run a task its
  *  engine cannot see. */
 function saveDeps(db: ClawbooDb): SavePersonWakeDeps {
-  return { startRefusal: (t) => (runnerTargetOf(db, t) ? null : engineRefusal(db, t)) }
+  return { startRefusal: (t) => startRefusal(db, t, runnerTargetOf(db, t) !== null) }
 }
 
 /** The pump's hands, for a person's wake acted on right away. Any start this one cannot

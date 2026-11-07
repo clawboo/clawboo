@@ -30,6 +30,7 @@ export {
   legalTargets,
   LOCAL_PERSON,
   normalizeAnswer,
+  oneLine,
   parseQuestionPayload,
   parseWaitingOn,
   planStepsMatch,

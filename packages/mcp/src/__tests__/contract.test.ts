@@ -136,7 +136,7 @@ describe('Tasks MCP', () => {
     expect(second.join('')).not.toContain('X finished') // …exactly once
   })
 
-  it('frames each piggybacked note as the board’s data, never as the person or an instruction (K12)', async () => {
+  it('frames each piggybacked note as the board’s data, never as the person or an instruction', async () => {
     enqueueInbox(db, {
       agentId: 'a1',
       teamId: 'A',

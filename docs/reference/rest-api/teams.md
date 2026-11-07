@@ -21,7 +21,7 @@ Teams are stored in the SQLite `teams` table. An agent's team is the nullable `a
 
 <Note>
 
-`DELETE /api/teams/:id` keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, verify command, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
+`DELETE /api/teams/:id` first stops the team's chats and their runs, and cancels its open requests with the work under them. Its other tasks stay as rows no engine, wake or rerun will start. It keeps the team's agents: it sets their `teamId` to `null` and removes the team's rules, verify command, intro flags, General clear time and resume pointers, and the team's folder with its files. The dashboard's **Delete with agents** first deletes each agent with `DELETE /api/agents/:agentId` (see the [Agents API](/reference/rest-api/agents)) and then deletes the team, so a REST caller that wants the same result deletes the agents itself.
 
 </Note>
 
@@ -230,6 +230,8 @@ curl -X POST http://localhost:18790/api/teams \
 ---
 
 ## `PATCH /api/teams/:id`
+
+Changing `isArchived` or `leaderAgentId` is a person's call: a caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. The other fields, and an `isArchived` that changes nothing, are open.
 
 Partially updates a team. Only the fields present in the body are written; `updatedAt` is always refreshed. `isArchived` is coerced to `0` or `1` from the body's truthiness. Returns the full updated row (including a recomputed `agentCount`).
 
@@ -760,6 +762,8 @@ curl http://localhost:18790/api/teams/<team-id>/onboarding
 
 ## `PATCH /api/teams/:id/onboarding`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Merge-updates the onboarding state and returns the full updated state. Only fields with the correct type are applied; a non-boolean `agentsIntroduced`/`userIntroduced` or non-string `userIntroText` is ignored and the current value is kept. `userIntroText` is truncated to 4000 characters.
 
 - **Path params**: `id` (team id).
@@ -807,6 +811,7 @@ Merge-updates the onboarding state and returns the full updated state. Only fiel
 
 ```bash
 curl -X PATCH http://localhost:18790/api/teams/<team-id>/onboarding \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"agentsIntroduced":true,"userIntroduced":true,"userIntroText":"I run a small SaaS."}'
 ```
@@ -858,6 +863,8 @@ curl http://localhost:18790/api/teams/<team-id>/activity-summary
 
 ## `POST /api/teams/:id/chat`
 
+A message from a caller that does not pass [the person check](/operating/security#the-person-check) still runs. It reads `Local API call` in the chat rather than `You`, records no one as asking, and leaves the team's failure breaker as it is.
+
 Sends your message to one chat, General by default or the room named by `roomId`, and answers **202** at once. The server runs the reply and any delegated work in the background, and closing the connection does not stop it. Each chat runs on its own, so work started in a room runs beside the other chats, and the tasks it delegates are filed with that room's id.
 
 Target resolution happens within that chat's roster (General: the team's active members plus Boo Zero; a room: its live members plus Boo Zero), by priority: an explicit `targetAgentId` that is in the roster, then a **leading** `@`-mention (the message must _start_ with `@<agent name>`, and the name must be followed by whitespace or the end of the message; a mention anywhere else in the text is ignored), then the chat's lead (Boo Zero, else the team's own lead if it is in the roster, else the first member). The user message is persisted under the target's session key for that chat (`agent:<id>:team:<teamId>` in General, `agent:<id>:team:<teamId>:room:<roomId>` in a room) before that agent's turn runs.
@@ -908,6 +915,12 @@ A team whose `team-server-orchestrated:<teamId>` setting is `'false'` gets a **4
 { "ok": true }
 ```
 
+**`404 Not Found`**: no team with that id, as for a tab left open on a deleted team:
+
+```json
+{ "error": "team not found" }
+```
+
 **`500 Internal Server Error`**: an unexpected throw before the enqueue:
 
 ```json
@@ -918,7 +931,7 @@ A team whose `team-server-orchestrated:<teamId>` setting is `'false'` gets a **4
 
 The 202 means "accepted", not "succeeded". Watch the reply on `GET /api/teams/:id/chat/stream`. A failed delivery is not returned here; it is saved in the transcript as a `role: 'system'`, `kind: 'meta'` entry. When the cause is a dropped OpenClaw Gateway connection, the server first reconnects and retries the turn once, and saves the entry only if that also fails.
 
-A team with no active members, or an unknown team id, also gets the 202, but nothing is stored and no turn runs.
+A team with no active members also gets the 202, but nothing is stored and no turn runs.
 
 </Note>
 
@@ -938,6 +951,8 @@ curl -X POST http://localhost:18790/api/teams/<team-id>/chat \
 ---
 
 ## `POST /api/teams/:id/chat/stop`
+
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
 
 Stops one chat, General by default or the room named by `roomId`, the way the **Stop** button does. Other chats keep going. A Stop:
 
@@ -991,7 +1006,8 @@ Stopping a chat with nothing running (no work has run in it since the server sta
 ### Example
 
 ```bash
-curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop
+curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors'
 
 # Stop one room; General and the other rooms keep going
 curl -X POST http://localhost:18790/api/teams/<team-id>/chat/stop \
@@ -1279,6 +1295,8 @@ curl http://localhost:18790/api/team-rules/<team-id>
 
 ## `PUT /api/team-rules/:teamId`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Replaces the team-rules text. `content` is required and must be a string; it is rejected (not truncated) when it exceeds 4000 characters. Returns the stored value.
 
 - **Path params**: `teamId` (team id).
@@ -1332,6 +1350,7 @@ Replaces the team-rules text. `content` is required and must be a string; it is 
 
 ```bash
 curl -X PUT http://localhost:18790/api/team-rules/<team-id> \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' \
   -d '{"content":"Reply in British English. Ask before you delete any file."}'
 ```

@@ -20,7 +20,12 @@ import {
   UserRound,
   X,
 } from 'lucide-react'
-import { delegationTargetOf, parseWaitingOn, waitsOnOtherWork } from '@clawboo/board-core'
+import {
+  delegationTargetOf,
+  isPlanHolder,
+  parseWaitingOn,
+  waitsOnOtherWork,
+} from '@clawboo/board-core'
 import type { DebtNote } from '@clawboo/governance'
 
 import { AgentBooAvatar } from '@/components/AgentBooAvatar'
@@ -71,14 +76,15 @@ import { pendingWakeText, readPendingWake } from './pendingWake'
 import { TaskComments } from './TaskComments'
 import { TaskReplyBox } from './TaskReplyBox'
 import {
-  ACCOUNT_FAILURE_META,
-  ATTENTION_META,
   FIX_SIGN_IN,
+  RUN_WORD,
   assigneePersonOf,
+  attentionHint,
   attentionLabel,
   boardColumnOf,
   openQuestionOf,
   otherAssigneeName,
+  personCanRestart,
   statusLabel,
   taskAttentionOf,
   waitingWorkLabel,
@@ -198,19 +204,6 @@ const VERDICT_FACE: Record<
   },
 }
 
-/** A run's outcome in words. */
-const RUN_WORD: Record<string, string> = {
-  queued: 'Queued',
-  running: 'Running',
-  succeeded: 'Succeeded',
-  failed: 'Failed',
-  timed_out: 'Timed out',
-  cancelled: 'Cancelled',
-  budget_paused: 'Stopped by a budget cap',
-  budget_held: 'Waited for budget room',
-  breaker_tripped: 'Stopped by the circuit breaker',
-}
-
 /** A section: a sentence-case heading that folds it, and its content. */
 function Section({
   title,
@@ -304,6 +297,8 @@ function subtaskProgress(subtasks: readonly DrawerSubtask[]): RequestProgress {
  *  are all at hand. */
 function NeedsYouBanner({
   taskId,
+  status,
+  planHolder,
   teamId,
   attention,
   bound,
@@ -314,6 +309,9 @@ function NeedsYouBanner({
   mainTask = false,
 }: {
   taskId: string
+  status: string
+  /** The card only holds a plan: it has no work of its own to run or hand over. */
+  planHolder: boolean
   teamId: string | null
   attention: TaskAttention
   /** It is a person's request, which runs nothing, so no agent is what it lacks. */
@@ -329,13 +327,15 @@ function NeedsYouBanner({
   onChanged: () => void
 }) {
   // Retry hands it back to its agent; with no agent bound, someone has to be
-  // picked. A bound task can also be handed to someone else.
-  const canRetry = attention.reason !== 'unassigned' && !!teamId && !!bound
+  // picked. A bound task can also be handed to someone else. Neither on a run still
+  // going or a check under way, which the server refuses, nor on a card that only
+  // holds a plan, which has no work of its own.
+  const restartable = personCanRestart({ status }, attention) && !planHolder
+  const canRetry = attention.reason !== 'unassigned' && !!teamId && !!bound && restartable
   const { retry, dismiss, fixSignIn, markDone } = useTaskActions()
   const assigned = attention.reason === 'assigned'
-  const meta = ATTENTION_META[attention.reason]
   const broke = attention.reason === 'failed' || attention.reason === 'timed_out'
-  const hint = attention.cause ? ACCOUNT_FAILURE_META[attention.cause].hint : meta.hint
+  const hint = attentionHint(attention, assignee)
   return (
     <div
       data-testid="task-needs-you"
@@ -390,7 +390,7 @@ function NeedsYouBanner({
             {assigned ? 'Give back to its agent' : 'Retry'}
           </Button>
         )}
-        {teamId && !mainTask && (
+        {teamId && !mainTask && restartable && (
           <AssignAgentSelect
             taskId={taskId}
             teamId={teamId}
@@ -402,7 +402,9 @@ function NeedsYouBanner({
         <Button
           size="sm"
           variant="ghost"
-          onClick={() => void dismiss(taskId).then((ok) => ok && onChanged())}
+          onClick={() =>
+            void dismiss(taskId, { request: mainTask }).then((ok) => ok && onChanged())
+          }
         >
           Dismiss
         </Button>
@@ -858,6 +860,8 @@ export function TaskDetailDrawer({
               {attention && (
                 <NeedsYouBanner
                   taskId={task.id}
+                  status={task.status}
+                  planHolder={isPlanHolder(sdid)}
                   teamId={teamId}
                   attention={attention}
                   bound={boundId}
@@ -1334,6 +1338,7 @@ export function TaskDetailDrawer({
                   agentName={ownerId ? (ownerName ?? ownerId) : null}
                   paused={taskPause !== null}
                   request={mainTask}
+                  planHolder={isPlanHolder(sdid)}
                   onSent={({ commentId, delivery, body }) => {
                     if (commentId && delivery) {
                       setReceipts((m) => new Map(m).set(commentId, { delivery, body }))

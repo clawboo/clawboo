@@ -143,13 +143,16 @@ describe('a person’s Stop', () => {
     expect(unreadIds()).toEqual([])
   })
 
-  it('counts as someone else’s from anyone but the dashboard’s page', async () => {
+  it('is refused from anyone but a person, and puts nothing back', async () => {
     const a = running()
     readAll()
     release(a)
-    await call(teamChatStopPOST, { params: { id: TEAM }, headers: {} })
+    expect(await call(teamChatStopPOST, { params: { id: TEAM }, headers: {} })).toBe(403)
     await settle()
-    expect(unreadIds()).toEqual([a])
+    expect(getDb().$client.prepare('SELECT status FROM tasks WHERE id = ?').get(a)).toEqual({
+      status: 'in_progress',
+    })
+    expect(unreadIds()).toEqual([])
   })
 
   it('leaves a task it did not put back: an agent finishing as Stop lands is news', async () => {

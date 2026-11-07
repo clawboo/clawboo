@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { http, HttpResponse } from 'msw'
 
-import { collectAlertItems } from '@/features/alerts/alertRules'
+import { alertNotice, collectAlertItems } from '@/features/alerts/alertRules'
 import { resetPersonCheckNotices } from '@/lib/personCheckNotice'
 import * as confirmStore from '@/stores/confirm'
 import { useToastStore } from '@/stores/toast'
@@ -36,6 +36,23 @@ const { FilterMenuButton, NO_FILTER, filterCount } = await import('../BoardToolb
 const QUESTION = { kind: 'question', questionId: 'q1' }
 
 describe('the board reads waiting_on', () => {
+  it('a pause leads: a held task is not waiting on anything it would move for', () => {
+    const pause = { kind: 'team', id: 'T', name: 'Team' }
+    expect(
+      waitingWorkLabel({ status: 'blocked', waitingOn: '{"kind":"subtasks"}', pause }),
+    ).toBeNull()
+    expect(
+      waitingWorkLabel({
+        status: 'todo',
+        waitingOn: JSON.stringify({ kind: 'retry', cause: 'rate_limited' }),
+        pause,
+      }),
+    ).toBeNull()
+    expect(waitingWorkLabel({ status: 'blocked', waitingOn: '{"kind":"subtasks"}' })).toBe(
+      'Waiting on its sub-tasks',
+    )
+  })
+
   it('a task waiting on other work sits in In progress and is not Needs you', () => {
     for (const waitingOn of [
       JSON.stringify({ kind: 'task', taskId: 't2' }),
@@ -178,6 +195,14 @@ describe('alerts', () => {
     ).toHaveLength(1)
     expect(collectAlertItems([task({ reason: 'assigned', failedRuns: 0 })], [])).toHaveLength(0)
   })
+
+  it('does not call a hand-back yours, since a sign-in proxy can hand it to someone else', () => {
+    const items = collectAlertItems(
+      [task({ reason: 'assigned', failedRuns: 0, handedBack: true, personId: 'p2' })],
+      [],
+    )
+    expect(JSON.stringify(alertNotice(items, () => null))).toContain('was handed back to a person')
+  })
 })
 
 describe('QuestionAnswer', () => {
@@ -294,6 +319,21 @@ describe('QuestionAnswer: what the person sees', () => {
     expect(button.className).not.toContain('shrink-0')
     expect(button.className).toContain('break-words')
     expect(button.className).toContain('max-w-full')
+  })
+
+  it('opens a long suggested step tall enough to read, without field-sizing', () => {
+    const long = 'Run the whole suite on every platform and write down what fails. '.repeat(5)
+    render(
+      <QuestionAnswer
+        question={q('q1', 'suggest_tasks', { tasks: [{ title: long }, { title: 'Short' }] })}
+        onAnswered={vi.fn()}
+      />,
+    )
+    const box = screen.getByLabelText('Suggested task 1') as HTMLTextAreaElement
+    expect(box.rows).toBeGreaterThan(4)
+    expect(box.rows).toBeLessThanOrEqual(8)
+    expect(box.className).toContain('resize-y')
+    expect((screen.getByLabelText('Suggested task 2') as HTMLTextAreaElement).rows).toBe(2)
   })
 
   it('a newer question brings its own list, not the older one’s edits', async () => {
@@ -413,6 +453,34 @@ describe('useTaskActions: people', () => {
     const { reopen } = actions()
     await expect(reopen('t1')).resolves.toBe(false)
     expect(useToastStore.getState().toasts.at(-1)?.message).toMatch(/Reopen that task first/)
+  })
+
+  it('says why the person check refused a retry, instead of "try again"', async () => {
+    resetPersonCheckNotices()
+    server.use(
+      http.post('/api/board/t1/retry', () =>
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
+      ),
+    )
+    expect(await actions().retry('t1')).toBe(false)
+    const message = useToastStore.getState().toasts.at(-1)?.message ?? ''
+    expect(message).not.toMatch(/try again/i)
+    expect(message).toMatch(/localhost|https/i)
+  })
+
+  it('says so once when the person check refused a whole card of retries', async () => {
+    resetPersonCheckNotices()
+    useToastStore.setState({ toasts: [] })
+    server.use(
+      http.post('/api/board/:id/retry', () =>
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
+      ),
+    )
+    expect(await actions().retryMany(['t1', 't2'])).toBe(0)
+    const messages = useToastStore.getState().toasts.map((t) => t.message)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).not.toMatch(/try again/i)
+    expect(messages[0]).toMatch(/localhost|https/i)
   })
 
   it('says why the person check refused taking a task, instead of "try again"', async () => {

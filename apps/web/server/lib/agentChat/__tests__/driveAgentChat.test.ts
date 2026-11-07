@@ -1149,6 +1149,23 @@ describe('driveAgentChat (1:1 native conversational runner)', () => {
     return seen
   }
 
+  it('marks the run as a chat, held to the agent’s own team on the board', async () => {
+    seedAgent('member', 'claude-code', 'team-w')
+    expect((await contextFor('member'))?.memoryScope).toMatchObject({
+      // Its Memory stays the person's chat, not that team's room.
+      teamId: null,
+      agentId: 'member',
+      chatRun: true,
+      chatRunTeamId: 'team-w',
+    })
+    seedAgent('zero', 'claude-code')
+    expect((await contextFor('zero'))?.memoryScope).toMatchObject({
+      teamId: null,
+      chatRun: true,
+      chatRunTeamId: null,
+    })
+  })
+
   it("a coding runtime starts in its team's folder, created owner-only", async () => {
     seedAgent('cc-w', 'claude-code', 'team-w')
     const ctx = await contextFor('cc-w')

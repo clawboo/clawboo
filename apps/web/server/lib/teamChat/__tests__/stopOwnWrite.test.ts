@@ -99,7 +99,7 @@ describe('Stop with the real engine', () => {
     return task.id
   }
 
-  async function pressStop(headers: Record<string, string>): Promise<void> {
+  function stopAnswers(headers: Record<string, string>): number {
     let status = 200
     teamChatStopPOST(
       { params: { id: 'T' }, body: {}, query: {}, headers } as unknown as Request,
@@ -113,7 +113,11 @@ describe('Stop with the real engine', () => {
         },
       } as unknown as Response,
     )
-    expect(status).toBe(200)
+    return status
+  }
+
+  async function pressStop(headers: Record<string, string>): Promise<void> {
+    expect(stopAnswers(headers)).toBe(200)
   }
 
   it('with no engine loaded, a task waiting to try again hears it', async () => {
@@ -150,10 +154,11 @@ describe('Stop with the real engine', () => {
     expect(unreadTasks(getDb(), LOCAL_READER)).toEqual([])
   })
 
-  it('is unread when anything but the dashboard’s page pressed it', async () => {
+  it('is refused from anything but a person, and stops nothing', async () => {
     const id = await runningTask()
-    await pressStop({})
-    await vi.waitFor(() => expect(getTask(getDb(), id)?.status).toBe('todo'))
-    expect(unreadTasks(getDb(), LOCAL_READER).map((t) => t.id)).toEqual([id])
+    expect(stopAnswers({})).toBe(403)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(getTask(getDb(), id)?.status).toBe('in_progress')
+    expect(unreadTasks(getDb(), LOCAL_READER)).toEqual([])
   })
 })

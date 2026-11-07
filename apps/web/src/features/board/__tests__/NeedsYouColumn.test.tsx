@@ -8,6 +8,7 @@
 // user's place when a focused card leaves.
 // RTL + msw (onUnhandledRequest:'error').
 
+import { encodePlanHolder } from '@clawboo/board-core'
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 
 // Generous async budget: the column polls `/api/tools/approvals` on mount, and
@@ -924,6 +925,171 @@ describe('Needs you when the provider refused the account', () => {
         .map((r) => r.textContent),
     ).toEqual(['Claude 1', 'Claude 2'])
     expect(screen.getAllByTestId('needs-you-task')).toHaveLength(4)
+  })
+})
+
+describe('NeedsYouColumn: someone else’s task', () => {
+  it('says whose it is, not that it is yours', async () => {
+    server.use(
+      http.get('/api/access/identity', () =>
+        HttpResponse.json({ you: { id: 'me', name: 'Me', role: null } }),
+      ),
+    )
+    renderColumn([
+      failedTask({
+        assigneeAgentId: null,
+        sourceDelegationId: null,
+        assigneePersonId: 'p2',
+        assigneePerson: JSON.stringify({ id: 'p2', name: 'Priya' }),
+        attention: { reason: 'assigned', failedRuns: 0, personId: 'p2' },
+      }),
+    ])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(card).toHaveTextContent('Assigned to Priya')
+    expect(card).toHaveTextContent('Priya has this. Give it to an agent or mark it done.')
+    expect(card).not.toHaveTextContent('This one is yours')
+  })
+})
+
+describe('NeedsYouColumn: which task it means', () => {
+  it('shows a card’s readable id, as the board card does', async () => {
+    renderColumn([failedTask({ identifier: 'RES-12' })])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).getByTestId('needs-you-identifier')).toHaveTextContent('RES-12')
+  })
+
+  it('shows nothing for a row with none', async () => {
+    renderColumn([failedTask()])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).queryByTestId('needs-you-identifier')).toBeNull()
+  })
+
+  it('shows each id on a card that gathers several tasks', async () => {
+    const same = (id: string, identifier: string) => failedTask({ id, identifier })
+    renderCell([same('t1', 'RES-12'), same('t2', 'RES-13')])
+    const group = await screen.findByTestId('needs-you-group', {}, T)
+    expect(
+      within(group)
+        .getAllByTestId('needs-you-identifier')
+        .map((el) => el.textContent),
+    ).toEqual(['RES-12', 'RES-13'])
+  })
+})
+
+describe('NeedsYouColumn: only what the server would accept', () => {
+  const menuOf = async (card: HTMLElement) => {
+    await userEvent.click(within(card).getByRole('button', { name: /^More for/ }))
+    return (await screen.findAllByRole('menuitem')).map((i) => i.textContent)
+  }
+
+  it('offers nothing but Dismiss on work being checked', async () => {
+    renderColumn([
+      failedTask({
+        status: 'in_review',
+        attention: { reason: 'needs_review', failedRuns: 0, detail: 'A check failed' },
+      }),
+    ])
+    expect(await menuOf(await screen.findByTestId('needs-you-task', {}, T))).toEqual(['Dismiss'])
+  })
+
+  it('offers nothing but Dismiss on a run still going', async () => {
+    renderColumn([
+      failedTask({
+        status: 'in_progress',
+        attention: { reason: 'question', failedRuns: 0, questionId: 'q1' },
+        openQuestion: {
+          id: 'q1',
+          kind: 'question',
+          payload: JSON.stringify({ prompt: 'Which audience?', options: ['Developers'] }),
+        },
+      }),
+    ])
+    expect(await menuOf(await screen.findByTestId('needs-you-task', {}, T))).toEqual(['Dismiss'])
+  })
+
+  it('still offers them on a card nothing is running', async () => {
+    renderColumn([
+      failedTask({
+        status: 'in_progress',
+        assigneeAgentId: null,
+        attention: { reason: 'unstarted', failedRuns: 0 },
+      }),
+    ])
+    const items = await menuOf(await screen.findByTestId('needs-you-task', {}, T))
+    expect(items).toContain('Take it yourself')
+    expect(items).toContain('Writer')
+  })
+
+  it('a card that only holds a plan keeps Dismiss, and nothing that runs it', async () => {
+    renderColumn([
+      failedTask({
+        sourceDelegationId: encodePlanHolder('a1', 'x'),
+        attention: { reason: 'failed', failedRuns: 1, detail: 'A step was refused' },
+      }),
+    ])
+    const card = await screen.findByTestId('needs-you-task', {}, T)
+    expect(within(card).queryByRole('button', { name: /Retry/ })).toBeNull()
+    expect(await menuOf(card)).toEqual(['Dismiss'])
+  })
+
+  it('never offers Retry all across cards nothing would accept', async () => {
+    const stuck = (id: string) =>
+      failedTask({
+        id,
+        status: 'in_review',
+        attention: { reason: 'needs_review', failedRuns: 0, detail: 'A check failed' },
+      })
+    renderCell([stuck('t1'), stuck('t2')])
+    const group = await screen.findByTestId('needs-you-group', {}, T)
+    expect(within(group).queryByRole('button', { name: /Retry all/ })).toBeNull()
+  })
+
+  it('leaves each request on a card of its own: its Dismiss takes its sub-tasks', async () => {
+    const parked = (id: string) =>
+      failedTask({
+        id,
+        isMainTask: 1,
+        sourceDelegationId: null,
+        attention: { reason: 'blocked', failedRuns: 0, detail: 'The lead could not sum up' },
+      })
+    renderCell([parked('t1'), parked('t2')])
+    expect(await screen.findAllByTestId('needs-you-task', {}, T)).toHaveLength(2)
+    expect(screen.queryByTestId('needs-you-group')).toBeNull()
+  })
+
+  it('Dismiss on a request says what happens to the work under it', async () => {
+    server.use(
+      http.patch('/api/board/t1', () =>
+        HttpResponse.json({
+          ok: true,
+          task: { id: 't1', status: 'cancelled' },
+          cancelledDependents: [
+            { id: 's2', title: 'Step two' },
+            { id: 's3', title: 'Step three' },
+          ],
+        }),
+      ),
+    )
+    renderColumn([
+      failedTask({
+        isMainTask: 1,
+        sourceDelegationId: null,
+        attention: { reason: 'blocked', failedRuns: 0, detail: 'The lead could not sum up' },
+      }),
+    ])
+    await pickFromMenu(await screen.findByTestId('needs-you-task', {}, T), 'Dismiss')
+    const dialog = await screen.findByTestId('confirm-dialog', {}, T)
+    expect(dialog).toHaveTextContent(
+      'It moves to Cancelled, and every sub-task still open is cancelled with it, stopping any run on them.',
+    )
+    await userEvent.click(within(dialog).getByTestId('confirm-ok'))
+    await waitFor(
+      () =>
+        expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+          'Request dismissed. 2 sub-tasks cancelled.',
+        ]),
+      T,
+    )
   })
 })
 

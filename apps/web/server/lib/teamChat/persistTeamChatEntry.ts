@@ -57,6 +57,8 @@ export interface PersistTeamChatEntryInput {
   entryId?: string
   /** Who posted it on the person's behalf (a routine), when they did not type it. */
   origin?: TranscriptEntryOrigin
+  /** A caller the person check did not let through sent it, not the person. */
+  fromCaller?: boolean
   /** The person who sent a user-role entry, when a sign-in proxy vouched for them. */
   person?: PersonRef
 }
@@ -93,6 +95,7 @@ export function persistTeamChatEntry(db: ClawbooDb, input: PersistTeamChatEntryI
     confirmed: true,
     fingerprint: randomUUID(),
     ...(input.origin ? { origin: input.origin } : {}),
+    ...(input.fromCaller ? { fromCaller: true } : {}),
     ...(input.person ? { person: input.person } : {}),
   }
   try {
