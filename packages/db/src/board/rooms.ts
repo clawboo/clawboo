@@ -10,7 +10,7 @@
 
 import { randomUUID } from 'node:crypto'
 
-import { delegationTargetOf } from '@clawboo/board-core'
+import { delegationTargetOf, isEngineRun } from '@clawboo/board-core'
 import { and, asc, eq, inArray, isNotNull, isNull, notInArray, sql } from 'drizzle-orm'
 
 import type { ClawbooDb } from '../db'
@@ -287,7 +287,7 @@ export interface MovedRoomTasks {
  *
  * Stopped first, the way the room engine's own Stop stops its work, so nothing
  * starts in the team chat until a person retries it:
- *  - a task still running in the room with an engine run (`openclaw`) no engine
+ *  - a task still running in the room with an engine run (`isEngineRun`) no engine
  *    stopped: after a restart a room's engine is built only for ready work, so
  *    nothing else would. Its run is closed as cancelled and the task goes back to
  *    To do. Moved while running, the stale sweep would release it and the team
@@ -340,7 +340,7 @@ export function moveArchivedRoomTasks(
       if (opts.skip?.(task)) continue
       const execs = listExecutions(db, task.id)
       const last = execs[execs.length - 1]
-      if (!last || last.status !== 'running' || last.executorType !== 'openclaw') continue
+      if (!last || last.status !== 'running' || !isEngineRun(last)) continue
       const closed = completeExecutionProcess(db, last.id, {
         status: 'cancelled',
         error: stopped,
@@ -369,11 +369,7 @@ export function moveArchivedRoomTasks(
       if (opts.skip?.(task)) continue
       const agentId = delegationTargetOf(task.sourceDelegationId)
       const last = listExecutions(db, task.id).at(-1)
-      if (
-        agentId &&
-        last?.executorType === 'openclaw' &&
-        classifyAttempts([last]).lastKind === 'crash'
-      )
+      if (agentId && last && isEngineRun(last) && classifyAttempts([last]).lastKind === 'crash')
         closedRuns.push({
           taskId: task.id,
           execId: last.id,
@@ -399,7 +395,11 @@ export function moveArchivedRoomTasks(
       if (!delegationTargetOf(task.sourceDelegationId) || opts.skip?.(task)) continue
       const execs = listExecutions(db, task.id)
       if (execs.length > 0 && execs[execs.length - 1]!.status === 'cancelled') continue
-      const stop = createExecutionProcess(db, { taskId: task.id, executorType: 'openclaw' })
+      const stop = createExecutionProcess(db, {
+        taskId: task.id,
+        executorType: 'openclaw',
+        engineRun: true,
+      })
       completeExecutionProcess(db, stop.id, { status: 'cancelled', error: stopped, byPerson: true })
     }
     const rows = withWriteRetry(() =>

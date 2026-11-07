@@ -85,9 +85,16 @@ describe('runFailureText — a context-overflow label', () => {
   })
 
   it('reads a rate limit in the same words as the rate limit it is', () => {
-    expect(runFailureText('Rate limit: too many tokens', 'codex')).toBe(
-      'The run failed: Rate limit: too many tokens',
-    )
+    // gatewayRunFailureText.test.ts pins the same reading on the browser's copy.
+    for (const raw of [
+      'Tokens per minute limit exceeded - too many tokens processed.',
+      '429 too many tokens',
+      'Rate limit: too many tokens',
+      'Too many tokens, please wait before trying again.',
+      'HTTP 429: too many tokens',
+    ]) {
+      expect(runFailureText(raw, 'codex')).toBe(`The run failed: ${raw}`)
+    }
   })
 
   it('leaves an unrelated failure verbatim, so real errors still reach the user', () => {

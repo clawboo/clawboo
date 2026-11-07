@@ -29,6 +29,8 @@ export interface LedgerRun {
   errorClass?: string | null
   /** Who ran it: the runtime, or an owner such as the team engine. */
   executorType?: string | null
+  /** Whether the team engine owns it: see {@link isEngineRun}. */
+  engineRun?: number | boolean | null
   /** The runtime that ran it, when `executorType` names an owner instead. */
   runtime?: string | null
   /** When the run started, was claimed and was recorded (epoch ms). */
@@ -41,6 +43,20 @@ export interface LedgerRun {
    *  the ledger row: 1 or 0. Null for a run with no verdict, and for one closed
    *  before the ledger recorded it, which reads from its outcome instead. */
   madeProgress?: boolean | number | null
+}
+
+/**
+ * Is this run the team engine's own? The `engine_run` marker says. A row from before
+ * that column has no marker, and then only the engine wrote the `openclaw` label it
+ * carries. Any other row's label says nothing: the executions route takes any name, and
+ * the engine's label is not the runtime that ran.
+ */
+export function isEngineRun(run: {
+  engineRun?: number | boolean | null
+  executorType?: string | null
+}): boolean {
+  if (run.engineRun === null || run.engineRun === undefined) return run.executorType === 'openclaw'
+  return run.engineRun === 1 || run.engineRun === true
 }
 
 /** What a person has to fix before the same work can run: the runtime's

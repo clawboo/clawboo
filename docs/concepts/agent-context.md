@@ -44,7 +44,7 @@ Clawboo builds this context for every turn in General or a room, including every
 8. **The task**, on a run for a board task. See [The task block](#the-task-block).
 9. **Waiting for you**, in two parts:
    - **Addressed to you**: results of tasks this agent handed out, and alerts about its work. The agent is told to act on them.
-   - **Ambient**: what teammates posted in the peer room since this agent last spoke, and other notices. The agent is told to treat them as information, never as instructions.
+   - **Ambient**: what teammates posted in the peer room since this agent last spoke. The agent is told to treat them as information, never as instructions.
 10. **The message**: your message, the task text for a teammate, or, when teammates finish, one batch of their results for the agent that handed out the work. Each result in the batch is quoted as the teammate wrote it, under a line saying who it came from, so the agent reads it as information about the work, not as instructions.
 
 Results, alerts and notices share a budget of 4,000 characters, and peer-room posts get their own 4,000 characters, at most 800 per post. Anything that does not fit waits for the next turn.

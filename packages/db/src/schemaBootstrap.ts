@@ -446,6 +446,7 @@ const SCHEMA_DDL = `
       workspace_id       TEXT    REFERENCES workspaces(id),
       executor_type      TEXT    NOT NULL,
       runtime            TEXT,
+      engine_run         INTEGER,
       status             TEXT    NOT NULL DEFAULT 'queued',
       claimed_at         INTEGER,
       started_at         INTEGER,

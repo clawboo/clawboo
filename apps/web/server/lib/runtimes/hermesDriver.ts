@@ -289,6 +289,10 @@ export interface HermesRunState {
   sawResult: boolean
 }
 
+/** The security scanner's startup warning, printed before the reply. Only this one, and
+ *  only before the reply starts: any other line is the model's own words. */
+const HERMES_TIRITH_BANNER_RE = /^\s*⚠\uFE0F?\s*tirith\b/iu
+
 /** Recognized JSON frame → native events; null when the JSON is not a frame
  *  (a JSON-shaped response line then passes through as plain text). */
 function translateJsonFrame(raw: unknown, state: HermesRunState): HermesNativeEvent[] | null {
@@ -338,6 +342,7 @@ export function parseHermesLine(line: string, state: HermesRunState): HermesNati
     state.sessionId = m[1]
     return [{ type: 'session', sessionId: m[1] }]
   }
+  if (!state.lastText && HERMES_TIRITH_BANNER_RE.test(line)) return []
   const text = `${line}\n`
   state.lastText += text
   return [{ type: 'message', text }]
@@ -588,7 +593,14 @@ export function createHermesDriver(
       // surface it as a clean `aborted` terminal, not a spurious error.
       const aborted = signal === 'SIGTERM' || signal === 'SIGKILL'
       const ok = code === 0
-      const summary = stripSessionInfo(state.lastText) || stripSessionInfo(stdout)
+      const summary =
+        stripSessionInfo(state.lastText) ||
+        stripSessionInfo(
+          stdout
+            .split('\n')
+            .filter((l) => !HERMES_TIRITH_BANNER_RE.test(l))
+            .join('\n'),
+        )
       return [
         {
           type: 'result',

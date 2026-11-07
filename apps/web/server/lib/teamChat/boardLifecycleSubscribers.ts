@@ -28,7 +28,7 @@
 // Registered once at boot. Every handler is best-effort and synchronous-cheap;
 // anything heavier (the pump) is debounced and detached.
 
-import { brakeUntil, trailingNoProgressRuns } from '@clawboo/board-core'
+import { brakeUntil, isEngineRun, trailingNoProgressRuns } from '@clawboo/board-core'
 import {
   addComment,
   enqueueInbox,
@@ -260,13 +260,12 @@ export function registerBoardLifecycleSubscribers(opts: {
     // an ADDITIVE ambient FYI on top, never the delivery of record. An
     // engine-path terminal may thus produce both a [Task Update] and a later
     // one-line digest entry — mild redundancy, bought for zero dropped notices.
-    // Only engine-owned execs ('openclaw') are skipped: their reflection is the
-    // engine's own synchronous duty and double-writing every cascade step would
-    // drown the digest.
+    // Only engine-owned execs are skipped: their reflection is the engine's own
+    // synchronous duty and double-writing every cascade step would drown the digest.
     if (
       ev.kind === 'execution_completed' &&
       TERMINAL_EXEC_STATUSES.has(ev.status) &&
-      ev.executorType !== 'openclaw'
+      !isEngineRun(ev)
     ) {
       try {
         const db = getDb()

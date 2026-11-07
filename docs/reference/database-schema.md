@@ -489,8 +489,9 @@ One row per run of a task, on any runtime: its status, git checkpoints, and toke
 | `id`                 | `TEXT`, PK                           |                                                                                                                                                                                                                                                     |
 | `task_id`            | `TEXT`, not null, FK `tasks.id`      |                                                                                                                                                                                                                                                     |
 | `workspace_id`       | `TEXT`, FK `workspaces.id`           | The worktree the run used, if any                                                                                                                                                                                                                   |
-| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran)                                                                                                                                     |
-| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` is the engine marker; otherwise null                                                                                                                                                                     |
+| `executor_type`      | `TEXT`, not null                     | The runtime id, or `openclaw` for runs the team engine fires (then `runtime` names the runtime that really ran). It does not say whose the run is: `engine_run` does                                                                                |
+| `engine_run`         | `INTEGER`                            | 1 when the team engine owns this run, 0 when anything else opened it. Null on a row from before this column, which counts as the engine's when `executor_type` is `openclaw`                                                                        |
+| `runtime`            | `TEXT`                               | The runtime that ran, when `executor_type` names the engine; otherwise null                                                                                                                                                                         |
 | `status`             | `TEXT`, not null, default `'queued'` | `queued`, `running`, `succeeded`, `failed`, `timed_out` or `cancelled`                                                                                                                                                                              |
 | `claimed_at`         | `INTEGER`                            |                                                                                                                                                                                                                                                     |
 | `started_at`         | `INTEGER`                            |                                                                                                                                                                                                                                                     |
@@ -867,18 +868,18 @@ Indexes: `uniq_team_chat_room_seq` (unique: `room_id`, `seq`), `idx_team_chat_te
 
 Each agent's mailbox of coordination notices. A notice is delivered once, by whichever channel reaches the agent first (the digest at the start of a run, or the MCP tool-result piggyback). Undelivered notices survive restarts.
 
-| Column          | Type                | Notes                                                                                            |
-| --------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
-| `id`            | `TEXT`, PK          |                                                                                                  |
-| `team_id`       | `TEXT`              |                                                                                                  |
-| `agent_id`      | `TEXT`, not null    | The recipient                                                                                    |
-| `kind`          | `TEXT`, not null    | `task_update` (a delegated task finished), `alert` (a coordination failure) or `signal` (an FYI) |
-| `body`          | `TEXT`, not null    |                                                                                                  |
-| `task_id`       | `TEXT`              |                                                                                                  |
-| `created_at`    | `INTEGER`, not null |                                                                                                  |
-| `delivered_at`  | `INTEGER`           | Null while pending                                                                               |
-| `delivered_via` | `TEXT`              | `digest`, `mcp` or `signal`                                                                      |
-| `tenant_id`     | `TEXT`              | Unused                                                                                           |
+| Column          | Type                | Notes                                                                         |
+| --------------- | ------------------- | ----------------------------------------------------------------------------- |
+| `id`            | `TEXT`, PK          |                                                                               |
+| `team_id`       | `TEXT`              |                                                                               |
+| `agent_id`      | `TEXT`, not null    | The recipient                                                                 |
+| `kind`          | `TEXT`, not null    | `task_update` (a delegated task finished) or `alert` (a coordination failure) |
+| `body`          | `TEXT`, not null    |                                                                               |
+| `task_id`       | `TEXT`              |                                                                               |
+| `created_at`    | `INTEGER`, not null |                                                                               |
+| `delivered_at`  | `INTEGER`           | Null while pending                                                            |
+| `delivered_via` | `TEXT`              | `digest`, `mcp` or `signal` (a steer into the agent's live run)               |
+| `tenant_id`     | `TEXT`              | Unused                                                                        |
 
 Indexes: `idx_agent_inbox_pending` (`agent_id`, `delivered_at`).
 

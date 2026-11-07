@@ -1713,7 +1713,7 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
         { id: 'a2', name: 'Bug Boo', gatewayId: 'a2', teamId: 'T', createdAt: now, updatedAt: now },
       ])
       .run()
-    // Two requests and one FYI, all in the same mailbox.
+    // Two requests in the mailbox.
     const update = enqueueInbox(db, {
       agentId: 'a1',
       teamId: 'T',
@@ -1726,10 +1726,11 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
       kind: 'alert',
       body: 'Could not deliver a task update to Design Boo',
     })
-    const signal = enqueueInbox(db, {
+    // A row of a kind nothing writes any more still reaches the agent, and not as ambient.
+    const older = enqueueInbox(db, {
       agentId: 'a1',
       teamId: 'T',
-      kind: 'signal',
+      kind: 'signal' as never,
       body: 'Design Boo started on the schema',
     })
     // And a teammate actually spoke while this agent was idle.
@@ -1759,29 +1760,28 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     const addressedBlock = ctx.slice(addressedAt, ambientAt)
     expect(addressedBlock).toContain('patched auth.ts')
     expect(addressedBlock).toContain('Could not deliver a task update')
-    // …and the FYI plus the peer's own words land in the ambient half, with the
-    // safety-critical wrapper intact.
+    expect(addressedBlock).toContain('Design Boo started on the schema')
+    // …and the peer's own words land in the ambient half, with the safety-critical
+    // wrapper intact. Ambient holds nothing else.
     const ambientBlock = ctx.slice(ambientAt)
-    expect(ambientBlock).toContain('Design Boo started on the schema')
+    expect(ambientBlock).not.toContain('Design Boo started on the schema')
     expect(ambientBlock).toContain('stop, I already fixed that')
     expect(ambientBlock).toContain('isUser=false')
     expect(ambientBlock).toContain('from=a2')
 
-    // Every row that was rendered is marked — across BOTH sections, from one
-    // budget. Splitting the render must not lose half the delivery record.
-    // Per-id, so a partial marking cannot hide behind an aggregate: each row we
+    // Every row that was rendered is marked. Per-id, so a partial marking cannot hide
+    // behind an aggregate: each row we
     // enqueued must be gone from the undelivered set. (The old trailing
     // toHaveLength(3) asserted the length of an array this test built itself,
     // which could never fail.)
     const undelivered = listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)
-    for (const id of [update.id, alert.id, signal.id]) expect(undelivered).not.toContain(id)
+    for (const id of [update.id, alert.id, older.id]) expect(undelivered).not.toContain(id)
     expect(undelivered).toEqual([])
   })
 
-  it('spends ONE budget across both sections — a section is not a fresh 4000 chars', async () => {
-    // Rendering each half against its own ceiling would silently double the cap
-    // the mailbox was bounded at, and the digest would start crowding out the
-    // instruction it is supposed to accompany.
+  it('stops at the budget, and a row past it waits for the next run', async () => {
+    // Past its ceiling the digest would start crowding out the instruction it is
+    // supposed to accompany.
     const now = Date.now()
     db.insert(teams)
       .values({
@@ -1808,14 +1808,11 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
         body: `u${i} `.padEnd(500, 'x'),
       })
     }
-    // At the per-row cap too, so the leftover after the addressed half (4000 minus
-    // the nine 404-char lines that fit = 364) cannot hold it. Under a per-section
-    // budget it would have had a fresh 4000 and rendered.
-    const fyi = enqueueInbox(db, {
+    const last = enqueueInbox(db, {
       agentId: 'a1',
       teamId: 'T',
-      kind: 'signal',
-      body: 'a peer FYI that must wait its turn '.padEnd(500, 'z'),
+      kind: 'task_update',
+      body: 'a last update that must wait its turn '.padEnd(500, 'z'),
     })
 
     const adapter = new FakeAdapter((run) =>
@@ -1827,10 +1824,10 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     await tick()
     const ctx = adapter.lastStartOpts?.context ?? ''
 
-    // The addressed half ate the budget, so the ambient row was never rendered…
-    expect(ctx).not.toContain('a peer FYI that must wait its turn')
+    // The rows before it ate the budget, so it was never rendered…
+    expect(ctx).not.toContain('a last update that must wait its turn')
     // …and therefore was never marked delivered. It rides the next run.
-    expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)).toContain(fyi.id)
+    expect(listUndeliveredInbox(db, 'a1', { teamId: 'T' }).map((r) => r.id)).toContain(last.id)
   })
 
   it('a QUEUED delivery renders from state at START, not at enqueue time', async () => {

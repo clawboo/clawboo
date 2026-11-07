@@ -290,7 +290,7 @@ describe('rooms REST', () => {
       sourceDelegationId: 'run-1:deleg:agent:a1:reflectTo:a2',
     })
     claimTask(db, step.id, 'a1')
-    createExecutionProcess(db, { taskId: step.id, executorType: 'openclaw' })
+    createExecutionProcess(db, { taskId: step.id, executorType: 'openclaw', engineRun: true })
     await teamRoomDELETE(req({ id: 'T', roomId: room.id }), fakeRes().res)
     expect(getTask(db, step.id)).toMatchObject({ status: 'todo', roomId: null })
     expect(listExecutions(db, step.id).map((e) => e.status)).toEqual(['cancelled'])

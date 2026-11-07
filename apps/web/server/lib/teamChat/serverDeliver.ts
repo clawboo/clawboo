@@ -33,7 +33,6 @@ import {
   recordSpend,
   INBOX_BUDGET_CHARS,
   packInboxRows,
-  splitInboxByAddressing,
   setSetting,
   adoptTaskWakes,
   startTaskHeartbeat,
@@ -1039,16 +1038,9 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             .filter((row) => inboxRowBelongsToRoom(db, row, chatRoomId))
             .slice(0, 20)
         : []
-      // Routed by `kind`, which the mailbox has carried since it shipped and
-      // nothing read: a `task_update` is a result to synthesize and an `alert` is
-      // a failure to act on. A `signal` is a peer speaking in passing.
-      const split = splitInboxByAddressing(inboxRows)
-      // ONE budget across both sections, spent on the addressed half first.
-      const packedAddressed = packInboxRows(split.addressed, INBOX_BUDGET_CHARS)
-      const packedAmbient = packInboxRows(
-        split.ambient,
-        INBOX_BUDGET_CHARS - packedAddressed.usedChars,
-      )
+      // All of it asks something of this agent: a `task_update` is a result to synthesize
+      // and an `alert` is a failure to act on. A peer speaking in passing is the catch-up.
+      const packedAddressed = packInboxRows(inboxRows, INBOX_BUDGET_CHARS)
       const roomId = isTeamSessionKey(targetSessionKey) ? resolveRoomForTeam(teamId) : null
       const catchup = roomId
         ? buildPeerCatchup(db, {
@@ -1057,23 +1049,20 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
             sinceSeq: loadChatLeaderState(db, roomId, targetAgentId).lastSeenSeq,
           })
         : { text: null, throughSeq: null }
-      // Section membership comes from provenance (`kind`, and which reader produced
-      // the item), NEVER from the text.
+      // Section membership comes from provenance (which reader produced the item),
+      // NEVER from the text.
       const envelope = buildTurnEnvelope({
         addressed: packedAddressed.bodies.length
           ? [{ text: packedAddressed.bodies.join('\n') }]
           : [],
-        ambient: [
-          ...(catchup.text ? [{ text: catchup.text }] : []),
-          ...(packedAmbient.bodies.length ? [{ text: packedAmbient.bodies.join('\n') }] : []),
-        ],
+        ambient: catchup.text ? [{ text: catchup.text }] : [],
       })
       return {
         teamContext:
           [baseTeamContext, ticketBlock, heldUpdate, envelope].filter(Boolean).join('\n\n') || null,
         // Only rows that actually FIT get marked — a row truncated out of the
         // budget was not delivered and rides the next digest.
-        digestIds: [...packedAddressed.includedIds, ...packedAmbient.includedIds],
+        digestIds: packedAddressed.includedIds,
         roomId,
         throughSeq: catchup.throughSeq,
       }

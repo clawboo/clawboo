@@ -62,6 +62,8 @@ export class FakeBoard implements CascadeBoard {
   execs = new Map<string, string>()
   /** execId → executorType, when it is NOT the engine's own 'openclaw' fire. */
   execTypes = new Map<string, string>()
+  /** execId → its engine marker, when it is not the engine's own (1). */
+  execMarks = new Map<string, number | null>()
   completed: { execId: string; outcome: CompleteExecutionOutcome }[] = []
   created: BoardTask[] = []
   forceClaimConflict = false
@@ -303,19 +305,24 @@ export class FakeBoard implements CascadeBoard {
   async completeExecution(execId: string, outcome: CompleteExecutionOutcome): Promise<void> {
     this.completed.push({ execId, outcome })
   }
-  async listExecutions(
-    taskId: string,
-  ): Promise<
-    Array<{ id: string; status: string; executorType?: string; errorClass?: string | null }>
+  async listExecutions(taskId: string): Promise<
+    Array<{
+      id: string
+      status: string
+      executorType?: string
+      engineRun?: number | null
+      errorClass?: string | null
+    }>
   > {
     // Derive the ledger from the recorded calls: every exec opened for the task,
     // in id order; a completed one carries its outcome status, else 'running'.
-    // Engine-created execs are 'openclaw' (fireTask/spawn), matching the real
-    // board — resume()'s ownership gate keys on it.
+    // Engine-created execs are 'openclaw' (fireTask/spawn) and marked as the engine's,
+    // matching the real board: resume()'s ownership gate reads the marker.
     const rows: Array<{
       id: string
       status: string
       executorType?: string
+      engineRun?: number | null
       errorClass?: string | null
     }> = []
     for (const [id, tid] of this.execs) {
@@ -325,6 +332,7 @@ export class FakeBoard implements CascadeBoard {
         id,
         status: done ? done.outcome.status : 'running',
         executorType: this.execTypes.get(id) ?? 'openclaw',
+        engineRun: this.execMarks.has(id) ? this.execMarks.get(id) : 1,
         ...(done?.outcome.errorClass ? { errorClass: done.outcome.errorClass } : {}),
       })
     }
@@ -412,7 +420,12 @@ export class FakeBoard implements CascadeBoard {
       const execId = `exec-${++this.execN}`
       this.execs.set(execId, id)
       this.seededExecs.add(execId)
-      if (exec === 'running-executor') this.execTypes.set(execId, 'codex')
+      if (exec === 'running-executor') {
+        this.execTypes.set(execId, 'codex')
+        this.execMarks.set(execId, 0)
+      }
+      if (exec === 'running-reported-openclaw') this.execMarks.set(execId, 0)
+      if (exec === 'running-old-openclaw') this.execMarks.set(execId, null)
     }
     return id
   }

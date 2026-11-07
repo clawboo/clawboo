@@ -37,6 +37,7 @@ import {
   listWaitingTaskWakes,
   recordTaskWake,
 } from '@clawboo/db'
+import { isEngineRun } from '@clawboo/board-core'
 import { createAsyncQueue } from '@clawboo/executor'
 import type { TaskTemplate } from '@clawboo/scheduler'
 
@@ -210,9 +211,11 @@ describe('dispatchConnectedSubstrate', () => {
     expect(execs[0]).toMatchObject({
       status: 'succeeded',
       executorType: ROUTINE_OPENCLAW_EXECUTOR,
+      engineRun: 0,
       runReason: 'routine',
     })
     expect(ROUTINE_OPENCLAW_EXECUTOR).not.toBe('openclaw')
+    expect(isEngineRun(execs[0]!)).toBe(false)
     expect(getComments(db, taskId).some((c) => c.body.includes('swept the queue'))).toBe(true)
     // The event subscription was released.
     expect(client.subscriberCount()).toBe(0)

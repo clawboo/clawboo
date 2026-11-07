@@ -28,6 +28,7 @@ import {
   claimTask,
   createDb,
   createExecutionProcess,
+  executionProcesses,
   createTask,
   getTask,
   listTasks,
@@ -35,6 +36,7 @@ import {
   type ClawbooDb,
   type TaskStatus,
 } from '@clawboo/db'
+import { eq } from 'drizzle-orm'
 import {
   runCascadeContract,
   type CascadeBoard,
@@ -231,10 +233,17 @@ class RealCascadeBoard implements CascadeBoard {
     // other two shapes exist so the resume guards are actually exercised.
     const exec = input.exec ?? 'running-openclaw'
     if (exec !== 'none') {
-      createExecutionProcess(this.db, {
+      const row = createExecutionProcess(this.db, {
         taskId: t.id,
         executorType: exec === 'running-executor' ? 'codex' : 'openclaw',
+        engineRun: exec === 'running-openclaw',
       })
+      if (exec === 'running-old-openclaw')
+        this.db
+          .update(executionProcesses)
+          .set({ engineRun: null })
+          .where(eq(executionProcesses.id, row.id))
+          .run()
     }
     return t.id
   }

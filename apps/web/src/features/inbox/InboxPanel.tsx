@@ -2,6 +2,7 @@
 //
 //   · Needs you: what is waiting on them, the same cards the Board shows.
 //   · Unread: what someone else changed or commented on since they last opened it.
+//   · Mine: what is assigned to them, the same tasks as the Board's Mine filter.
 //   · All: every task, newest change first.
 //
 // Read state lives on the server (see @clawboo/db's board/readState.ts). Opening a
@@ -18,8 +19,9 @@ import { NeedsYouItems, useNeedsYou } from '@/features/board/NeedsYouColumn'
 import { StatusGlyph, glyphKindOf } from '@/features/board/StatusGlyph'
 import { TaskDetailDrawer, type DrawerPosition } from '@/features/board/TaskDetailDrawer'
 import { taskOwnerOf } from '@/features/board/TaskCard'
-import { boardColumnOf } from '@/features/board/boardStatus'
+import { boardColumnOf, isMyTask } from '@/features/board/boardStatus'
 import { agoLabel } from '@/features/board/calendar/calendarFormat'
+import { useBoardPerson } from '@/features/board/useBoardPerson'
 import { CollapsedSidebarToggle } from '@/features/layout/SidebarToggle'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { Button } from '@/features/shared/Button'
@@ -47,6 +49,19 @@ import {
 
 /** How many rows a list shows before asking. */
 const PAGE = 100
+
+/** What a tab says with nothing to list. Needs you has its own. */
+const EMPTY: Record<Exclude<InboxTab, 'needs-you'>, { title: string; helper: string }> = {
+  unread: {
+    title: 'Nothing unread',
+    helper: 'Comments and changes from anyone else show up here until you open the task.',
+  },
+  mine: {
+    title: 'Nothing assigned to you',
+    helper: 'Tasks you take on, and tasks an agent hands back to you, show up here.',
+  },
+  all: { title: 'No tasks yet', helper: 'Tasks from every team show up here.' },
+}
 
 function InboxRow({
   task,
@@ -111,6 +126,7 @@ export function InboxPanel() {
   const approvalsWaiting = useInboxStore((s) => s.approvals.length)
   const revision = useInboxStore((s) => s.revision)
   const addToast = useToastStore((s) => s.addToast)
+  const me = useBoardPerson()
 
   const [teamFilter, setTeamFilter] = useState('all')
   const [tasks, setTasks] = useState<BoardTask[]>([])
@@ -163,6 +179,7 @@ export function InboxPanel() {
     [tasks, readMarks],
   )
   const allList = useMemo(() => [...tasks].sort(byNewestChange), [tasks])
+  const mineList = useMemo(() => allList.filter((t) => isMyTask(t, me)), [allList, me])
 
   // Opens on what matters most, decided once: a list that swaps itself when an
   // approval arrives would move under the person's hand. The Needs you cards read
@@ -171,12 +188,13 @@ export function InboxPanel() {
     setPicked(needsYou.total > 0 || approvalsWaiting > 0 ? 'needs-you' : 'unread')
   }
   const tab: InboxTab = picked ?? 'needs-you'
-  const list = tab === 'unread' ? unreadList : allList
+  const list = tab === 'unread' ? unreadList : tab === 'mine' ? mineList : allList
   const shown = list.slice(0, limit)
 
   const TABS: TabItem<InboxTab>[] = [
     { id: 'needs-you', label: 'Needs you', count: needsYou.total },
     { id: 'unread', label: 'Unread', count: unreadCount },
+    { id: 'mine', label: 'Mine', count: mineList.length },
     { id: 'all', label: 'All', count: tasks.length },
   ]
 
@@ -254,7 +272,8 @@ export function InboxPanel() {
           <div ref={tabsRef} className="-ml-3 max-w-full overflow-x-auto">
             <Tabs tabs={TABS} value={tab} onChange={onTabChange} />
           </div>
-          {tab !== 'needs-you' && unreadCount > 0 ? (
+          {/* It clears every unread task, so not from a tab showing only some of them. */}
+          {(tab === 'unread' || tab === 'all') && unreadCount > 0 ? (
             <Button variant="ghost" size="sm" onClick={() => void markAll()}>
               Mark all read
             </Button>
@@ -289,15 +308,7 @@ export function InboxPanel() {
             />
           ) : shown.length === 0 ? (
             <div data-testid="inbox-empty">
-              <EmptyState
-                icon={Inbox}
-                title={tab === 'unread' ? 'Nothing unread' : 'No tasks yet'}
-                helper={
-                  tab === 'unread'
-                    ? 'Comments and changes from anyone else show up here until you open the task.'
-                    : 'Tasks from every team show up here.'
-                }
-              />
+              <EmptyState icon={Inbox} {...EMPTY[tab]} />
             </div>
           ) : (
             <>

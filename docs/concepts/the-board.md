@@ -60,7 +60,7 @@ A task that waits says what for. Agents must give the reason when they block a t
 
 ## Tasks for a person
 
-A task has one assignee, an agent or a person, never both. A task assigned to a person never starts on its own and no agent can claim it. It shows in Needs you as **Assigned to you**, until you mark it done or give it to an agent. An agent can also hand its own task back to the person who asked for it, saying what they must do: the card says whose turn it is, and your reply or **Give back to its agent** returns it. The **Mine** filter narrows the board to the tasks assigned to you.
+A task has one assignee, an agent or a person, never both. A task assigned to a person never starts on its own and no agent can claim it. It shows in Needs you as **Assigned to you**, until you mark it done or give it to an agent. An agent can also hand its own task back to the person who asked for it, saying what they must do: the card says whose turn it is, and your reply or **Give back to its agent** returns it. The **Mine** filter narrows the board to the tasks assigned to you, and the Inbox has a **Mine** tab that lists the same ones.
 
 On a local install there is one built-in person, "You". Behind a [sign-in proxy](/guides/sso-proxy), you are the person the proxy's token names, and a task that an agent handed back with no one on record who asked goes to whoever opens it. There is no member list: you can assign a task to yourself, or to the person who asked for it.
 
@@ -144,7 +144,7 @@ Each card leads with the one action that gets it going: **Retry** runs it again,
 
 ## Unread
 
-The board also keeps track of what you have read, per task, on the server. A task is **unread** when someone else changed or commented on it since you last opened it. That covers a new task, a move, an edit and a comment from an agent or from another person. It does not cover the app's own notes or a running task's heartbeat. Acting on a task reads it, so your own comment, move, Retry or Stop never shows as unread for you. The [Inbox](/using/board#see-it-all-in-the-inbox) lists what is unread beside **Needs you**, and a badge counts both.
+The board also keeps track of what you have read, per task, on the server. A task is **unread** when someone else changed or commented on it since you last opened it. That covers a new task, a move, an edit and a comment from an agent or from another person. It does not cover the app's own notes or a running task's heartbeat. Acting on a task reads it, so your own comment, move, Retry or Stop never shows as unread for you. Nor does the card moving when your comment starts a run, even some time later, such as when a hold lifts, though anything you had not read by then stays unread, and what the agent does next is news as usual. The [Inbox](/using/board#see-it-all-in-the-inbox) lists what is unread beside **Needs you**, and a badge counts both.
 
 Marks are positions in the board's history rather than times, and a page marks what it actually showed. So a comment that lands while a task is opening stays unread, and two changes in the same millisecond stay two changes.
 
