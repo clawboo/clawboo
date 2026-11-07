@@ -33,7 +33,7 @@ An agent routine on OpenClaw takes a third, smaller path: a dispatcher that send
 | Guardrail                         | Default                  | Team chat                        | Task runner                     | OpenClaw agent routine |
 | --------------------------------- | ------------------------ | -------------------------------- | ------------------------------- | ---------------------- |
 | Spend counted against budgets     | On, once a budget exists | Yes                              | Yes                             | Yes                    |
-| Budget warnings in the audit log  | On, once a budget exists | No                               | Yes                             | Yes                    |
+| Budget warnings in the audit log  | On, once a budget exists | Yes                              | Yes                             | Yes                    |
 | Hard cap refuses the next run     | Off until you set one    | Yes                              | Yes                             | Yes                    |
 | Hard cap stops a run partway      | Off until you set one    | Clawboo Native on a priced model | Clawboo Native                  | No                     |
 | Per-run cost cap                  | Off                      | No                               | Routines set up through the API | No                     |
@@ -148,7 +148,6 @@ Claude Code, Codex and Hermes run with their own approval prompts turned off, so
 
 - **What a run can touch.** Budgets, breakers and caps limit spend and effort. A run that stays under its budget can still read and change anything its runtime can reach. See [What agents can do](/concepts/permissions).
 - **Stuck runs in team chat.** Team chat has no circuit breakers. Besides the delegation caps, its guard against a stuck run is time. A handed-off task whose run reports nothing for 8 minutes is failed (24 minutes while the agent is inside one tool call), and any run silent for 30 minutes is ended. The task runner and one-to-one chat end a run after the same 30 minutes of silence. These limits count only time the computer is awake, so a laptop that sleeps through a run does not trip them.
-- **Warnings from team-chat spend.** Spend from team chat moves a budget's bar and status in the Governance panel, but no warning event is written to the audit log.
 - **Expensive but healthy runs.** The breakers are tuned so a healthy run never trips them, so a costly run that keeps making progress passes them. A hard-cap budget is the only limit set in dollars, and it holds only as far as [What a hard cap stops](#what-a-hard-cap-stops) describes.
 
 <AccordionGroup>

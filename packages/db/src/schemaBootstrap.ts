@@ -330,6 +330,8 @@ const SCHEMA_DDL = `
       payload         TEXT    NOT NULL,
       status          TEXT    NOT NULL DEFAULT 'pending',
       idempotency_key TEXT,
+      -- The execution row of the run that asked, when an agent's run did.
+      execution_id    TEXT,
       answer          TEXT,
       answered_by     TEXT,
       close_reason    TEXT,
@@ -355,6 +357,8 @@ const SCHEMA_DDL = `
       kind            TEXT,
       -- When it was steered into a run that took it live.
       steered_at      INTEGER,
+      -- The execution row of the run that wrote it, when an agent's run did.
+      execution_id    TEXT,
       created_at      INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_task_comments_task ON task_comments (task_id);

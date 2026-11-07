@@ -380,6 +380,7 @@ What an agent asked a person about a task, and the answer. A task has at most on
 | `payload`         | `TEXT`, not null                      | JSON: the prompt, and the options or suggested tasks                                                  |
 | `status`          | `TEXT`, not null, default `'pending'` | `pending`, `answered`, `expired` or `cancelled`                                                       |
 | `idempotency_key` | `TEXT`                                | Set by the asker, so a repeated call asks once. Cleared when the question closes unanswered           |
+| `execution_id`    | `TEXT`                                | The `execution_processes` row of the run that asked, when an agent's run did. Null otherwise          |
 | `answer`          | `TEXT`                                | JSON: the answer                                                                                      |
 | `answered_by`     | `TEXT`                                | JSON `{ id, name, role }`: the person a sign-in proxy vouched for, else the install's built-in person |
 | `close_reason`    | `TEXT`                                | Why it closed unanswered: `replaced`, `task_closed` or `moved`                                        |
@@ -404,6 +405,7 @@ Comments and system notes on a task, such as report-backs and verification resul
 | `person`          | `TEXT`                          | JSON `{ id, name, role }` of the person whose request added it, when a [sign-in proxy](/guides/sso-proxy) vouched for them                         |
 | `kind`            | `TEXT`                          | What wrote it, as the writer labelled it: `person`, `agent`, `note` or `result`. Null for a caller that gave none, and such a comment wakes no one |
 | `steered_at`      | `INTEGER`                       | When it was steered into a run that took it live, so a session resumed from that run is not shown it again                                         |
+| `execution_id`    | `TEXT`                          | The `execution_processes` row of the run that wrote it, when an agent's run did. Null otherwise                                                    |
 | `created_at`      | `INTEGER`, not null             |                                                                                                                                                    |
 
 Indexes: `idx_task_comments_task` (`task_id`).
@@ -663,7 +665,7 @@ Approval requests. `kind: 'tool'` is a call Clawboo itself is holding (the broke
 | `args_summary`   | `TEXT`                                | Scrubbed JSON                                                                                                                                      |
 | `reason`         | `TEXT`                                | Why it needs approval                                                                                                                              |
 | `status`         | `TEXT`, not null, default `'pending'` | `pending`, `allow_once`, `allow_always`, `deny` or `expired`                                                                                       |
-| `task_id`        | `TEXT`                                | Plain reference to `tasks.id`, so an expired approval can unblock its task                                                                         |
+| `task_id`        | `TEXT`                                | Plain reference to `tasks.id`: the task the asking run works on, so the card can name it. An expired approval moves no task                        |
 | `tenant_id`      | `TEXT`                                | Unused                                                                                                                                             |
 | `grant_id`       | `TEXT`                                | The connector grant the call was checked against                                                                                                   |
 | `connector_id`   | `TEXT`                                |                                                                                                                                                    |

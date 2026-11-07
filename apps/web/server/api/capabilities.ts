@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { decideApproval } from '../lib/approvalDecision'
-import { personOf } from '../lib/auth'
+import { personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { rowToRecord } from '../lib/capabilitySource/mapper'
 import { CapabilityInstallBlockedError } from '../lib/capabilitySource/native'
@@ -75,6 +75,8 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
     const db = getDb()
 
     if (action === 'approve') {
+      // Only a person's request, as on the tools route: an answer is their authority.
+      if (refuseUnlessPerson(req, res)) return
       const id = strParam(body['id'])
       const decision = body['decision']
       if (

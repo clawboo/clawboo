@@ -549,6 +549,8 @@ export const taskQuestions = sqliteTable(
     // unanswered, so asking again really asks. A plain column with a separate
     // unique index, per task.
     idempotencyKey: text('idempotency_key'),
+    // The execution row of the run that asked, when an agent's run did.
+    executionId: text('execution_id'),
     // JSON QuestionAnswer.
     answer: text('answer'),
     // Who answered: a JSON {id, name, role}.
@@ -589,6 +591,9 @@ export const taskComments = sqliteTable(
     /** When it was steered into a run that took it live. A session resumed from that
      *  run has heard it, so its next ticket block leaves it out. */
     steeredAt: integer('steered_at'),
+    /** The execution row of the run that wrote it, when an agent's run did. Null
+     *  for anything else, and for an agent's turn with no execution row. */
+    executionId: text('execution_id'),
     createdAt: integer('created_at').notNull(),
   },
   (t) => [index('idx_task_comments_task').on(t.taskId)],
@@ -910,8 +915,9 @@ export const toolCallApprovals = sqliteTable(
     reason: text('reason'),
     // pending | allow_once | allow_always | deny | expired
     status: text('status').notNull().default('pending'),
-    // The board task this approval gates, when known (so the TTL reaper can
-    // unblock it on expiry). Nullable — tool-call approvals carry no task.
+    // The board task the asking run works on, when it works on one: named on the
+    // card and in the approval events. Nothing moves the task when the approval
+    // expires. Nullable: a 1:1 chat or a lead's own turn has no task.
     taskId: text('task_id'),
     tenantId: text('tenant_id'),
     grantId: text('grant_id'),

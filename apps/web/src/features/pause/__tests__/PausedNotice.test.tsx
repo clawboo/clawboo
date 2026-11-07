@@ -2,7 +2,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { apiFetch } from '@clawboo/control-client'
+import { PERSON_CHECK_REFUSED, resetPersonCheckNotices } from '@/lib/personCheckNotice'
 import { useConfirmStore } from '@/stores/confirm'
+import { useToastStore } from '@/stores/toast'
 import {
   pausedByWords,
   pauseOfAgent,
@@ -13,7 +15,7 @@ import {
 } from '@/stores/pauses'
 
 import { latestPauseEvent } from '../latestPauseEvent'
-import { PausedNotice, PauseToggle } from '../PausedNotice'
+import { PausedNotice, pauseWithConfirm, PauseToggle, resumeWithToast } from '../PausedNotice'
 
 vi.mock('@clawboo/control-client', async (orig) => ({
   ...(await orig<typeof import('@clawboo/control-client')>()),
@@ -95,6 +97,34 @@ describe('PausedNotice', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
     await waitFor(() => expect(onChanged).toHaveBeenCalled())
     expect(mocked).toHaveBeenCalledWith('/api/pauses/task/root', { method: 'DELETE' })
+  })
+
+  it('says why the person check refused a resume, instead of "try again"', async () => {
+    resetPersonCheckNotices()
+    useToastStore.setState({ toasts: [] })
+    mocked.mockResolvedValueOnce(json({ ok: false, error: 'person_only' }, 403))
+    expect(await resumeWithToast({ kind: 'agent', id: 'a1' })).toBe(false)
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([PERSON_CHECK_REFUSED])
+  })
+
+  it('says why the person check refused a pause, instead of "try again"', async () => {
+    resetPersonCheckNotices()
+    useToastStore.setState({ toasts: [] })
+    mocked.mockResolvedValueOnce(json({ ok: false, error: 'person_only' }, 403))
+    const paused = pauseWithConfirm({ kind: 'agent', id: 'a1' }, 'Ada')
+    await waitFor(() => expect(useConfirmStore.getState().open).toBe(true))
+    useConfirmStore.getState().settle(true)
+    expect(await paused).toBe(false)
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([PERSON_CHECK_REFUSED])
+  })
+
+  it('still says try again when something else went wrong', async () => {
+    useToastStore.setState({ toasts: [] })
+    mocked.mockResolvedValueOnce(json({ error: 'boom' }, 500))
+    expect(await resumeWithToast({ kind: 'agent', id: 'a1' })).toBe(false)
+    expect(useToastStore.getState().toasts.map((t) => t.message)).toEqual([
+      'Could not resume. Try again.',
+    ])
   })
 
   it('adds what this pause does not cover when told to', () => {

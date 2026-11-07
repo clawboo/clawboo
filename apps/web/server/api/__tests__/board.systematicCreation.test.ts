@@ -117,8 +117,8 @@ describe('POST /api/board', () => {
 
   it('a retried draft returns the same task, starts one run, logs one create', () => {
     const body = { title: 'a', teamId: TEAM, assigneeAgentId: 'a1', idempotencyKey: 'draft-1' }
-    const first = call(boardCreatePOST, { body })
-    const again = call(boardCreatePOST, { body })
+    const first = call(boardCreatePOST, { body, headers: DASHBOARD })
+    const again = call(boardCreatePOST, { body, headers: DASHBOARD })
     expect((again.body['task'] as TaskRow).id).toBe((first.body['task'] as TaskRow).id)
     expect(first.body['deduplicated']).toBeUndefined()
     expect(again.body['deduplicated']).toBe(true)
@@ -176,7 +176,11 @@ describe('PATCH /api/board/:taskId', () => {
     const second = child('two')
     linkDep(db, second, first)
     expect(createCappedSubtask(db, parent.id, { title: 'x' }, { maxChildren: 2 }).ok).toBe(false)
-    call(boardUpdatePATCH, { params: { taskId: first }, body: { status: 'cancelled' } })
+    call(boardUpdatePATCH, {
+      params: { taskId: first },
+      body: { status: 'cancelled' },
+      headers: DASHBOARD,
+    })
     expect(getTask(db, second)?.status).toBe('cancelled')
     expect(createCappedSubtask(db, parent.id, { title: 'x' }, { maxChildren: 2 }).ok).toBe(true)
     expect(createCappedSubtask(db, parent.id, { title: 'y' }, { maxChildren: 2 }).ok).toBe(true)

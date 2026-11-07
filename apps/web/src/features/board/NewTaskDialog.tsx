@@ -23,6 +23,7 @@ import {
   fetchMemberRoles,
   type BoardTask,
 } from '@/lib/boardClient'
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
@@ -32,7 +33,6 @@ import { useFocusTrap } from '@/features/shared/useFocusTrap'
 
 import { useDismissableLayer } from '@/features/shared/useDismissableLayer'
 
-import { DASHBOARD_ONLY } from './boardStatus'
 import { recentAssignees, rememberAssignee } from './newTaskMemory'
 import { suggestAgent, type AgentCandidate, type SuggestionReason } from './suggestAgent'
 
@@ -208,13 +208,8 @@ function NewTaskDialogBody({ onClose, defaultTeamId, onCreated }: NewTaskDialogB
         onCreated(mine.task)
         onClose()
       } else {
-        addToast({
-          type: 'error',
-          message:
-            mine.reason === 'dashboard_only'
-              ? DASHBOARD_ONLY
-              : 'Couldn’t create the task. Please try again.',
-        })
+        if (mine.reason === 'person_only') notePersonCheck(PERSON_CHECK_REFUSED)
+        else addToast({ type: 'error', message: 'Couldn’t create the task. Please try again.' })
         setSubmitting(false)
       }
       return

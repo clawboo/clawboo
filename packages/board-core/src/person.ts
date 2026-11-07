@@ -4,7 +4,7 @@
 // person, "You", with a fixed id: whoever is at the dashboard. Writes record it
 // when nothing vouched for anyone else, and a task assigned to it is everyone's
 // on that install. It proves nothing about who sent a request: see the server's
-// `isDashboardRequest` for the check that stands in for that locally.
+// `actsAsPerson` for the check that stands in for that locally.
 //
 // The same shape as @clawboo/protocol's PersonRef. Import-free.
 

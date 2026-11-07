@@ -596,7 +596,7 @@ How long one database write keeps retrying while another process holds the file.
 - Default: `86400000` (24 hours)
 - Example: `CLAWBOO_APPROVAL_TTL_MS=43200000`
 
-The age at which the hourly reaper marks a still-pending approval expired and unblocks any task it was holding (unless a failed verification is what holds it). It does not change how long an approval prompt waits for your answer: tool and delegation approvals expire after 5 minutes whatever this is set to. [Limits and defaults](/reference/limits-and-defaults) lists every approval window.
+The age at which the hourly reaper marks a still-pending approval expired. It moves no task. It does not change how long an approval prompt waits for your answer: tool and delegation approvals expire after 5 minutes whatever this is set to. [Limits and defaults](/reference/limits-and-defaults) lists every approval window.
 
 ### CLAWBOO_APPROVAL_REAPER_INTERVAL_MS
 

@@ -12,7 +12,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 
 import { DEFAULT_AGENT_CONFIG, NATIVE_PROVIDER_ENV_VARS } from '@clawboo/adapter-native'
-import { agents, getBudget, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import {
+  agents,
+  getBudget,
+  listGovernanceAudit,
+  getSetting,
+  setSetting,
+  type ClawbooDb,
+} from '@clawboo/db'
 
 import { getDb, resetDb } from '../../db'
 import { adapterFactoryFor } from '../../runtimes'
@@ -308,6 +315,17 @@ describe('ClawbooNativeAgentSource (AgentSource contract + native specifics)', (
       limitUsdCents: 150,
       mode: 'cap',
       status: 'active',
+    })
+    // A hard cap set this way is on record like one set from the Governance panel.
+    const [row] = listGovernanceAudit(db, { eventType: 'budget' })
+    expect(row?.agentId).toBe(a.id)
+    expect(JSON.parse(row!.summary)).toMatchObject({
+      reason: 'edit',
+      action: 'set_limit',
+      scope: 'agent',
+      before: null,
+      after: { limitUsdCents: 150, mode: 'cap' },
+      via: 'agent_create',
     })
   })
 

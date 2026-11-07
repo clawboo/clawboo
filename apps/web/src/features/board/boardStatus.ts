@@ -298,12 +298,6 @@ export function taskAttentionOf(task: {
 
 // ─── People ─────────────────────────────────────────────────────────────────
 
-/** Why a person-only write was refused with `dashboard_only`. A browser sends the
- *  fetch metadata the check reads only on localhost or over HTTPS, so this is what a
- *  plain http network address gets, and trying again would not change it. */
-export const DASHBOARD_ONLY =
-  'Clawboo could not tell this came from the board itself. Open the board on localhost or over HTTPS to do this.'
-
 /** Why a person's words did not reach an agent (a `not-delivered` reply). */
 export function notDeliveredWhy(reason: string): string {
   switch (reason) {

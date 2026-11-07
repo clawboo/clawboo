@@ -6,6 +6,7 @@
 import {
   createBuiltinRegistry,
   defaultAvailabilityContext,
+  getTask,
   listAudit,
   listPendingApprovals,
   resolveApprovalBody,
@@ -13,7 +14,7 @@ import {
 import type { Request, Response } from 'express'
 
 import { decideApproval } from '../lib/approvalDecision'
-import { personOf } from '../lib/auth'
+import { personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { redactJsonString, redactValue } from '../lib/redact'
 
@@ -43,9 +44,11 @@ export function toolsApprovalsGET(_req: Request, res: Response): void {
     const db = getDb()
     // Redact-on-display: the args summary (JSON text) is scrubbed at write time; mask
     // its credential-shaped keys again at the rendering boundary (defense in depth).
+    // The task's title goes with its id, so the card can say what the call is for.
     const approvals = listPendingApprovals(db).map((a) => ({
       ...a,
       argsSummary: redactJsonString(a.argsSummary),
+      taskTitle: a.taskId ? (getTask(db, a.taskId)?.title ?? null) : null,
     }))
     res.json({ ok: true, approvals })
   } catch (err) {
@@ -55,9 +58,11 @@ export function toolsApprovalsGET(_req: Request, res: Response): void {
 
 // POST /api/tools/approvals/:id/resolve { decision }
 // An `exec` approval is released by the Gateway, a `tool` one by this process;
-// `decideApproval` dispatches on the stored kind.
+// `decideApproval` dispatches on the stored kind. Only a person's request: an
+// answer is the person's authority and nothing else.
 export async function toolsApprovalResolvePOST(req: Request, res: Response): Promise<void> {
   try {
+    if (refuseUnlessPerson(req, res)) return
     const parsed = resolveApprovalBody.safeParse(req.body)
     if (!parsed.success) {
       res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })

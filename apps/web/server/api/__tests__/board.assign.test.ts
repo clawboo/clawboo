@@ -78,8 +78,16 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   } as unknown as Response
   return { res, statusCode: () => code, body: () => payload }
 }
+// The dashboard's own page: Retry and Assign act for the person (see personCheck.test.ts).
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, app: { locals: {} }, ...over }) as unknown as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    app: { locals: {} },
+    ...over,
+  }) as unknown as Request
 
 type TaskBody = {
   task: { id: string; status: string; sourceDelegationId: string | null; attention: unknown }

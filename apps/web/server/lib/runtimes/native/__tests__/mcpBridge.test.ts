@@ -14,17 +14,20 @@ import {
   SqliteMemoryStore,
   createDb,
   createTask,
+  getComments,
+  listEvents,
   listTasks,
   type ClawbooDb,
 } from '@clawboo/db'
 
+import { getDbPath } from '../../../db'
 import { connectMcpBridge } from '../mcpBridge'
 
 describe('native MCP bridge (in-process)', () => {
   let sandbox: string
   let dbPath: string
   let db: ClawbooDb
-  let prevHome: string | undefined
+  const prev: Record<string, string | undefined> = {}
 
   beforeEach(async () => {
     sandbox = await mkdtemp(path.join(os.tmpdir(), 'clawboo-native-mcp-'))
@@ -32,12 +35,17 @@ describe('native MCP bridge (in-process)', () => {
     db = createDb(dbPath) // bootstrap the schema
     // Anything that reaches the shared server state lands in the sandbox, never
     // in the developer's own ~/.clawboo.
-    prevHome = process.env['CLAWBOO_HOME']
-    process.env['CLAWBOO_HOME'] = sandbox
+    for (const name of ['HOME', 'CLAWBOO_HOME']) {
+      prev[name] = process.env[name]
+      process.env[name] = sandbox
+    }
+    expect(getDbPath().startsWith(sandbox)).toBe(true)
   })
   afterEach(async () => {
-    if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
-    else process.env['CLAWBOO_HOME'] = prevHome
+    for (const name of ['HOME', 'CLAWBOO_HOME']) {
+      if (prev[name] === undefined) delete process.env[name]
+      else process.env[name] = prev[name]
+    }
     db.$client.close()
     await rm(sandbox, { recursive: true, force: true })
   })
@@ -119,6 +127,30 @@ describe('native MCP bridge (in-process)', () => {
     const out = await bridge!.callTool('get_task', {})
     expect(out.isError).toBe(false)
     expect(out.output).toContain('Native own task')
+    await bridge!.close()
+  })
+
+  it('a Tasks write records the agent and the run, as a signed Tasks URL does', async () => {
+    const task = createTask(db, { title: 'Native write', teamId: 'team-bridge' })
+    const bridge = await connectMcpBridge({
+      db,
+      agentId: 'native-team-agent',
+      enable: { tasks: true, memory: false, tools: false },
+      memoryScope: { teamId: 'team-bridge', agentId: 'native-team-agent' },
+      boundTaskId: task.id,
+      boundExecutionId: 'exec-1',
+    })
+    await bridge!.callTool('add_comment', { body: 'noted' })
+    expect(getComments(db, task.id)[0]).toMatchObject({
+      authorAgentId: 'native-team-agent',
+      executionId: 'exec-1',
+    })
+    const [event] = listEvents(db, { kinds: ['comment_added'] }).filter((e) => e.taskId === task.id)
+    expect((JSON.parse(event!.data) as Record<string, unknown>)['actor']).toEqual({
+      kind: 'agent',
+      agentId: 'native-team-agent',
+      execId: 'exec-1',
+    })
     await bridge!.close()
   })
 

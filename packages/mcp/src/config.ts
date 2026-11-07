@@ -68,9 +68,16 @@ export interface AttachScope {
    * leaves out `taskId`. Kept apart from `taskId` above on purpose: that one is
    * a memory provenance stamp, and the learning overlay counts distinct (agent,
    * task) reporters as corroborators, so setting it changes how memories get
-   * promoted. Binding a run to its task changes nothing in memory.
+   * promoted. Binding a run to its task changes nothing in memory. It rides the
+   * Tools URL too, so an approval the broker opens names the task.
    */
   boundTaskId?: string | null
+  /**
+   * The execution row of the run. Rides the Tasks URL only, as `scopeExecutionId`
+   * inside its `scopeSig`, and is recorded as the run behind each write the Tasks
+   * tools make. It changes from run to run, so it stays off the other URLs.
+   */
+  boundExecutionId?: string | null
 }
 
 export interface AttachConfigInput {
@@ -115,8 +122,8 @@ export function mcpHttpUrl(
   // the engine does not drive, and win back every write.
   const teamRun = scope.delegate === true
   // What each URL's signature covers, built field by field rather than spread
-  // from `scope`: a field only one URL carries (the bound task) must never
-  // reach another URL's signature, or that URL would stop verifying.
+  // from `scope`: a field only some URLs carry (the bound task, the run's id) must
+  // never reach another URL's signature, or that URL would stop verifying.
   const sign = (claim: Omit<SignableScope, 'teamId' | 'agentId' | 'tenantId'>): string =>
     signAttachScope(scope.attachSecret!, {
       teamId: scope.teamId,
@@ -154,10 +161,13 @@ export function mcpHttpUrl(
     if (teamRun) p.set('teamRun', '1')
     // The run's own task: the default for a Tasks tool call that names none.
     if (scope.boundTaskId) p.set('scopeTaskId', scope.boundTaskId)
+    // The run itself: recorded with each write the session makes.
+    if (scope.boundExecutionId) p.set('scopeExecutionId', scope.boundExecutionId)
     // Tasks never grants delegation, so its signature pins delegate:false — a
     // signed tasks URL replayed onto teamchat with delegate=1 must not verify.
     // `teamRun` is inside the signature: stripping it would win back the writes.
     // So is the bound task: moving it would aim the defaults at another task.
+    // And the run's id: moving it would file the writes under another run.
     if (scope.attachSecret && claimsScope)
       p.set(
         'scopeSig',
@@ -165,6 +175,7 @@ export function mcpHttpUrl(
           delegate: false,
           teamRun,
           ...(scope.boundTaskId ? { boundTaskId: scope.boundTaskId } : {}),
+          ...(scope.boundExecutionId ? { boundExecutionId: scope.boundExecutionId } : {}),
         }),
       )
   } else if (server === 'teamchat') {
@@ -190,7 +201,18 @@ export function mcpHttpUrl(
     if (scope.teamId) p.set('scopeTeamId', scope.teamId)
     if (scope.agentId) p.set('scopeAgentId', scope.agentId)
     if (teamRun) p.set('teamRun', '1')
-    if (scope.attachSecret && claimsScope) p.set('scopeSig', sign({ delegate: false, teamRun }))
+    // The run's own task, so an approval a connector call opens names it. Inside
+    // the signature for the same reason as on the Tasks URL.
+    if (scope.boundTaskId) p.set('scopeTaskId', scope.boundTaskId)
+    if (scope.attachSecret && claimsScope)
+      p.set(
+        'scopeSig',
+        sign({
+          delegate: false,
+          teamRun,
+          ...(scope.boundTaskId ? { boundTaskId: scope.boundTaskId } : {}),
+        }),
+      )
   }
   // On every server's URL, scoped or not: the access gate refuses a cookieless
   // /api/mcp/* request without it (see `signAttachAccess`).

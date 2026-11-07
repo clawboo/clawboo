@@ -43,6 +43,7 @@ import type { TaskTemplate } from '@clawboo/scheduler'
 import {
   dispatchConnectedSubstrate,
   ROUTINE_OPENCLAW_EXECUTOR,
+  taskForRoutineSession,
   type OperatorClientLike,
 } from '../openclawDispatch'
 import { createRunSlots, setRunSlotsForTests, type RunSlots } from '../../runSlots'
@@ -269,6 +270,40 @@ describe('dispatchConnectedSubstrate', () => {
     expect(listExecutions(db, taskId)[0]?.status).toBe('failed')
   })
 
+  it('knows which task its session is running for as long as the fire runs', async () => {
+    const agentRow = seedAgent()
+    const run = seedRoutine(agentRow.id)
+    const taskId = seedTask()
+    const client = new FakeOperatorClient()
+    let sessionKey = ''
+    let during: string | null = null
+
+    await dispatchConnectedSubstrate({
+      db,
+      run,
+      template: TEMPLATE,
+      agentRow,
+      taskId,
+      client: client as unknown as OperatorClientLike,
+      makeAdapter: () => ({
+        start: async (_task: unknown, opts: { sessionKey: string }) => {
+          sessionKey = opts.sessionKey
+          during = taskForRoutineSession(sessionKey)
+          return { adapterId: 'openclaw', sessionKey, runId: 'run-1' }
+        },
+        events: () => ({
+          [Symbol.asyncIterator]: () => ({
+            next: () => Promise.reject(new Error('operator socket closed')),
+          }),
+        }),
+        abort: async () => undefined,
+      }),
+    })
+
+    expect(during).toBe(taskId)
+    expect(taskForRoutineSession(sessionKey)).toBeNull()
+  })
+
   it('a stream that throws mid-run fails the exec, aborts the run and hands the task back', async () => {
     const agentRow = seedAgent()
     const run = seedRoutine(agentRow.id)
@@ -432,6 +467,11 @@ describe('dispatchConnectedSubstrate', () => {
     expect(getTask(db, taskId)?.status).toBe('todo') // released
     expect(listExecutions(db, taskId)[0]).toMatchObject({ status: 'cancelled' })
     expect(getBudget(db, 'agent', agentRow.id)?.status).toBe('paused')
+    const audit = listGovernanceAudit(db, { eventType: 'budget' }).map(
+      (r) => JSON.parse(r.summary) as Record<string, unknown>,
+    )
+    expect(audit).toHaveLength(1)
+    expect(audit[0]).toMatchObject({ reason: 'auto_pause', scope: 'agent', runKind: 'routine' })
   })
 
   it('records ESTIMATED spend on a REAL OpenClaw frame (no injected cost) and the cap engages', async () => {
@@ -468,6 +508,17 @@ describe('dispatchConnectedSubstrate', () => {
     const budget = getBudget(db, 'agent', agentRow.id)
     expect(budget?.spentUsdCents).toBeGreaterThan(0) // spend is no longer invisible
     expect(budget?.status).toBe('paused') // the cap engaged on the estimate
+    // The usual path for an OpenClaw cost, and its row reads like every other.
+    const crossing = listGovernanceAudit(db, { eventType: 'budget' })
+      .map((r) => JSON.parse(r.summary) as Record<string, unknown>)
+      .find((r) => r['runKind'] === 'routine')
+    expect(crossing).toMatchObject({
+      reason: 'auto_pause',
+      level: 'hard',
+      scope: 'agent',
+      runtime: 'openclaw',
+      estimated: true,
+    })
     expect(getComments(db, taskId).some((c) => c.body.includes('Budget cap reached'))).toBe(true)
     // The run's ledger row records the estimate the budgets were charged, and the
     // task's cost is that row's.

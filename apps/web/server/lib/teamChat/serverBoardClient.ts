@@ -287,15 +287,26 @@ export function createServerBoardClient(
 
     async addComment(taskId, body, authorType = 'system', authorAgentId): Promise<void> {
       try {
-        // Clawboo's own note, or a run's result recorded by the engine.
+        // Clawboo's own note, or a run's result recorded by the engine. The engine
+        // posts a run's report in its agent's name, around when it closes the run's
+        // ledger row, so the task's latest run is that run.
+        const execId =
+          authorType === 'agent' ? (listExecutions(db, taskId).at(-1)?.id ?? null) : null
         addComment(db, taskId, body, authorType, authorAgentId ?? null, {
           kind: authorType === 'system' ? 'note' : authorType === 'agent' ? 'result' : null,
+          executionId: execId,
         })
         emitEvent(db, {
           kind: 'comment_added',
           taskId,
           agentId: authorAgentId ?? null,
-          data: { authorType, body },
+          data: {
+            authorType,
+            body,
+            ...(authorType === 'agent' && authorAgentId
+              ? { actor: { kind: 'agent', agentId: authorAgentId, execId } }
+              : {}),
+          },
         })
       } catch {
         // best-effort

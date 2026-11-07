@@ -5,6 +5,7 @@
 import { useEffect, useState } from 'react'
 
 import { Switch } from '@/features/shared/Switch'
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { fetchTeamAgentWakes, saveTeamAgentWakes } from '@/lib/teamAgentWakes'
 import { useToastStore } from '@/stores/toast'
 
@@ -27,6 +28,10 @@ export function TeamAgentWakesToggle({ teamId }: { teamId: string }) {
     setSaving(true)
     const saved = await saveTeamAgentWakes(teamId, next)
     setSaving(false)
+    if (saved === 'person_only') {
+      notePersonCheck(PERSON_CHECK_REFUSED)
+      return
+    }
     if (saved === null) {
       addToast({ type: 'error', message: 'Couldn’t save that. Please try again.' })
       return

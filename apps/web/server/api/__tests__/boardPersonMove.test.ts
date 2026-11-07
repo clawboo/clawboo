@@ -72,8 +72,16 @@ function mockRes(): { res: Response; statusCode: () => number; body: () => unkno
   } as unknown as Response
   return { res, statusCode: () => code, body: () => payload }
 }
+// The dashboard's own page, so a move is a person's (see personCheck.test.ts).
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, app: { locals: {} }, ...over }) as unknown as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    app: { locals: {} },
+    ...over,
+  }) as unknown as Request
 
 function patch(taskId: string, body: Record<string, unknown>) {
   const r = mockRes()

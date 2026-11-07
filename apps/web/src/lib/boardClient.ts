@@ -11,6 +11,8 @@ import type { AgentWakeChoice } from '@clawboo/board-core'
 import { apiFetch } from '@clawboo/control-client'
 import type { BoardClient, BoardTask, TaskDetail, ExecutionRef } from '@clawboo/team-orchestration'
 
+import { notePersonCheck, PERSON_CHECK_MOVE, PERSON_CHECK_REPLY } from './personCheckNotice'
+
 export type {
   BoardClient,
   BoardTask,
@@ -263,7 +265,9 @@ export async function updateStatusResult(
     if (r.ok) {
       const body = (await r.json().catch(() => null)) as {
         cancelledDependents?: Array<{ id?: unknown; title?: unknown }>
+        byPerson?: unknown
       } | null
+      if (body?.byPerson === false) notePersonCheck(PERSON_CHECK_MOVE)
       const steps = Array.isArray(body?.cancelledDependents)
         ? body.cancelledDependents
             .filter((d): d is { id: string; title?: unknown } => typeof d?.id === 'string')
@@ -425,7 +429,9 @@ export async function postTaskComment(
       forwarded?: boolean
       delivery?: ReplyDelivery
       comment?: { id?: unknown }
+      byPerson?: unknown
     } | null
+    if (payload?.byPerson === false) notePersonCheck(PERSON_CHECK_REPLY)
     return {
       ok: true,
       forwarded: payload?.forwarded === true,

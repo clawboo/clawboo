@@ -136,6 +136,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // marks its task with `checkHeldSince`.
     'board.checkHold': true,
     'board.steering': true,
+    // Enforced inside each person write (lib/auth.ts), on no route of its own.
+    'board.personCheck': true,
     'board.readableIds': true,
     'board.labels': true,
     'board.inbox': true,

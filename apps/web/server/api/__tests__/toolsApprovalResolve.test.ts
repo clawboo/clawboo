@@ -51,8 +51,10 @@ function mockRes(): { res: Response; done: Promise<{ code: number; body: unknown
   return { res, done }
 }
 
+/** The dashboard's own page: only a person may answer (see personCheck.test.ts). */
+const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
 const req = (id: string, decision: string): Request =>
-  ({ params: { id }, query: {}, body: { decision } }) as unknown as Request
+  ({ params: { id }, query: {}, body: { decision }, headers: DASHBOARD }) as unknown as Request
 
 function seed(id: string, kind: 'exec' | 'tool', expiresAt = Date.now() + 600_000): void {
   db.insert(toolCallApprovals)
@@ -253,7 +255,13 @@ describe('who answered', () => {
   type Person = { id: string; name: string | null; role: string | null }
   const ADA: Person = { id: 'user-42', name: 'Ada', role: 'admin' }
   const asPerson = (id: string, decision: string, person: Person | null): Request =>
-    ({ params: { id }, query: {}, body: { decision }, person }) as unknown as Request
+    ({
+      params: { id },
+      query: {},
+      body: { decision },
+      headers: DASHBOARD,
+      person,
+    }) as unknown as Request
   const resolvedByOf = (id: string): string | null | undefined =>
     db
       .select({ resolvedBy: toolCallApprovals.resolvedBy })
@@ -290,6 +298,7 @@ describe('who answered', () => {
         params: { id: 'ap-anon' },
         query: {},
         body: { decision: 'allow_once', resolvedBy: ADA, person: ADA },
+        headers: DASHBOARD,
       } as unknown as Request,
       res,
     )

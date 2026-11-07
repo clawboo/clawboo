@@ -8,6 +8,9 @@
 
 import {
   createDb,
+  createTask,
+  getTask,
+  updateStatus,
   getApproval,
   listEvents,
   listPendingApprovals,
@@ -238,6 +241,48 @@ onPosix('the event log', () => {
     expect(resolved.map((e) => e.data)).toEqual([
       { approvalId: cardId, decision: 'expired', kind: 'tool', toolName: 'run_command' },
     ])
+  })
+
+  describe('a card on a board task', () => {
+    const toolOn = (taskId: string) =>
+      buildExecTool({ db, agentId: 'a', cwd: '/tmp', enabled: true, taskId })[0]
+    const blockedTask = (): string => {
+      const task = createTask(db, { title: 'gated', teamId: 'T' })
+      updateStatus(db, task.id, 'blocked')
+      return task.id
+    }
+
+    it('names the task', async () => {
+      const taskId = blockedTask()
+      const controller = new AbortController()
+      const p = toolOn(taskId)?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
+      const cardId = await cardWhenAsked()
+      expect(getApproval(db, cardId)?.taskId).toBe(taskId)
+      controller.abort()
+      await p
+    })
+
+    it('leaves a blocked task alone when nobody answered', async () => {
+      const taskId = blockedTask()
+      const p = toolOn(taskId)?.run({ argv: ['echo', 'hi'] }, { signal: never })
+      const cardId = await cardWhenAsked()
+      db.update(toolCallApprovals)
+        .set({ expiresAt: Date.now() - 1000 })
+        .where(eq(toolCallApprovals.id, cardId))
+        .run()
+      await p
+      expect(getTask(db, taskId)?.status).toBe('blocked')
+    })
+
+    it('leaves the task as it is when the run was stopped', async () => {
+      const taskId = blockedTask()
+      const controller = new AbortController()
+      const p = toolOn(taskId)?.run({ argv: ['echo', 'hi'] }, { signal: controller.signal })
+      await cardWhenAsked()
+      controller.abort()
+      await p
+      expect(getTask(db, taskId)?.status).toBe('blocked')
+    })
   })
 
   it('runs the command when an answer lands as the card expires', async () => {

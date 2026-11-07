@@ -34,6 +34,7 @@ import {
   createTask,
   getBudget,
   getComments,
+  listExecutions,
   getTask,
   getTaskVerification,
   listEvents,
@@ -219,9 +220,11 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     b.done('success')
     const adapter = new ScriptedAdapter('claude-code', b.build())
 
+    let boundExecutionId: string | null | undefined
     const result = await runTaskOnRuntime({
       db: getDb(),
       makeAdapter: (ctx: RuntimeRunContext) => {
+        boundExecutionId = ctx.memoryScope?.boundExecutionId
         if (ctx.cwd) dirtyWorktree(ctx.cwd) // real call (worktree present) → leave a verifiable deliverable
         return adapter
       },
@@ -248,6 +251,11 @@ describe('executor runner — all-on integration (board + executors + worktrees 
     // ── board ──────────────────────────────────────────────────────────────────
     expect(getTask(db, taskId)?.status).toBe('done')
     expect(getComments(db, taskId).some((c) => c.body.includes('scripted done'))).toBe(true) // report-up
+    // Who wrote it: the run's own ledger row, which its Tasks tools are bound to as well.
+    const runId = listExecutions(db, taskId).at(-1)?.id
+    expect(boundExecutionId).toBe(runId)
+    const report = getComments(db, taskId).find((c) => c.body.includes('scripted done'))
+    expect(report).toMatchObject({ authorType: 'agent', executionId: runId })
 
     // ── worktrees ──────────────────────────────────────────────────────────────
     const ws = await getTaskWorkspace(taskId)

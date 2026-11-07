@@ -346,6 +346,8 @@ describe('serverDeliver: a board task run is bound to its task', () => {
         expect(run.ctx).toBeNull()
       } else {
         expect(run.ctx?.memoryScope?.boundTaskId).toBe(taskId)
+        // The run's own ledger row: what its Tasks writes record.
+        expect(run.ctx?.memoryScope?.boundExecutionId).toEqual(expect.any(String))
         // Not the provenance stamp: memory promotion is unchanged.
         expect(run.ctx?.memoryScope?.taskId).toBeUndefined()
       }

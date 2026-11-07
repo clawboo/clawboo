@@ -188,7 +188,7 @@ function wake(
       kind: 'status_changed',
       taskId: task.id,
       teamId,
-      data: { to: 'todo', reason: 'reply' },
+      data: { to: 'todo', reason: 'reply', actor: { kind: 'person' } },
     })
   }
   // A step still waiting on another task cannot start; the reply waits with it.

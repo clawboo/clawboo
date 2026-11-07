@@ -139,7 +139,7 @@ If no row appears, Clawboo refused the budget, for example because the limit was
 
 Hover a row's mode pill to read it in a few words: **warn** says "Track-and-warn: never auto-pauses", and **cap** says "Hard cap: auto-pauses at 100%".
 
-When an agent routine, a run started through the API, or an OpenClaw routine takes a budget past 80% or 100%, Clawboo also writes a `budget` entry to the audit log. Spend from team chat and one-to-one chat moves the bar and the status, but writes no audit entry.
+When any run takes a budget past 80% or 100% (an agent routine, a run started through the API, an OpenClaw routine, team chat, a one-to-one chat or the peer exchange), Clawboo also writes a `budget` entry to the audit log. Setting a limit and resuming a budget write one too, with the budget before and after the change, and so does creating a Clawboo Native agent with a budget.
 
 ## What a hard cap stops
 
@@ -326,7 +326,7 @@ A model your own Ollama serves is free, so its runs read **free** and charge no 
 
 <Accordion title="The bar is amber, but the audit log shows no warning">
 
-Spend from team chat and one-to-one chat updates the budget's bar and status without writing an audit entry. Warnings appear in the log only for agent routines, API runs and OpenClaw routines.
+A warning is written once, on the charge that crosses 80% or 100%. A bar that was already past the line before this release, or a budget created already over it, has no crossing left to record. A spend that could not be recorded writes no warning either.
 
 </Accordion>
 

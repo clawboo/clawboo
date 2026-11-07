@@ -9,6 +9,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { resetPersonCheckNotices } from '@/lib/personCheckNotice'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { useToastStore } from '@/stores/toast'
@@ -245,13 +246,12 @@ describe('NewTaskDialog', () => {
       expect(posted[0]).not.toHaveProperty('assigneeAgentId')
     })
 
-    it('says why a plain-http dashboard cannot, instead of "try again"', async () => {
+    it('says why the person check refused, instead of "try again"', async () => {
+      resetPersonCheckNotices()
       allTeams()
       serve()
       server.use(
-        http.post('/api/board', () =>
-          HttpResponse.json({ error: 'dashboard_only' }, { status: 403 }),
-        ),
+        http.post('/api/board', () => HttpResponse.json({ error: 'person_only' }, { status: 403 })),
       )
       const user = userEvent.setup()
       const { dialog, field } = renderDialog()

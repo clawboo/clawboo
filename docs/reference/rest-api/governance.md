@@ -134,6 +134,8 @@ A limit of `0` is refused: a budget is a positive limit, and an untracked scope 
 { "error": "invalid body", "details": { "formErrors": [], "fieldErrors": {} } }
 ```
 
+Each call writes a `budget` row to the audit log with the limit and mode before and after, and who asked (see `GET /api/governance/audit` below).
+
 ### Example
 
 ```bash
@@ -195,6 +197,8 @@ Sets a paused budget back to `active`. If the spend has already reached the limi
 { "error": "budget not found" }
 ```
 
+A resume writes a `budget` row to the audit log with the budget before and after, and who asked.
+
 ### Example
 
 ```bash
@@ -210,7 +214,9 @@ curl -X POST http://localhost:18790/api/governance/budgets/team/<team-id>/resume
 
 Reads the append-only audit log, newest first: installs, approvals, tool calls, budget events, cap hits, check results and circuit breaks. There is no write route; the server writes these rows itself. Each row's `summary` was scrubbed of secrets when it was written, and is masked again before it is sent.
 
-The 80% and 100% budget warnings (`eventType: 'budget'`) are written by task-runner runs and OpenClaw Routine fires. Team chat and 1:1 chat update the budget row without writing a warning row. A task-runner run also writes a `budget` row when a hard cap stops it (`summary.reason` is `'auto_pause'`), or when its final cost report crossed a cap after the work was done (`'cap_reached_at_end'`).
+The 80% and 100% budget warnings (`eventType: 'budget'`, `summary.reason: 'warn'`) are written by every run that spends: task-runner runs, OpenClaw Routine fires, team chat (a hand-off, a team turn and its work check's review), 1:1 chat and the peer exchange. Each is written once, when a charge crosses the line. A task-runner run also writes a `budget` row when a hard cap stops it (`summary.reason` is `'auto_pause'`), or when its final cost report crossed a cap after the work was done (`'cap_reached_at_end'`). Team chat, 1:1 chat and the peer exchange write `'auto_pause'` on the charge that took a hard cap to 100%. Their rows carry `summary.runKind`: `'team-chat'`, `'chat'` or `'exchange'`.
+
+A budget edit writes a `budget` row too, with `summary.reason: 'edit'`: `action` (`'set_limit'` or `'resume'`), the `scope` and `scopeId`, the spend at the time, the limit, mode and status `before` (null for a new budget) and `after`, and who asked: the `actor` (`{ kind: 'person' }` for a request that passed [the person check](/operating/security#the-person-check), else `{ kind: 'caller' }`), or `via: 'agent_create'` for a budget set by creating a Clawboo Native agent with one.
 
 - **Query params**:
 
@@ -263,7 +269,7 @@ curl "http://localhost:18790/api/governance/audit?agentId=<agent-id>&eventType=b
 
 Asks a team lead to approve a risky delegation before it runs. It opens a pending approval in `tool_call_approvals` (it appears in the [approval cards](/using/approvals)) and holds the request open until the lead answers or the approval expires. The approval's key is `delegate:<kind>`, and it is marked `neverRemember`: every request asks, whatever the lead answered before.
 
-The wait is fixed at 5 minutes: the approval expires 5 minutes after it is created, and the request gives up at the same time. `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default) does not change this wait. It sets how old an abandoned pending approval must be before the hourly cleanup expires it and unblocks any task it was holding.
+The wait is fixed at 5 minutes: the approval expires 5 minutes after it is created, and the request gives up at the same time. `CLAWBOO_APPROVAL_TTL_MS` (24 hours by default) does not change this wait. It sets how old an abandoned pending approval must be before the hourly cleanup expires it. An expired approval moves no task.
 
 - **Path/query params**: none.
 - **Request body**:
@@ -274,7 +280,7 @@ The wait is fixed at 5 minutes: the approval expires 5 minutes after it is creat
   kind?: string               // the delegation kind; the key is 'delegate:<kind>'; default 'code'
   targetAgentName?: string    // the agent the work goes to (shown in the prompt)
   task?: string               // what is being delegated
-  taskId?: string             // the board task this approval gates, so the cleanup can unblock it
+  taskId?: string             // the board task the delegating run works on, shown with the card
 }
 ```
 
@@ -369,7 +375,7 @@ Stores one approval decision in `approval_history` and returns the stored row.
 }
 ```
 
-A `resolvedBy` key in `details` is dropped. When the request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified, the server writes `details.resolvedBy` itself, as `{ id, name, role }`.
+The row says a person decided, so only a request that passes [the person check](/operating/security#the-person-check) is stored; any other caller gets **403** `{ "ok": false, "error": "person_only" }` and nothing is written. A `resolvedBy` key in `details` is dropped. When the request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified, the server writes `details.resolvedBy` itself, as `{ id, name, role }`.
 
 ### Responses
 

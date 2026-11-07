@@ -49,6 +49,8 @@ export interface ExecApprovalRequest {
   id: string
   command: string
   agentId: string | null
+  /** The OpenClaw session the command came from, which says which task it is for. */
+  sessionKey: string | null
   cwd: string | null
   reason: string | null
   expiresAtMs: number | null
@@ -80,6 +82,7 @@ export function parseExecApprovalRequest(payload: unknown): ExecApprovalRequest 
     id,
     command,
     agentId: typeof req['agentId'] === 'string' ? req['agentId'] : null,
+    sessionKey: typeof req['sessionKey'] === 'string' ? req['sessionKey'] : null,
     cwd: typeof req['cwd'] === 'string' ? req['cwd'] : null,
     // The Gateway's own sentence about why it stopped, when it wrote one. It is
     // more specific than anything clawboo can say about a command from outside.
@@ -119,6 +122,11 @@ export interface ExecApprovalSource {
 
 /** Map an OpenClaw agent id to the clawboo row id the card is filed under. */
 export type ResolveAgentId = (sourceAgentId: string) => string | null
+
+/** The board task the run on an OpenClaw session works on, or null: a 1:1 chat, a
+ *  lead's own turn, a message from outside clawboo. Never a guess: a command the
+ *  map cannot place is a card with no task. */
+export type ResolveTaskId = (sessionKey: string) => string | null
 
 /** How often the mirror checks whether the Gateway has stopped waiting. */
 const EXPIRY_SWEEP_MS = 30_000
@@ -194,6 +202,7 @@ export interface ExecApprovalSurface {
 export function startExecApprovalSurface(
   source: ExecApprovalSource,
   resolveAgentId: ResolveAgentId,
+  resolveTaskId: ResolveTaskId = () => null,
 ): ExecApprovalSurface {
   const off = source.onGatewayBroadcast((frame) => {
     try {
@@ -213,6 +222,7 @@ export function startExecApprovalSurface(
             // has to be answerable. Showing a command whose agent is unknown is
             // worse than nothing only if it is silently ignored.
             agentId: req.agentId ? (resolveAgentId(req.agentId) ?? req.agentId) : null,
+            taskId: req.sessionKey ? resolveTaskId(req.sessionKey) : null,
             argsSummary: JSON.stringify({ command: req.command, cwd: req.cwd }),
             reason: req.reason ?? 'this command is not on the trusted list',
             status: 'pending',

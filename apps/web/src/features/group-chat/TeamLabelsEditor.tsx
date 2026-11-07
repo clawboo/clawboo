@@ -20,7 +20,7 @@ const REFUSAL_WORDS: Record<LabelRefusal, string> = {
   taken: 'This team already has a label with that name.',
   too_many: 'This team has the most labels it can have.',
   not_found: 'That label is gone.',
-  person_only: 'Change labels from the dashboard.',
+  person_only: 'Not saved. Clawboo could not tell that this came from you in the dashboard.',
   failed: 'Could not save. Please try again.',
 }
 

@@ -176,6 +176,8 @@ export interface TeamOrchestrator {
 
 interface Instance {
   orchestrator: TeamOrchestrator
+  /** The task this instance's engine has a session working on, or null. */
+  taskForSession(sessionKey: string): string | null
   touch(): void
   getLastActivity(): number
   /** Move the idle clock past `ms` the process spent suspended, never past `at`. */
@@ -734,6 +736,7 @@ function buildInstance(teamId: string, roomId: string | null, mcpBaseUrl: string
     // A live run registers itself in `abortMap` for its whole lifetime, so an
     // empty map is exactly "nothing running". A work check runs after its run has
     // ended, so the engine counts those itself.
+    taskForSession: (sk) => engine.taskForSession(sk),
     isQuiescent: () => abortMap.size === 0 && engine.checksInFlight() === 0,
     ownsSession: (sk) =>
       abortMap.has(sk) ||
@@ -763,6 +766,15 @@ export function getTeamOrchestrator(
   }
   inst.touch()
   return inst.orchestrator
+}
+
+/** The task a live engine has this session working on, or null. */
+export function taskForLiveSession(sessionKey: string): string | null {
+  for (const inst of instances.values()) {
+    const taskId = inst.taskForSession(sessionKey)
+    if (taskId) return taskId
+  }
+  return null
 }
 
 /** True when a team chat room has a live orchestrator (introspection / tests). */

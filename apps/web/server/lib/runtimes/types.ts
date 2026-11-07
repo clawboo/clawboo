@@ -58,6 +58,9 @@ export interface RuntimeRunContext {
      *  leaves taskId out (signed onto the Tasks URL; in-process for Native).
      *  Not `taskId`, which is a memory provenance stamp. */
     boundTaskId?: string | null
+    /** The run's execution row: recorded with each write its Tasks tools make
+     *  (signed onto the Tasks URL; in-process for Native). */
+    boundExecutionId?: string | null
   } | null
   /** Extra env for a spawned subprocess (provider API keys, isolated HOME, …). */
   apiKeyEnv?: Record<string, string>

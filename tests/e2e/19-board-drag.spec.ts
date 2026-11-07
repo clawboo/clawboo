@@ -37,7 +37,9 @@ async function createCard(
   title: string,
   blockerId: string,
 ): Promise<string> {
+  // A value naming an agent takes a person's request, as the dashboard's page sends.
   const r = await request.post(`${API_BASE}/api/board`, {
+    headers: { 'Sec-Fetch-Site': 'same-origin', 'Sec-Fetch-Mode': 'cors' },
     data: { title, teamId, status: 'todo', sourceDelegationId: `e2e:${title}:agent:a2` },
   })
   const { task } = (await r.json()) as { task: { id: string } }

@@ -568,6 +568,50 @@ describe('Tools MCP', () => {
     expect(res.text).toBe('hello-mcp')
   })
 
+  it("a card a connector call opens names the run's task, or none", async () => {
+    ensureOwnerGrant(db, {
+      subjectKind: 'agent',
+      subjectId: 'a-del',
+      capabilityKind: 'connector',
+      connectorId: 'conn:connector:clawboo:files',
+      capabilityId: null,
+    })
+    const taskOfCard = async (taskId?: string): Promise<string | null | undefined> => {
+      const client = await connectInMemory(
+        createToolsServer(db, {
+          agentId: 'a-del',
+          ...(taskId ? { taskId } : {}),
+          availability: defaultAvailabilityContext({ env: {} }),
+          broker: { approvalPollMs: 10, approvalTimeoutMs: 4000 },
+          connectorTools: [
+            {
+              descriptor: {
+                name: 'mcp__files__delete_path',
+                description: 'a destructive connector tool',
+                inputSchema: z.object({ path: z.string() }),
+                owner: 'mcp',
+                destructive: true,
+                executor: () => 'deleted',
+              },
+              connectorId: 'conn:connector:clawboo:files',
+            },
+          ],
+        }),
+      )
+      const call = callText(client, 'mcp__files__delete_path', { path: '/tmp/x' })
+      let card = listPendingApprovals(db)[0]
+      for (let i = 0; i < 300 && !card; i++) {
+        await sleep(10)
+        card = listPendingApprovals(db)[0]
+      }
+      resolveApproval(db, card!.id, 'deny')
+      await call
+      return card?.taskId
+    }
+    expect(await taskOfCard('task-1')).toBe('task-1')
+    expect(await taskOfCard()).toBeNull()
+  })
+
   it('a destructive tool requires approval (resolved via the DB) before it runs', async () => {
     ensureOwnerGrant(db, {
       subjectKind: 'agent',

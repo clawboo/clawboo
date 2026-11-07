@@ -80,6 +80,7 @@ const PINNED_FEATURES = [
   'board.verification',
   'board.checkHold',
   'board.steering',
+  'board.personCheck',
   'board.readableIds',
   'board.labels',
   'board.inbox',

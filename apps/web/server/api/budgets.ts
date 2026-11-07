@@ -6,6 +6,7 @@
 import type { Request, Response } from 'express'
 
 import {
+  getBudget,
   listBudgets,
   resumeBudget,
   resumeBudgetBody,
@@ -13,6 +14,8 @@ import {
   setBudgetLimit,
 } from '@clawboo/db'
 
+import { actorField } from '../lib/auth'
+import { auditBudgetEdit } from '../lib/budgetAudit'
 import { getDb } from '../lib/db'
 
 const SCOPES = ['agent', 'mission', 'team', 'tenant'] as const
@@ -34,7 +37,11 @@ export function budgetsSetPOST(req: Request, res: Response): void {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
     return
   }
-  res.json({ budget: setBudgetLimit(getDb(), parsed.data) })
+  const db = getDb()
+  const before = getBudget(db, parsed.data.scope, parsed.data.scopeId)
+  const budget = setBudgetLimit(db, parsed.data)
+  auditBudgetEdit(db, { action: 'set_limit', after: budget, before, by: actorField(req) })
+  res.json({ budget })
 }
 
 // POST /api/governance/budgets/:scope/:scopeId/resume — human override / un-pause.
@@ -53,11 +60,14 @@ export function budgetsResumePOST(req: Request, res: Response): void {
     res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
     return
   }
-  const budget = resumeBudget(getDb(), scope, scopeId, parsed.data)
+  const db = getDb()
+  const before = getBudget(db, scope, scopeId)
+  const budget = resumeBudget(db, scope, scopeId, parsed.data)
   if (!budget) {
     res.status(404).json({ error: 'budget not found' })
     return
   }
+  auditBudgetEdit(db, { action: 'resume', after: budget, before, by: actorField(req) })
   const willRepause = budget.spentUsdCents >= budget.limitUsdCents
   res.json({ budget, willRepause })
 }

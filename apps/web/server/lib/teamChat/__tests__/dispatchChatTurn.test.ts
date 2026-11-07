@@ -13,6 +13,7 @@ import {
   recordSpend,
   reserveBudgets,
   resolveRoomForTeam,
+  listGovernanceAudit,
   setBudgetLimit,
   type ClawbooDb,
 } from '@clawboo/db'
@@ -140,6 +141,54 @@ describe('dispatchChatTurn — an aborted turn commits no durable state', () => 
     expect(readRoom(db, { roomId })).toHaveLength(1)
     expect(loadChatLeaderState(db, roomId, participant.agentId).turnIndex).toBe(1)
     expect(getBudget(db, 'team', teamId)?.spentUsdCents ?? 0).toBeGreaterThan(0)
+  })
+})
+
+describe('dispatchChatTurn: a peer turn crossing a budget', () => {
+  const rows = () =>
+    listGovernanceAudit(db, { eventType: 'budget' }).map((r) => ({
+      teamId: r.teamId,
+      agentId: r.agentId,
+      summary: JSON.parse(r.summary) as Record<string, unknown>,
+    }))
+  const turn = (teamId: string, costUsd: number) =>
+    dispatchChatTurn(
+      {
+        db,
+        participant,
+        roomId: resolveRoomForTeam(teamId),
+        teamId,
+        makeAdapter: adapterFactory({ costUsd }),
+      },
+      1,
+    )
+
+  it('writes a warning row at 80% and at 100% of a warn-only budget, once each', async () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 'tW', limitUsdCents: 10, mode: 'warn' })
+    await turn('tW', 0.09)
+    await turn('tW', 0.0001)
+    await turn('tW', 0.02)
+    expect(rows().map((r) => r.summary['level'])).toEqual(expect.arrayContaining(['soft', 'hard']))
+    expect(rows()).toHaveLength(2)
+    expect(rows().find((r) => r.summary['level'] === 'soft')).toMatchObject({
+      teamId: 'tW',
+      agentId: participant.agentId,
+      summary: { reason: 'warn', scope: 'team', scopeId: 'tW', mode: 'warn', runKind: 'exchange' },
+    })
+  })
+
+  it('says a hard cap paused the budget', async () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 'tC2', limitUsdCents: 10, mode: 'cap' })
+    await turn('tC2', 0.5)
+    expect(rows()).toHaveLength(1)
+    expect(rows()[0]?.summary).toMatchObject({ reason: 'auto_pause', level: 'hard', mode: 'cap' })
+  })
+
+  it('writes nothing under the line, or with no budget', async () => {
+    setBudgetLimit(db, { scope: 'team', scopeId: 'tU', limitUsdCents: 1000, mode: 'cap' })
+    await turn('tU', 0.01)
+    await turn('tNone', 0.5)
+    expect(rows()).toEqual([])
   })
 })
 

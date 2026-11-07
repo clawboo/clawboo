@@ -50,6 +50,7 @@ import type { RuntimeAdapter, RuntimeEvent } from '@clawboo/executor'
 import { usdToFractionalCents } from '@clawboo/governance'
 import { formatPeerPost } from '@clawboo/mcp'
 
+import { auditBudgetCrossing } from '../budgetAudit'
 import { reserveRunBudget, type RunBudgetHold } from '../budgetHold'
 import { budgetRefusalText } from '../budgetPreflight'
 import { estimateRunCostUsd } from '../runtimes/estimateCost'
@@ -381,6 +382,9 @@ async function dispatchHeldTurn(
     const cents = usdToFractionalCents(usd)
     const a = recordSpend(db, 'agent', agentId, cents, { holdId: hold.id })
     const t = recordSpend(db, 'team', teamId, cents, { holdId: hold.id })
+    const on = { runKind: 'exchange', agentId, teamId } as const
+    auditBudgetCrossing(db, { ...on, scope: 'agent', scopeId: agentId, result: a })
+    auditBudgetCrossing(db, { ...on, scope: 'team', scopeId: teamId, result: t })
     if (a?.status === 'paused' && a.mode === 'cap') budgetStopped = 'agent'
     else if (t?.status === 'paused' && t.mode === 'cap') budgetStopped = 'team'
   }

@@ -166,6 +166,16 @@ describe('schedules REST (gateway disconnected)', () => {
       expect(storedPriority()).toBe(2)
     })
 
+    it('keeps Urgent from a person a sign-in proxy vouched for, in a script', async () => {
+      const person = mockRes()
+      await schedulesCreatePOST(
+        req({ body: urgent, headers: {}, person: { id: 'user-42', name: 'Ada', role: null } }),
+        person.res,
+      )
+      expect(person.status()).toBe(201)
+      expect(storedPriority()).toBe(2)
+    })
+
     it('holds a change to Urgent to the same rule', async () => {
       const made = mockRes()
       await schedulesCreatePOST(req({ body: CREATE_BODY, headers: DASHBOARD }), made.res)

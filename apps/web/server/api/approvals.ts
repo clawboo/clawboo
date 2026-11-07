@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express'
 import { approvalHistory } from '@clawboo/db'
 import { desc, eq } from 'drizzle-orm'
-import { personOf } from '../lib/auth'
+import { personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 
 // ─── POST /api/approvals — persist a decision ─────────────────────────────────
@@ -14,6 +14,8 @@ type PostBody = {
 }
 
 export async function approvalsPOST(req: Request, res: Response): Promise<void> {
+  // Only a person's request: the row says a person decided.
+  if (refuseUnlessPerson(req, res)) return
   const body = req.body as PostBody | undefined
   if (!body || typeof body !== 'object') {
     res.status(400).json({ ok: false, error: 'Invalid JSON body' })

@@ -153,6 +153,17 @@ That is 13 fields plus `data`. Before a row is stored, secrets in `data` are scr
 
 Board events carry the task in `taskId` and its team in `teamId`. Those written by the board routes the dashboard calls also carry `person`, `{ id: string; name: string | null; role: string | null }`, when the request came through a [sign-in proxy](/guides/sso-proxy) whose identity token Clawboo verified. Without one there is no `person` field.
 
+Board events also say who made the write, as `actor`:
+
+```ts
+type Actor =
+  | { kind: 'person' } // a request that passed the person check
+  | { kind: 'agent'; agentId: string; execId: string | null } // a Tasks tool call from a bound session, and its run
+  | { kind: 'caller' } // anything else: a REST call that did not pass the person check, an unsigned MCP session
+```
+
+An event with no `actor` was written by Clawboo itself (the team engine, the task runner, a sweep), or by an older release. See [the person check](/operating/security#the-person-check) and [Who made a write](/reference/mcp-tools#who-made-a-write).
+
 ### task_created
 
 A task was created.
@@ -164,6 +175,7 @@ A task was created.
   parentTaskId?: string | null
   priority?: string | null
   person?: { id: string; name: string | null; role: string | null }
+  actor?: Actor
 }
 ```
 
@@ -172,7 +184,7 @@ A task was created.
 An agent was given a task, by a claim or an assignment.
 
 ```ts
-{ assigneeAgentId?: string | null; assigneeRuntime?: string | null; person?: Person }
+{ assigneeAgentId?: string | null; assigneeRuntime?: string | null; person?: Person; actor?: Actor }
 ```
 
 ### status_changed
@@ -180,20 +192,20 @@ An agent was given a task, by a claim or an assignment.
 A task moved to another status. `to` is always present.
 
 ```ts
-{ from?: string | null; to: string; by?: 'person'; person?: Person }
+{ from?: string | null; to: string; by?: 'person'; person?: Person; actor?: Actor }
 ```
 
 `Person` is the `person` shape above. Some writers add fields the typed shape does not declare:
 
 - `by: 'person'` marks a move a person made on the board, and `person` names them when a sign-in proxy vouched for them.
-- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `agent_blocked` (a task runner run's own agent blocked the task), `check_interrupted` (a task runner's check never reached a verdict), `rerun_not_started` (a rerun through the task runner could not start), or `routine_fire_failed` (a routine's run failed and its task was set aside).
+- `reason` says why the server moved it: `retry` (a person pressed Retry), `assigned` (a person assigned the task), `blocker_failed` (a task it waited on failed or was cancelled, so it was cancelled too), `verification_exhausted` (its checks failed and the fix attempts ran out), `agent_blocked` (a task runner run's own agent blocked the task), `check_interrupted` (a task runner's check never reached a verdict), `rerun_not_started` (a rerun through the task runner could not start), `routine_fire_failed` (a routine's run failed and its task was set aside), `released` (an agent released the task through `release_task`), or `workspace_complete` (a person completed its worktree).
 
 ### comment_added
 
 A comment or system note landed on a task.
 
 ```ts
-{ authorType?: string; body?: string; person?: Person }
+{ authorType?: string; body?: string; person?: Person; actor?: Actor }
 ```
 
 ### dep_linked
@@ -201,7 +213,7 @@ A comment or system note landed on a task.
 A task was made to wait for another. The task that waits is `taskId`.
 
 ```ts
-{ dependsOnTaskId: string; person?: Person }
+{ dependsOnTaskId: string; person?: Person; actor?: Actor }
 ```
 
 ## Run events
@@ -304,7 +316,7 @@ A task-runner run reached its turn limit or filled its context, and continued in
 
 ## Pause events
 
-`pause_placed` and `pause_lifted` carry `{ scope, id, reason?, person? }`, where `scope` is `agent`, `team` or `task_tree`. The envelope names the agent, the team or the root task. A second pause of something already paused writes nothing. The dashboard reads these to keep what it shows as paused up to date. A task a pause holds back raises no Needs you alert, since a person placed the pause.
+`pause_placed` and `pause_lifted` carry `{ scope, id, reason?, person?, actor? }`, where `scope` is `agent`, `team` or `task_tree`. The envelope names the agent, the team or the root task. A second pause of something already paused writes nothing. The dashboard reads these to keep what it shows as paused up to date. A task a pause holds back raises no Needs you alert, since a person placed the pause.
 
 ## Approval events
 

@@ -52,6 +52,8 @@ export interface ToolCallContext {
   toolBlocklist?: string[]
   /** The agent's team, so a team-scoped grant can authorize the call. */
   teamId?: string | null
+  /** The board task the run works on, recorded on an approval the call opens. */
+  taskId?: string | null
   /**
    * The connector this call is being brokered on behalf of.
    *

@@ -7,6 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { http, HttpResponse } from 'msw'
 
 import { collectAlertItems } from '@/features/alerts/alertRules'
+import { resetPersonCheckNotices } from '@/lib/personCheckNotice'
 import * as confirmStore from '@/stores/confirm'
 import { useToastStore } from '@/stores/toast'
 
@@ -350,13 +351,11 @@ describe('the board client carries what the server says', () => {
 
   it('New task for me reports why the server refused', async () => {
     server.use(
-      http.post('/api/board', () =>
-        HttpResponse.json({ error: 'dashboard_only' }, { status: 403 }),
-      ),
+      http.post('/api/board', () => HttpResponse.json({ error: 'person_only' }, { status: 403 })),
     )
     expect(await createTaskForMe({ title: 'x', teamId: 'T' })).toEqual({
       ok: false,
-      reason: 'dashboard_only',
+      reason: 'person_only',
     })
   })
 })
@@ -385,10 +384,11 @@ describe('useTaskActions: people', () => {
     expect(useToastStore.getState().toasts.at(-1)?.message).toMatch(/Reopen that task first/)
   })
 
-  it('says why a plain-http dashboard cannot take a task, instead of "try again"', async () => {
+  it('says why the person check refused taking a task, instead of "try again"', async () => {
+    resetPersonCheckNotices()
     server.use(
       http.post('/api/board/t1/assign-person', () =>
-        HttpResponse.json({ ok: false, error: 'dashboard_only' }, { status: 403 }),
+        HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
       ),
     )
     expect(await actions().assignToMe('t1')).toBe(false)

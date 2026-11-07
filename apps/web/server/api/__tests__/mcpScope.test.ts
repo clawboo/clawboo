@@ -14,23 +14,28 @@ import path from 'node:path'
 import { mcpHttpUrl } from '@clawboo/mcp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { getDb, resetDb } from '../../lib/db'
+import { getDb, getDbPath, resetDb } from '../../lib/db'
 import { getMcpAttachSecret } from '../../lib/mcpAttachSecret'
-import { parseBoundProvenance, parseBoundScope, parseTasksBinding } from '../mcp'
+import { parseBoundProvenance, parseBoundScope, parseTasksBinding, parseToolsBinding } from '../mcp'
 
 const req = (url: string): IncomingMessage => ({ url }) as IncomingMessage
 
 let dir: string
-let prevHome: string | undefined
+const prev: Record<string, string | undefined> = {}
 beforeAll(() => {
-  prevHome = process.env['CLAWBOO_HOME']
   dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-mcpscope-'))
-  process.env['CLAWBOO_HOME'] = dir
+  for (const name of ['HOME', 'CLAWBOO_HOME']) {
+    prev[name] = process.env[name]
+    process.env[name] = dir
+  }
+  expect(getDbPath().startsWith(dir)).toBe(true)
 })
 afterAll(() => {
   resetDb()
-  if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
-  else process.env['CLAWBOO_HOME'] = prevHome
+  for (const name of ['HOME', 'CLAWBOO_HOME']) {
+    if (prev[name] === undefined) delete process.env[name]
+    else process.env[name] = prev[name]
+  }
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -166,6 +171,7 @@ const signedTasksUrl = (scope: {
   agentId: string
   delegate?: boolean
   boundTaskId?: string
+  boundExecutionId?: string
 }): string =>
   mcpHttpUrl('http://127.0.0.1:1', 'tasks', {
     ...scope,
@@ -251,12 +257,90 @@ describe('parseTasksBinding: the run’s own task', () => {
     expect(parseTasksBinding(req(`${plain}&scopeTaskId=task-1`))).toBeUndefined()
   })
 
-  it('leaves the Memory and Tools binding alone: only the Tasks URL carries a task', () => {
+  it('leaves the Memory binding alone: the Memory URL carries no task', () => {
     const memory = mcpHttpUrl('http://127.0.0.1:1', 'memory', {
       ...onTask,
       attachSecret: getMcpAttachSecret(getDb()),
     }).replace('http://127.0.0.1:1', '')
     expect(memory).not.toContain('scopeTaskId')
     expect(parseBoundScope(req(memory))).toEqual({ teamId: 'team-A', agentId: 'coder' })
+  })
+})
+
+// The run's id rides the Tasks URL inside its signature, so a write the session
+// makes records its agent and its run.
+describe('parseTasksBinding: the run’s id', () => {
+  const onRun = {
+    teamId: 'team-A',
+    agentId: 'coder',
+    delegate: true,
+    boundTaskId: 'task-1',
+    boundExecutionId: 'exec-1',
+  }
+
+  it('reads the run a session is bound to', () => {
+    expect(parseTasksBinding(req(signedTasksUrl(onRun)))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      teamRun: true,
+      taskId: 'task-1',
+      executionId: 'exec-1',
+    })
+  })
+
+  it('refuses the URL when the id was moved, stripped or added', () => {
+    const url = signedTasksUrl(onRun)
+    expect(
+      parseTasksBinding(req(url.replace('scopeExecutionId=exec-1', 'scopeExecutionId=exec-2'))),
+    ).toBeUndefined()
+    expect(parseTasksBinding(req(url.replace(/&?scopeExecutionId=exec-1/, '')))).toBeUndefined()
+    const plain = signedTasksUrl({ ...onRun, boundExecutionId: undefined })
+    expect(parseTasksBinding(req(`${plain}&scopeExecutionId=exec-1`))).toBeUndefined()
+  })
+
+  it('still reads a URL minted before there was a run id', () => {
+    const plain = signedTasksUrl({ ...onRun, boundExecutionId: undefined })
+    expect(parseTasksBinding(req(plain))?.executionId).toBeUndefined()
+    expect(parseTasksBinding(req(plain))?.taskId).toBe('task-1')
+  })
+})
+
+// The bound task rides the Tools URL too, so an approval the broker opens names
+// the task. Signed like the Tasks URL's: a runtime cannot point its approvals at
+// another task's card.
+describe('parseToolsBinding', () => {
+  const toolsUrl = (scope: { boundTaskId?: string; boundExecutionId?: string } = {}): string =>
+    mcpHttpUrl('http://127.0.0.1:1', 'tools', {
+      teamId: 'team-A',
+      agentId: 'coder',
+      delegate: true,
+      ...scope,
+      attachSecret: getMcpAttachSecret(getDb()),
+    }).replace('http://127.0.0.1:1', '')
+
+  it('reads the agent, the team and the task', () => {
+    expect(parseToolsBinding(req(toolsUrl({ boundTaskId: 'task-1' })))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+      taskId: 'task-1',
+    })
+  })
+
+  it('reads a run with no task, as it always did', () => {
+    expect(parseToolsBinding(req(toolsUrl()))).toEqual({
+      scope: { teamId: 'team-A', agentId: 'coder' },
+    })
+  })
+
+  it('refuses the URL when the task was moved, stripped or added', () => {
+    const url = toolsUrl({ boundTaskId: 'task-1' })
+    expect(
+      parseToolsBinding(req(url.replace('scopeTaskId=task-1', 'scopeTaskId=task-2'))),
+    ).toBeUndefined()
+    expect(parseToolsBinding(req(url.replace(/&?scopeTaskId=task-1/, '')))).toBeUndefined()
+    expect(parseToolsBinding(req(`${toolsUrl()}&scopeTaskId=task-1`))).toBeUndefined()
+  })
+
+  it('is unbound with no scope at all', () => {
+    expect(parseToolsBinding(req('/api/mcp/tools'))).toBeUndefined()
+    expect(parseToolsBinding(undefined)).toBeUndefined()
   })
 })

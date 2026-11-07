@@ -50,8 +50,12 @@ export interface McpBridgeOptions {
    *  `teamRun`), as the HTTP runtimes' signed team-run URLs do. */
   teamRun?: boolean
   /** The board task the run works on: the Tasks tools use it when a call leaves
-   *  taskId out, as the HTTP runtimes' signed Tasks URLs say. */
+   *  taskId out, as the HTTP runtimes' signed Tasks URLs say. An approval its
+   *  Tools server opens names the same task. */
   boundTaskId?: string | null
+  /** The run's execution row: recorded with each write its Tasks tools make, as
+   *  the HTTP runtimes' signed Tasks URLs say. */
+  boundExecutionId?: string | null
   /**
    * The run's authoritative memory scope — bound onto the in-process Memory
    * server so native saves are team-shared + reads team-limited, matching the
@@ -110,6 +114,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
                   ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
                   ...(opts.agentId ? { agentId: opts.agentId } : {}),
                   ...(opts.boundTaskId ? { taskId: opts.boundTaskId } : {}),
+                  ...(opts.boundExecutionId ? { executionId: opts.boundExecutionId } : {}),
                 },
               }
             : {}),
@@ -149,6 +154,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
           // null teamId makes every one of them invisible to the gate, and the
           // call is then denied `no-grant` with nothing explaining why.
           ...(opts.memoryScope?.teamId ? { teamId: opts.memoryScope.teamId } : {}),
+          ...(opts.boundTaskId ? { taskId: opts.boundTaskId } : {}),
           // Connector tools, so a NATIVE run can call them too. This server is
           // built in-memory rather than over HTTP, so it does not pick them up
           // from the HTTP mount: without this line connectors work for every

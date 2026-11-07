@@ -123,8 +123,16 @@ const OVERFLOW: RuntimeEvent[] = mapClaudeEvent(
   'Reading the four reader files first.',
 )
 
+// The dashboard's own page: a person's Retry.
 const req = (over: Partial<Request> = {}): Request =>
-  ({ params: {}, query: {}, body: {}, headers: {}, app: { locals: {} }, ...over }) as Request
+  ({
+    params: {},
+    query: {},
+    body: {},
+    headers: { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' },
+    app: { locals: {} },
+    ...over,
+  }) as Request
 function mockRes(): { res: Response; statusCode: () => number } {
   let code = 200
   const res = {

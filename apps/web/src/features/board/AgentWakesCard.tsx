@@ -14,15 +14,13 @@ import {
 
 import { Button } from '@/features/shared/Button'
 import { decideAgentWakes } from '@/lib/boardClient'
+import { notePersonCheck, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 import { useFleetStore } from '@/stores/fleet'
 import { useToastStore } from '@/stores/toast'
-
-import { DASHBOARD_ONLY } from './boardStatus'
 
 const REFUSED: Record<string, string> = {
   no_card: 'That has already been answered.',
   no_team: 'This task has no team to allow it in.',
-  dashboard_only: DASHBOARD_ONLY,
 }
 
 const TEAMMATE = 'A teammate'
@@ -52,10 +50,13 @@ export function AgentWakesCard({
       onDecided()
       return
     }
-    addToast({
-      type: 'error',
-      message: REFUSED[result.reason] ?? 'Couldn’t save that. Please try again.',
-    })
+    if (result.reason === 'person_only') notePersonCheck(PERSON_CHECK_REFUSED)
+    else {
+      addToast({
+        type: 'error',
+        message: REFUSED[result.reason] ?? 'Couldn’t save that. Please try again.',
+      })
+    }
     // Someone else answered: the board's next read takes the card away.
     if (result.reason === 'no_card') onDecided()
   }

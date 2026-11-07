@@ -712,6 +712,9 @@ export interface BoardOrchestratorDeps {
     targetAgentId: string
     targetAgentName: string
     task: string
+    /** The task the delegating run works on, when it works on one. A lead's own
+     *  turn has none, and the hand-off's task does not exist until it is allowed. */
+    taskId?: string | null
   }) => Promise<'allow_once' | 'allow_always' | 'deny' | 'expired' | 'timeout'>
   /**
    * Abort a session's LIVE run (the host wires it to its abort map). Called when
@@ -1510,6 +1513,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
           targetAgentId: signal.targetAgentId,
           targetAgentName: signal.targetAgentName,
           task: signal.task,
+          taskId: sourceTaskId,
         })
         if (resolution !== 'allow_once' && resolution !== 'allow_always') {
           if (sourceTaskId)

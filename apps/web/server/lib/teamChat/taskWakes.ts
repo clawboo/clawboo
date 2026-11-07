@@ -375,7 +375,7 @@ function pumpOne(
       kind: 'status_changed',
       taskId: task.id,
       teamId: task.teamId,
-      data: { to: 'todo', reason: 'wake' },
+      data: { to: 'todo', reason: 'wake', wakeReason: row.reason },
     })
   }
   // The runner's own pump reads only a binding, so a wake that ended a wait on one with

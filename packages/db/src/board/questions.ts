@@ -42,6 +42,9 @@ export interface AskQuestionInput {
   payload: QuestionPayload
   /** A repeated call with this key asks once. */
   idempotencyKey?: string | null
+  /** The run asking, when an agent's run is. Its words go on the thread under this run
+   *  once the question is answered. */
+  executionId?: string | null
 }
 
 export type AskQuestionResult =
@@ -87,6 +90,7 @@ export function askQuestion(db: ClawbooDb, input: AskQuestionInput): AskQuestion
       payload: JSON.stringify(input.payload),
       status: 'pending',
       idempotencyKey: key,
+      executionId: input.executionId ?? null,
       answer: null,
       answeredBy: null,
       closeReason: null,
@@ -121,7 +125,12 @@ export function askQuestion(db: ClawbooDb, input: AskQuestionInput): AskQuestion
         taskId: result.task.id,
         teamId: result.task.teamId ?? null,
         agentId: input.agentId,
-        data: { to: 'blocked', reason: 'question', questionId: result.question.id },
+        data: {
+          to: 'blocked',
+          reason: 'question',
+          questionId: result.question.id,
+          actor: { kind: 'agent', agentId: input.agentId, execId: input.executionId ?? null },
+        },
       })
     } catch {
       // The question stands; the run's end announces it too.

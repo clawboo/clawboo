@@ -175,9 +175,19 @@ describe("the run's own task on the Tasks URL", () => {
       'http://x/api/mcp/teamchat?roomTeamId=T&postAuthorAgentId=A&delegate=1&scopeSig=4c83478a053c745ca5d1027514a5a843698b4a42b894903bfc03cfa7da7a7113&attachToken=9e22050f1ed0c614bf696bededd7b238b569056a9cf79f632e4c260c05dc53c6',
   }
 
-  it('stays off every other URL, whose bytes are what they were before it', () => {
-    for (const server of ['memory', 'tools', 'teamchat'] as const)
+  it('stays off the Memory and TeamChat URLs, whose bytes are what they were before it', () => {
+    for (const server of ['memory', 'teamchat'] as const)
       expect(mcpHttpUrl('http://x', server, onTask)).toBe(BEFORE[server])
+  })
+
+  it('rides the Tools URL too, signed, so an approval can name the task', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'tools', onTask))
+    expect(url.searchParams.get('scopeTaskId')).toBe('task-1')
+    const sig = url.searchParams.get('scopeSig')!
+    const claim = { teamId: 'T', agentId: 'A', teamRun: true }
+    expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-1' }, sig)).toBe(true)
+    expect(verifyAttachScope(SECRET, { ...claim, boundTaskId: 'task-2' }, sig)).toBe(false)
+    expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
   })
 
   it('is not the memory provenance task id, and does not turn on memory provenance', () => {
@@ -199,9 +209,76 @@ describe("the run's own task on the Tasks URL", () => {
     )
   })
 
-  it('leaves the Tasks URL of a run with no task byte-identical to before', () => {
+  it('leaves the Tasks and Tools URLs of a run with no task byte-identical to before', () => {
     const withoutTask = { ...onTask, boundTaskId: undefined }
     expect(mcpHttpUrl('http://x', 'tasks', withoutTask)).toBe(BEFORE.tasks)
+    expect(mcpHttpUrl('http://x', 'tools', withoutTask)).toBe(BEFORE.tools)
+  })
+})
+
+describe("the run's id on the Tasks URL", () => {
+  const onRun = {
+    teamId: 'T',
+    agentId: 'A',
+    delegate: true,
+    boundTaskId: 'task-1',
+    boundExecutionId: 'exec-1',
+    attachSecret: SECRET,
+  }
+  const claim = { teamId: 'T', agentId: 'A', teamRun: true, boundTaskId: 'task-1' }
+
+  /** What the code before the run id signed. Worked out by hand from the old
+   *  canonical form and pinned, so a change to how old scopes sign fails here. */
+  const SIGNED_BEFORE = [
+    [
+      { teamId: 'T', agentId: 'A' },
+      '37eb9cbeb4aef4e197d0e301f4d3cca919df1ae54d18439ad3ede7d29091de99',
+    ],
+    [
+      { teamId: 'T', agentId: 'A', delegate: true },
+      '4c83478a053c745ca5d1027514a5a843698b4a42b894903bfc03cfa7da7a7113',
+    ],
+    [
+      { teamId: 'T', agentId: 'A', teamRun: true },
+      '76862723e094032fe21326e43ed2ee2acb31b0121a340f96918b0426819002f5',
+    ],
+    [
+      { teamId: 'T', agentId: 'A', teamRun: true, boundTaskId: 'task-1' },
+      '22b37d9836b591df636d63c019c82672423994ac1db91c8549cac33c7572246e',
+    ],
+  ] as const
+
+  it('signs every scope that carries no run id to the same bytes as before', () => {
+    for (const [scope, sig] of SIGNED_BEFORE) expect(signAttachScope(SECRET, scope)).toBe(sig)
+  })
+
+  it('is covered by the signature: it can be neither moved, stripped nor added', () => {
+    const url = new URL(mcpHttpUrl('http://x', 'tasks', onRun))
+    expect(url.searchParams.get('scopeExecutionId')).toBe('exec-1')
+    const sig = url.searchParams.get('scopeSig')!
+    expect(verifyAttachScope(SECRET, { ...claim, boundExecutionId: 'exec-1' }, sig)).toBe(true)
+    expect(verifyAttachScope(SECRET, { ...claim, boundExecutionId: 'exec-2' }, sig)).toBe(false)
+    expect(verifyAttachScope(SECRET, claim, sig)).toBe(false)
+  })
+
+  it('cannot pass for a bound task, or the reverse', () => {
+    const sig = signAttachScope(SECRET, { teamId: 'T', agentId: 'A', boundExecutionId: 'x' })
+    expect(verifyAttachScope(SECRET, { teamId: 'T', agentId: 'A', boundTaskId: 'x' }, sig)).toBe(
+      false,
+    )
+  })
+
+  it('rides no other URL, so their bytes do not change from run to run', () => {
+    for (const server of ['memory', 'tools', 'teamchat'] as const) {
+      const without = { ...onRun, boundExecutionId: undefined }
+      expect(mcpHttpUrl('http://x', server, onRun)).toBe(mcpHttpUrl('http://x', server, without))
+    }
+  })
+
+  it('leaves the Tasks URL of a run with no id byte-identical to its old form', () => {
+    expect(mcpHttpUrl('http://x', 'tasks', { ...onRun, boundExecutionId: null })).toBe(
+      mcpHttpUrl('http://x', 'tasks', { ...onRun, boundExecutionId: undefined }),
+    )
   })
 })
 

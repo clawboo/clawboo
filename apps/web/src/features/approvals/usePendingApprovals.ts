@@ -52,6 +52,9 @@ export interface ToolApproval {
    */
   toolClass?: 'read' | 'write' | 'destructive' | null
   toolSummary?: string | null
+  /** The board task the call is for, when its run works on one. */
+  taskId?: string | null
+  taskTitle?: string | null
   /**
    * Which system is holding the call open.
    *

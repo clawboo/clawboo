@@ -53,11 +53,16 @@ const TONE_PREFIX: Record<ToastType, string> = {
   info: '',
 }
 
+// Not `crypto.randomUUID`: a browser has it only on a secure address, so on the
+// documented plain http network bind it would throw and no toast would ever show.
+let nextToastId = 0
+
 export const useToastStore = create<ToastStore>((set) => ({
   toasts: [],
   announcement: null,
   addToast: (t) => {
-    const id = crypto.randomUUID()
+    nextToastId += 1
+    const id = `toast-${nextToastId}`
     set((s) => ({
       toasts: [...s.toasts, { ...t, id }],
       announcement: { id, type: t.type, text: `${TONE_PREFIX[t.type]}${t.message}` },

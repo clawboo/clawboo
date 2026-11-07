@@ -75,15 +75,15 @@ All three rules ignore letter case, because 0.5.0 also routes variants such as `
 
 ## What is protected by default, and what is not
 
-| Who could reach Clawboo                                                         | Protected by default? | What protects it                                                                                                                             |
-| ------------------------------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Another computer on your network                                                | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                                          |
-| A web page open in your browser                                                 | Yes                   | The same-origin guard                                                                                                                        |
-| Anyone who can reach a reverse proxy in front of Clawboo                        | Yes                   | The access token, unless you turn it off                                                                                                     |
-| Another user account on the same computer                                       | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you                                 |
-| Agents, connectors and other programs running as you                            | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                                       |
-| One person behind your sign-in proxy passing as another                         | No, off by default    | The [proxy identity lane](#signed-identity-from-a-sign-in-proxy), when an administrator turns it on                                          |
-| An agent answering its own question, allowing its own wakes or reopening a task | A speed bump locally  | The board's person-only routes refuse any request the dashboard's page did not send. See [What counts as a person](#what-counts-as-a-person) |
+| Who could reach Clawboo                                                         | Protected by default? | What protects it                                                                                                                                                    |
+| ------------------------------------------------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Another computer on your network                                                | Yes                   | Clawboo listens only on `127.0.0.1`                                                                                                                                 |
+| A web page open in your browser                                                 | Yes                   | The same-origin guard                                                                                                                                               |
+| Anyone who can reach a reverse proxy in front of Clawboo                        | Yes                   | The access token, unless you turn it off                                                                                                                            |
+| Another user account on the same computer                                       | Yes                   | The access token, and your Clawboo folder and the OpenClaw key files Clawboo writes are readable only by you                                                        |
+| Agents, connectors and other programs running as you                            | No                    | Nothing in Clawboo can fully stop them (see [What agents can do](#what-agents-can-do-on-your-machine))                                                              |
+| One person behind your sign-in proxy passing as another                         | No, off by default    | The [proxy identity lane](#signed-identity-from-a-sign-in-proxy), when an administrator turns it on                                                                 |
+| An agent answering its own question, allowing its own wakes or reopening a task | A speed bump locally  | The board's person-only routes refuse any request that does not pass [the person check](#the-person-check). See [What counts as a person](#what-counts-as-a-person) |
 
 Releases after 0.5.0 give every install an access token: without one, anything that reaches Clawboo from `127.0.0.1` looked like you, and could call every `/api/` route, including the ones that answer approvals, grant connector access and start agent runs. The token is in a file only your user account can read, so it closes the API to other user accounts and to anyone behind a reverse proxy. It does not stop a program running as you: an agent can read `~/.clawboo/access-token` as easily as it can read the database.
 
@@ -192,20 +192,76 @@ Off by default. With a sign-in proxy in front of Clawboo, such as Cloudflare Acc
 - **Public keys only.** Clawboo verifies the token with the proxy's public key or its JWKS URL, and accepts only asymmetric signatures. It refuses to start with a private key or a shared HMAC key, and refuses unsigned (`alg: none`) tokens and HMAC tokens "signed" with the public key. A shared secret would not work here: agents run as your user account and could read it, then sign a token as anyone.
 - **Bound and short-lived by default.** A request-bound token names the request's method and path, lives at most `proxyIdentityMaxLifetime` seconds (60 by default), and works once. Proxies that send their own sign-in token on every request need `session` binding, where a copied token works on any path until it expires.
 - **Never downgraded.** A token that does not verify gets `401`, in every mode. It never passes as an unnamed request.
-- **Beside the access token.** While the access token is on, a request needs the cookie too. In `required` mode, a request without a good token is refused, so an agent that reads the access token file can no longer use the API as a person. A spawned runtime's own MCP calls still work by their attach token.
+- **Beside the access token.** While the access token is on, a request needs the cookie too. In `required` mode, a request without a good token is refused, so an agent that reads the access token file can no longer use the API as a person. A spawned runtime's own MCP calls still work by their attach token, which opens only the four MCP mounts: never settings, budgets, holds, the board or a team's work check, however the path is spelled.
+- **The person check.** A person the lane verified passes [the person check](#the-person-check) on every person write, from a script as well as from the dashboard.
 
-What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced; the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup (on Windows, whenever the settings come from the file, since it cannot check who can change it there). The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
+What it does not change: everyone who gets through the proxy can still do everything, since roles are recorded and not enforced (no route checks a role yet); the records live in a database that programs running as your user can change; in `on` mode the access token alone still gets in, unnamed; and an operator file this user owns, can write or can replace through a folder above it would let an agent swap the key, which the server warns about at startup (on Windows, whenever the settings come from the file, since it cannot check who can change it there). The guide lists [everything it does not protect](/guides/sso-proxy#what-it-does-not-protect).
+
+## The person check
+
+Some writes carry a person's authority: moving a card, Retry, Assign, answering an approval, a person's comment on a task, and setting a team's work check. Each of them goes through one check, which lets a request through when:
+
+- a [sign-in proxy](#signed-identity-from-a-sign-in-proxy) vouched for the person who sent it, or
+- the dashboard's own page sent it. A browser marks its page's requests with `Sec-Fetch-Site: same-origin` and `Sec-Fetch-Mode: cors` (or `same-origin`). Over plain `http` to another machine's address, see [Plain http](#plain-http-to-another-machine) below.
+
+Any other caller, such as `curl`, a script or an agent's command, does not get the person's authority:
+
+| Write                                      | Without the person check                                                                                                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Retry, Assign                              | `403` `{ "ok": false, "error": "person_only" }`                                                                                                          |
+| Answering an approval                      | `403` `person_only`, on `POST /api/tools/approvals/:id/resolve`, `POST /api/capabilities/approve` and `POST /api/approvals`                              |
+| A team's work check                        | `403` `person_only` on `PUT /api/team-verify-command/:teamId`                                                                                            |
+| Moving a card (`PATCH /api/board/:taskId`) | The move happens, as an agent's own move does: it stops no run, cannot undo a person's move, cannot use `humanOverride`, and is not recorded as a person |
+| A comment                                  | Saved as an `agent` comment, whatever `authorType` it named, and delivered to no run                                                                     |
+
+These writes take the same check and answer the same `403`:
+
+- Creating a task for a named agent: `POST /api/board` with `assigneeAgentId`, or with a `sourceDelegationId` that names an agent or says a person chose. Both write what Assign writes. So does `assignToMe`, which makes the task the sender's. A task with none of them does not need the check.
+- Reopening a finished task, assigning a task to a person, answering a question an agent asked and answering the card about agents waking each other: see [What counts as a person](#what-counts-as-a-person).
+- A team's setting that lets its agents wake each other without asking: `PUT /api/team-agent-wakes/:teamId`.
+- A team's readable-id letters, its labels and a task's labels.
+- Marking a task or the inbox read.
+- Pausing and resuming an agent, a team or a task tree: `POST /api/pauses` and `DELETE /api/pauses/:kind/:id`.
+- Completing a worktree: `PATCH /api/board/:taskId/workspace` with `{"action":"complete"}`, which moves the card and, on an empty diff, can pass a failing check. `pause` moves no card and stays open.
+
+And `POST /api/board/:taskId/executions` answers `409 person_moved` while a person's move stands, because a new run is what ends one.
+
+Two things a person can set are quietly limited rather than refused. A priority of Urgent stops at High without the check, on a new task, on a move and in a routine's task template. And `POST /api/board` records who asked for a task (`requested_by`) only with the check. No request body can name the person who asked or the person a task is for: the fields are not read, and the person comes from the check.
+
+A script you run yourself can say it acts for you by sending the two `Sec-Fetch-` headers above.
+
+### Plain http to another machine
+
+Browsers send `Sec-Fetch-` headers only to a secure address: localhost, or `https`. A dashboard opened at, say, `http://192.168.1.20:18789` sends none, and the check would refuse its own page. So for a request over plain `http` to an address that is not loopback, and only when it carries no fetch metadata at all, an `Origin` header that names the same host and port as the `Host` header counts as the page's.
+
+What that means in practice:
+
+- It is no stronger than the headers it stands in for. Anything that can reach the address can send those two headers.
+- It does not apply on localhost or over `https`, where a browser always sends fetch metadata, so a request without it stays refused there.
+- A proxy that rewrites `Host`, as nginx does by default, makes the two disagree, so the dashboard's own writes fail the check, and the dashboard says so. Make the proxy pass the original `Host` (`proxy_set_header Host $host;`), or use `https`.
+
+The check sits on Clawboo's REST routes. A dashboard tab with its own Gateway connection answers an OpenClaw command directly over that connection, which the access token guards and this check does not. The approval and connector-grant controls in [What agents can do](#what-agents-can-do-on-your-machine) are not changed by it.
+
+<Warning>
+
+On your own computer this is a speed bump, not a security boundary. Agents run as your user account, so an agent can send the same headers, read `~/.clawboo/access-token`, or change Clawboo's database directly. The check stops a confused or prompt-injected agent from passing for you by accident or by setting one field. Behind a sign-in proxy in `required` mode, every API request has to name a verified person, so an agent that holds the access token still cannot use these routes. An agent running as the same user as Clawboo can still change the database directly, for example to answer an approval, until agent mode keeps it out.
+
+</Warning>
+
+Creating, claiming, moving, linking and commenting on a task record who did it, and so do a person's Reopen, assignment, answer, pause and resume, and an agent's question and hand-back. Through the board routes, the event says `actor: { kind: 'person' }` or `{ kind: 'caller' }`; through the Tasks tools, it names the agent and its run (see [Who made a write](/reference/mcp-tools#who-made-a-write)). A wake is Clawboo acting on one of those writes, so its own events have no `actor`: the comment or move behind it says who, and the wake's row names the run that took it. An OpenClaw agent's writes name no agent: its MCP address is shared by all of its agents and carries no signature. Two kinds of write record nothing: editing a task's title, description or priority, and pausing a worktree.
+
+If the dashboard tells you it could not tell a request came from you, a proxy is usually why. See [the troubleshooting entry](/guides/self-host-securely#troubleshooting).
 
 ## What counts as a person
 
-Some board writes are a person's alone: answering a question an agent asked, reopening a finished task, and assigning a task to yourself. Each sits under `/api/`, never under `/api/mcp/`, so a runtime's attach token does not reach it, and no Tasks tool does any of them. Each refuses a request the dashboard's own page did not send, by its browser fetch metadata, and records who did it: the person a sign-in proxy vouched for, else the install's built-in person, "You".
+Some board writes are a person's alone: answering a question an agent asked, answering the card about agents waking each other, reopening a finished task, and assigning a task to yourself. Each sits under `/api/`, never under `/api/mcp/`, so a runtime's attach token does not reach it, and no Tasks tool does any of them. Each takes [the person check](#the-person-check), so a request it does not let through gets `403` `person_only`, and records who did it: the person a sign-in proxy vouched for, else the install's built-in person, "You".
 
 | Your install                          | What stops an agent acting as a person                                                                                                                                           |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Local, or behind a proxy in `on` mode | A speed bump. An agent running as your user can read the access token file and send the same fetch metadata. It stops an agent passing for you by setting one field, and no more |
 | Behind a proxy in `required` mode     | The request also needs a token the proxy signed, so reading the access token file is not enough                                                                                  |
 
-A browser sends fetch metadata only to localhost or an HTTPS address. A dashboard opened over plain http on a network address sends none, so these writes are refused there, and the board says to open it on localhost or over HTTPS.
+A dashboard opened over plain `http` on a network address passes the check through [the `Origin` fallback](#plain-http-to-another-machine), which is no stronger.
 
 Isolating agents from your user account is what would turn the local case into a boundary. Until then, treat "a person answered" as the board's record of what happened, not as proof.
 
@@ -321,7 +377,8 @@ The rules in short; [Reach Clawboo from another machine](/guides/self-host-secur
 - **One person, one secret.** There are no user accounts, roles or per-team permissions, and the token gives full access. A sign-in proxy's identity tokens add names to what people do, not permissions.
 - **A person's writes on a local install are a speed bump.** See [What counts as a person](#what-counts-as-a-person).
 - **One store for the whole install.** All teams share one database and one vault, and each key name holds one value for the whole install.
-- **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API.
+- **Local code is trusted.** Anything running as your user can read Clawboo's files, the token file among them, and so use its API, the person check included.
+- **Roles are not enforced.** A sign-in proxy's token can carry a role, which Clawboo records. No route refuses a person for their role yet.
 
 ## Related
 

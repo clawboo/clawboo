@@ -1,15 +1,16 @@
 // GET/PUT for a team's verify command, the check the verification gate runs
 // for the team's tasks (see lib/verification/teamVerifyCommand.ts).
 //
-// Like every local /api route without STUDIO_ACCESS_TOKEN, the PUT answers any
-// loopback caller, a coding agent's shell included. The setting keeps a
-// cooperative builder from choosing its own check; it is not a security
-// boundary against an agent that runs as the same user.
+// The PUT takes only a person's request (see actsAsPerson), because a team's check
+// must not be its builder's to choose. It keeps a cooperative builder from doing
+// that; it is not a security boundary against an agent that runs as the same user,
+// which can read the access token and send the same headers.
 
 import type { Request, Response } from 'express'
 import { appendAudit, setSetting, teams } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
+import { actorField, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import {
   readTeamVerifyCommand,
@@ -38,6 +39,7 @@ export function teamVerifyCommandGET(req: Request, res: Response): void {
 // MAX_COMMAND_CHARS: init.sh stores it as a single VERIFY_CMD assignment.
 
 export function teamVerifyCommandPUT(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const teamId = req.params['teamId'] as string | undefined
   if (!teamId) {
     res.status(400).json({ error: 'team id required' })
@@ -69,7 +71,7 @@ export function teamVerifyCommandPUT(req: Request, res: Response): void {
     appendAudit(db, {
       eventType: 'verification',
       teamId,
-      summary: { action: 'set_team_verify_command', command, previous },
+      summary: { action: 'set_team_verify_command', command, previous, ...actorField(req) },
     })
     res.json({ command })
   } catch (err) {

@@ -6,6 +6,7 @@ import { useFleetStore } from '@/stores/fleet'
 import type { DbApprovalHistory } from '@clawboo/db'
 import { GatewayResponseError } from '@clawboo/gateway-client'
 import { apiFetch, listAgentSessions } from '@clawboo/control-client'
+import { isPersonOnlyRefusal, PERSON_CHECK_REFUSED } from '@/lib/personCheckNotice'
 
 // ─── Parsers ─────────────────────────────────────────────────────────────────
 
@@ -178,7 +179,8 @@ export async function runApprovalFollowup(deps: ApprovalFollowupDeps): Promise<v
  * its route answers the Gateway FIRST and only then marks the row, so a failure
  * here is reported rather than papered over.
  */
-async function resolveViaServer(id: string, decision: ApprovalDecision): Promise<boolean> {
+async function resolveViaServer(id: string, decision: ApprovalDecision): Promise<string | null> {
+  const failed = 'clawboo could not reach the Gateway to send that decision.'
   const wire =
     decision === 'deny' ? 'deny' : decision === 'allow-always' ? 'allow_always' : 'allow_once'
   try {
@@ -187,9 +189,10 @@ async function resolveViaServer(id: string, decision: ApprovalDecision): Promise
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ decision: wire }),
     })
-    return res.ok
+    if (res.ok) return null
+    return (await isPersonOnlyRefusal(res)) ? PERSON_CHECK_REFUSED : failed
   } catch {
-    return false
+    return failed
   }
 }
 
@@ -209,9 +212,9 @@ export function useApprovalActions() {
       // client for history and followup, none of which matters if the decision
       // never reached the Gateway.
       if (!client) {
-        const ok = await resolveViaServer(id, decision)
-        if (ok) removePending(id)
-        else setResolving(id, false, 'clawboo could not reach the Gateway to send that decision.')
+        const failure = await resolveViaServer(id, decision)
+        if (failure === null) removePending(id)
+        else setResolving(id, false, failure)
         return
       }
 

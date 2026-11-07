@@ -1,9 +1,14 @@
 // Durable approval-TTL reaper. A forgotten
 // pending approval — its waiter died, or no one ever resolved it — would otherwise
 // sit `pending` forever. This is the background timeout-watcher: it expires
-// abandoned pending rows after a configurable window (default 24h), unblocks any
-// linked task, and audits. `expireStaleApprovals` writes the approval_resolved
-// event for each row. Idempotent (a second pass expires nothing).
+// abandoned pending rows after a configurable window (default 24h) and audits.
+// `expireStaleApprovals` writes the approval_resolved event for each row. Idempotent
+// (a second pass expires nothing). A waiter that is still alive expires its own row
+// first, so this reaches only the rows of waiters that died.
+//
+// It moves no task. Nothing blocks a task for an approval, so a blocked task a card
+// names is blocked for another reason: a person, a failed run, its agent asking for
+// help. Putting it back in To do would undo that and run it again.
 //
 // Best-effort + non-blocking, mirroring the orphan-reconciliation / worktree-GC
 // boot blocks in server/index.ts: a one-shot pass at boot + a singleton interval
@@ -14,13 +19,8 @@ import {
   expireStaleApprovals,
   reapToolResults,
   sweepExpiredGrants,
-  getTask,
-  getTaskVerification,
-  parseWaitingOn,
-  unblockTask,
   type ClawbooDb,
 } from '@clawboo/db'
-import { isVerdictPromotable } from '@clawboo/governance'
 
 import { getDb } from './db'
 
@@ -43,7 +43,6 @@ function envMs(name: string, fallback: number): number {
 
 export interface ReapResult {
   expired: string[]
-  unblocked: string[]
   /** Grants moved to `expired`, and standing rules dropped, by this pass. */
   grantsExpired: number
   rulesExpired: number
@@ -51,8 +50,8 @@ export interface ReapResult {
   toolResultsReaped: number
 }
 
-/** One reaper pass: expire stale pending approvals, unblock any linked blocked
- *  task, audit per row. Returns only the rows expired by THIS pass. */
+/** One reaper pass: expire stale pending approvals and audit per row. Returns only
+ *  the rows expired by THIS pass. */
 export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {}): ReapResult {
   const ttlMs = opts.ttlMs ?? envMs('CLAWBOO_APPROVAL_TTL_MS', DEFAULT_TTL_MS)
 
@@ -74,7 +73,6 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
   const reapedResults = reapToolResults(db, envMs('CLAWBOO_TOOL_RESULT_TTL_MS', RESULT_TTL_MS))
 
   const expiredRows = expireStaleApprovals(db, { olderThanMs: ttlMs })
-  const unblocked: string[] = []
   for (const row of expiredRows) {
     appendAudit(db, {
       eventType: 'approval',
@@ -83,28 +81,9 @@ export function reapStaleApprovals(db: ClawbooDb, opts: { ttlMs?: number } = {})
       tenantId: row.tenantId,
       summary: { approvalId: row.id, toolName: row.toolName, resolution: 'expired' },
     })
-    if (row.taskId) {
-      const task = getTask(db, row.taskId)
-      // Only unblock a task THIS approval blocked. `blocked` has more than one
-      // cause now: verification exhaustion routes here too, and `unblockTask` is
-      // `updateStatus(-> todo)`, which nulls the verification cell. Without this
-      // check an unrelated approval expiring somewhere else would silently clear a
-      // failing verdict and re-queue work a human was asked to look at.
-      const verdict = getTaskVerification(db, row.taskId)
-      const blockedByVerification = verdict !== null && !isVerdictPromotable(verdict)
-      // Nor one that says it waits on something else: a question to a person, a
-      // hand-back, other tasks. Moving it would run it without what it waits for.
-      const waiting = parseWaitingOn(task?.waitingOn)
-      const waitsOnElse = waiting !== null && waiting.kind !== 'approval'
-      if (task?.status === 'blocked' && !blockedByVerification && !waitsOnElse) {
-        unblockTask(db, row.taskId)
-        unblocked.push(row.taskId)
-      }
-    }
   }
   return {
     expired: expiredRows.map((r) => r.id),
-    unblocked,
     grantsExpired: swept.grants,
     rulesExpired: swept.rules,
     toolResultsReaped: reapedResults,
@@ -123,12 +102,9 @@ export function startApprovalReaper(opts: { log: ReaperLog }): void {
 
   const runOnce = (): void => {
     try {
-      const { expired, unblocked } = reapStaleApprovals(getDb())
-      if (expired.length > 0 || unblocked.length > 0) {
-        opts.log.info(
-          { expired: expired.length, unblocked: unblocked.length },
-          'Approvals: reaper expired stale approvals',
-        )
+      const { expired } = reapStaleApprovals(getDb())
+      if (expired.length > 0) {
+        opts.log.info({ expired: expired.length }, 'Approvals: reaper expired stale approvals')
       }
     } catch (err) {
       opts.log.error({ err }, 'Approvals: reaper pass failed (non-fatal)')

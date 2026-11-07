@@ -7,6 +7,8 @@ import { create } from 'zustand'
 
 import { apiFetch } from '@clawboo/control-client'
 
+import { isPersonOnlyRefusal } from '@/lib/personCheckNotice'
+
 export type PauseKind = 'agent' | 'team' | 'task_tree'
 
 export interface PauseView {
@@ -23,13 +25,20 @@ export interface PauseView {
 /** What a request names: an agent, a team, or any task in a tree. */
 export type PauseTarget = { kind: 'agent' | 'team' | 'task'; id: string }
 
+/** How a pause or a resume went. `person_only`: the server's person check refused it,
+ *  which trying again would not change. */
+export type PauseWrite = 'done' | 'person_only' | 'failed'
+
+const refusedAs = async (res: Response): Promise<PauseWrite> =>
+  (await isPersonOnlyRefusal(res)) ? 'person_only' : 'failed'
+
 interface PauseState {
   pauses: PauseView[]
   refresh(): Promise<void>
-  /** Resolves true when it is paused. */
-  pause(target: PauseTarget): Promise<boolean>
-  /** Resolves true when it is resumed. A pause already gone counts. */
-  resume(target: PauseTarget): Promise<boolean>
+  /** Resolves `done` when it is paused. */
+  pause(target: PauseTarget): Promise<PauseWrite>
+  /** Resolves `done` when it is resumed. A pause already gone counts. */
+  resume(target: PauseTarget): Promise<PauseWrite>
 }
 
 export const usePauseStore = create<PauseState>((set, get) => ({
@@ -51,11 +60,11 @@ export const usePauseStore = create<PauseState>((set, get) => ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(target),
       })
-      if (!res.ok) return false
+      if (!res.ok) return await refusedAs(res)
       await get().refresh()
-      return true
+      return 'done'
     } catch {
-      return false
+      return 'failed'
     }
   },
   async resume(target) {
@@ -64,11 +73,11 @@ export const usePauseStore = create<PauseState>((set, get) => ({
         `/api/pauses/${encodeURIComponent(target.kind)}/${encodeURIComponent(target.id)}`,
         { method: 'DELETE' },
       )
-      if (!res.ok && res.status !== 404) return false
+      if (!res.ok && res.status !== 404) return await refusedAs(res)
       await get().refresh()
-      return true
+      return 'done'
     } catch {
-      return false
+      return 'failed'
     }
   },
 }))

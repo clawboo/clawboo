@@ -50,6 +50,7 @@ import {
   readRecordedNativeDefault,
   resolveDeployNativeDefaults,
 } from '../runtimes/native/nativeProviderDefaults'
+import { auditBudgetEdit } from '../budgetAudit'
 import { nativeTeamSessionKeysForAgentLike } from '../teamChat/nativeTeamSession'
 
 const SOURCE_ID = 'clawboo-native'
@@ -286,12 +287,18 @@ export class ClawbooNativeAgentSource implements AgentSource {
       if (typeof value === 'string' && value) writeNativeAgentFile(db, id, name, value)
     }
     if (config.budgetUsd != null && config.budgetUsd > 0) {
-      setBudgetLimit(db, {
+      const budget = setBudgetLimit(db, {
         scope: 'agent',
         scopeId: id,
         limitUsdCents: Math.round(config.budgetUsd * 100),
         mode: 'cap',
         tenantId: input.tenantId ?? null,
+      })
+      auditBudgetEdit(db, {
+        action: 'set_limit',
+        after: budget,
+        before: null,
+        by: { via: 'agent_create' },
       })
     }
 
