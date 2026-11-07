@@ -299,14 +299,14 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
                 right. It belongs to the chat, so with the cards closed it spans
                 the full width and the toggles ride along to the right edge. */}
       <div className="flex h-11 shrink-0 items-center justify-between border-b border-border bg-surface px-3">
-        <div className="flex min-w-0 items-center gap-2.5 max-sm:gap-1.5">
+        <div className="flex min-w-0 items-center gap-2.5 overflow-hidden max-sm:gap-1.5">
           <CollapsedSidebarToggle className="-mr-0.5" />
           {/* A phone keeps the name and leaves the face out. */}
           <span className="flex shrink-0 max-sm:hidden">
             <AgentBooAvatar agentId={agent.id} size={28} />
           </span>
           <h2
-            className="truncate text-[15px] font-semibold text-foreground"
+            className="min-w-22 truncate text-[15px] font-semibold text-foreground"
             style={{ letterSpacing: '-0.01em' }}
           >
             {agent.name}
@@ -337,7 +337,7 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
             </span>
           ) : (
             <span
-              className="ml-0.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+              className="ml-0.5 flex min-w-0 shrink-[4] items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
               aria-label={`Connection: ${connectionStatus}`}
             >
               <span
@@ -352,7 +352,9 @@ export function AgentDetailView({ agentId }: { agentId: string }) {
                       : 'bg-amber/70',
                 ].join(' ')}
               />
-              <span className="max-sm:sr-only">{connectionStatusLabel(connectionStatus)}</span>
+              <span className="truncate max-sm:sr-only">
+                {connectionStatusLabel(connectionStatus)}
+              </span>
             </span>
           )}
         </div>
