@@ -16,28 +16,39 @@ import {
   addComment,
   cancelDependents,
   claimTask,
+  clearDelegationFailure,
   completeExecutionProcess,
+  createCappedRootTask,
+  createCappedSubtask,
   createExecutionProcess,
   createTask,
+  deriveCreateKey,
   getAncestors,
   getComments,
   getReadyTasks,
+  handOffCapacity,
+  handOffChain,
   listExecutions,
   getTask,
   linkDep,
   listTasks,
+  markDelegationFailureNotified,
+  noteDelegationFailure,
+  readDelegationFailure,
   updateStatus,
   type ClawbooDb,
   type TaskStatus,
 } from '@clawboo/db'
 import type {
-  BoardClient,
   BoardTask,
   ClaimResult,
   CompleteExecutionOutcome,
   CreateTaskInput,
+  EngineBoardClient,
   ExecutionRef,
   ExecutionSummary,
+  HandOffInput,
+  HandOffResult,
   TaskDetail,
 } from '@clawboo/team-orchestration'
 
@@ -66,7 +77,7 @@ export interface ServerBoardClientOptions {
 export function createServerBoardClient(
   db: ClawbooDb,
   opts: ServerBoardClientOptions = {},
-): BoardClient {
+): EngineBoardClient {
   const scoped = 'roomId' in opts
   const roomId = opts.roomId ?? null
   return {
@@ -82,6 +93,96 @@ export function createServerBoardClient(
         return task as BoardTask
       } catch {
         return null
+      }
+    },
+
+    // A hand-off goes through the guarded creates, inside one write transaction: a
+    // replay returns its task, the same words return the open one, and the caps the
+    // Tasks tools answer to apply here too. The key is a derived one: if it ever meets
+    // a blocked task or an old one, this is a new hand-off, not a replay.
+    async createHandOff(input: HandOffInput): Promise<HandOffResult> {
+      const { handOffKey, turnId, parentTaskId, ...fields } = input
+      try {
+        const row = {
+          ...(scoped ? { ...fields, roomId } : fields),
+          agentCreated: true,
+          titleMatchNeedsOwner: true,
+          titleMatchExceptTurn: turnId ?? null,
+          createKey: handOffKey ? deriveCreateKey(handOffKey.scope, handOffKey.text) : null,
+        }
+        const result = parentTaskId
+          ? createCappedSubtask(db, parentTaskId, row)
+          : createCappedRootTask(db, row, { teamId: fields.teamId ?? null })
+        if (!result.ok) {
+          return {
+            ok: false,
+            reason: result.reason,
+            ...(result.count !== undefined ? { count: result.count } : {}),
+            ...(result.max !== undefined ? { max: result.max } : {}),
+            ...(result.windowMs !== undefined ? { windowMs: result.windowMs } : {}),
+          }
+        }
+        const task = result.task
+        if (task.deduplicated) {
+          return { ok: true, task: task as BoardTask, deduplicated: task.deduplicatedBy ?? 'key' }
+        }
+        emitEvent(db, {
+          kind: 'task_created',
+          taskId: task.id,
+          teamId: task.teamId,
+          data: { title: task.title, status: task.status, parentTaskId: task.parentTaskId },
+        })
+        return { ok: true, task: task as BoardTask }
+      } catch {
+        return { ok: false, reason: 'error' }
+      }
+    },
+
+    async handOffRoom(teamId, parentTaskId) {
+      try {
+        return handOffCapacity(db, parentTaskId, teamId)
+      } catch {
+        return null
+      }
+    },
+
+    async handOffChain(taskId) {
+      try {
+        return handOffChain(db, taskId)
+      } catch {
+        return null
+      }
+    },
+
+    async delegationFailure(teamId, targetAgentId, taskKey) {
+      try {
+        return readDelegationFailure(db, teamId, targetAgentId, taskKey)
+      } catch {
+        return { failures: 0, notified: false }
+      }
+    },
+
+    async noteDelegationFailure(teamId, targetAgentId, taskKey) {
+      try {
+        noteDelegationFailure(db, teamId, targetAgentId, taskKey)
+      } catch {
+        // best-effort: a breaker that missed one failure allows one more try
+      }
+    },
+
+    async markDelegationFailureNotified(teamId, targetAgentId, taskKey) {
+      try {
+        markDelegationFailureNotified(db, teamId, targetAgentId, taskKey)
+      } catch {
+        // best-effort
+      }
+    },
+
+    async clearDelegationFailure(teamId, targetAgentId, taskKey) {
+      try {
+        clearDelegationFailure(db, teamId, targetAgentId, taskKey)
+      } catch {
+        // best-effort
       }
     },
 

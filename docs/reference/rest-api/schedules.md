@@ -141,7 +141,8 @@ For an `openclaw-gateway-cron` create, Clawboo calls the Gateway's `cron.add` wi
   teamId?: string | null       // required for a team routine; must match the agent's team otherwise
   label?: string
   teamTaskId?: string | null   // agent routines: bind to an existing board task (one-shot specs only)
-  taskTemplate?: unknown       // Routines: the task template, for example { description }
+  taskTemplate?: unknown       // Routines: the task template, for example { description }.
+                               // Its priority stops at 1 (High) unless the dashboard's page sends it
   payload?: unknown            // Gateway jobs: the cron payload, for example { kind: 'agentTurn', message }
   tenantId?: string | null     // unused
 }
@@ -301,7 +302,8 @@ For a Gateway cron job:
   patch: {
     cronSpec?: string
     label?: string
-    taskTemplate?: unknown        // Routines, e.g. { description } for new instructions
+    taskTemplate?: unknown        // Routines, e.g. { description } for new instructions.
+                                  // Its priority stops at 1 (High) unless the dashboard's page sends it
     target?: 'team' | 'agent'     // Routines: point the Routine somewhere else
     agentId?: string | null       // Routines
     teamId?: string | null        // Routines

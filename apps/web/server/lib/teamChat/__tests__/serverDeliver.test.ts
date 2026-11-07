@@ -1238,7 +1238,8 @@ describe('serverDeliver (adapter run + event drain — NOT runTaskOnRuntime)', (
     expect(w.events.map((e) => e.kind)).toEqual(['text-delta', 'done'])
     expect(w.persisted).toEqual([])
     expect(w.deltas).toEqual([])
-    for (const s of w.stamps) expect(s).toEqual({ reportForTaskId: 'T1', stopGen: 0 })
+    for (const s of w.stamps)
+      expect(s).toEqual({ deliveryId: expect.any(String), reportForTaskId: 'T1', stopGen: 0 })
   })
 
   it('a FOLLOW-UP that fails, or ends with no terminal, posts no chat notice', async () => {

@@ -63,6 +63,7 @@ const EVENT_TYPES: AuditEventType[] = [
   'cap_hit',
   'verification',
   'circuit_break',
+  'board',
 ]
 const SINCE_WINDOWS: { label: string; ms: number | null }[] = [
   { label: 'All', ms: null },
@@ -81,6 +82,7 @@ const AUDIT_TONE: Record<AuditEventType, StatusTone> = {
   cap_hit: 'warning',
   verification: 'success',
   circuit_break: 'error',
+  board: 'idle',
 }
 
 // Budget lifecycle → shared StatusPill tone. active → success, soft-capped →

@@ -27,6 +27,7 @@ import {
   type McpToolInfo,
 } from '@clawboo/mcp'
 
+import { isLeadOfTeam } from '../../teamChat/booZero'
 import { connectorToolsForServer, onConnectorsChanged } from '../../connectors/supervisor'
 import { getEmbedProvider } from '../../memoryEmbedding'
 import type { NativeToolOutcome } from './fileTools'
@@ -96,6 +97,7 @@ export async function connectMcpBridge(opts: McpBridgeOptions): Promise<McpBridg
     clients.push(
       await connectInMemoryClient(
         createTasksServer(db, {
+          isLeadAgent: (teamId, agentId) => isLeadOfTeam(db, teamId, agentId),
           readOnly: enable.tasks === 'read',
           ...(opts.teamRun ? { teamRun: true } : {}),
           // Same binding the Memory + TeamChat servers get: the run's team is

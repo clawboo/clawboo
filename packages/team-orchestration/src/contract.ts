@@ -26,17 +26,19 @@ import {
   DELEGATION_IDLE_TIMEOUT_MS,
   MAX_AUTO_FIRES,
   MAX_DELEGATION_FAILURES,
+  MAX_PLAN_STEPS,
   MAX_SPAWN_DEPTH,
   OPEN_TOOL_CALL_TIMEOUT_MS,
   PENDING_START_TIMEOUT_MS,
   REFLECT_WINDOW_MS,
   type BoardChange,
+  type CapHit,
   type DelegationSignal,
   type KnownAgent,
 } from './boardOrchestration'
 import { DeliveryRefusedError } from './deliveryRefused'
 import type { RunStamp, TurnOrigin } from './turnOrigin'
-import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardClient'
+import type { BoardTask, CompleteExecutionOutcome, EngineBoardClient } from './boardClient'
 
 // ─── The board-agnostic inspection + control surface ──────────────────────────
 // A superset of `BoardClient` the contract scenarios use. Both the in-memory fake
@@ -46,7 +48,7 @@ import type { BoardClient, BoardTask, CompleteExecutionOutcome } from './boardCl
 // pre-seeded resumable task) portably across both boards.
 export type SeedExecState = 'none' | 'running-openclaw' | 'running-executor'
 
-export interface CascadeBoard extends BoardClient {
+export interface CascadeBoard extends EngineBoardClient {
   /** Tasks created via `createTask`, in call order (source of dynamic ids). */
   readonly created: readonly BoardTask[]
   /** Task ids passed to `claim`, in order. */
@@ -173,7 +175,9 @@ type DelegationResolution = 'allow_once' | 'allow_always' | 'deny' | 'expired' |
 interface HarnessOpts {
   stopGen?: () => number
   caps?: { maxFanout?: number }
-  onCapHit?: (info: { kind: 'fanout'; sourceTaskId: string | null }) => void
+  onCapHit?: (info: CapHit) => void
+  /** Run a second engine over the same board, as the next one after a restart does. */
+  board?: CascadeBoard
   isRiskyDelegation?: (sig: DelegationSignal) => boolean
   requestDelegationApproval?: (input: {
     leaderAgentId: string
@@ -238,8 +242,8 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
     aborted: string[]
     orchestrator: ReturnType<typeof createBoardOrchestrator>
   } {
-    const board = harness.makeBoard()
-    openBoards.push(board)
+    const board = opts?.board ?? harness.makeBoard()
+    if (!opts?.board) openBoards.push(board)
     const delivered: Delivered[] = []
     const changes: BoardChange[] = []
     const narrations: { sessionKey: string; text: string }[] = []
@@ -2467,8 +2471,9 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
 
     it('a plan step the board could not create, from a finished task, comes back as a follow-up', async () => {
       const h = makeHarness()
-      const create = h.board.createTask.bind(h.board)
-      h.board.createTask = async (input) => (input.title === 's1' ? null : create(input))
+      const create = h.board.createHandOff.bind(h.board)
+      h.board.createHandOff = async (input) =>
+        input.title === 's1' ? { ok: false, reason: 'error' } : create(input)
       const top = await closeTopWith(h, '<plan><step to="@Design Boo">s1</step></plan>')
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(followUpTo(h.delivered, 'a2', /Could not create the board task/)).toEqual({
@@ -2686,6 +2691,520 @@ export function runCascadeContract(harness: CascadeContractHarness): void {
       expect(board.taskCount()).toBe(1)
       await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
       expect(reflections(delivered)).toHaveLength(0)
+    })
+  })
+
+  describe('createBoardOrchestrator: a task is made once', () => {
+    const handOff = (to: string, task: string): string => `<delegate to="@${to}">${task}</delegate>`
+
+    it('a replay of a hand-off, seen by the next engine after a restart, makes no second task', async () => {
+      const first = makeHarness()
+      const ev = doneEvent('r1', handOff('Bug Boo', 'fix the login'))
+      await first.orchestrator.onEvent(sk('leader'), ev)
+      expect(first.board.taskCount()).toBe(1)
+      expect(deliveredTo(first.delivered, 'a2')).toHaveLength(1)
+
+      const next = makeHarness({ board: first.board })
+      await next.orchestrator.onEvent(sk('leader'), ev)
+      expect(first.board.taskCount()).toBe(1)
+      expect(deliveredTo(next.delivered, 'a2')).toEqual([])
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(next.delivered)).toEqual([])
+    })
+
+    it('a plan replayed by the next engine makes no second steps', async () => {
+      const first = makeHarness()
+      const ev = doneEvent(
+        'r1',
+        '<plan><step to="@Bug Boo">one</step><step to="@Design Boo">two</step></plan>',
+      )
+      await first.orchestrator.onEvent(sk('leader'), ev)
+      expect(first.board.taskCount()).toBe(2)
+      const next = makeHarness({ board: first.board })
+      await next.orchestrator.onEvent(sk('leader'), ev)
+      expect(first.board.taskCount()).toBe(2)
+    })
+
+    it('one run handing out two long asks that start alike makes two tasks', async () => {
+      const { board, orchestrator } = makeHarness()
+      const start = 'Please look into the failing checks on the payments page and report '
+      const ev = doneEvent(
+        'r1',
+        handOff('Bug Boo', `${start} what broke in the sandbox`) +
+          handOff('Bug Boo', `${start} what broke in production`),
+      )
+      await orchestrator.onEvent(sk('leader'), ev)
+      expect(board.taskCount()).toBe(2)
+    })
+
+    it('a later run handing out the same words gets the open task, and the sender is told once', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', handOff('Bug Boo', 'Write the docs')),
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', handOff('Bug Boo', 'write the docs.')),
+      )
+      // Even to another teammate: one piece of work, one task.
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r3', handOff('Design Boo', 'Write the docs')),
+      )
+      expect(board.taskCount()).toBe(1)
+      expect(deliveredTo(delivered, 'a3')).toEqual([])
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const notes = reflections(delivered).filter((r) => /already/i.test(r.task))
+      expect(notes).toHaveLength(1)
+      expect(notes[0]!.sessionKey).toBe(sk('leader'))
+      expect(notes[0]!.task).not.toMatch(/different title|reword|rename/i)
+    })
+
+    it('a found task is reported as open, not as a failure, and stays outstanding', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', handOff('Bug Boo', 'Write the docs')),
+      )
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r2', handOff('Bug Boo', 'Write the docs')),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const note = reflections(delivered).find((r) => /already/i.test(r.task))!.task
+      expect(note).not.toMatch(/did NOT complete|DID NOT COMPLETE|failed with an error/)
+      expect(note).not.toMatch(/reached a terminal state/)
+      expect(note).toMatch(/Still outstanding: 1/)
+      expect(note).toMatch(/Bug Boo/)
+    })
+
+    it('a plan that finds its step already on the board says so once, across the turns it starts', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', handOff('Bug Boo', 'Write the docs')),
+      )
+      const plan = '<plan><step to="@Design Boo">Write the docs</step></plan>'
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', plan))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(sk('leader'), doneEvent('r3', plan))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).filter((r) => /already/i.test(r.task))).toHaveLength(1)
+    })
+
+    it('one turn asking two teammates the same thing makes two tasks, and a later retry makes none', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const ask =
+        handOff('Bug Boo', 'What do you think?') + handOff('Design Boo', 'What do you think?')
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', ask))
+      expect(board.taskCount()).toBe(2)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+      expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+      // A later turn saying it again is a retry.
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', ask))
+      expect(board.taskCount()).toBe(2)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+      expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+    })
+
+    /** One delivery of a lead turn on a runtime that resumes one native thread, so
+     *  every turn's events carry the same run id. */
+    const delivery = (deliveryId: string): RunStamp => ({
+      reportForTaskId: null,
+      stopGen: 0,
+      deliveryId,
+    })
+
+    it('on a runtime that reuses its run id, later words after a closed task make a new task', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      const ev = doneEvent('native-thread-1', handOff('Bug Boo', 'Run the test suite'))
+      await orchestrator.onEvent(sk('leader'), ev, delivery('monday'))
+      await orchestrator.onEvent(sk('a2'), doneEvent('rc1', 'all green'))
+      expect(board.taskCount()).toBe(1)
+      await orchestrator.onEvent(sk('leader'), ev, delivery('thursday'))
+      expect(board.taskCount()).toBe(2)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(2)
+    })
+
+    it('a replay of one delivery, seen by the next engine, still makes no second task', async () => {
+      const first = makeHarness()
+      const ev = doneEvent('native-thread-1', handOff('Bug Boo', 'Run the test suite'))
+      await first.orchestrator.onEvent(sk('leader'), ev, delivery('monday'))
+      await first.orchestrator.onEvent(sk('a2'), doneEvent('rc1', 'all green'))
+      const next = makeHarness({ board: first.board })
+      await next.orchestrator.onEvent(sk('leader'), ev, delivery('monday'))
+      expect(first.board.taskCount()).toBe(1)
+      expect(deliveredTo(next.delivered, 'a2')).toEqual([])
+    })
+
+    it('a replay does not hold a blocked task against the retry', async () => {
+      const first = makeHarness()
+      const ev = doneEvent('r1', handOff('Bug Boo', 'Run the test suite'))
+      await first.orchestrator.onEvent(sk('leader'), ev)
+      await first.orchestrator.onEvent(sk('a2'), failedDoneEvent('rc1', 'error', 'boom'))
+      const next = makeHarness({ board: first.board })
+      await next.orchestrator.onEvent(sk('leader'), ev)
+      expect(first.board.taskCount()).toBe(2)
+      expect(deliveredTo(next.delivered, 'a2')).toHaveLength(1)
+    })
+
+    it('a blocked task does not swallow the retry', async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', handOff('Bug Boo', 'try this')))
+      await orchestrator.onEvent(sk('a2'), failedDoneEvent('rc', 'error', 'boom'))
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', handOff('Design Boo', 'try this')))
+      expect(board.taskCount()).toBe(2)
+      expect(deliveredTo(delivered, 'a3')).toHaveLength(1)
+    })
+
+    it('a task a person stopped does not swallow the hand-off that restarts the work', async () => {
+      let gen = 0
+      const { board, delivered, orchestrator } = makeHarness({ stopGen: () => gen })
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', handOff('Bug Boo', 'try again')))
+      gen += 1
+      await orchestrator.onEvent(sk('a2'), failedDoneEvent('rc', 'aborted', 'stopped'))
+      expect(board.allStatuses()).toContain('todo')
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', handOff('Bug Boo', 'try again')))
+      expect(board.taskCount()).toBe(2)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(2)
+    })
+
+    it("a person's parked Backlog card, even bound to an agent, does not swallow a hand-off", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await board.createTask({
+        title: 'Clean the logs',
+        teamId: 't1',
+        status: 'backlog',
+        sourceDelegationId: encodeHumanAssignment('a2', 'n1'),
+      })
+      const before = board.taskCount()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', handOff('Bug Boo', 'clean the logs')),
+      )
+      expect(board.taskCount()).toBe(before + 1)
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+    })
+
+    it("a person's card with nobody on it does not swallow a hand-off", async () => {
+      const { board, delivered, orchestrator } = makeHarness()
+      await board.createTask({ title: 'Clean the logs', teamId: 't1' })
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', handOff('Bug Boo', 'clean the logs')),
+      )
+      expect(deliveredTo(delivered, 'a2')).toHaveLength(1)
+    })
+
+    it('a plan may repeat a step, and each repeat is its own task', async () => {
+      const { board, orchestrator } = makeHarness()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(
+          'r1',
+          '<plan><step to="@Bug Boo">run the tests</step><step to="@Design Boo">fix what fails</step><step to="@Bug Boo">run the tests</step></plan>',
+        ),
+      )
+      expect(board.taskCount()).toBe(3)
+    })
+  })
+
+  describe('createBoardOrchestrator: no hand-off goes in a circle', () => {
+    const handOff = (to: string, task: string): string => `<delegate to="@${to}">${task}</delegate>`
+
+    /** The leader hands to Bug Boo, which hands to Design Boo. */
+    const chain = async (h: ReturnType<typeof makeHarness>): Promise<void> => {
+      await h.orchestrator.onEvent(sk('leader'), doneEvent('r1', handOff('Bug Boo', 'first job')))
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        toolCallEvent('r2', 'team_delegate', { assignee: 'Design Boo', task: 'second job' }),
+      )
+    }
+
+    it('A to B to A is refused through a tool call, and the sender is told', async () => {
+      const h = makeHarness()
+      await chain(h)
+      expect(h.board.taskCount()).toBe(2)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        toolCallEvent('r3', 'team_delegate', { assignee: 'Bug Boo', task: 'back to you' }),
+      )
+      expect(h.board.taskCount()).toBe(2)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      const notes = reflections(h.delivered).filter((r) => r.sessionKey === sk('a3'))
+      expect(notes).toHaveLength(1)
+      expect(notes[0]!.task).toMatch(/Bug Boo/)
+      expect(notes[0]!.task).toMatch(/was not started/)
+      expect(h.board.comments.some((c) => /Bug Boo/.test(c.body))).toBe(true)
+    })
+
+    it('A to B to A is refused through a closing message, which finishes the task first', async () => {
+      const h = makeHarness()
+      await chain(h)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        doneEvent('r3', `Done. ${handOff('Bug Boo', 'back to you')}`),
+      )
+      expect(h.board.taskCount()).toBe(2)
+    })
+
+    it('A to B to C to A is refused for every agent up the chain', async () => {
+      const h = makeHarness()
+      await chain(h)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        toolCallEvent('r3', 'team_delegate', { assignee: 'Test Boo', task: 'third job' }),
+      )
+      expect(h.board.taskCount()).toBe(3)
+      await h.orchestrator.onEvent(
+        sk('a4'),
+        toolCallEvent('r4', 'team_delegate', { assignee: 'Design Boo', task: 'back up one' }),
+      )
+      await h.orchestrator.onEvent(
+        sk('a4'),
+        toolCallEvent('r4', 'team_delegate', { assignee: 'Bug Boo', task: 'back up two' }),
+      )
+      expect(h.board.taskCount()).toBe(3)
+    })
+
+    it('a plan with a step back up the chain is refused whole', async () => {
+      const h = makeHarness()
+      await chain(h)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        doneEvent(
+          'r3',
+          '<plan><step to="@Test Boo">fine</step><step to="@Bug Boo">back</step></plan>',
+        ),
+      )
+      expect(h.board.taskCount()).toBe(2)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered).some((r) => /Plan not started/.test(r.task))).toBe(true)
+    })
+
+    it('an escalation to the lead goes through, though the lead delegated the chain', async () => {
+      const h = makeHarness()
+      await chain(h)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        toolCallEvent('r3', 'team_delegate', { assignee: 'Boo Zero', task: 'I am stuck' }),
+      )
+      expect(h.board.taskCount()).toBe(3)
+      expect(deliveredTo(h.delivered, 'leader').some((t) => /I am stuck/.test(t))).toBe(true)
+    })
+
+    it('a sideways hand-off to someone new goes through', async () => {
+      const h = makeHarness()
+      await chain(h)
+      await h.orchestrator.onEvent(
+        sk('a3'),
+        toolCallEvent('r3', 'team_delegate', { assignee: 'Test Boo', task: 'for you' }),
+      )
+      expect(h.board.taskCount()).toBe(3)
+    })
+
+    it('tells the sender once, though it tries again on the turn the refusal starts', async () => {
+      const h = makeHarness()
+      await chain(h)
+      const again = (run: string) =>
+        h.orchestrator.onEvent(
+          sk('a3'),
+          toolCallEvent(run, 'team_delegate', { assignee: 'Bug Boo', task: 'back to you' }),
+        )
+      await again('r3')
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await again('r4')
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered).filter((r) => r.sessionKey === sk('a3'))).toHaveLength(1)
+    })
+  })
+
+  describe('createBoardOrchestrator: the caps hold', () => {
+    const tool = (run: string, task: string, assignee = 'Bug Boo'): RuntimeEvent =>
+      toolCallEvent(run, 'team_delegate', { assignee, task })
+
+    it('counts the hand-off cap per turn, across tool calls that are each their own event', async () => {
+      const capHits: CapHit[] = []
+      const { board, orchestrator } = makeHarness({
+        caps: { maxFanout: 2 },
+        onCapHit: (i) => capHits.push(i),
+      })
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'one'))
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'two', 'Design Boo'))
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'three', 'Test Boo'))
+      expect(board.taskCount()).toBe(2)
+      expect(capHits.map((c) => c.kind)).toEqual(['fanout'])
+    })
+
+    it('gives each turn its own count, and a turn that ended gives back its count', async () => {
+      const { board, orchestrator } = makeHarness({ caps: { maxFanout: 1 } })
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'one'))
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'two', 'Design Boo'))
+      expect(board.taskCount()).toBe(1)
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', 'over'))
+      await orchestrator.onEvent(sk('leader'), tool('r2', 'three', 'Design Boo'))
+      expect(board.taskCount()).toBe(2)
+    })
+
+    it('a repeat of one hand-off in a turn uses no part of the cap', async () => {
+      const { board, orchestrator } = makeHarness({ caps: { maxFanout: 2 } })
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'one'))
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'one'))
+      await orchestrator.onEvent(sk('leader'), tool('r1', 'two', 'Design Boo'))
+      expect(board.taskCount()).toBe(2)
+    })
+
+    it('refuses a plan too long, whole, and tells the sender', async () => {
+      const capHits: CapHit[] = []
+      const { board, delivered, orchestrator } = makeHarness({ onCapHit: (i) => capHits.push(i) })
+      const steps = Array.from(
+        { length: MAX_PLAN_STEPS + 1 },
+        (_, i) => `<step to="@Bug Boo">step ${i}</step>`,
+      )
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', `<plan>${steps.join('')}</plan>`))
+      expect(board.taskCount()).toBe(0)
+      expect(capHits.map((c) => c.kind)).toEqual(['plan_length'])
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).some((r) => /Plan not started/.test(r.task))).toBe(true)
+    })
+
+    it('lets a plan of the most steps through', async () => {
+      const { board, orchestrator } = makeHarness()
+      const steps = Array.from(
+        { length: MAX_PLAN_STEPS },
+        (_, i) => `<step to="@Bug Boo">step ${i}</step>`,
+      )
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', `<plan>${steps.join('')}</plan>`))
+      expect(board.taskCount()).toBe(MAX_PLAN_STEPS)
+    })
+
+    /** A task Bug Boo is running, with `children` sub-tasks under it. */
+    const parentWith = async (
+      h: ReturnType<typeof makeHarness>,
+      children: number,
+    ): Promise<string> => {
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">parent</delegate>'),
+      )
+      const parent = idsOf(h.board)[0]!
+      for (let i = 0; i < children; i += 1) {
+        await h.board.createTask({ title: `child ${i}`, teamId: 't1', parentTaskId: parent })
+      }
+      return parent
+    }
+
+    it('caps a hand-off at the most sub-tasks one task can have', async () => {
+      const capHits: CapHit[] = []
+      const h = makeHarness({ onCapHit: (i) => capHits.push(i) })
+      await parentWith(h, 24)
+      const before = h.board.taskCount()
+      await h.orchestrator.onEvent(sk('a2'), tool('r2', 'one more', 'Design Boo'))
+      expect(h.board.taskCount()).toBe(before)
+      expect(deliveredTo(h.delivered, 'a3')).toEqual([])
+      expect(capHits.map((c) => c.kind)).toEqual(['child_cap'])
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered).filter((r) => r.sessionKey === sk('a2'))).toHaveLength(1)
+    })
+
+    it('refuses a plan the parent has no room for, whole', async () => {
+      const h = makeHarness()
+      await parentWith(h, 23)
+      const before = h.board.taskCount()
+      await h.orchestrator.onEvent(
+        sk('a2'),
+        doneEvent(
+          'r2',
+          '<plan><step to="@Design Boo">a</step><step to="@Test Boo">b</step></plan>',
+        ),
+      )
+      expect(h.board.taskCount()).toBe(before)
+    })
+
+    it('tells the sender of a capped hand-off once, across the turns it starts', async () => {
+      const h = makeHarness()
+      await parentWith(h, 24)
+      await h.orchestrator.onEvent(sk('a2'), tool('r2', 'one more', 'Design Boo'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await h.orchestrator.onEvent(sk('a2'), tool('r3', 'one more', 'Design Boo'))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(h.delivered).filter((r) => r.sessionKey === sk('a2'))).toHaveLength(1)
+    })
+
+    it('tells the sender of a refused plan once, across the turns it starts', async () => {
+      const { delivered, orchestrator } = makeHarness()
+      const steps = Array.from(
+        { length: MAX_PLAN_STEPS + 1 },
+        (_, i) => `<step to="@Bug Boo">step ${i}</step>`,
+      )
+      await orchestrator.onEvent(sk('leader'), doneEvent('r1', `<plan>${steps.join('')}</plan>`))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      await orchestrator.onEvent(sk('leader'), doneEvent('r2', `<plan>${steps.join('')}</plan>`))
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(delivered).filter((r) => /Plan not started/.test(r.task))).toHaveLength(1)
+    })
+
+    it('holds top-level hand-offs to the same rate as other top-level creates', async () => {
+      const capHits: CapHit[] = []
+      const { board, delivered, orchestrator } = makeHarness({ onCapHit: (i) => capHits.push(i) })
+      for (let i = 0; i < 30; i += 1) await board.createTask({ title: `root ${i}`, teamId: 't1' })
+      const before = board.taskCount()
+      await orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r1', '<delegate to="@Bug Boo">more</delegate>'),
+      )
+      expect(board.taskCount()).toBe(before)
+      expect(deliveredTo(delivered, 'a2')).toEqual([])
+      expect(capHits.map((c) => c.kind)).toEqual(['root_rate_cap'])
+    })
+  })
+
+  describe('createBoardOrchestrator: the failure breaker outlives its engine', () => {
+    const failOnce = async (h: ReturnType<typeof makeHarness>, i: number): Promise<void> => {
+      await h.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent(`r${i}`, '<delegate to="@Bug Boo">flaky</delegate>'),
+      )
+      await h.orchestrator.onEvent(sk('a2'), failedDoneEvent(`rc${i}`, 'error', 'boom'))
+    }
+
+    it('counts failures across a restart, and refuses on the next engine', async () => {
+      const first = makeHarness()
+      await failOnce(first, 0)
+      await failOnce(first, 1)
+      first.orchestrator.reset()
+      const second = makeHarness({ board: first.board })
+      await failOnce(second, 2)
+      second.orchestrator.reset()
+      const count = first.board.taskCount()
+
+      const third = makeHarness({ board: first.board })
+      await third.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r9', '<delegate to="@Bug Boo">flaky</delegate>'),
+      )
+      expect(first.board.taskCount()).toBe(count)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(third.delivered).some((r) => /failed .* times/i.test(r.task))).toBe(true)
+    })
+
+    it('tells the delegator once, across engines', async () => {
+      const first = makeHarness()
+      for (let i = 0; i < MAX_DELEGATION_FAILURES; i += 1) await failOnce(first, i)
+      const handOff = doneEvent('r8', '<delegate to="@Bug Boo">flaky</delegate>')
+      await first.orchestrator.onEvent(sk('leader'), handOff)
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(first.delivered).some((r) => /failed .* times/i.test(r.task))).toBe(true)
+      first.orchestrator.reset()
+
+      const next = makeHarness({ board: first.board })
+      await next.orchestrator.onEvent(
+        sk('leader'),
+        doneEvent('r9', '<delegate to="@Bug Boo">flaky</delegate>'),
+      )
+      await vi.advanceTimersByTimeAsync(REFLECT_WINDOW_MS)
+      expect(reflections(next.delivered)).toEqual([])
     })
   })
 }

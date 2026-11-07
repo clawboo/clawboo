@@ -39,6 +39,7 @@ import type { Request, Response } from 'express'
 
 import { connectorToolsForServer, onConnectorsChanged } from '../lib/connectors/supervisor'
 import { getDb, getDbPath } from '../lib/db'
+import { isLeadOfTeam } from '../lib/teamChat/booZero'
 import {
   getEmbedProvider,
   invalidateEmbedProvider,
@@ -300,7 +301,9 @@ function getHandlers(): Record<McpServerName, McpHttpHandlers> {
     // another card (see createTasksServer).
     tasks: createStreamableHttpHandlers((req) => {
       const binding = parseTasksBinding(req)
-      return createTasksServer(getDb(), {
+      const db = getDb()
+      return createTasksServer(db, {
+        isLeadAgent: (teamId, agentId) => isLeadOfTeam(db, teamId, agentId),
         ...(binding
           ? {
               boundScope: {

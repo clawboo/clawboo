@@ -305,4 +305,12 @@ describe('Open on board', () => {
     expect(state.viewMode).toEqual({ type: 'nav', view: 'board' })
     expect(state.boardFocus).toMatchObject({ taskId: 't1', teamId: 'T' })
   })
+
+  it('names the task by its readable id, and says Task when it has none', () => {
+    render(task({ identifier: 'CLB-12' }))
+    expect(screen.getByTestId('board-task-id')).toHaveTextContent('CLB-12')
+    cleanup()
+    render(task())
+    expect(screen.getByTestId('board-task-id')).toHaveTextContent('Task')
+  })
 })

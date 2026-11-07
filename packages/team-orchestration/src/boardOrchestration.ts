@@ -17,16 +17,32 @@
 
 import {
   delegationTargetOf,
+  findHandOffCycle,
+  HAND_OFF_TITLE_CHARS,
   isHumanAssignment,
   ledgerAllowsAutoFire,
   MAX_AUTO_FIRES,
+  normalizeTaskTitle,
+  type HandOffLink,
   type TaskAttention,
 } from '@clawboo/board-core'
 import { createSuspendDetector, setAwakeTimeout, type RuntimeEvent } from '@clawboo/executor'
-import { checkDepthCap, checkFanoutCap, DEFAULT_MAX_DEPTH } from '@clawboo/governance'
+import {
+  checkDepthCap,
+  checkFanoutCap,
+  DEFAULT_MAX_DEPTH,
+  DEFAULT_MAX_PLAN_STEPS,
+} from '@clawboo/governance'
 import { classifyError, isAccountError } from '@clawboo/obs'
 
-import type { BoardClient, BoardTask, CompleteExecutionOutcome, ExecutionRef } from './boardClient'
+import type {
+  BoardTask,
+  CompleteExecutionOutcome,
+  EngineBoardClient,
+  ExecutionRef,
+  HandOffInput,
+  HandOffResult,
+} from './boardClient'
 import { DeliveryRefusedError } from './deliveryRefused'
 import {
   buildTaskUpdateMessage,
@@ -49,6 +65,12 @@ import { ASSIGNMENT_TURN, SYSTEM_TURN, type RunStamp, type TurnOrigin } from './
  * have no source task (depth 0) and may always delegate.
  */
 export const MAX_SPAWN_DEPTH = DEFAULT_MAX_DEPTH
+
+/** The most steps a plan may have. Longer is refused whole. */
+export const MAX_PLAN_STEPS = DEFAULT_MAX_PLAN_STEPS
+
+/** What the run id reads as when an event carries none. */
+const NO_RUN_ID = 'norun'
 
 /** Debounce window for batching board→chat reflections (avoids message storms). */
 export const REFLECT_WINDOW_MS = 3000
@@ -233,8 +255,17 @@ export interface ExtractedSignals {
  * `done`) the reflection batcher. Carries whatever fields the orchestrator knows
  * at the call-site; the store merges by id (last-write-wins on `updatedAt`).
  */
+/** A hand-off a cap refused. `max` is the ceiling, when it is not the fan-out cap. */
+export interface CapHit {
+  kind: 'fanout' | 'plan_length' | 'child_cap' | 'root_rate_cap'
+  sourceTaskId: string | null
+  max?: number
+}
+
 export interface BoardChange {
   id: string
+  /** The readable id, like `CLB-12`, on a change that announces a new task. */
+  identifier?: string | null
   title?: string
   status?: string
   assigneeAgentId?: string | null
@@ -476,7 +507,7 @@ export interface WorkCheck {
 
 export interface BoardOrchestratorDeps {
   teamId: string
-  board: BoardClient
+  board: EngineBoardClient
   /** Current participant roster (read fresh each event so adds/removes flow through). */
   known: () => KnownAgent[]
   /** The team's reduce point — reflections are delivered here for synthesis. */
@@ -554,7 +585,7 @@ export interface BoardOrchestratorDeps {
    */
   caps?: { maxFanout?: number }
   /** Audit hook for a cap hit (the wiring logs a governance_audit row). Optional. */
-  onCapHit?: (info: { kind: 'fanout'; sourceTaskId: string | null }) => void
+  onCapHit?: (info: CapHit) => void
   /** Heuristic: is this delegation risky enough to need leader approval? Optional. */
   isRiskyDelegation?: (signal: DelegationSignal) => boolean
   /**
@@ -744,7 +775,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
   const lastActivityAt = new Map<string, number>() // child session → last event ts (watchdog)
   const openToolCall = new Set<string>() // sessions currently inside a tool call (longer idle allowance)
   const recentlyTerminated = new Map<string, number>() // child session → terminal ts (late-replay guard)
-  const failureCounts = new Map<string, number>() // `${target}:${task}` → consecutive failures (loop breaker)
+  const handOffsByTurn = new Map<string, { count: number; at: number }>() // `${session}:${run}` → hand-offs this turn, across its events (age-reaped)
   const humanTasks = new Set<string>() // task ids a PERSON assigned: they report to the card, not an agent
   const waitingOnTurn = new Set<string>() // sessions with work deferred behind a non-task turn (pump on its terminal)
   const forceFire = new Set<string>() // task ids a person asked to run: waive the auto-fire ledger policy once
@@ -883,15 +914,104 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     (opts.agentId ? `:agent:${opts.agentId}` : '') +
     `:reflectTo:${opts.reflectTo ?? ''}`
 
+  /** Which turn an event belongs to: its delivery, which the host stamps once per
+   *  delivery. An event's own run id is only the fallback for a caller with no stamp:
+   *  a runtime that resumes a native thread repeats it on every turn. */
+  const turnIdOf = (event: RuntimeEvent, run?: RunStamp): string =>
+    run?.deliveryId ?? (event.runId || NO_RUN_ID)
+
+  /** What ties a hand-off to its turn: the key that makes a replay return its task
+   *  (the team, the turn, the rest of `scope`, and the words), and the turn itself,
+   *  whose own tasks do not count as repeats of each other. An event with no turn has
+   *  neither, since nothing then says two hand-offs are the same one. */
+  const handOffIdentity = (
+    scope: readonly string[],
+    text: string,
+  ): Pick<HandOffInput, 'handOffKey' | 'turnId'> => {
+    const turnId = scope[1]
+    return !turnId || turnId === NO_RUN_ID
+      ? {}
+      : { handOffKey: { scope: [deps.teamId, ...scope], text }, turnId }
+  }
+
   // ── failure loop breaker ────────────────────────────────────────────────────
   const failKey = (targetAgentId: string, task: string): string =>
     `${targetAgentId}:${task.slice(0, 80).toLowerCase().trim()}`
-  const noteFailure = (targetAgentId: string, task: string): void => {
-    const k = failKey(targetAgentId, task)
-    failureCounts.set(k, (failureCounts.get(k) ?? 0) + 1)
+  const noteFailure = (targetAgentId: string, task: string): Promise<void> =>
+    deps.board.noteDelegationFailure(deps.teamId, targetAgentId, failKey(targetAgentId, task))
+  const clearFailure = (targetAgentId: string, task: string): Promise<void> =>
+    deps.board.clearDelegationFailure(deps.teamId, targetAgentId, failKey(targetAgentId, task))
+
+  // ── the hand-off cycle guard ────────────────────────────────────────────────
+  /** The open task `targetAgentId` delegated on the sender's chain, or null. The
+   *  lead is exempt: every agent is told to take a blocker there, and it delegated
+   *  most top-level tasks. A chain that cannot be read lets the hand-off through;
+   *  the depth cap still bounds it. `ownTask` is the task the sender's run is on. */
+  async function cycleFor(
+    targetAgentId: string,
+    sourceTaskId: string | null,
+    ownTask: boolean,
+  ): Promise<HandOffLink | null> {
+    if (!sourceTaskId || targetAgentId === deps.leaderAgentId()) return null
+    const chain = await deps.board.handOffChain(sourceTaskId)
+    return chain
+      ? findHandOffCycle(chain, targetAgentId, { ownTaskId: ownTask ? sourceTaskId : null })
+      : null
   }
-  const clearFailure = (targetAgentId: string, task: string): void => {
-    failureCounts.delete(failKey(targetAgentId, task))
+
+  /**
+   * Is this the first refusal of this hand-off from this sender? The note arrives as
+   * a new turn, and a sender that repeats the hand-off in it has a new run id, so
+   * without this each refusal starts the next. Once per sender, target and words while
+   * the entry lives, as for a hand-off no teammate can take.
+   */
+  const firstRefusal = (
+    kind: string,
+    sender: string | null,
+    target: string,
+    words: string,
+  ): boolean => {
+    const key = `refused:${kind}:${sender}:${target}:${normalizeTaskTitle(words)}`
+    if (processed.has(key)) return false
+    processed.set(key, now())
+    return true
+  }
+
+  /** Is this the first note to this sender that a hand-off found this task? */
+  const firstDuplicateNote = (sender: string | null, taskId: string): boolean =>
+    firstRefusal('duplicate', sender, taskId, '')
+
+  /** How a refusal names a task: its readable id, else its title. */
+  const nameOfLink = (link: HandOffLink): string =>
+    link.identifier ?? `"${link.title.slice(0, 60)}"`
+
+  /** The words for a hand-off going back up its own chain. */
+  const cycleRefusal = (targetName: string, link: HandOffLink): string =>
+    `${targetName} handed out ${nameOfLink(link)}, which is still open and waiting on this work, so the board did not hand it back to them. Each would wait on the other. Finish your part and your result reports back on its own. For a blocker, go to the team lead.`
+
+  /** The words for a hand-off a cap refused. */
+  function capRefusal(refused: Extract<HandOffResult, { ok: false }>, targetName: string): string {
+    const count = refused.count ?? refused.max ?? 0
+    if (refused.reason === 'child_cap')
+      return `This task already has ${count} sub-tasks, the most one task can have (${refused.max}), so the hand-off to ${targetName} did not start. Finished and cancelled sub-tasks still count. Do the work yourself, or tell the person.`
+    if (refused.reason === 'root_rate_cap') {
+      const mins = Math.round((refused.windowMs ?? 0) / 60_000)
+      return `${count} top-level tasks were made in the last ${mins} minutes, the most allowed (${refused.max}), so the hand-off to ${targetName} did not start. Hand out less at once, or tell the person.`
+    }
+    return `The hand-off to ${targetName} was refused (max delegation depth ${MAX_SPAWN_DEPTH} reached, or its parent task is gone). Handle it directly or report it back.`
+  }
+
+  /** The words for a hand-off that found its task already on the board. */
+  function duplicateNote(task: BoardTask, delegatorAgentId: string | null): string {
+    const name = task.identifier ?? `"${(task.title ?? '').slice(0, 60)}"`
+    const owner = targetForTask(task) ?? (task.assigneeAgentId as string | null | undefined) ?? null
+    const reportsTo = sdidReflectTo(sdidOf(task))
+    const result = isHumanAssignment(sdidOf(task))
+      ? 'Its result goes to the person, on its card.'
+      : reportsTo === delegatorAgentId
+        ? 'Its result will reach you when it ends.'
+        : `Its result goes to ${nameOf(reportsTo ?? deps.leaderAgentId())}.`
+    return `An open task with these words is already on the board: ${name}${owner ? `, with ${nameOf(owner)}` : ''}. The board did not make a second one. ${result}`
   }
 
   /** Did the user press Stop since this delegation was dispatched? (Stop = clean
@@ -1047,17 +1167,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sourceTaskId: string | null,
     delegatorAgentId: string | null,
     runId: string,
+    /** `sourceTaskId` is the task the sender's run is on, not one it follows up on. */
+    ownTask: boolean,
   ): Promise<string | null> {
     const startGen = deps.stopGen()
     // Tell the delegator (not silently drop) whenever a delegation can't start —
     // otherwise it waits forever for an answer that will never come.
-    const dropReflect = (summary: string): void =>
+    const dropReflect = (summary: string, outcome: TaskUpdateOutcome = 'error'): void =>
       enqueueReflection({
         toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
         by: signal.targetAgentName,
         title: signal.task.slice(0, 80),
         summary,
-        outcome: 'error',
+        outcome,
         ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
       })
 
@@ -1073,10 +1195,19 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // same task MAX times — a code-level cap on the failure→reflect→re-delegate
     // cycle (the leader is uncapped by depth, so prompts alone can't bound it). We
     // notify the delegator exactly ONCE on crossing the cap, then refuse silently.
-    const fc = failureCounts.get(failKey(signal.targetAgentId, signal.task)) ?? 0
-    if (fc >= MAX_DELEGATION_FAILURES) {
-      if (fc === MAX_DELEGATION_FAILURES) {
-        failureCounts.set(failKey(signal.targetAgentId, signal.task), fc + 1) // mark "notified"
+    const breakerKey = failKey(signal.targetAgentId, signal.task)
+    const breaker = await deps.board.delegationFailure(
+      deps.teamId,
+      signal.targetAgentId,
+      breakerKey,
+    )
+    if (breaker.failures >= MAX_DELEGATION_FAILURES) {
+      if (!breaker.notified) {
+        await deps.board.markDelegationFailureNotified(
+          deps.teamId,
+          signal.targetAgentId,
+          breakerKey,
+        )
         if (sourceTaskId)
           await deps.board.addComment(
             sourceTaskId,
@@ -1086,6 +1217,22 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         dropReflect(
           `${signal.targetAgentName} has failed "${signal.task.slice(0, 80)}" ${MAX_DELEGATION_FAILURES} times — handle it directly, reassign it, or tell the user it can't be done. Do not keep re-delegating it.`,
         )
+      }
+      return null
+    }
+
+    // Going back up its own chain. Checked before the depth cap, so an agent stopped
+    // by both hears the one that says what to do.
+    const cycle = await cycleFor(signal.targetAgentId, sourceTaskId, ownTask)
+    if (cycle) {
+      if (firstRefusal('cycle', delegatorAgentId, signal.targetAgentId, signal.task)) {
+        if (sourceTaskId)
+          await deps.board.addComment(
+            sourceTaskId,
+            `Not handed to ${signal.targetAgentName}: they handed out ${nameOfLink(cycle)}, which is still open.`,
+            'system',
+          )
+        dropReflect(cycleRefusal(signal.targetAgentName, cycle), 'not_started')
       }
       return null
     }
@@ -1141,8 +1288,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // a refresh, `resume`'s pump decodes the agent from the persisted id). The
     // delegator is encoded too so a mid-chain reduce-point survives a refresh.
     const deferred = !sessionTakesTask(targetSk)
-    const title = signal.task.slice(0, 200)
-    const task = await deps.board.createTask({
+    const title = signal.task.slice(0, HAND_OFF_TITLE_CHARS)
+    const created = await deps.board.createHandOff({
       title,
       description: signal.task,
       teamId: deps.teamId,
@@ -1155,17 +1302,44 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         agentId: signal.targetAgentId,
         reflectTo: delegatorAgentId,
       }),
+      ...handOffIdentity(['deleg', runId, signal.targetAgentId], signal.task),
     })
-    if (!task) {
-      dropReflect(
-        `Could not create the board task for ${signal.targetAgentName} (server error). The delegation did not start.`,
-      )
+    if (!created.ok) {
+      if (created.reason === 'error') {
+        dropReflect(
+          `Could not create the board task for ${signal.targetAgentName} (server error). The delegation did not start.`,
+        )
+        return null
+      }
+      if (created.reason === 'child_cap' || created.reason === 'root_rate_cap')
+        deps.onCapHit?.({
+          kind: created.reason,
+          sourceTaskId,
+          ...(created.max != null ? { max: created.max } : {}),
+        })
+      if (firstRefusal('cap', delegatorAgentId, signal.targetAgentId, signal.task)) {
+        const summary = capRefusal(created, signal.targetAgentName)
+        if (sourceTaskId) await deps.board.addComment(sourceTaskId, summary, 'system')
+        dropReflect(summary, 'not_started')
+      }
       return null
     }
+    // The task was there already, so nothing starts. A replay of this same hand-off
+    // is silent: it was dealt with the first time. A hand-off that found someone
+    // else's open task says so, once, or the sender waits on a report it may never
+    // get. Once per sender and task, not per run: the note arrives as a new turn, and
+    // a sender that repeats the hand-off in it gets no second one.
+    if (created.deduplicated) {
+      if (created.deduplicated === 'title' && firstDuplicateNote(delegatorAgentId, created.task.id))
+        dropReflect(duplicateNote(created.task, delegatorAgentId), 'already_open')
+      return null
+    }
+    const task = created.task
     taskTitle.set(task.id, title)
     if (delegatorAgentId) taskReflectTo.set(task.id, delegatorAgentId)
     emit({
       id: task.id,
+      identifier: task.identifier ?? null,
       title,
       status: task.status ?? 'todo',
       parentTaskId: sourceTaskId,
@@ -1254,7 +1428,44 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     sourceTaskId: string | null,
     delegatorAgentId: string | null,
     runId: string,
+    ownTask: boolean,
   ): Promise<void> {
+    /** Refuse the whole plan, before any step exists: a plan cut short is worse than
+     *  none, since its later steps may rely on the ones left out. */
+    const refusePlan = async (summary: string): Promise<void> => {
+      if (!firstRefusal('plan', delegatorAgentId, steps[0]?.targetAgentId ?? '', summary)) return
+      if (sourceTaskId) await deps.board.addComment(sourceTaskId, summary, 'system')
+      enqueueReflection({
+        toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
+        by: steps[0]?.targetAgentName ?? 'plan',
+        summary,
+        outcome: 'not_started',
+        ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+      })
+    }
+    if (steps.length > MAX_PLAN_STEPS) {
+      deps.onCapHit?.({ kind: 'plan_length', sourceTaskId, max: MAX_PLAN_STEPS })
+      await refusePlan(
+        `Plan not started: it has ${steps.length} steps, and a plan can have ${MAX_PLAN_STEPS}. Plan less at once and hand out the rest when these are done.`,
+      )
+      return
+    }
+    for (const step of steps) {
+      const cycle = await cycleFor(step.targetAgentId, sourceTaskId, ownTask)
+      if (cycle) {
+        await refusePlan(`Plan not started. ${cycleRefusal(step.targetAgentName, cycle)}`)
+        return
+      }
+    }
+    const capacity = await deps.board.handOffRoom(deps.teamId, sourceTaskId)
+    if (capacity && steps.length > capacity.room) {
+      deps.onCapHit?.({ kind: capacity.reason, sourceTaskId, max: capacity.max })
+      await refusePlan(
+        `Plan not started: it has ${steps.length} steps and only ${capacity.room} more tasks fit right now (the limit is ${capacity.max}). Plan less at once, or tell the person.`,
+      )
+      return
+    }
+
     // Depth preflight for the WHOLE plan. `spawn` gates each immediate delegation,
     // but a plan does not go through `spawn`, so without this every step would be
     // created as a child of a source task already AT the ceiling — through the
@@ -1296,8 +1507,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         })
         continue
       }
-      const title = step.task.slice(0, 200)
-      const task = await deps.board.createTask({
+      const title = step.task.slice(0, HAND_OFF_TITLE_CHARS)
+      const created = await deps.board.createHandOff({
         title,
         description: step.task,
         teamId: deps.teamId,
@@ -1307,29 +1518,49 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
         // refresh (the durable ready-pump decodes the target; `resume` decodes the
         // delegator so a mid-chain reduce-point isn't lost).
         sourceDelegationId: `${runId}:plan:${stepIndex}:agent:${step.targetAgentId}:reflectTo:${delegatorAgentId ?? ''}`,
+        ...handOffIdentity(['plan', runId, String(stepIndex), step.targetAgentId], step.task),
       })
-      if (!task) {
+      if (!created.ok) {
         enqueueReflection({
           toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
           by: step.targetAgentName,
-          summary: `Could not create the board task for plan step "${title.slice(0, 60)}" (server error).`,
-          outcome: 'error',
+          summary:
+            created.reason === 'error'
+              ? `Could not create the board task for plan step "${title.slice(0, 60)}" (server error).`
+              : `Plan step "${title.slice(0, 60)}" did not start. ${capRefusal(created, step.targetAgentName)}`,
+          outcome: created.reason === 'error' ? 'error' : 'not_started',
           ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
         })
         continue
       }
-      taskTitle.set(task.id, title)
-      pendingTargets.set(task.id, step.targetAgentId)
-      if (delegatorAgentId) taskReflectTo.set(task.id, delegatorAgentId)
-      emit({
-        id: task.id,
-        title,
-        status: task.status ?? 'todo',
-        parentTaskId: sourceTaskId,
-        createdAt: task.createdAt,
-        updatedAt: task.updatedAt,
-      })
-      if (prevTaskId) await deps.board.linkDep(task.id, prevTaskId)
+      const task = created.task
+      // A step that found its task already there keeps that task's own target and
+      // delegator, and only holds its place in the chain.
+      if (created.deduplicated) {
+        if (created.deduplicated === 'title' && firstDuplicateNote(delegatorAgentId, task.id))
+          enqueueReflection({
+            toAgentId: delegatorAgentId ?? deps.leaderAgentId(),
+            by: step.targetAgentName,
+            title: title.slice(0, 80),
+            summary: duplicateNote(task, delegatorAgentId),
+            outcome: 'already_open',
+            ...(sourceTaskId ? { forTaskId: sourceTaskId } : {}),
+          })
+      } else {
+        taskTitle.set(task.id, title)
+        pendingTargets.set(task.id, step.targetAgentId)
+        if (delegatorAgentId) taskReflectTo.set(task.id, delegatorAgentId)
+        emit({
+          id: task.id,
+          identifier: task.identifier ?? null,
+          title,
+          status: task.status ?? 'todo',
+          parentTaskId: sourceTaskId,
+          createdAt: task.createdAt,
+          updatedAt: task.updatedAt,
+        })
+      }
+      if (prevTaskId && prevTaskId !== task.id) await deps.board.linkDep(task.id, prevTaskId)
       prevTaskId = task.id
     }
     // Fire whatever is ready now (step 0 has no dep).
@@ -1700,7 +1931,13 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const outstanding: OutstandingDelegation[] = []
       const toAgentId = deps.agentIdForSession(toSk)
       if (toAgentId) {
-        const settled = new Set(group.map((i) => i.title ?? ''))
+        // Only a finished task is settled. A hand-off that was refused or found its task
+        // open says nothing about that task, whose title it may share.
+        const settled = new Set(
+          group
+            .filter((i) => i.outcome !== 'already_open' && i.outcome !== 'not_started')
+            .map((i) => i.title ?? ''),
+        )
         const batchIds = new Set(group.flatMap((i) => (i.taskId ? [i.taskId] : [])))
         for (const t of await deps.board.listTasks(deps.teamId).catch(() => [])) {
           const sdid = typeof t.sourceDelegationId === 'string' ? t.sourceDelegationId : ''
@@ -1986,7 +2223,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     fixNote: string,
   ): Promise<void> {
     const agentId = deps.agentIdForSession(sessionKey)
-    let detail: Awaited<ReturnType<BoardClient['getTask']>>
+    let detail: Awaited<ReturnType<EngineBoardClient['getTask']>>
     let exec: ExecutionRef | null
     const prevExec = taskToExec.get(taskId)
     let prevClosed = false
@@ -2260,7 +2497,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     )
     emit({ id: taskId, status: 'done', summary: trimmed, updatedAt: Date.now() })
     // A success resets the loop breaker for this (agent, task).
-    if (agentId && title) clearFailure(agentId, title)
+    if (agentId && title) await clearFailure(agentId, title)
     if (!stopped) {
       // Visible "done ≠ stuck" marker so the user always sees a completion, even
       // when the recipient legitimately stays silent (UI-only; no agent round-trip).
@@ -2365,7 +2602,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // re-delegation is eventually refused in `spawn`. An account refusal counts the
     // same way: the report tells the delegator not to re-delegate, and a person who
     // fixed the sign-in can still say "try again" in chat.
-    if (agentId && title) noteFailure(agentId, title)
+    if (agentId && title) await noteFailure(agentId, title)
     await deps.board.updateStatus(taskId, 'blocked')
     const execId = taskToExec.get(taskId)
     if (execId) {
@@ -2500,8 +2737,12 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (slept > 0)
       for (const clocks of [lastActivityAt, recentlyTerminated, processed, intentMissed])
         for (const [k, ts] of clocks) clocks.set(k, Math.min(ts + slept, tnow))
+    if (slept > 0)
+      for (const turn of handOffsByTurn.values()) turn.at = Math.min(turn.at + slept, tnow)
     for (const [k, ts] of processed) if (ts <= tnow - PROCESSED_TTL_MS) processed.delete(k)
     for (const [k, ts] of intentMissed) if (ts <= tnow - PROCESSED_TTL_MS) intentMissed.delete(k)
+    for (const [k, turn] of handOffsByTurn)
+      if (turn.at <= tnow - PROCESSED_TTL_MS) handOffsByTurn.delete(k)
     for (const [s, ts] of recentlyTerminated)
       if (ts <= tnow - RECENTLY_TERMINATED_TTL_MS) recentlyTerminated.delete(s)
     // Settlements whose write failed are written now; report-ups whose run ended
@@ -2679,6 +2920,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     // while handling the event cannot leave them held.
     if (terminal) closeReportUpRun(run, event.kind === 'done' && event.reason === 'success')
     await handleEvent(sessionKey, event, run)
+    // The turn is over, and so is its hand-off count.
+    if (terminal) handOffsByTurn.delete(`${sessionKey}:${turnIdOf(event, run)}`)
     // The turn a fix round was waiting on has ended.
     if (terminal) deferPendingFix(sessionKey)
     // A NON-task turn (a user turn, a reflection) just ended on a session that had
@@ -2784,29 +3027,43 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     if (sourceTaskId === null && recentlyTerminated.has(sessionKey)) return
 
     const signals = extractSignals(event, sourceAgentId, deps.known())
-    const runId = event.runId || 'norun'
+    const runId = turnIdOf(event, run)
     // The agent that emitted these delegations is the reduce-point recipient for
     // their results (and the one told if a delegation can't be started).
     const delegatorAgentId = sourceAgentId || deps.leaderAgentId()
 
     const maxFanout = deps.caps?.maxFanout
-    let spawnedThisTurn = 0
+    // Per TURN, not per event: each hand-off tool call is its own event, so a count
+    // kept per event never reached the cap for a runtime that hands off by tool.
+    const turnKey = `${sessionKey}:${runId}`
+    const handOffsThisTurn = (): number => handOffsByTurn.get(turnKey)?.count ?? 0
+    const addHandOff = (by: number): void => {
+      handOffsByTurn.set(turnKey, { count: handOffsThisTurn() + by, at: now() })
+    }
+    // The run's own task, as opposed to one a follow-up run reports on.
+    const ownTask = mapped !== null
     let cappedThisTurn = 0
     for (const sig of signals.parallel) {
-      const key = `${runId}:${sig.targetAgentId}:${sig.task.slice(0, 80)}`
+      // A latch for what THIS engine has acted on, so a refused hand-off seen again is
+      // not refused out loud again, and two overlapping events do not both start it.
+      // The task's own idempotency key is what makes a replay safe: it lives on the
+      // board, so it holds past this engine and past this entry's age.
+      const key = `${runId}:${sig.targetAgentId}:${normalizeTaskTitle(sig.task)}`
       if (processed.has(key)) continue
       // Fan-out cap: bound parallel delegations per turn, independent of how many
       // the model emitted. Overflow is COUNTED + reported (not silently dropped).
       if (
         maxFanout != null &&
-        !checkFanoutCap({ siblingCount: spawnedThisTurn, max: maxFanout }).ok
+        !checkFanoutCap({ siblingCount: handOffsThisTurn(), max: maxFanout }).ok
       ) {
         cappedThisTurn += 1
         continue
       }
       processed.set(key, now())
-      const id = await spawn(sig, sourceTaskId, delegatorAgentId, runId)
-      if (id) spawnedThisTurn += 1
+      // Counted before the wait, so an event that overlaps this one sees it.
+      addHandOff(1)
+      const id = await spawn(sig, sourceTaskId, delegatorAgentId, runId, ownTask)
+      if (!id) addHandOff(-1)
     }
     if (cappedThisTurn > 0) {
       if (sourceTaskId)
@@ -2829,7 +3086,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       const planId = `${deps.teamId}:${runId}:plan`
       if (!processed.has(planId)) {
         processed.set(planId, now())
-        await startPlan(signals.plan, sourceTaskId, delegatorAgentId, runId)
+        await startPlan(signals.plan, sourceTaskId, delegatorAgentId, runId, ownTask)
       }
     }
 
@@ -3123,7 +3380,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       lastActivityAt.clear()
       openToolCall.clear()
       recentlyTerminated.clear()
-      failureCounts.clear()
+      handOffsByTurn.clear()
       humanTasks.clear()
       forceFire.clear()
       pendingStart.clear()

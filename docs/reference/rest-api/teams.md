@@ -50,6 +50,12 @@ Request bodies are JSON (up to 2 MB). Every route here is on the general [rate l
 | DELETE | `/api/teams/:id/rooms/:roomId`     | Archive a room: stop its work, keep its conversation         | No      |
 | GET    | `/api/teams/:id/onboarding`        | Read the per-team onboarding flags + user-intro text         | No      |
 | PATCH  | `/api/teams/:id/onboarding`        | Merge-update the onboarding state                            | No      |
+| GET    | `/api/teams/:id/task-prefix`       | The letters on the team's task ids                           | No      |
+| PUT    | `/api/teams/:id/task-prefix`       | Set them, until the team's first task (dashboard only)       | No      |
+| GET    | `/api/teams/:id/labels`            | The team's labels                                            | No      |
+| POST   | `/api/teams/:id/labels`            | Add a label (dashboard only)                                 | No      |
+| PATCH  | `/api/teams/:id/labels/:labelId`   | Rename a label (dashboard only)                              | No      |
+| DELETE | `/api/teams/:id/labels/:labelId`   | Remove a label from the team and every task (dashboard only) | No      |
 | GET    | `/api/teams/:id/activity-summary`  | Short summary of the team's brief, board, memory and chat    | No      |
 | POST   | `/api/teams/:id/chat`              | Send a message to a chat; the reply runs in the background   | No      |
 | POST   | `/api/teams/:id/chat/stop`         | Stop one chat's running turns and release their tasks        | No      |
@@ -1143,6 +1149,84 @@ curl -N 'http://localhost:18790/api/teams/<team-id>/chat/stream?since=8121'
 # Tail one room instead of General
 curl -N 'http://localhost:18790/api/teams/<team-id>/chat/stream?roomId=<room-id>'
 ```
+
+---
+
+## `GET /api/teams/:id/task-prefix`
+
+The letters on the team's readable task ids (`MAR` in `MAR-12`).
+
+### Responses
+
+**`200 OK`**:
+
+```ts
+{
+  prefix: string | null // what the team holds; null until a person sets it or its first task takes it
+  suggested: string // what its first task would take now; reserves nothing
+  locked: boolean // the team has a task, so the letters are fixed
+}
+```
+
+**`404 Not Found`**: `{ "error": "team not found" }`.
+
+---
+
+## `PUT /api/teams/:id/task-prefix`
+
+Sets the letters, until the team's first task exists. After that they never change, and neither does a team rename change them. A person's call: a request that did not come from the dashboard's own page gets **403** `person_only`. That check is a speed bump, not a boundary (see [Security](/operating/security)). A change goes on the [audit feed](/reference/rest-api/governance) as a `board` event.
+
+- **Request body**: `{ prefix: string }`. Two to six letters and numbers, starting with a letter, in either case; stored in upper case.
+
+### Responses
+
+**`200 OK`**: `{ "prefix": "MAR" }`.
+
+**`400 Bad Request`**: `{ "error": "invalid" }`.
+
+**`403 Forbidden`**: `{ "error": "person_only" }`.
+
+**`404 Not Found`**: `{ "error": "not_found" }`.
+
+**`409 Conflict`**: `{ "error": "locked" }` (the team has a task) or `{ "error": "taken" }` (another team holds it, or a task of a deleted team still carries it).
+
+---
+
+## `GET /api/teams/:id/labels`
+
+The team's labels, by name: `{ labels: Array<{ id: string; name: string }> }`.
+
+---
+
+## `POST /api/teams/:id/labels`
+
+Adds a label. Dashboard only, as above, and audited as a `board` event.
+
+- **Request body**: `{ name: string }`. One to 40 characters once trimmed. Names compare without case.
+
+### Responses
+
+**`201 Created`**: `{ label: { id: string, name: string } }`.
+
+**`400 Bad Request`**: `{ "error": "invalid" }`.
+
+**`403 Forbidden`**: `{ "error": "person_only" }`.
+
+**`404 Not Found`**: `{ "error": "not_found" }`, no such team.
+
+**`409 Conflict`**: `{ "error": "taken" }` or, past 100 labels on the team, `{ "error": "too_many" }`.
+
+---
+
+## `PATCH /api/teams/:id/labels/:labelId`
+
+Renames a label, by the same rules. **`200 OK`**: `{ label: { id: string, name: string } }`. Errors as for `POST`; **`404`** also for a label of another team.
+
+---
+
+## `DELETE /api/teams/:id/labels/:labelId`
+
+Removes the label from the team and from every task. Dashboard only, and audited. **`200 OK`**: `{ "ok": true }`. **`403`**: `person_only`. **`404`**: `not_found`.
 
 ---
 

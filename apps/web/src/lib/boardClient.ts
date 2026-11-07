@@ -288,6 +288,8 @@ export interface CreateTaskForAgentInput {
   assigneeAgentId: string
   /** The task this one follows up on. */
   parentTaskId?: string
+  /** Makes the create safe to repeat: the same key returns the same task. */
+  idempotencyKey?: string
 }
 
 /** Set a task's priority, a person's change from the task drawer. The server

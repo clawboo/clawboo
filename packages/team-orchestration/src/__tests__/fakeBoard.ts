@@ -4,7 +4,21 @@
 // the engine asked the board to do. Shared by the cascade contract run
 // (boardOrchestration.test.ts) and the engine's own scenario tests.
 
-import { canTransition, isTaskStatus } from '@clawboo/board-core'
+import {
+  canTransition,
+  delegationTargetOf,
+  delegatorOf,
+  HAND_OFF_TITLE_CHARS,
+  isTaskStatus,
+  ledgerAllowsAutoFire,
+  normalizeTaskTitle,
+  type HandOffLink,
+} from '@clawboo/board-core'
+import {
+  DEFAULT_MAX_CHILDREN,
+  DEFAULT_MAX_ROOT_CREATES,
+  DEFAULT_ROOT_CREATE_WINDOW_MS,
+} from '@clawboo/governance'
 
 import type {
   BoardTask,
@@ -12,6 +26,9 @@ import type {
   CompleteExecutionOutcome,
   CreateTaskInput,
   ExecutionRef,
+  HandOffCapacity,
+  HandOffInput,
+  HandOffResult,
   TaskDetail,
 } from '../boardClient'
 import type { CascadeBoard, SeedExecState } from '../contract'
@@ -80,7 +97,7 @@ export class FakeBoard implements CascadeBoard {
     const id = `task-${++this.taskN}`
     const row: FakeRow = {
       id,
-      status: 'todo',
+      status: input.status ?? 'todo',
       parentTaskId: input.parentTaskId ?? null,
       title: input.title,
       description: input.description ?? '',
@@ -92,6 +109,144 @@ export class FakeBoard implements CascadeBoard {
     this.created.push(bt)
     return bt
   }
+
+  // ── The engine's own surface, mirroring what the server binding does ──
+  private keys = new Map<string, string>() // hand-off key → task id
+  private failures = new Map<string, { failures: number; notified: boolean }>()
+
+  private childCount(parentId: string): number {
+    let n = 0
+    for (const t of this.tasks.values()) if (t.parentTaskId === parentId) n += 1
+    return n
+  }
+  private rootCount(): number {
+    let n = 0
+    for (const t of this.tasks.values()) if (t.parentTaskId === null) n += 1
+    return n
+  }
+  private sameAsk(row: FakeRow, input: HandOffInput): boolean {
+    const ask = (t: { title: string; description?: string | null }): string =>
+      normalizeTaskTitle(
+        t.title.length >= HAND_OFF_TITLE_CHARS && t.description?.startsWith(t.title)
+          ? t.description
+          : t.title,
+      )
+    return ask(row) === ask(input)
+  }
+  private openTitleMatch(input: HandOffInput): FakeRow | undefined {
+    const parent = input.parentTaskId ?? null
+    for (const t of this.tasks.values()) {
+      if (t.parentTaskId !== parent || !this.sameAsk(t, input)) continue
+      if (input.turnId && t.sourceDelegationId?.startsWith(`${input.turnId}:`)) continue
+      if (!['todo', 'in_progress', 'in_review'].includes(t.status)) continue
+      if (!t.assigneeAgentId && !delegationTargetOf(t.sourceDelegationId)) continue
+      if (t.status === 'todo' && !ledgerAllowsAutoFire(this.ledger(t.id))) continue
+      return t
+    }
+    return undefined
+  }
+  private ledger(taskId: string): Array<{ status: string }> {
+    const out: Array<{ status: string }> = []
+    for (const [execId, tid] of this.execs) {
+      if (tid !== taskId) continue
+      const done = this.completed.find((c) => c.execId === execId)
+      out.push({ status: done ? done.outcome.status : 'running' })
+    }
+    return out
+  }
+  async createHandOff(input: HandOffInput): Promise<HandOffResult> {
+    const key = input.handOffKey
+      ? `${input.handOffKey.scope.join(':')}:${normalizeTaskTitle(input.handOffKey.text)}`
+      : null
+    const replayed = key ? this.tasks.get(this.keys.get(key) ?? '') : undefined
+    if (replayed && replayed.status !== 'blocked') {
+      return { ok: true, task: this.toBoardTask(replayed), deduplicated: 'key' }
+    }
+    const open = this.openTitleMatch(input)
+    if (open) {
+      if (key) this.keys.set(key, open.id)
+      return { ok: true, task: this.toBoardTask(open), deduplicated: 'title' }
+    }
+    if (input.parentTaskId) {
+      const count = this.childCount(input.parentTaskId)
+      if (count >= DEFAULT_MAX_CHILDREN) {
+        return { ok: false, reason: 'child_cap', count, max: DEFAULT_MAX_CHILDREN }
+      }
+    } else {
+      const count = this.rootCount()
+      if (count >= DEFAULT_MAX_ROOT_CREATES) {
+        return {
+          ok: false,
+          reason: 'root_rate_cap',
+          count,
+          max: DEFAULT_MAX_ROOT_CREATES,
+          windowMs: DEFAULT_ROOT_CREATE_WINDOW_MS,
+        }
+      }
+    }
+    const task = await this.createTask(input)
+    if (!task) return { ok: false, reason: 'error' }
+    if (key) this.keys.set(key, task.id)
+    return { ok: true, task }
+  }
+  async handOffRoom(_teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null> {
+    if (parentTaskId === null) {
+      return {
+        room: Math.max(0, DEFAULT_MAX_ROOT_CREATES - this.rootCount()),
+        max: DEFAULT_MAX_ROOT_CREATES,
+        reason: 'root_rate_cap',
+      }
+    }
+    if (!this.tasks.has(parentTaskId)) return null
+    return {
+      room: Math.max(0, DEFAULT_MAX_CHILDREN - this.childCount(parentTaskId)),
+      max: DEFAULT_MAX_CHILDREN,
+      reason: 'child_cap',
+    }
+  }
+  async handOffChain(taskId: string): Promise<HandOffLink[] | null> {
+    const chain: HandOffLink[] = []
+    let cursor: string | null = taskId
+    while (cursor) {
+      const row: FakeRow | undefined = this.tasks.get(cursor)
+      if (!row) break
+      chain.push({
+        id: row.id,
+        status: row.status,
+        delegatedBy: delegatorOf(row.sourceDelegationId),
+        title: row.title,
+        identifier: null,
+      })
+      cursor = row.parentTaskId
+    }
+    return chain
+  }
+  private failureKey(teamId: string, target: string, task: string): string {
+    return `${teamId}|${target}|${task}`
+  }
+  async delegationFailure(
+    teamId: string,
+    target: string,
+    task: string,
+  ): Promise<{ failures: number; notified: boolean }> {
+    return (
+      this.failures.get(this.failureKey(teamId, target, task)) ?? { failures: 0, notified: false }
+    )
+  }
+  async noteDelegationFailure(teamId: string, target: string, task: string): Promise<void> {
+    const k = this.failureKey(teamId, target, task)
+    const now = this.failures.get(k) ?? { failures: 0, notified: false }
+    this.failures.set(k, { ...now, failures: now.failures + 1 })
+  }
+  async markDelegationFailureNotified(teamId: string, target: string, task: string): Promise<void> {
+    const k = this.failureKey(teamId, target, task)
+    const now = this.failures.get(k)
+    if (now) this.failures.set(k, { ...now, notified: true })
+  }
+  async clearDelegationFailure(teamId: string, target: string, task: string): Promise<void> {
+    this.failures.delete(this.failureKey(teamId, target, task))
+  }
+
   async claim(taskId: string, assigneeAgentId?: string): Promise<ClaimResult> {
     this.onClaim?.()
     this.claims.push(taskId)

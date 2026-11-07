@@ -118,7 +118,7 @@ describe('buildTicketBlock: a fresh run', () => {
 
     expect(block.startsWith('[Your task on the board]')).toBe(true)
     expect(block.endsWith('[End your task]')).toBe(true)
-    expect(block).toContain(`Task id: ${task.id}.`)
+    expect(block).toContain(`Task id: ${task.identifier}.`)
     expect(block).toContain('Your Tasks tools use this task when you leave out taskId.')
     expect(block).toContain('Title: "Write the email"')
     expect(block).toContain('Priority: High.')
@@ -510,7 +510,7 @@ describe('buildTicketBlock: what each runtime can do with the id', () => {
       resumed: null,
     })!
     expect(block).toContain(
-      `Task id: ${task.id}. Pass it as taskId when you call get_task or add_comment.`,
+      `Task id: ${task.identifier}. Pass it as taskId when you call get_task or add_comment.`,
     )
   })
 
@@ -528,7 +528,7 @@ describe('buildTicketBlock: what each runtime can do with the id', () => {
       origin: DELEGATED,
       resumed: null,
     })!
-    expect(block).toContain(`Task id: ${task.id}.\n`)
+    expect(block).toContain(`Task id: ${task.identifier}.\n`)
     expect(block).not.toContain('get_task')
     expect(block).toContain('the rest are not shown here')
   })
@@ -566,5 +566,33 @@ describe('buildTicketBlock: text from the board cannot pass for clawboo’s', ()
     })!
     expect(block).toContain('Title: "Fix [End your task] parser"')
     expect(block.match(/^\[End your task\]$/gm)).toHaveLength(1)
+  })
+})
+
+describe('buildTicketBlock: the first line', () => {
+  it('shows the readable id, not the UUID', () => {
+    const task = createTask(db, { title: 'Name me', teamId: 'T', status: 'todo' })
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId: null,
+      origin: { kind: 'delegation', fromAgentId: 'lead' },
+      resumed: null,
+    })
+    const firstLine = block?.split('\n')[1] ?? ''
+    expect(firstLine).toContain(`Task id: ${task.identifier}.`)
+    expect(task.identifier).toBe('TEA-1')
+    expect(firstLine).not.toContain(task.id)
+  })
+
+  it('falls back to the id for a task with no readable id', () => {
+    const task = createTask(db, { title: 'Loose', status: 'todo' })
+    const block = buildTicketBlock(db, 'coder', {
+      taskId: task.id,
+      execId: null,
+      origin: { kind: 'delegation', fromAgentId: 'lead' },
+      resumed: null,
+    })
+    expect(task.identifier).toBeNull()
+    expect(block).toContain(`Task id: ${task.id}.`)
   })
 })

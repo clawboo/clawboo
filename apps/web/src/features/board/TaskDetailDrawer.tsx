@@ -32,6 +32,7 @@ import {
   type TaskDetail,
   type WorkspaceDetail,
 } from '@/lib/boardClient'
+import { labelsOfTask } from '@/lib/teamLabels'
 import { useFleetStore } from '@/stores/fleet'
 import { useTeamStore } from '@/stores/team'
 import { MD_COMPONENTS } from '@/features/chat/chatComponents'
@@ -46,6 +47,7 @@ import { Modal } from '@/features/shared/Modal'
 import { AssignAgentSelect } from './AssignAgentSelect'
 import { PrioritySelect } from './PrioritySelect'
 import { StatusSelect } from './StatusSelect'
+import { TaskLabelsSelect } from './TaskLabelsSelect'
 import type { StatusCommit } from './useStatusMutation'
 import { runtimeNameOf, taskRuntimeOf, useAgentRuntime } from './TaskCard'
 import { ReplyReceipt } from './ReplyReceipt'
@@ -578,6 +580,13 @@ export function TaskDetailDrawer({
                 {task.title || 'Untitled task'}
               </h2>
               <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                {task.identifier ? (
+                  <Pill>
+                    <span className="font-mono" data-testid="task-identifier">
+                      {task.identifier}
+                    </span>
+                  </Pill>
+                ) : null}
                 <Pill>
                   <StatusGlyph kind={glyphKindOf(boardColumnOf(task))} />
                   {attention ? 'Needs you' : statusLabel(task.status)}
@@ -692,6 +701,21 @@ export function TaskDetailDrawer({
                       }}
                     />
                   </PropRow>
+                  {teamId ? (
+                    <PropRow label="Labels">
+                      <TaskLabelsSelect
+                        taskId={task.id}
+                        teamId={teamId}
+                        labels={labelsOfTask(task)}
+                        onChange={(labels) => {
+                          setDetail((d) =>
+                            d && d.task.id === taskId ? { ...d, task: { ...d.task, labels } } : d,
+                          )
+                          onChanged?.()
+                        }}
+                      />
+                    </PropRow>
+                  ) : null}
                   <PropRow label="Runtime">
                     {taskRuntime
                       ? runtimeNameOf(taskRuntime)

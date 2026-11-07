@@ -11,7 +11,7 @@
 // OpenClaw over the operator connection), so the leader is not coupled to any one runtime.
 
 import { envVarForProvider } from '@clawboo/adapter-native'
-import { agents, getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { agents, getSetting, isTeamLeadAgent, setSetting, type ClawbooDb } from '@clawboo/db'
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 
 import { SETTING_DEFAULT_ID } from '../agentSource/openClawAgentSource'
@@ -128,6 +128,12 @@ function activeMembers(db: ClawbooDb, teamId: string): AgentLite[] {
 export function booZeroForTeam(db: ClawbooDb, teamId: string): { id: string; name: string } | null {
   if (activeMembers(db, teamId).length === 0) return null
   return resolveBooZero(db)
+}
+
+/** Is this agent a lead of the team: its own lead, or Boo Zero, which leads every team?
+ *  A hand-off to one is an escalation, which the cycle guard lets through. */
+export function isLeadOfTeam(db: ClawbooDb, teamId: string | null, agentId: string): boolean {
+  return resolveBooZero(db)?.id === agentId || isTeamLeadAgent(db, teamId, agentId)
 }
 
 /** True when the install actually uses native — there is at least one native team member.

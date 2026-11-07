@@ -39,6 +39,16 @@ export function clampTaskPriority(value: number): number {
   return Math.min(MAX_TASK_PRIORITY, Math.max(MIN_TASK_PRIORITY, Math.round(value)))
 }
 
+/**
+ * The value to store for a priority an agent asked for. Urgent is a person's call,
+ * so an agent's write stops at High: Urgent goes to the front of every queue, and
+ * an agent marking its own work urgent would push a person's aside. The one place
+ * this rule lives.
+ */
+export function clampAgentTaskPriority(value: number): number {
+  return Math.min(TASK_PRIORITY_VALUE.high, clampTaskPriority(value))
+}
+
 /** The level a stored value reads as. */
 export function taskPriorityOf(value: number | null | undefined): TaskPriority {
   const v = clampTaskPriority(value ?? TASK_PRIORITY_VALUE.normal)

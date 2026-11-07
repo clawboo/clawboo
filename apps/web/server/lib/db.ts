@@ -17,6 +17,7 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import {
+  backfillTaskIdentifiers,
   ensureSchema,
   openDb,
   retireRulesFromBeforeRememberedChanges,
@@ -66,6 +67,11 @@ export function getDb(): ClawbooDb {
         { count: added.length, columns: added.map((c) => `${c.table}.${c.column}`) },
         'SQLite: added missing columns to an existing database',
       )
+    }
+    // Tasks made before readable ids existed get theirs. Does nothing once done.
+    const numbered = backfillTaskIdentifiers(db)
+    if (numbered > 0) {
+      log.info({ count: numbered }, 'Board: gave existing tasks their readable ids')
     }
     // A permission change is never silent. An older build granted every
     // connector to the whole fleet on connect; those rows still answer for every

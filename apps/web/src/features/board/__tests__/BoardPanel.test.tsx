@@ -234,6 +234,7 @@ describe('BoardPanel', () => {
 
     await waitFor(() => expect(createdBody).not.toBeNull())
     expect(createdBody).toEqual({
+      idempotencyKey: expect.any(String),
       title: 'Draft the changelog',
       teamId: 'team-1',
       assigneeAgentId: 'coder',

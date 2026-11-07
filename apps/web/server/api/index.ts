@@ -52,6 +52,14 @@ import {
   teamChatStopPOST,
   teamChatClearPOST,
 } from './teams'
+import {
+  teamLabelDELETE,
+  teamLabelPATCH,
+  teamLabelsGET,
+  teamLabelsPOST,
+  teamTaskPrefixGET,
+  teamTaskPrefixPUT,
+} from './teamLabels'
 import { teamRoomDELETE, teamRoomPATCH, teamRoomsGET, teamRoomsPOST } from './rooms'
 import { teamChatGET, teamChatExchangePOST } from './teamChat'
 import { teamChatStreamGET } from './teamChatStream'
@@ -95,6 +103,7 @@ import {
   boardUpdatePATCH,
   boardCancelDependentsPOST,
   boardCommentPOST,
+  boardTaskLabelsPUT,
   boardExecutionCreatePOST,
   boardExecutionCompletePATCH,
   boardExecutionsGET,
@@ -322,6 +331,12 @@ router.patch('/api/teams/:id', teamsPATCH)
 router.delete('/api/teams/:id', teamsDELETE)
 router.post('/api/teams/:id/agents', teamAgentPOST)
 router.delete('/api/teams/:id/agents/:agentId', teamAgentDELETE)
+router.get('/api/teams/:id/task-prefix', teamTaskPrefixGET)
+router.put('/api/teams/:id/task-prefix', teamTaskPrefixPUT)
+router.get('/api/teams/:id/labels', teamLabelsGET)
+router.post('/api/teams/:id/labels', teamLabelsPOST)
+router.patch('/api/teams/:id/labels/:labelId', teamLabelPATCH)
+router.delete('/api/teams/:id/labels/:labelId', teamLabelDELETE)
 
 // Chat rooms inside a team (subsets of its members, each its own conversation).
 // DELETE archives: the transcript is kept, the room's in-flight work is stopped.
@@ -417,6 +432,7 @@ router.get('/api/board/:taskId', boardGetGET)
 router.post('/api/board/:taskId/claim', boardClaimPOST)
 router.patch('/api/board/:taskId', boardUpdatePATCH)
 router.post('/api/board/:taskId/comments', boardCommentPOST)
+router.put('/api/board/:taskId/labels', boardTaskLabelsPUT)
 // A person's direct hand-off: run a stuck task again, or give it to one agent.
 router.post('/api/board/:taskId/retry', boardRetryPOST)
 router.post('/api/board/:taskId/assign', boardAssignPOST)

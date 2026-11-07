@@ -188,6 +188,11 @@ teammate can act without coming back to ask questions.
 </delegate>
 \`\`\`
 
+The board makes a task once. If an open task with the same words already sits under
+the same parent from the last 48 hours, you get a note naming that task instead of a
+second one. A hand-off cannot go back to an agent waiting on your work, except the lead:
+your result reaches whoever handed you the task on its own.
+
 You can include multiple \`<delegate>\` blocks in a single response — one per
 teammate you're coordinating with.
 
@@ -501,6 +506,11 @@ A specific, self-contained task description. Include all the context the
 teammate needs to act without coming back to ask questions.
 </delegate>
 \`\`\`
+
+The board makes a task once. If an open task with the same words already sits under
+the same parent from the last 48 hours, you get a note naming that task instead of a
+second one. A hand-off cannot go back to an agent waiting on your work, except the lead:
+your result reaches whoever handed you the task on its own.
 
 You can include multiple \`<delegate>\` blocks in a single response.
 

@@ -1,7 +1,15 @@
 import crypto from 'node:crypto'
 import { rm } from 'node:fs/promises'
 import type { Request, Response } from 'express'
-import { chatMessages, setSetting, teams, agents, settings } from '@clawboo/db'
+import {
+  chatMessages,
+  clearTeamDelegationFailures,
+  setSetting,
+  teams,
+  agents,
+  settings,
+} from '@clawboo/db'
+import { createLogger } from '@clawboo/logger'
 import { eq, inArray, like, sql } from 'drizzle-orm'
 import { personOf } from '../lib/auth'
 import { getDb } from '../lib/db'
@@ -30,6 +38,8 @@ import {
   hasTeamOrchestrator,
   isActiveTeamRoom,
 } from '../lib/teamChat/teamOrchestrator'
+
+const log = createLogger('teams-api')
 
 /** The chat room a request names (`roomId` in the body or query); null = the
  *  team's own group chat. Anything that is not a non-empty string is the default. */
@@ -297,7 +307,10 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
       .where(like(settings.key, taskSessionKeysForTeamLike(teamId)))
       .run()
 
-    // Delete the team (boo_zero_team_briefs and rooms FK-cascade).
+    // Its failure counts go with it (a soft reference, so no cascade).
+    clearTeamDelegationFailures(db, teamId)
+
+    // Delete the team (boo_zero_team_briefs, rooms and labels FK-cascade).
     const existed = db.delete(teams).where(eq(teams.id, teamId)).run().changes > 0
 
     // After the row, so a failed delete never loses the files, and only for a
@@ -457,6 +470,15 @@ export function teamChatIngestPOST(req: Request, res: Response): void {
     if (!isActiveTeamRoom(teamId, roomId)) {
       res.status(404).json({ error: 'room not found' })
       return
+    }
+    // A person has spoken to the team, so the failure breaker starts over: "try
+    // again" must work once they have fixed what was wrong. A loop no person is in
+    // sends no message here, and that loop is what the breaker is for. Best-effort: a
+    // person's message must not fail on this bookkeeping.
+    try {
+      clearTeamDelegationFailures(db, teamId)
+    } catch (err) {
+      log.warn({ err, teamId }, 'could not clear the failure breaker')
     }
     const mcpBaseUrl = loopbackMcpBaseUrl(req)
     // Fire-and-forget: the orchestrator owns the long-running cascade. Not awaited

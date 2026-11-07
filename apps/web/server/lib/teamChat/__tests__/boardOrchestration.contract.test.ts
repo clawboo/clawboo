@@ -41,12 +41,16 @@ import {
   type SeedExecState,
 } from '@clawboo/team-orchestration/contract'
 import type {
-  BoardClient,
   BoardTask,
   ClaimResult,
   CompleteExecutionOutcome,
   CreateTaskInput,
+  EngineBoardClient,
   ExecutionRef,
+  HandOffCapacity,
+  HandOffInput,
+  HandOffLink,
+  HandOffResult,
   TaskDetail,
 } from '@clawboo/team-orchestration'
 
@@ -58,7 +62,7 @@ const TEAM = 't1'
 class RealCascadeBoard implements CascadeBoard {
   private dir: string
   private db: ClawbooDb
-  private real: BoardClient
+  private real: EngineBoardClient
   /** Undefined = an unscoped client (the team's group chat, as before rooms). */
   private readonly roomId: string | undefined
 
@@ -108,6 +112,30 @@ class RealCascadeBoard implements CascadeBoard {
     const task = await this.real.createTask({ ...input, teamId: input.teamId ?? TEAM })
     if (task) this.created.push(task)
     return task
+  }
+  async createHandOff(input: HandOffInput): Promise<HandOffResult> {
+    this.onCreate?.()
+    const result = await this.real.createHandOff({ ...input, teamId: input.teamId ?? TEAM })
+    if (result.ok && !result.deduplicated) this.created.push(result.task)
+    return result
+  }
+  handOffRoom(teamId: string, parentTaskId: string | null): Promise<HandOffCapacity | null> {
+    return this.real.handOffRoom(teamId, parentTaskId)
+  }
+  handOffChain(taskId: string): Promise<HandOffLink[] | null> {
+    return this.real.handOffChain(taskId)
+  }
+  delegationFailure(teamId: string, target: string, task: string) {
+    return this.real.delegationFailure(teamId, target, task)
+  }
+  noteDelegationFailure(teamId: string, target: string, task: string): Promise<void> {
+    return this.real.noteDelegationFailure(teamId, target, task)
+  }
+  markDelegationFailureNotified(teamId: string, target: string, task: string): Promise<void> {
+    return this.real.markDelegationFailureNotified(teamId, target, task)
+  }
+  clearDelegationFailure(teamId: string, target: string, task: string): Promise<void> {
+    return this.real.clearDelegationFailure(teamId, target, task)
   }
   async claim(
     taskId: string,

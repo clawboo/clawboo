@@ -1,7 +1,8 @@
 // The New task dialog leads with one field and a suggested agent: the sentence's
 // words against each member's role (GET /api/teams/member-roles), else the agent
 // last given a task, else the team lead. Enter sends it, picking an agent picks
-// its team, and More options opens the full form. The POST body is unchanged.
+// its team, and More options opens the full form. The POST body carries the draft's
+// idempotency key besides.
 
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -103,7 +104,12 @@ describe('NewTaskDialog', () => {
     await user.keyboard('{Enter}')
     await waitFor(() => expect(onClose).toHaveBeenCalled())
     expect(posted).toEqual([
-      { title: 'Draft the launch announcement', teamId: 'team-1', assigneeAgentId: 'ada' },
+      {
+        title: 'Draft the launch announcement',
+        teamId: 'team-1',
+        assigneeAgentId: 'ada',
+        idempotencyKey: expect.any(String),
+      },
     ])
     expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ id: 'new1' }))
   })
@@ -171,6 +177,7 @@ describe('NewTaskDialog', () => {
 
     await waitFor(() => expect(posted).toHaveLength(1))
     expect(posted[0]).toEqual({
+      idempotencyKey: expect.any(String),
       title: 'Draft the launch announcement',
       description: 'Keep it short.',
       teamId: 'team-1',
@@ -218,5 +225,35 @@ describe('NewTaskDialog', () => {
     expect(within(dialog).queryByTestId('new-task-suggestion')).toBeNull()
     await user.click(agent)
     expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual(['Coder'])
+  })
+
+  it('sends one key per draft: a retry repeats it, and an edit makes a new one', async () => {
+    seed()
+    const posted: Record<string, unknown>[] = []
+    let refuse = true
+    server.use(
+      http.get('/api/teams/member-roles', () => HttpResponse.json({ roles: ROLES })),
+      http.post('/api/board', async ({ request }) => {
+        posted.push((await request.json()) as Record<string, unknown>)
+        if (refuse) return new HttpResponse(null, { status: 500 })
+        return HttpResponse.json({ task: { id: 'new', title: 'x' } })
+      }),
+    )
+    const user = userEvent.setup()
+    const { dialog, field } = renderDialog()
+    await user.type(field, 'Draft the launch announcement{Enter}')
+    await waitFor(() => expect(posted).toHaveLength(1))
+    // The answer never came back, so the person sends it again.
+    await waitFor(() =>
+      expect(within(dialog).getByRole('button', { name: /create|send/i })).toBeEnabled(),
+    )
+    await user.type(field, '{Enter}')
+    await waitFor(() => expect(posted).toHaveLength(2))
+    expect(posted[0]!['idempotencyKey']).toEqual(expect.any(String))
+    expect(posted[1]!['idempotencyKey']).toBe(posted[0]!['idempotencyKey'])
+    refuse = false
+    await user.type(field, ' today{Enter}')
+    await waitFor(() => expect(posted).toHaveLength(3))
+    expect(posted[2]!['idempotencyKey']).not.toBe(posted[0]!['idempotencyKey'])
   })
 })

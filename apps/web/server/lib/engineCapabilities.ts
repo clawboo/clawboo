@@ -38,6 +38,14 @@ export const FEATURE_ROUTES = {
     'GET /api/agents/:agentId/chat/stream',
   ],
   'board.steering': ['POST /api/board/:taskId/comments'],
+  'board.readableIds': ['GET /api/teams/:id/task-prefix', 'PUT /api/teams/:id/task-prefix'],
+  'board.labels': [
+    'GET /api/teams/:id/labels',
+    'POST /api/teams/:id/labels',
+    'PATCH /api/teams/:id/labels/:labelId',
+    'DELETE /api/teams/:id/labels/:labelId',
+    'PUT /api/board/:taskId/labels',
+  ],
   'workspace.view': [
     'GET /api/agents/:agentId/workspaces',
     'GET /api/board/:taskId/workspace/tree',
@@ -108,6 +116,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // without a person's override. A task with no verdict can still be moved.
     'board.verification': true,
     'board.steering': true,
+    'board.readableIds': true,
+    'board.labels': true,
     'workspace.view': true,
     'workspace.preview': true,
     'agent.nativeShell': true,

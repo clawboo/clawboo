@@ -51,6 +51,8 @@ export type TicketToolAccess =
 
 export interface TicketBlockInput {
   taskId: string
+  /** The readable id, like `CLB-12`, which is what the first line shows. */
+  identifier?: string | null
   title: string
   priority: TaskPriority
   /** Why this run started, as a sentence ending in a full stop. */
@@ -95,12 +97,13 @@ const title = (t: string): string => `"${oneLine(t, TICKET_LIMITS.titleChars)}"`
 
 export function renderTicketBlock(input: TicketBlockInput): string {
   const lines: string[] = [OPEN]
+  const shownId = input.identifier ?? input.taskId
   lines.push(
     input.tools === 'bound'
-      ? `Task id: ${input.taskId}. Your Tasks tools use this task when you leave out taskId.`
+      ? `Task id: ${shownId}. Your Tasks tools use this task when you leave out taskId.`
       : input.tools === 'pass-id'
-        ? `Task id: ${input.taskId}. Pass it as taskId when you call get_task or add_comment.`
-        : `Task id: ${input.taskId}.`,
+        ? `Task id: ${shownId}. Pass it as taskId when you call get_task or add_comment.`
+        : `Task id: ${shownId}.`,
   )
   lines.push(`Title: ${title(input.title)}`)
   if (input.priority !== 'normal') lines.push(`Priority: ${TASK_PRIORITY_LABEL[input.priority]}.`)

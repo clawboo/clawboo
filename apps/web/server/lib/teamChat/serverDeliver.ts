@@ -18,6 +18,7 @@
 // so it has exactly ONE drain. There is no catch-all consume loop — a run started
 // out-of-band would be invisible to the engine.
 
+import { randomUUID } from 'node:crypto'
 import { mkdir } from 'node:fs/promises'
 
 import {
@@ -930,6 +931,7 @@ export function createServerDeliver(deps: ServerDeliverDeps) {
     const stamp: RunStamp = {
       reportForTaskId,
       stopGen: deliveredGen,
+      deliveryId: randomUUID(),
       ...(reportUpIds?.length ? { reportUpIds } : {}),
     }
     // A follow-up holds work too: it neither resumes the agent's user-facing

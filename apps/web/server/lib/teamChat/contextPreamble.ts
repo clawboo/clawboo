@@ -528,6 +528,7 @@ export function buildTicketBlock(db: ClawbooDb, agentId: string, run: TicketRun)
 
   return renderTicketBlock({
     taskId: task.id,
+    identifier: task.identifier,
     title: task.title,
     priority: taskPriorityOf(task.priority),
     why,

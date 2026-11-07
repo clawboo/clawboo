@@ -37,7 +37,7 @@ import type {
   StartOpts,
   TaskHandle,
 } from '@clawboo/executor'
-import { createNudgeQueue, type TurnOrigin } from '@clawboo/team-orchestration'
+import { createNudgeQueue, type RunStamp, type TurnOrigin } from '@clawboo/team-orchestration'
 import { eq } from 'drizzle-orm'
 
 import { getDb, resetDb } from '../../db'
@@ -236,6 +236,8 @@ describe('serverDeliver: a board task run is bound to its task', () => {
       .run()
   }
 
+  const stamps: RunStamp[] = []
+
   function deliver(nudge = createNudgeQueue()) {
     return createServerDeliver({
       db,
@@ -243,7 +245,8 @@ describe('serverDeliver: a board task run is bound to its task', () => {
       mcpBaseUrl: 'http://127.0.0.1:1',
       nudge,
       abortMap: new Map(),
-      onEvent: async (_sk, ev) => {
+      onEvent: async (_sk, ev, run) => {
+        stamps.push(run)
         if (ev.kind === 'done' || (ev.kind === 'error' && ev.fatal)) ended++
       },
       onSessionClosed: async () => {
@@ -295,6 +298,19 @@ describe('serverDeliver: a board task run is bound to its task', () => {
     return captured[captured.length - 1]!
   }
 
+  it('stamps each delivery with its own id, the same on all of its events', async () => {
+    seedAgent('a1', 'codex')
+    stamps.length = 0
+    await runLeaderTurn('a1', 'first')
+    const first = [...stamps]
+    stamps.length = 0
+    await runLeaderTurn('a1', 'second')
+    expect(first[0]?.deliveryId).toEqual(expect.any(String))
+    expect(new Set(first.map((r) => r.deliveryId)).size).toBe(1)
+    expect(stamps[0]?.deliveryId).toEqual(expect.any(String))
+    expect(stamps[0]?.deliveryId).not.toBe(first[0]?.deliveryId)
+  })
+
   function claimedTask(title: string, agentId: string): string {
     const t = createTask(db, { title, description: `Details for ${title}.`, teamId: 'T' })
     expect(claimTask(db, t.id, agentId).ok).toBe(true)
@@ -312,7 +328,9 @@ describe('serverDeliver: a board task run is bound to its task', () => {
       // The brief stays the message, the agent's instruction.
       expect(run.opts.message).toBe('Write the parser\n\nDetails for Write the parser.')
       const context = run.opts.context ?? ''
-      expect(context).toContain(`Task id: ${taskId}.`)
+      // The ticket block names the task by its readable id.
+      expect(context).toContain(`Task id: ${getTask(db, taskId)?.identifier}.`)
+      expect(getTask(db, taskId)?.identifier).toMatch(/^[A-Z][A-Z0-9]+-\d+$/)
       // Stable team preamble, then the ticket block, then the envelope.
       const roster = context.indexOf('Your teammates')
       const open = context.indexOf('[Your task on the board]')

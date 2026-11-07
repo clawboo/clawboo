@@ -763,3 +763,22 @@ describe('DraggableCard: keys, clicks and the grip', () => {
     expect(card).not.toHaveClass('calendar-chip--source')
   })
 })
+
+describe('TaskCard: readable id and labels', () => {
+  const base = { id: 't1', title: 'Work', status: 'todo', createdAt: 1, updatedAt: 1 }
+
+  it('shows the readable id, and nothing in its place for a task with none', () => {
+    render(<TaskCard task={{ ...base, identifier: 'CLB-12' }} onClick={() => {}} />)
+    expect(screen.getByTestId('board-card-identifier')).toHaveTextContent('CLB-12')
+    cleanup()
+    render(<TaskCard task={base} onClick={() => {}} />)
+    expect(screen.queryByTestId('board-card-identifier')).toBeNull()
+  })
+
+  it('shows two labels and counts the rest', () => {
+    const labels = ['a', 'b', 'c', 'd'].map((name) => ({ id: name, name }))
+    render(<TaskCard task={{ ...base, labels }} onClick={() => {}} />)
+    expect(screen.getAllByTestId('task-label').map((el) => el.textContent)).toEqual(['a', 'b'])
+    expect(screen.getByText('+2')).toHaveAttribute('title', 'c, d')
+  })
+})

@@ -23,6 +23,7 @@ import { useEditorStore } from '@/stores/editor'
 import { useSettingsModalStore } from '@/stores/settingsModal'
 import { useFleetStore } from '@/stores/fleet'
 import { fetchBoardResult, type BoardTask } from '@/lib/boardClient'
+import { labelsOfTask } from '@/lib/teamLabels'
 import {
   fetchSchedules,
   runScheduleNow,
@@ -325,6 +326,12 @@ function isRunning(task: BoardTask): boolean {
 /** Whether the board's filter lets a task through. */
 function matchesFilter(task: BoardTask, filter: BoardFilter): boolean {
   if (filter.running && !isRunning(task)) return false
+  if (
+    filter.labels.size > 0 &&
+    !labelsOfTask(task).some((label) => filter.labels.has(label.name.toLowerCase()))
+  ) {
+    return false
+  }
   if (filter.agents.size === 0 && !filter.unowned) return true
   const owner = taskOwnerOf(task)
   return owner ? filter.agents.has(owner) : filter.unowned
@@ -881,6 +888,18 @@ export function BoardPanel() {
           }),
     [tasks, overrides],
   )
+
+  // The labels Filter offers: the names on the tasks in view, one entry per name.
+  const filterLabels = useMemo(() => {
+    const byKey = new Map<string, string>()
+    for (const task of effectiveTasks) {
+      for (const label of labelsOfTask(task)) {
+        const key = label.name.toLowerCase()
+        if (!byKey.has(key)) byKey.set(key, label.name)
+      }
+    }
+    return [...byKey.values()].sort((a, b) => a.localeCompare(b))
+  }, [effectiveTasks])
 
   // The filter, applied once: the columns, Needs you and the calendar all draw
   // from what it lets through. Find still searches every task.
@@ -1917,7 +1936,12 @@ export function BoardPanel() {
       >
         <Search size={14} strokeWidth={2} aria-hidden />
       </button>
-      <FilterMenuButton agents={filterAgents} filter={boardFilter} onChange={setBoardFilter} />
+      <FilterMenuButton
+        agents={filterAgents}
+        labels={filterLabels}
+        filter={boardFilter}
+        onChange={setBoardFilter}
+      />
       <DisplayButton
         routines={
           range

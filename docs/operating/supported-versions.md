@@ -55,6 +55,8 @@ Every surface talks to the same server, so a feature the server has can reach ev
 | 1:1 chats                                           | `chat.direct`                                                               | Supported                      | Planned     | Planned       |
 | Board, with checks on finished work                 | `board.verification`                                                        | Supported                      | Planned     | Planned       |
 | Comments that reach a running task                  | `board.steering`                                                            | Supported                      | Planned     | Planned       |
+| Readable task ids                                   | `board.readableIds`                                                         |
+| Team labels on tasks                                | `board.labels`                                                              |
 | Workspace view and page preview                     | `workspace.view`, `workspace.preview`                                       | Supported                      | Planned     | Planned       |
 | Agent browser screenshots                           | `agent.screenshots`                                                         | Supported                      | Planned     | Planned       |
 | Shell commands for Clawboo Native agents            | `agent.nativeShell`                                                         | Supported                      | Planned     | Planned       |

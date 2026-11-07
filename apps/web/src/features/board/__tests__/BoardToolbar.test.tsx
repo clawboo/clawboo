@@ -106,6 +106,30 @@ describe('Filter', () => {
     expect(screen.queryByRole('menu', { name: 'Filter the board' })).toBeNull()
   })
 
+  it('narrows the board to a label, one entry per name across teams', async () => {
+    serve()
+    server.use(
+      http.get('/api/board', () =>
+        HttpResponse.json({
+          tasks: [
+            { ...TASKS()[0], labels: [{ id: 'l1', name: 'Bug' }] },
+            { ...TASKS()[1], labels: [{ id: 'l2', name: 'bug' }] },
+            { id: 'c', title: 'Plain work', status: 'todo', createdAt: earlier(), labels: [] },
+          ],
+        }),
+      ),
+    )
+    const user = userEvent.setup()
+    renderBoard()
+    await screen.findByText('Plain work')
+    await user.click(screen.getByTestId('board-filter'))
+    const menu = await screen.findByRole('menu', { name: 'Filter the board' })
+    expect(within(menu).getAllByRole('menuitemcheckbox', { name: /bug/i })).toHaveLength(1)
+    await user.click(within(menu).getByRole('menuitemcheckbox', { name: /bug/i }))
+    expect(shownTitles()).toEqual(['Coder work', 'Writer work'])
+    expect(screen.getByTestId('board-filter')).toHaveAccessibleName('Filter, 1 on')
+  })
+
   it('drops the filter when a browser alert opens Needs you, so what it is about shows', async () => {
     serve([
       ...TASKS(),

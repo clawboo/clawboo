@@ -124,6 +124,10 @@ Do not sign the URL for the id of an agent Clawboo also runs. The outside agent 
 
 </Warning>
 
+## How agents name and create tasks
+
+The Tasks tools take a task's readable id (`MAR-12`) wherever they take its id. Creates are safe to repeat: the same create, or an open task with the same title under the same parent from the last 48 hours, returns the existing task with `deduplicated: true`. An agent can set a priority up to High. See [MCP tools](/reference/mcp-tools#a-task-is-made-once).
+
 ## What an attached agent can do
 
 What an agent may do depends on the URL it attaches with. A URL counts as signed only when its `scopeSig` matches the ids in it. A URL without a signature, or with any id edited by hand, is served as unsigned, and so is the default snippet you get without `scopeTeamId` or `scopeAgentId`.

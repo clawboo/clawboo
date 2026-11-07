@@ -26,7 +26,14 @@ export interface Budget {
 }
 
 export type AuditEventType =
-  'install' | 'approval' | 'tool_call' | 'budget' | 'cap_hit' | 'verification' | 'circuit_break'
+  | 'install'
+  | 'approval'
+  | 'tool_call'
+  | 'budget'
+  | 'cap_hit'
+  | 'verification'
+  | 'circuit_break'
+  | 'board'
 
 export interface AuditRow {
   id: string

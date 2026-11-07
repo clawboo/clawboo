@@ -6,6 +6,7 @@ import { Worker } from 'node:worker_threads'
 import { describe, expect, it } from 'vitest'
 
 import { createDb } from '../../db'
+import { teams } from '../../schema'
 import { createTask, listTasks } from '../repository'
 
 // Gated: real OS-thread contention needs the BUILT dist (a Worker gets no TS
@@ -64,6 +65,25 @@ function runChildWorker(
   })
 }
 
+function runCreateWorker(
+  dbPath: string,
+  teamId: string,
+  id: number,
+  startAtMs: number,
+  input: Record<string, unknown>,
+): Promise<{ taskId: string; identifier: string | null }> {
+  return new Promise((resolve, reject) => {
+    const w = new Worker(workerPath, {
+      workerData: { dbPath, taskId: teamId, id, mode: 'create', startAtMs, input },
+    })
+    w.once('message', (m: { taskId: string; identifier: string | null; error?: string }) => {
+      if (m.error) reject(new Error(m.error))
+      else resolve({ taskId: m.taskId, identifier: m.identifier })
+    })
+    w.once('error', reject)
+  })
+}
+
 describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
   it(`${WORKERS} concurrent writers complete with zero "database is locked"`, async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-contention-'))
@@ -97,6 +117,58 @@ describe.skipIf(!ENABLED)('write contention (real concurrency)', () => {
       expect(winners).toHaveLength(1)
       expect(losers).toHaveLength(WORKERS - 1)
       expect(losers.every((r) => r.reason === 'conflict')).toBe(true)
+      db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it(`${WORKERS} concurrent creates never share an identifier, even on the team's first task`, async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-identifier-race-'))
+    const dbPath = path.join(dir, 'test.db')
+    try {
+      const db = createDb(dbPath)
+      db.insert(teams)
+        .values({ id: 't1', name: 'Clawboo', icon: 'x', color: '#0', createdAt: 1, updatedAt: 1 })
+        .run()
+      const startAtMs = Date.now() + 3000
+      const results = await Promise.all(
+        Array.from({ length: WORKERS }, (_, i) => runCreateWorker(dbPath, 't1', i, startAtMs, {})),
+      )
+      const ids = results.map((r) => r.identifier)
+      expect(new Set(ids).size).toBe(WORKERS)
+      expect(new Set(ids.map((i) => i?.split('-')[0]))).toEqual(new Set(['CLA']))
+      expect(ids.map((i) => Number(i?.split('-')[1])).sort((a, b) => a - b)).toEqual(
+        Array.from({ length: WORKERS }, (_, i) => i + 1),
+      )
+      db.$client.close()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it(`${WORKERS} concurrent creates with one key make one task, and same words as an agent make one`, async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'clawboo-key-race-'))
+    const dbPath = path.join(dir, 'test.db')
+    try {
+      const db = createDb(dbPath)
+      const startAtMs = Date.now() + 3000
+      const keyed = await Promise.all(
+        Array.from({ length: WORKERS }, (_, i) =>
+          runCreateWorker(dbPath, 'team1', i, startAtMs, { createKey: { key: 'same' } }),
+        ),
+      )
+      expect(new Set(keyed.map((r) => r.taskId)).size).toBe(1)
+      const startTitles = Date.now() + 3000
+      const titled = await Promise.all(
+        Array.from({ length: WORKERS }, (_, i) =>
+          runCreateWorker(dbPath, 'team2', i, startTitles, {
+            title: 'Same words',
+            agentCreated: true,
+          }),
+        ),
+      )
+      expect(new Set(titled.map((r) => r.taskId)).size).toBe(1)
       db.$client.close()
     } finally {
       rmSync(dir, { recursive: true, force: true })

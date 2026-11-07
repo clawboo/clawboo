@@ -93,6 +93,11 @@ function TaskRow({ task, onOpen }: { task: BoardTaskView; onOpen: () => void }) 
           {task.title || 'Untitled task'}
         </span>
         <span className="truncate text-[11.5px] text-muted-foreground">
+          {task.identifier ? (
+            <span className="font-mono" data-testid="team-task-id">
+              {task.identifier} ·{' '}
+            </span>
+          ) : null}
           {subtitleOf(task, assigneeName)}
         </span>
       </span>

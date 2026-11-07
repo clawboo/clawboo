@@ -14,16 +14,20 @@ export {
   RUN_COST_SOURCES,
   TASK_STATUSES,
   canTransition,
+  clampAgentTaskPriority,
   delegatorOf,
+  findHandOffCycle,
   formatInterSessionMessage,
   formatPeerPost,
   isLocked,
   isTaskStatus,
+  isTaskIdentifier,
   isTerminal,
   legalTargets,
   summarizeRunCost,
 } from '@clawboo/board-core'
 export type {
+  HandOffLink,
   AttentionReason,
   InterSessionAttribution,
   PeerPostLike,
@@ -34,6 +38,10 @@ export type {
 } from '@clawboo/board-core'
 export * from './attention'
 export * from './attempts'
+export { deriveCreateKey } from './createDedupe'
+export * from './delegationFailures'
+export * from './identifiers'
+export * from './labels'
 export * from './events'
 export * from './repository'
 export * from './rooms'

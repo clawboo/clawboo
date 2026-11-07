@@ -8,7 +8,11 @@ import type { Request, Response } from 'express'
 import { randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 
-import { delegationTargetOf, encodeHumanAssignment } from '@clawboo/board-core'
+import {
+  clampAgentTaskPriority,
+  delegationTargetOf,
+  encodeHumanAssignment,
+} from '@clawboo/board-core'
 import {
   addComment,
   agents,
@@ -45,8 +49,12 @@ import {
   workspaceActionBody,
   getWorkspaceForTask,
   isStrandedInProgress,
+  labelsForTasks,
+  setTaskLabels,
+  taskLabelsBody,
   type ClawbooDb,
   type DbTask,
+  type TaskLabel,
   type TaskRunCost,
   type TaskStatus,
 } from '@clawboo/db'
@@ -110,7 +118,10 @@ export function boardListGET(req: Request, res: Response): void {
     res.json({
       tasks: withRunningSince(
         db,
-        withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+        withLabels(
+          db,
+          withRunCost(db, withAttention(db, listTasks(db, { teamId, status, includeDropped }))),
+        ),
       ),
     })
   } catch (err) {
@@ -138,6 +149,7 @@ export function boardGetGET(req: Request, res: Response): void {
         runningSince: runningSinceForTasks(db, [taskId]).get(taskId) ?? null,
         // How the run on it takes a comment right now, for the composer's hint.
         runSteering: taskRunSteering(taskId),
+        labels: labelsForTasks(db, [taskId]).get(taskId) ?? [],
       },
       comments: getComments(db, taskId),
       ancestors: getAncestors(db, taskId),
@@ -156,6 +168,28 @@ function withAttention(db: ClawbooDb, rows: DbTask[]): Array<DbTask & { attentio
 
 /** What a task with no recorded run cost carries. */
 const NO_RUN_COST: TaskRunCost = { usd: null, estimated: false }
+
+/** Each task with its labels, read in one query. */
+function withLabels<T extends DbTask>(
+  db: ClawbooDb,
+  rows: T[],
+): Array<T & { labels: TaskLabel[] }> {
+  const byId = labelsForTasks(
+    db,
+    rows.map((t) => t.id),
+  )
+  return rows.map((t) => ({ ...t, labels: byId.get(t.id) ?? [] }))
+}
+
+/**
+ * A priority as this caller may set it. Urgent is a person's call: anything but the
+ * dashboard's own page stops at High, as an agent's create_task does. A speed bump
+ * (see isDashboardRequest), and the same one a person's comment goes through.
+ */
+function priorityFor(req: Request, priority: number | undefined): number | undefined {
+  if (priority === undefined || isDashboardRequest(req)) return priority
+  return clampAgentTaskPriority(priority)
+}
 
 /** Each task with what its runs cost (`runCost`), summed from the run ledger in
  *  one read, so a card shows every run's cost and whether any of it is estimated. */
@@ -212,7 +246,7 @@ export function boardCreatePOST(req: Request, res: Response): void {
       return
     }
     const db = getDb()
-    const { assigneeAgentId, ...input } = parsed.data
+    const { assigneeAgentId, idempotencyKey, priority, ...input } = parsed.data
     if (assigneeAgentId) {
       if (!input.teamId) {
         res.status(400).json({ error: 'team_required' })
@@ -227,8 +261,14 @@ export function boardCreatePOST(req: Request, res: Response): void {
         return
       }
     }
+    const allowedPriority = priorityFor(req, priority)
     const task = createTask(db, {
       ...input,
+      ...(allowedPriority !== undefined ? { priority: allowedPriority } : {}),
+      // Kept to its team, so a key cannot fetch another team's task.
+      ...(idempotencyKey
+        ? { createKey: { key: `rest:${input.teamId ?? ''}:${idempotencyKey}` } }
+        : {}),
       ...(assigneeAgentId
         ? {
             status: input.status ?? 'todo',
@@ -236,6 +276,14 @@ export function boardCreatePOST(req: Request, res: Response): void {
           }
         : {}),
     })
+    // A retried draft: it was logged and started the first time.
+    if (task.deduplicated) {
+      res.json({
+        task: { ...task, attention: attentionForTask(db, task.id), runCost: runCostOf(db, task) },
+        deduplicated: true,
+      })
+      return
+    }
     // Observability: emit self-gates → no-op when obs is off.
     emitEvent(db, {
       kind: 'task_created',
@@ -283,6 +331,44 @@ function startTask(
     })
   } else if (teamId) {
     requestTaskDispatch(teamId, taskId, mcpBaseUrl)
+  }
+}
+
+// ─── PUT /api/board/:taskId/labels ──────────────────────────────────────────
+// Body: { labelIds }. Replaces the task's labels, all from its own team's. A person's
+// call, so it must come from the dashboard's own page.
+export function boardTaskLabelsPUT(req: Request, res: Response): void {
+  if (!isDashboardRequest(req)) {
+    res.status(403).json({ error: 'person_only' })
+    return
+  }
+  const parsed = taskLabelsBody.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
+    return
+  }
+  try {
+    const db = getDb()
+    const taskId = (req.params['taskId'] as string | undefined) ?? ''
+    const result = setTaskLabels(db, taskId, parsed.data.labelIds)
+    if (!result.ok) {
+      res.status(result.reason === 'not_found' ? 404 : 409).json({ error: result.reason })
+      return
+    }
+    const task = getTask(db, taskId)
+    appendAudit(db, {
+      eventType: 'board',
+      taskId,
+      teamId: task?.teamId ?? null,
+      summary: {
+        action: 'set_task_labels',
+        labels: result.labels.map((l) => l.name),
+        ...personField(req),
+      },
+    })
+    res.json({ labels: result.labels })
+  } catch (err) {
+    res.status(500).json({ error: String(err) })
   }
 }
 
@@ -499,7 +585,12 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
     }
     const db = getDb()
     const taskId = (req.params['taskId'] as string | undefined) ?? ''
-    const { status, humanOverride, completedAt, ...fields } = parsed.data
+    const { status, humanOverride, completedAt, priority, ...rest } = parsed.data
+    const allowedPriority = priorityFor(req, priority)
+    const fields = {
+      ...rest,
+      ...(allowedPriority !== undefined ? { priority: allowedPriority } : {}),
+    }
 
     let priorStatus: string | null = null
     let cancelledDependents: Array<{ id: string; title: string }> = []
@@ -529,7 +620,7 @@ export function boardUpdatePATCH(req: Request, res: Response): void {
       // could run either: cancel them with it rather than leave them looking
       // queued forever.
       if (status === 'cancelled' && priorStatus !== 'cancelled') {
-        cancelledDependents = cancelDependents(db, taskId).map((d) => ({
+        cancelledDependents = cancelDependents(db, taskId, { byPerson: true }).map((d) => ({
           id: d.id,
           title: d.title,
         }))

@@ -17,6 +17,7 @@ import {
   agents,
   createDb,
   createTask,
+  updateStatus,
   getComments,
   getTask,
   listEvents,
@@ -335,6 +336,25 @@ describe('dispatchRoutine', () => {
     const refused = await dispatchRoutine(run2, { db, mcpBaseUrl: null })
     expect(refused.ok).toBe(false)
     expect(refused.error).toContain('not claimable')
+  })
+
+  it('a recurring routine files a new task on every fire, whatever became of the last', async () => {
+    seedAgent('agent-cc', 'claude-code')
+    const run = seedRoutine('agent-cc')
+    const seen: string[] = []
+    const runTask = async (input: { taskId: string }) => {
+      seen.push(input.taskId)
+      return { ok: true as const }
+    }
+    const fire = () => dispatchRoutine(run, { db, mcpBaseUrl: null, runTask: runTask as never })
+    await fire()
+    updateStatus(db, seen[0]!, 'in_progress')
+    expect(updateStatus(db, seen[0]!, 'done').ok).toBe(true)
+    await fire()
+    expect(updateStatus(db, seen[1]!, 'blocked').ok).toBe(true)
+    await fire()
+    expect(new Set(seen).size).toBe(3)
+    expect(listTasks(db)).toHaveLength(3)
   })
 
   it('a LOST claim (conflict) is satisfied, never retried', async () => {

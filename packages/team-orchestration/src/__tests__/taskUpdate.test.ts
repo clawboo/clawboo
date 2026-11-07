@@ -159,3 +159,43 @@ describe('buildTaskUpdateMessage, results framed as data (K12)', () => {
     expect(msg).toContain('[Inter-session message · from=clawboo · kind=board-note · isUser=false]')
   })
 })
+
+describe('buildTaskUpdateMessage: a hand-off that found its work on the board', () => {
+  const FOUND: TaskUpdateItem = {
+    by: 'Bug Boo',
+    title: 'Write the docs',
+    summary: 'An open task with these words is already on the board: MAR-1.',
+    outcome: 'already_open',
+  }
+  const DONE: TaskUpdateItem = { by: 'Ada', title: 'Fix parser', summary: 'Fixed.' }
+
+  it('is not a failure and does not say a task finished', () => {
+    const msg = buildTaskUpdateMessage([FOUND])
+    expect(msg).not.toMatch(/did NOT complete|DID NOT COMPLETE|reached a terminal state/)
+    expect(msg).toMatch(/a hand-off found the work already on the board/)
+    expect(msg).toContain('Already on the board')
+    expect(msg).toContain('"Write the docs"')
+  })
+
+  it('counts apart from the tasks that did finish', () => {
+    const msg = buildTaskUpdateMessage([DONE, FOUND])
+    expect(msg).toMatch(/1 task on the board reached a terminal state, and a hand-off found/)
+    expect(msg).not.toMatch(/did NOT complete/)
+  })
+
+  it('is the board speaking, not the teammate', () => {
+    expect(buildTaskUpdateMessage([FOUND])).toMatch(/clawboo/)
+  })
+
+  it('leaves a batch with none of these as it was', () => {
+    expect(buildTaskUpdateMessage([DONE])).toMatch(
+      /^\[Task Update\] — 1 task on the board reached a terminal state \(not a fresh user message\)\./,
+    )
+  })
+
+  it('a refused hand-off still asks for a decision', () => {
+    const msg = buildTaskUpdateMessage([{ ...FOUND, outcome: 'not_started' }])
+    expect(msg).toMatch(/did NOT complete/)
+    expect(msg).toMatch(/was not started/)
+  })
+})

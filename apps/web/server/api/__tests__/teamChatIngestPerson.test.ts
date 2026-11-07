@@ -3,7 +3,7 @@
 // a request body names. The engine's side, persisting it on the message, is
 // covered in teamChat/__tests__/teamOrchestratorRoutineIngest.test.ts.
 
-import { createDb, type ClawbooDb } from '@clawboo/db'
+import { createDb, noteDelegationFailure, readDelegationFailure, type ClawbooDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -62,5 +62,19 @@ describe('POST /api/teams/:id/chat', () => {
   it('passes no one when nothing vouched for the request, whatever the body says', () => {
     expect(ingest({ message: 'hi', person: ADA }, null)).toBe(202)
     expect(enqueued).toEqual([expect.objectContaining({ stimulus: 'hi', person: null })])
+  })
+
+  it("starts the team's failure breaker over: someone has looked, and try again must work", () => {
+    noteDelegationFailure(db, 'T', 'a1', 'flaky')
+    noteDelegationFailure(db, 'other', 'a1', 'flaky')
+    expect(ingest({ message: 'try again' }, null)).toBe(202)
+    expect(readDelegationFailure(db, 'T', 'a1', 'flaky').failures).toBe(0)
+    expect(readDelegationFailure(db, 'other', 'a1', 'flaky').failures).toBe(1)
+  })
+
+  it('still delivers the message when the breaker cannot be cleared', () => {
+    db.$client.exec('DROP TABLE delegation_failures')
+    expect(ingest({ message: 'try again' }, null)).toBe(202)
+    expect(enqueued).toEqual([expect.objectContaining({ stimulus: 'try again' })])
   })
 })

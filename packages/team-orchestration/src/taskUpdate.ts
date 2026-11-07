@@ -21,7 +21,10 @@ import { formatInterSessionMessage, oneLine } from '@clawboo/board-core'
  * team's check not passing the work (on its last attempt, or a check that could
  * not run), and `'check_interrupted'` a check a restart cut short; both leave the
  * task for a person too, as does `'done_refused'`: the work passed the check, but
- * the board did not mark the task done. The others are failures. All of these but
+ * the board did not mark the task done. `'not_started'` is a hand-off the board
+ * refused, so no run failed but the work is still undone. `'already_open'` is not a
+ * failure at all: a hand-off found its work already on the board, and that task's
+ * own result comes later. The others are failures. All of these but
  * the person's decisions are ones the leader must act on rather than keep waiting
  * for.
  */
@@ -33,6 +36,8 @@ export type TaskUpdateOutcome =
   | 'check_failed'
   | 'check_interrupted'
   | 'done_refused'
+  | 'not_started'
+  | 'already_open'
   | 'error'
   | 'aborted'
   | 'timeout'
@@ -49,7 +54,10 @@ export interface TaskUpdateItem {
   outcome?: TaskUpdateOutcome
 }
 
-type FailedOutcome = Exclude<TaskUpdateOutcome, 'done' | 'person_done' | 'person_cancelled'>
+type FailedOutcome = Exclude<
+  TaskUpdateOutcome,
+  'done' | 'person_done' | 'person_cancelled' | 'already_open'
+>
 
 const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
   blocked: 'marked it blocked: it needs a person before it can go on',
@@ -58,6 +66,7 @@ const TASK_FAILURE_LABEL: Record<FailedOutcome, string> = {
     'finished, but its check was cut short, so the work was not checked: it needs a person',
   done_refused:
     "finished and the work passed the team's check, but the board did not mark it done: it needs a person",
+  not_started: 'was not started',
   error: 'failed with an error',
   aborted: 'was stopped before finishing',
   timeout: 'went silent — timed out with no response',
@@ -116,7 +125,12 @@ const RESULTS_ARE_DATA =
 /** Who a result is attributed to, and what kind it is. A person's decision is
  *  the board's note, not the agent's words. */
 function resultSource(item: TaskUpdateItem): { from: string; kind: string } {
-  if (item.outcome === 'person_done' || item.outcome === 'person_cancelled')
+  if (
+    item.outcome === 'person_done' ||
+    item.outcome === 'person_cancelled' ||
+    item.outcome === 'already_open' ||
+    item.outcome === 'not_started'
+  )
     return { from: 'clawboo', kind: 'board-note' }
   return {
     from: item.by,
@@ -147,10 +161,21 @@ export function buildTaskUpdateMessage(
 ): string {
   if (items.length === 0) return ''
   const failures = items.filter((i) => isTaskFailure(i.outcome))
-  const plural = items.length === 1 ? 'task' : 'tasks'
+  // A hand-off that found its work on the board finished nothing, so it is not counted
+  // as a task that did. A batch with none of these reads as it always has.
+  const found = items.filter((i) => i.outcome === 'already_open').length
+  const finished = items.length - found
+  const plural = finished === 1 ? 'task' : 'tasks'
+  const foundPhrase = `${found === 1 ? 'a hand-off' : `${found} hand-offs`} found the work already on the board`
+  const opening =
+    found === 0
+      ? `${finished} ${plural} on the board reached a terminal state`
+      : finished === 0
+        ? `${foundPhrase}, so no new task was made`
+        : `${finished} ${plural} on the board reached a terminal state, and ${foundPhrase}`
   const where = opts.followUp?.title ? `"${clipTitle(opts.followUp.title)}"` : 'a task'
   const headerLines = [
-    `[Task Update] — ${items.length} ${plural} on the board reached a terminal state (not a fresh user message).`,
+    `[Task Update] — ${opening} (not a fresh user message).`,
     opts.followUp
       ? `These came back from work you handed to teammates while on ${where}, which has since closed. Your reply is not shown to the user: it is recorded on that task and passed to whoever gave it to you. Reply with ONE short, concrete follow-up on what these results add to it. Do not address the user or ask them anything, and do NOT acknowledge the results individually.`
       : 'These are board-sourced results. Synthesize across them ONLY when the user is waiting on a combined answer, or when you need a unified takeaway to drive the next step. Do NOT acknowledge them individually.',
@@ -184,11 +209,13 @@ export function buildTaskUpdateMessage(
     const by = oneLine(item.by)
     let header = failed
       ? `⚠ ${by} — DID NOT COMPLETE (${failLabel})`
-      : item.outcome === 'person_cancelled'
-        ? `✕ Cancelled by a person (it was ${by}'s)`
-        : item.outcome === 'person_done'
-          ? `✓ Marked done by a person (it was ${by}'s)`
-          : `✓ ${by}`
+      : item.outcome === 'already_open'
+        ? 'Already on the board'
+        : item.outcome === 'person_cancelled'
+          ? `✕ Cancelled by a person (it was ${by}'s)`
+          : item.outcome === 'person_done'
+            ? `✓ Marked done by a person (it was ${by}'s)`
+            : `✓ ${by}`
     if (item.title) header += ` — "${clipTitle(item.title)}"`
     sections.push(header)
     const result = item.summary || (failed ? '(no output was produced before it stopped)' : '')

@@ -131,14 +131,25 @@ Rules that apply to every Tasks tool:
 
 Creates through these tools are capped so a looping agent cannot flood the board. The caps count every task on the board, including tasks created through the dashboard, the API or the team engine, which are not capped themselves.
 
-| Cap                 | Limit                                                             | Tool error                                                                                                                                                    | `_meta.denied`     |
-| ------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
-| Children per parent | 24 live (not dropped) subtasks; `done` and `cancelled` ones count | `subtask rejected: parent <id> already has <n> children (max 24); drop one or attach the new task elsewhere`                                                  | `child_cap`        |
-| Nesting depth       | 2 levels below a root task (root, child, grandchild)              | `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`                                                   | `depth_cap`        |
-| Root tasks          | 30 new root tasks per rolling 5 minutes                           | `task rejected: <n> root tasks already created in the last 5 min (max 30); attach this work to an existing task with parentTaskId instead of opening another` | `root_rate_cap`    |
-| Missing parent      | The parent must exist                                             | `parent not found: <id>`                                                                                                                                      | `parent_not_found` |
+| Cap                 | Limit                                                                                                          | Tool error                                                                                                                                                                                                         | `_meta.denied`     |
+| ------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ |
+| Children per parent | 24 live (not dropped) subtasks; `done` ones and ones an agent cancelled count; a person's cancel frees a place | `subtask rejected: parent <id> already has <n> children (max 24). Finished and cancelled children still count, and only a person cancelling one frees a place. Attach the new task elsewhere, or tell the person.` | `child_cap`        |
+| Nesting depth       | 2 levels below a root task (root, child, grandchild)                                                           | `subtask rejected: parent <id> is at the maximum nesting depth (2); attach the new task higher in the tree`                                                                                                        | `depth_cap`        |
+| Root tasks          | 30 new root tasks per rolling 5 minutes                                                                        | `task rejected: <n> root tasks already created in the last 5 min (max 30); attach this work to an existing task with parentTaskId instead of opening another`                                                      | `root_rate_cap`    |
+| Missing parent      | The parent must exist                                                                                          | `parent not found: <id>`                                                                                                                                                                                           | `parent_not_found` |
 
-The check and the insert run in one write transaction, so two runtimes racing for the last slot cannot both get it. An unchanged retry gets the same answer; dropping a stale child frees a slot, and the root window rolls. A refusal also carries its reason in the result's `_meta.denied` field. Clawboo Native turns that field into a `policy_denied` error, and repeated identical refusals in a task-runner run trip the circuit breaker (see [Governance](/concepts/governance)).
+The check and the insert run in one write transaction, so two runtimes racing for the last slot cannot both get it. An unchanged retry that would make a new task gets the same answer; a person cancelling a child, or dropping a stale one, frees a slot, and the root window rolls. A refusal also carries its reason in the result's `_meta.denied` field. Clawboo Native turns that field into a `policy_denied` error, and repeated identical refusals in a task-runner run trip the circuit breaker (see [Governance](/concepts/governance)).
+
+### A task is made once
+
+`create_task` and `create_subtask` return an existing task instead of making a second one in two cases. The row comes back with `deduplicated: true`, `deduplicatedBy` (`key` or `title`) and a `note` naming the task, and the model should work with that task. Neither case is an error, and both come before the caps, so a repeat is never refused.
+
+- **The same key.** `idempotencyKey` names a create, for this caller, this title and this parent: the run's own task if it has one, else the agent, else the team. The same key from the same caller with the same title and parent returns the same task, whatever became of it. A different caller, title or parent is a different create. A call with no key gets one from the run's own task, the parent and the title, which holds for 48 hours and does not match a blocked task, so a retry of failed work makes a new one. A caller with no bound task (an OpenClaw session, a lead's chat turn) gets one from the team, the parent and the title, which also does not match a finished or cancelled task: it speaks for every teammate, so an old task is not what a new create is asking for.
+- **The same words.** An open task (`backlog`, `todo`, `in_progress` or `in_review`) with the same title under the same parent, team and chat room, made in the last 48 hours, is returned. Case, spacing and surrounding punctuation do not count. A blocked task is not open here, and neither is a `todo` task that will not start by itself. A task a person makes on the board can be returned too, but a person's own create never goes through this check.
+
+### Readable ids
+
+Every argument that names a task (`taskId`, `parentTaskId`, `dependsOnTaskId`) takes the task's id or its readable id, like `MAR-12`, in either case. Task rows carry it as `identifier`; it is null for a task with no team. A session bound to a team resolves only that team's ids: another team's readable id answers `not found`, the same as one that does not exist.
 
 ### list_tasks
 
@@ -175,28 +186,29 @@ Create a task. With `parentTaskId` it is a subtask and the per-parent caps apply
   title: string
   description?: string
   status?: TaskStatus // default 'todo'
-  priority?: number // 2 urgent, 1 high, 0 normal (default), -1 low; held to that range
+  priority?: number // 1 high, 0 normal (default), -1 low; held to that range. Only a person sets urgent
   teamId?: string
   parentTaskId?: string // non-empty when present
   assigneeRuntime?: string
+  idempotencyKey?: string // 1 to 200 characters; see "A task is made once"
 }
 ```
 
 - A subtask takes its parent's team and chat room.
 - On a team-bound session the task is created in the session's team and `teamId` is ignored. A parent outside the team is refused with `not found: <parentTaskId>`.
 - An empty `parentTaskId` fails argument validation (`invalid args: ...`); it is never treated as a root task.
-- Returns the new task row, or one of the cap errors.
+- Returns the new task row, the task that was already there (see [A task is made once](#a-task-is-made-once)), or one of the cap errors.
 
 ### create_subtask
 
 Create a subtask under a parent. It takes the parent's team and chat room, and starts in `todo`.
 
 ```ts
-{ parentTaskId: string; title: string; description?: string }
+{ parentTaskId: string; title: string; description?: string; idempotencyKey?: string }
 ```
 
 - Same caps and errors as a `create_task` with `parentTaskId`, including the team-bound parent check.
-- Returns the new task row.
+- Returns the new task row, or the task that was already there (see [A task is made once](#a-task-is-made-once)).
 
 ### claim_task
 
@@ -215,6 +227,8 @@ Claim a `todo` task for an agent. The claim is atomic: when two agents race, exa
 ### assign_task
 
 Hand a `todo` task to an agent. It is the same atomic claim as `claim_task`, with the same results and errors, and `assigneeAgentId` is always required; `conflict` means the task is already taken. Not served to an unverified HTTP caller or on a team run.
+
+A hand-off cannot go in a circle. It is refused with `Not handed off: ...` (typed `hand_off_cycle` in `_meta.denied`) when the target handed out the task or any of its open ancestors, unless the target is the team's lead or Boo Zero. Assigning to yourself is not a hand-off. A bound caller is recorded as the task's delegator, and so is a bound caller that creates it.
 
 ### release_task
 
