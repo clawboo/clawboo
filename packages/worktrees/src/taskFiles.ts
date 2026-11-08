@@ -16,10 +16,11 @@
 //   link and the same file `lstat` saw (device and file id), so a hard link to
 //   another file, or anything swapped in between the two, is refused too. The
 //   handle is then the file that was checked, whatever happens to the name.
-// A missing file is made empty under a new random name and hard-linked to the
-// name, which fails on anything already there, a link that points nowhere
-// included. Opening the name itself with `O_CREAT | O_EXCL` would not do on
-// Windows, where that open follows such a link and creates its target.
+// A missing file is created with `O_CREAT | O_EXCL | O_NOFOLLOW`, which fails on
+// anything already at the name, a link that points nowhere included. Windows
+// has no `O_NOFOLLOW`, and there an exclusive create follows such a link and
+// creates its target, so there the file is made empty under a new random name
+// and hard-linked to the name, which fails on anything already there.
 // A write goes to a new file of a random name that is then renamed over the
 // old one, so whatever was at the name is replaced, never written through.
 
@@ -172,17 +173,31 @@ export async function appendTaskFile(dir: string, name: string, content: string)
   }
 }
 
-/** An empty file at `filePath`, unless something is there already: made under a
- *  new random name and hard-linked to `filePath`, which never follows a link at
- *  `filePath`. The name must then be the very file that was made: the agent
- *  could swap the temp name for a link in between. */
+/** An empty file at `filePath`, unless something is there already. Never
+ *  through a link at `filePath`; the caller checks whatever is there next. */
 async function createEmptyAt(dir: string, name: string, filePath: string): Promise<void> {
+  if (NOFOLLOW !== 0) {
+    try {
+      const handle = await open(
+        filePath,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW | NONBLOCK,
+        0o666,
+      )
+      await handle.close()
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+    }
+    return
+  }
+  await createEmptyByLink(dir, name, filePath)
+}
+
+/** {@link createEmptyAt} where the platform has no `O_NOFOLLOW`: made under a new
+ *  random name and hard-linked to `filePath`. The name must then be the very
+ *  file that was made: the agent could swap the temp name for a link in between. */
+async function createEmptyByLink(dir: string, name: string, filePath: string): Promise<void> {
   const temp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`)
-  const handle = await open(
-    temp,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW,
-    0o666,
-  )
+  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666)
   let made: BigIntStats
   try {
     made = await handle.stat({ bigint: true })
