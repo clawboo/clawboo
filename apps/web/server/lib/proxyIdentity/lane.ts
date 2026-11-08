@@ -121,8 +121,9 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
   const required = sources.some((s) => s.config.mode === 'required')
   const fromOf = (source: LaneSource): 'proxy' | 'app' =>
     source.config.accountSubjects === 'only' ? 'app' : 'proxy'
-  const carriesToken = (req: IncomingMessage): boolean =>
-    sources.some((s) => tokenFrom(req, s.config.header) !== undefined)
+  const tokensCarried = (req: IncomingMessage): number =>
+    sources.filter((s) => tokenFrom(req, s.config.header) !== undefined).length
+  const carriesToken = (req: IncomingMessage): boolean => tokensCarried(req) > 0
 
   /** A token from an issuer limited to some routes, on a request that is not
    *  one of them. Every reading of the path must match the same route, so no
@@ -191,7 +192,13 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     // The path as the request arrived, base path included: the one the proxy
     // signed. An absolute-form target is cut to its path; nothing is resolved.
     const path = targetPath(req.originalUrl ?? req.url) ?? ''
-    // Before the token is checked, so a refused route never spends it.
+    // Before any token is checked, so a refused request never spends one: two
+    // tokens first, whatever the route, then an app token off its routes.
+    if (tokensCarried(req) > 1) {
+      opts.onRefuse?.({ reason: 'two-tokens', method: req.method, path })
+      refuse(res, 'two-tokens')
+      return
+    }
     if (offRoute(req)) {
       opts.onRefuse?.({ reason: 'route', method: req.method, path })
       refuse(res, 'route', 'app')

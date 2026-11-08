@@ -687,6 +687,19 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
     expect((await get('/api/who')).body).toEqual({ via: null })
   })
 
+  it('says two-tokens before anything else, even on a route the app may not sign for', async () => {
+    await start({ mode: 'on', appLink: true })
+    const res = await get(
+      '/api/team-verify-command/t1',
+      {
+        ...(await signed('PUT', '/api/team-verify-command/t1')),
+        ...(await signedByApp('PUT', '/api/team-verify-command/t1')),
+      },
+      'PUT',
+    )
+    expect(res).toMatchObject({ status: 401, body: { reason: 'two-tokens' } })
+  })
+
   it('refuses a request that carries both tokens', async () => {
     await start({ mode: 'on', appLink: true })
     const res = await get('/api/access/identity', {

@@ -378,7 +378,7 @@ Turning it on needs a key (`CLAWBOO_PROXY_IDENTITY_JWKS_URL` or `CLAWBOO_PROXY_I
 - Default: `clawboo-identity`
 - Example: `CLAWBOO_PROXY_IDENTITY_HEADER=Cf-Access-Jwt-Assertion`
 
-The request header that carries the token, in any letter case. A `Bearer ` prefix is allowed, so `authorization` works for a proxy that sends `Authorization: Bearer <token>`. Headers Clawboo or a browser already uses, such as `cookie`, `host` and the forwarding headers, are refused, and so is `clawboo-app-identity` while [CLAWBOO_APP_LINK_PUBLIC_KEY](#clawboo_app_link_public_key) is set. Operator file key: `proxyIdentityHeader`.
+The request header that carries the token, in any letter case. A `Bearer ` prefix is allowed, so `authorization` works for a proxy that sends `Authorization: Bearer <token>`. Headers Clawboo or a browser already uses, such as `cookie`, `host` and the forwarding headers, are refused. So is `clawboo-app-identity` when the lane is `on` or `required` and [CLAWBOO_APP_LINK_PUBLIC_KEY](#clawboo_app_link_public_key) is set too; with the lane `off`, Clawboo reads no proxy header at all. Operator file key: `proxyIdentityHeader`.
 
 ### CLAWBOO_PROXY_IDENTITY_JWKS_URL
 
