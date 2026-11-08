@@ -223,7 +223,13 @@ describe.each(['clawboo-native', 'claude-code', 'codex', 'hermes'])(
       )
       fireEvent.click(screen.getByRole('button', { name: /Accept/ }))
       await waitFor(() => expect(answered).toHaveLength(1))
-      expect(answered[0]).toMatchObject({ id: 'q-1', answer: { accepted: true } })
+      expect(answered[0]).toMatchObject({
+        id: 'q-1',
+        answer: {
+          accepted: true,
+          tasks: [{ title: 'fix the parser', agentId: 'coder', agentName: 'Coder' }],
+        },
+      })
 
       // Answered, the stream says the card waits on nothing, and the buttons go.
       act(() =>

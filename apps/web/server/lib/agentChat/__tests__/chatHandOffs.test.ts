@@ -1644,6 +1644,20 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         await vi.waitFor(() => expect(writer.starts).toHaveLength(1))
       })
 
+      it('a team inside a longer team’s name is not open: “Growth Ops” does not reach Growth', async () => {
+        const coder = new ScriptedAdapter([[done('never')]])
+        workers.set(CODER, coder)
+        boo = new ScriptedAdapter([[done(TO_THEIR_TEAM)]])
+        await turn('[Team Activity: Growth Ops]\n| Fix the parser.\n\nhow is it going?', {
+          namedTeamId: OTHER,
+          carriesTeamActivity: true,
+          words: '@Growth Ops how is it going?',
+        })
+        expect(listChatHandOffTasks(db, CHAT)).toEqual([])
+        expect(coder.starts).toEqual([])
+        expect(notes().at(-1)).toMatch(/Not handed off to Growth:/)
+      })
+
       it('a name inside the block is not the person naming it', async () => {
         withWriter()
         boo = new ScriptedAdapter([[done(TO_OTHER_TEAM)]])
@@ -3091,6 +3105,47 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       for (const card of cards) expect(pendingOn(card.id)).not.toBeNull()
       const questions = cards.flatMap((c) => listTaskQuestions(db, c.id))
       expect(questions.filter((q) => q.status !== 'pending')).toEqual([])
+    })
+
+    it('a team inside a longer team’s name is not named: Growth Ops starts, Growth waits', async () => {
+      const writer = new ScriptedAdapter([[done('notes written')]])
+      workers.set(WRITER, writer)
+      const coder = new ScriptedAdapter([[done('never')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth Ops/Writer">write the notes</delegate> <delegate to="@Growth/Coder">fix the parser</delegate>',
+          ),
+        ],
+      ])
+
+      await asked('have Growth Ops look at it', 'm1', { namedTeamId: null })
+
+      await vi.waitFor(() => expect(writer.starts).toHaveLength(1))
+      expect(coder.starts).toEqual([])
+      expect(holders()).toHaveLength(1)
+      expect(notes().join()).toMatch(/did not name Growth,/)
+    })
+
+    it('both named on their own start at once', async () => {
+      const writer = new ScriptedAdapter([[done('notes written')]])
+      workers.set(WRITER, writer)
+      const coder = new ScriptedAdapter([[done('parser fixed')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth Ops/Writer">write the notes</delegate> <delegate to="@Growth/Coder">fix the parser</delegate>',
+          ),
+        ],
+      ])
+
+      await asked('Growth and Growth Ops, please', 'm1', { namedTeamId: null })
+
+      await vi.waitFor(() => expect(writer.starts).toHaveLength(1))
+      await vi.waitFor(() => expect(coder.starts).toHaveLength(1))
+      expect(holders()).toEqual([])
     })
 
     it('a turn reading a result still asks nobody: it starts nothing outside its team', async () => {

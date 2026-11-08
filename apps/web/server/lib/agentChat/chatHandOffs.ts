@@ -664,14 +664,31 @@ const wordsOf = (text: string): string =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
-/** The teams a person's own words name, as whole words. */
+/** The teams a person's own words name, as whole words. A name standing inside a longer
+ *  team's name belongs to that team: "have Growth Ops look" names Growth Ops, not Growth.
+ *  "Growth and Growth Ops" names both, and two teams with one name are both named. */
 function teamsNamedInWords(db: ClawbooDb, words: string): string[] {
   const said = ` ${wordsOf(words)} `
-  return activeTeams(db)
-    .filter((team) => {
-      const name = wordsOf(team.name)
-      return name !== '' && said.includes(` ${name} `)
-    })
+  const named = activeTeams(db)
+    .map((team) => ({ id: team.id, name: wordsOf(team.name) }))
+    .filter((team) => team.name !== '')
+  // Where each name stands in the words, as [start, end) of the name itself.
+  const places = new Map<string, Array<[number, number]>>()
+  for (const { name } of named) {
+    if (places.has(name)) continue
+    const at: Array<[number, number]> = []
+    const needle = ` ${name} `
+    for (let i = said.indexOf(needle); i !== -1; i = said.indexOf(needle, i + 1))
+      at.push([i + 1, i + 1 + name.length])
+    places.set(name, at)
+  }
+  const insideLonger = (name: string, [start, end]: [number, number]): boolean =>
+    [...places].some(
+      ([other, at]) =>
+        other.length > name.length && at.some(([os, oe]) => os <= start && end <= oe),
+    )
+  return named
+    .filter((team) => (places.get(team.name) ?? []).some((at) => !insideLonger(team.name, at)))
     .map((team) => team.id)
 }
 
