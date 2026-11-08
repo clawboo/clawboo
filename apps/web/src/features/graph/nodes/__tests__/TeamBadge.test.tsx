@@ -37,7 +37,11 @@ describe('TeamBadge', () => {
     const badge = screen.getByTestId('team-junction-badge')
     expect(badge).toHaveTextContent('🔬')
     expect(badge).toHaveAttribute('title', 'Research Lab')
-    expect(badge).toHaveStyle({ background: '#3b82f6' })
+    // The longhands, not `background`: jsdom 30.1+ serializes the computed
+    // shorthand with every default layer value, so it never equals a bare colour.
+    // backgroundImage keeps what the shorthand also checked: nothing drawn over
+    // the colour.
+    expect(badge).toHaveStyle({ backgroundColor: '#3b82f6', backgroundImage: 'none' })
   })
 
   it('draws nothing for a team that no longer exists, not a blank disc', () => {
