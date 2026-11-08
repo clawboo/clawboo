@@ -601,22 +601,27 @@ describe('findActionableHandOffs: a tag starts work only where a reader sees a t
   it('stays linear on a line of quoted openers', { timeout: 60_000 }, () => {
     // Wall time on a busy CI runner says little, so this compares sizes instead: eight
     // times the input may take about eight times as long, not the 64 of a quadratic read.
+    // It counts the CPU time this process spent, not the wall clock, which stretches
+    // when the tests running beside this one take the machine. The two sizes take turns
+    // and each keeps its fastest read.
     const quotedOpeners = (count: number): string =>
       Array.from({ length: count }, () => '"x <delegate to="@Name"> y"').join(' ') + ' ' + tag
-    const fastest = (count: number, tries: number): number => {
-      const text = quotedOpeners(count)
-      let best = Infinity
-      for (let i = 0; i < tries; i++) {
-        const started = performance.now()
-        findActionableHandOffs(text)
-        looksLikeBrokenHandOff(text)
-        best = Math.min(best, performance.now() - started)
-      }
-      return best
+    const read = (text: string): number => {
+      const started = process.cpuUsage()
+      findActionableHandOffs(text)
+      looksLikeBrokenHandOff(text)
+      const spent = process.cpuUsage(started)
+      return spent.user + spent.system
     }
-    fastest(1000, 1)
-    const small = fastest(1000, 3)
-    const large = fastest(8000, 2)
+    const smallText = quotedOpeners(1000)
+    const largeText = quotedOpeners(8000)
+    read(smallText)
+    let small = Infinity
+    let large = Infinity
+    for (let i = 0; i < 5; i++) {
+      small = Math.min(small, read(smallText))
+      large = Math.min(large, read(largeText))
+    }
     expect(large / small).toBeLessThan(24)
     // And it still reads the long reply right: only the real tag at the end hands off.
     const text = quotedOpeners(8000)
