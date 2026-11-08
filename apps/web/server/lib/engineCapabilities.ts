@@ -16,7 +16,7 @@ import {
 } from '@clawboo/control-client'
 import { embeddingsDisabled } from '@clawboo/db'
 
-import { proxyIdentityMode } from './proxyIdentity/config'
+import { appLinkOn, proxyIdentityMode } from './proxyIdentity/config'
 import { NON_OPENCLAW_RUNTIME_IDS } from './runtimes/descriptor'
 import { getCurrentVersion, selfUpdateRefusal } from './updateCheck'
 
@@ -119,6 +119,7 @@ export const FEATURE_ROUTES = {
   ],
   'board.pause': ['GET /api/pauses', 'POST /api/pauses', 'DELETE /api/pauses/:kind/:id'],
   'auth.proxyIdentity': ['GET /api/access/identity'],
+  'auth.appLink': ['GET /api/access/identity'],
 } as const satisfies Partial<Record<EngineFeature, readonly string[]>>
 
 export function buildEngineCapabilities(): EngineCapabilities {
@@ -194,6 +195,8 @@ export function buildEngineCapabilities(): EngineCapabilities {
     // The administrator's switch, on or required. Either way a verified token
     // names the person; whether one is required is the lane's own business.
     'auth.proxyIdentity': proxyIdentityMode() !== 'off',
+    // On only when the app that started this engine handed it a key.
+    'auth.appLink': appLinkOn(),
   }
   return {
     version,

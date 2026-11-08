@@ -16,7 +16,7 @@ import type { Request, Response } from 'express'
 import type { AccessGate } from '@clawboo/gateway-proxy'
 
 import { actingPerson, personOf } from '../lib/auth'
-import { proxyIdentityMode } from '../lib/proxyIdentity/config'
+import { appLinkOn, proxyIdentityMode } from '../lib/proxyIdentity/config'
 
 /** The gate ../index.ts publishes on `app.locals`. */
 function gateOf(req: Request): Pick<AccessGate, 'enabled' | 'mintLaunchCode'> | null {
@@ -43,13 +43,20 @@ export function accessLaunchCodePOST(req: Request, res: Response): void {
 }
 
 /**
- * The proxy identity lane's mode (`off`, `on` or `required`) and the person this
- * request's verified token names, or null. An administrator checks a new proxy
- * with it; the dashboard can say who is signed in, and whose tasks are its own.
+ * The proxy identity lane's mode (`off`, `on` or `required`), whether the app
+ * that started this engine has an app link, and the person this request's
+ * verified token names, or null. An administrator checks a new proxy with it,
+ * and an app its link; the dashboard can say who is signed in, and whose tasks
+ * are its own.
  */
 export function accessIdentityGET(req: Request, res: Response): void {
   res.set('Cache-Control', 'no-store')
   // `you` is who "Assigned to you" and the Mine filter mean: the verified person,
   // else the install's built-in one.
-  res.json({ proxyIdentity: proxyIdentityMode(), person: personOf(req), you: actingPerson(req) })
+  res.json({
+    proxyIdentity: proxyIdentityMode(),
+    appLink: appLinkOn(),
+    person: personOf(req),
+    you: actingPerson(req),
+  })
 }

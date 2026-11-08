@@ -183,6 +183,7 @@ Then restart Clawboo (`clawboo restart`, or your service manager). The startup l
 ```json
 {
   "proxyIdentity": "required",
+  "appLink": false,
   "person": { "id": "user-42", "name": "Ada Lovelace", "role": "admin" }
 }
 ```
@@ -218,6 +219,26 @@ With `proxyIdentity` set to `required`, you can turn the access token off with `
 - **Some actions carry no name.** OpenClaw agents' 1:1 chat and everything else sent over the Gateway WebSocket (the connection is checked when it opens, but the messages on it are not), edits to a task's title, description or priority, and work started by routines.
 - **Clocks must agree.** Clawboo allows 5 seconds of difference between its clock and the proxy's.
 
+## An app that starts Clawboo
+
+An app that starts Clawboo itself, such as the desktop app, can name its own people too, beside a sign-in proxy or without one. It hands Clawboo its public key in [`CLAWBOO_APP_LINK_PUBLIC_KEY`](/reference/environment-variables#clawboo_app_link_public_key) when it starts it, and signs a token for each request it sends on someone's behalf:
+
+- in the `clawboo-app-identity` header, with or without a `Bearer ` prefix;
+- signed with `EdDSA` (Ed25519);
+- `iss` `clawboo-app-link` and `aud` `clawboo-engine`;
+- `sub` the person's id, which must start with `account:` and have more after it, and an optional `name`;
+- request-bound, always: `htm`, `htu`, `iat`, `exp` at most 60 seconds after `iat`, and a `jti` it never reuses.
+
+A good token makes the request that person's, exactly as a proxy's token does: it passes [the person check](/operating/security#the-person-check), and the person is recorded on what it does. The two never mix:
+
+- A sign-in proxy's token may not name an `account:` person, and the app's token may name no one else. Either is refused with `claims`.
+- A request that carries both headers is refused with `two-tokens`.
+- The app's token never makes one required. Requests without it, such as the dashboard's own, work as before, whatever `proxyIdentity` is set to.
+
+An app's person may allow an approval once or deny it, but not allow it always: that answer gets `403` with `"error": "allow_always_from_app"`, and the approval stays as it was. The key for this sits on the computer that runs the app, and a standing rule signed with a stolen one would outlast every card the person saw.
+
+`GET /api/access/identity` answers `"appLink": true` when Clawboo has the app's key, so the app can check its link. A request it signed should come back with its person.
+
 ## Refusals
 
 A refused request gets `401` with a JSON body. Its `reason` says why:
@@ -230,21 +251,22 @@ A refused request gets `401` with a JSON body. Its `reason` says why:
 }
 ```
 
-| `reason`           | Meaning                                                                                                   |
-| ------------------ | --------------------------------------------------------------------------------------------------------- |
-| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                   |
-| `malformed`        | Not a signed token, an empty header, or the header sent twice                                             |
-| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens |
-| `signature`        | The signature does not match any of the proxy's keys                                                      |
-| `issuer`           | Another `iss`                                                                                             |
-| `audience`         | Another `aud`                                                                                             |
-| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                  |
-| `not-yet-valid`    | Issued, or valid only, in the future                                                                      |
-| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                              |
-| `binding`          | For another method or path                                                                                |
-| `replayed`         | A request-bound token Clawboo already accepted                                                            |
-| `claims`           | A required claim is missing or has the wrong type, such as no `sub`                                       |
-| `keys-unavailable` | The proxy's key set could not be fetched                                                                  |
+| `reason`           | Meaning                                                                                                    |
+| ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                    |
+| `two-tokens`       | Both a sign-in proxy's token and an [app's](#an-app-that-starts-clawboo) token on one request              |
+| `malformed`        | Not a signed token, an empty header, or the header sent twice                                              |
+| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens  |
+| `signature`        | The signature does not match any of the proxy's keys                                                       |
+| `issuer`           | Another `iss`                                                                                              |
+| `audience`         | Another `aud`                                                                                              |
+| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                   |
+| `not-yet-valid`    | Issued, or valid only, in the future                                                                       |
+| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                               |
+| `binding`          | For another method or path                                                                                 |
+| `replayed`         | A request-bound token Clawboo already accepted                                                             |
+| `claims`           | A required claim is missing or has the wrong type, such as no `sub`, or a `sub` of the other issuer's kind |
+| `keys-unavailable` | The proxy's key set could not be fetched                                                                   |
 
 A refused WebSocket upgrade gets `401 Unauthorized`. The server logs `Proxy identity: refused a request` with the reason, the method and the path, never the token.
 

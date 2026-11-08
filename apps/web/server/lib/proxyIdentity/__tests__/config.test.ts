@@ -15,6 +15,10 @@ import {
   resetOperatorSettings,
 } from '../../operatorSettings'
 import {
+  APP_LINK_HEADER,
+  APP_LINK_KEY_ENV,
+  appLinkOn,
+  loadAppLinkConfig,
   loadProxyIdentityConfig,
   parsePublicKeySetting,
   proxyIdentityFileWarning,
@@ -97,6 +101,7 @@ describe('turned on', () => {
       nameClaim: 'name',
       roleClaim: 'role',
       keys: { source: 'public-key', jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519' }] } },
+      accountSubjects: 'never',
     })
   })
 
@@ -131,6 +136,8 @@ describe('turned on', () => {
     stubLane({ CLAWBOO_PROXY_IDENTITY_PUBLIC_KEY: edPem.trim().replace(/\n/g, '\\n') })
     initOperatorSettings()
     expect(loadProxyIdentityConfig()?.keys.source).toBe('public-key')
+    // With its trailing newline escaped too, as a PEM file's contents usually end.
+    expect(parsePublicKeySetting(edPem.replace(/\n/g, '\\n'), 'k').keys).toHaveLength(1)
     expect(parsePublicKeySetting(JSON.stringify(edJwk), 'k').keys).toHaveLength(1)
     expect(
       parsePublicKeySetting(JSON.stringify({ keys: [edJwk, { ...edJwk, kid: 'b' }] }), 'k').keys,
@@ -441,5 +448,71 @@ describe.skipIf(process.platform === 'win32')('who can replace the operator file
       '/etc/operator.json': { uid: ROOT, mode: 0o100666, writable: true },
     })
     expect(replaceableBy('/etc/operator.json', US, fs)).toBe(true)
+  })
+})
+
+describe('the app link', () => {
+  const appRefusal = (env: NodeJS.ProcessEnv): string => {
+    try {
+      loadAppLinkConfig(env)
+    } catch (err) {
+      expect(err).toBeInstanceOf(OperatorSettingsError)
+      return (err as Error).message
+    }
+    throw new Error('expected a refusal')
+  }
+
+  it('is off without a key, or with a blank one', () => {
+    expect(loadAppLinkConfig({})).toBeNull()
+    expect(loadAppLinkConfig({ [APP_LINK_KEY_ENV]: '  ' })).toBeNull()
+    expect(appLinkOn({})).toBe(false)
+  })
+
+  it('trusts an Ed25519 key for request-bound account: tokens, in on mode', () => {
+    const env = { [APP_LINK_KEY_ENV]: edPem.replace(/\n/g, '\\n') }
+    expect(appLinkOn(env)).toBe(true)
+    expect(loadAppLinkConfig(env)).toEqual({
+      mode: 'on',
+      header: 'clawboo-app-identity',
+      issuer: 'clawboo-app-link',
+      audience: 'clawboo-engine',
+      binding: 'request',
+      maxLifetimeSeconds: 60,
+      nameClaim: 'name',
+      roleClaim: 'role',
+      keys: { source: 'public-key', jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: edJwk.x }] } },
+      accountSubjects: 'only',
+    })
+    expect(loadAppLinkConfig({ [APP_LINK_KEY_ENV]: JSON.stringify(edJwk) })?.keys).toEqual({
+      source: 'public-key',
+      jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: edJwk.x }] },
+    })
+  })
+
+  it('refuses any key but an Ed25519 public key, and says who keeps the private one', () => {
+    expect(appRefusal({ [APP_LINK_KEY_ENV]: RSA_1024_PUBLIC_PEM })).toMatch(/shorter than 2048/)
+    const rsa = generateKeyPairSync('rsa', { modulusLength: 2048 })
+    const rsaPem = rsa.publicKey.export({ format: 'pem', type: 'spki' }).toString()
+    expect(appRefusal({ [APP_LINK_KEY_ENV]: rsaPem })).toBe(
+      `${APP_LINK_KEY_ENV} must be an Ed25519 public key.`,
+    )
+    const privatePem = ed.privateKey.export({ format: 'pem', type: 'pkcs8' }).toString()
+    expect(appRefusal({ [APP_LINK_KEY_ENV]: privatePem })).toMatch(
+      /Clawboo needs only the app's public key; keep the private key with the app/,
+    )
+  })
+
+  it('is never read from the operator file: there it is an unknown key', () => {
+    writeFileSync(
+      path.join(home, 'operator.json'),
+      JSON.stringify({ CLAWBOO_APP_LINK_PUBLIC_KEY: edPem }),
+    )
+    expect(() => initOperatorSettings()).toThrow(/unknown key/)
+    expect(loadAppLinkConfig({})).toBeNull()
+  })
+
+  it("keeps its header out of a sign-in proxy's reach", () => {
+    stubLane({ CLAWBOO_PROXY_IDENTITY_HEADER: APP_LINK_HEADER })
+    expect(refusal()).toMatch(/proxyIdentityHeader must be a header name of your own/)
   })
 })

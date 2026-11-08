@@ -102,6 +102,9 @@ export const ENGINE_FEATURES = [
   // names is recorded on approvals, chat messages and task edits. Who a request
   // is signed in as: GET /api/access/identity.
   'auth.proxyIdentity',
+  // The app that started this engine (a desktop app) can name its own people on
+  // the requests it signs, as `account:` people (CLAWBOO_APP_LINK_PUBLIC_KEY).
+  'auth.appLink',
 ] as const
 export type EngineFeature = (typeof ENGINE_FEATURES)[number]
 

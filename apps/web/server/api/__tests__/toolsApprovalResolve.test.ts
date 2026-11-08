@@ -105,6 +105,55 @@ beforeEach(() => {
   failWith = null
 })
 
+/** A request signed by the app that started the engine, for one of its own
+ *  people: the identity lane set `person`, and it carries no fetch metadata. */
+const fromApp = (id: string, decision: string): Request =>
+  ({
+    params: { id },
+    query: {},
+    body: { decision },
+    headers: {},
+    person: { id: 'account:u-7', name: 'Grace', role: null },
+  }) as unknown as Request
+
+describe('an answer from the app that started the engine', () => {
+  it('may not allow always, on either kind of card, and leaves the card waiting', async () => {
+    seed('ap-app-exec', 'exec')
+    seed('ap-app-tool', 'tool')
+    for (const id of ['ap-app-exec', 'ap-app-tool']) {
+      const { res, done } = mockRes()
+      toolsApprovalResolvePOST(fromApp(id, 'allow_always'), res)
+      expect(await done).toEqual({
+        code: 403,
+        body: {
+          error: 'allow_always_from_app',
+          message: 'An answer from the app that started Clawboo can allow once or deny.',
+        },
+      })
+      expect(statusOf(id)).toBe('pending')
+    }
+    expect(calls).toEqual([])
+  })
+
+  it('may allow once, and the card records who answered', async () => {
+    seed('ap-app-once', 'tool')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(fromApp('ap-app-once', 'allow_once'), res)
+    expect((await done).code).toBe(200)
+    const row = db
+      .select({ status: toolCallApprovals.status, resolvedBy: toolCallApprovals.resolvedBy })
+      .from(toolCallApprovals)
+      .where(eq(toolCallApprovals.id, 'ap-app-once'))
+      .get()
+    expect(row?.status).toBe('allow_once')
+    expect(JSON.parse(row?.resolvedBy ?? 'null')).toEqual({
+      id: 'account:u-7',
+      name: 'Grace',
+      role: null,
+    })
+  })
+})
+
 describe('POST /api/tools/approvals/:id/resolve', () => {
   it('releases an exec card at the GATEWAY, not locally', async () => {
     seed('ap-exec', 'exec')

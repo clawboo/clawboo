@@ -186,6 +186,8 @@ Clawboo makes no rule of its own for an `exec` row. An `allow_always` is passed 
 
 **`403 Forbidden`**: `{ "ok": false, "error": "person_only" }`: an answer is a person's, and the request did not pass [the person check](/operating/security#the-person-check). The approval is left as it was. A script answering for you sends `Sec-Fetch-Site: same-origin` and `Sec-Fetch-Mode: cors`; this is a speed bump on your own computer, not a boundary.
 
+**`403 Forbidden`**: `{ "error": "allow_always_from_app", "message": "An answer from the app that started Clawboo can allow once or deny." }`: an `allow_always` from one of the people an [app that started Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) names. The approval is left as it was, on either kind of row.
+
 **`404 Not Found`**: no approval with that id exists:
 
 ```json
