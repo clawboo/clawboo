@@ -3,7 +3,7 @@
 // so it never fires the dozens of reads that would each fail with a 401.
 
 import { useEffect } from 'react'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -25,10 +25,6 @@ const GATE_401 = {
 }
 
 afterEach(() => cleanup())
-
-async function waitForCondition(check: () => boolean): Promise<void> {
-  for (let i = 0; i < 100 && !check(); i++) await new Promise((r) => setTimeout(r, 10))
-}
 
 function renderLock() {
   return render(
@@ -114,11 +110,26 @@ describe('AccessLock', () => {
         HttpResponse.json({ ok: false, error: 'person_only' }, { status: 403 }),
       ),
     )
-    renderLock()
+    // The dashboard sends it, as a click would. A request the test sent once the
+    // dashboard showed could be answered before AccessLock's effect began watching
+    // responses (React runs that effect after the commit, a loaded runner later
+    // still); the dashboard's own effect runs in the same flush, just before it.
+    function Dashboard() {
+      useEffect(() => {
+        void apiFetch('/api/board/t1/retry', { method: 'POST' })
+      }, [])
+      return <div data-testid="dashboard">dashboard</div>
+    }
+    render(
+      <AccessLock>
+        <Dashboard />
+      </AccessLock>,
+    )
     await screen.findByTestId('dashboard')
-    await apiFetch('/api/board/t1/retry', { method: 'POST' })
-    await waitForCondition(() => useToastStore.getState().toasts.length > 0)
-    expect(useToastStore.getState().toasts[0]?.message).toBe(PERSON_CHECK_REFUSED)
+    await waitFor(
+      () => expect(useToastStore.getState().toasts[0]?.message).toBe(PERSON_CHECK_REFUSED),
+      { timeout: 5_000 },
+    )
   })
 
   it('locks a dashboard that is already open when a later read gets the gate refusal', async () => {
@@ -161,7 +172,7 @@ describe('AccessLock', () => {
       </AccessLock>,
     )
     expect(await screen.findByTestId('dashboard')).toBeInTheDocument()
-    await waitForCondition(() => answered)
+    await waitFor(() => expect(answered).toBe(true), { timeout: 5_000 })
     await new Promise((r) => setTimeout(r, 20))
     expect(screen.queryByTestId('access-locked')).not.toBeInTheDocument()
   })
