@@ -56,6 +56,8 @@ import { createServerBoardClient } from '../serverBoardClient'
 import { createServerDeliver, type QueuedRun, type RunEntry } from '../serverDeliver'
 import { abortTaskRun } from '../teamOrchestrator'
 
+import { settle } from './settleCascade'
+
 const TEAM = 'T'
 const LEAD = 'lead'
 const WORKER = 'worker'
@@ -173,19 +175,6 @@ const delegateTo = (assignee: string, task: string): Step =>
     input: { assignee, task },
     partial: false,
   }) as Step
-
-/** Advance fake time in small steps, interleaving real macrotasks for the drains'
- *  sqlite / fs work, until `cond` holds or the budget runs out. */
-async function settle(cond: () => boolean, budgetMs = 30 * REFLECT_WINDOW_MS): Promise<void> {
-  const flush = async (): Promise<void> => {
-    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r))
-  }
-  for (let t = 0; t < budgetMs && !cond(); t += 250) {
-    await vi.advanceTimersByTimeAsync(250)
-    await flush()
-  }
-  await flush()
-}
 
 describe('the run cap in team chat (cap of one slot)', () => {
   let home: string
@@ -324,7 +313,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
 
     await h.deliver(skFor(LEAD), LEAD, 'build a parser', HUMAN_TURN)
     // The lead streamed its delegation and is still working, holding the one slot.
-    await settle(() => lead.release !== null)
+    await settle(() => lead.release !== null, "the lead's hold")
     const task = listTasks(db, { teamId: TEAM })[0]!
     expect(task.status).toBe('in_progress')
     expect(worker.starts).toHaveLength(0)
@@ -335,7 +324,10 @@ describe('the run cap in team chat (cap of one slot)', () => {
     // The lead's drain was never stuck behind its delegate: its run ends normally,
     // the slot passes to the delegate, and the cascade finishes.
     lead.release!()
-    await settle(() => h.persisted.some((p) => p.text.includes('SYNTHESIS')))
+    await settle(
+      () => h.persisted.some((p) => p.text.includes('SYNTHESIS')),
+      "the lead's synthesis",
+    )
 
     expect(listTasks(db, { teamId: TEAM })[0]!.status).toBe('done')
     expect(worker.starts).toHaveLength(1)
@@ -363,7 +355,10 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(LEAD), LEAD, 'build a parser', HUMAN_TURN)
-    await settle(() => h.persisted.some((p) => p.text.includes('SYNTHESIS')))
+    await settle(
+      () => h.persisted.some((p) => p.text.includes('SYNTHESIS')),
+      "the lead's synthesis",
+    )
 
     expect(worker.starts).toHaveLength(1)
     // It never had to queue: the lead's slot was free before the engine reacted.
@@ -387,12 +382,15 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(LEAD), LEAD, 'build a parser', HUMAN_TURN)
-    await settle(() => lead.release !== null)
+    await settle(() => lead.release !== null, "the lead's hold")
     expect(h.queuedRuns.has(skFor(WORKER))).toBe(true)
     const taskId = listTasks(db, { teamId: TEAM })[0]!.id
 
     h.stop()
-    await settle(() => slots.stats().running === 0 && h.queuedRuns.size === 0)
+    await settle(
+      () => slots.stats().running === 0 && h.queuedRuns.size === 0,
+      'every slot and the queue to empty',
+    )
 
     // The queued delegate never started, and its task went back to To do as a stop,
     // not a failure: no Blocked, a cancelled execution, no failure notice.
@@ -429,7 +427,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(LEAD), LEAD, 'build a parser', HUMAN_TURN)
-    await settle(() => lead.release !== null)
+    await settle(() => lead.release !== null, "the lead's hold")
 
     // An hour of waiting, past the 8-minute idle window and the 24-minute
     // pending-start one, swept the way the server's interval sweeps.
@@ -442,7 +440,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
     expect(listExecutions(db, task.id).map((e) => e.status)).toEqual(['running'])
 
     lead.release!()
-    await settle(() => listTasks(db, { teamId: TEAM })[0]!.status === 'done')
+    await settle(() => listTasks(db, { teamId: TEAM })[0]!.status === 'done', 'the task to be done')
     expect(worker.starts).toHaveLength(1)
   })
 
@@ -458,21 +456,21 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
-    await settle(() => other.release !== null)
+    await settle(() => other.release !== null, "the other agent's hold")
     // Nothing holding a slot awaits a person's message, so it waits for its slot
     // unsettled and its caller hears how the start went, as without the cap.
     let settled = false
     const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN).then(() => {
       settled = true
     })
-    await settle(() => h.queuedRuns.has(skFor(LEAD)))
+    await settle(() => h.queuedRuns.has(skFor(LEAD)), "the lead's turn to queue")
     expect(settled).toBe(false)
     expect(lead.starts).toHaveLength(0)
 
     other.release!()
     await delivery
     expect(lead.starts).toHaveLength(1)
-    await settle(() => h.persisted.some((p) => p.text.includes('hello back')))
+    await settle(() => h.persisted.some((p) => p.text.includes('hello back')), "the lead's reply")
     expect(order).toEqual(['other:start', 'other:end', 'lead:start', 'lead:end'])
   })
 
@@ -490,9 +488,9 @@ describe('the run cap in team chat (cap of one slot)', () => {
         ]),
       )
       await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
-      await settle(() => other.release !== null)
+      await settle(() => other.release !== null, "the other agent's hold")
       const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN)
-      await settle(() => h.queuedRuns.has(skFor(LEAD)))
+      await settle(() => h.queuedRuns.has(skFor(LEAD)), "the lead's turn to queue")
 
       h.stop()
       await delivery
@@ -507,7 +505,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
       const lead = new ScriptedAdapter('lead', [['hold', done('first')]], order)
       const h = harness(new Map([[LEAD, lead]]))
       await h.deliver(skFor(LEAD), LEAD, 'first', HUMAN_TURN)
-      await settle(() => lead.release !== null)
+      await settle(() => lead.release !== null, "the lead's hold")
       await h.deliver(skFor(LEAD), LEAD, 'second', HUMAN_TURN)
 
       h.stop()
@@ -519,7 +517,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
       const lead = new ScriptedAdapter('lead', [['hold', done('first')]], order)
       const h = harness(new Map([[LEAD, lead]]))
       await h.deliver(skFor(LEAD), LEAD, 'first', HUMAN_TURN)
-      await settle(() => lead.release !== null)
+      await settle(() => lead.release !== null, "the lead's hold")
       await h.deliver(skFor(LEAD), LEAD, '[Task Update]', { kind: 'system' })
 
       h.stop()
@@ -539,9 +537,9 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
-    await settle(() => other.release !== null)
+    await settle(() => other.release !== null, "the other agent's hold")
     const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN)
-    await settle(() => h.queuedRuns.has(skFor(LEAD)))
+    await settle(() => h.queuedRuns.has(skFor(LEAD)), "the lead's turn to queue")
     // A teammate's result and a teammate's post reach the lead while its turn waits.
     enqueueInbox(db, {
       agentId: LEAD,
@@ -582,18 +580,18 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(OTHER), OTHER, 'keep busy', HUMAN_TURN)
-    await settle(() => other.release !== null)
+    await settle(() => other.release !== null, "the other agent's hold")
     const delivery = h.deliver(skFor(LEAD), LEAD, 'hello', HUMAN_TURN)
     const outcome = delivery.then(
       () => 'resolved',
       (err: Error) => err.message,
     )
-    await settle(() => h.queuedRuns.has(skFor(LEAD)))
+    await settle(() => h.queuedRuns.has(skFor(LEAD)), "the lead's turn to queue")
 
     other.release!()
     expect(await outcome).toBe('spawn claude ENOENT')
     expect(h.queuedRuns.size).toBe(0)
-    await settle(() => slots.stats().running === 0)
+    await settle(() => slots.stats().running === 0, 'every slot to be free')
   })
 
   it('a delegate whose agent already holds a slot waits without one, so another agent goes first', async () => {
@@ -631,7 +629,10 @@ describe('the run cap in team chat (cap of one slot)', () => {
     const lockHeld = homeDispatchMutex.run(homeW, () => new Promise<void>((r) => (unlock = r)))
 
     await h.deliver(skFor(LEAD), LEAD, 'split the work', HUMAN_TURN)
-    await settle(() => lead.release !== null && other.release !== null)
+    await settle(
+      () => lead.release !== null && other.release !== null,
+      "the lead's and the other agent's holds",
+    )
     // Every slot is in use, but by runs that are working: the worker's delegation
     // waits for its own agent without parking on the free slot the other agent took.
     expect(worker.starts).toHaveLength(0)
@@ -643,7 +644,10 @@ describe('the run cap in team chat (cap of one slot)', () => {
     workerElsewhere.release()
     other.release!()
     lead.release!()
-    await settle(() => listTasks(db, { teamId: TEAM }).every((t) => t.status === 'done'))
+    await settle(
+      () => listTasks(db, { teamId: TEAM }).every((t) => t.status === 'done'),
+      'every task to be done',
+    )
     expect(worker.starts).toHaveLength(1)
   })
 
@@ -667,17 +671,21 @@ describe('the run cap in team chat (cap of one slot)', () => {
     const lockHeld = homeDispatchMutex.run(homeW, () => new Promise<void>((r) => (unlock = r)))
 
     await h.deliver(skFor(LEAD), LEAD, 'go', HUMAN_TURN)
-    await settle(() => lead.release !== null)
+    await settle(() => lead.release !== null, "the lead's hold")
     const t1 = listTasks(db, { teamId: TEAM })[0]!.id
     // The lead ends and its slot passes to the delegate, which now waits on the lock.
     lead.release!()
     await settle(
       () => lead.starts.length === 1 && slots.stats().running === 1 && order.includes('lead:end'),
+      "the lead's end and its slot passing to the delegate",
     )
 
     // Stop. The engine releases the task; the board subscriber then detaches it.
     h.stop()
-    await settle(() => listTasks(db, { teamId: TEAM }).find((t) => t.id === t1)?.status === 'todo')
+    await settle(
+      () => listTasks(db, { teamId: TEAM }).find((t) => t.id === t1)?.status === 'todo',
+      'the first task back in To do',
+    )
     expect(h.engine.detachTask(t1)).toBe(true)
 
     // A newer task takes the worker's freed session and queues behind the old delivery.
@@ -693,7 +701,10 @@ describe('the run cap in team chat (cap of one slot)', () => {
     // ending must not reach the newer task.
     unlock()
     await lockHeld
-    await settle(() => listTasks(db, { teamId: TEAM }).find((t) => t.id === t2)?.status === 'done')
+    await settle(
+      () => listTasks(db, { teamId: TEAM }).find((t) => t.id === t2)?.status === 'done',
+      'the newer task to be done',
+    )
     expect(listTasks(db, { teamId: TEAM }).find((t) => t.id === t2)?.status).toBe('done')
     expect(listTasks(db, { teamId: TEAM }).find((t) => t.id === t1)?.status).toBe('todo')
     expect(worker.starts).toHaveLength(1)
@@ -716,12 +727,15 @@ describe('the run cap in team chat (cap of one slot)', () => {
     )
 
     await h.deliver(skFor(LEAD), LEAD, 'build a parser', HUMAN_TURN)
-    await settle(() => lead.release !== null)
+    await settle(() => lead.release !== null, "the lead's hold")
     expect(h.queuedRuns.has(skFor(WORKER))).toBe(true)
 
     lead.release!()
     const taskId = listTasks(db, { teamId: TEAM })[0]!.id
-    await settle(() => listTasks(db, { teamId: TEAM })[0]!.status === 'blocked')
+    await settle(
+      () => listTasks(db, { teamId: TEAM })[0]!.status === 'blocked',
+      'the task to be blocked',
+    )
 
     expect(listExecutions(db, taskId).map((e) => e.status)).toEqual(['failed'])
     expect(
@@ -730,7 +744,7 @@ describe('the run cap in team chat (cap of one slot)', () => {
         .join('\n'),
     ).toContain('spawn claude ENOENT')
     expect(h.queuedRuns.size).toBe(0)
-    await settle(() => slots.stats().running === 0)
+    await settle(() => slots.stats().running === 0, 'every slot to be free')
     expect(slots.stats()).toEqual({ size: 1, running: 0, queued: 0 })
   })
 })
