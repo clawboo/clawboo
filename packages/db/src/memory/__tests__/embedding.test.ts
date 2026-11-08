@@ -122,6 +122,28 @@ describe('probeEmbeddingProvider', () => {
     )
   })
 
+  it("keeps OpenAI's id for OpenAI's own address however it is spelled", async () => {
+    stubTags('down')
+    for (const openaiBaseUrl of [
+      'https://api.openai.com/v1',
+      'https://API.openai.com/v1',
+      'https://api.openai.com:443/v1/',
+      'HTTPS://Api.OpenAI.com/v1//',
+    ]) {
+      const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })
+      expect(res.provider?.id, openaiBaseUrl).toBe('openai:text-embedding-3-small')
+    }
+    // A different path, port or scheme on OpenAI's host is not its own address.
+    for (const openaiBaseUrl of [
+      'https://api.openai.com/proxy/v1',
+      'https://api.openai.com:8443/v1',
+      'http://api.openai.com/v1',
+    ]) {
+      const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })
+      expect(res.provider?.id, openaiBaseUrl).toMatch(/^openai:text-embedding-3-small@/)
+    }
+  })
+
   it('still prefers local Ollama when it has the model and a key exists too', async () => {
     stubTags([`${OLLAMA_DEFAULT_MODEL}:latest`])
     const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })

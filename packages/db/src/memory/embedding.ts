@@ -141,6 +141,38 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 const OPENAI_DEFAULT_URL = 'https://api.openai.com/v1'
 
+/** A URL without its trailing slashes. A loop, not a regex: a `/+$` pattern
+ *  slows down badly on a long run of slashes in a value it does not control. */
+function withoutTrailingSlashes(url: string): string
+function withoutTrailingSlashes(url: string | undefined): string | undefined
+function withoutTrailingSlashes(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined
+  let end = url.length
+  while (end > 0 && url[end - 1] === '/') end--
+  return url.slice(0, end)
+}
+
+/** Whether a base URL is OpenAI's own address however it is spelled: the host
+ *  in capitals, the default port written out, a trailing slash. Vectors made
+ *  there are OpenAI's, so they keep OpenAI's id and stay searchable. */
+function isOpenAiOwnAddress(baseUrl: string): boolean {
+  let url: URL
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    return false
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.host === 'api.openai.com' &&
+    withoutTrailingSlashes(url.pathname) === '/v1' &&
+    !url.search &&
+    !url.hash &&
+    !url.username &&
+    !url.password
+  )
+}
+
 /** The host and path of a base URL, to name it, or the text itself when it
  *  does not parse. */
 function safeHost(baseUrl: string): string {
@@ -168,7 +200,7 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
     // name: it may serve another embedding space, and vectors are only compared
     // within one source. The `openai:` prefix keeps it counted as remote.
     const gateway =
-      opts.baseUrl && opts.baseUrl !== OPENAI_DEFAULT_URL ? safeHost(opts.baseUrl) : null
+      opts.baseUrl && !isOpenAiOwnAddress(opts.baseUrl) ? safeHost(opts.baseUrl) : null
     this.id = gateway ? `openai:${this.model}@${gateway}` : `openai:${this.model}`
   }
 
@@ -320,15 +352,6 @@ export async function probeEmbeddingProvider(
  * deterministic graph (tag and version edges only). Callers that would read a
  * key or open the store to resolve a provider check this first.
  */
-/** A URL without its trailing slashes. A loop, not a regex: a `/+$` pattern
- *  slows down badly on a long run of slashes in a value it does not control. */
-function withoutTrailingSlashes(url: string | undefined): string | undefined {
-  if (url === undefined) return undefined
-  let end = url.length
-  while (end > 0 && url[end - 1] === '/') end--
-  return url.slice(0, end)
-}
-
 export function embeddingsDisabled(): boolean {
   return process.env['CLAWBOO_DISABLE_EMBEDDINGS'] === '1'
 }
