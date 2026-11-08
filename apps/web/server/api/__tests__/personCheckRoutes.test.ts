@@ -87,8 +87,13 @@ const { teamRulesPUT } = await import('../teamRules')
 const { teamOnboardingPATCH } = await import('../teamOnboarding')
 const { booZeroOverridePOST } = await import('../booZeroOverride')
 const { budgetsResumePOST, budgetsSetPOST } = await import('../budgets')
-const { schedulesCreatePOST, schedulesDELETE, schedulesRunPOST, schedulesUpdatePATCH } =
-  await import('../schedules')
+const {
+  schedulesCreatePOST,
+  schedulesDELETE,
+  schedulesRunPOST,
+  schedulesTimeZonePUT,
+  schedulesUpdatePATCH,
+} = await import('../schedules')
 
 const TEAM = 'T'
 const DASHBOARD = { 'sec-fetch-site': 'same-origin', 'sec-fetch-mode': 'cors' }
@@ -303,6 +308,10 @@ const ROUTES: Array<[string, (who: Who, res: Response) => unknown]> = [
   [
     'deleting a routine',
     async (who, res) => schedulesDELETE(req({ params: { id: await routine() }, ...who }), res),
+  ],
+  [
+    'setting the routine time zone',
+    (who, res) => schedulesTimeZonePUT(req({ body: { timeZone: 'UTC' }, ...who }), res),
   ],
   [
     "a task's title",
