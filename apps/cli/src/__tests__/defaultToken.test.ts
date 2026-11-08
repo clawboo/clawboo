@@ -24,6 +24,7 @@ import {
   openUrlInBrowser,
   probeDashboard,
 } from '../lifecycle'
+import { startListening } from './startListening'
 
 const FILE_TOKEN = 'file-token-abc_123'
 
@@ -59,7 +60,7 @@ async function listen(handler: http.RequestListener, host = '127.0.0.1'): Promis
     seen.push({ method: req.method ?? '', url: req.url ?? '', cookie: req.headers.cookie ?? '' })
     handler(req, res)
   })
-  await new Promise<void>((resolve) => server.listen(0, host, resolve))
+  await startListening(server, host)
   return {
     port: (server.address() as AddressInfo).port,
     seen,

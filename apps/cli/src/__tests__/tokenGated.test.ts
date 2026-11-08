@@ -25,6 +25,7 @@ vi.mock('child_process', async (orig) => {
 })
 
 import { discoverDashboard, fetchServerVersion, probeDashboard, startDashboard } from '../lifecycle'
+import { startListening } from './startListening'
 
 const TOKEN = 'test-token-1234'
 
@@ -52,7 +53,7 @@ async function listen(handler: http.RequestListener, cookies: string[]): Promise
     cookies.push(req.headers.cookie ?? '')
     handler(req, res)
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await startListening(server, '127.0.0.1')
   return {
     port: (server.address() as AddressInfo).port,
     cookies,

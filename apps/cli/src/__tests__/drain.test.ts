@@ -21,6 +21,7 @@ import {
   type Method,
   type StopDeps,
 } from '../lifecycle'
+import { startListening } from './startListening'
 
 const PORT = 18790
 
@@ -516,7 +517,7 @@ describe('the hold requests over HTTP', () => {
         res.end(html)
       })
     })
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
+    await startListening(server!, '127.0.0.1')
     return (server.address() as AddressInfo).port
   }
 
@@ -564,7 +565,7 @@ describe('the hold requests over HTTP', () => {
         )
       })
     })
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
+    await startListening(server!, '127.0.0.1')
     const port = (server.address() as AddressInfo).port
     // The launcher dials 127.0.0.1 unless HOST names another loopback address.
     vi.stubEnv('HOST', '')
@@ -614,7 +615,7 @@ describe('the hold requests over HTTP', () => {
         )
       })
     })
-    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve))
+    await startListening(server!, '127.0.0.1')
     const port = (server.address() as AddressInfo).port
     // The token goes only to the port the server recorded.
     vi.stubEnv('HOST', '')
