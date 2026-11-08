@@ -24,6 +24,9 @@ declare global {
       /** The person a sign-in proxy's verified token names (lib/proxyIdentity).
        *  Unset when the lane is off or the request carried no token. */
       person?: PersonRef | null
+      /** Which issuer vouched for `person`: a sign-in proxy, or the app that
+       *  started the engine (its app link). Unset with no person. */
+      personVia?: 'proxy' | 'app'
     }
   }
 }
@@ -53,6 +56,13 @@ export function personOf(req: Request): PersonRef | null {
  */
 export function actingPerson(req: Request): PersonRef {
   return personOf(req) ?? { ...LOCAL_PERSON }
+}
+
+/** True when the app that started the engine vouched for this request's person
+ *  (its app link), rather than a sign-in proxy. Decided by which key verified
+ *  the token, never by the person's id. */
+export function personFromAppLink(req: Request): boolean {
+  return personOf(req) !== null && req.personVia === 'app'
 }
 
 /** `{ person }` to spread into what a request records, or `{}` when nothing

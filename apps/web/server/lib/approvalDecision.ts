@@ -11,7 +11,6 @@
 // inferred. POST /api/tools/approvals/:id/resolve and POST
 // /api/capabilities/approve both answer through here, so neither can skip it.
 
-import { isAccountPerson } from '@clawboo/board-core'
 import { resolveApproval, toolCallApprovals, type ClawbooDb, type PersonRecord } from '@clawboo/db'
 import { eq } from 'drizzle-orm'
 
@@ -29,19 +28,22 @@ export interface ApprovalAnswer {
   body: Record<string, unknown>
 }
 
-/** `resolvedBy` is the person a sign-in proxy vouched for, recorded on the
- *  approval with the answer; null records it with no name. */
+/** `resolvedBy` is the person a sign-in proxy (or the app link) vouched for,
+ *  recorded on the approval with the answer; null records it with no name.
+ *  `fromAppLink` says the app link vouched for them (lib/auth personFromAppLink). */
 export async function decideApproval(
   db: ClawbooDb,
   id: string,
   decision: ApprovalDecision,
-  opts: { resolvedBy?: PersonRecord | null } = {},
+  opts: { resolvedBy?: PersonRecord | null; fromAppLink?: boolean } = {},
 ): Promise<ApprovalAnswer> {
   // An app link answers for its people from another device, with a key that
   // lives on this computer. It may allow once or deny, never mint a standing
   // rule: an "Always" signed with a stolen key would outlast every card the
   // person ever saw. Refused before anything is read or released.
-  if (decision === 'allow_always' && isAccountPerson(opts.resolvedBy?.id)) {
+  // Decided by which key vouched for the person, never by the id: a sign-in
+  // proxy on its own may name people however it likes.
+  if (decision === 'allow_always' && opts.fromAppLink === true) {
     return {
       status: 403,
       body: {

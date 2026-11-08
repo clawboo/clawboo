@@ -114,6 +114,18 @@ const fromApp = (id: string, decision: string): Request =>
     body: { decision },
     headers: {},
     person: { id: 'account:u-7', name: 'Grace', role: null },
+    personVia: 'app',
+  }) as unknown as Request
+
+/** The same id from a sign-in proxy on its own: a proxy may name people so. */
+const fromProxy = (id: string, decision: string): Request =>
+  ({
+    params: { id },
+    query: {},
+    body: { decision },
+    headers: {},
+    person: { id: 'account:u-7', name: 'Grace', role: null },
+    personVia: 'proxy',
   }) as unknown as Request
 
 describe('an answer from the app that started the engine', () => {
@@ -133,6 +145,14 @@ describe('an answer from the app that started the engine', () => {
       expect(statusOf(id)).toBe('pending')
     }
     expect(calls).toEqual([])
+  })
+
+  it("leaves a sign-in proxy's person free to allow always, whatever their id", async () => {
+    seed('ap-proxy-always', 'tool')
+    const { res, done } = mockRes()
+    toolsApprovalResolvePOST(fromProxy('ap-proxy-always', 'allow_always'), res)
+    expect((await done).code).toBe(200)
+    expect(statusOf('ap-proxy-always')).toBe('allow_always')
   })
 
   it('may allow once, and the card records who answered', async () => {

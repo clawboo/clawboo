@@ -143,6 +143,9 @@ async function start(opts: {
   app.put('/api/team-verify-command/:teamId', (req, res) => {
     res.json({ actsAsPerson: actsAsPerson(req), person: req.person ?? null })
   })
+  app.get('/api/who', (req, res) => {
+    res.json({ via: req.personVia ?? null })
+  })
   // A wildcard route, which absorbs dot segments the way the board's preview
   // route does: the raw path stays under /api/ while a resolved one leaves it.
   app.all('/api/files/*splat', (req, res) => {
@@ -613,6 +616,17 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
       'clawboo-identity': await appAssertion('GET', '/api/access/identity'),
     }
     expect((await get('/api/access/identity', appTokenOnProxyHeader)).status).toBe(401)
+  })
+
+  it('says which issuer vouched for the person, so a rule can tell them apart', async () => {
+    await start({ mode: 'on', appLink: true })
+    expect((await get('/api/who', await signedByApp('GET', '/api/who'))).body).toEqual({
+      via: 'app',
+    })
+    expect((await get('/api/who', await signed('GET', '/api/who'))).body).toEqual({
+      via: 'proxy',
+    })
+    expect((await get('/api/who')).body).toEqual({ via: null })
   })
 
   it('refuses a request that carries both tokens', async () => {

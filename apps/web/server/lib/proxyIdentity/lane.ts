@@ -138,7 +138,7 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
     if (token === '') return { ok: false, reason: 'malformed', from }
     try {
       const result = await source.verifier.verify({ token, method: req.method ?? 'GET', path })
-      return result.ok ? { ok: true, person: result.person } : { ...result, from }
+      return result.ok ? { ok: true, person: result.person, from } : { ...result, from }
     } catch {
       return { ok: false, reason: 'malformed', from }
     }
@@ -176,6 +176,7 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
         return
       }
       req.person = decision.person
+      if (decision.person && decision.from) req.personVia = decision.from
       next()
     })
   }
