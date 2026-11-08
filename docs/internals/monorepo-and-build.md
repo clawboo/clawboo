@@ -165,7 +165,7 @@ Two members have a `dev` script, so `pnpm dev` starts both:
 - **`apps/web`** runs `scripts/dev-orchestrator.cjs`. It picks the API port first: exactly `CLAWBOO_API_PORT` if set (and exits if that port is busy), otherwise the first free port of 20 from `CLAWBOO_API_PORT_START` (default 18790). It then runs `pnpm dev:api` (`tsx watch server/index.ts --dev`) and `pnpm dev:ui` (Vite on port 5173) with that port in their environment, so the UI's proxy and the API agree.
 - **`docs`** runs `mint dev --port 3111`, the Mintlify preview. It needs the Mintlify CLI (`npm i -g mint`, or `npx mint`).
 
-The repo needs Node `>=22.12.0` and pnpm `>=9`; `packageManager` pins `pnpm@9.15.0`, and `corepack enable` selects it. CI uses Node 22 and `pnpm install --frozen-lockfile`, so an out-of-date lockfile fails the install.
+The repo needs Node `>=22.13.0` and pnpm `>=9` (ESLint 10 and parts of the test toolchain need 22.13; the published CLI's own floor stays 22.12, see `apps/cli/src/node-version.ts`); `packageManager` pins `pnpm@9.15.0`, and `corepack enable` selects it. CI uses Node 22 and `pnpm install --frozen-lockfile`, so an out-of-date lockfile fails the install.
 
 ## Schema changes
 
