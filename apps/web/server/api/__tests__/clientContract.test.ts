@@ -116,6 +116,7 @@ const PINNED_FEATURES = [
   'system.hold',
   'board.pause',
   'auth.proxyIdentity',
+  'auth.appLink',
 ]
 
 /** The drain-and-hold answer (GET, POST /api/system/hold, DELETE /api/system/hold/:owner). */

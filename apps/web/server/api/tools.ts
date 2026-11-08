@@ -14,7 +14,7 @@ import {
 import type { Request, Response } from 'express'
 
 import { decideApproval } from '../lib/approvalDecision'
-import { personOf, refuseUnlessPerson } from '../lib/auth'
+import { personFromAppLink, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { redactJsonString, redactValue } from '../lib/redact'
 
@@ -71,6 +71,7 @@ export async function toolsApprovalResolvePOST(req: Request, res: Response): Pro
     const id = (req.params['id'] as string | undefined) ?? ''
     const answer = await decideApproval(getDb(), id, parsed.data.decision, {
       resolvedBy: personOf(req),
+      fromAppLink: personFromAppLink(req),
     })
     res.status(answer.status).json(answer.body)
   } catch (err) {

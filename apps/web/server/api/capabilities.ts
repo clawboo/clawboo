@@ -16,7 +16,7 @@ import { eq } from 'drizzle-orm'
 import type { Request, Response } from 'express'
 
 import { decideApproval } from '../lib/approvalDecision'
-import { personOf, refuseUnlessPerson } from '../lib/auth'
+import { personFromAppLink, personOf, refuseUnlessPerson } from '../lib/auth'
 import { getDb } from '../lib/db'
 import { rowToRecord } from '../lib/capabilitySource/mapper'
 import { CapabilityInstallBlockedError } from '../lib/capabilitySource/native'
@@ -86,7 +86,10 @@ export async function capabilitiesActionPOST(req: Request, res: Response): Promi
         res.status(400).json({ error: 'approve requires { id, decision }' })
         return
       }
-      const answer = await decideApproval(db, id, decision, { resolvedBy: personOf(req) })
+      const answer = await decideApproval(db, id, decision, {
+        resolvedBy: personOf(req),
+        fromAppLink: personFromAppLink(req),
+      })
       res.status(answer.status).json(answer.body)
       return
     }

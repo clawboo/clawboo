@@ -19,20 +19,39 @@ import { resolveExecApproval } from './agentSource/execApprovalSurface'
 
 export type ApprovalDecision = 'allow_once' | 'allow_always' | 'deny'
 
+/** The error an "Allow always" from an app link's person gets. */
+export const ALLOW_ALWAYS_FROM_APP = 'allow_always_from_app'
+
 /** The HTTP status and body a route sends back. */
 export interface ApprovalAnswer {
   status: number
   body: Record<string, unknown>
 }
 
-/** `resolvedBy` is the person a sign-in proxy vouched for, recorded on the
- *  approval with the answer; null records it with no name. */
+/** `resolvedBy` is the person a sign-in proxy (or the app link) vouched for,
+ *  recorded on the approval with the answer; null records it with no name.
+ *  `fromAppLink` says the app link vouched for them (lib/auth personFromAppLink). */
 export async function decideApproval(
   db: ClawbooDb,
   id: string,
   decision: ApprovalDecision,
-  opts: { resolvedBy?: PersonRecord | null } = {},
+  opts: { resolvedBy?: PersonRecord | null; fromAppLink?: boolean } = {},
 ): Promise<ApprovalAnswer> {
+  // An app link answers for its people from another device, with a key that
+  // lives on this computer. It may allow once or deny, never mint a standing
+  // rule: an "Always" signed with a stolen key would outlast every card the
+  // person ever saw. Refused before anything is read or released.
+  // Decided by which key vouched for the person, never by the id: a sign-in
+  // proxy on its own may name people however it likes.
+  if (decision === 'allow_always' && opts.fromAppLink === true) {
+    return {
+      status: 403,
+      body: {
+        error: ALLOW_ALWAYS_FROM_APP,
+        message: 'An answer from the app that started Clawboo can allow once or deny.',
+      },
+    }
+  }
   const row = db
     .select({ kind: toolCallApprovals.kind })
     .from(toolCallApprovals)

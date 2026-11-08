@@ -49,6 +49,7 @@ const config = {
     source: 'public-key' as const,
     jwks: { keys: [ed.publicKey.export({ format: 'jwk' }) as JWK] },
   },
+  accountSubjects: 'never' as const,
 }
 
 let n = 0
