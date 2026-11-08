@@ -41,6 +41,7 @@ import {
   fetchOllamaModels,
   fetchProviderModels,
   fetchProviders,
+  providerKeySaved,
   healthcheckNativeKey,
   setNativeLeaderModel,
   type ProviderModelOption,
@@ -153,8 +154,9 @@ export function RuntimeProvidersBody({
   variant = 'settings',
 }: RuntimeProvidersBodyProps) {
   const isNative = runtime === 'clawboo-native'
-  // Hub truth: which providers already hold a key (vault OR OpenClaw .env).
+  // Hub truth: which providers have a key (vault, OpenClaw .env or the environment).
   const [hubConnected, setHubConnected] = useState<Set<string> | null>(null)
+  const [hubSaved, setHubSaved] = useState<Set<string>>(new Set())
   const [leader, setLeader] = useState<{ provider: string | null; model: string | null }>({
     provider: null,
     model: null,
@@ -190,6 +192,8 @@ export function RuntimeProvidersBody({
       isNative ? fetchNativeLeaderModel() : Promise.resolve({ provider: null, model: null }),
     ])
     setHubConnected(new Set(providers.filter((p) => p.connected).map((p) => p.id)))
+    // A key only the environment supplies has nothing to disconnect here.
+    setHubSaved(new Set(providers.filter(providerKeySaved).map((p) => p.id)))
     setLeader(leaderModel)
   }, [isNative])
 
@@ -541,16 +545,25 @@ export function RuntimeProvidersBody({
                           )}
                         </div>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={busy}
-                        data-testid={`native-provider-disconnect-${p.id}`}
-                        onClick={() => void handleDisconnectKey(p)}
-                        className="self-start text-foreground/50"
-                      >
-                        Disconnect {p.name}
-                      </Button>
+                      {p.id === OLLAMA_PROVIDER.id || hubSaved.has(p.id) ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busy}
+                          data-testid={`native-provider-disconnect-${p.id}`}
+                          onClick={() => void handleDisconnectKey(p)}
+                          className="self-start text-foreground/50"
+                        >
+                          Disconnect {p.name}
+                        </Button>
+                      ) : (
+                        <span
+                          className="self-start text-[11.5px] text-muted-foreground"
+                          data-testid={`native-provider-from-environment-${p.id}`}
+                        >
+                          {"From Clawboo's environment, where it is started"}
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>
