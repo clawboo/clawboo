@@ -4,7 +4,7 @@
 // The open and the handle it returns are wrapped so a test can act at those
 // moments; everything else is the real file system.
 
-import { mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
+import { link, mkdtemp, readdir, readFile, rm, symlink, unlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -18,6 +18,8 @@ const hooks = vi.hoisted(() => ({
   beforeOpen: null as null | { name: string; fn: () => Promise<void> },
   /** Makes the next handle's `writeFile` or `close` fail. */
   fail: null as null | 'writeFile' | 'close',
+  /** Runs once, just before the next hard link is made from `from` to `to`. */
+  beforeLink: null as null | ((from: string, to: string) => Promise<void>),
 }))
 
 vi.mock('node:fs/promises', async (importOriginal) => {
@@ -55,7 +57,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     }
     return handle
   }) as typeof actual.open
-  const mocked = { ...actual, open }
+  const link = (async (
+    from: Parameters<typeof actual.link>[0],
+    to: Parameters<typeof actual.link>[1],
+  ) => {
+    const armed = hooks.beforeLink
+    hooks.beforeLink = null
+    if (armed) await armed(String(from), String(to))
+    return actual.link(from, to)
+  }) as typeof actual.link
+  const mocked = { ...actual, open, link }
   return { ...mocked, default: mocked }
 })
 
@@ -75,6 +86,7 @@ let secret: string
 beforeEach(async () => {
   hooks.beforeOpen = null
   hooks.fail = null
+  hooks.beforeLink = null
   dir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-taskfaults-'))
   secretDir = await mkdtemp(path.join(os.tmpdir(), 'clawboo-taskfaults-secret-'))
   secret = path.join(secretDir, 'master.key')
@@ -139,6 +151,15 @@ describe('task files when the open has no O_NOFOLLOW', () => {
     await expect(appendTaskFile(dir, 'other.md', 'x')).rejects.toBeInstanceOf(UnsafeTaskFileError)
     await expect(readFile(nowhere)).rejects.toThrow()
     expect(await readdir(dir)).toEqual(['other.md'])
+  })
+
+  it('refuses the new file when its temp name was swapped for a link to another file', async () => {
+    hooks.beforeLink = async (temp) => {
+      await rm(temp, { force: true })
+      await link(secret, temp)
+    }
+    await expect(appendTaskFile(dir, 'swapped.md', 'x')).rejects.toBeInstanceOf(UnsafeTaskFileError)
+    expect(await readFile(secret, 'utf8')).toBe(SECRET)
   })
 
   it('appends to a plain file made at the name since the check', async () => {

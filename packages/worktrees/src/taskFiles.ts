@@ -165,16 +165,35 @@ export async function appendTaskFile(dir: string, name: string, content: string)
 }
 
 /** An empty file at `filePath`, unless something is there already: made under a
- *  new random name and hard-linked to `filePath`, which never follows a link. */
+ *  new random name and hard-linked to `filePath`, which never follows a link at
+ *  `filePath`. The name must then be the very file that was made: the agent
+ *  could swap the temp name for a link in between. */
 async function createEmptyAt(dir: string, name: string, filePath: string): Promise<void> {
   const temp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`)
-  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666)
-  await handle.close()
+  const handle = await open(
+    temp,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NOFOLLOW,
+    0o666,
+  )
+  let made: BigIntStats
+  try {
+    made = await handle.stat({ bigint: true })
+  } finally {
+    await handle.close()
+  }
   try {
     await link(temp, filePath)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return // checked by the caller
+    throw err
   } finally {
     await rm(temp, { force: true })
+  }
+  const named = await lstat(filePath, { bigint: true })
+  if (named.dev !== made.dev || named.ino !== made.ino) {
+    throw new UnsafeTaskFileError(
+      filePath,
+      'the file made for it was replaced before it got its name',
+    )
   }
 }
