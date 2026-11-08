@@ -190,11 +190,21 @@ describe('short reads and writes', () => {
     expect(await readTaskFile(dir, 'task-progress.md')).toBe('abcdefghij')
   })
 
-  it('appends every byte when each write takes a few', async () => {
+  // The append uses writeFile, which writes on until every byte is out and so
+  // never calls the handle's `write`; this fails if it goes back to one `write`.
+  it('appends every byte, which one short write call would not', async () => {
     await writeFile(path.join(dir, 'VERIFICATION.md'), 'start\n')
     hooks.fail = 'shortWrite'
     await appendTaskFile(dir, 'VERIFICATION.md', 'evidence line\n')
     expect(await readFile(path.join(dir, 'VERIFICATION.md'), 'utf8')).toBe('start\nevidence line\n')
+  })
+})
+
+describe('creating a missing file where there is no O_NOFOLLOW', () => {
+  it('leaves no temp file when closing it fails', async () => {
+    hooks.fail = 'close'
+    await expect(appendTaskFile(dir, 'notes.md', 'x')).rejects.toThrow()
+    expect(await readdir(dir)).toEqual([])
   })
 })
 

@@ -200,9 +200,15 @@ async function createEmptyByLink(dir: string, name: string, filePath: string): P
   const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666)
   let made: BigIntStats
   try {
-    made = await handle.stat({ bigint: true })
-  } finally {
-    await handle.close()
+    try {
+      made = await handle.stat({ bigint: true })
+    } finally {
+      await handle.close()
+    }
+  } catch (err) {
+    // Not left behind in the agent's folder; the first error is the one thrown.
+    await rm(temp, { force: true }).catch(() => undefined)
+    throw err
   }
   try {
     await link(temp, filePath)

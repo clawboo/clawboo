@@ -140,7 +140,7 @@ The second command offers to restart the older server; `clawboo -y` restarts it 
 
 1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
 2. Stop the server and remove the package with the two commands below.
-3. To delete your data as well, remove the `~/.clawboo` folder, and the work folder `~/clawboo-work` with your agents' files.
+3. To delete your data as well, remove the `~/.clawboo` folder. Remove the work folder `~/clawboo-work`, with your agents' files, only when no other Clawboo install uses it (through `CLAWBOO_WORK_DIR`); for a shared one, see [Reset everything](/operating/data-and-state#reset-everything).
 
 ```bash
 clawboo stop
