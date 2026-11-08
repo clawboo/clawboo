@@ -140,7 +140,7 @@ The second command offers to restart the older server; `clawboo -y` restarts it 
 
 1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
 2. Stop the server and remove the package with the two commands below.
-3. To delete your data as well, remove the `~/.clawboo` folder. Remove the work folder `~/clawboo-work`, with your agents' files, only when no other Clawboo install uses it (through `CLAWBOO_WORK_DIR`); for a shared one, see [Reset everything](/operating/data-and-state#reset-everything).
+3. To delete your data as well, remove the data folder: `~/.clawboo`, or the folder `CLAWBOO_HOME` names. Then remove the work folder, with your agents' files: the folder `CLAWBOO_WORK_DIR` names, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`. Remove the work folder only when no other Clawboo install uses it; for a shared one, see [Reset everything](/operating/data-and-state#reset-everything).
 
 ```bash
 clawboo stop
@@ -153,7 +153,7 @@ Deleting `~/.clawboo` permanently removes your teams, tasks, chats, memory, sett
 
 </Warning>
 
-If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove `~/.clawboo` and `~/clawboo-work` if you want. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
+If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove the folders in step 3 if you want, with the same care for a work folder another install shares. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
 
 ## Where your data lives
 

@@ -18,7 +18,7 @@ const hooks = vi.hoisted(() => ({
   beforeOpen: null as null | { name: string; fn: () => Promise<void> },
   /** Makes the next handle's `writeFile` or `close` fail, or its `read` and
    *  `write` move at most 3 bytes a call, as a file system may. */
-  fail: null as null | 'writeFile' | 'close' | 'shortRead' | 'shortWrite',
+  fail: null as null | 'writeFile' | 'close' | 'stat' | 'shortRead' | 'shortWrite',
   /** Runs once, just before the next hard link is made from `from` to `to`. */
   beforeLink: null as null | ((from: string, to: string) => Promise<void>),
 }))
@@ -49,6 +49,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       handle.writeFile = async () => {
         throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
       }
+    } else if (fail === 'stat') {
+      handle.stat = (async () => {
+        throw Object.assign(new Error('i/o error'), { code: 'EIO' })
+      }) as typeof handle.stat
     } else if (fail === 'shortRead') {
       const read = handle.read.bind(handle) as (...a: unknown[]) => ReturnType<typeof handle.read>
       handle.read = ((buf: Buffer, off: number, len: number, pos: number) =>
@@ -201,11 +205,15 @@ describe('short reads and writes', () => {
 })
 
 describe('creating a missing file where there is no O_NOFOLLOW', () => {
-  it('leaves no temp file when closing it fails', async () => {
-    hooks.fail = 'close'
-    await expect(appendTaskFile(dir, 'notes.md', 'x')).rejects.toThrow()
-    expect(await readdir(dir)).toEqual([])
-  })
+  // The first open of a missing file is its temp file's, so the fault lands there.
+  it.each(['stat', 'close'] as const)(
+    'leaves no temp file, and throws that error, when %s of the temp file fails',
+    async (step) => {
+      hooks.fail = step
+      await expect(appendTaskFile(dir, 'notes.md', 'x')).rejects.toMatchObject({ code: 'EIO' })
+      expect(await readdir(dir)).toEqual([])
+    },
+  )
 })
 
 describe('replaceTaskFile', () => {
