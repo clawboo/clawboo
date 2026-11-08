@@ -23,6 +23,7 @@ import {
   fetchProviders,
   fetchRuntimes,
   healthcheckNativeKey,
+  providerKeySaved,
   type ProviderStatus,
 } from '@clawboo/control-client'
 
@@ -61,6 +62,11 @@ function ProviderRow({
   const addToast = useToastStore((s) => s.addToast)
 
   const connected = status?.connected ?? false
+  // A key set in the environment Clawboo was started with: runs use it, and read
+  // it before a saved one, but nothing here can change or remove it.
+  const saved = status ? providerKeySaved(status) : false
+  const fromEnvironment = status?.fromEnvironment === true
+  const envVar = status?.envVar ?? 'its environment variable'
 
   const handleSave = useCallback(
     async (opts?: { skipVerify?: boolean }) => {
@@ -126,6 +132,16 @@ function ProviderRow({
             <span className="text-[13.5px] font-semibold text-foreground">{entry.name}</span>
             {connected && <StatusPill tone="success" label="Connected" />}
           </div>
+          {fromEnvironment && (
+            <p
+              className="mt-0.5 text-[11.5px] text-muted-foreground"
+              data-testid={`provider-${entry.id}-from-environment`}
+            >
+              {saved
+                ? `${envVar} in Clawboo's environment is used before the key saved here.`
+                : `From ${envVar} in Clawboo's environment. Change it where Clawboo is started.`}
+            </p>
+          )}
         </div>
 
         {editing ? (
@@ -141,7 +157,7 @@ function ProviderRow({
           >
             Cancel
           </Button>
-        ) : connected ? (
+        ) : connected && !saved ? null : connected ? (
           <>
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               Update

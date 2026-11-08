@@ -8,7 +8,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { getRuntimeSecret } from '../secretsVault'
-import { openclawEnvHasKey, writeOpenclawProviderKeys } from '../openclawEnv'
+import { ENV_KEY_MAP, openclawEnvHasKey, writeOpenclawProviderKeys } from '../openclawEnv'
 import {
   connectProviderKey,
   disconnectProviderKey,
@@ -22,15 +22,13 @@ describe('providerKeys', () => {
   const prev: Record<string, string | undefined> = {}
   // Clear ambient provider vars — a real exported key would shadow the vault +
   // .env under test (process.env wins in resolveRuntimeKey by design).
+  const PROVIDER_VARS = [...new Set(Object.values(ENV_KEY_MAP))]
   const SAVED = [
     'CLAWBOO_HOME',
     'CLAWBOO_SECRETS_MASTER_KEY',
     'OPENCLAW_STATE_DIR',
-    'ANTHROPIC_API_KEY',
-    'OPENROUTER_API_KEY',
-    'GEMINI_API_KEY',
-    'MISTRAL_API_KEY',
-  ] as const
+    ...PROVIDER_VARS,
+  ]
 
   beforeEach(() => {
     for (const k of SAVED) prev[k] = process.env[k]
@@ -39,13 +37,7 @@ describe('providerKeys', () => {
     process.env['CLAWBOO_HOME'] = clawbooHome
     process.env['OPENCLAW_STATE_DIR'] = stateDir
     delete process.env['CLAWBOO_SECRETS_MASTER_KEY']
-    for (const k of [
-      'ANTHROPIC_API_KEY',
-      'OPENROUTER_API_KEY',
-      'GEMINI_API_KEY',
-      'MISTRAL_API_KEY',
-    ])
-      delete process.env[k]
+    for (const k of PROVIDER_VARS) delete process.env[k]
   })
   afterEach(() => {
     for (const k of SAVED) {
@@ -108,6 +100,33 @@ describe('providerKeys', () => {
     writeOpenclawProviderKeys(stateDir, [{ provider: 'mistral', key: 'm-key' }])
     expect(getRuntimeSecret('MISTRAL_API_KEY')).toBeNull() // never entered the vault
     expect(providerStatus().find((p) => p.id === 'mistral')?.connected).toBe(true)
+  })
+
+  it('counts a key set only in the environment as connected, but not saved', () => {
+    const groq = providerStatus({ GROQ_API_KEY: 'gsk-env' }).find((p) => p.id === 'groq')
+    expect(groq).toMatchObject({
+      connected: true,
+      saved: false,
+      fromEnvironment: true,
+      envVar: 'GROQ_API_KEY',
+    })
+    expect(providerStatus({ GROQ_API_KEY: '  ' }).find((p) => p.id === 'groq')).toMatchObject({
+      connected: false,
+      fromEnvironment: false,
+    })
+  })
+
+  it('says a saved key and the same variable in the environment are both there', () => {
+    connectProviderKey('anthropic', 'sk-ant-saved')
+    const anthropic = providerStatus({ ANTHROPIC_API_KEY: 'sk-ant-env' }).find(
+      (p) => p.id === 'anthropic',
+    )
+    expect(anthropic).toMatchObject({ connected: true, saved: true, fromEnvironment: true })
+    // Disconnect removes the saved copy only: the environment still supplies one.
+    disconnectProviderKey('anthropic')
+    expect(
+      providerStatus({ ANTHROPIC_API_KEY: 'sk-ant-env' }).find((p) => p.id === 'anthropic'),
+    ).toMatchObject({ connected: true, saved: false })
   })
 
   it('isKnownProvider gates the id set', () => {

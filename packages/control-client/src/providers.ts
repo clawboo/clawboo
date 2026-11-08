@@ -5,8 +5,23 @@ import { apiFetch } from './config'
 
 export interface ProviderStatus {
   id: string
+  /** Saved, or set in the server's environment: either way runs use it. */
   connected: boolean
+  /** In the vault or OpenClaw's `.env`, so Disconnect can remove it. Absent
+   *  from a server that predates it, where `connected` meant saved. */
+  saved?: boolean
+  /** Set in the environment the server was started with, which nothing in the
+   *  dashboard can remove. */
+  fromEnvironment?: boolean
+  /** The variable that holds the key: a name, never the value. */
+  envVar?: string
   poweredRuntimes: string[]
+}
+
+/** Whether Disconnect would remove this provider's key: an older server's
+ *  `connected` meant saved. */
+export function providerKeySaved(p: ProviderStatus): boolean {
+  return p.saved ?? p.connected
 }
 
 export interface ProviderMutationResult {

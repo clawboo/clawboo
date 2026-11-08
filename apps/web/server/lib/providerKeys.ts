@@ -29,7 +29,15 @@ function poweredRuntimesFor(envVar: string): string[] {
 
 export interface ProviderStatus {
   id: string
+  /** Saved here, or set in the server's environment: either way, runs use it. */
   connected: boolean
+  /** In the vault or OpenClaw's `.env`, so Disconnect can remove it. */
+  saved: boolean
+  /** Set in the environment Clawboo was started with. Runs read it before a
+   *  saved key, and nothing here can remove it. */
+  fromEnvironment: boolean
+  /** The variable that holds the key: a name, never the value. */
+  envVar: string
   poweredRuntimes: string[]
 }
 
@@ -56,14 +64,22 @@ export function disconnectProviderKey(provider: string): void {
   removeOpenclawProviderKey(resolveStateDir(), provider)
 }
 
-/** Per-provider connection status. `connected` = present in the vault OR in
- *  OpenClaw's `.env` — never an ambient `process.env` var alone (mirrors the
- *  `hasVaultCredential` distinction), so status reflects a deliberately-set key. */
-export function providerStatus(): ProviderStatus[] {
+/** Per-provider connection status. A key the server's environment supplies is
+ *  connected too, since runs use it (they read the environment first), but is
+ *  marked `fromEnvironment` rather than `saved`: Disconnect cannot remove it, and
+ *  the dashboard says where it comes from instead of offering to. */
+export function providerStatus(env: NodeJS.ProcessEnv = process.env): ProviderStatus[] {
   const stateDir = resolveStateDir()
-  return PROVIDER_METAS.map((p) => ({
-    id: p.id,
-    connected: hasRuntimeSecret(p.envVar) || openclawEnvHasKey(stateDir, p.envVar),
-    poweredRuntimes: p.poweredRuntimes,
-  }))
+  return PROVIDER_METAS.map((p) => {
+    const saved = hasRuntimeSecret(p.envVar) || openclawEnvHasKey(stateDir, p.envVar)
+    const fromEnvironment = (env[p.envVar]?.trim() ?? '') !== ''
+    return {
+      id: p.id,
+      connected: saved || fromEnvironment,
+      saved,
+      fromEnvironment,
+      envVar: p.envVar,
+      poweredRuntimes: p.poweredRuntimes,
+    }
+  })
 }

@@ -37,6 +37,49 @@ describe('ProvidersPanel', () => {
     expect(screen.getByText('OpenAI')).toBeInTheDocument()
   })
 
+  it('says a key comes from the environment, and offers no Update or Disconnect for it', async () => {
+    server.use(
+      http.get('/api/providers', () =>
+        HttpResponse.json({
+          providers: [
+            {
+              id: 'anthropic',
+              connected: true,
+              saved: false,
+              fromEnvironment: true,
+              envVar: 'ANTHROPIC_API_KEY',
+              poweredRuntimes: ['Clawboo Native', 'OpenClaw'],
+            },
+            {
+              id: 'openai',
+              connected: true,
+              saved: true,
+              fromEnvironment: true,
+              envVar: 'OPENAI_API_KEY',
+              poweredRuntimes: ['Clawboo Native', 'OpenClaw'],
+            },
+          ],
+        }),
+      ),
+    )
+    render(<ProvidersPanel />)
+    const anthropic = await rowFor('Anthropic')
+    expect(within(anthropic).getByText('Connected')).toBeInTheDocument()
+    expect(within(anthropic).getByTestId('provider-anthropic-from-environment')).toHaveTextContent(
+      "From ANTHROPIC_API_KEY in Clawboo's environment.",
+    )
+    expect(within(anthropic).queryByRole('button', { name: 'Update' })).toBeNull()
+    expect(within(anthropic).queryByRole('button', { name: 'Disconnect' })).toBeNull()
+    expect(within(anthropic).queryByRole('button', { name: 'Connect' })).toBeNull()
+    // Saved as well: the saved copy can be updated or removed, and the row says
+    // which one runs use.
+    const openai = await rowFor('OpenAI')
+    expect(within(openai).getByTestId('provider-openai-from-environment')).toHaveTextContent(
+      "OPENAI_API_KEY in Clawboo's environment is used before the key saved here.",
+    )
+    expect(within(openai).getByRole('button', { name: 'Disconnect' })).toBeInTheDocument()
+  })
+
   it('Connect reveals the key input for a provider', async () => {
     server.use(http.get('/api/providers', () => HttpResponse.json({ providers: [] })))
     render(<ProvidersPanel />)
