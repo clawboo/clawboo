@@ -61,9 +61,10 @@ import { pickBooColor } from '@/lib/resolveTeamBooColor'
 import { calculateCostUsd, formatCost } from '@/features/cost/costUtils'
 import { shouldDropAssistantTurn } from '@/lib/teamProtocol'
 import { parseToolEntry } from './parseToolEntry'
-import { splitAssistantText } from './splitAssistantText'
+import { splitAssistantText, type AssistantSegment } from './splitAssistantText'
 import {
   stripActionableHandOffs,
+  findActionableHandOffs,
   stripPlanBlocks,
   stripDelegationBlocks,
 } from '@/features/group-chat/delegationTags'
@@ -928,7 +929,8 @@ export const DelegationCard = memo(function DelegationCard({
 /** How a reply's `<delegate>` blocks are drawn: `card` in a team's chat, where each one
  *  starts a task; `chat-card` in a one-to-one chat that acts on them, where only a tag
  *  outside code and quotes starts one and any other stays on screen as written; and
- *  `not-handed-off`, a note in a one-to-one chat where nothing acts on them. */
+ *  `not-handed-off`, a note in a one-to-one chat where nothing acts on them, drawn
+ *  only for a tag outside code and quotes. */
 export type HandOffDisplay = 'card' | 'chat-card' | 'not-handed-off'
 
 /** A task card placed in a one-to-one chat's timeline by when it was made. */
@@ -970,6 +972,34 @@ export const NotHandedOffNote = memo(function NotHandedOffNote({
   )
 })
 
+/** A reply's segments for a chat where nothing acts on a tag, with the plans that would
+ *  act taken out of its prose. Both are read in the reply as written. */
+function withoutActionablePlans(text: string): AssistantSegment[] {
+  const { plans } = findActionableHandOffs(text)
+  // A prose segment runs from the end of the tag before it, so its offsets can be found.
+  let cursor = 0
+  return splitAssistantText(text, { actionableOnly: true }).flatMap(
+    (segment): AssistantSegment[] => {
+      if (segment.kind === 'delegation') {
+        cursor = segment.blockEnd
+        return [segment]
+      }
+      const start = cursor
+      const end = start + segment.text.length
+      let out = ''
+      let at = start
+      for (const plan of plans) {
+        if (plan.blockStart < start || plan.blockEnd > end) continue
+        out += text.slice(at, plan.blockStart)
+        at = plan.blockEnd
+      }
+      if (at === start) return [segment]
+      const kept = (out + text.slice(at, end)).trim()
+      return kept ? [{ ...segment, text: kept }] : []
+    },
+  )
+}
+
 // ─── AssistantTurnCard ────────────────────────────────────────────────────────
 
 export const AssistantTurnCard = memo(function AssistantTurnCard({
@@ -1003,8 +1033,12 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   const hasText = Boolean(block.assistant?.text)
   const rawText = block.assistant?.text ?? ''
   const shownText = isRelay ? stripRelayPrefix(rawText) : rawText
+  // A tag in code or a quote is only shown, here as in a chat that hands off, so it stays
+  // as written and gets no note. It is read in the reply as written, as the streaming
+  // card reads it: taking plans out first can join a quote's lines. Only a plan that
+  // would act is taken out; one shown in code or a quote stays.
   const segments = useMemo(
-    () => (handOffs === 'not-handed-off' ? splitAssistantText(stripPlanBlocks(shownText)) : []),
+    () => (handOffs === 'not-handed-off' ? withoutActionablePlans(shownText) : []),
     [handOffs, shownText],
   )
   const charCount = block.assistant?.text?.length ?? 0
@@ -1137,7 +1171,7 @@ export const StreamingCard = memo(function StreamingCard({
   // required), so it remains in the prose segment until it completes — at
   // which point the next render flips it into a card.
   const segments = useMemo(
-    () => splitAssistantText(text, { actionableOnly: handOffs === 'chat-card' }),
+    () => splitAssistantText(text, { actionableOnly: handOffs !== 'card' }),
     [text, handOffs],
   )
   return (

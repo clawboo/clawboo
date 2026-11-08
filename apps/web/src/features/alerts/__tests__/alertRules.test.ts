@@ -136,13 +136,16 @@ describe('the card about agents waking each other', () => {
     approvals: [],
     approvalsComplete: true,
   })
-  const cardTask = (kind: 'ask' | 'back_and_forth'): AlertTaskInput =>
+  const cardTask = (
+    kind: 'ask' | 'back_and_forth',
+    card: { fromAgentId?: string; openedAt?: number } = {},
+  ): AlertTaskInput =>
     task('t1', 'agent_wakes', {
       updatedAt: 6000,
       attention: {
         reason: 'agent_wakes',
         failedRuns: 0,
-        agentWakes: { jobTaskId: 'j', kind, fromAgentId: 'a', toAgentId: 'b' },
+        agentWakes: { jobTaskId: 'j', kind, fromAgentId: 'a', toAgentId: 'b', ...card },
       },
     })
 
@@ -161,6 +164,74 @@ describe('the card about agents waking each other', () => {
     const next = foldAlertRead(first.memory, read([cardTask('back_and_forth')]), {
       announce: true,
     })
+    expect(next.fresh).toHaveLength(1)
+  })
+
+  it('a card of the same kind that opened again is news, and an unchanged one is not', () => {
+    const first = foldAlertRead(
+      startAlertMemory(SINCE),
+      read([cardTask('ask', { openedAt: 5500 })]),
+      { announce: true },
+    )
+    expect(first.fresh).toHaveLength(1)
+    const same = foldAlertRead(first.memory, read([cardTask('ask', { openedAt: 5500 })]), {
+      announce: true,
+    })
+    expect(same.fresh).toEqual([])
+    // Another pair on the task, or the same card back after an answer.
+    const reopened = foldAlertRead(
+      same.memory,
+      read([cardTask('ask', { fromAgentId: 'c', openedAt: 5800 })]),
+      { announce: true },
+    )
+    expect(reopened.fresh).toHaveLength(1)
+    // The same pair, opened again later: the time alone tells it apart.
+    const samePair = foldAlertRead(
+      reopened.memory,
+      read([cardTask('ask', { fromAgentId: 'c', openedAt: 6200 })]),
+      { announce: true },
+    )
+    expect(samePair.fresh).toHaveLength(1)
+  })
+
+  it('another pair taking the card in the same millisecond is news', () => {
+    const first = foldAlertRead(
+      startAlertMemory(SINCE),
+      read([cardTask('ask', { openedAt: 5500 })]),
+      { announce: true },
+    )
+    const otherPair = foldAlertRead(
+      first.memory,
+      read([cardTask('ask', { fromAgentId: 'c', openedAt: 5500 })]),
+      { announce: true },
+    )
+    expect(otherPair.fresh).toHaveLength(1)
+  })
+
+  it('a card that opened after the tab left is news though the task is older', () => {
+    // The read as the tab left missed the board, so the times decide. The task last
+    // changed before the tab left; the card opened after.
+    const m = startAlertMemory(SINCE)
+    const leaving = foldAlertRead(
+      m,
+      { tasks: null, approvals: [], approvalsComplete: true },
+      { announce: false },
+    )
+    const older = task('t1', 'agent_wakes', {
+      updatedAt: 1000,
+      attention: {
+        reason: 'agent_wakes',
+        failedRuns: 0,
+        agentWakes: {
+          jobTaskId: 'j',
+          kind: 'ask',
+          fromAgentId: 'a',
+          toAgentId: 'b',
+          openedAt: 6000,
+        },
+      },
+    })
+    const next = foldAlertRead(leaving.memory, read([older]), { announce: true })
     expect(next.fresh).toHaveLength(1)
   })
 })

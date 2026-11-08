@@ -1774,6 +1774,29 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       expect(heardNext().join()).toMatch(/A Stop came before the rest/)
     })
 
+    it('a Stop still ends the rest when the person writes again before the next one', async () => {
+      boo = new ScriptedAdapter([[done(TWO)]])
+      const asked: string[] = []
+
+      await runChatTurn({
+        db,
+        agentId: BZ,
+        message: 'both, on Growth',
+        ...opts(),
+        routeFor: () => ({
+          handOffFromChat: async (input) => {
+            asked.push(input.task)
+            await stopChatTurn(db, BZ)
+            // Their next message lifts the hold before this loop looks again.
+            releaseChatResults(db, BZ)
+            return { taskId: 'started' }
+          },
+        }),
+      })
+
+      expect(asked).toEqual(['fix the parser'])
+    })
+
     it('a Stop from before the reply does not end them', async () => {
       await stopChatTurn(db, BZ)
       boo = new ScriptedAdapter([[done(TWO)]])
@@ -1822,6 +1845,34 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
 
       expect(whileDeciding).toBeNull()
       expect(settledHow(row)).toBe('delivered')
+    })
+
+    it('a result a person’s message carries stays unsettled until its hand-offs are decided', async () => {
+      await stopChatTurn(db, BZ)
+      createChatReportUps(db, TEAM, { onRecorded: () => undefined }).take(
+        { toAgentId: BZ, by: 'Coder', summary: 'the numbers are off', chatSessionKey: CHAT },
+        { held: false },
+      )
+      const [row] = listHeldChatReportUps(db, CHAT)
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the numbers</delegate>')]])
+      let whileDeciding: string | null | undefined
+
+      await runChatTurn({
+        db,
+        agentId: BZ,
+        message: 'fix it, on Growth',
+        ...opts(),
+        routeFor: () => ({
+          handOffFromChat: async () => {
+            whileDeciding = settledHow(row!.id)
+            return { taskId: 'started' }
+          },
+        }),
+      })
+
+      expect(boo.starts[0]!.context).toContain('the numbers are off')
+      expect(whileDeciding).toBeNull()
+      expect(settledHow(row!.id)).toBe('delivered')
     })
 
     it('a hand-off that throws still settles what the turn read', async () => {

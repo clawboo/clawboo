@@ -404,34 +404,109 @@ const CLOSING_QUOTES = new Set(['"', "'", '”', '’'])
 const inQuotationMarks = (text: string, start: number, end: number): boolean =>
   OPENING_QUOTES.has(text[start - 1] ?? '') && CLOSING_QUOTES.has(text[end] ?? '')
 
-/** A tag partway through a quoted sentence on one line: a quote opens before it and is
- *  still open, and closes after it. A straight apostrophe says nothing, so `'` is left out. */
-function inQuotedSentence(text: string, start: number, end: number): boolean {
-  const lineEnd = text.indexOf('\n', end)
-  const before = text.slice(text.lastIndexOf('\n', start - 1) + 1, start)
-  const after = text.slice(end, lineEnd === -1 ? text.length : lineEnd)
-  const opens = (open: string, close: string): boolean =>
-    before.lastIndexOf(open) > before.lastIndexOf(close) && after.includes(close)
-  return (
-    ((before.match(/"/g)?.length ?? 0) % 2 === 1 && after.includes('"')) ||
-    opens('“', '”') ||
-    opens('‘', '’')
-  )
+const WORD_CHAR_RE = /[\p{L}\p{N}]/u
+const DIGIT_RE = /\p{N}/u
+
+/** A mark with a letter or digit on both sides, like the apostrophe in `It’s`. */
+const inWord = (text: string, at: number): boolean =>
+  WORD_CHAR_RE.test(text[at - 1] ?? '') && WORD_CHAR_RE.test(text[at + 1] ?? '')
+
+/**
+ * Reads, for a tag at `[start, end)` in `scan`, where the quoted sentence holding it
+ * closes on its line, or -1 when it stands in none: a quote opens before it on the line
+ * where it starts and is still open, and closes after it on the line where it ends. A
+ * straight double quote opens only where no word runs into it, and while one is open
+ * the next one closes it. One right after a digit, as in `5"`, may be an inch mark or
+ * the end of `"take 5"`, so both readings are kept, and a tag is shown when either puts
+ * it in a quoted sentence: showing is the safe side. A curly apostrophe between two
+ * letters, as in `It’s`, is not a closing quote. A straight apostrophe says nothing, so
+ * `'` is left out.
+ *
+ * `scan` has tags and code blanked, so their quote marks count for nothing. Asked in
+ * order along the text, it carries the state forward, so a reply is read once however
+ * many tags it has.
+ */
+function quoteReader(scan: string): (start: number, end: number) => number {
+  let pos = 0
+  // The readings of the straight quotes so far: one may have a quote open, one closed.
+  let mayBeOpen = false
+  let mayBeClosed = true
+  let doubleOpen = -1
+  let doubleClose = -1
+  let singleOpen = -1
+  let singleClose = -1
+  let lastEnd = 0
+  const found = new Map<string, number>()
+  // The first `ch` at or after `from`. `from` only grows, so a search is not repeated.
+  // An apostrophe inside a word is skipped, so `’` finds only a closing quote.
+  const nextIndex = (ch: string, from: number): number => {
+    const at = found.get(ch)
+    if (at !== undefined && (at === -1 || at >= from)) return at
+    let fresh = scan.indexOf(ch, from)
+    while (fresh !== -1 && ch === '’' && inWord(scan, fresh)) fresh = scan.indexOf(ch, fresh + 1)
+    found.set(ch, fresh)
+    return fresh
+  }
+  return (start, end) => {
+    if (start < pos || end < lastEnd) {
+      // Asked out of order: read this line again from its start.
+      pos = scan.lastIndexOf('\n', start - 1) + 1
+      mayBeOpen = false
+      mayBeClosed = true
+      doubleOpen = doubleClose = singleOpen = singleClose = -1
+      found.clear()
+    }
+    lastEnd = end
+    for (; pos < start; pos++) {
+      const c = scan[pos]
+      if (c === '\n') {
+        mayBeOpen = false
+        mayBeClosed = true
+        doubleOpen = doubleClose = singleOpen = singleClose = -1
+      } else if (c === '"') {
+        const before = scan[pos - 1] ?? ''
+        const afterWord = WORD_CHAR_RE.test(before)
+        // An open quote closes, or after a digit may stay open; a closed one opens unless
+        // a word runs into it.
+        const open = (mayBeOpen && DIGIT_RE.test(before)) || (mayBeClosed && !afterWord)
+        mayBeClosed = mayBeOpen || (mayBeClosed && afterWord)
+        mayBeOpen = open
+      } else if (c === '“') doubleOpen = pos
+      else if (c === '”') doubleClose = pos
+      else if (c === '‘') singleOpen = pos
+      else if (c === '’' && !inWord(scan, pos)) singleClose = pos
+    }
+    const lineEnd = nextIndex('\n', end)
+    let closesAt = -1
+    const consider = (ch: string): void => {
+      const at = nextIndex(ch, end)
+      if (at !== -1 && (lineEnd === -1 || at < lineEnd) && (closesAt === -1 || at < closesAt))
+        closesAt = at
+    }
+    if (mayBeOpen) consider('"')
+    if (doubleOpen > doubleClose) consider('”')
+    if (singleOpen > singleClose) consider('’')
+    return closesAt === -1 ? -1 : closesAt + 1
+  }
 }
 
-/** `text` with these ranges blanked, so every other offset stays where it was. */
+/** `text` with these ranges blanked, so every other offset stays where it was. Line
+ *  breaks stay too, so a blanked range never joins two lines into one. */
 function blanked(text: string, ranges: readonly Span[]): string {
   const parts: string[] = []
   let cursor = 0
   for (const [start, end] of [...ranges].sort((a, b) => a[0] - b[0])) {
     if (end <= cursor) continue
     const from = Math.max(start, cursor)
-    parts.push(text.slice(cursor, from), ' '.repeat(end - from))
+    parts.push(text.slice(cursor, from), text.slice(from, end).replace(/[^\n]/g, ' '))
     cursor = end
   }
   parts.push(text.slice(cursor))
   return parts.join('')
 }
+
+const matchSpans = (text: string, re: RegExp): Span[] =>
+  [...text.matchAll(re)].map((m): Span => [m.index ?? 0, (m.index ?? 0) + m[0].length])
 
 /** A reply's tags, split by whether a reader sees them as tags. A tag counts by where
  *  it opens, so a real one keeps a brief with code or a quote in it. */
@@ -448,47 +523,91 @@ export interface ActionableHandOffs {
  *  real tag's brief is passed over, so the brief keeps it. */
 function shownOpenersWithNoClose(text: string, spans: readonly Span[]): Span[] {
   const closes = [...text.matchAll(DELEGATE_CLOSE_RE)]
+  // Quotes are counted with every tag's own marks blanked, and code's.
+  const scan = blanked(text, [
+    ...matchSpans(text, DELEGATE_OPEN_RE),
+    ...matchSpans(text, DELEGATE_CLOSE_RE),
+    ...spans,
+  ])
+  const quotedEnd = quoteReader(scan)
   const mentions: Span[] = []
   let cursor = 0
+  // Openers come in order, so the first closer after each one, and the code or quote
+  // span that could hold it, only move forward.
+  let next = 0
+  const sorted = [...spans].sort((a, b) => a[0] - b[0])
+  let inSpan = 0
   for (const open of text.matchAll(DELEGATE_OPEN_RE)) {
     const at = open.index ?? 0
     if (at < cursor) continue
     const bodyStart = at + open[0].length
-    const close = closes.find((c) => (c.index ?? 0) >= bodyStart)
-    const shownIn = spans.find(([start, end]) => at >= start && at < end)
-    if (shownIn && (!close || (close.index ?? 0) >= shownIn[1])) {
+    while (next < closes.length && (closes[next]!.index ?? 0) < bodyStart) next += 1
+    const close = closes[next]
+    while (inSpan < sorted.length && sorted[inSpan]![1] <= at) inSpan += 1
+    const span = sorted[inSpan]
+    const shownUntil =
+      (span && span[0] <= at ? span[1] : undefined) ??
+      (inQuotationMarks(text, at, bodyStart) ? bodyStart + 1 : quotedEnd(at, bodyStart))
+    // With no closer left it pairs with nothing, but one that is shown is still only a
+    // mention, not a hand-off that could not be read.
+    if (shownUntil !== -1 && (!close || (close.index ?? 0) >= shownUntil)) {
       mentions.push([at, bodyStart])
       continue
     }
-    if (!close) break
+    if (!close) continue
     cursor = (close.index ?? 0) + close[0].length
   }
   return mentions
 }
 
-export function findActionableHandOffs(text: string): ActionableHandOffs {
+/** The hand-offs, plus what only shows one: code and quotes, and the openers shown in
+ *  them that `shownOpenersWithNoClose` set aside. */
+function readHandOffs(text: string): ActionableHandOffs & { shown: Span[] } {
   const spans = shownSpans(text)
-  const isShown = (start: number, end: number): boolean =>
-    inSpans(spans, start) ||
-    inQuotationMarks(text, start, end) ||
-    inQuotedSentence(text, start, end)
   const allPlans = findPlanBlocks(text)
-  const plans = allPlans.filter((p) => !isShown(p.blockStart, p.blockEnd))
-  const shownPlans = allPlans.filter((p) => isShown(p.blockStart, p.blockEnd))
+  const planSpans = allPlans.map((p): Span => [p.blockStart, p.blockEnd])
   // A plan's steps have the same `to="…">` shape, so they are not read as delegates.
-  const withoutPlans = blanked(
-    text,
-    allPlans.map((p): Span => [p.blockStart, p.blockEnd]),
-  )
-  const allDelegates = findDelegationBlocks(
-    blanked(withoutPlans, shownOpenersWithNoClose(withoutPlans, spans)),
-  )
-  return {
-    delegates: allDelegates.filter((d) => !isShown(d.blockStart, d.blockEnd)),
-    plans,
-    shownDelegates: allDelegates.filter((d) => isShown(d.blockStart, d.blockEnd)),
-    shownPlans,
+  const withoutPlans = blanked(text, planSpans)
+  const mentions = shownOpenersWithNoClose(withoutPlans, spans)
+  const tagText = blanked(withoutPlans, mentions)
+  const allDelegates = findDelegationBlocks(tagText)
+  // Quotes are counted with every tag and all code blanked: their quote marks are not
+  // a sentence's.
+  const scan = blanked(tagText, [
+    ...allDelegates.map((d): Span => [d.blockStart, d.blockEnd]),
+    ...matchSpans(tagText, DELEGATE_OPEN_RE),
+    ...matchSpans(tagText, DELEGATE_CLOSE_RE),
+    ...spans,
+  ])
+  // Each tag is asked once, in order along the text, so the quotes are read in one pass.
+  const quotedEnd = quoteReader(scan)
+  const shownAt = new Set<number>()
+  for (const { blockStart: start, blockEnd: end } of [...allDelegates, ...allPlans].sort(
+    (x, y) => x.blockStart - y.blockStart,
+  )) {
+    if (inSpans(spans, start) || inQuotationMarks(text, start, end) || quotedEnd(start, end) !== -1)
+      shownAt.add(start)
   }
+  const isShown = (start: number): boolean => shownAt.has(start)
+  const shownDelegates = allDelegates.filter((d) => isShown(d.blockStart))
+  const shownPlans = allPlans.filter((p) => isShown(p.blockStart))
+  return {
+    delegates: allDelegates.filter((d) => !isShown(d.blockStart)),
+    plans: allPlans.filter((p) => !isShown(p.blockStart)),
+    shownDelegates,
+    shownPlans,
+    shown: [
+      ...spans,
+      ...mentions,
+      ...shownDelegates.map((d): Span => [d.blockStart, d.blockEnd]),
+      ...shownPlans.map((p): Span => [p.blockStart, p.blockEnd]),
+    ],
+  }
+}
+
+export function findActionableHandOffs(text: string): ActionableHandOffs {
+  const { delegates, plans, shownDelegates, shownPlans } = readHandOffs(text)
+  return { delegates, plans, shownDelegates, shownPlans }
 }
 
 /** Take out the tags that count, and leave those only shown. Text with neither comes
@@ -519,10 +638,10 @@ const BROKEN_HAND_OFF_RE =
  * and quotes do not count, and neither do tags that could be read.
  */
 export function looksLikeBrokenHandOff(text: string): boolean {
-  const { delegates, plans } = findActionableHandOffs(text)
+  const { delegates, plans, shown } = readHandOffs(text)
   return BROKEN_HAND_OFF_RE.test(
     blanked(text, [
-      ...shownSpans(text),
+      ...shown,
       ...delegates.map((d): Span => [d.blockStart, d.blockEnd]),
       ...plans.map((p): Span => [p.blockStart, p.blockEnd]),
     ]),

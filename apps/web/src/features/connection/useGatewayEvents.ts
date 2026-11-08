@@ -48,6 +48,14 @@ const CONTEXT_OVERFLOW_RE =
   /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|exceeds? (?:the )?(?:maximum )?context|too many tokens|reduce the length of the (?:messages|prompt)/i
 
 /**
+ * Wordings the pattern above misses: Gemini's "exceeds the maximum number of tokens
+ * allowed", Moonshot's "exceeded model token limit" and xAI's "maximum prompt length".
+ * Kept character-for-character with MORE_CONTEXT_OVERFLOW_RE in the same server file.
+ */
+const MORE_CONTEXT_OVERFLOW_RE =
+  /exceed(?:s|ed)? (?:the )?(?:maximum number of tokens|model token limit)|maximum prompt length/i
+
+/**
  * A rate limit can use the same words ("too many tokens"), and waiting fixes that one.
  * Beside the copy above, never inside it. Kept character-for-character with
  * RATE_LIMIT_MESSAGE_RE in the same server file, for the same reason.
@@ -81,7 +89,8 @@ const NAMED_TOKEN_LIMIT_RE =
 export function gatewayRunFailureText(reason: string | null | undefined): string {
   const trimmed = reason?.trim()
   const overflowWords = (text: string): boolean =>
-    CONTEXT_OVERFLOW_RE.test(text) && !RATE_LIMIT_MESSAGE_RE.test(text)
+    (CONTEXT_OVERFLOW_RE.test(text) || MORE_CONTEXT_OVERFLOW_RE.test(text)) &&
+    !RATE_LIMIT_MESSAGE_RE.test(text)
   if (!trimmed) {
     return 'The run ended without reporting a result. The connection to the runtime may have dropped; try sending again.'
   }

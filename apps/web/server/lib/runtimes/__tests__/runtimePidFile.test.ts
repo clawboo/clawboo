@@ -56,6 +56,8 @@ let home: string
 let prevHome: string | undefined
 let prevClawbooHome: string | undefined
 const sleepers: ChildProcess[] = []
+/** When each sleeper was spawned, as the real probe would report its start. */
+const spawnedAt = new Map<number, number>()
 
 beforeEach(() => {
   home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-runtime-pids-'))
@@ -76,6 +78,7 @@ afterEach(() => {
   for (const child of sleepers.splice(0)) {
     if (child.pid && alive(child.pid)) killProcessTreeByPid(child.pid)
   }
+  spawnedAt.clear()
 })
 
 function alive(pid: number): boolean {
@@ -92,6 +95,7 @@ function spawnSleeper(): number {
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)'], { stdio: 'ignore' })
   sleepers.push(child)
   if (!child.pid) throw new Error('no pid')
+  spawnedAt.set(child.pid, Date.now())
   return child.pid
 }
 
@@ -171,11 +175,13 @@ describe('runtime pid record', () => {
 })
 
 /** On Windows the real probe is a PowerShell start, which on a loaded runner can take
- *  past a test's timeout. There these tests stand in what it would say of a process that
- *  has just started. It has its own test below, given the time it can need. */
+ *  past a test's timeout. There these tests stand in what it would say: when each
+ *  process was spawned, not when it was asked, so a slow runner does not make a test's
+ *  own child look like a recycled pid. The real probe has its own tests below, given
+ *  the time it can need. */
 const startedJustNow = (pids: readonly number[]): StartTimes => ({
   ok: true,
-  times: new Map(pids.map((pid) => [pid, Date.now()])),
+  times: new Map(pids.map((pid) => [pid, spawnedAt.get(pid) ?? Date.now()])),
 })
 const reap = (deps: RuntimeReapDeps = {}): RuntimeReapReport =>
   reapOrphanedRuntimeChildren({ ...(isWin ? { startTimes: startedJustNow } : {}), ...deps })
@@ -210,21 +216,26 @@ describe('boot reap of runtime children', () => {
     expect(alive(stranger)).toBe(true)
   })
 
-  it('does not signal a pid whose process started half a minute after the record', () => {
-    // A record is written as soon as the spawn returns, so a process that took
-    // the pid even seconds later is not the child: killing it would take a
-    // stranger's whole process tree.
-    const stranger = spawnSleeper()
-    writeEngineFile('gone.json', {
-      owner: goneEngine(),
-      children: [{ pid: stranger, startedAt: Date.now() - 30_000 }],
-    })
-    const killed: number[] = []
-    const report = reap({ kill: (pid) => killed.push(pid) })
-    expect(killed).toEqual([])
-    expect(report.expired).toBe(1)
-    expect(alive(stranger)).toBe(true)
-  })
+  it(
+    'does not signal a pid whose process started half a minute after the record',
+    { timeout: 120_000 },
+    () => {
+      // A record is written as soon as the spawn returns, so a process that took
+      // the pid even seconds later is not the child: killing it would take a
+      // stranger's whole process tree. The real probe on every platform, since
+      // this is the closest call it has to make.
+      const stranger = spawnSleeper()
+      writeEngineFile('gone.json', {
+        owner: goneEngine(),
+        children: [{ pid: stranger, startedAt: Date.now() - 30_000 }],
+      })
+      const killed: number[] = []
+      const report = reapOrphanedRuntimeChildren({ kill: (pid) => killed.push(pid) })
+      expect(killed).toEqual([])
+      expect(report.expired).toBe(1)
+      expect(alive(stranger)).toBe(true)
+    },
+  )
 
   it('leaves a file from another PID namespace alone', () => {
     // Another container sharing the state directory: its pids name processes in
@@ -466,6 +477,56 @@ describe('boot reap of runtime children', () => {
     expect(killed).toEqual([child])
     expect(report.killed).toBe(1)
     expect(existsSync(file)).toBe(false)
+  })
+
+  it('does not count dropped entries again on every start it cannot check', () => {
+    // The file stays for the child it could not check. What it dropped (too old,
+    // or no longer running) must not stay with it, or each start the probe fails
+    // reports it as reaped again.
+    const child = spawnSleeper()
+    const file = writeEngineFile('gone.json', {
+      owner: goneEngine(),
+      children: [
+        { pid: child, startedAt: Date.now() },
+        { pid: DEAD_PID, startedAt: Date.now() },
+        { pid: spawnSleeper(), startedAt: Date.now() - 13 * 60 * 60_000 },
+      ],
+    })
+    const cannotCheck = () => ({ ok: false, times: new Map<number, number>(), error: 'timed out' })
+    const first = reap({ kill: () => {}, startTimes: cannotCheck })
+    expect(first).toMatchObject({ unverified: 1, expired: 1, killed: 0 })
+    const kept = JSON.parse(readFileSync(file, 'utf8')) as RecordFileShape
+    expect(kept.children.map((c) => c.pid)).toEqual([child])
+    expect(kept.owner.pid).toBe(DEAD_PID)
+
+    const second = reap({ kill: () => {}, startTimes: cannotCheck })
+    expect(second).toMatchObject({ unverified: 1, expired: 0, killed: 0 })
+
+    // The stand-in, so a slow `ps` cannot leave the child unchecked here; the real
+    // probe has its own tests below.
+    const killed: number[] = []
+    const third = reap({ kill: (pid) => killed.push(pid), startTimes: startedJustNow })
+    expect(killed).toEqual([child])
+    expect(third.killed).toBe(1)
+    expect(existsSync(file)).toBe(false)
+  })
+
+  it('leaves the whole file as it was when it cannot be cut down by a rename', () => {
+    // Writing it in place instead could leave half a file, which the next start
+    // cannot read and removes, losing the child it still names.
+    const child = spawnSleeper()
+    const record = {
+      owner: goneEngine(),
+      children: [
+        { pid: child, startedAt: Date.now() },
+        { pid: DEAD_PID, startedAt: Date.now() },
+      ],
+    }
+    const file = writeEngineFile('gone.json', record)
+    mkdirSync(`${file}.tmp`)
+    const cannotCheck = () => ({ ok: false, times: new Map<number, number>(), error: 'timed out' })
+    expect(reap({ kill: () => {}, startTimes: cannotCheck })).toMatchObject({ unverified: 1 })
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(record)
   })
 
   it(

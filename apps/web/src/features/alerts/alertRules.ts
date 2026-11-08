@@ -140,14 +140,26 @@ export function collectAlertItems(
     if (attention.byPerson) continue
     // They took it themselves. An agent handing it back is news.
     if (attention.reason === 'assigned' && !attention.handedBack) continue
+    const card = attention.agentWakes
     items.push({
       // Keyed by the reason and the failed-run count too: a task that fails,
       // is retried and fails again is news again, even when no read saw it
-      // leave the list in between. The same goes for one wake card after another.
+      // leave the list in between. The same goes for one wake card after another,
+      // which its pair and the time it opened tell apart: another pair on it, or
+      // the same card back after an answer, opens it again.
       key: `task:${t.id}:${attention.reason}:${attention.failedRuns}${
-        attention.agentWakes ? `:${attention.agentWakes.kind}` : ''
+        card
+          ? `:${card.kind}:${card.fromAgentId ?? ''}>${card.toAgentId ?? ''}:${card.openedAt ?? ''}`
+          : ''
       }`,
-      at: typeof t.updatedAt === 'number' ? t.updatedAt : null,
+      // A card opening leaves the task's own time where it was, so the card's time
+      // says when it began waiting.
+      at:
+        typeof card?.openedAt === 'number'
+          ? card.openedAt
+          : typeof t.updatedAt === 'number'
+            ? t.updatedAt
+            : null,
       kind: 'task',
       taskId: t.id,
       title: titleOf(t),

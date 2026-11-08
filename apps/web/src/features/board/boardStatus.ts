@@ -291,6 +291,7 @@ function readAgentWakeCard(value: unknown): AgentWakeCard | null {
     fromAgentId: id(v['fromAgentId']),
     toAgentId: id(v['toAgentId']),
     ...(typeof v['alsoWaiting'] === 'number' ? { alsoWaiting: v['alsoWaiting'] } : {}),
+    ...(typeof v['openedAt'] === 'number' ? { openedAt: v['openedAt'] } : {}),
   }
 }
 

@@ -96,6 +96,45 @@ describe('a 1:1 chat with a <delegate> block in the reply', () => {
     expect(screen.getByText(/On it\./)).toBeInTheDocument()
   })
 
+  // Until the stream says this chat hands off, Boo Zero's chat draws this way too, and
+  // the server may already have read a tag in a quote as a draft.
+  it.each([
+    ['code', 'Draft:\n\n```\n<delegate to="@Research Boo">find the numbers</delegate>\n```'],
+    ['a quote', 'He wrote "<delegate to="@Research Boo">find the numbers</delegate>" once.'],
+  ])('keeps a tag in %s as written, with no note', (_name, text) => {
+    renderList([assistantTurn(text)], null)
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByText(/delegate to=/)).toBeInTheDocument()
+    cleanup()
+    renderList([], text)
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByText(/delegate to=/)).toBeInTheDocument()
+  })
+
+  it('reads a committed turn as written, as the streaming card does', () => {
+    // A plan on the quote's line runs over lines; taking it out first would join the
+    // quote to the tag's line and hide the note the streaming card drew.
+    const text =
+      'He said "draft: <plan>\n<step to="@A Boo">look</step>\n</plan> then ' +
+      '<delegate to="@Research Boo">find the numbers</delegate> done" ok.'
+    renderList([], text)
+    expect(screen.getByTestId('not-handed-off-note')).toBeInTheDocument()
+    cleanup()
+    renderList([assistantTurn(text)], null)
+    expect(screen.getByTestId('not-handed-off-note')).toBeInTheDocument()
+    // The plan opens and closes in the quoted sentence, so it is shown and stays.
+    expect(screen.getByText(/look/)).toBeInTheDocument()
+  })
+
+  it('keeps a plan shown in code in the committed turn, and takes out only a real one', () => {
+    const text =
+      'Like so:\n\n```\n<plan>\n<step to="@A Boo">the example</step>\n</plan>\n```\n\n' +
+      '<plan>\n<step to="@B Boo">the real one</step>\n</plan>'
+    renderList([assistantTurn(text)], null)
+    expect(screen.getByText(/the example/)).toBeInTheDocument()
+    expect(screen.queryByText(/the real one/)).toBeNull()
+  })
+
   it('renders a reply with no tag as plain prose', () => {
     renderList([assistantTurn('Here is the summary you asked for.')], null)
     expect(screen.queryByTestId('not-handed-off-note')).toBeNull()

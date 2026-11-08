@@ -67,6 +67,19 @@ describe('gatewayRunFailureText — a context-overflow label', () => {
     }
   })
 
+  it('catches the wordings the server reads with its second pattern', () => {
+    // apps/web/server/lib/runtimes/native/__tests__/conversation.test.ts pins the same
+    // three for isContextOverflowMessage.
+    for (const raw of [
+      'The input token count (40000) exceeds the maximum number of tokens allowed (32768).',
+      'Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)',
+      "This model's maximum prompt length is 131072 but the request contains 200000 tokens.",
+      'maximum prompt length exceeded',
+    ]) {
+      expect(gatewayRunFailureText(raw)).toMatch(/context-window setting/i)
+    }
+  })
+
   it('does not read a rate limit as an overflow, whatever words it uses', () => {
     // apps/web/server/lib/__tests__/runFailureText.test.ts pins the same reading.
     for (const raw of [
