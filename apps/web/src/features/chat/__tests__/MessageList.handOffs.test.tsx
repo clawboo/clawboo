@@ -122,7 +122,17 @@ describe('a 1:1 chat with a <delegate> block in the reply', () => {
     cleanup()
     renderList([assistantTurn(text)], null)
     expect(screen.getByTestId('not-handed-off-note')).toBeInTheDocument()
-    expect(screen.queryByText(/look/)).toBeNull()
+    // The plan opens and closes in the quoted sentence, so it is shown and stays.
+    expect(screen.getByText(/look/)).toBeInTheDocument()
+  })
+
+  it('keeps a plan shown in code in the committed turn, and takes out only a real one', () => {
+    const text =
+      'Like so:\n\n```\n<plan>\n<step to="@A Boo">the example</step>\n</plan>\n```\n\n' +
+      '<plan>\n<step to="@B Boo">the real one</step>\n</plan>'
+    renderList([assistantTurn(text)], null)
+    expect(screen.getByText(/the example/)).toBeInTheDocument()
+    expect(screen.queryByText(/the real one/)).toBeNull()
   })
 
   it('renders a reply with no tag as plain prose', () => {

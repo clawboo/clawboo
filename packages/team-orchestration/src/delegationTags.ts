@@ -407,14 +407,20 @@ const inQuotationMarks = (text: string, start: number, end: number): boolean =>
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u
 const DIGIT_RE = /\p{N}/u
 
+/** A mark with a letter or digit on both sides, like the apostrophe in `It’s`. */
+const inWord = (text: string, at: number): boolean =>
+  WORD_CHAR_RE.test(text[at - 1] ?? '') && WORD_CHAR_RE.test(text[at + 1] ?? '')
+
 /**
  * Reads, for a tag at `[start, end)` in `scan`, where the quoted sentence holding it
  * closes on its line, or -1 when it stands in none: a quote opens before it on the line
  * where it starts and is still open, and closes after it on the line where it ends. A
  * straight double quote opens only where no word runs into it, and while one is open
- * the next one closes it unless a digit runs into it: the inch mark in `5"` opens
- * nothing and closes nothing. A curly apostrophe between two letters, as in `It’s`, is
- * not a closing quote. A straight apostrophe says nothing, so `'` is left out.
+ * the next one closes it. One right after a digit, as in `5"`, may be an inch mark or
+ * the end of `"take 5"`, so both readings are kept, and a tag is shown when either puts
+ * it in a quoted sentence: showing is the safe side. A curly apostrophe between two
+ * letters, as in `It’s`, is not a closing quote. A straight apostrophe says nothing, so
+ * `'` is left out.
  *
  * `scan` has tags and code blanked, so their quote marks count for nothing. Asked in
  * order along the text, it carries the state forward, so a reply is read once however
@@ -422,7 +428,9 @@ const DIGIT_RE = /\p{N}/u
  */
 function quoteReader(scan: string): (start: number, end: number) => number {
   let pos = 0
-  let straight = false
+  // The readings of the straight quotes so far: one may have a quote open, one closed.
+  let mayBeOpen = false
+  let mayBeClosed = true
   let doubleOpen = -1
   let doubleClose = -1
   let singleOpen = -1
@@ -430,10 +438,12 @@ function quoteReader(scan: string): (start: number, end: number) => number {
   let lastEnd = 0
   const found = new Map<string, number>()
   // The first `ch` at or after `from`. `from` only grows, so a search is not repeated.
+  // An apostrophe inside a word is skipped, so `’` finds only a closing quote.
   const nextIndex = (ch: string, from: number): number => {
     const at = found.get(ch)
     if (at !== undefined && (at === -1 || at >= from)) return at
-    const fresh = scan.indexOf(ch, from)
+    let fresh = scan.indexOf(ch, from)
+    while (fresh !== -1 && ch === '’' && inWord(scan, fresh)) fresh = scan.indexOf(ch, fresh + 1)
     found.set(ch, fresh)
     return fresh
   }
@@ -441,7 +451,8 @@ function quoteReader(scan: string): (start: number, end: number) => number {
     if (start < pos || end < lastEnd) {
       // Asked out of order: read this line again from its start.
       pos = scan.lastIndexOf('\n', start - 1) + 1
-      straight = false
+      mayBeOpen = false
+      mayBeClosed = true
       doubleOpen = doubleClose = singleOpen = singleClose = -1
       found.clear()
     }
@@ -449,21 +460,21 @@ function quoteReader(scan: string): (start: number, end: number) => number {
     for (; pos < start; pos++) {
       const c = scan[pos]
       if (c === '\n') {
-        straight = false
+        mayBeOpen = false
+        mayBeClosed = true
         doubleOpen = doubleClose = singleOpen = singleClose = -1
       } else if (c === '"') {
         const before = scan[pos - 1] ?? ''
-        if (straight) {
-          if (!DIGIT_RE.test(before)) straight = false
-        } else if (!WORD_CHAR_RE.test(before)) straight = true
+        const afterWord = WORD_CHAR_RE.test(before)
+        // An open quote closes, or after a digit may stay open; a closed one opens unless
+        // a word runs into it.
+        const open = (mayBeOpen && DIGIT_RE.test(before)) || (mayBeClosed && !afterWord)
+        mayBeClosed = mayBeOpen || (mayBeClosed && afterWord)
+        mayBeOpen = open
       } else if (c === '“') doubleOpen = pos
       else if (c === '”') doubleClose = pos
       else if (c === '‘') singleOpen = pos
-      else if (
-        c === '’' &&
-        !(WORD_CHAR_RE.test(scan[pos - 1] ?? '') && WORD_CHAR_RE.test(scan[pos + 1] ?? ''))
-      )
-        singleClose = pos
+      else if (c === '’' && !inWord(scan, pos)) singleClose = pos
     }
     const lineEnd = nextIndex('\n', end)
     let closesAt = -1
@@ -472,7 +483,7 @@ function quoteReader(scan: string): (start: number, end: number) => number {
       if (at !== -1 && (lineEnd === -1 || at < lineEnd) && (closesAt === -1 || at < closesAt))
         closesAt = at
     }
-    if (straight) consider('"')
+    if (mayBeOpen) consider('"')
     if (doubleOpen > doubleClose) consider('”')
     if (singleOpen > singleClose) consider('’')
     return closesAt === -1 ? -1 : closesAt + 1

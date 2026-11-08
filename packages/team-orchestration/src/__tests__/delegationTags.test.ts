@@ -529,6 +529,25 @@ describe('findActionableHandOffs: a tag starts work only where a reader sees a t
     expect(found.shownDelegates).toHaveLength(1)
   })
 
+  it('a quote mark after a number is read both ways, and either reading can show a tag', () => {
+    // `5"` may end "take 5", so the quote may be closed there, and the next mark may
+    // open another quote around the tag. Showing it is the safe side.
+    const take5 = findActionableHandOffs(`He said "take 5" and then "please ${tag} now" ok.`)
+    expect(take5.delegates).toEqual([])
+    expect(take5.shownDelegates).toHaveLength(1)
+    // With no quote open before it, a mark after a number opens nothing.
+    expect(findActionableHandOffs(`It is 5" long. ${tag}`).delegates).toHaveLength(1)
+    expect(findActionableHandOffs(`The 5" and 6" pipes, ${tag} today.`).delegates).toHaveLength(1)
+  })
+
+  it('a curly apostrophe in a quoted brief is not its closing quote', () => {
+    const reply = `She wrote ‘<delegate to="@Growth/Coder">It’s broken</delegate>’ yesterday.`
+    const found = findActionableHandOffs(reply)
+    expect(found.delegates).toEqual([])
+    expect(found.shownDelegates).toHaveLength(1)
+    expect(looksLikeBrokenHandOff(reply)).toBe(false)
+  })
+
   it('an apostrophe inside curly quotes does not close them', () => {
     const found = findActionableHandOffs(`She said ‘It’s done, ${tag} now’ and left.`)
     expect(found.delegates).toEqual([])
