@@ -219,6 +219,49 @@ describe('the switch', () => {
   })
 })
 
+describe('a plan put to the person whatever the switch says', () => {
+  const pendingOf = (taskId: string) =>
+    listTaskQuestions(db, taskId).filter((q) => q.status === 'pending')
+
+  it('is asked on a team whose switch is off, and carries why', () => {
+    const r = propose({ ask: 'unnamed_team', parallel: true })
+    expect(r.status).toBe('proposed')
+    if (r.status !== 'proposed') return
+    expect(r.holderCreated).toBe(true)
+    expect(parseQuestionPayload(r.question.payload)?.plan).toMatchObject({
+      holder: true,
+      parallel: true,
+      ask: 'unnamed_team',
+    })
+  })
+
+  it('takes no other card’s place, and no other plan takes its place', () => {
+    on()
+    const first = propose({ ask: 'unnamed_team', turnId: 't1' })
+    const second = propose({ ask: 'unnamed_team', turnId: 't2', steps: STEPS.slice(0, 2) })
+    const plain = propose({ turnId: 't3', steps: STEPS.slice(0, 1) })
+    if (first.status !== 'proposed' || second.status !== 'proposed') throw new Error('not asked')
+    expect(plain.status).toBe('proposed')
+    if (plain.status !== 'proposed') return
+    expect(new Set([first.task.id, second.task.id, plain.task.id]).size).toBe(3)
+    expect(second.replaced).toBeUndefined()
+    expect(plain.replaced).toBeUndefined()
+    for (const r of [first, second, plain]) expect(pendingOf(r.task.id)).toHaveLength(1)
+  })
+
+  it('stays waiting when the switch goes off and a plan starts without asking', () => {
+    on()
+    const asked = propose({ ask: 'unnamed_team' })
+    if (asked.status !== 'proposed') throw new Error('not asked')
+    setSetting(db, planApprovalSettingKey('T'), JSON.stringify({ on: false }))
+
+    expect(propose({ turnId: 't2', steps: STEPS.slice(0, 1) })).toEqual({ status: 'off' })
+
+    expect(pendingOf(asked.task.id)).toHaveLength(1)
+    expect(getTask(db, asked.task.id)!.status).toBe('blocked')
+  })
+})
+
 describe('proposing a plan', () => {
   beforeEach(() => on())
 

@@ -21,6 +21,13 @@ export interface SuggestedTask {
   agentName?: string
 }
 
+/**
+ * Why a plan is put to a person whatever its team's switch says:
+ *  • `unnamed_team`: Boo Zero's one-to-one chat chose a team the person's message did
+ *    not name, so its hand-offs to that team wait for the person's yes.
+ */
+export type PlanAskReason = 'unnamed_team'
+
 /** What makes a `suggest_tasks` question a plan: accepting it creates the steps. */
 export interface PlanRef {
   /** The revision of the task's plan document this asks about. */
@@ -31,6 +38,9 @@ export interface PlanRef {
   holder: boolean
   /** A batch of hand-offs, not an ordered plan: its steps all start at once. */
   parallel?: boolean
+  /** Asked whatever the team's switch says. Such a card is its own request: no other
+   *  plan takes its place, and the switch going off does not close it. */
+  ask?: PlanAskReason
 }
 
 export interface QuestionPayload {
@@ -88,6 +98,7 @@ function planRef(v: unknown): PlanRef | null {
     parentTaskId: typeof p['parentTaskId'] === 'string' ? p['parentTaskId'] : null,
     holder: p['holder'] === true,
     ...(p['parallel'] === true ? { parallel: true } : {}),
+    ...(p['ask'] === 'unnamed_team' ? { ask: 'unnamed_team' as const } : {}),
   }
 }
 

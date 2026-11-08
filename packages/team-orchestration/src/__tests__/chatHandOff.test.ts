@@ -648,3 +648,42 @@ describe('a batch from a one-to-one chat, on a team that asks first', () => {
     )
   })
 })
+
+describe('hand-offs from a one-to-one chat to a team the person did not name', () => {
+  const unnamed = {
+    fromAgentId: 'bz',
+    turnId: 'chat-turn-1',
+    chatSessionKey: CHAT,
+    request: { messageId: 'message-1', words: 'Fix the parser' },
+    steps: [{ targetAgentId: 'a2', targetAgentName: 'Bug Boo', task: 'fix the parser' }],
+    ask: { reason: 'unnamed_team' as const, teamName: 'Growth' },
+  }
+
+  it('are put to the person on a team that does not ask, even one alone, and nothing starts', async () => {
+    const board = new FakeBoard()
+    const { engine, delivered } = boot(board)
+
+    expect(await engine.handOffBatchFromChat(unnamed)).toBe('asked')
+
+    expect(delivered).toEqual([])
+    const holder = [...board.tasks.values()].find((t) => !t.isMainTask)!
+    expect(holder.status).toBe('blocked')
+    expect(holder.chatSessionKey).toBe(CHAT)
+  })
+
+  it('a Stop while it is being checked puts nothing to the person and starts nothing', async () => {
+    const board = new FakeBoard()
+    let gen = 0
+    const room = board.handOffRoom.bind(board)
+    board.handOffRoom = async (...args: Parameters<FakeBoard['handOffRoom']>) => {
+      gen = 1
+      return room(...args)
+    }
+    const { engine, delivered } = boot(board, { stopGen: () => gen })
+
+    expect(await engine.handOffBatchFromChat(unnamed)).toBe('stopped')
+
+    expect(delivered).toEqual([])
+    expect([...board.tasks.values()].filter((t) => !t.isMainTask)).toEqual([])
+  })
+})

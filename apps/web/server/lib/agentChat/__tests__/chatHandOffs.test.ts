@@ -275,8 +275,20 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
     makeAdapter: () => boo,
   })
 
+  /** A turn of a person's message. Its words are the message, as the route sends them, and
+   *  it names Growth, as a person picking it above the box does: a person's message starts
+   *  work at once only on a team it names. A test about naming another team, or none, says
+   *  so in `extra`. */
   const turn = (message: string, extra: Partial<ChatTurnParams> = {}): Promise<void> =>
-    runChatTurn({ db, agentId: BZ, message, ...opts(), ...extra })
+    runChatTurn({
+      db,
+      agentId: BZ,
+      message,
+      words: message,
+      namedTeamId: TEAM,
+      ...opts(),
+      ...extra,
+    })
 
   const chatRows = (key = CHAT): Array<{ kind: string; role: string; text: string }> =>
     (
@@ -410,7 +422,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
     it('with no team named, starts nothing and asks which team', async () => {
       boo = new ScriptedAdapter([[done('<delegate to="@Coder">fix the parser</delegate>')]])
 
-      await turn('fix the parser')
+      await turn('fix the parser', { namedTeamId: null })
 
       expect(listTasks(db)).toEqual([])
       expect(notes()).toHaveLength(1)
@@ -1277,7 +1289,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       'after %s, on its next turn, in words that say it did not happen',
       async (_n, reply, words) => {
         boo = new ScriptedAdapter([[done(reply)]])
-        await turn('do it')
+        await turn('do it', { namedTeamId: null })
         expect(heardNext().join()).toMatch(words)
 
         boo = new ScriptedAdapter([[done('Sorry.')]])
@@ -1321,7 +1333,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
 
     it('a row about no team is not reaped as an orphan before it is heard', async () => {
       boo = new ScriptedAdapter([[done('<delegate to="@Coder">x</delegate>')]])
-      await turn('do it')
+      await turn('do it', { namedTeamId: null })
       reapReportUps(db)
       expect(heardNext()).toHaveLength(1)
     })
@@ -1347,6 +1359,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         db,
         agentId: BZ,
         message: 'fix it, on Growth',
+        words: 'fix it, on Growth',
         ...opts(),
         routeFor: () => ({
           handOffFromChat: async () => ({ taskId: null, told: false, why }),
@@ -1365,6 +1378,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         db,
         agentId: BZ,
         message: 'fix it, on Growth',
+        words: 'fix it, on Growth',
         ...opts(),
         routeFor: () => ({ handOffFromChat: async () => ({ taskId: null, told: true }) }),
       })
@@ -1575,7 +1589,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       boo = new ScriptedAdapter([[done(reply)]])
       workers.set('fo', new ScriptedAdapter([[done('booked')]]))
 
-      await turn('book it')
+      await turn('book it', { namedTeamId: 'T5' })
 
       expect(listChatHandOffTasks(db, CHAT).map((t) => t.teamId)).toEqual(['T5'])
       expect(notes()).toEqual([])
@@ -1759,6 +1773,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         db,
         agentId: BZ,
         message: 'both, on Growth',
+        words: 'both, on Growth',
         ...opts(),
         routeFor: () => ({
           handOffFromChat: async (input) => {
@@ -1782,6 +1797,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         db,
         agentId: BZ,
         message: 'both, on Growth',
+        words: 'both, on Growth',
         ...opts(),
         routeFor: () => ({
           handOffFromChat: async (input) => {
@@ -1807,6 +1823,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         agentId: BZ,
         // A message the person check turned away lifts no hold, so this one is still on.
         message: 'both, on Growth',
+        words: 'both, on Growth',
         ...opts(),
         readingResultsFrom: [TEAM],
         messageId: 'm1',
@@ -1861,6 +1878,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
         db,
         agentId: BZ,
         message: 'fix it, on Growth',
+        words: 'fix it, on Growth',
         ...opts(),
         routeFor: () => ({
           handOffFromChat: async () => {
@@ -2173,6 +2191,8 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       words: message,
       messageId,
       requestedBy: { id: 'local', name: 'You', role: null },
+      // Growth, as `turn` names it: see there.
+      namedTeamId: TEAM,
       ...opts(),
       ...extra,
     })
@@ -2826,7 +2846,7 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
           ),
         ],
       ])
-      await asked('Two things', 'm2')
+      await asked('Two things', 'm2', { namedTeamId: OTHER })
       expect(
         allTasks(OTHER)
           .filter((t) => t.isMainTask !== 1)
@@ -2919,6 +2939,176 @@ describe("hand-offs from Boo Zero's one-to-one chat", () => {
       expect(fromChat.task.id).not.toBe(fromTeam.task.id)
       expect(fromChat.replaced).toBeUndefined()
       expect(getTask(db, fromTeam.task.id)!.status).toBe('blocked')
+    })
+  })
+
+  describe('on a team the person did not name', () => {
+    /** The pending plan question on a card, and what it proposed. */
+    const pendingOn = (taskId: string) => {
+      const q = listTaskQuestions(db, taskId).find((row) => row.status === 'pending')
+      return q ? { q, payload: parseQuestionPayload(q.payload)! } : null
+    }
+    const holders = (teamId = TEAM) =>
+      allTasks(teamId).filter((t) => t.isMainTask !== 1 && t.status === 'blocked')
+    const answer = (questionId: string, accepted: boolean, tasks: unknown[] = []) => {
+      const done = answerQuestion(
+        db,
+        questionId,
+        { kind: 'suggest_tasks', accepted, tasks },
+        { person: { id: 'local', name: 'You', role: null } },
+      )
+      expect(done.ok).toBe(true)
+    }
+
+    it('a hand-off there makes a card in this chat and starts nothing', async () => {
+      const coder = new ScriptedAdapter([[done('never')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+
+      await asked('Fix the parser', 'm1', { namedTeamId: null })
+
+      expect(coder.starts).toEqual([])
+      const [card] = holders()
+      expect(card).toBeDefined()
+      expect(card!.chatSessionKey).toBe(CHAT)
+      const open = pendingOn(card!.id)!
+      expect(open.payload.plan).toMatchObject({ holder: true, parallel: true, ask: 'unnamed_team' })
+      expect(open.payload.prompt).toMatch(/hand this to Growth, a team you did not name/)
+      expect(open.payload.tasks!.map((t) => t.title)).toEqual(['fix the parser'])
+      // Its answer buttons show in this chat.
+      const frame = chatHandOffFrames(db, listChatHandOffTasks(db, CHAT)).find(
+        (f) => f['id'] === card!.id,
+      )!
+      expect(frame['openQuestion']).toMatchObject({ id: open.q.id, kind: 'suggest_tasks' })
+      expect(notes()[0]).toMatch(/did not name Growth, so this hand-off waits for your yes/)
+      expect(notes()[0]).toMatch(/Nothing has started/)
+      expect(heardNext().join()).toMatch(/Do not write it again/)
+    })
+
+    it('accepting it starts the work, with the person as the one who asked', async () => {
+      const coder = new ScriptedAdapter([[done('parser fixed')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+      await asked('Fix the parser', 'm1', { namedTeamId: null })
+      const open = pendingOn(holders()[0]!.id)!
+
+      answer(open.q.id, true, open.payload.tasks!)
+
+      const step = allTasks().find((t) => t.title === 'fix the parser')!
+      expect((JSON.parse(step.requestedBy!) as { id: string }).id).toBe('local')
+      expect(step.chatSessionKey).toBe(CHAT)
+      await engineFor().resume()
+      await vi.waitFor(() => expect(coder.starts).toHaveLength(1))
+    })
+
+    it('turning it down starts nothing', async () => {
+      const coder = new ScriptedAdapter([[done('never')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+      await asked('Fix the parser', 'm1', { namedTeamId: null })
+      const open = pendingOn(holders()[0]!.id)!
+
+      answer(open.q.id, false)
+      await engineFor().resume()
+
+      expect(allTasks().find((t) => t.title === 'fix the parser')).toBeUndefined()
+      expect(coder.starts).toEqual([])
+    })
+
+    it.each([
+      ['@Team', 'Fix the parser', TEAM],
+      ['its words', 'Fix the parser for Growth', null],
+    ])('a team named with %s starts at once, as before', async (_by, words, namedTeamId) => {
+      const coder = new ScriptedAdapter([[done('parser fixed')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+
+      await asked(words, 'm1', { namedTeamId })
+
+      await vi.waitFor(() => expect(coder.starts).toHaveLength(1))
+      expect(holders()).toEqual([])
+      expect(notes()).toEqual([])
+    })
+
+    it('one card holds every hand-off to that team from the reply', async () => {
+      workers.set(CODER, new ScriptedAdapter([[done('never')]]))
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth/Coder">fix the parser</delegate> <delegate to="@Growth/Sam">check the numbers</delegate>',
+          ),
+        ],
+      ])
+
+      await asked('Both of these', 'm1', { namedTeamId: null })
+
+      expect(holders()).toHaveLength(1)
+      expect(pendingOn(holders()[0]!.id)!.payload.tasks!.map((t) => t.title)).toEqual([
+        'fix the parser',
+        'check the numbers',
+      ])
+      expect(notes()[0]).toMatch(/these 2 hand-offs wait for your yes/)
+    })
+
+    it('a named team starts while the one it did not name waits, in the same reply', async () => {
+      const writer = new ScriptedAdapter([[done('notes written')]])
+      workers.set(WRITER, writer)
+      const coder = new ScriptedAdapter([[done('never')]])
+      workers.set(CODER, coder)
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth Ops/Writer">write the notes</delegate> <delegate to="@Growth/Coder">fix the parser</delegate>',
+          ),
+        ],
+      ])
+
+      await asked('Write the notes', 'm1', { namedTeamId: OTHER })
+
+      await vi.waitFor(() => expect(writer.starts).toHaveLength(1))
+      expect(coder.starts).toEqual([])
+      expect(holders()).toHaveLength(1)
+    })
+
+    it('each card stands on its own: a later one takes no other’s place', async () => {
+      setSetting(db, planApprovalSettingKey(TEAM), JSON.stringify({ on: true }))
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+      await asked('Fix the parser', 'm1', { namedTeamId: null })
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Sam">check the numbers</delegate>')]])
+      await asked('Check the numbers', 'm2', { namedTeamId: null })
+      // A batch on a team that asks first, which a person named, from the same chat.
+      boo = new ScriptedAdapter([
+        [
+          done(
+            '<delegate to="@Growth/Coder">write tests</delegate> <delegate to="@Growth/Sam">read them</delegate>',
+          ),
+        ],
+      ])
+      await asked('Tests please', 'm3')
+
+      const cards = holders()
+      expect(cards).toHaveLength(3)
+      for (const card of cards) expect(pendingOn(card.id)).not.toBeNull()
+      const questions = cards.flatMap((c) => listTaskQuestions(db, c.id))
+      expect(questions.filter((q) => q.status !== 'pending')).toEqual([])
+    })
+
+    it('a turn reading a result still asks nobody: it starts nothing outside its team', async () => {
+      const id = recordReportUp(db, {
+        teamId: OTHER,
+        roomId: null,
+        recipientAgentId: BZ,
+        taskId: null,
+        payload: JSON.stringify({ toAgentId: BZ, by: 'Writer', summary: 'notes written' }),
+        chatSessionKey: CHAT,
+      })
+      expect(id).toBeTruthy()
+      boo = new ScriptedAdapter([[done('<delegate to="@Growth/Coder">fix the parser</delegate>')]])
+
+      await flushChatReportUps(db, CHAT, opts())
+
+      expect(holders()).toEqual([])
+      expect(notes().join()).toMatch(/Not handed off to Growth/)
     })
   })
 

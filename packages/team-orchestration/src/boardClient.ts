@@ -15,6 +15,7 @@ import type {
   ResultClaim,
   SubtaskView,
   LocalPersonRef,
+  PlanAskReason,
   TaskStatus,
   TaskWakeReason,
   WaitingOn,
@@ -303,6 +304,8 @@ export interface ProposePlanInput {
   /** The one-to-one chat it came from: its card shows there, and the answer and the
    *  accepted steps' results go back there. */
   chatSessionKey?: string
+  /** Put to the person whatever the team's switch says (see `PlanAskReason`). */
+  ask?: PlanAskReason
 }
 
 export type PlanProposal =

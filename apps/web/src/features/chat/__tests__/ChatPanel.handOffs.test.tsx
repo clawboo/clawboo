@@ -181,6 +181,63 @@ describe.each(['clawboo-native', 'claude-code', 'codex', 'hermes'])(
       expect(screen.getByTestId('board-task-card')).toHaveAttribute('data-task-status', 'done')
     })
 
+    it('a card waiting for the person’s yes carries its answer buttons, which answer it', async () => {
+      const answered: Array<Record<string, unknown>> = []
+      server.use(
+        http.post('/api/board/questions/:id/answer', async ({ request, params }) => {
+          answered.push({ id: params['id'], ...((await request.json()) as object) })
+          return HttpResponse.json({ ok: true, created: 1 })
+        }),
+      )
+      seed(runtime, key, null)
+      useChatHandOffStore.getState().applyFrame('bz', {
+        id: 'holder-1',
+        title: 'Plan: fix the parser',
+        status: 'blocked',
+        teamId: 'team-1',
+        planHolder: true,
+        openQuestion: {
+          id: 'q-1',
+          kind: 'suggest_tasks',
+          payload: JSON.stringify({
+            prompt:
+              'Boo Zero wants to hand this to Growth, a team you did not name in your message.',
+            tasks: [{ title: 'fix the parser', agentId: 'coder', agentName: 'Coder' }],
+            plan: {
+              revision: 1,
+              parentTaskId: null,
+              holder: true,
+              parallel: true,
+              ask: 'unnamed_team',
+            },
+          }),
+        },
+        createdAt: 1_500,
+        updatedAt: 2_000,
+      })
+      renderPanel()
+
+      expect(screen.getByTestId('chat-hand-off')).toHaveTextContent('Waiting for your answer')
+      expect(screen.getByTestId('chat-hand-off-answer')).toHaveTextContent(
+        'a team you did not name',
+      )
+      fireEvent.click(screen.getByRole('button', { name: /Accept/ }))
+      await waitFor(() => expect(answered).toHaveLength(1))
+      expect(answered[0]).toMatchObject({ id: 'q-1', answer: { accepted: true } })
+
+      // Answered, the stream says the card waits on nothing, and the buttons go.
+      act(() =>
+        useChatHandOffStore.getState().applyFrame('bz', {
+          id: 'holder-1',
+          status: 'blocked',
+          teamId: 'team-1',
+          openQuestion: null,
+          updatedAt: 3_000,
+        }),
+      )
+      expect(screen.queryByTestId('chat-hand-off-answer')).toBeNull()
+    })
+
     it('a card a person cancelled leaves the chat, as in a team chat', () => {
       seed(runtime, key, null)
       card()
