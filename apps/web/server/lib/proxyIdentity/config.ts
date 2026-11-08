@@ -10,6 +10,16 @@
 // audience, a key it cannot read, a JWKS URL over plain http to another host)
 // stops the server at startup, like every other operator setting: starting
 // without it would let anyone with the access token act as an unnamed person.
+//
+// TWO ISSUERS. Beside a sign-in proxy, an app that starts this engine itself (a
+// desktop app) can name the person a request comes from: its app link. It signs
+// with its own Ed25519 key, whose public half it hands the engine in
+// CLAWBOO_APP_LINK_PUBLIC_KEY when it starts it, sends its token in a header of
+// its own, and may only name `account:` people. While it is on, a proxy may
+// never name one.
+// That key is read from the environment and nowhere else: the operator file is
+// a file an agent could change, and an app link is only ever set up by the app
+// that launches the engine.
 
 import { createPublicKey, type webcrypto } from 'node:crypto'
 import fs from 'node:fs'
@@ -45,7 +55,49 @@ export interface ProxyIdentityConfig {
   nameClaim: string
   roleClaim: string
   keys: ProxyIdentityKeys
+  /** `only`: every token must name an `account:` person (an app link).
+   *  `never`: no token may (a sign-in proxy beside an app link), so the two cannot
+   *  pass for each other. `any`: no rule (a sign-in proxy on its own, so a proxy
+   *  that already names such people keeps working). */
+  accountSubjects: 'only' | 'never' | 'any'
+  /** The only routes a token from this issuer may be used on, when it is limited
+   *  (the app link). Unset: any route (a sign-in proxy). */
+  routes?: readonly AppLinkRoute[]
 }
+
+/** A route an app link's token may be used on: a method and a whole-path pattern. */
+export interface AppLinkRoute {
+  method: string
+  path: RegExp
+}
+
+/** One path segment that is not a dot segment. */
+const SEGMENT = '(?!\\.\\.?(?:/|$))[^/]+'
+
+/**
+ * What the app that started the engine signs for, and nothing else: sending
+ * work to an agent or a team, answering an approval, and checking its link.
+ * Its people may not change who is asked about what (grants, an agent's
+ * posture, standing rules) or any other setting, so that a key copied from the
+ * computer the app runs on cannot mint standing permissions.
+ */
+export const APP_LINK_ROUTES: readonly AppLinkRoute[] = [
+  { method: 'GET', path: /^\/api\/access\/identity$/i },
+  { method: 'POST', path: new RegExp(`^/api/agents/${SEGMENT}/chat$`, 'i') },
+  { method: 'POST', path: new RegExp(`^/api/teams/${SEGMENT}/chat$`, 'i') },
+  { method: 'POST', path: new RegExp(`^/api/tools/approvals/${SEGMENT}/resolve$`, 'i') },
+  { method: 'POST', path: /^\/api\/capabilities\/approve$/i },
+]
+
+/** The header an app link's token travels in. Its own, so a sign-in proxy's
+ *  header can be anything and the two never meet. */
+export const APP_LINK_HEADER = 'clawboo-app-identity'
+/** The `iss` and `aud` an app link's token carries. The key is the app's alone
+ *  and trusted for nothing else, so these say what kind of token it is. */
+export const APP_LINK_ISSUER = 'clawboo-app-link'
+export const APP_LINK_AUDIENCE = 'clawboo-engine'
+/** The environment variable that holds the app link's public key. */
+export const APP_LINK_KEY_ENV = 'CLAWBOO_APP_LINK_PUBLIC_KEY'
 
 /** A header name: an HTTP token, and none Clawboo or a browser already gives a meaning. */
 const HEADER_NAME = /^[A-Za-z0-9-]{1,64}$/
@@ -88,8 +140,9 @@ function fail(message: string): never {
   throw new OperatorSettingsError(message)
 }
 
-/** Check one JWK and return the members a verifier needs. Never echoes key material. */
-function checkJwk(raw: unknown, where: string): JWK {
+/** Check one JWK and return the members a verifier needs. Never echoes key material.
+ *  `holder` names who keeps the private key, for the error. */
+function checkJwk(raw: unknown, where: string, holder: string): JWK {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     fail(`${where} must be a JSON Web Key object.`)
   }
@@ -97,8 +150,8 @@ function checkJwk(raw: unknown, where: string): JWK {
   for (const member of PRIVATE_MEMBERS) {
     if (member in jwk) {
       fail(
-        `${where} holds a private or shared key. Clawboo needs only the proxy's public key; ` +
-          'keep the private key with the proxy.',
+        `${where} holds a private or shared key. Clawboo needs only ${holder}'s public key; ` +
+          `keep the private key with ${holder}.`,
       )
     }
   }
@@ -152,12 +205,17 @@ function checkJwk(raw: unknown, where: string): JWK {
  * Literal `\n` sequences count as line breaks, so a PEM fits in one environment
  * variable. Private keys, certificates and symmetric keys are refused.
  */
-export function parsePublicKeySetting(raw: string, where: string): JSONWebKeySet {
-  const text = raw.trim().replace(/\\n/g, '\n')
+export function parsePublicKeySetting(
+  raw: string,
+  where: string,
+  holder = 'the proxy',
+): JSONWebKeySet {
+  // Trimmed again after: a PEM written with an escaped trailing newline ends in one.
+  const text = raw.trim().replace(/\\n/g, '\n').trim()
   if (/PRIVATE KEY/.test(text)) {
     fail(
-      `${where} holds a private key. Clawboo needs only the proxy's public key; ` +
-        'keep the private key with the proxy, and replace it if others could read this setting.',
+      `${where} holds a private key. Clawboo needs only ${holder}'s public key; ` +
+        `keep the private key with ${holder}, and replace it if others could read this setting.`,
     )
   }
   if (text.startsWith('{')) {
@@ -171,7 +229,9 @@ export function parsePublicKeySetting(raw: string, where: string): JSONWebKeySet
     const list = Array.isArray(set?.keys) ? set.keys : [doc]
     if (list.length === 0 || list.length > 16) fail(`${where} must hold from 1 to 16 keys.`)
     return {
-      keys: list.map((k, i) => checkJwk(k, list.length > 1 ? `${where} key ${i + 1}` : where)),
+      keys: list.map((k, i) =>
+        checkJwk(k, list.length > 1 ? `${where} key ${i + 1}` : where, holder),
+      ),
     }
   }
   if (/^-----BEGIN PUBLIC KEY-----[\s\S]+-----END PUBLIC KEY-----$/.test(text)) {
@@ -181,7 +241,7 @@ export function parsePublicKeySetting(raw: string, where: string): JSONWebKeySet
     } catch {
       fail(`${where} is not a public key Clawboo can read.`)
     }
-    return { keys: [checkJwk(jwk, where)] }
+    return { keys: [checkJwk(jwk, where, holder)] }
   }
   fail(`${where} must be a PEM public key (BEGIN PUBLIC KEY), a JWK or a JWKS.`)
 }
@@ -264,6 +324,67 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
     nameClaim,
     roleClaim,
     keys,
+    accountSubjects: 'any',
+  }
+}
+
+/**
+ * The issuers the lane trusts, in order: the sign-in proxy's, then the app
+ * link's. With both on, the proxy may not name an `account:` person, so the two
+ * id spaces cannot meet. A proxy on its own keeps whatever ids it already used.
+ */
+export function identityConfigs(
+  proxy: ProxyIdentityConfig | null,
+  appLink: ProxyIdentityConfig | null,
+): ProxyIdentityConfig[] {
+  if (!proxy) return appLink ? [appLink] : []
+  if (!appLink) return [proxy]
+  // Only a clash when both are on: a proxy on its own may use any header name.
+  if (proxy.header === appLink.header) {
+    fail(
+      `proxyIdentityHeader is ${APP_LINK_HEADER}, the header the app that started Clawboo ` +
+        'signs its requests in. Give your sign-in proxy a header of its own.',
+    )
+  }
+  return [{ ...proxy, accountSubjects: 'never' }, appLink]
+}
+
+/** Whether the app that started this engine handed it an app link key. */
+export function appLinkOn(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env[APP_LINK_KEY_ENV]?.trim() ?? '') !== ''
+}
+
+/**
+ * The app link's settings, or null when the app that started this engine gave
+ * it no key. Read from `env` only, never from the operator file (see the top of
+ * this file). Throws OperatorSettingsError on a key it cannot trust, so the
+ * engine does not start with a link the app believes is on.
+ *
+ * What it trusts is fixed: Ed25519 only, request-bound tokens of at most 60
+ * seconds, and `account:` people only. An app link's tokens never make a
+ * request required to carry one; the dashboard keeps working without.
+ */
+export function loadAppLinkConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): ProxyIdentityConfig | null {
+  const raw = env[APP_LINK_KEY_ENV]?.trim()
+  if (!raw) return null
+  const jwks = parsePublicKeySetting(raw, APP_LINK_KEY_ENV, 'the app')
+  if (jwks.keys.some((k) => k.kty !== 'OKP')) {
+    fail(`${APP_LINK_KEY_ENV} must be an Ed25519 public key.`)
+  }
+  return {
+    mode: 'on',
+    header: APP_LINK_HEADER,
+    issuer: APP_LINK_ISSUER,
+    audience: APP_LINK_AUDIENCE,
+    binding: 'request',
+    maxLifetimeSeconds: 60,
+    nameClaim: 'name',
+    roleClaim: 'role',
+    keys: { source: 'public-key', jwks },
+    accountSubjects: 'only',
+    routes: APP_LINK_ROUTES,
   }
 }
 

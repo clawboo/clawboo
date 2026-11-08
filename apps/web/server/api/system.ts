@@ -765,7 +765,9 @@ export async function autoConfigureOpenclawPOST(req: Request, res: Response): Pr
     const stateDir = resolveStateDir()
     let provider: string
     let key: string | null = null
-    const connected = providerStatus().find((p) => p.connected)
+    // A SAVED key only: one set in the server's environment is not copied into
+    // OpenClaw's .env, which would write that secret to disk unasked.
+    const connected = providerStatus().find((p) => p.saved)
     const connectedKey = connected
       ? resolveRuntimeKey(envVarForOpenclawProvider(connected.id))
       : null

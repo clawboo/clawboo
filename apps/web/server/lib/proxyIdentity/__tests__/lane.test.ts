@@ -20,12 +20,20 @@ import { accessIdentityGET } from '../../../api/access'
 import { actsAsPerson, attachIdentity } from '../../auth'
 import { createBasePathMiddleware } from '../../basePathMiddleware'
 import { resetOperatorSettings } from '../../operatorSettings'
-import type { ProxyIdentityConfig } from '../config'
-import { createProxyIdentityLane, type ProxyIdentityLane } from '../lane'
+import { APP_LINK_KEY_ENV, loadAppLinkConfig, type ProxyIdentityConfig } from '../config'
+import {
+  createIdentityLane,
+  createProxyIdentityLane,
+  type LaneSource,
+  type ProxyIdentityLane,
+} from '../lane'
 import { createAssertionVerifier } from '../verifier'
 
 const ed = generateKeyPairSync('ed25519')
 const other = generateKeyPairSync('ed25519')
+/** The app link's own key: one per purpose, never the proxy's. */
+const app = generateKeyPairSync('ed25519')
+const APP_PEM = app.publicKey.export({ format: 'pem', type: 'spki' }).toString()
 const ACCESS_TOKEN = 'access-token-for-tests'
 
 function config(mode: 'on' | 'required'): ProxyIdentityConfig {
@@ -39,6 +47,7 @@ function config(mode: 'on' | 'required'): ProxyIdentityConfig {
     nameClaim: 'name',
     roleClaim: 'role',
     keys: { source: 'public-key', jwks: { keys: [ed.publicKey.export({ format: 'jwk' }) as JWK] } },
+    accountSubjects: 'never',
   }
 }
 
@@ -57,6 +66,25 @@ async function assertion(method: string, path: string, key = ed.privateKey): Pro
     .sign(key)
 }
 
+/** A token the app that started the engine signs for one of its own people. */
+async function appAssertion(
+  method: string,
+  path: string,
+  { sub = 'account:u-7', key = app.privateKey } = {},
+): Promise<string> {
+  const now = Math.floor(Date.now() / 1000)
+  n += 1
+  return new SignJWT({ name: 'Grace', htm: method, htu: path })
+    .setProtectedHeader({ alg: 'EdDSA' })
+    .setIssuer('clawboo-app-link')
+    .setAudience('clawboo-engine')
+    .setSubject(sub)
+    .setIssuedAt(now)
+    .setExpirationTime(now + 30)
+    .setJti(`app-${n}-${Math.random()}`)
+    .sign(key)
+}
+
 let server: http.Server | null = null
 let base = ''
 let port = 0
@@ -66,17 +94,40 @@ async function start(opts: {
   mode: 'on' | 'required'
   accessToken?: string
   basePath?: string
+  /** Also trust an app link, as the server does when its launcher hands it a key. */
+  appLink?: boolean
+  /** Leave the sign-in proxy out, for an app link on its own. */
+  proxy?: boolean
 }): Promise<void> {
-  vi.stubEnv('CLAWBOO_PROXY_IDENTITY', opts.mode)
+  if (opts.proxy !== false) vi.stubEnv('CLAWBOO_PROXY_IDENTITY', opts.mode)
   const gate = createAccessGate({
     token: opts.accessToken ?? '',
     basePath: opts.basePath ?? '',
     authorizeRuntime: (req) => req.headers['x-test-attach'] === 'minted',
   })
-  lane = createProxyIdentityLane(config(opts.mode), createAssertionVerifier(config(opts.mode)), {
-    isRuntimeRequest: (req) =>
+  const laneOpts = {
+    isRuntimeRequest: (req: http.IncomingMessage) =>
       isRuntimeControlRequest(req, (r) => r.headers['x-test-attach'] === 'minted'),
-  })
+  }
+  if (opts.appLink) {
+    vi.stubEnv(APP_LINK_KEY_ENV, APP_PEM)
+    const sources: LaneSource[] = []
+    if (opts.proxy !== false) {
+      sources.push({
+        config: config(opts.mode),
+        verifier: createAssertionVerifier(config(opts.mode)),
+      })
+    }
+    const appLink = loadAppLinkConfig(process.env)!
+    sources.push({ config: appLink, verifier: createAssertionVerifier(appLink) })
+    lane = createIdentityLane(sources, laneOpts)
+  } else {
+    lane = createProxyIdentityLane(
+      config(opts.mode),
+      createAssertionVerifier(config(opts.mode)),
+      laneOpts,
+    )
+  }
   const app = express()
   app.use(createBasePathMiddleware(opts.basePath ?? ''))
   app.use((req, res, next) => {
@@ -91,6 +142,17 @@ async function start(opts: {
   })
   app.put('/api/team-verify-command/:teamId', (req, res) => {
     res.json({ actsAsPerson: actsAsPerson(req), person: req.person ?? null })
+  })
+  app.get('/api/who', (req, res) => {
+    res.json({ via: req.personVia ?? null })
+  })
+  // One of the routes the app link may sign for: sending an agent work.
+  app.post('/api/agents/:agentId/chat', (req, res) => {
+    res.json({
+      actsAsPerson: actsAsPerson(req),
+      person: req.person ?? null,
+      via: req.personVia ?? null,
+    })
   })
   // A wildcard route, which absorbs dot segments the way the board's preview
   // route does: the raw path stays under /api/ while a resolved one leaves it.
@@ -176,6 +238,7 @@ describe('on', () => {
       status: 200,
       body: {
         proxyIdentity: 'on',
+        appLink: false,
         person: { id: 'user-42', name: 'Ada', role: 'admin' },
         you: { id: 'user-42', name: 'Ada', role: 'admin' },
       },
@@ -186,7 +249,12 @@ describe('on', () => {
     await start({ mode: 'on' })
     expect(await get('/api/access/identity')).toEqual({
       status: 200,
-      body: { proxyIdentity: 'on', person: null, you: { id: 'local', name: 'You', role: null } },
+      body: {
+        proxyIdentity: 'on',
+        appLink: false,
+        person: null,
+        you: { id: 'local', name: 'You', role: null },
+      },
     })
   })
 
@@ -480,5 +548,205 @@ describe('the Gateway connection', () => {
       ok: false,
       reason: 'binding',
     })
+  })
+})
+
+describe('two issuers: a sign-in proxy and the app that started the engine', () => {
+  const signedByApp = async (method: string, path: string, over = {}) => ({
+    'clawboo-app-identity': await appAssertion(method, path, over),
+  })
+
+  it("names the app's account: person, and still the proxy's person on its own header", async () => {
+    await start({ mode: 'on', appLink: true })
+    expect(
+      await get('/api/access/identity', await signedByApp('GET', '/api/access/identity')),
+    ).toEqual({
+      status: 200,
+      body: {
+        proxyIdentity: 'on',
+        appLink: true,
+        person: { id: 'account:u-7', name: 'Grace', role: null },
+        you: { id: 'account:u-7', name: 'Grace', role: null },
+      },
+    })
+    const viaProxy = await get('/api/access/identity', await signed('GET', '/api/access/identity'))
+    expect(viaProxy.body['person']).toEqual({ id: 'user-42', name: 'Ada', role: 'admin' })
+  })
+
+  it('makes the app its person: it passes the person check with no fetch metadata', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    const res = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('POST', '/api/agents/a1/chat'),
+      'POST',
+    )
+    expect(res).toEqual({
+      status: 200,
+      body: {
+        actsAsPerson: true,
+        person: { id: 'account:u-7', name: 'Grace', role: null },
+        via: 'app',
+      },
+    })
+  })
+
+  it('refuses the app token on any route the app does not sign for', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    // A person write such as a team's work check, a standing grant or any other
+    // setting: a copied key must not reach them.
+    const res = await get(
+      '/api/team-verify-command/t1',
+      await signedByApp('PUT', '/api/team-verify-command/t1'),
+      'PUT',
+    )
+    expect(res).toMatchObject({
+      status: 401,
+      body: {
+        reason: 'route',
+        error: 'The app that started Clawboo may not sign for this request.',
+      },
+    })
+    // The right path with the wrong method.
+    const wrongMethod = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('GET', '/api/agents/a1/chat'),
+    )
+    expect(wrongMethod).toMatchObject({ status: 401, body: { reason: 'route' } })
+  })
+
+  it('refuses an allowed-looking path that another reading takes elsewhere', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    // As sent it matches /api/agents/:id/chat; resolved, it is /api/chat.
+    const sneaky = '/api/agents/%2e%2e/chat'
+    const res = await raw(
+      sneaky,
+      { 'clawboo-app-identity': await appAssertion('POST', sneaky) },
+      'POST',
+    )
+    expect(res).toMatchObject({ status: 401, body: { reason: 'route' } })
+    const dotted = '/api/agents/../files/x/chat'
+    const res2 = await raw(
+      dotted,
+      { 'clawboo-app-identity': await appAssertion('POST', dotted) },
+      'POST',
+    )
+    expect(res2).toMatchObject({ status: 401, body: { reason: 'route' } })
+  })
+
+  it('lets a request without a token through with no name: an app link never requires one', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    expect(lane.mode).toBe('on')
+    const res = await get('/api/team-verify-command/t1', {}, 'PUT')
+    expect(res).toEqual({ status: 200, body: { actsAsPerson: false, person: null } })
+  })
+
+  it('refuses an app token that does not verify, rather than treating it as no token', async () => {
+    await start({ mode: 'on', appLink: true })
+    const forged = await signedByApp('GET', '/api/access/identity', { key: other.privateKey })
+    const res = await get('/api/access/identity', forged)
+    expect(res.status).toBe(401)
+    expect(res.body).toMatchObject({
+      gate: 'clawboo-proxy-identity',
+      reason: 'signature',
+      error: 'Clawboo refused the identity token from the app that started it.',
+    })
+  })
+
+  it("refuses the app's key used to name anyone but an account: person", async () => {
+    await start({ mode: 'on', appLink: true })
+    const res = await get(
+      '/api/access/identity',
+      await signedByApp('GET', '/api/access/identity', { sub: 'user-42' }),
+    )
+    expect(res).toMatchObject({ status: 401, body: { reason: 'claims' } })
+  })
+
+  it("refuses a proxy-signed token on the app's header, and an app token on the proxy's", async () => {
+    await start({ mode: 'on', appLink: true })
+    const proxyTokenOnAppHeader = {
+      'clawboo-app-identity': await assertion('GET', '/api/access/identity'),
+    }
+    expect((await get('/api/access/identity', proxyTokenOnAppHeader)).status).toBe(401)
+    const appTokenOnProxyHeader = {
+      'clawboo-identity': await appAssertion('GET', '/api/access/identity'),
+    }
+    expect((await get('/api/access/identity', appTokenOnProxyHeader)).status).toBe(401)
+  })
+
+  it('says which issuer vouched for the person, so a rule can tell them apart', async () => {
+    await start({ mode: 'on', appLink: true })
+    const viaApp = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('POST', '/api/agents/a1/chat'),
+      'POST',
+    )
+    expect(viaApp.body['via']).toBe('app')
+    expect((await get('/api/who', await signed('GET', '/api/who'))).body).toEqual({
+      via: 'proxy',
+    })
+    expect((await get('/api/who')).body).toEqual({ via: null })
+  })
+
+  it('says two-tokens before anything else, even on a route the app may not sign for', async () => {
+    await start({ mode: 'on', appLink: true })
+    const res = await get(
+      '/api/team-verify-command/t1',
+      {
+        ...(await signed('PUT', '/api/team-verify-command/t1')),
+        ...(await signedByApp('PUT', '/api/team-verify-command/t1')),
+      },
+      'PUT',
+    )
+    expect(res).toMatchObject({ status: 401, body: { reason: 'two-tokens' } })
+  })
+
+  it('refuses a request that carries both tokens', async () => {
+    await start({ mode: 'on', appLink: true })
+    const res = await get('/api/access/identity', {
+      ...(await signed('GET', '/api/access/identity')),
+      ...(await signedByApp('GET', '/api/access/identity')),
+    })
+    expect(res).toMatchObject({ status: 401, body: { reason: 'two-tokens' } })
+  })
+
+  it("lets the app's person through a required proxy lane, and nothing without a token", async () => {
+    await start({ mode: 'required', appLink: true })
+    expect(lane.mode).toBe('required')
+    const res = await get('/api/access/identity', await signedByApp('GET', '/api/access/identity'))
+    expect(res.status).toBe(200)
+    expect((await get('/api/access/identity')).status).toBe(401)
+  })
+
+  it("refuses the app's token on the Gateway connection, even a good one", async () => {
+    const upgrade = (headers: Record<string, string>) =>
+      ({ method: 'GET', url: '/api/gateway/ws', headers }) as unknown as http.IncomingMessage
+    for (const mode of ['on', 'required'] as const) {
+      await start({ mode, appLink: true })
+      const appToken = await appAssertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-app-identity': appToken }))).toEqual({
+        ok: false,
+        reason: 'binding',
+      })
+      const proxyToken = await assertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-identity': proxyToken }))).toEqual({
+        ok: true,
+        person: { id: 'user-42', name: 'Ada', role: 'admin' },
+      })
+      await new Promise<void>((r) => server!.close(() => r()))
+      server = null
+    }
+    await start({ mode: 'on', appLink: true, proxy: false })
+    expect(await lane.checkUpgrade(upgrade({}))).toEqual({ ok: true, person: null })
+  })
+
+  it("lets a spawned runtime's own call through only when it carries neither token", async () => {
+    await start({ mode: 'required', appLink: true })
+    const runtime = { 'x-test-attach': 'minted' }
+    expect((await get('/api/mcp/tasks', runtime, 'POST')).status).toBe(200)
+    const withForgedAppToken = {
+      ...runtime,
+      ...(await signedByApp('POST', '/api/mcp/tasks', { key: other.privateKey })),
+    }
+    expect((await get('/api/mcp/tasks', withForgedAppToken, 'POST')).status).toBe(401)
   })
 })

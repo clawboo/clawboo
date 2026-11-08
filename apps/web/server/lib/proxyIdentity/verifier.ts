@@ -7,7 +7,8 @@
 //     public key as its secret is the classic forgery, and it is refused by
 //     algorithm before any key is looked at;
 //   - the operator's issuer and audience;
-//   - a `sub` (the person's id);
+//   - a `sub` (the person's id). An app link's `sub` must start with `account:`,
+//     and while one is on, a sign-in proxy's never may (accountSubjects);
 //   - not expired, and not issued in the future, within CLOCK_SKEW_SECONDS.
 //
 // REQUEST BINDING (the default) asks more of every token: `htm` and `htu` (the
@@ -27,6 +28,7 @@ import {
   type JWTVerifyGetKey,
 } from 'jose'
 
+import { ACCOUNT_PERSON_PREFIX, isAccountPerson } from '@clawboo/board-core'
 import type { PersonRef } from '@clawboo/protocol'
 
 import type { ProxyIdentityConfig } from './config'
@@ -248,6 +250,15 @@ export function createAssertionVerifier(
 
     const sub = cleanText(payload.sub, MAX_ID_CHARS)
     if (!sub || sub !== payload.sub) return { ok: false, reason: 'claims' }
+    // Each issuer keeps to its own people. A proxy naming an `account:` person
+    // would pass for the app link's, and an app link naming anyone else would
+    // pass for the proxy's.
+    if (config.accountSubjects === 'only' && !isAccountPerson(sub)) {
+      return { ok: false, reason: 'claims' }
+    }
+    if (config.accountSubjects === 'never' && sub.startsWith(ACCOUNT_PERSON_PREFIX)) {
+      return { ok: false, reason: 'claims' }
+    }
     const nowSeconds = at / 1000
     if (typeof payload.iat === 'number' && payload.iat > nowSeconds + CLOCK_SKEW_SECONDS) {
       return { ok: false, reason: 'not-yet-valid' }

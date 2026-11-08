@@ -27,3 +27,22 @@ export const LOCAL_PERSON: Readonly<LocalPersonRef> = Object.freeze({
 export function isLocalPerson(id: string | null | undefined): boolean {
   return id === LOCAL_PERSON_ID
 }
+
+// ─── People an app link names ───────────────────────────────────────────────
+// An app that starts this engine itself (a desktop app) may name the person a
+// request comes from, by signing a short token with its own key (the server's
+// app link, lib/proxyIdentity). Every such person's id starts with this prefix,
+// and a sign-in proxy's token may never carry one, so the two id spaces cannot
+// collide and a proxy cannot pass for an app's person, nor an app for a proxy's.
+
+/** The prefix every person an app link names carries in their id. */
+export const ACCOUNT_PERSON_PREFIX = 'account:'
+
+/** True for a person an app link named. */
+export function isAccountPerson(id: string | null | undefined): boolean {
+  return (
+    typeof id === 'string' &&
+    id.startsWith(ACCOUNT_PERSON_PREFIX) &&
+    id.length > ACCOUNT_PERSON_PREFIX.length
+  )
+}

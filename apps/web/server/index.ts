@@ -85,12 +85,14 @@ import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSetti
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import { loadProviderBaseUrls, providerBaseUrlWarnings } from './lib/providerBaseUrls'
 import {
+  identityConfigs,
+  loadAppLinkConfig,
   loadProxyIdentityConfig,
   operatorFileReplaceable,
   proxyIdentityFileWarning,
   type ProxyIdentityConfig,
 } from './lib/proxyIdentity/config'
-import { createProxyIdentityLane } from './lib/proxyIdentity/lane'
+import { createIdentityLane, type LaneSource } from './lib/proxyIdentity/lane'
 import { createAssertionVerifier } from './lib/proxyIdentity/verifier'
 import { agents, costRecords } from '@clawboo/db'
 import { ensureBrowserGrantsForAllAgents } from './lib/connectors/browserGrants'
@@ -183,8 +185,12 @@ async function main() {
   // carrying on would quietly drop pins they rely on, such as a disabled
   // self-update.
   // The proxy identity lane is among them, and refuses the same way when it is
-  // on but has no key, issuer or audience it can trust.
+  // on but has no key, issuer or audience it can trust. So is the app link's key,
+  // which only the environment can set: an app that starts the engine and believes
+  // its link is on must not get an engine that ignores it.
   let proxyIdentityConfig: ProxyIdentityConfig | null = null
+  let appLinkConfig: ProxyIdentityConfig | null = null
+  let identityConfigList: ProxyIdentityConfig[] = []
   try {
     const operator = initOperatorSettings(process.env)
     const pinned = Object.entries(operator.pins).map(([key, pin]) => `${key} (${pin.source})`)
@@ -192,6 +198,8 @@ async function main() {
       log.info({ file: operator.file, pinned }, 'Operator settings: pinned by the administrator')
     }
     proxyIdentityConfig = loadProxyIdentityConfig()
+    appLinkConfig = loadAppLinkConfig(process.env)
+    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig)
     // Where Clawboo Native reaches each model provider (a gateway, a company
     // proxy), read once like the rest. A base URL receives the provider's key.
     loadProviderBaseUrls()
@@ -255,14 +263,27 @@ async function main() {
   // place of it: a request still needs the access token while the gate is on.
   // A spawned runtime's own control-plane calls are judged by the gate's own
   // test, so the lane exempts exactly what the gate admits without a cookie.
-  const proxyIdentity = proxyIdentityConfig
-    ? createProxyIdentityLane(proxyIdentityConfig, createAssertionVerifier(proxyIdentityConfig), {
-        isRuntimeRequest: (req) => isRuntimeControlRequest(req, carriesAttachToken),
-        // The reason only: the token never reaches a log.
-        onRefuse: ({ reason, method, path }) =>
-          log.warn({ reason, method, path }, 'Proxy identity: refused a request'),
-      })
-    : null
+  // The app link (an app that started this engine and signs for its own
+  // `account:` people) joins it as a second issuer, always in `on` mode.
+  const identitySources: LaneSource[] = identityConfigList.map((config) => ({
+    config,
+    verifier: createAssertionVerifier(config),
+  }))
+  const proxyIdentity =
+    identitySources.length > 0
+      ? createIdentityLane(identitySources, {
+          isRuntimeRequest: (req) => isRuntimeControlRequest(req, carriesAttachToken),
+          // The reason only: the token never reaches a log.
+          onRefuse: ({ reason, method, path }) =>
+            log.warn({ reason, method, path }, 'Proxy identity: refused a request'),
+        })
+      : null
+  if (appLinkConfig) {
+    log.info(
+      'App link on: the app that started this engine can name its own people on a request ' +
+        'it signs. A request it does not sign is treated as before.',
+    )
+  }
   if (proxyIdentityConfig) {
     log.info(
       {

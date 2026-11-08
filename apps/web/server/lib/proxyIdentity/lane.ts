@@ -17,19 +17,42 @@
 // This sits beside the access gate, after it: the access token still has to be
 // right while the gate is on. An operator who wants the proxy instead of the
 // access token sets this to `required` and turns the access token off.
+//
+// It reads one header per issuer: the sign-in proxy's and the app link's (see
+// config.ts). A request carries at most one token. One that carries both is
+// refused, so nothing has to choose which of two people sent it. The app link
+// never makes a token required: its mode is always `on`.
+//
+// The app link's token is for /api/ requests only, never the Gateway
+// WebSocket. Messages on that socket are not checked one by one, so an answer
+// sent there would skip what an app's person may not do (allow an approval
+// always); an upgrade that carries the app's token is refused.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { NextFunction, Request, Response } from 'express'
 
-import { anyPathUnder, everyPathUnder, targetPath } from '@clawboo/gateway-proxy'
+import {
+  anyPathUnder,
+  everyPathUnder,
+  requestPathReadings,
+  targetPath,
+} from '@clawboo/gateway-proxy'
 import type { PersonRef } from '@clawboo/protocol'
 
 import type { ProxyIdentityConfig } from './config'
 import type { AssertionRefusal, AssertionVerifier } from './verifier'
 
-/** The refusal's reason when a required token is missing. */
-export type LaneRefusal = AssertionRefusal | 'missing'
+/** The refusal's reason: a verifier's, `missing` when a required token is
+ *  absent, `two-tokens` when a request carries both issuers' tokens, `route`
+ *  when an issuer limited to some routes (the app link) sent one elsewhere. */
+export type LaneRefusal = AssertionRefusal | 'missing' | 'two-tokens' | 'route'
+
+/** One issuer the lane trusts: its settings and the verifier built from them. */
+export interface LaneSource {
+  config: ProxyIdentityConfig
+  verifier: AssertionVerifier
+}
 
 export interface ProxyIdentityLane {
   mode: ProxyIdentityConfig['mode']
@@ -49,13 +72,20 @@ export interface LaneOptions {
   onRefuse?: (info: { reason: LaneRefusal; method: string; path: string }) => void
 }
 
-/** Recognised by "clawboo" and "token" like the access gate's 401, and by `gate`. */
-export function laneRefusalBody(reason: LaneRefusal): string {
+/** Recognised by "clawboo" and "token" like the access gate's 401, and by `gate`.
+ *  `from` names whose token was refused, when one was. */
+export function laneRefusalBody(reason: LaneRefusal, from: 'proxy' | 'app' = 'proxy'): string {
   return JSON.stringify({
     error:
       reason === 'missing'
         ? 'Clawboo needs a signed identity token from your sign-in proxy for this request.'
-        : 'Clawboo refused the identity token from your sign-in proxy.',
+        : reason === 'two-tokens'
+          ? 'Clawboo refused a request that carries two identity tokens. Send one.'
+          : reason === 'route'
+            ? 'The app that started Clawboo may not sign for this request.'
+            : from === 'app'
+              ? 'Clawboo refused the identity token from the app that started it.'
+              : 'Clawboo refused the identity token from your sign-in proxy.',
     gate: 'clawboo-proxy-identity',
     reason,
   })
@@ -71,34 +101,77 @@ function tokenFrom(req: IncomingMessage, header: string): string | undefined {
   return token.includes(',') ? '' : token
 }
 
+/** The lane for one issuer: a sign-in proxy's alone. */
 export function createProxyIdentityLane(
   config: ProxyIdentityConfig,
   verifier: AssertionVerifier,
   opts: LaneOptions,
 ): ProxyIdentityLane {
-  const required = config.mode === 'required'
+  return createIdentityLane([{ config, verifier }], opts)
+}
+
+type Decided = LaneDecision & { from?: 'proxy' | 'app' }
+
+/** The lane for every issuer the engine trusts: the sign-in proxy's, the app
+ *  link's, or both. Each reads its own header. */
+export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): ProxyIdentityLane {
+  if (sources.length === 0) throw new Error('an identity lane needs at least one issuer')
+  const headers = new Set(sources.map((s) => s.config.header))
+  if (headers.size !== sources.length) throw new Error('two issuers share one header')
+  const required = sources.some((s) => s.config.mode === 'required')
+  const fromOf = (source: LaneSource): 'proxy' | 'app' =>
+    source.config.accountSubjects === 'only' ? 'app' : 'proxy'
+  const tokensCarried = (req: IncomingMessage): number =>
+    sources.filter((s) => tokenFrom(req, s.config.header) !== undefined).length
+  const carriesToken = (req: IncomingMessage): boolean => tokensCarried(req) > 0
+
+  /** A token from an issuer limited to some routes, on a request that is not
+   *  one of them. Every reading of the path must match the same route, so no
+   *  dot segment, backslash or other spelling reaches another one. */
+  const offRoute = (req: IncomingMessage): boolean =>
+    sources.some((s) => {
+      const routes = s.config.routes
+      if (!routes || tokenFrom(req, s.config.header) === undefined) return false
+      const method = (req.method ?? 'GET').toUpperCase()
+      const readings = requestPathReadings(req)
+      return !routes.some(
+        (r) => r.method === method && readings.every((p) => p !== null && r.path.test(p)),
+      )
+    })
+
+  const upgradeSources = sources.filter((s) => fromOf(s) === 'proxy')
+  const appSources = sources.filter((s) => fromOf(s) === 'app')
 
   /** `path` is the one the request arrived with, the base path included: the
-   *  path the proxy signed. */
-  async function decide(req: IncomingMessage, path: string): Promise<LaneDecision> {
-    const token = tokenFrom(req, config.header)
-    if (token === undefined) {
+   *  path the proxy signed. `pool` is the issuers whose tokens count here. */
+  async function decide(
+    req: IncomingMessage,
+    path: string,
+    pool: LaneSource[] = sources,
+  ): Promise<Decided> {
+    const carried = pool
+      .map((source) => ({ source, token: tokenFrom(req, source.config.header) }))
+      .filter((c): c is { source: LaneSource; token: string } => c.token !== undefined)
+    if (carried.length === 0) {
       return required ? { ok: false, reason: 'missing' } : { ok: true, person: null }
     }
-    if (token === '') return { ok: false, reason: 'malformed' }
+    if (carried.length > 1) return { ok: false, reason: 'two-tokens' }
+    const { source, token } = carried[0]!
+    const from = fromOf(source)
+    if (token === '') return { ok: false, reason: 'malformed', from }
     try {
-      const result = await verifier.verify({ token, method: req.method ?? 'GET', path })
-      return result.ok ? { ok: true, person: result.person } : result
+      const result = await source.verifier.verify({ token, method: req.method ?? 'GET', path })
+      return result.ok ? { ok: true, person: result.person, from } : { ...result, from }
     } catch {
-      return { ok: false, reason: 'malformed' }
+      return { ok: false, reason: 'malformed', from }
     }
   }
 
-  function refuse(res: ServerResponse, reason: LaneRefusal): void {
+  function refuse(res: ServerResponse, reason: LaneRefusal, from?: 'proxy' | 'app'): void {
     res.statusCode = 401
     res.setHeader('Content-Type', 'application/json')
     res.setHeader('Cache-Control', 'no-store')
-    res.end(laneRefusalBody(reason))
+    res.end(laneRefusalBody(reason, from))
   }
 
   function http(req: Request, res: Response, next: NextFunction): void {
@@ -112,35 +185,47 @@ export function createProxyIdentityLane(
     }
     // A runtime's own control-plane call carries no identity token. One that
     // does is checked like any other: a bad token is refused on every path.
-    if (
-      everyPathUnder(req, '/api/mcp/') &&
-      tokenFrom(req, config.header) === undefined &&
-      opts.isRuntimeRequest(req)
-    ) {
+    if (everyPathUnder(req, '/api/mcp/') && !carriesToken(req) && opts.isRuntimeRequest(req)) {
       next()
       return
     }
     // The path as the request arrived, base path included: the one the proxy
     // signed. An absolute-form target is cut to its path; nothing is resolved.
     const path = targetPath(req.originalUrl ?? req.url) ?? ''
+    // Before any token is checked, so a refused request never spends one: two
+    // tokens first, whatever the route, then an app token off its routes.
+    if (tokensCarried(req) > 1) {
+      opts.onRefuse?.({ reason: 'two-tokens', method: req.method, path })
+      refuse(res, 'two-tokens')
+      return
+    }
+    if (offRoute(req)) {
+      opts.onRefuse?.({ reason: 'route', method: req.method, path })
+      refuse(res, 'route', 'app')
+      return
+    }
     void decide(req, path).then((decision) => {
       if (!decision.ok) {
         opts.onRefuse?.({ reason: decision.reason, method: req.method, path })
-        refuse(res, decision.reason)
+        refuse(res, decision.reason, decision.from)
         return
       }
       req.person = decision.person
+      if (decision.person && decision.from) req.personVia = decision.from
       next()
     })
   }
 
   async function checkUpgrade(req: IncomingMessage): Promise<LaneDecision> {
     const path = targetPath(req.url) ?? ''
-    const decision = await decide(req, path)
-    if (!decision.ok)
-      opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })
-    return decision
+    const appToken = appSources.some((s) => tokenFrom(req, s.config.header) !== undefined)
+    const decision: Decided = appToken
+      ? { ok: false, reason: 'binding' }
+      : await decide(req, path, upgradeSources)
+    if (decision.ok) return { ok: true, person: decision.person }
+    opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })
+    return { ok: false, reason: decision.reason }
   }
 
-  return { mode: config.mode, http, checkUpgrade }
+  return { mode: required ? 'required' : 'on', http, checkUpgrade }
 }

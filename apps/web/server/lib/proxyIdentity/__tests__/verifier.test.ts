@@ -39,6 +39,7 @@ function config(over: Partial<ProxyIdentityConfig> = {}): ProxyIdentityConfig {
     nameClaim: 'name',
     roleClaim: 'role',
     keys: { source: 'public-key', jwks: { keys: [jwkOf(ed.publicKey)] } },
+    accountSubjects: 'never',
     ...over,
   }
 }
@@ -179,6 +180,38 @@ describe('issuer, audience and subject', () => {
   it('refuses a token with no subject', async () => {
     const token = await sign(claims({ sub: undefined }))
     expect(await verifier().verify(at(token))).toEqual({ ok: false, reason: 'claims' })
+  })
+
+  it("refuses a sign-in proxy's token that names an app link's account: person", async () => {
+    const token = await sign(claims({ sub: 'account:u-7' }))
+    expect(await verifier().verify(at(token))).toEqual({ ok: false, reason: 'claims' })
+  })
+
+  it('keeps a proxy that already names account: people working while no app link is on', async () => {
+    const token = await sign(claims({ sub: 'account:u-7' }))
+    expect(await verifier({ accountSubjects: 'any' }).verify(at(token))).toMatchObject({
+      ok: true,
+      person: { id: 'account:u-7' },
+    })
+  })
+})
+
+describe("an app link's people", () => {
+  const appLink = () => verifier({ accountSubjects: 'only', mode: 'on' })
+
+  it('names an account: person', async () => {
+    const token = await sign(claims({ sub: 'account:u-7', name: 'Ada', role: undefined }))
+    expect(await appLink().verify(at(token))).toEqual({
+      ok: true,
+      person: { id: 'account:u-7', name: 'Ada', role: null },
+    })
+  })
+
+  it('refuses anyone else, and an account: prefix with no id after it', async () => {
+    for (const sub of ['user-42', 'local', 'account:', 'Account:u-7']) {
+      const token = await sign(claims({ sub }))
+      expect(await appLink().verify(at(token))).toEqual({ ok: false, reason: 'claims' })
+    }
   })
 })
 
