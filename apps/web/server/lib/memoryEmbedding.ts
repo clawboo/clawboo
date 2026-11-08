@@ -40,6 +40,7 @@ import {
 import { createLogger } from '@clawboo/logger'
 
 import { getDb } from './db'
+import { providerBaseUrlOverride } from './providerBaseUrls'
 import { getRuntimeSecret, hasRuntimeSecret, isVaultReadable } from './secretsVault'
 
 const log = createLogger('memory-embedding')
@@ -227,7 +228,10 @@ async function resolveFresh(): Promise<Resolved> {
   const localFirst = storeIsLocalFirst(getDb())
   const consented = getSetting(getDb(), REMOTE_CONSENT_SETTING) === '1'
   const allowRemote = !localFirst || (consented && openaiApiKey != null)
-  const res = await probeEmbeddingProvider({ openaiApiKey, allowRemote })
+  // OpenAI's base URL as an administrator set it (OPENAI_BASE_URL or the
+  // operator file), so embeddings take the same gateway as runs.
+  const openaiBaseUrl = providerBaseUrlOverride('openai') ?? undefined
+  const res = await probeEmbeddingProvider({ openaiApiKey, openaiBaseUrl, allowRemote })
   const fingerprint =
     res.state === 'ready' && isRemoteEmbeddingProvider(res.provider.id) && openaiApiKey
       ? keyIdentity(openaiApiKey)

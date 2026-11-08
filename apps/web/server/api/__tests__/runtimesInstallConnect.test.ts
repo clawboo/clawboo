@@ -1505,6 +1505,33 @@ describe('runtimes install/connect REST', () => {
     vi.unstubAllGlobals()
   })
 
+  it("native healthcheck checks the key at the provider's base URL, behind a gateway", async () => {
+    // Behind a gateway the public address may be unreachable, or reject the key,
+    // so a check there would read a good key as bad.
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(null, { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://gw.example.com/anthropic/')
+    vi.stubEnv('OPENROUTER_BASE_URL', 'https://gw.example.com/openrouter/v1')
+    vi.stubEnv('GROQ_BASE_URL', 'https://gw.example.com/groq/v1')
+    for (const provider of ['anthropic', 'openrouter', 'groq']) {
+      const m = mockRes()
+      await runtimesHealthcheckPOST(
+        req({ params: { id: 'clawboo-native' }, body: { provider, apiKey: 'sk-probe' } }),
+        m.res,
+      )
+      expect((m.body() as { ok?: boolean }).ok).toBe(true)
+    }
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      'https://gw.example.com/anthropic/v1/models',
+      'https://gw.example.com/openrouter/v1/models',
+      'https://gw.example.com/groq/v1/models',
+    ])
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
   it('native healthcheck fails closed (never ok) when the provider redirects', async () => {
     // `redirect: 'error'` makes fetch reject; the handler must degrade to the
     // friendly unreachable message rather than surfacing a 200.

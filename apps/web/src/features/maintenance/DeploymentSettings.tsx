@@ -12,8 +12,27 @@ import { useToastStore } from '@/stores/toast'
 
 import { SectionCard } from './SectionCard'
 
+/** Where Clawboo Native reaches each model provider, by operator key. */
+const PROVIDER_ADDRESS_KEYS = {
+  anthropicBaseUrl: 'Anthropic',
+  openaiBaseUrl: 'OpenAI',
+  openrouterBaseUrl: 'OpenRouter',
+  googleBaseUrl: 'Google',
+  xaiBaseUrl: 'xAI',
+  groqBaseUrl: 'Groq',
+  mistralBaseUrl: 'Mistral',
+  togetherBaseUrl: 'Together',
+  cerebrasBaseUrl: 'Cerebras',
+  moonshotBaseUrl: 'Moonshot',
+} as const
+type ProviderAddressKey = keyof typeof PROVIDER_ADDRESS_KEYS
+
 type SettingKey =
-  'disableSelfUpdate' | 'disableBrowserAutostart' | 'catalogIndexUrl' | 'proxyIdentity'
+  | 'disableSelfUpdate'
+  | 'disableBrowserAutostart'
+  | 'catalogIndexUrl'
+  | 'proxyIdentity'
+  | ProviderAddressKey
 
 export interface EffectiveSetting {
   key: SettingKey
@@ -71,6 +90,47 @@ function Row({
 
 function Value({ children }: { children: ReactNode }) {
   return <span className="font-data break-all text-[12px] text-foreground/80">{children}</span>
+}
+
+/** The model providers an administrator pointed at another address, such as a
+ *  gateway. Only an administrator sets these, so the row only shows them. */
+function ProviderAddresses({ settings }: { settings: EffectiveSetting[] }) {
+  const set = settings.filter(
+    (s): s is EffectiveSetting & { key: ProviderAddressKey; value: string } =>
+      s.key in PROVIDER_ADDRESS_KEYS && typeof s.value === 'string',
+  )
+  return (
+    <div
+      className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0"
+      data-testid="deployment-providerBaseUrls"
+    >
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className="text-[12.5px] font-medium text-foreground">Model provider addresses</span>
+        <span className="text-[11.5px] leading-relaxed text-muted-foreground">
+          {
+            "Where Clawboo Native sends each provider's requests, key check and model list, such as a gateway or a company proxy."
+          }
+        </span>
+        {set.length > 0 && (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Lock size={11} strokeWidth={2} aria-hidden />
+            Set by your administrator
+          </span>
+        )}
+      </span>
+      <span className="flex max-w-[45%] shrink-0 flex-col gap-1 pt-0.5 text-right">
+        {set.length === 0 ? (
+          <Value>{"Each provider's own"}</Value>
+        ) : (
+          set.map((s) => (
+            <Value key={s.key}>
+              {PROVIDER_ADDRESS_KEYS[s.key]}: {s.value}
+            </Value>
+          ))
+        )}
+      </span>
+    </div>
+  )
 }
 
 export function DeploymentSettings() {
@@ -183,6 +243,7 @@ export function DeploymentSettings() {
             <Value>{typeof catalog.value === 'string' ? catalog.value : 'Default'}</Value>
           </Row>
         )}
+        <ProviderAddresses settings={settings} />
         {proxyIdentity && (
           <Row
             title="Sign-in proxy"

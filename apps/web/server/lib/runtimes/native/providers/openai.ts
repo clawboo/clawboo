@@ -230,11 +230,12 @@ export function createOpenAiProvider(opts: {
             model: p.model,
             messages: toOpenAiMessages(p.system, p.messages, opts.provider),
             ...(p.tools.length > 0 ? { tools: toOpenAiTools(p.tools) } : {}),
-            // api.openai.com wants the modern param; compat endpoints
-            // (OpenRouter/Ollama, reached via baseURL) take the classic one.
-            ...(opts.baseURL
-              ? { max_tokens: p.maxOutputTokens }
-              : { max_completion_tokens: p.maxOutputTokens }),
+            // OpenAI wants the modern param, also through a gateway an
+            // administrator pointed it at (OPENAI_BASE_URL); the compatible
+            // providers (OpenRouter, Ollama and the rest) take the classic one.
+            ...(opts.provider === 'openai'
+              ? { max_completion_tokens: p.maxOutputTokens }
+              : { max_tokens: p.maxOutputTokens }),
             ...openRouterCacheControl(opts.provider, p.model),
             stream: true,
             stream_options: { include_usage: true },

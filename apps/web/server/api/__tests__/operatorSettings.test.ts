@@ -9,7 +9,7 @@ import type { Request, Response } from 'express'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, resetDb } from '../../lib/db'
-import { resetOperatorSettings } from '../../lib/operatorSettings'
+import { OPERATOR_KEYS, resetOperatorSettings } from '../../lib/operatorSettings'
 import { operatorSettingsGET, operatorSettingsPUT } from '../operatorSettings'
 
 function call(
@@ -37,6 +37,9 @@ describe('/api/system/operator-settings', () => {
   beforeEach(() => {
     home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-operator-api-'))
     vi.stubEnv('CLAWBOO_HOME', home)
+    // A shell can carry one of these (Claude Code sets ANTHROPIC_BASE_URL), and
+    // a pinned variable would change every answer below.
+    for (const spec of Object.values(OPERATOR_KEYS)) vi.stubEnv(spec.env, '')
     resetOperatorSettings()
     resetDb()
     getDb()
@@ -89,6 +92,16 @@ describe('/api/system/operator-settings', () => {
           ['proxyIdentityMaxLifetime', 60, 'CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME'],
           ['proxyIdentityNameClaim', 'name', 'CLAWBOO_PROXY_IDENTITY_NAME_CLAIM'],
           ['proxyIdentityRoleClaim', 'role', 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM'],
+          ['anthropicBaseUrl', null, 'ANTHROPIC_BASE_URL'],
+          ['openaiBaseUrl', null, 'OPENAI_BASE_URL'],
+          ['openrouterBaseUrl', null, 'OPENROUTER_BASE_URL'],
+          ['googleBaseUrl', null, 'GEMINI_BASE_URL'],
+          ['xaiBaseUrl', null, 'XAI_BASE_URL'],
+          ['groqBaseUrl', null, 'GROQ_BASE_URL'],
+          ['mistralBaseUrl', null, 'MISTRAL_BASE_URL'],
+          ['togetherBaseUrl', null, 'TOGETHER_BASE_URL'],
+          ['cerebrasBaseUrl', null, 'CEREBRAS_BASE_URL'],
+          ['moonshotBaseUrl', null, 'MOONSHOT_BASE_URL'],
         ] as const
       ).map(([key, value, env]) => ({
         key,

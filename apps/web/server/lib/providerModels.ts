@@ -7,6 +7,7 @@
 
 import { randomBytes, scryptSync } from 'node:crypto'
 
+import { providerBaseUrl, providerBaseUrlOverride, type BaseUrlProvider } from './providerBaseUrls'
 import { NATIVE_COMPAT_PROVIDERS } from './runtimes/native/nativeProviders'
 
 export interface ModelOption {
@@ -21,6 +22,8 @@ interface CacheEntry {
   models: ModelOption[]
   at: number
   keyHash: string
+  /** The base URL the list came from: another one is another list. */
+  base: string
 }
 const cache = new Map<string, CacheEntry>()
 
@@ -44,8 +47,8 @@ async function timedFetch(url: string, headers: Record<string, string>): Promise
   const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS)
   try {
     // `redirect: 'error'` for the same reason as the healthcheck probe: these are
-    // hard-coded provider `/models` endpoints that never legitimately 3xx, and the
-    // request carries the user's key. `fetch` strips `Authorization` across
+    // provider `/models` endpoints (or an administrator's gateway for them) that
+    // never legitimately 3xx, and the request carries the user's key. `fetch` strips `Authorization` across
     // origins but NOT Anthropic's custom `x-api-key`, so following a redirect
     // could hand the key to another host. Failing closed returns null → the
     // caller serves its last-good list.
@@ -64,7 +67,7 @@ const OPENAI_DROP_RE =
   /(embedding|whisper|tts|dall-?e|moderation|audio|realtime|image|transcribe|search|babbage|davinci|-instruct|codex)/i
 
 async function fetchAnthropic(key: string): Promise<ModelOption[] | null> {
-  const res = await timedFetch('https://api.anthropic.com/v1/models?limit=100', {
+  const res = await timedFetch(`${providerBaseUrl('anthropic')}/v1/models?limit=100`, {
     'x-api-key': key,
     'anthropic-version': '2023-06-01',
   })
@@ -83,7 +86,7 @@ async function fetchAnthropic(key: string): Promise<ModelOption[] | null> {
 }
 
 async function fetchOpenAI(key: string): Promise<ModelOption[] | null> {
-  const res = await timedFetch('https://api.openai.com/v1/models', {
+  const res = await timedFetch(`${providerBaseUrl('openai')}/models`, {
     Authorization: `Bearer ${key}`,
   })
   if (!res || !res.ok) return null
@@ -91,10 +94,15 @@ async function fetchOpenAI(key: string): Promise<ModelOption[] | null> {
     data?: { id?: unknown; created?: unknown }[]
   } | null
   if (!body || !Array.isArray(body.data)) return null
+  // A gateway names its deployments as it likes (`sales-chat`), so only the
+  // public endpoint's list is narrowed to OpenAI's own chat families.
+  const gateway = providerBaseUrlOverride('openai') !== null
   return body.data
     .filter(
       (m): m is { id: string; created?: number } =>
-        typeof m.id === 'string' && OPENAI_CHAT_RE.test(m.id) && !OPENAI_DROP_RE.test(m.id),
+        typeof m.id === 'string' &&
+        (gateway || OPENAI_CHAT_RE.test(m.id)) &&
+        !OPENAI_DROP_RE.test(m.id),
     )
     .sort((a, b) => Number(b.created ?? 0) - Number(a.created ?? 0))
     .map((m) => ({ id: m.id, label: m.id }))
@@ -106,8 +114,13 @@ const COMPAT_DROP_RE =
   /(embedding|embed|rerank|whisper|tts|audio|dall-?e|image|vision-encoder|moderation|guard|transcribe|-ocr|bge-|nomic-)/i
 
 /** Generic OpenAI-compatible `/models` reader (Google, xAI, Groq, Mistral, …). */
-async function fetchOpenAiCompat(baseURL: string, key: string): Promise<ModelOption[] | null> {
-  const res = await timedFetch(`${baseURL}/models`, { Authorization: `Bearer ${key}` })
+async function fetchOpenAiCompat(
+  provider: BaseUrlProvider,
+  key: string,
+): Promise<ModelOption[] | null> {
+  const res = await timedFetch(`${providerBaseUrl(provider)}/models`, {
+    Authorization: `Bearer ${key}`,
+  })
   if (!res || !res.ok) return null
   const body = (await res.json().catch(() => null)) as { data?: { id?: unknown }[] } | null
   if (!body || !Array.isArray(body.data)) return null
@@ -119,9 +132,18 @@ async function fetchOpenAiCompat(baseURL: string, key: string): Promise<ModelOpt
 const FETCHERS: Record<string, (key: string) => Promise<ModelOption[] | null>> = {
   anthropic: fetchAnthropic,
   openai: fetchOpenAI,
+  // OpenRouter's own list is the curated one the client already has. Through a
+  // gateway, the gateway's list is the one that says what can be picked.
+  openrouter: (key: string) =>
+    providerBaseUrlOverride('openrouter')
+      ? fetchOpenAiCompat('openrouter', key)
+      : Promise.resolve(null),
   // Each extra OpenAI-compatible provider reads its own `/models` endpoint.
   ...Object.fromEntries(
-    NATIVE_COMPAT_PROVIDERS.map((p) => [p.id, (key: string) => fetchOpenAiCompat(p.baseURL, key)]),
+    NATIVE_COMPAT_PROVIDERS.map((p) => [
+      p.id,
+      (key: string) => fetchOpenAiCompat(p.id as BaseUrlProvider, key),
+    ]),
   ),
 }
 
@@ -140,13 +162,15 @@ export async function fetchNativeModelsForKey(
   const fetcher = FETCHERS[provider]
   if (!fetcher || !key) return []
   const kh = keyHash(key)
+  const base = providerBaseUrl(provider as BaseUrlProvider)
   const hit = cache.get(provider)
-  if (hit && hit.keyHash === kh && Date.now() - hit.at < CACHE_TTL_MS) return hit.models
+  const same = hit !== undefined && hit.keyHash === kh && hit.base === base
+  if (same && Date.now() - hit.at < CACHE_TTL_MS) return hit.models
   const fetched = await fetcher(key)
   if (fetched && fetched.length > 0) {
-    cache.set(provider, { models: fetched, at: Date.now(), keyHash: kh })
+    cache.set(provider, { models: fetched, at: Date.now(), keyHash: kh, base })
     return fetched
   }
-  if (hit && hit.keyHash === kh) return hit.models // last-good for the same key
+  if (same) return hit.models // last-good for the same key and address
   return []
 }

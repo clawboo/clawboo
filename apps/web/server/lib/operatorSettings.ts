@@ -154,6 +154,20 @@ export const OPERATOR_KEYS = {
     env: 'CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM',
     userEditable: false,
   },
+  // Where Clawboo Native sends each provider's requests, its key check and its
+  // model list, for model traffic that goes through a gateway or company proxy
+  // (lib/providerBaseUrls). Only an administrator sets these: a base URL
+  // receives the provider's API key with every request.
+  anthropicBaseUrl: { kind: 'url', env: 'ANTHROPIC_BASE_URL', userEditable: false },
+  openaiBaseUrl: { kind: 'url', env: 'OPENAI_BASE_URL', userEditable: false },
+  openrouterBaseUrl: { kind: 'url', env: 'OPENROUTER_BASE_URL', userEditable: false },
+  googleBaseUrl: { kind: 'url', env: 'GEMINI_BASE_URL', userEditable: false },
+  xaiBaseUrl: { kind: 'url', env: 'XAI_BASE_URL', userEditable: false },
+  groqBaseUrl: { kind: 'url', env: 'GROQ_BASE_URL', userEditable: false },
+  mistralBaseUrl: { kind: 'url', env: 'MISTRAL_BASE_URL', userEditable: false },
+  togetherBaseUrl: { kind: 'url', env: 'TOGETHER_BASE_URL', userEditable: false },
+  cerebrasBaseUrl: { kind: 'url', env: 'CEREBRAS_BASE_URL', userEditable: false },
+  moonshotBaseUrl: { kind: 'url', env: 'MOONSHOT_BASE_URL', userEditable: false },
 } as const satisfies Record<string, KeySpec>
 
 export type OperatorKey = keyof typeof OPERATOR_KEYS
@@ -173,6 +187,16 @@ const DEFAULTS: { [K in OperatorKey]: OperatorValue<K> } = {
   proxyIdentityMaxLifetime: 60,
   proxyIdentityNameClaim: 'name',
   proxyIdentityRoleClaim: 'role',
+  anthropicBaseUrl: null,
+  openaiBaseUrl: null,
+  openrouterBaseUrl: null,
+  googleBaseUrl: null,
+  xaiBaseUrl: null,
+  groqBaseUrl: null,
+  mistralBaseUrl: null,
+  togetherBaseUrl: null,
+  cerebrasBaseUrl: null,
+  moonshotBaseUrl: null,
 }
 
 /** TypeScript resolves DEFAULTS to a plain object, so `DEFAULTS[K]` loses its tie to K. */
