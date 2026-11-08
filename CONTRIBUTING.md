@@ -6,7 +6,7 @@ Thanks for taking the time to contribute. Please read this guide before opening 
 
 ## Prerequisites
 
-- Node.js 22.12 or later (the root `package.json` requires `>=22.12.0`)
+- Node.js 22.13 or later (the root `package.json` requires `>=22.13.0`, because ESLint 10 and parts of the test toolchain need it; the published `clawboo` CLI still runs on 22.12)
 - pnpm 9 (pinned to 9.15.0; `corepack enable` selects it, see Setup)
 
 That's it. Clawboo runs agents natively (paste a provider key), so you do not need any external runtime to develop or test. Connecting OpenClaw, Claude Code, Codex, or Hermes is optional and only needed when you are working on those adapters.

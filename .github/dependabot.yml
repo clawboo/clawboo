@@ -3,39 +3,73 @@ version: 2
 # Automated dependency-update PRs. Three ecosystems, because the repo holds two
 # independent pnpm roots plus the workflow files themselves.
 #
-# Everything is grouped and weekly on purpose. A pnpm lockfile regenerates
-# wholesale, so N ungrouped PRs would mean N mutually-conflicting `pnpm-lock.yaml`
-# diffs and N full CI runs; one grouped PR per week is a single review and a
-# single lockfile rebase. Major bumps stay OUT of the groups so a breaking change
-# never arrives buried in a list of thirty patch bumps.
+# MONTHLY, NOT WEEKLY. Weekly batches arrived faster than they could be merged.
+# From mid-September to November 2026, eight root npm batches in a row (#211
+# through #329, growing from 14 updates to 41) went unmerged: each of the first
+# seven was closed by Dependabot itself when the next one replaced it, and each
+# ran the full three-OS CI matrix on its way. The last of them was red on a
+# single test broken by a jsdom minor bump, a five-minute fix that a weekly
+# cadence never left room for. A monthly batch carries the same updates in a
+# quarter of the PRs and leaves time to merge it.
+#
+# GROUPED, AND MAJORS GROUPED SEPARATELY. A pnpm lockfile regenerates
+# wholesale, so N ungrouped PRs would mean N mutually-conflicting
+# `pnpm-lock.yaml` diffs and N full CI runs. Minor and patch bumps share one PR;
+# major bumps share another, so a breaking change never arrives buried in a list
+# of thirty patch bumps, and the majors are reviewed together in one sitting
+# rather than as a trickle of single PRs.
+#
+# If one bump in a group breaks and has no quick fix, do not let the whole group
+# stall: comment `@dependabot ignore <dependency> major version` (or `minor`) on
+# the group PR. Dependabot rebuilds the group without it, the rest can merge, and
+# the skipped one waits for a deliberate upgrade.
+#
+# COOLDOWN. A release has to have been public for a while before Dependabot
+# proposes it. Broken or compromised npm releases are usually pulled or patched
+# within days, and a version that gets a quick follow-up patch then never
+# reaches a PR at all. Security updates are a separate repository setting
+# (Settings > Code security > Dependabot security updates) and are bound by
+# neither this schedule nor the cooldown.
 updates:
   # The root pnpm workspace: apps/*, packages/*, packages/adapters/*, docs.
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '06:00'
       timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     open-pull-requests-limit: 5
     commit-message:
       prefix: chore
       include: scope
     groups:
+      # better-sqlite3 and ws are the only exact-pinned dependencies in the repo
+      # (apps/cli/package.json; everything else uses a caret range). They are
+      # deliberately kept OUT of the CLI's tsup bundle, so npm resolves them on
+      # the user's machine at install time, better-sqlite3 as a native binding
+      # compiled per platform. Excluding them from both groups means each one
+      # arrives as its own PR, where the clean-install smoke gate
+      # (test:clean-install, run on ubuntu, windows and macos) is read against a
+      # single dependency change instead of a pile of them.
       npm-minor-and-patch:
         patterns:
           - '*'
         update-types:
           - minor
           - patch
-        # better-sqlite3 and ws are the only exact-pinned dependencies in the
-        # repo (apps/cli/package.json; everything else uses a caret range). They
-        # are deliberately kept OUT of the CLI's tsup bundle, so npm resolves
-        # them on the user's machine at install time, better-sqlite3 as a native
-        # binding compiled per platform. Excluding them from the group means each
-        # one arrives as its own PR, where the clean-install smoke gate
-        # (test:clean-install, run on ubuntu + windows) is read against a single
-        # dependency change instead of a pile of them.
+        exclude-patterns:
+          - better-sqlite3
+          - ws
+      npm-major:
+        patterns:
+          - '*'
+        update-types:
+          - major
         exclude-patterns:
           - better-sqlite3
           - ws
@@ -46,10 +80,14 @@ updates:
   - package-ecosystem: npm
     directory: /website
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '06:00'
       timezone: Etc/UTC
+    cooldown:
+      default-days: 7
+      semver-major-days: 30
+      semver-minor-days: 7
+      semver-patch-days: 3
     open-pull-requests-limit: 3
     commit-message:
       prefix: chore
@@ -61,18 +99,25 @@ updates:
         update-types:
           - minor
           - patch
+      website-major:
+        patterns:
+          - '*'
+        update-types:
+          - major
 
   # Keeps the action majors current across ci.yml / evals.yml / publish.yml /
-  # codeql.yml. Majors are grouped here (unlike npm above) because an action
-  # major bump is usually just a runner-Node upgrade, and reviewing them one at a
-  # time across four workflows is churn with no added signal.
+  # codeql.yml / catalog-ci.yml. Majors are grouped with everything else here
+  # (unlike npm above) because an action major bump is usually just a
+  # runner-Node upgrade, and reviewing them one at a time across five workflows
+  # is churn with no added signal.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
       time: '06:00'
       timezone: Etc/UTC
+    cooldown:
+      default-days: 7
     open-pull-requests-limit: 3
     commit-message:
       prefix: chore

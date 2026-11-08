@@ -142,6 +142,13 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
       ],
+      // Two rules ESLint 10 added to `recommended`, held off so the upgrade
+      // changed the toolchain and not what it enforces. Every current hit is
+      // the defensive `let x = fallback; try { x = read() } catch { ... }`
+      // shape, not a bug. Turning them on is a code cleanup of its own (about
+      // 30 sites), not part of a dependency bump.
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
     },
   },
   // CommonJS scripts (e.g. `apps/web/scripts/dev-orchestrator.cjs`) — these
