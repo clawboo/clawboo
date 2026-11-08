@@ -146,6 +146,14 @@ async function start(opts: {
   app.get('/api/who', (req, res) => {
     res.json({ via: req.personVia ?? null })
   })
+  // One of the routes the app link may sign for: sending an agent work.
+  app.post('/api/agents/:agentId/chat', (req, res) => {
+    res.json({
+      actsAsPerson: actsAsPerson(req),
+      person: req.person ?? null,
+      via: req.personVia ?? null,
+    })
+  })
   // A wildcard route, which absorbs dot segments the way the board's preview
   // route does: the raw path stays under /api/ while a resolved one leaves it.
   app.all('/api/files/*splat', (req, res) => {
@@ -568,14 +576,61 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
   it('makes the app its person: it passes the person check with no fetch metadata', async () => {
     await start({ mode: 'on', appLink: true, proxy: false })
     const res = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('POST', '/api/agents/a1/chat'),
+      'POST',
+    )
+    expect(res).toEqual({
+      status: 200,
+      body: {
+        actsAsPerson: true,
+        person: { id: 'account:u-7', name: 'Grace', role: null },
+        via: 'app',
+      },
+    })
+  })
+
+  it('refuses the app token on any route the app does not sign for', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    // A person write such as a team's work check, a standing grant or any other
+    // setting: a copied key must not reach them.
+    const res = await get(
       '/api/team-verify-command/t1',
       await signedByApp('PUT', '/api/team-verify-command/t1'),
       'PUT',
     )
-    expect(res).toEqual({
-      status: 200,
-      body: { actsAsPerson: true, person: { id: 'account:u-7', name: 'Grace', role: null } },
+    expect(res).toMatchObject({
+      status: 401,
+      body: {
+        reason: 'route',
+        error: 'The app that started Clawboo may not sign for this request.',
+      },
     })
+    // The right path with the wrong method.
+    const wrongMethod = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('GET', '/api/agents/a1/chat'),
+    )
+    expect(wrongMethod).toMatchObject({ status: 401, body: { reason: 'route' } })
+  })
+
+  it('refuses an allowed-looking path that another reading takes elsewhere', async () => {
+    await start({ mode: 'on', appLink: true, proxy: false })
+    // As sent it matches /api/agents/:id/chat; resolved, it is /api/chat.
+    const sneaky = '/api/agents/%2e%2e/chat'
+    const res = await raw(
+      sneaky,
+      { 'clawboo-app-identity': await appAssertion('POST', sneaky) },
+      'POST',
+    )
+    expect(res).toMatchObject({ status: 401, body: { reason: 'route' } })
+    const dotted = '/api/agents/../files/x/chat'
+    const res2 = await raw(
+      dotted,
+      { 'clawboo-app-identity': await appAssertion('POST', dotted) },
+      'POST',
+    )
+    expect(res2).toMatchObject({ status: 401, body: { reason: 'route' } })
   })
 
   it('lets a request without a token through with no name: an app link never requires one', async () => {
@@ -620,9 +675,12 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
 
   it('says which issuer vouched for the person, so a rule can tell them apart', async () => {
     await start({ mode: 'on', appLink: true })
-    expect((await get('/api/who', await signedByApp('GET', '/api/who'))).body).toEqual({
-      via: 'app',
-    })
+    const viaApp = await get(
+      '/api/agents/a1/chat',
+      await signedByApp('POST', '/api/agents/a1/chat'),
+      'POST',
+    )
+    expect(viaApp.body['via']).toBe('app')
     expect((await get('/api/who', await signed('GET', '/api/who'))).body).toEqual({
       via: 'proxy',
     })

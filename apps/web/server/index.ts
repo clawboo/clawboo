@@ -188,6 +188,7 @@ async function main() {
   // its link is on must not get an engine that ignores it.
   let proxyIdentityConfig: ProxyIdentityConfig | null = null
   let appLinkConfig: ProxyIdentityConfig | null = null
+  let identityConfigList: ProxyIdentityConfig[] = []
   try {
     const operator = initOperatorSettings(process.env)
     const pinned = Object.entries(operator.pins).map(([key, pin]) => `${key} (${pin.source})`)
@@ -196,6 +197,7 @@ async function main() {
     }
     proxyIdentityConfig = loadProxyIdentityConfig()
     appLinkConfig = loadAppLinkConfig(process.env)
+    identityConfigList = identityConfigs(proxyIdentityConfig, appLinkConfig)
   } catch (err) {
     if (!(err instanceof OperatorSettingsError)) throw err
     log.error(`CONFIG: refusing to start. ${err.message}`)
@@ -255,9 +257,10 @@ async function main() {
   // test, so the lane exempts exactly what the gate admits without a cookie.
   // The app link (an app that started this engine and signs for its own
   // `account:` people) joins it as a second issuer, always in `on` mode.
-  const identitySources: LaneSource[] = identityConfigs(proxyIdentityConfig, appLinkConfig).map(
-    (config) => ({ config, verifier: createAssertionVerifier(config) }),
-  )
+  const identitySources: LaneSource[] = identityConfigList.map((config) => ({
+    config,
+    verifier: createAssertionVerifier(config),
+  }))
   const proxyIdentity =
     identitySources.length > 0
       ? createIdentityLane(identitySources, {

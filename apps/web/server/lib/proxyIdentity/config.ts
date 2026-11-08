@@ -60,7 +60,34 @@ export interface ProxyIdentityConfig {
    *  pass for each other. `any`: no rule (a sign-in proxy on its own, so a proxy
    *  that already names such people keeps working). */
   accountSubjects: 'only' | 'never' | 'any'
+  /** The only routes a token from this issuer may be used on, when it is limited
+   *  (the app link). Unset: any route (a sign-in proxy). */
+  routes?: readonly AppLinkRoute[]
 }
+
+/** A route an app link's token may be used on: a method and a whole-path pattern. */
+export interface AppLinkRoute {
+  method: string
+  path: RegExp
+}
+
+/** One path segment that is not a dot segment. */
+const SEGMENT = '(?!\\.\\.?(?:/|$))[^/]+'
+
+/**
+ * What the app that started the engine signs for, and nothing else: sending
+ * work to an agent or a team, answering an approval, and checking its link.
+ * Its people may not change who is asked about what (grants, an agent's
+ * posture, standing rules) or any other setting, so that a key copied from the
+ * computer the app runs on cannot mint standing permissions.
+ */
+export const APP_LINK_ROUTES: readonly AppLinkRoute[] = [
+  { method: 'GET', path: /^\/api\/access\/identity$/i },
+  { method: 'POST', path: new RegExp(`^/api/agents/${SEGMENT}/chat$`, 'i') },
+  { method: 'POST', path: new RegExp(`^/api/teams/${SEGMENT}/chat$`, 'i') },
+  { method: 'POST', path: new RegExp(`^/api/tools/approvals/${SEGMENT}/resolve$`, 'i') },
+  { method: 'POST', path: /^\/api\/capabilities\/approve$/i },
+]
 
 /** The header an app link's token travels in. Its own, so a sign-in proxy's
  *  header can be anything and the two never meet. */
@@ -88,7 +115,6 @@ const RESERVED_HEADERS = new Set([
   'x-forwarded-host',
   'x-forwarded-proto',
   'x-real-ip',
-  APP_LINK_HEADER,
 ])
 
 /** A claim name, or a dotted path into nested claims (`realm_access.roles`). */
@@ -313,6 +339,13 @@ export function identityConfigs(
 ): ProxyIdentityConfig[] {
   if (!proxy) return appLink ? [appLink] : []
   if (!appLink) return [proxy]
+  // Only a clash when both are on: a proxy on its own may use any header name.
+  if (proxy.header === appLink.header) {
+    fail(
+      `proxyIdentityHeader is ${APP_LINK_HEADER}, the header the app that started Clawboo ` +
+        'signs its requests in. Give your sign-in proxy a header of its own.',
+    )
+  }
   return [{ ...proxy, accountSubjects: 'never' }, appLink]
 }
 
@@ -351,6 +384,7 @@ export function loadAppLinkConfig(
     roleClaim: 'role',
     keys: { source: 'public-key', jwks },
     accountSubjects: 'only',
+    routes: APP_LINK_ROUTES,
   }
 }
 

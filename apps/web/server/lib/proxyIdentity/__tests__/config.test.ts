@@ -16,6 +16,7 @@ import {
 } from '../../operatorSettings'
 import {
   APP_LINK_HEADER,
+  APP_LINK_ROUTES,
   APP_LINK_KEY_ENV,
   appLinkOn,
   identityConfigs,
@@ -483,6 +484,7 @@ describe('the app link', () => {
       roleClaim: 'role',
       keys: { source: 'public-key', jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519', x: edJwk.x }] } },
       accountSubjects: 'only',
+      routes: APP_LINK_ROUTES,
     })
     expect(loadAppLinkConfig({ [APP_LINK_KEY_ENV]: JSON.stringify(edJwk) })?.keys).toEqual({
       source: 'public-key',
@@ -523,8 +525,32 @@ describe('the app link', () => {
     expect(identityConfigs(null, null)).toEqual([])
   })
 
-  it("keeps its header out of a sign-in proxy's reach", () => {
+  it('keeps its header from a sign-in proxy only while both are on', () => {
     stubLane({ CLAWBOO_PROXY_IDENTITY_HEADER: APP_LINK_HEADER })
-    expect(refusal()).toMatch(/proxyIdentityHeader must be a header name of your own/)
+    initOperatorSettings()
+    // A proxy on its own may already use this header name: it keeps working.
+    const proxy = loadProxyIdentityConfig()!
+    expect(proxy.header).toBe(APP_LINK_HEADER)
+    expect(identityConfigs(proxy, null)).toHaveLength(1)
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(() => identityConfigs(proxy, appLink)).toThrow(
+      /proxyIdentityHeader is clawboo-app-identity/,
+    )
+  })
+
+  it('limits the app link to the routes it signs for', () => {
+    const routes = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!.routes ?? []
+    const allows = (method: string, path: string) =>
+      routes.some((r) => r.method === method && r.path.test(path))
+    expect(allows('POST', '/api/agents/native-boo-zero/chat')).toBe(true)
+    expect(allows('POST', '/api/teams/t-1/chat')).toBe(true)
+    expect(allows('POST', '/api/tools/approvals/ap-1/resolve')).toBe(true)
+    expect(allows('POST', '/api/capabilities/approve')).toBe(true)
+    expect(allows('GET', '/api/access/identity')).toBe(true)
+    expect(allows('POST', '/api/grants')).toBe(false)
+    expect(allows('POST', '/api/exec-settings')).toBe(false)
+    expect(allows('POST', '/api/agents/a1/chat/stop')).toBe(false)
+    expect(allows('POST', '/api/agents/../chat')).toBe(false)
+    expect(allows('POST', '/api/agents/./chat')).toBe(false)
   })
 })

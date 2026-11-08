@@ -196,7 +196,7 @@ Set by an app that starts Clawboo itself, such as the desktop app, so that the r
 - Default: unset (off)
 - Example: `CLAWBOO_APP_LINK_PUBLIC_KEY='{"kty":"OKP","crv":"Ed25519","x":"…"}'`
 
-With it set, an `/api/` request may carry a token in the `clawboo-app-identity` header (a Gateway WebSocket upgrade that carries one is refused), signed with the app's private key, that names one of the app's own people. Such a person's id starts with `account:`, and the request then counts as theirs, as a [sign-in proxy's](#clawboo_proxy_identity) person's does. A request without the header works as before. A token that does not verify gets `401`, and an `allow_always` answer to an approval from one of these people gets `403`. [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) has the token's format.
+With it set, an `/api/` request may carry a token in the `clawboo-app-identity` header (a Gateway WebSocket upgrade that carries one is refused), signed with the app's private key, that names one of the app's own people. Such a person's id starts with `account:`, and the request then counts as theirs, as a [sign-in proxy's](#clawboo_proxy_identity) person's does, on the few routes the app signs for: sending work, answering an approval and checking its link. Anywhere else the token is refused. A request without the header works as before. A token that does not verify gets `401`, and an `allow_always` answer to an approval from one of these people gets `403`. [An app that starts Clawboo](/guides/sso-proxy#an-app-that-starts-clawboo) has the token's format.
 
 Clawboo reads it from the environment only, never from the operator file, where an agent running as your user could swap in a key of its own. A key that is not an Ed25519 public key stops the server at startup.
 
@@ -378,7 +378,7 @@ Turning it on needs a key (`CLAWBOO_PROXY_IDENTITY_JWKS_URL` or `CLAWBOO_PROXY_I
 - Default: `clawboo-identity`
 - Example: `CLAWBOO_PROXY_IDENTITY_HEADER=Cf-Access-Jwt-Assertion`
 
-The request header that carries the token, in any letter case. A `Bearer ` prefix is allowed, so `authorization` works for a proxy that sends `Authorization: Bearer <token>`. Headers Clawboo or a browser already uses, such as `cookie`, `host`, the forwarding headers and `clawboo-app-identity` (see [CLAWBOO_APP_LINK_PUBLIC_KEY](#clawboo_app_link_public_key)), are refused. Operator file key: `proxyIdentityHeader`.
+The request header that carries the token, in any letter case. A `Bearer ` prefix is allowed, so `authorization` works for a proxy that sends `Authorization: Bearer <token>`. Headers Clawboo or a browser already uses, such as `cookie`, `host` and the forwarding headers, are refused, and so is `clawboo-app-identity` while [CLAWBOO_APP_LINK_PUBLIC_KEY](#clawboo_app_link_public_key) is set. Operator file key: `proxyIdentityHeader`.
 
 ### CLAWBOO_PROXY_IDENTITY_JWKS_URL
 
