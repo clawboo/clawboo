@@ -316,7 +316,10 @@ export function schedulesTimeZoneGET(_req: Request, res: Response): void {
 // PUT /api/schedules/time-zone: body { timeZone: string | null }. A zone name
 // stores that zone; null follows the host's again. Every armed routine's next
 // run moves onto the new zone's wall clock.
+// Setting the zone moves every armed Routine's next run, so it is a person's request,
+// like writing a Routine.
 export function schedulesTimeZonePUT(req: Request, res: Response): void {
+  if (refuseUnlessPerson(req, res)) return
   const raw = (req.body as { timeZone?: unknown } | undefined)?.timeZone
   if (raw !== null && typeof raw !== 'string') {
     res.status(400).json({

@@ -647,6 +647,8 @@ The time zone Routines are worked out in. A cron spec is wall-clock time, so `0 
 
 ## `PUT /api/schedules/time-zone`
 
+**A person's route.** A caller that does not pass [the person check](/operating/security#the-person-check) gets `403 { "ok": false, "error": "person_only" }`, and nothing changes. A script you run yourself can pass it with the two `Sec-Fetch-` headers in the example.
+
 Set the time zone Routines are worked out in, for every Routine on the install. It is stored in Clawboo's database, independent of the server process, so it survives a restart. Each armed Routine's next run moves to the new zone's clock in the same write as the setting, so a failed request changes neither. A Routine already due keeps its run; a paused Routine, or one stopped after a failure, takes the new zone when it is resumed, and one that is running takes it when the run ends.
 
 - **Request body**: `{ "timeZone": string | null }`. An IANA zone name such as `America/New_York` sets that zone. The name is kept as given, apart from letter case (`utc` is stored as `UTC`). `null` goes back to the server's own zone.
@@ -666,10 +668,12 @@ Set the time zone Routines are worked out in, for every Routine on the install. 
 ```bash
 # Work Routines out in New York time
 curl -X PUT http://localhost:18790/api/schedules/time-zone \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' -d '{"timeZone":"America/New_York"}'
 
 # Follow the server's own zone again
 curl -X PUT http://localhost:18790/api/schedules/time-zone \
+  -H 'Sec-Fetch-Site: same-origin' -H 'Sec-Fetch-Mode: cors' \
   -H 'Content-Type: application/json' -d '{"timeZone":null}'
 ```
 
