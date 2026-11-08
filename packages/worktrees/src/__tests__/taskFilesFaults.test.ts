@@ -1,5 +1,5 @@
 // The task file helpers where the file system works against them: a platform
-// with no O_NOFOLLOW, as on Windows, so the open itself would follow a link; a
+// with no O_NOFOLLOW whose exclusive create follows a link, as on Windows; a
 // name swapped between the check and the open; and a write that fails partway.
 // The open and the handle it returns are wrapped so a test can act at those
 // moments; everything else is the real file system.
@@ -13,7 +13,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { appendTaskFile, readTaskFile, replaceTaskFile, UnsafeTaskFileError } from '../taskFiles'
 
 const hooks = vi.hoisted(() => ({
-  /** Runs once, just before the next open of a path ending in `name`. */
+  /** Runs once, just before the next open of a path ending in `name`. A missing
+   *  file is made under a temp name (ending `.tmp`) before it gets its own. */
   beforeOpen: null as null | { name: string; fn: () => Promise<void> },
   /** Makes the next handle's `writeFile` or `close` fail. */
   fail: null as null | 'writeFile' | 'close',
@@ -26,6 +27,17 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     if (armed && String(args[0]).endsWith(armed.name)) {
       hooks.beforeOpen = null
       await armed.fn()
+    }
+    // As on Windows: an exclusive create follows a link at the name, even one
+    // that points nowhere, and makes the file it points to.
+    const want = typeof args[1] === 'number' ? args[1] : 0
+    const { O_CREAT, O_EXCL } = actual.constants
+    if ((want & O_CREAT) !== 0 && (want & O_EXCL) !== 0) {
+      const at = String(args[0])
+      const st = await actual.lstat(at).catch(() => null)
+      if (st?.isSymbolicLink()) {
+        args[0] = path.resolve(path.dirname(at), await actual.readlink(at))
+      }
     }
     const handle = await actual.open(...args)
     const fail = hooks.fail
@@ -121,16 +133,17 @@ describe('task files when the open has no O_NOFOLLOW', () => {
     ctx.skip(!(await canSymlink()), 'this user may not make file links (EPERM)')
     const nowhere = path.join(secretDir, 'new.txt')
     hooks.beforeOpen = {
-      name: 'other.md',
+      name: '.tmp',
       fn: () => symlink(nowhere, path.join(dir, 'other.md'), 'file'),
     }
     await expect(appendTaskFile(dir, 'other.md', 'x')).rejects.toBeInstanceOf(UnsafeTaskFileError)
     await expect(readFile(nowhere)).rejects.toThrow()
+    expect(await readdir(dir)).toEqual(['other.md'])
   })
 
   it('appends to a plain file made at the name since the check', async () => {
     hooks.beforeOpen = {
-      name: 'notes.md',
+      name: '.tmp',
       fn: () => writeFile(path.join(dir, 'notes.md'), 'one\n'),
     }
     await appendTaskFile(dir, 'notes.md', 'two\n')

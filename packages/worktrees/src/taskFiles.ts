@@ -16,14 +16,16 @@
 //   link and the same file `lstat` saw (device and file id), so a hard link to
 //   another file, or anything swapped in between the two, is refused too. The
 //   handle is then the file that was checked, whatever happens to the name.
-// A missing file is created with `O_EXCL`, which fails on anything at the name,
-// a link that points nowhere included, rather than following it.
+// A missing file is made empty under a new random name and hard-linked to the
+// name, which fails on anything already there, a link that points nowhere
+// included. Opening the name itself with `O_CREAT | O_EXCL` would not do on
+// Windows, where that open follows such a link and creates its target.
 // A write goes to a new file of a random name that is then renamed over the
 // old one, so whatever was at the name is replaced, never written through.
 
 import { randomBytes } from 'node:crypto'
 import { constants, type BigIntStats } from 'node:fs'
-import { lstat, open, rename, rm, type FileHandle } from 'node:fs/promises'
+import { link, lstat, open, rename, rm, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0
@@ -144,31 +146,35 @@ export async function replaceTaskFile(dir: string, name: string, content: string
  */
 export async function appendTaskFile(dir: string, name: string, content: string): Promise<void> {
   const filePath = fileIn(dir, name)
-  const flags = constants.O_WRONLY | constants.O_APPEND | NOFOLLOW | NONBLOCK
-  let seen: BigIntStats | null
+  let seen: BigIntStats
   try {
     seen = await plainFileAt(filePath)
   } catch (err) {
     if (!isMissing(err)) throw err
-    seen = null
+    await createEmptyAt(dir, name, filePath)
+    // Ours, or whatever got there first: checked the same way.
+    seen = await plainFileAt(filePath)
   }
-  let handle: FileHandle
-  if (seen) {
-    handle = await open(filePath, flags)
-  } else {
-    try {
-      handle = await open(filePath, flags | constants.O_CREAT | constants.O_EXCL, 0o666)
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-      // Something was put at the name since the check: look at it once more.
-      seen = await plainFileAt(filePath)
-      handle = await open(filePath, flags)
-    }
-  }
+  const handle = await open(filePath, constants.O_WRONLY | constants.O_APPEND | NOFOLLOW | NONBLOCK)
   try {
     await assertPlainFile(handle, filePath, seen)
     await handle.write(content, null, 'utf8')
   } finally {
     await handle.close()
+  }
+}
+
+/** An empty file at `filePath`, unless something is there already: made under a
+ *  new random name and hard-linked to `filePath`, which never follows a link. */
+async function createEmptyAt(dir: string, name: string, filePath: string): Promise<void> {
+  const temp = path.join(dir, `.${name}.${randomBytes(6).toString('hex')}.tmp`)
+  const handle = await open(temp, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o666)
+  await handle.close()
+  try {
+    await link(temp, filePath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+  } finally {
+    await rm(temp, { force: true })
   }
 }
