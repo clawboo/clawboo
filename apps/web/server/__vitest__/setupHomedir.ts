@@ -43,3 +43,8 @@ os.homedir = function sandboxedHomedir(): string {
   if (profile) return profile
   return realHomedir()
 }
+
+// A CLAWBOO_WORK_DIR exported in the developer's shell would steer every suite's
+// team folders and checkouts into that real folder, and a team-delete test
+// removes `teams/<id>` from it. A suite that needs one sets it itself.
+delete process.env['CLAWBOO_WORK_DIR']

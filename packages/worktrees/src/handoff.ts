@@ -5,12 +5,17 @@
 // "what's done / what's broken / what's next" purely from the worktree's
 // system-of-record, with no access to chat history or the board UI.
 
-import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { z } from 'zod'
 
 import { SOR_FILES } from './scaffold'
+import {
+  readTaskFile,
+  replaceTaskFile,
+  TASK_FILE_MAX_BYTES,
+  UnsafeTaskFileError,
+} from './taskFiles'
 import type { ResumeState } from './types'
 
 /**
@@ -76,7 +81,12 @@ export type AgentHandoff = z.infer<typeof agentHandoffSchema>
 /** Input to `writeHandoff` — `timestamp` defaults to now if omitted. */
 export type AgentHandoffInput = Omit<AgentHandoff, 'timestamp'> & { timestamp?: string }
 
-/** Write `AGENT_HANDOFF.json` at the worktree root (the clock-out artifact). */
+/** Write `AGENT_HANDOFF.json` at the worktree root (the clock-out artifact). The
+ *  file is replaced, never written through: the agent owns the folder and can
+ *  put a link at the name (see `taskFiles.ts`). Throws
+ *  {@link UnsafeTaskFileError}, writing nothing, for a handoff larger than
+ *  {@link TASK_FILE_MAX_BYTES}: {@link readHandoff} would refuse it, and the
+ *  next pickup would start without it. */
 export async function writeHandoff(
   worktreePath: string,
   input: AgentHandoffInput,
@@ -85,21 +95,26 @@ export async function writeHandoff(
     ...input,
     timestamp: input.timestamp ?? new Date().toISOString(),
   })
-  await writeFile(
-    path.join(worktreePath, SOR_FILES.handoff),
-    JSON.stringify(handoff, null, 2) + '\n',
-    'utf8',
-  )
+  const text = JSON.stringify(handoff, null, 2) + '\n'
+  const bytes = Buffer.byteLength(text, 'utf8')
+  if (bytes > TASK_FILE_MAX_BYTES) {
+    throw new UnsafeTaskFileError(
+      path.join(worktreePath, SOR_FILES.handoff),
+      `it would be ${bytes} bytes, more than the ${TASK_FILE_MAX_BYTES} a read takes in`,
+    )
+  }
+  await replaceTaskFile(worktreePath, SOR_FILES.handoff, text)
   return handoff
 }
 
-/** Read + validate `AGENT_HANDOFF.json`; null if absent or malformed. */
+/** Read + validate `AGENT_HANDOFF.json`; null if absent, malformed, or not a
+ *  plain file (a link or hard link is not followed: see `taskFiles.ts`). */
 export async function readHandoff(worktreePath: string): Promise<AgentHandoff | null> {
   let raw: string
   try {
-    raw = await readFile(path.join(worktreePath, SOR_FILES.handoff), 'utf8')
+    raw = await readTaskFile(worktreePath, SOR_FILES.handoff)
   } catch {
-    return null // no handoff written yet (first pickup)
+    return null // no handoff written yet (first pickup), or refused
   }
   try {
     return agentHandoffSchema.parse(JSON.parse(raw))
@@ -115,7 +130,7 @@ async function readInitCommands(
   const commands = { init: `./${SOR_FILES.init}`, verify: '', start: '' }
   let body: string
   try {
-    body = await readFile(path.join(worktreePath, SOR_FILES.init), 'utf8')
+    body = await readTaskFile(worktreePath, SOR_FILES.init)
   } catch {
     return commands
   }
@@ -182,9 +197,9 @@ export async function reconstructState(worktreePath: string): Promise<ResumeStat
   // still works from the repo alone.
   let progress = ''
   try {
-    progress = await readFile(path.join(worktreePath, SOR_FILES.progress), 'utf8')
+    progress = await readTaskFile(worktreePath, SOR_FILES.progress)
   } catch {
-    // no progress file either — return an empty-but-valid resume state
+    // no progress file either (or one refused): return an empty-but-valid resume state
   }
   return {
     hasHandoff: false,

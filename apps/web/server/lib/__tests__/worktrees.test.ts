@@ -7,7 +7,7 @@
 // read-only work is refused.
 
 import { execFile } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -102,8 +102,10 @@ describe('server worktree orchestrator (real git + real board)', () => {
     expect(prov.worktree.branch).toBe(`clawboo/task-${taskId}`)
     expect(existsSync(path.join(prov.worktree.worktreePath, SOR_FILES.task))).toBe(true)
     expect(existsSync(path.join(prov.worktree.worktreePath, SOR_FILES.init))).toBe(true)
-    // Worktree lives OUTSIDE the user's repo (under the sandbox HOME).
-    expect(prov.worktree.worktreePath.startsWith(home)).toBe(true)
+    // Worktree lives OUTSIDE the user's repo and the data folder: in the work
+    // folder (`~/clawboo-work` in the sandbox HOME, by its real path).
+    const workRoot = path.join(realpathSync.native(home), 'clawboo-work', 'worktrees')
+    expect(prov.worktree.worktreePath.startsWith(workRoot + path.sep)).toBe(true)
 
     const db = getDb()
     const ws = getWorkspaceForTask(db, taskId)

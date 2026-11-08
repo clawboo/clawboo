@@ -15,7 +15,6 @@
 // and an agent running as the same user can change any of these files.
 
 import { spawn } from 'node:child_process'
-import { appendFile, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
@@ -28,12 +27,13 @@ import {
   type DeterministicResult,
   type VerifyCommandSource,
 } from '@clawboo/governance'
-import { execGit, SOR_FILES } from '@clawboo/worktrees'
+import { appendTaskFile, execGit, readTaskFile, SOR_FILES } from '@clawboo/worktrees'
 
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
 import { killProcessTree } from '../runtimes/killTree'
 import { realPathOf, workDirSpellings } from '../workDir'
+import { stayingRoots } from '../workDirJournal'
 
 const DEFAULT_TIMEOUT_MS = 10 * 60_000
 const TAIL_CHARS = 4_000
@@ -62,18 +62,20 @@ export interface DeterministicGateInput {
   env?: NodeJS.ProcessEnv
 }
 
+// The checkout's files are read and appended to without following a link: the
+// builder owns the folder and can put one at either name, to the vault key or
+// the database (see `readTaskFile` / `appendTaskFile`). A refused file reads as
+// a missing one.
 async function worktreeVerifyCommand(worktreePath: string): Promise<string | null> {
   try {
-    const fromInit = parseVerifyCommand(
-      await readFile(path.join(worktreePath, SOR_FILES.init), 'utf8'),
-    )
+    const fromInit = parseVerifyCommand(await readTaskFile(worktreePath, SOR_FILES.init))
     if (fromInit) return fromInit
   } catch {
-    /* no init.sh */
+    /* no init.sh, or refused */
   }
   try {
     return parseVerifyCommandFromVerificationMd(
-      await readFile(path.join(worktreePath, SOR_FILES.verification), 'utf8'),
+      await readTaskFile(worktreePath, SOR_FILES.verification),
     )
   } catch {
     return null
@@ -131,7 +133,7 @@ async function appendEvidence(
     '',
   ].join('\n')
   try {
-    await appendFile(path.join(worktreePath, SOR_FILES.verification), block, 'utf8')
+    await appendTaskFile(worktreePath, SOR_FILES.verification, block)
   } catch {
     /* evidence is best-effort; the typed verdict on the task is the source of truth */
   }
@@ -149,13 +151,15 @@ async function appendEvidence(
 export async function runDeterministicGate(
   input: DeterministicGateInput,
 ): Promise<DeterministicResult> {
-  // Every task and review checkout clawboo provisions lives inside its own state
-  // directory, or, in the newer layout, under the work folder's `worktrees/` or
-  // `reviews/`. The verify command is worktree-authored and runs through a
-  // shell, so the directory it runs in, reads its command from, and appends
-  // evidence to is confirmed to be in one of those first: a path that resolves
-  // anywhere else is a broken record, not a place to run commands. The work
-  // folder's team folders are not checkouts, so the rest of it does not count.
+  // Every task and review checkout clawboo provisions lives under the work
+  // folder's `worktrees/` or `reviews/`, and every team folder under its
+  // `teams/`; older versions made them inside the state directory, and the work
+  // folder move can keep one at its old place (the journal names those). The
+  // verify command is worktree-authored and runs through a shell, so the
+  // directory it runs in, reads its command from, and appends evidence to is
+  // confirmed to be in one of those first: a path that resolves anywhere else
+  // is a broken record, not a place to run commands. The rest of the work
+  // folder (the folder itself, its README) does not count.
   //
   // The check is written out here rather than shared from a helper on purpose.
   // A helper that validates and then RETURNS the path hands the caller a value
@@ -185,7 +189,9 @@ export async function runDeterministicGate(
     ...workDirSpellings().flatMap((dir) => [
       path.join(dir, 'worktrees'),
       path.join(dir, 'reviews'),
+      path.join(dir, 'teams'),
     ]),
+    ...stayingRoots(),
   ]
   const asPrefix = (root: string): string => (root.endsWith(path.sep) ? root : root + path.sep)
   const recordedPath = path.resolve(input.worktreePath)

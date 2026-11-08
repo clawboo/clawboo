@@ -24,79 +24,79 @@ These are the environment variables Clawboo's own code reads, and the ones it se
 
 Durations are in milliseconds, and an unset, empty or non-numeric duration means the default. Each variable's section below says how it handles other values. Agent runtimes and OpenClaw read variables of their own, which this page does not cover.
 
-| Variable                               | Default                           | What it does                                                 |
-| -------------------------------------- | --------------------------------- | ------------------------------------------------------------ |
-| **Access and network**                 |                                   |                                                              |
-| `HOST`                                 | `127.0.0.1`                       | Address the dashboard listens on                             |
-| `STUDIO_ACCESS_TOKEN`                  | per-install token file            | The access token for `/api/*`; blank turns the gate off      |
-| `CLAWBOO_ALLOW_INSECURE`               | unset                             | Allows a wide bind with no token                             |
-| `CLAWBOO_ALLOWED_ORIGINS`              | loopback only                     | Extra browser origins allowed to call the API                |
-| `CLAWBOO_ALLOWED_HOSTS`                | loopback and the bind host        | Extra `Host` header values the server accepts                |
-| `CLAWBOO_BASE_PATH`                    | unset (root)                      | Serves the whole app under a URL prefix                      |
-| `CLAWBOO_SECRETS_MASTER_KEY`           | generated key file                | Key that encrypts saved provider keys                        |
-| **Ports**                              |                                   |                                                              |
-| `CLAWBOO_API_PORT`                     | unset (scan from 18790)           | Exact port for the dashboard                                 |
-| `CLAWBOO_API_PORT_START`               | `18790`                           | First port of the 20-port scan                               |
-| `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset |
-| **Folders**                            |                                   |                                                              |
-| `CLAWBOO_HOME`                         | `~/.clawboo`                      | Folder for everything Clawboo stores                         |
-| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder; `<CLAWBOO_HOME>-work` when that is set          |
-| `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes            |
-| `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                    |
-| `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                      |
-| `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                     |
-| **Pinned by an administrator**         |                                   |                                                              |
-| `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                   |
-| `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off         |
-| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install             |
-| `CLAWBOO_PROXY_IDENTITY`               | `off`                             | Checks a sign-in proxy's signed identity tokens              |
-| `CLAWBOO_PROXY_IDENTITY_*`             | see below                         | The proxy's keys, issuer, audience, header and binding       |
-| **Provider keys**                      |                                   |                                                              |
-| `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes              |
-| `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings           |
-| `OPENROUTER_API_KEY`                   | unset                             | Hermes, Clawboo Native (OpenRouter)                          |
-| `GEMINI_API_KEY` and six more          | unset                             | Clawboo Native through OpenAI-compatible providers           |
-| `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup         |
-| `OPENROUTER_BASE_URL` and nine more    | each provider's own address       | Sends a provider's traffic through a gateway or proxy        |
-| `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                       |
-| **Runs and verification**              |                                   |                                                              |
-| `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn    |
-| `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                         |
-| `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                 |
-| `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                       |
-| `CLAWBOO_MAX_FIX_CYCLES`               | `1`                               | Retries after a failed verification                          |
-| `CLAWBOO_REVIEWER_MODEL`               | the builder's model               | Model for the verification reviewer                          |
-| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`  | `600000` (10 min)                 | Wait for an OpenClaw agent's Routine run                     |
-| **Board timing**                       |                                   |                                                              |
-| `CLAWBOO_BOARD_STALE_TTL_MS`           | `180000` (3 min)                  | Missed heartbeats before a running task is released          |
-| `CLAWBOO_BOARD_STALE_SWEEP_MS`         | `60000` (1 min)                   | How often that check runs                                    |
-| `CLAWBOO_DISPATCH_PUMP_MS`             | `60000` (1 min)                   | How often waiting delegated work is woken                    |
-| `CLAWBOO_DB_WRITE_BUDGET_MS`           | `1500`                            | Retry time for a busy database write                         |
-| **Approvals and retention**            |                                   |                                                              |
-| `CLAWBOO_APPROVAL_TTL_MS`              | `86400000` (24 h)                 | Age at which the reaper expires a forgotten approval         |
-| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`  | `3600000` (1 h)                   | How often the reaper runs                                    |
-| `CLAWBOO_TOOL_RESULT_TTL_MS`           | `604800000` (7 days)              | How long stored large tool results are kept                  |
-| **Memory, browsers and MCP**           |                                   |                                                              |
-| `CLAWBOO_DISABLE_EMBEDDINGS`           | unset                             | `1` turns memory embeddings off                              |
-| `CLAWBOO_MAX_AGENT_BROWSERS`           | `4`                               | Agent browsers open at once                                  |
-| `CLAWBOO_AGENT_BROWSER_IDLE_MS`        | `600000` (10 min)                 | Idle time before an agent browser closes                     |
-| `CLAWBOO_OPENCLAW_CDP_PORT`            | `18800`                           | Debugging port of OpenClaw's browser                         |
-| `OPENCLAW_GATEWAY_PORT`                | `18789`                           | Only used to work out that debugging port                    |
-| `CLAWBOO_MCP_PROBE_MS`                 | `60000` (1 min)                   | How often the server checks its MCP servers                  |
-| **Logging and tracing**                |                                   |                                                              |
-| `LOG_LEVEL`                            | `info`                            | Server log level                                             |
-| `NODE_ENV`                             | unset (the CLI sets `production`) | `production` writes JSON logs                                |
-| `OTEL_EXPORTER_OTLP_ENDPOINT`          | unset                             | Exports traces over OTLP                                     |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`   | unset                             | Traces-only OTLP endpoint                                    |
-| `OTEL_SERVICE_NAME`                    | `clawboo`                         | Service name on exported traces                              |
-| **Read from other tools**              |                                   |                                                              |
-| `CODEX_HOME`                           | `~/.codex`                        | Where Clawboo looks for your `codex login`                   |
-| `HERMES_HOME`                          | `~/.hermes`                       | Where Clawboo looks for your Hermes sign-in                  |
-| `CLAUDE_CODE_USE_BEDROCK`              | unset                             | Keeps AWS keys for runtimes Clawboo starts                   |
-| `HTTP_PROXY` and other proxy variables | unset                             | Clawboo keeps its own loopback traffic off the proxy         |
-| **Testing and development**            |                                   |                                                              |
-| `CLAWBOO_ENABLE_MOCK_RUNTIME`          | unset                             | `1` adds a fault-injection test runtime                      |
-| `CLAWBOO_SERVER_PATH`                  | found automatically               | Source checkout the CLI starts in development                |
+| Variable                               | Default                           | What it does                                                           |
+| -------------------------------------- | --------------------------------- | ---------------------------------------------------------------------- |
+| **Access and network**                 |                                   |                                                                        |
+| `HOST`                                 | `127.0.0.1`                       | Address the dashboard listens on                                       |
+| `STUDIO_ACCESS_TOKEN`                  | per-install token file            | The access token for `/api/*`; blank turns the gate off                |
+| `CLAWBOO_ALLOW_INSECURE`               | unset                             | Allows a wide bind with no token                                       |
+| `CLAWBOO_ALLOWED_ORIGINS`              | loopback only                     | Extra browser origins allowed to call the API                          |
+| `CLAWBOO_ALLOWED_HOSTS`                | loopback and the bind host        | Extra `Host` header values the server accepts                          |
+| `CLAWBOO_BASE_PATH`                    | unset (root)                      | Serves the whole app under a URL prefix                                |
+| `CLAWBOO_SECRETS_MASTER_KEY`           | generated key file                | Key that encrypts saved provider keys                                  |
+| **Ports**                              |                                   |                                                                        |
+| `CLAWBOO_API_PORT`                     | unset (scan from 18790)           | Exact port for the dashboard                                           |
+| `CLAWBOO_API_PORT_START`               | `18790`                           | First port of the 20-port scan                                         |
+| `PORT`                                 | unset                             | Hosting-platform port, used when `CLAWBOO_API_PORT` is unset           |
+| **Folders**                            |                                   |                                                                        |
+| `CLAWBOO_HOME`                         | `~/.clawboo`                      | Data folder: the database, vault, settings and logs                    |
+| `CLAWBOO_WORK_DIR`                     | `~/clawboo-work`                  | Work folder for all agent work; `<CLAWBOO_HOME>-work` when that is set |
+| `OPENCLAW_STATE_DIR`                   | `~/.openclaw`                     | OpenClaw's folder, which Clawboo reads and writes                      |
+| `CLAWBOO_DB_PATH`                      | `~/.openclaw/clawboo/clawboo.db`  | Database file for the MCP stdio bins only                              |
+| `CLAWBOO_UI_DIR`                       | `<server folder>/ui`              | Built dashboard files the server serves                                |
+| `CLAWBOO_CATALOG_INDEX_URL`            | this release's catalog on GitHub  | Where the marketplace catalog comes from                               |
+| **Pinned by an administrator**         |                                   |                                                                        |
+| `CLAWBOO_OPERATOR_SETTINGS`            | `<CLAWBOO_HOME>/operator.json`    | The operator settings file                                             |
+| `CLAWBOO_DISABLE_SELF_UPDATE`          | unset                             | `1` turns the dashboard's update chip and update off                   |
+| `CLAWBOO_DISABLE_BROWSER_AUTOSTART`    | unset                             | `1` stops the browsers starting on a new install                       |
+| `CLAWBOO_PROXY_IDENTITY`               | `off`                             | Checks a sign-in proxy's signed identity tokens                        |
+| `CLAWBOO_PROXY_IDENTITY_*`             | see below                         | The proxy's keys, issuer, audience, header and binding                 |
+| **Provider keys**                      |                                   |                                                                        |
+| `ANTHROPIC_API_KEY`                    | unset                             | Claude Code, Clawboo Native (Anthropic), Hermes                        |
+| `OPENAI_API_KEY`                       | unset                             | Clawboo Native (OpenAI), Hermes, memory embeddings                     |
+| `OPENROUTER_API_KEY`                   | unset                             | Hermes, Clawboo Native (OpenRouter)                                    |
+| `GEMINI_API_KEY` and six more          | unset                             | Clawboo Native through OpenAI-compatible providers                     |
+| `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup                   |
+| `OPENROUTER_BASE_URL` and nine more    | each provider's own address       | Sends a provider's traffic through a gateway or proxy                  |
+| `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                                 |
+| **Runs and verification**              |                                   |                                                                        |
+| `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn              |
+| `CLAWBOO_RUN_SILENT_TIMEOUT_MS`        | `1800000` (30 min)                | Silence after which a run is stopped                                   |
+| `CLAWBOO_HERMES_TRANSPORT`             | unset (ACP, else quiet)           | How Hermes runs are driven: `acp` or `quiet`                           |
+| `CLAWBOO_HOME_MUTEX_ACQUIRE_MS`        | `600000` (10 min)                 | Wait for the same agent's previous run                                 |
+| `CLAWBOO_MAX_FIX_CYCLES`               | `1`                               | Retries after a failed verification                                    |
+| `CLAWBOO_REVIEWER_MODEL`               | the builder's model               | Model for the verification reviewer                                    |
+| `CLAWBOO_ROUTINE_OPENCLAW_TIMEOUT_MS`  | `600000` (10 min)                 | Wait for an OpenClaw agent's Routine run                               |
+| **Board timing**                       |                                   |                                                                        |
+| `CLAWBOO_BOARD_STALE_TTL_MS`           | `180000` (3 min)                  | Missed heartbeats before a running task is released                    |
+| `CLAWBOO_BOARD_STALE_SWEEP_MS`         | `60000` (1 min)                   | How often that check runs                                              |
+| `CLAWBOO_DISPATCH_PUMP_MS`             | `60000` (1 min)                   | How often waiting delegated work is woken                              |
+| `CLAWBOO_DB_WRITE_BUDGET_MS`           | `1500`                            | Retry time for a busy database write                                   |
+| **Approvals and retention**            |                                   |                                                                        |
+| `CLAWBOO_APPROVAL_TTL_MS`              | `86400000` (24 h)                 | Age at which the reaper expires a forgotten approval                   |
+| `CLAWBOO_APPROVAL_REAPER_INTERVAL_MS`  | `3600000` (1 h)                   | How often the reaper runs                                              |
+| `CLAWBOO_TOOL_RESULT_TTL_MS`           | `604800000` (7 days)              | How long stored large tool results are kept                            |
+| **Memory, browsers and MCP**           |                                   |                                                                        |
+| `CLAWBOO_DISABLE_EMBEDDINGS`           | unset                             | `1` turns memory embeddings off                                        |
+| `CLAWBOO_MAX_AGENT_BROWSERS`           | `4`                               | Agent browsers open at once                                            |
+| `CLAWBOO_AGENT_BROWSER_IDLE_MS`        | `600000` (10 min)                 | Idle time before an agent browser closes                               |
+| `CLAWBOO_OPENCLAW_CDP_PORT`            | `18800`                           | Debugging port of OpenClaw's browser                                   |
+| `OPENCLAW_GATEWAY_PORT`                | `18789`                           | Only used to work out that debugging port                              |
+| `CLAWBOO_MCP_PROBE_MS`                 | `60000` (1 min)                   | How often the server checks its MCP servers                            |
+| **Logging and tracing**                |                                   |                                                                        |
+| `LOG_LEVEL`                            | `info`                            | Server log level                                                       |
+| `NODE_ENV`                             | unset (the CLI sets `production`) | `production` writes JSON logs                                          |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`          | unset                             | Exports traces over OTLP                                               |
+| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`   | unset                             | Traces-only OTLP endpoint                                              |
+| `OTEL_SERVICE_NAME`                    | `clawboo`                         | Service name on exported traces                                        |
+| **Read from other tools**              |                                   |                                                                        |
+| `CODEX_HOME`                           | `~/.codex`                        | Where Clawboo looks for your `codex login`                             |
+| `HERMES_HOME`                          | `~/.hermes`                       | Where Clawboo looks for your Hermes sign-in                            |
+| `CLAUDE_CODE_USE_BEDROCK`              | unset                             | Keeps AWS keys for runtimes Clawboo starts                             |
+| `HTTP_PROXY` and other proxy variables | unset                             | Clawboo keeps its own loopback traffic off the proxy                   |
+| **Testing and development**            |                                   |                                                                        |
+| `CLAWBOO_ENABLE_MOCK_RUNTIME`          | unset                             | `1` adds a fault-injection test runtime                                |
+| `CLAWBOO_SERVER_PATH`                  | found automatically               | Source checkout the CLI starts in development                          |
 
 `HOSTNAME`, `OPENCLAW_CONFIG_PATH`, `CLAWBOO_API_URL` and `GATEWAY_AUTH_TOKEN` (outside a `${...}` template) are not read. `TAVILY_API_KEY` is no longer used: Clawboo has no built-in web search, so connect a search connector such as Exa Search instead. Variables Clawboo sets on the processes it starts are listed under [Set by Clawboo](#set-by-clawboo).
 
@@ -239,23 +239,25 @@ Honored only when `CLAWBOO_API_PORT` is unset and the server is not running in d
 
 ### CLAWBOO_HOME
 
-The folder for everything Clawboo stores.
+The data folder, where Clawboo keeps its own state.
 
 - Type: path; a leading `~` is expanded and a relative path is resolved
 - Default: `~/.clawboo`
 - Example: `CLAWBOO_HOME=/srv/clawboo`
 
-It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, worktrees, team folders, agent browser profiles and per-agent runtime homes. The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
+It moves the database, `settings.json`, the vault, `api-port.txt`, the logs, agent browser profiles, per-agent runtime homes and the history of team folders. It also moves the default work folder, which becomes `<CLAWBOO_HOME>-work` (see [CLAWBOO_WORK_DIR](#clawboo_work_dir)). The bundled server also runs with it as its working directory. Use the same value for every `clawboo` command, or `stop` and `backup` look in the wrong place. [Configuration](/reference/configuration) lists every file inside.
 
 ### CLAWBOO_WORK_DIR
 
-The work folder, where a newer layout keeps task worktrees, review checkouts and team folders.
+The work folder, where all agent work goes: team folders (`teams/`), task worktrees (`worktrees/`) and review checkouts (`reviews/`).
 
 - Type: path; a leading `~` is expanded and a relative path is resolved
-- Default: `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`
+- Default: `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work` (`%USERPROFILE%\clawboo-work` on Windows)
 - Example: `CLAWBOO_WORK_DIR=/srv/clawboo-work`
 
-New worktrees, review checkouts and team folders still go in `CLAWBOO_HOME`. Clawboo works with a task worktree the board records under the work folder's `worktrees/`, and creates something there only to rebuild such a worktree after a pause. See [The work folder](/operating/data-and-state#the-work-folder).
+Clawboo uses the folder by its real path, with links resolved, and creates what it puts there readable only by you (`0700`). At startup it moves team folders and task checkouts that an older version made in `CLAWBOO_HOME` into this folder, leaving a link at each old path. Changing the value is a move too: the next start moves this install's work from the previous folder to the new one.
+
+The server refuses to start when this folder is the data folder, sits inside it or contains it, and when a value you set names a folder it cannot create. When the variable is unset and the default cannot be created, Clawboo logs a warning and keeps new work in `CLAWBOO_HOME`. In a container, set it to a second volume or folder. See [The work folder](/operating/data-and-state#the-work-folder).
 
 ### OPENCLAW_STATE_DIR
 

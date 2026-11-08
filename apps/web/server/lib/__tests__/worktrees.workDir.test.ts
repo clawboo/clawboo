@@ -1,9 +1,10 @@
-// Task checkouts recorded under the work folder (`resolveWorkDir`), the place a
-// newer layout keeps them, outside the data folder. New checkouts still go under
-// the data folder; these tests set up the newer layout by moving a checkout with
-// `git worktree move` and rewriting its recorded path, the way such a version
-// leaves it. Pause, complete, the verify gate, resume, GC and a repeat provision
-// all have to act on the checkout where it is recorded.
+// Task checkouts recorded under the work folder (`resolveWorkDir`) while new
+// ones go under the data folder: the old layout (`setWorkLayout('data')`), which
+// is how a version before the move behaves, and how an install that cannot make
+// the work folder keeps working. These tests set up the newer layout by moving a
+// checkout with `git worktree move` and rewriting its recorded path, the way the
+// move leaves it. Pause, complete, the verify gate, resume, GC and a repeat
+// provision all have to act on the checkout where it is recorded.
 
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
@@ -37,6 +38,7 @@ import {
 import { branchExists, isWorktreeRegistered, SOR_FILES } from '@clawboo/worktrees'
 
 import { getDb, resetDb } from '../db'
+import { setWorkLayout } from '../workDir'
 import { teamVerifyCommandSettingKey } from '../verification/teamVerifyCommand'
 import {
   listWorkspaceDir,
@@ -82,10 +84,12 @@ describe('task checkouts recorded under the work folder', () => {
     prevWorkDir = process.env['CLAWBOO_WORK_DIR']
     process.env['HOME'] = home // data folder: <home>/.clawboo; work folder: <home>/clawboo-work
     delete process.env['CLAWBOO_WORK_DIR']
+    setWorkLayout('data')
     repo = await initRepo()
   })
 
   afterEach(async () => {
+    setWorkLayout('work')
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome

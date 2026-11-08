@@ -86,7 +86,7 @@ Clawboo makes a few requests of its own. The server downloads the Marketplace ca
 
 ### Where is my data stored?
 
-In `~/.clawboo` on your computer, or the folder you set in `CLAWBOO_HOME`. It holds the database with your teams, tasks, chats and memory, your settings, the encrypted key vault, the server log and a folder for each team's files.
+In `~/.clawboo` on your computer, or the folder you set in `CLAWBOO_HOME`. It holds the database with your teams, tasks, chats and memory, your settings, the encrypted key vault and the server log. Your agents' work goes in a separate work folder, `~/clawboo-work` by default (`<CLAWBOO_HOME>-work` when you set `CLAWBOO_HOME`, or the folder in `CLAWBOO_WORK_DIR`): a folder for each team's files, and the task worktrees. An older version kept those in `~/.clawboo`; Clawboo moves them at startup and leaves a link at each old path.
 
 Clawboo also writes to OpenClaw's `~/.openclaw` folder in a few cases:
 
@@ -133,7 +133,7 @@ No, but the Clawboo server has to keep running. The server runs your team's work
 
 ### Where do I find what my team made?
 
-Boo Zero posts a summary in the chat when the teammates finish. Each teammate's full result is saved on its task: open **Comments & activity** on the task card in the chat, or open the task on the **Board**. Agents return their results as text. Claude Code, Codex, Hermes and Clawboo Native can also write files. In team chat they start in their team's folder (`~/.clawboo/workspaces/<team id>`), which the agent's **Workspace** tab shows. Claude Code, Codex and Hermes can write anywhere you can, so name the folder you want when you ask for files elsewhere. See [Work with your first team](/getting-started/first-team).
+Boo Zero posts a summary in the chat when the teammates finish. Each teammate's full result is saved on its task: open **Comments & activity** on the task card in the chat, or open the task on the **Board**. Agents return their results as text. Claude Code, Codex, Hermes and Clawboo Native can also write files. In team chat they start in their team's folder (`~/clawboo-work/teams/<team id>`), which the agent's **Workspace** tab shows. Claude Code, Codex and Hermes can write anywhere you can, so name the folder you want when you ask for files elsewhere. See [Work with your first team](/getting-started/first-team).
 
 ### My agent is not doing what I asked. Where do I start?
 
@@ -200,7 +200,7 @@ clawboo stop && rm -f ~/.clawboo/clawboo.db ~/.clawboo/clawboo.db-wal ~/.clawboo
 clawboo
 ```
 
-Your provider keys and `settings.json` stay. Everything in the database starts over: teams and agents, the board, chats, memory, routines, budgets and most dashboard settings, including your default model. To reset everything, including the saved keys, delete the whole `~/.clawboo` folder instead. That also deletes task worktrees with any uncommitted work in them, and `clawboo backup` does not copy those, so commit or copy that work first. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`.
+Your provider keys and `settings.json` stay. Everything in the database starts over: teams and agents, the board, chats, memory, routines, budgets and most dashboard settings, including your default model. To reset everything, including the saved keys, delete the whole `~/.clawboo` folder instead. If you set `CLAWBOO_HOME`, use that folder in place of `~/.clawboo`. Team folders and task worktrees are in the work folder (`~/clawboo-work` by default), which that leaves alone; delete it too to remove them. That deletes any uncommitted work in the worktrees, and `clawboo backup` does not copy them, so commit or copy that work first.
 
 Keys you saved under **Settings > Providers** also live in `~/.openclaw/.env`, which a reset does not touch. To keep a copy of the database first, run `clawboo backup`. See [Hard reset](/operating/data-and-state#hard-reset).
 

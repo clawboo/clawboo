@@ -93,6 +93,8 @@ describe('driveAgentChat: cost records and budget holds', () => {
       else process.env[k] = prev[k]
     }
     await rm(home, { recursive: true, force: true })
+    // The work folder beside CLAWBOO_HOME, where a coding agent's team folder goes.
+    await rm(`${home}-work`, { recursive: true, force: true })
   })
 
   function seedAgent(id: string, runtime: string): void {

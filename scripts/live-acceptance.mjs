@@ -150,8 +150,12 @@ async function main() {
   const intact = JSON.stringify(beforeNames) === JSON.stringify(afterNames)
   log('existing teams AFTER (must equal BEFORE)', { intact, afterNames })
 
-  const wtRoot = path.join(os.homedir(), '.openclaw', 'clawboo', 'worktrees')
-  evidence.steps.worktreeRootExists = existsSync(wtRoot)
+  // Where the server put the checkout: the work folder, or the data folder when
+  // it kept the old layout. Read from its record, not guessed.
+  // Unknown when the server recorded no checkout.
+  const recorded = ws.json?.workspace?.worktreePath
+  const wtRoot = recorded ? path.dirname(path.dirname(recorded)) : null
+  evidence.steps.worktreeRootExists = wtRoot ? existsSync(wtRoot) : null
   evidence.cleanup = {
     note: 'No team row created. Residual throwaway task/execution/obs rows remain in the dev DB.',
     throwawayTaskId: taskId,

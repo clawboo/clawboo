@@ -44,7 +44,13 @@ export interface BootReport {
 
 async function parse(res: Response): Promise<BootReport> {
   if (!res.ok) throw new Error(`health check failed (${res.status})`)
-  return (await res.json()) as BootReport
+  const body = (await res.json()) as BootReport | { status?: unknown }
+  // While the server moves its work folders at boot, /api/health answers with
+  // that instead of a boot report.
+  if ((body as { status?: unknown }).status === 'migrating') {
+    throw new Error('Clawboo is moving its work folders. Try again in a moment.')
+  }
+  return body as BootReport
 }
 
 /** GET the latest boot report (computed at boot, cached). */

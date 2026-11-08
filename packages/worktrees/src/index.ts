@@ -59,6 +59,18 @@ export {
   type ReviewOptions,
 } from './lifecycle'
 
+// Moving a checkout with git's links fixed (the work folder migration).
+export { relocateWorktree, isCheckoutAt, type RelocateResult } from './relocate'
+
+// Task files read and written without following a link the agent put there.
+export {
+  readTaskFile,
+  replaceTaskFile,
+  appendTaskFile,
+  UnsafeTaskFileError,
+  TASK_FILE_MAX_BYTES,
+} from './taskFiles'
+
 // Low-level git helpers — exported for the server orchestrator + tests
 // (resolve a base SHA, inspect a diff, detect a detached reviewer HEAD).
 export {

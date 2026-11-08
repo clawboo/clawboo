@@ -51,6 +51,23 @@ const REPORT = {
 const GREEN = { ...REPORT, degraded: [], checks: REPORT.checks.map((c) => ({ ...c, ok: true })) }
 
 describe('SystemHealthPanel', () => {
+  it('says the work folders are moving, rather than failing, while the server moves them', async () => {
+    server.use(
+      http.get('/api/health', () =>
+        HttpResponse.json({
+          ok: false,
+          status: 'migrating',
+          migration: { total: 3, done: 1, left: 2 },
+        }),
+      ),
+    )
+
+    render(<SystemHealthPanel />)
+
+    await waitFor(() => expect(screen.getByTestId('system-health-error')).toBeInTheDocument())
+    expect(screen.getByText(/moving its work folders/i)).toBeInTheDocument()
+  })
+
   it('renders the checklist, the degraded banner, and the posture', async () => {
     server.use(http.get('/api/health', () => HttpResponse.json(REPORT)))
 

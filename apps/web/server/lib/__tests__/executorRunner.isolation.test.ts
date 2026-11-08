@@ -12,6 +12,7 @@
  *     `in_progress` with no runner behind it until the stale sweep.
  */
 
+import { realpathSync } from 'node:fs'
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -78,6 +79,8 @@ class ProbeAdapter implements RuntimeAdapter {
 describe('executor runner — isolation + claim safety', () => {
   let home: string
   let prevHome: string | undefined
+  /** `~/clawboo-work/teams` in the sandboxed home, by its real path. */
+  const teamsRoot = (): string => path.join(realpathSync.native(home), 'clawboo-work', 'teams')
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-iso-home-'))
@@ -175,7 +178,7 @@ describe('executor runner — isolation + claim safety', () => {
       const { ok, cwd } = await readOnlyRunCwd(runtime, 'team-1')
 
       expect(ok).toBe(true)
-      const folder = path.join(home, '.clawboo', 'workspaces', 'team-1')
+      const folder = path.join(teamsRoot(), 'team-1')
       expect(cwd).toBe(folder)
       expect((await stat(folder)).isDirectory()).toBe(true)
       if (process.platform !== 'win32') expect((await stat(folder)).mode & 0o777).toBe(0o700)
@@ -186,14 +189,14 @@ describe('executor runner — isolation + claim safety', () => {
     const { ok, cwd } = await readOnlyRunCwd('codex', null)
 
     expect(ok).toBe(true)
-    expect(cwd).toBe(path.join(home, '.clawboo', 'workspaces', '_no-team'))
+    expect(cwd).toBe(path.join(teamsRoot(), '_no-team'))
   })
 
   it("starts read-only Clawboo Native work in its team's folder too", async () => {
     const { ok, cwd } = await readOnlyRunCwd('clawboo-native', 'team-1')
 
     expect(ok).toBe(true)
-    expect(cwd).toBe(path.join(home, '.clawboo', 'workspaces', 'team-1'))
+    expect(cwd).toBe(path.join(teamsRoot(), 'team-1'))
   })
 
   it('gives a runtime with no folder (the mock harness) no cwd', async () => {
@@ -204,9 +207,9 @@ describe('executor runner — isolation + claim safety', () => {
   })
 
   it('refuses read-only work, rather than running in the server cwd, when its folder cannot be created', async () => {
-    // getDb() creates the clawboo home; a file where workspaces/ should be.
+    // A file where the work folder should be.
     getDb()
-    await writeFile(path.join(home, '.clawboo', 'workspaces'), 'not a folder')
+    await writeFile(path.join(home, 'clawboo-work'), 'not a folder')
 
     const { ok, fake } = await readOnlyRunCwd('claude-code', 'team-1')
 

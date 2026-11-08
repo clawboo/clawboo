@@ -1,6 +1,6 @@
 ---
 title: 'Data and state'
-description: 'Where Clawboo keeps its data, what it writes in the OpenClaw folder, how to back it up, and what a reset removes and leaves behind.'
+description: "Where Clawboo keeps its data and its agents' work, what it writes in the OpenClaw folder, how to back it up, and what a reset removes and leaves behind."
 keywords:
   [
     'backup',
@@ -11,14 +11,16 @@ keywords:
     'state directory',
     'server.log',
     'CLAWBOO_DB_PATH',
+    'CLAWBOO_WORK_DIR',
+    'work folder',
   ]
 ---
 
-Use this page to find Clawboo's data, back it up, move it or wipe it. Clawboo keeps its own state in one folder, `~/.clawboo`. It also writes a few files in OpenClaw's folder, `~/.openclaw`, and a reset of `~/.clawboo` leaves those alone.
+Use this page to find Clawboo's data, back it up, move it or wipe it. Clawboo keeps its own state in one folder, `~/.clawboo`, and its agents' work in another, the work folder (`~/clawboo-work`). It also writes a few files in OpenClaw's folder, `~/.openclaw`, and a reset of `~/.clawboo` leaves those alone.
 
 ## Where Clawboo keeps its data
 
-Clawboo's folder is `~/.clawboo`. To use another folder, set `CLAWBOO_HOME` before you start the server (a leading `~` is expanded). The database, the key vault, the logs, the worktrees and the team folders all move with it.
+Clawboo's data folder is `~/.clawboo`. To use another folder, set `CLAWBOO_HOME` before you start the server (a leading `~` is expanded). The database, the key vault, the settings and the logs move with it, and the work folder becomes `<CLAWBOO_HOME>-work` unless `CLAWBOO_WORK_DIR` names another. Team folders, task checkouts and review checkouts live in the work folder; see [The work folder](#the-work-folder).
 
 ```bash
 CLAWBOO_HOME=/srv/clawboo clawboo
@@ -45,43 +47,121 @@ CLAWBOO_HOME=/srv/clawboo clawboo
 ├── frames/                     screenshots from agents' browsers
 ├── runtimes/                   per-agent homes for Codex and Hermes
 ├── catalog/                    a cached copy of the Marketplace catalog
-├── workspaces/                 a folder for each team, where its agents start
-├── team-folder-history/        a git history of each team's folder, for checks
-├── worktrees/                  git worktrees for board tasks
-└── reviews/                    checkouts for verifying finished work
+└── team-folder-history/        a git history of each team's folder, for checks
 ```
 
-| Path                                 | What it holds                                                                                                                                                               | Safe to delete?                             | What you lose                                                                                    |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `clawboo.db`, `-wal`, `-shm`         | Teams, agents, the board, chats, memory, routines, budgets, most dashboard settings, and the secret that signs MCP attach URLs                                              | Only to start over, with the server stopped | All of that. Attach URLs you copied by hand stop working.                                        |
-| `settings.json`                      | The Gateway URL and token, and when you dismissed the first-run screen. The access token is never read from here                                                            | Yes                                         | The saved Gateway link. Clawboo falls back to the Gateway details in OpenClaw's `openclaw.json`. |
-| `access-token`                       | The dashboard's access token when `STUDIO_ACCESS_TOKEN` is unset, made on the first start and readable only by you. The Clawboo desktop app can share it                    | Yes, with the server stopped                | Every browser's sign-in. The next start makes a new token; run `clawboo open` to sign in again.  |
-| `api-port.txt`                       | The port of the running server                                                                                                                                              | Yes                                         | Usually nothing: `clawboo` also scans ports 18790 to 18809.                                      |
-| `server.log`, `server.log.1`         | Output of a server that `clawboo` started                                                                                                                                   | Yes                                         | Old log lines.                                                                                   |
-| `gateway.log`, `gateway.pid`         | Output and process id of an OpenClaw Gateway that Clawboo started                                                                                                           | Yes                                         | Old log lines. Clawboo finds the Gateway by its port instead.                                    |
-| `connector-pids.json`                | Connector processes Clawboo started                                                                                                                                         | Yes, with the server stopped                | After a crash, leftover connector processes are not cleaned up at the next start.                |
-| `runtime-pids/`                      | Agent processes each running server started (Codex, Hermes, Claude Code, and commands a Clawboo Native agent runs), one file per server                                     | Yes, with the server stopped                | After a crash, agent runs that outlived the server are not stopped at the next start.            |
-| `proxy-device-identity.json`         | The key pair Clawboo uses to identify itself to the OpenClaw Gateway                                                                                                        | Only if you can pair again                  | Clawboo makes a new identity, so the Gateway may ask you to pair it again.                       |
-| `secrets/master.key`                 | The key that decrypts the vault                                                                                                                                             | No                                          | Every key in the vault: re-enter provider keys and reconnect connectors.                         |
-| `secrets/runtime-keys.json`          | The encrypted vault: provider keys, connector credentials and sign-ins, the Composio key                                                                                    | Only to remove every saved key              | The same as losing the master key.                                                               |
-| `secrets/disconnected-runtimes.json` | The runtimes you disconnected                                                                                                                                               | Yes                                         | A disconnected runtime can pick up a key from your shell or `~/.openclaw/.env` again.            |
-| `secrets/keyless-providers.json`     | Whether you chose local Ollama for Clawboo Native                                                                                                                           | Yes                                         | Clawboo forgets the choice; choose Ollama again.                                                 |
-| `browser-profiles/`                  | Each agent's browser profile, including the sites it is signed in to                                                                                                        | Yes                                         | Agents' browser sign-ins and cookies.                                                            |
-| `frames/`                            | Screenshots saved from agents' browsers                                                                                                                                     | Yes                                         | Those screenshots.                                                                               |
-| `runtimes/`                          | Per-agent homes for Codex and Hermes agents, including a copy of your Codex sign-in                                                                                         | Yes, when no run is active                  | Those agents' saved sessions; they start fresh.                                                  |
-| `catalog/`                           | A cached copy of the Marketplace catalog                                                                                                                                    | Yes                                         | Nothing. Clawboo downloads it again.                                                             |
-| `workspaces/`                        | One folder per team (`workspaces/<team id>`), where its agents start when a run has no worktree, plus `_no-team` for tasks with no team. Deleting a team deletes its folder | Yes, when no run is active                  | The files agents saved there. Clawboo creates a team's folder again on its next run.             |
-| `team-folder-history/`               | A git history of each team's folder (`<team id>.git`), saved as team chat tasks start and end so their work can be checked. Deleting a team deletes it                      | Yes, when no run or check is active         | Running tasks lose their starting point: unchecked, or Needs you after a failed check.           |
-| `worktrees/`                         | Git worktrees for board tasks that run in a repository                                                                                                                      | No: Clawboo removes old ones itself         | Uncommitted work in those checkouts.                                                             |
-| `reviews/`                           | Read-only checkouts for verifying finished work                                                                                                                             | Yes, when no check is running               | Nothing.                                                                                         |
+| Path                                 | What it holds                                                                                                                                                                                                                                                                                     | Safe to delete?                             | What you lose                                                                                        |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `clawboo.db`, `-wal`, `-shm`         | Teams, agents, the board, chats, memory, routines, budgets, most dashboard settings, and the secret that signs MCP attach URLs                                                                                                                                                                    | Only to start over, with the server stopped | All of that. Attach URLs you copied by hand stop working.                                            |
+| `settings.json`                      | The Gateway URL and token, and when you dismissed the first-run screen. The access token is never read from here                                                                                                                                                                                  | Yes                                         | The saved Gateway link. Clawboo falls back to the Gateway details in OpenClaw's `openclaw.json`.     |
+| `access-token`                       | The dashboard's access token when `STUDIO_ACCESS_TOKEN` is unset, made on the first start and readable only by you. The Clawboo desktop app can share it                                                                                                                                          | Yes, with the server stopped                | Every browser's sign-in. The next start makes a new token; run `clawboo open` to sign in again.      |
+| `api-port.txt`                       | The port of the running server                                                                                                                                                                                                                                                                    | Yes                                         | Usually nothing: `clawboo` also scans ports 18790 to 18809.                                          |
+| `server.log`, `server.log.1`         | Output of a server that `clawboo` started                                                                                                                                                                                                                                                         | Yes                                         | Old log lines.                                                                                       |
+| `gateway.log`, `gateway.pid`         | Output and process id of an OpenClaw Gateway that Clawboo started                                                                                                                                                                                                                                 | Yes                                         | Old log lines. Clawboo finds the Gateway by its port instead.                                        |
+| `connector-pids.json`                | Connector processes Clawboo started                                                                                                                                                                                                                                                               | Yes, with the server stopped                | After a crash, leftover connector processes are not cleaned up at the next start.                    |
+| `runtime-pids/`                      | Agent processes each running server started (Codex, Hermes, Claude Code, and commands a Clawboo Native agent runs), one file per server                                                                                                                                                           | Yes, with the server stopped                | After a crash, agent runs that outlived the server are not stopped at the next start.                |
+| `proxy-device-identity.json`         | The key pair Clawboo uses to identify itself to the OpenClaw Gateway                                                                                                                                                                                                                              | Only if you can pair again                  | Clawboo makes a new identity, so the Gateway may ask you to pair it again.                           |
+| `secrets/master.key`                 | The key that decrypts the vault                                                                                                                                                                                                                                                                   | No                                          | Every key in the vault: re-enter provider keys and reconnect connectors.                             |
+| `secrets/runtime-keys.json`          | The encrypted vault: provider keys, connector credentials and sign-ins, the Composio key                                                                                                                                                                                                          | Only to remove every saved key              | The same as losing the master key.                                                                   |
+| `secrets/disconnected-runtimes.json` | The runtimes you disconnected                                                                                                                                                                                                                                                                     | Yes                                         | A disconnected runtime can pick up a key from your shell or `~/.openclaw/.env` again.                |
+| `secrets/keyless-providers.json`     | Whether you chose local Ollama for Clawboo Native                                                                                                                                                                                                                                                 | Yes                                         | Clawboo forgets the choice; choose Ollama again.                                                     |
+| `browser-profiles/`                  | Each agent's browser profile, including the sites it is signed in to                                                                                                                                                                                                                              | Yes                                         | Agents' browser sign-ins and cookies.                                                                |
+| `frames/`                            | Screenshots saved from agents' browsers                                                                                                                                                                                                                                                           | Yes                                         | Those screenshots.                                                                                   |
+| `runtimes/`                          | Per-agent homes for Codex and Hermes agents, including a copy of your Codex sign-in                                                                                                                                                                                                               | Yes, when no run is active                  | Those agents' saved sessions; they start fresh.                                                      |
+| `catalog/`                           | A cached copy of the Marketplace catalog                                                                                                                                                                                                                                                          | Yes                                         | Nothing. Clawboo downloads it again.                                                                 |
+| `team-folder-history/`               | A git history of each team's folder (`<team id>.git`), saved as team chat tasks start and end so their work can be checked. Deleting a team deletes it                                                                                                                                            | Yes, when no run or check is active         | Running tasks lose their starting point: unchecked, or Needs you after a failed check.               |
+| `workspaces/`, `worktrees/`          | Left by an older version. After the [move](#move-older-work-into-it), a link at each old path to the team folder or checkout that moved, and any folder the move kept at its old place. New work goes here only when the [work folder cannot be created](#when-the-work-folder-cannot-be-created) | No                                          | A folder kept here is still in use. Without the links, 0.6.x finds no team folders after a rollback. |
+| `reviews/`                           | Review checkouts an older version made. New ones go in the work folder, or here when it cannot be created                                                                                                                                                                                         | Yes, when no check is running               | Nothing.                                                                                             |
 
-On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `workspaces/` instead, created readable only by you. It still has your account's full file access; see [What agents can do](/concepts/permissions).
+On macOS and Linux, Clawboo makes the database, its working files, `settings.json` and the folder readable only by your user account, and keeps `secrets/` the same way. A server started by `clawboo` also uses this folder as its working directory. A coding agent that runs without a worktree (every team-chat turn, every one-to-one chat, research and review tasks, and Routines you make in the dashboard) starts in its team's folder in the work folder instead. It still has your account's full file access; see [What agents can do](/concepts/permissions).
 
-### The work folder
+## The work folder
 
-A newer layout keeps task worktrees, review checkouts and team folders out of `~/.clawboo`, in a separate work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. This version still makes new worktrees, review checkouts and team folders in `~/.clawboo`.
+Your agents' work lives in the work folder, apart from the data folder. It is the folder `CLAWBOO_WORK_DIR` names, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work` (`%USERPROFILE%\clawboo-work` on Windows). Clawboo uses it by its real path, with every link resolved.
 
-It does work with a task worktree the board records under the work folder's `worktrees/`, so a version that keeps them there can be rolled back to this one. Pausing and completing the task and its work check act on that checkout where it is, and a paused one is rebuilt there. The worktree cleanup also removes old checkouts there, but only ones the board records, so it never touches a folder another install keeps in the same work folder. When a checkout has to be made again under `~/.clawboo` instead, the board records the new place. The Workspace tab shows such a worktree, and a team folder whose `workspaces/<team id>` is a link into the work folder.
+```text
+~/clawboo-work/
+├── README.txt                  what this folder is
+├── teams/                      a folder for each team, where its agents start
+│   ├── <team id>/
+│   └── _no-team/               for tasks and agents with no team
+├── worktrees/                  git worktrees for board tasks
+│   └── <repo hash>/<task id>/
+└── reviews/                    checkouts for verifying finished work
+    └── <install>/              a folder of this install's own
+        ├── <repo hash>/<short sha>/
+        └── team-<team id>/
+```
+
+| Path         | What it holds                                                                                                                                                                     | Safe to delete?                     | What you lose                                                                        |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `teams/`     | One folder per team (`teams/<team id>`), where its agents start when a run has no worktree, plus `_no-team` for tasks and agents with no team. Deleting a team deletes its folder | Yes, when no run is active          | The files agents saved there. Clawboo creates a team's folder again on its next run. |
+| `worktrees/` | Git worktrees for board tasks that run in a repository, each with a `.<task id>.owner` file beside it                                                                             | No: Clawboo removes old ones itself | Uncommitted work in those checkouts.                                                 |
+| `reviews/`   | Read-only checkouts for verifying finished work                                                                                                                                   | Yes, when no check is running       | Nothing.                                                                             |
+| `README.txt` | A note on what the folder holds                                                                                                                                                   | Yes                                 | Nothing. Clawboo writes it again at the next start.                                  |
+
+Everything Clawboo creates in the work folder is readable only by your user account (`0700`). The `.<task id>.owner` file beside each checkout holds this install's id. The worktree cleanup in the work folder removes only checkouts this install's board records or that carry its id, so two installs can share one work folder.
+
+The data folder keeps the rest: the database, the key vault, the settings, the runtime homes (`runtimes/`), the browser profiles, connector state, and `team-folder-history/`, the work check's history of each team folder.
+
+Keeping the work apart removes the short relative path from an agent's folder to your data: `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. That holds only for work in the work folder. When the work folder cannot be created and the install keeps the old layout, or the move below keeps a folder at its old place, that folder is still inside the data folder and `../..` from it does reach the data. It is not a boundary either way. Agents still run as your user account and can open `~/.clawboo` by its full path; see [What agents can do](/concepts/permissions).
+
+### Move older work into it
+
+Older versions kept team folders in `~/.clawboo/workspaces` and task checkouts in `~/.clawboo/worktrees`. Once per start, after the database opens and stale runs are released, and before the worktree cleanup or any run, Clawboo moves the team folders it finds in `workspaces/`, and the checkouts the board records in `worktrees/`, into the work folder:
+
+- **Renames only.** Nothing is copied, so a folder usually takes milliseconds.
+- **A link at each old path.** `~/.clawboo/workspaces/<team id>` still leads to the folder, for older versions and for tools that saved the path.
+- **Uncommitted work is saved first.** Before a checkout moves, Clawboo commits its uncommitted work on the task's branch (`clawboo: save work before moving task <id>`), the same kind of commit a pause makes. The checkout moves with `git worktree move`, or, when it is locked, with a rename and `git worktree repair`, which needs git 2.30 or later. The board's recorded paths change to the new place.
+- **Paused tasks move too.** A paused task's record names the new place, and resuming the task rebuilds its checkout in the work folder.
+- **Review checkouts stay.** Clawboo does not move them. New ones go in the work folder, in `reviews/` under a folder named for this install, since two installs that share a work folder can review the same commit.
+- **A crash is safe.** Every step is written to a journal before it happens, so a crash or a kill at any point is finished or undone at the next start. When a folder has moved but the link at its old path cannot be made, the move still counts: runs use the new path, and the journal notes the missing link.
+- **One server moves at a time.** A second server started on the same data folder waits for the first one's move to end, answering `migrating` meanwhile, and then starts.
+
+Claude Code files its saved sessions under the folder they ran in. After a team folder moves, Clawboo drops the session ids it saved for Claude Code agents (1:1 chat, team chat and task pointers), and after a checkout moves, the session id in its handoff. Their next turn starts a fresh session with the brief and the chat history. Codex, Hermes and Clawboo Native agents keep their sessions.
+
+### What the move leaves where it is
+
+The move leaves these where they are, logs the warning `Work folder: kept at its old place`, and tries again at the next start. Each one keeps working where it is:
+
+- a folder on another volume, since the move never copies;
+- a checkout git does not list;
+- a checkout with a run still going in it;
+- a conflict, where something is already at the new path. Both are kept, and the team keeps using its old folder.
+
+See [Troubleshooting](/help/troubleshooting#work-folder-kept-at-its-old-place) for what to do about each.
+
+### Change the work folder
+
+Stop Clawboo, set `CLAWBOO_WORK_DIR` to the new folder, and start it again. Clawboo treats the change as a move: at that start, this install's team folders and recorded checkouts move from the previous work folder to the new one, with links left at the previous paths. The same rules apply, so work on another volume stays in the previous folder and keeps working there. A previous work folder that is not there at that start, such as one on a drive that is not mounted, stays on record with the warning `Work folder: the previous work folder is not there`, and its team folders move at the first start that finds it again. Changing back to a work folder used before works the same way: the links the earlier move left there are replaced by the folders.
+
+### While the move runs
+
+The server listens while it moves folders, so a service manager or a monitor sees it starting:
+
+- `GET /api/health` answers `200` with `{ "ok": false, "status": "migrating", "migration": { "total": 4, "done": 1, "left": 3 } }`.
+- Every other request answers `503` with `Retry-After: 2` and `{ "error": "Clawboo is moving its work folders. Try again in a moment.", "status": "migrating" }`.
+- A WebSocket connection is refused with `503`.
+
+The HTTP answers come after the access gate, the same as at any other time. A WebSocket upgrade is refused before the origin and access checks. The move usually takes milliseconds per folder.
+
+### When Clawboo refuses to start
+
+The server exits at startup when the work folder is the data folder, sits inside it, or contains it. It compares real paths, so a link cannot hide one folder inside the other:
+
+```text
+CONFIG: refusing to start. CLAWBOO_WORK_DIR (/srv/clawboo/work) must be outside Clawboo's data folder (/srv/clawboo). Set CLAWBOO_WORK_DIR to a folder outside it.
+```
+
+When the data folder is inside the work folder, the message says the reverse: `Clawboo's data folder (<path>) must be outside the work folder (<path>). Set CLAWBOO_WORK_DIR to a folder that does not contain it.` The server also refuses to start when it cannot create or write to a `CLAWBOO_WORK_DIR` you set (`CLAWBOO_WORK_DIR (<path>) cannot be used: <reason>`), and when `teams/`, `worktrees/` or `reviews/` inside the work folder is a link (`<path> is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`) or a file (`<path> is not a folder.`). On Windows and macOS the comparison ignores case, since their file systems usually do.
+
+### When the work folder cannot be created
+
+When `CLAWBOO_WORK_DIR` is not set and Clawboo cannot create or write to the default work folder, as in a container whose data folder is a volume under a root-owned `/`, it logs a warning and keeps the old layout: new work stays in the data folder (`workspaces/`, `worktrees/` and `reviews/`), and nothing moves. Set `CLAWBOO_WORK_DIR` to a folder Clawboo can create, such as a second volume in a container, and the next start moves the work there.
+
+### Roll back to 0.6.x
+
+You can go back to 0.6.x after the move. 0.6.0 already reads checkouts in the work folder, and finds team folders through the links. One limit: 0.6.x's work check refuses a team folder in the work folder, so team chat work checks fail on 0.6.x until you upgrade again. Versions before 0.6.0 do not read the work folder, so do not go below 0.6.0 after the move.
 
 ## What Clawboo writes in OpenClaw's folder
 
@@ -143,7 +223,7 @@ The database is most of your data, but not all of it. Copy these too when you ne
 | `proxy-device-identity.json`                 | Clawboo's identity with the Gateway, so you do not have to pair it again.                       |
 | `browser-profiles/`                          | The sites your agents' browsers are signed in to.                                               |
 | `runtimes/`                                  | Codex and Hermes agents' saved sessions, including a copy of your Codex sign-in.                |
-| `workspaces/`                                | The files your agents saved in their team's folder.                                             |
+| The work folder's `teams/`                   | The files your agents saved in their team's folder.                                             |
 | `~/.openclaw` (or your `OPENCLAW_STATE_DIR`) | OpenClaw's own agents, config and keys, if you use OpenClaw. Clawboo never backs it up.         |
 
 ### Back up everything
@@ -156,7 +236,7 @@ cp -a ~/.clawboo ~/clawboo-backup-$(date +%Y%m%d)
 clawboo
 ```
 
-The copy holds your vault and its key and your agents' signed-in browser profiles. Store it as carefully as a password file.
+The copy holds your vault and its key and your agents' signed-in browser profiles. Store it as carefully as a password file. Your agents' files are in the [work folder](#the-work-folder); copy it the same way, with the server stopped, to keep them too.
 
 <Note>
 
@@ -219,7 +299,7 @@ clawboo stop && rm -rf ~/.clawboo
 clawboo
 ```
 
-Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs, the browser profiles, the team folders and the worktrees, including any uncommitted work in them (run `git worktree prune` in each repository afterwards). It does not touch `~/.openclaw`; see [What a reset leaves behind](#what-a-reset-leaves-behind).
+Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs and the browser profiles. It does not touch `~/.openclaw` (see [What a reset leaves behind](#what-a-reset-leaves-behind)) or the work folder. A new install's cleanup never removes the old team folders and worktrees there, because its board does not record them. To remove them too, delete the work folder (`rm -rf ~/clawboo-work`, with the server stopped), which loses any uncommitted work in those worktrees, then run `git worktree prune` in each repository. Do that only when no other install uses the same work folder (through `CLAWBOO_WORK_DIR`): deleting it would remove that install's team folders and checkouts too. A shared folder is cleaned by hand, removing only the reset install's team folders and the checkouts whose `.<task id>.owner` file holds its id.
 
 ## Two database paths
 

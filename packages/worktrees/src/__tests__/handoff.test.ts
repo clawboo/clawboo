@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { agentHandoffSchema, reconstructState, readHandoff, writeHandoff } from '../handoff'
 import { SOR_FILES, writeScaffold } from '../scaffold'
+import { TASK_FILE_MAX_BYTES, UnsafeTaskFileError } from '../taskFiles'
 import { scaffoldInput } from './gitHarness'
 
 describe('agent handoff protocol (no git needed — pure files)', () => {
@@ -145,5 +146,34 @@ describe('agent handoff protocol (no git needed — pure files)', () => {
     const state = await reconstructState(dir)
     expect(state.hasHandoff).toBe(true)
     expect(state.nativeSessionId).toBeNull()
+  })
+
+  it('refuses a handoff too large to read back, and keeps the one already there', async () => {
+    const base = {
+      handoffFrom: 'A',
+      runtime: 'codex',
+      completedSubtasks: [],
+      brokenOrUnverified: [],
+      nextBestStep: 'small',
+      commands: { init: './init.sh', verify: '', start: '' },
+      evidence: {},
+      warnings: [],
+    }
+    await writeHandoff(dir, base)
+    await expect(
+      writeHandoff(dir, { ...base, nextBestStep: 'x'.repeat(TASK_FILE_MAX_BYTES) }),
+    ).rejects.toBeInstanceOf(UnsafeTaskFileError)
+    expect((await readHandoff(dir))?.nextBestStep).toBe('small')
+    // One that fits is read back whole.
+    const near = 'y'.repeat(TASK_FILE_MAX_BYTES - 4096)
+    await writeHandoff(dir, { ...base, nextBestStep: near })
+    expect((await readHandoff(dir))?.nextBestStep).toBe(near)
+    // Counted in bytes, not characters: under the limit in length, over it in UTF-8.
+    const wide = '\u20ac'.repeat(Math.ceil(TASK_FILE_MAX_BYTES / 2))
+    expect(wide.length).toBeLessThan(TASK_FILE_MAX_BYTES)
+    await expect(writeHandoff(dir, { ...base, nextBestStep: wide })).rejects.toBeInstanceOf(
+      UnsafeTaskFileError,
+    )
+    expect((await readHandoff(dir))?.nextBestStep).toBe(near)
   })
 })

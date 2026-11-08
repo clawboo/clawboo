@@ -138,7 +138,7 @@ A native agent acts only through the tools Clawboo gives it. Which tools it has 
 | `read_file`, `write_file`, `list_files` | Reads and writes files inside the run's folder, and nowhere else, not even through a symlink                    | Every run                                    |
 | `run_command`                           | Runs one program after you approve it                                                                           | Every run, once you allow it, not on Windows |
 
-The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else it is the team's folder, `~/.clawboo/workspaces/<team id>`, shared with every teammate: in team chat, on the tasks agents delegate there, on research and review task runs, and in the agent's 1:1 chat. In its 1:1 chat, an agent on no team, such as Boo Zero, uses `~/.clawboo/workspaces/_no-team`. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
+The run's folder is the task's own git worktree when the task run has one; see [Worktrees and handoff](/concepts/worktrees-and-handoff). Everywhere else it is the team's folder, `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default), shared with every teammate: in team chat, on the tasks agents delegate there, on research and review task runs, and in the agent's 1:1 chat. In its 1:1 chat, an agent on no team, such as Boo Zero, uses `teams/_no-team`. For how this compares with the other runtimes, see [What agents can do](/concepts/permissions).
 
 ### Running commands
 

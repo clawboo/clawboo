@@ -98,7 +98,7 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 
 **Fix:** read those log lines. They point to one of three cases:
 
-1. **An error.** For example "CLAWBOO_API_PORT=18800 is already in use.", "No free port available in range 18790-18809." or a line that starts with "SECURITY: refusing to start". Find the message on this page, fix it, then run `clawboo` again.
+1. **An error.** For example "CLAWBOO_API_PORT=18800 is already in use.", "No free port available in range 18790-18809." or a line that starts with "SECURITY: refusing to start" or "CONFIG: refusing to start". Find the message on this page, fix it, then run `clawboo` again.
 2. **On 0.5.0 and older: you set `STUDIO_ACCESS_TOKEN`, and the log has a line containing `Clawboo ready`.** The server is running. Those releases cannot confirm a server protected by an access token, so the command gives up after 45 seconds and exits with an error. Open `http://localhost:<port>/?access_token=<your token>` in your browser; the port is in `~/.clawboo/api-port.txt`. Newer releases use the `STUDIO_ACCESS_TOKEN` from the shell, which the server they start inherits, so they find it.
 3. **No error, on a first start on Windows.** Antivirus software scanning the new files can slow the first start. Run `clawboo` again.
 
@@ -117,6 +117,29 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 **What it means:** the command could not find the server files that come with it, so the install is incomplete.
 
 **Fix:** reinstall with `npm install -g clawboo`, or run `npx clawboo@latest`.
+
+### CONFIG: refusing to start. CLAWBOO_WORK_DIR must be outside Clawboo's data folder
+
+**What it means:** the [work folder](/operating/data-and-state#the-work-folder), where agents work, is Clawboo's data folder (`~/.clawboo`, or `CLAWBOO_HOME`), sits inside it, or contains it. Clawboo compares real paths, so a link does not get around the check. The server log names both folders:
+
+```text
+CONFIG: refusing to start. CLAWBOO_WORK_DIR (/srv/clawboo/work) must be outside Clawboo's data folder (/srv/clawboo). Set CLAWBOO_WORK_DIR to a folder outside it.
+```
+
+When the data folder is inside the work folder, the message reads `Clawboo's data folder (<path>) must be outside the work folder (<path>)` instead. A message that says `CLAWBOO_WORK_DIR (<path>) cannot be used:` and a reason means Clawboo could not create the folder you set.
+
+**Fix:** set `CLAWBOO_WORK_DIR` to a folder that is outside the data folder and does not contain it, such as `/srv/clawboo-work` beside `/srv/clawboo`, or unset it to use the default. When the folder cannot be created, choose one your user account can create. Then start Clawboo again.
+
+### Work folder: kept at its old place
+
+**What it means:** at startup, Clawboo could not move a team folder or a task checkout from its old place (`~/.clawboo/workspaces`, `~/.clawboo/worktrees`, or a previous `CLAWBOO_WORK_DIR`) into the work folder. The warning in the server log names the folder (`from`), where it would go (`to`) and why. The folder keeps working where it is, and the next start tries again. See [What the move leaves where it is](/operating/data-and-state#what-the-move-leaves-where-it-is).
+
+**Fix:** it depends on the reason.
+
+- **The folder is on another volume.** The move only renames, so it never moves work across volumes. Leaving it is safe. To have it move, set `CLAWBOO_WORK_DIR` to a folder on the same volume and start Clawboo again.
+- **A run is still going in the checkout.** Let the run finish. The next start moves it.
+- **Git does not list the checkout.** Clawboo leaves it alone rather than risk the work in it. Run `git worktree list` in the task's repository to see what git knows, and copy out anything you need from the folder.
+- **Something is already at the new path.** Clawboo keeps both, and the team keeps using its old folder. With the server stopped, compare the two folders, copy what you need out of the one at the new path, and remove it. The next start moves the old folder.
 
 ### More install messages
 
@@ -159,6 +182,14 @@ If none of this helps, go through [When an agent is not doing what you asked](#w
 **What it means:** this line is information only. On every start, `clawboo` checks whether an OpenClaw Gateway answers on its default port, 18789.
 
 **Fix:** nothing to fix. You need a Gateway only for OpenClaw agents; see [OpenClaw](/runtimes/openclaw).
+
+</Accordion>
+
+<Accordion title="Work folder: could not be created">
+
+**What it means:** `CLAWBOO_WORK_DIR` is not set, and Clawboo could not create the default work folder, for example in a container whose data folder is a volume under a root-owned `/`. Clawboo keeps the old layout: new team folders and checkouts stay in the data folder, and nothing moves.
+
+**Fix:** set `CLAWBOO_WORK_DIR` to a folder Clawboo can create, outside the data folder, such as a second volume in a container. The next start moves the work there.
 
 </Accordion>
 
@@ -436,7 +467,7 @@ If it still does not answer, go through [When an agent is not doing what you ask
 **Fix:**
 
 - **Agent files.** Only OpenClaw reads AGENTS.md and IDENTITY.md as instructions. OpenClaw 2026.9 and later neither loads nor accepts TOOLS.md, so put tool notes in AGENTS.md. On the other runtimes the agent follows SOUL.md: all of it on Clawboo Native, the first 4,000 characters on Claude Code, Codex and Hermes. See [Edit the agent files](/using/agents#edit-the-agent-files).
-- **Files on your computer.** In team chat and in an agent's own chat, a Clawboo Native agent can open files only in its team's folder (`~/.clawboo/workspaces/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
+- **Files on your computer.** In team chat and in an agent's own chat, a Clawboo Native agent can open files only in its team's folder (`~/clawboo-work/teams/<team id>`). Claude Code, Codex and Hermes agents start in that folder too, so give them the file's full path. They can reach any file your user account can; see [What agents can do](/concepts/permissions).
 
 ### More chat messages
 

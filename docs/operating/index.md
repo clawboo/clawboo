@@ -29,7 +29,7 @@ Clawboo is one Node.js program. It serves the dashboard and the REST API on one 
 - **Only this machine can connect.** The server listens on `127.0.0.1` until you set `HOST`.
 - **The dashboard is locked with an access token.** The first start makes a per-install token in `~/.clawboo/access-token`, readable only by you, unless you set `STUDIO_ACCESS_TOKEN` yourself. `STUDIO_ACCESS_TOKEN=` set blank turns it off; then anyone who can reach the server can use it, and with `HOST` set to anything but a loopback address the server refuses to start, but a reverse proxy on the same machine does not trip that check.
 - **Browsers must use a local address.** The same-origin guard rejects API calls that arrive under another name, such as your proxy's domain, until you list it in `CLAWBOO_ALLOWED_HOSTS` and `CLAWBOO_ALLOWED_ORIGINS`.
-- **State lives in `~/.clawboo`.** Clawboo also writes provider keys and OpenClaw settings in OpenClaw's `~/.openclaw` folder.
+- **State lives in `~/.clawboo`, and agents' work in `~/clawboo-work`.** Clawboo also writes provider keys and OpenClaw settings in OpenClaw's `~/.openclaw` folder.
 - **Spend is tracked, not capped.** Budgets warn by default. A hard cap is something you turn on.
 
 Prompts go only to the providers and apps you connect. No Clawboo account, and Clawboo itself sends no telemetry. The server also fetches the Marketplace catalog from GitHub, OpenRouter's public model list and the latest version from npm, and the dashboard loads its font from Google Fonts and its GitHub star count; [Production defaults](/operating/production-defaults#what-leaves-the-machine) lists each one.
