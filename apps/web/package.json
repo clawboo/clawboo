@@ -16,8 +16,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "0.3.316",
-    "@anthropic-ai/sdk": "0.125.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.318",
+    "@anthropic-ai/sdk": "0.137.0",
     "@clawboo/adapter-claude-code": "workspace:*",
     "@clawboo/adapter-codex": "workspace:*",
     "@clawboo/adapter-hermes": "workspace:*",
@@ -63,7 +63,7 @@
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
     "@opentelemetry/sdk-node": "^0.300.0",
     "@radix-ui/react-slider": "^1.6.1",
-    "@xyflow/react": "^12.12.0",
+    "@xyflow/react": "^12.12.1",
     "better-sqlite3": "^12.11.1",
     "camera-controls": "^3.1.2",
     "codemirror": "^6.0.2",
@@ -74,7 +74,7 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.2",
     "framer-motion": "^13.5.1",
-    "jose": "6.2.14",
+    "jose": "6.2.15",
     "lucide-react": "^0.468.0",
     "openai": "7.47.0",
     "qrcode.react": "^4.2.0",
@@ -89,7 +89,7 @@
   },
   "devDependencies": {
     "@clawboo/tsconfig": "workspace:*",
-    "@tailwindcss/postcss": "^4.3.3",
+    "@tailwindcss/postcss": "^4.3.4",
     "@types/better-sqlite3": "^7.6.0",
     "@types/cors": "^2.8.19",
     "@types/culori": "^4.0.1",
@@ -100,11 +100,11 @@
     "@vitejs/plugin-react": "^6.1.2",
     "concurrently": "^10.0.6",
     "eslint": "^10.14.0",
-    "tailwindcss": "^4.3.3",
+    "tailwindcss": "^4.3.4",
     "tsup": "^8.4.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "vite": "^8.3.5",
+    "vite": "^8.3.6",
     "vite-tsconfig-paths": "^6.1.1",
     "yaml": "2.9.1"
   }
