@@ -189,9 +189,10 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
-    # Matches smoke-test-bundle's budget: a cold Windows runner plus a from-source
-    # build of better-sqlite3's native binding is the slow part.
-    timeout-minutes: 20
+    # A cold Windows runner plus a from-source build of better-sqlite3's native
+    # binding is the slow part. The Windows leg usually takes 15 to 17 minutes and
+    # sometimes passed 20 on a slow runner, so it gets 30; macOS keeps 20.
+    timeout-minutes: ${{ matrix.os == 'windows-latest' && 30 || 20 }}
     steps:
       - uses: actions/checkout@v7
 

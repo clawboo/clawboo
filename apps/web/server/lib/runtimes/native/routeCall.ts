@@ -16,7 +16,8 @@ import { resolveRuntimeKeyForRuntime } from '../../secretsVault'
 import { isNativeOllamaRemoved } from './nativeProviderDefaults'
 import { nativeCompatProvider } from './nativeProviders'
 import { createAnthropicProvider } from './providers/anthropic'
-import { createOpenAiProvider, ollamaBaseUrl, OPENROUTER_BASE_URL } from './providers/openai'
+import { providerBaseUrl, providerBaseUrlOverride } from '../../providerBaseUrls'
+import { createOpenAiProvider, ollamaBaseUrl } from './providers/openai'
 import {
   isFallbackWorthy,
   normalizeProviderError,
@@ -53,15 +54,25 @@ export interface RouteDeps {
 
 function defaultMakeProvider(c: RouteCandidate): ProviderClient {
   switch (c.provider) {
-    case 'anthropic':
-      return createAnthropicProvider({ apiKey: c.key ?? '' })
-    case 'openai':
-      return createOpenAiProvider({ provider: 'openai', apiKey: c.key ?? '' })
+    // Anthropic and OpenAI get a base URL only when an administrator set one:
+    // otherwise their SDKs use their own address.
+    case 'anthropic': {
+      const baseURL = providerBaseUrlOverride('anthropic')
+      return createAnthropicProvider({ apiKey: c.key ?? '', ...(baseURL ? { baseURL } : {}) })
+    }
+    case 'openai': {
+      const baseURL = providerBaseUrlOverride('openai')
+      return createOpenAiProvider({
+        provider: 'openai',
+        apiKey: c.key ?? '',
+        ...(baseURL ? { baseURL } : {}),
+      })
+    }
     case 'openrouter':
       return createOpenAiProvider({
         provider: 'openrouter',
         apiKey: c.key ?? '',
-        baseURL: OPENROUTER_BASE_URL,
+        baseURL: providerBaseUrl('openrouter'),
       })
     case 'ollama':
       return createOpenAiProvider({
@@ -77,7 +88,7 @@ function defaultMakeProvider(c: RouteCandidate): ProviderClient {
         return createOpenAiProvider({
           provider: c.provider,
           apiKey: c.key ?? '',
-          baseURL: ep.baseURL,
+          baseURL: providerBaseUrlOverride(ep.id) ?? ep.baseURL,
         })
       }
       throw new ProviderError(`unknown provider: ${c.provider}`, 'bad_request')

@@ -30,7 +30,7 @@ import type { EmbeddingProvider } from '../types'
 
 // ─── Resolver ────────────────────────────────────────────────────────────────
 
-const ENV_KEYS = ['OPENAI_API_KEY', 'CLAWBOO_DISABLE_EMBEDDINGS'] as const
+const ENV_KEYS = ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CLAWBOO_DISABLE_EMBEDDINGS'] as const
 let savedEnv: Record<string, string | undefined> = {}
 
 beforeEach(() => {
@@ -87,6 +87,73 @@ describe('probeEmbeddingProvider', () => {
     const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })
     expect(res.state).toBe('ready')
     expect(res.provider?.id).toBe('openai:text-embedding-3-small')
+  })
+
+  it("embeds through OpenAI's base URL when one is set, as runs do behind a gateway", async () => {
+    const calls: string[] = []
+    const embedAt = (url: string) => {
+      calls.push(url)
+      return url.endsWith('/api/tags')
+        ? Promise.reject(new TypeError('fetch failed'))
+        : Promise.resolve(Response.json({ data: [{ embedding: [0.1, 0.2] }] }))
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => embedAt(url)),
+    )
+    const passed = await probeEmbeddingProvider({
+      openaiApiKey: 'sk-test',
+      openaiBaseUrl: 'https://gw.example.com/openai/v1/',
+    })
+    await passed.provider?.embed(['a fact'])
+    process.env['OPENAI_BASE_URL'] = 'https://env.example.com/v1'
+    const fromEnv = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })
+    await fromEnv.provider?.embed(['a fact'])
+    expect(calls.filter((u) => !u.endsWith('/api/tags'))).toEqual([
+      'https://gw.example.com/openai/v1/embeddings',
+      'https://env.example.com/v1/embeddings',
+    ])
+    // A gateway's vectors are their own source, and still count as remote.
+    expect(passed.provider?.id).toBe('openai:text-embedding-3-small@gw.example.com/openai/v1')
+    expect(fromEnv.provider?.id).toBe('openai:text-embedding-3-small@env.example.com/v1')
+    delete process.env['OPENAI_BASE_URL']
+    expect((await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })).provider?.id).toBe(
+      'openai:text-embedding-3-small',
+    )
+  })
+
+  it("keeps OpenAI's id for OpenAI's own address however it is spelled", async () => {
+    stubTags('down')
+    for (const openaiBaseUrl of [
+      'https://api.openai.com/v1',
+      'https://API.openai.com/v1',
+      'https://api.openai.com:443/v1/',
+      'HTTPS://Api.OpenAI.com/v1//',
+    ]) {
+      const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })
+      expect(res.provider?.id, openaiBaseUrl).toBe('openai:text-embedding-3-small')
+    }
+    // A different path, port or scheme on OpenAI's host is not its own address.
+    for (const openaiBaseUrl of [
+      'https://api.openai.com/proxy/v1',
+      'https://api.openai.com:8443/v1',
+      'http://api.openai.com/v1',
+    ]) {
+      const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })
+      expect(res.provider?.id, openaiBaseUrl).toMatch(/^openai:text-embedding-3-small@/)
+    }
+  })
+
+  it('gives an http gateway and an https gateway at the same address different ids', async () => {
+    stubTags('down')
+    const id = async (openaiBaseUrl: string) =>
+      (await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })).provider?.id
+    expect(await id('https://gateway.example/v1')).toBe(
+      'openai:text-embedding-3-small@gateway.example/v1',
+    )
+    expect(await id('http://gateway.example/v1')).toBe(
+      'openai:text-embedding-3-small@http://gateway.example/v1',
+    )
   })
 
   it('still prefers local Ollama when it has the model and a key exists too', async () => {

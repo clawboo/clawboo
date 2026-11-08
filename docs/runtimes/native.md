@@ -261,7 +261,7 @@ You should see a reply stream in. If an error appears instead, find it under [Tr
 
 <Accordion title="Under the hood">
 
-- **Where it runs.** Inside the Clawboo server process. Anthropic models go through the Anthropic SDK. Every other provider goes through the OpenAI SDK with that provider's base URL; Ollama's is `OLLAMA_BASE_URL`, default `http://localhost:11434/v1`.
+- **Where it runs.** Inside the Clawboo server process. Anthropic models go through the Anthropic SDK. Every other provider goes through the OpenAI SDK with that provider's base URL; Ollama's is `OLLAMA_BASE_URL`, default `http://localhost:11434/v1`. To send a provider's traffic through your own gateway or a company proxy, set its [base URL](/reference/environment-variables#provider-base-urls); the key check and the model list follow it too.
 - **A run.** Up to 16 turns; each turn is one model call plus the tool calls it asks for, and each turn reports its own cost.
 - **Fallback providers.** An agent's config can list fallback providers (through the API). If a provider fails with an auth, rate-limit, overload or network error before it has produced any output, the next one is tried. A provider that answers is kept for the rest of the conversation.
 - **Saved conversations.** Each run's transcript is saved under `~/.clawboo/runtimes/clawboo-native/<agent>/sessions/` (the folder follows `CLAWBOO_HOME`).

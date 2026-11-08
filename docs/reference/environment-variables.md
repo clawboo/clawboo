@@ -15,6 +15,8 @@ keywords:
     'CLAWBOO_DISABLE_SELF_UPDATE',
     'CLAWBOO_MAX_CONCURRENT_RUNS',
     'CLAWBOO_PROXY_IDENTITY',
+    'OPENROUTER_BASE_URL',
+    'ANTHROPIC_BASE_URL',
   ]
 ---
 
@@ -55,6 +57,7 @@ Durations are in milliseconds, and an unset, empty or non-numeric duration means
 | `OPENROUTER_API_KEY`                   | unset                             | Hermes, Clawboo Native (OpenRouter)                                    |
 | `GEMINI_API_KEY` and six more          | unset                             | Clawboo Native through OpenAI-compatible providers                     |
 | `OLLAMA_BASE_URL`                      | `http://localhost:11434/v1`       | Ollama address for Clawboo Native and OpenClaw setup                   |
+| `OPENROUTER_BASE_URL` and nine more    | each provider's own address       | Sends a provider's traffic through a gateway or proxy                  |
 | `COMPOSIO_BASE_URL`                    | `https://backend.composio.dev`    | Composio API address for brokered apps                                 |
 | **Runs and verification**              |                                   |                                                                        |
 | `CLAWBOO_MAX_CONCURRENT_RUNS`          | `8`                               | Agent runs that execute at once; the rest wait their turn              |
@@ -337,6 +340,16 @@ The file is a JSON object of the keys below. Clawboo reads it once at startup an
 | `proxyIdentityMaxLifetime` | seconds (number)          | `CLAWBOO_PROXY_IDENTITY_MAX_LIFETIME` |
 | `proxyIdentityNameClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_NAME_CLAIM`   |
 | `proxyIdentityRoleClaim`   | claim name                | `CLAWBOO_PROXY_IDENTITY_ROLE_CLAIM`   |
+| `anthropicBaseUrl`         | URL                       | `ANTHROPIC_BASE_URL`                  |
+| `openaiBaseUrl`            | URL                       | `OPENAI_BASE_URL`                     |
+| `openrouterBaseUrl`        | URL                       | `OPENROUTER_BASE_URL`                 |
+| `googleBaseUrl`            | URL                       | `GEMINI_BASE_URL`                     |
+| `xaiBaseUrl`               | URL                       | `XAI_BASE_URL`                        |
+| `groqBaseUrl`              | URL                       | `GROQ_BASE_URL`                       |
+| `mistralBaseUrl`           | URL                       | `MISTRAL_BASE_URL`                    |
+| `togetherBaseUrl`          | URL                       | `TOGETHER_BASE_URL`                   |
+| `cerebrasBaseUrl`          | URL                       | `CEREBRAS_BASE_URL`                   |
+| `moonshotBaseUrl`          | URL                       | `MOONSHOT_BASE_URL`                   |
 
 Agents run as the same user as the server, so on a shared machine put the file where that user can read it but not write it, such as a root-owned `/etc/clawboo/operator.json`, and point this variable at it.
 
@@ -501,6 +514,39 @@ The address of an Ollama server, for keyless local models.
 Clawboo Native sends Ollama requests here and lists your pulled models from the same server. You do not need it to use a local Ollama: picking Ollama in onboarding or in Clawboo Native's providers list records that choice. With no recorded choice, setting this variable also counts as Ollama being set up. After you remove Ollama (**Disconnect Ollama**) or disconnect Clawboo Native, the variable no longer turns Ollama on; only picking Ollama again does.
 
 OpenClaw does not read this variable, so when Clawboo sets up OpenClaw on Ollama it writes the same address (without `/v1`) into `openclaw.json`. Memory embeddings ignore it and always look for Ollama at `http://localhost:11434`; with a remote Ollama, memory search stays keyword-only unless a local Ollama or an allowed OpenAI key provides embeddings.
+
+### Provider base URLs
+
+Where Clawboo Native sends a provider's requests, for model traffic that goes through your own gateway or a company proxy, such as LiteLLM, an egress proxy or a regional endpoint. Leave them unset to reach each provider at its own address.
+
+- Type: URL, `http` or `https`, with no user name, password, credential, query string or fragment in it
+- Default: unset (the provider's own address)
+- Example: `OPENROUTER_BASE_URL=https://llm-gateway.example.com/openrouter/v1`
+
+| Provider   | Variable              | Operator file key   | Its own address                                           |
+| ---------- | --------------------- | ------------------- | --------------------------------------------------------- |
+| Anthropic  | `ANTHROPIC_BASE_URL`  | `anthropicBaseUrl`  | `https://api.anthropic.com` (no `/v1`)                    |
+| OpenAI     | `OPENAI_BASE_URL`     | `openaiBaseUrl`     | `https://api.openai.com/v1`                               |
+| OpenRouter | `OPENROUTER_BASE_URL` | `openrouterBaseUrl` | `https://openrouter.ai/api/v1`                            |
+| Google     | `GEMINI_BASE_URL`     | `googleBaseUrl`     | `https://generativelanguage.googleapis.com/v1beta/openai` |
+| xAI        | `XAI_BASE_URL`        | `xaiBaseUrl`        | `https://api.x.ai/v1`                                     |
+| Groq       | `GROQ_BASE_URL`       | `groqBaseUrl`       | `https://api.groq.com/openai/v1`                          |
+| Mistral    | `MISTRAL_BASE_URL`    | `mistralBaseUrl`    | `https://api.mistral.ai/v1`                               |
+| Together   | `TOGETHER_BASE_URL`   | `togetherBaseUrl`   | `https://api.together.xyz/v1`                             |
+| Cerebras   | `CEREBRAS_BASE_URL`   | `cerebrasBaseUrl`   | `https://api.cerebras.ai/v1`                              |
+| Moonshot   | `MOONSHOT_BASE_URL`   | `moonshotBaseUrl`   | `https://api.moonshot.ai/v1`                              |
+
+Write the address the way the provider's own is written above: Anthropic's without `/v1`, every other one with its version path. Clawboo Native's runs, the key check when you save a key, and the model lists all use it, so a key that only works through your gateway checks as good and its models show up:
+
+- Through a gateway, OpenAI's list keeps every chat model the gateway names, such as its own deployment names, not only OpenAI's `gpt-` families.
+- Through a gateway, OpenRouter's list is asked with your OpenRouter key, and Clawboo Native's default-model picker lists the gateway's models. Without one, the picker keeps its own list of OpenRouter models.
+- Memory embeddings take `OPENAI_BASE_URL` too. Vectors made through a gateway count as their own source, apart from vectors made by OpenAI itself, so the two are never compared with each other.
+
+Each variable wins over its operator file key, and Clawboo reads both once at startup.
+
+- A base URL receives the provider's API key with every request. The server logs a `SECURITY:` warning for one that would send it over plain `http` to another machine, and for one that comes from an operator file its own user can change, since every agent it runs could then point a provider at a server of its own. On Windows it warns whenever one comes from the operator file.
+- A URL with a user name, a password, a credential parameter, a query string or a fragment in it stops the server at startup.
+- Other runtimes keep their own settings. Claude Code, Codex, Hermes and OpenClaw decide for themselves where their requests go; a variable set for the server reaches the programs it starts, but a value from the operator file does not. Ollama has its own [OLLAMA_BASE_URL](#ollama_base_url).
 
 ### COMPOSIO_BASE_URL
 

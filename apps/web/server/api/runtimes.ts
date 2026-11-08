@@ -18,6 +18,7 @@ import { getDb } from '../lib/db'
 import { runTaskOnRuntime } from '../lib/executorRunner'
 import { loopbackMcpBaseUrl } from '../lib/mcpBaseUrl'
 import { fetchOpenRouterModels } from '../lib/openrouterModels'
+import { providerBaseUrl, providerBaseUrlOverride } from '../lib/providerBaseUrls'
 import {
   findExecutable,
   isWindows,
@@ -744,19 +745,22 @@ function ollamaTagsUrl(): string {
 
 function providerProbe(provider: string): ProviderProbe | null {
   switch (provider) {
+    // Each at the base URL an administrator set (lib/providerBaseUrls), else the
+    // provider's own: behind a gateway, a check against the public address would
+    // read a good key as bad.
     case 'anthropic':
       return {
-        url: 'https://api.anthropic.com/v1/models',
+        url: `${providerBaseUrl('anthropic')}/v1/models`,
         headers: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
       }
     case 'openai':
       return {
-        url: 'https://api.openai.com/v1/models',
+        url: `${providerBaseUrl('openai')}/models`,
         headers: (key) => ({ Authorization: `Bearer ${key}` }),
       }
     case 'openrouter':
       return {
-        url: 'https://openrouter.ai/api/v1/models',
+        url: `${providerBaseUrl('openrouter')}/models`,
         headers: (key) => ({ Authorization: `Bearer ${key}` }),
       }
     case 'ollama':
@@ -766,7 +770,7 @@ function providerProbe(provider: string): ProviderProbe | null {
       const ep = nativeCompatProvider(provider)
       if (ep)
         return {
-          url: `${ep.baseURL}/models`,
+          url: `${providerBaseUrlOverride(ep.id) ?? ep.baseURL}/models`,
           headers: (key) => ({ Authorization: `Bearer ${key}` }),
         }
       return null

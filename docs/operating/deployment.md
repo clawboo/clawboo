@@ -196,12 +196,13 @@ Put the file at `~/.clawboo/operator.json` (inside `CLAWBOO_HOME`), or anywhere 
 }
 ```
 
-| Key                                                 | What it pins                                                                                                                 | Same as                                                                     |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `disableSelfUpdate`                                 | No update chip, no update from the dashboard, no npm check                                                                   | `CLAWBOO_DISABLE_SELF_UPDATE`                                               |
-| `disableBrowserAutostart`                           | Playwright and Chrome DevTools do not start on a new install                                                                 | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`                                         |
-| `catalogIndexUrl`                                   | Where the Marketplace catalog comes from, such as a mirror                                                                   | `CLAWBOO_CATALOG_INDEX_URL`                                                 |
-| `proxyIdentity` and the other `proxyIdentity*` keys | Checking a sign-in proxy's signed identity tokens, and its keys; see [Run Clawboo behind a sign-in proxy](/guides/sso-proxy) | `CLAWBOO_PROXY_IDENTITY` and the other `CLAWBOO_PROXY_IDENTITY_*` variables |
+| Key                                                 | What it pins                                                                                                                                          | Same as                                                                     |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `disableSelfUpdate`                                 | No update chip, no update from the dashboard, no npm check                                                                                            | `CLAWBOO_DISABLE_SELF_UPDATE`                                               |
+| `disableBrowserAutostart`                           | Playwright and Chrome DevTools do not start on a new install                                                                                          | `CLAWBOO_DISABLE_BROWSER_AUTOSTART`                                         |
+| `catalogIndexUrl`                                   | Where the Marketplace catalog comes from, such as a mirror                                                                                            | `CLAWBOO_CATALOG_INDEX_URL`                                                 |
+| `proxyIdentity` and the other `proxyIdentity*` keys | Checking a sign-in proxy's signed identity tokens, and its keys; see [Run Clawboo behind a sign-in proxy](/guides/sso-proxy)                          | `CLAWBOO_PROXY_IDENTITY` and the other `CLAWBOO_PROXY_IDENTITY_*` variables |
+| `openrouterBaseUrl` and the other `*BaseUrl` keys   | Where Clawboo Native reaches each model provider, such as your gateway; see [Provider base URLs](/reference/environment-variables#provider-base-urls) | `OPENROUTER_BASE_URL` and the other provider `*_BASE_URL` variables         |
 
 - Every key also has an environment variable, and the variable wins over the file.
 - Clawboo reads the file once at startup, so run `clawboo restart` after a change. It never writes the file.

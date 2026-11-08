@@ -139,6 +139,53 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 // ─── OpenAI provider (fallback when a key is present) ────────────────────────
 
+const OPENAI_DEFAULT_URL = 'https://api.openai.com/v1'
+
+/** A URL without its trailing slashes. A loop, not a regex: a `/+$` pattern
+ *  slows down badly on a long run of slashes in a value it does not control. */
+function withoutTrailingSlashes(url: string): string
+function withoutTrailingSlashes(url: string | undefined): string | undefined
+function withoutTrailingSlashes(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined
+  let end = url.length
+  while (end > 0 && url[end - 1] === '/') end--
+  return url.slice(0, end)
+}
+
+/** Whether a base URL is OpenAI's own address however it is spelled: the host
+ *  in capitals, the default port written out, a trailing slash. Vectors made
+ *  there are OpenAI's, so they keep OpenAI's id and stay searchable. */
+function isOpenAiOwnAddress(baseUrl: string): boolean {
+  let url: URL
+  try {
+    url = new URL(baseUrl)
+  } catch {
+    return false
+  }
+  return (
+    url.protocol === 'https:' &&
+    url.host === 'api.openai.com' &&
+    withoutTrailingSlashes(url.pathname) === '/v1' &&
+    !url.search &&
+    !url.hash &&
+    !url.username &&
+    !url.password
+  )
+}
+
+/** The host and path of a base URL, to name it, or the text itself when it
+ *  does not parse. A scheme other than https is kept, since http and https
+ *  at the same address are two servers that may serve different vectors. */
+function safeHost(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl)
+    const scheme = url.protocol === 'https:' ? '' : `${url.protocol}//`
+    return `${scheme}${url.host}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return baseUrl
+  }
+}
+
 export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   readonly id: string
   readonly dimensions: number
@@ -149,9 +196,14 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   constructor(opts: { apiKey: string; model?: string; baseUrl?: string; dimensions?: number }) {
     this.apiKey = opts.apiKey
     this.model = opts.model ?? 'text-embedding-3-small'
-    this.baseUrl = opts.baseUrl ?? 'https://api.openai.com/v1'
+    this.baseUrl = opts.baseUrl ?? OPENAI_DEFAULT_URL
     this.dimensions = opts.dimensions ?? 1536
-    this.id = `openai:${this.model}`
+    // Vectors from a gateway are their own source, even under OpenAI's model
+    // name: it may serve another embedding space, and vectors are only compared
+    // within one source. The `openai:` prefix keeps it counted as remote.
+    const gateway =
+      opts.baseUrl && !isOpenAiOwnAddress(opts.baseUrl) ? safeHost(opts.baseUrl) : null
+    this.id = gateway ? `openai:${this.model}@${gateway}` : `openai:${this.model}`
   }
 
   async embed(texts: string[]): Promise<number[][]> {
@@ -177,6 +229,11 @@ export interface ResolveEmbeddingOpts {
   ollamaModel?: string
   /** OpenAI key (falls back to process.env.OPENAI_API_KEY). */
   openaiApiKey?: string
+  /**
+   * Where OpenAI's API is, `/v1` included, for traffic that goes through a
+   * gateway (falls back to process.env.OPENAI_BASE_URL, then OpenAI's own).
+   */
+  openaiBaseUrl?: string
   /** Probe timeout for the Ollama reachability check. */
   probeTimeoutMs?: number
   /**
@@ -275,9 +332,12 @@ export async function probeEmbeddingProvider(
   const allowRemote = opts.allowRemote ?? true
   const key = allowRemote ? (opts.openaiApiKey ?? process.env['OPENAI_API_KEY']) : undefined
   if (key) {
+    const baseUrl = withoutTrailingSlashes(
+      (opts.openaiBaseUrl ?? process.env['OPENAI_BASE_URL'])?.trim(),
+    )
     return {
       state: 'ready',
-      provider: new OpenAiEmbeddingProvider({ apiKey: key }),
+      provider: new OpenAiEmbeddingProvider({ apiKey: key, ...(baseUrl ? { baseUrl } : {}) }),
       ...(tags.reachable ? { localModelMissing: { model: ollamaModel, baseUrl: ollamaUrl } } : {}),
     }
   }

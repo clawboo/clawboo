@@ -455,6 +455,17 @@ function replaceableByUs(file: string, uid: number): boolean {
 }
 
 /**
+ * Whether this server's own OS user can change or replace the operator file
+ * (see replaceableBy), or null on Windows, where Node cannot tell.
+ */
+export function operatorFileReplaceable(
+  { uid }: { uid: number | undefined } = { uid: process.getuid?.() },
+): boolean | null {
+  if (uid === undefined) return null
+  return replaceableByUs(operatorFileLocation().path, uid)
+}
+
+/**
  * A warning when the lane's settings come from an operator file that this
  * server's own OS user can change, or replace through a folder above it (see
  * replaceableBy). Agents run as that user, so one could put its own key there

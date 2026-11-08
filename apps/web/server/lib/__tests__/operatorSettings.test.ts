@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getDb, resetDb } from '../db'
 import {
+  OPERATOR_KEYS,
   OperatorSettingsError,
   PinnedSettingError,
   effectiveSetting,
@@ -26,6 +27,9 @@ const writeOperator = (doc: unknown) =>
 beforeEach(() => {
   home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-operator-'))
   vi.stubEnv('CLAWBOO_HOME', home)
+  // A shell can carry one of these (Claude Code sets ANTHROPIC_BASE_URL), and a
+  // pinned variable would change what every test below sees.
+  for (const spec of Object.values(OPERATOR_KEYS)) vi.stubEnv(spec.env, '')
   resetOperatorSettings()
   resetDb()
   getDb()

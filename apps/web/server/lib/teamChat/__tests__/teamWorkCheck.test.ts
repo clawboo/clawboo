@@ -166,7 +166,9 @@ describe('team chat work check', () => {
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
-    await rm(home, { recursive: true, force: true })
+    // Windows can refuse (EBUSY) to remove a folder a git process has only just let
+    // go of. Retry as rm allows; a folder that stays busy still fails the test.
+    await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
   })
 
   it('says when a teammate worked in the folder during the run', async () => {
@@ -386,15 +388,37 @@ describe('team chat work check', () => {
     it('starts none while the engine is held', async () => {
       const { wc, id } = await largeChange()
       engineHold().place('test-hold')
+      const pending = runCheck(wc, id)
+      let ended = false
+      void pending.then(
+        () => {
+          ended = true
+        },
+        () => {
+          ended = true
+        },
+      )
       try {
-        const pending = runCheck(wc, id)
-        await vi.waitFor(() => expect(runSlots().stats().queued).toBe(1))
+        // The check runs git and the team's command before its reviewer asks for a
+        // slot, and on a loaded Windows runner that takes longer than waitFor's 1s
+        // default. Wait for the request itself, and stop waiting if the check ends
+        // without one: the assertion below then fails.
+        await vi.waitFor(
+          () => {
+            if (!ended) expect(runSlots().stats().queued).toBe(1)
+          },
+          { timeout: 25_000, interval: 10 },
+        )
+        expect(runSlots().stats().queued, 'the reviewer waiting for a slot').toBe(1)
         expect(reviewer.started).toHaveLength(0)
         engineHold().release('test-hold')
         expect(await pending).toEqual({ verdict: 'pass' })
         expect(reviewer.started).toHaveLength(1)
       } finally {
         engineHold().release('test-hold')
+        // A failed assertion must not leave the check running: its git calls keep the
+        // history open (EBUSY on Windows) and it would write to the next test's DB.
+        await pending.catch(() => undefined)
       }
     })
   })
