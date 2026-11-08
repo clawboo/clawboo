@@ -632,6 +632,28 @@ describe('two issuers: a sign-in proxy and the app that started the engine', () 
     expect((await get('/api/access/identity')).status).toBe(401)
   })
 
+  it("refuses the app's token on the Gateway connection, even a good one", async () => {
+    const upgrade = (headers: Record<string, string>) =>
+      ({ method: 'GET', url: '/api/gateway/ws', headers }) as unknown as http.IncomingMessage
+    for (const mode of ['on', 'required'] as const) {
+      await start({ mode, appLink: true })
+      const appToken = await appAssertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-app-identity': appToken }))).toEqual({
+        ok: false,
+        reason: 'binding',
+      })
+      const proxyToken = await assertion('GET', '/api/gateway/ws')
+      expect(await lane.checkUpgrade(upgrade({ 'clawboo-identity': proxyToken }))).toEqual({
+        ok: true,
+        person: { id: 'user-42', name: 'Ada', role: 'admin' },
+      })
+      await new Promise<void>((r) => server!.close(() => r()))
+      server = null
+    }
+    await start({ mode: 'on', appLink: true, proxy: false })
+    expect(await lane.checkUpgrade(upgrade({}))).toEqual({ ok: true, person: null })
+  })
+
   it("lets a spawned runtime's own call through only when it carries neither token", async () => {
     await start({ mode: 'required', appLink: true })
     const runtime = { 'x-test-attach': 'minted' }

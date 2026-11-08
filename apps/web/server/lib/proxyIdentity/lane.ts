@@ -22,6 +22,11 @@
 // config.ts). A request carries at most one token. One that carries both is
 // refused, so nothing has to choose which of two people sent it. The app link
 // never makes a token required: its mode is always `on`.
+//
+// The app link's token is for /api/ requests only, never the Gateway
+// WebSocket. Messages on that socket are not checked one by one, so an answer
+// sent there would skip what an app's person may not do (allow an approval
+// always); an upgrade that carries the app's token is refused.
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
@@ -111,10 +116,17 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
   const carriesToken = (req: IncomingMessage): boolean =>
     sources.some((s) => tokenFrom(req, s.config.header) !== undefined)
 
+  const upgradeSources = sources.filter((s) => fromOf(s) === 'proxy')
+  const appSources = sources.filter((s) => fromOf(s) === 'app')
+
   /** `path` is the one the request arrived with, the base path included: the
-   *  path the proxy signed. */
-  async function decide(req: IncomingMessage, path: string): Promise<Decided> {
-    const carried = sources
+   *  path the proxy signed. `pool` is the issuers whose tokens count here. */
+  async function decide(
+    req: IncomingMessage,
+    path: string,
+    pool: LaneSource[] = sources,
+  ): Promise<Decided> {
+    const carried = pool
       .map((source) => ({ source, token: tokenFrom(req, source.config.header) }))
       .filter((c): c is { source: LaneSource; token: string } => c.token !== undefined)
     if (carried.length === 0) {
@@ -170,7 +182,10 @@ export function createIdentityLane(sources: LaneSource[], opts: LaneOptions): Pr
 
   async function checkUpgrade(req: IncomingMessage): Promise<LaneDecision> {
     const path = targetPath(req.url) ?? ''
-    const decision = await decide(req, path)
+    const appToken = appSources.some((s) => tokenFrom(req, s.config.header) !== undefined)
+    const decision: Decided = appToken
+      ? { ok: false, reason: 'binding' }
+      : await decide(req, path, upgradeSources)
     if (decision.ok) return { ok: true, person: decision.person }
     opts.onRefuse?.({ reason: decision.reason, method: req.method ?? 'GET', path })
     return { ok: false, reason: decision.reason }

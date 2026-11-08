@@ -234,6 +234,7 @@ A good token makes the request that person's, exactly as a proxy's token does: i
 - A sign-in proxy's token may not name an `account:` person, and the app's token may name no one else. Either is refused with `claims`.
 - A request that carries both headers is refused with `two-tokens`.
 - The app's token never makes one required. Requests without it, such as the dashboard's own, work as before, whatever `proxyIdentity` is set to.
+- The app's token is for `/api/` requests only. A Gateway WebSocket upgrade that carries it is refused with `binding`, because messages on that socket are not checked one by one.
 
 An app's person may allow an approval once or deny it, but not allow it always: that answer gets `403` with `"error": "allow_always_from_app"`, and the approval stays as it was. The key for this sits on the computer that runs the app, and a standing rule signed with a stolen one would outlast every card the person saw.
 
