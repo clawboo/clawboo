@@ -57,9 +57,12 @@ export function isBaseUrlProvider(provider: string): provider is BaseUrlProvider
   return Object.prototype.hasOwnProperty.call(KEY_OF, provider)
 }
 
-/** No trailing slash, so `${base}/models` never doubles one. */
+/** No trailing slash, so `${base}/models` never doubles one. A loop, not a
+ *  regex: a `/+$` pattern slows down badly on a long run of slashes. */
 function trimSlash(url: string): string {
-  return url.replace(/\/+$/, '')
+  let end = url.length
+  while (end > 0 && url[end - 1] === '/') end--
+  return url.slice(0, end)
 }
 
 let loaded: Partial<Record<BaseUrlProvider, string>> | null = null

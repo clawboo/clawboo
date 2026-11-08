@@ -280,9 +280,9 @@ export async function probeEmbeddingProvider(
   const allowRemote = opts.allowRemote ?? true
   const key = allowRemote ? (opts.openaiApiKey ?? process.env['OPENAI_API_KEY']) : undefined
   if (key) {
-    const baseUrl = (opts.openaiBaseUrl ?? process.env['OPENAI_BASE_URL'])
-      ?.trim()
-      .replace(/\/+$/, '')
+    const baseUrl = withoutTrailingSlashes(
+      (opts.openaiBaseUrl ?? process.env['OPENAI_BASE_URL'])?.trim(),
+    )
     return {
       state: 'ready',
       provider: new OpenAiEmbeddingProvider({ apiKey: key, ...(baseUrl ? { baseUrl } : {}) }),
@@ -302,6 +302,15 @@ export async function probeEmbeddingProvider(
  * deterministic graph (tag and version edges only). Callers that would read a
  * key or open the store to resolve a provider check this first.
  */
+/** A URL without its trailing slashes. A loop, not a regex: a `/+$` pattern
+ *  slows down badly on a long run of slashes in a value it does not control. */
+function withoutTrailingSlashes(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined
+  let end = url.length
+  while (end > 0 && url[end - 1] === '/') end--
+  return url.slice(0, end)
+}
+
 export function embeddingsDisabled(): boolean {
   return process.env['CLAWBOO_DISABLE_EMBEDDINGS'] === '1'
 }
