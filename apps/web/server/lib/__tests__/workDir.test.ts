@@ -130,4 +130,11 @@ describe('the ownership marker', () => {
   it('refuses a task id that is not one path segment', async () => {
     await expect(writeOwnerMarker(base, '../x', 'id')).rejects.toThrow(/unsafe task id/)
   })
+
+  it('puts the marker directly in the resolved root, however the root is spelled', () => {
+    const spelled = path.join(base, 'worktrees', 'x', '..', 'abc')
+    const marker = ownerMarkerPath(spelled, 't1')
+    expect(marker).toBe(path.join(base, 'worktrees', 'abc', '.t1.owner'))
+    expect(() => ownerMarkerPath(base, '..')).toThrow(/unsafe task id/)
+  })
 })

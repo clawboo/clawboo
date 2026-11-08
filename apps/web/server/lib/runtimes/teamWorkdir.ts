@@ -56,6 +56,18 @@ export function legacyTeamFoldersRoot(env: NodeJS.ProcessEnv = process.env): str
   return path.resolve(resolveClawbooDir(env), 'workspaces')
 }
 
+/** `<clawboo home>/workspaces/<sanitized teamId>`, the old place of a team's
+ *  folder, pinned under that root with the same test as {@link teamWorkdirPath}. */
+export function legacyTeamFolderPath(teamId: string, env: NodeJS.ProcessEnv = process.env): string {
+  const root = legacyTeamFoldersRoot(env)
+  const prefix = root.endsWith(path.sep) ? root : root + path.sep
+  const dir = path.resolve(root, sanitizeAgentId(teamId))
+  if (!dir.startsWith(prefix)) {
+    throw new Error(`team working folder escapes ${root}: ${dir}`)
+  }
+  return dir
+}
+
 /**
  * `<work folder>/teams/<sanitized teamId>`, stable across runs. A folder the
  * work folder move kept at the old place (another volume, or something already

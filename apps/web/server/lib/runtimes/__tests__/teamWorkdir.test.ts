@@ -13,6 +13,7 @@ import { setWorkLayout } from '../../workDir'
 import { setWorkDirJournal } from '../../workDirJournal'
 import {
   ensureTeamWorkdir,
+  legacyTeamFolderPath,
   taskRunWorkdirFor,
   teamWorkdirFor,
   teamWorkdirPath,
@@ -105,6 +106,14 @@ describe('team-chat working folder', () => {
       expect(path.dirname(dir)).toBe(root)
       expect(dir).not.toBe(home)
       expect(dir.startsWith(path.join(home, 'secrets'))).toBe(false)
+    }
+  })
+
+  it('the old place of a team folder is one segment under <clawboo home>/workspaces', () => {
+    const root = path.join(home, 'workspaces')
+    expect(legacyTeamFolderPath('team-1')).toBe(path.join(root, 'team-1'))
+    for (const hostile of ['..', '../secrets', '/etc/passwd', '..\\win', '.']) {
+      expect(path.dirname(legacyTeamFolderPath(hostile))).toBe(root)
     }
   })
 

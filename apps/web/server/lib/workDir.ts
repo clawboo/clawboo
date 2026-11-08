@@ -207,8 +207,15 @@ export function installId(db: ClawbooDb): string {
   return id
 }
 
+/** `<root>/.<taskId>.owner`, pinned under `root` with a single startsWith test. */
 export function ownerMarkerPath(root: string, taskId: string): string {
-  return path.join(root, `.${assertSafeTaskId(taskId)}.owner`)
+  const base = path.resolve(root)
+  const prefix = base.endsWith(path.sep) ? base : base + path.sep
+  const marker = path.resolve(base, `.${assertSafeTaskId(taskId)}.owner`)
+  if (!marker.startsWith(prefix)) {
+    throw new Error(`owner marker escapes ${base}: ${marker}`)
+  }
+  return marker
 }
 
 /**

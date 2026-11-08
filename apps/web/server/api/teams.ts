@@ -1,7 +1,6 @@
 import crypto from 'node:crypto'
 import { lstatSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import path from 'node:path'
 import type { Request, Response } from 'express'
 import {
   appendAudit,
@@ -28,8 +27,7 @@ import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/board
 import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs'
 import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
-import { sanitizeAgentId } from '../lib/runtimes/identityHome'
-import { legacyTeamFoldersRoot, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
+import { legacyTeamFolderPath, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
 import { getRegistry } from '../lib/agentSource/registry'
 import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
@@ -405,8 +403,8 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
       }
       // The link the work folder move left at the old place, when it is one. A
       // real folder there is not this team's current folder, so it stays.
-      const legacy = path.join(legacyTeamFoldersRoot(), sanitizeAgentId(teamId))
       try {
+        const legacy = legacyTeamFolderPath(teamId)
         if (lstatSync(legacy).isSymbolicLink()) await rm(legacy, { force: true })
       } catch {
         /* nothing there */
