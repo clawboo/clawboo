@@ -113,6 +113,13 @@ describe('probeEmbeddingProvider', () => {
       'https://gw.example.com/openai/v1/embeddings',
       'https://env.example.com/v1/embeddings',
     ])
+    // A gateway's vectors are their own source, and still count as remote.
+    expect(passed.provider?.id).toBe('openai:text-embedding-3-small@gw.example.com/openai/v1')
+    expect(fromEnv.provider?.id).toBe('openai:text-embedding-3-small@env.example.com/v1')
+    delete process.env['OPENAI_BASE_URL']
+    expect((await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })).provider?.id).toBe(
+      'openai:text-embedding-3-small',
+    )
   })
 
   it('still prefers local Ollama when it has the model and a key exists too', async () => {

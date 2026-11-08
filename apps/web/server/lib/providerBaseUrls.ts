@@ -17,7 +17,12 @@
 // plain http to another machine, or that comes from an operator file this
 // server's own user (and so every agent it runs) can change.
 
-import { effectiveSetting, OPERATOR_KEYS, type OperatorKey } from './operatorSettings'
+import {
+  effectiveSetting,
+  OPERATOR_KEYS,
+  OperatorSettingsError,
+  type OperatorKey,
+} from './operatorSettings'
 import { NATIVE_COMPAT_PROVIDERS } from './runtimes/native/nativeProviders'
 import { OPENROUTER_BASE_URL } from './runtimes/native/providers/openai'
 
@@ -75,7 +80,17 @@ export function loadProviderBaseUrls(): void {
   const next: Partial<Record<BaseUrlProvider, string>> = {}
   for (const provider of BASE_URL_PROVIDERS) {
     const value = effectiveSetting(KEY_OF[provider]).value
-    if (typeof value === 'string' && value.trim() !== '') next[provider] = trimSlash(value.trim())
+    if (typeof value !== 'string' || value.trim() === '') continue
+    // Paths are added to a base URL as text, by Clawboo and by the providers'
+    // SDKs alike, so a query or a fragment would land in the wrong place.
+    const url = new URL(value.trim())
+    if (url.search || url.hash) {
+      throw new OperatorSettingsError(
+        `${OPERATOR_KEYS[KEY_OF[provider]].env} must be an address with no query string or ` +
+          'fragment (nothing after ? or #).',
+      )
+    }
+    next[provider] = trimSlash(value.trim())
   }
   loaded = next
 }

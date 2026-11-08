@@ -47,7 +47,7 @@ vi.mock('openai', () => ({
   },
 }))
 
-const { initOperatorSettings, OperatorSettingsError, resetOperatorSettings } =
+const { initOperatorSettings, OPERATOR_KEYS, OperatorSettingsError, resetOperatorSettings } =
   await import('../operatorSettings')
 const {
   loadProviderBaseUrls,
@@ -65,15 +65,10 @@ beforeEach(() => {
   home = mkdtempSync(path.join(os.tmpdir(), 'clawboo-base-urls-'))
   vi.stubEnv('HOME', home)
   vi.stubEnv('CLAWBOO_HOME', home)
-  for (const name of [
-    'ANTHROPIC_BASE_URL',
-    'OPENAI_BASE_URL',
-    'OPENROUTER_BASE_URL',
-    'GROQ_BASE_URL',
-    'CLAWBOO_OPERATOR_SETTINGS',
-  ]) {
-    vi.stubEnv(name, '')
-  }
+  // Every operator variable, and the provider keys the lists may send: a shell
+  // that sets one (Claude Code sets ANTHROPIC_BASE_URL) must not change a test.
+  for (const spec of Object.values(OPERATOR_KEYS)) vi.stubEnv(spec.env, '')
+  for (const name of ['CLAWBOO_OPERATOR_SETTINGS', 'OPENROUTER_API_KEY']) vi.stubEnv(name, '')
   resetOperatorSettings()
   resetProviderBaseUrls()
   built.anthropic.length = 0
@@ -122,6 +117,16 @@ describe('the base URL in force', () => {
   it('refuses to start on a base URL that carries credentials', () => {
     vi.stubEnv('OPENAI_BASE_URL', 'https://user:pass@gw.example.com/v1')
     expect(() => initOperatorSettings()).toThrow(OperatorSettingsError)
+  })
+
+  it('refuses to start on a base URL with a query or a fragment', () => {
+    for (const value of ['https://gw.example.com/v1?region=eu', 'https://gw.example.com/v1#x']) {
+      vi.stubEnv('GROQ_BASE_URL', value)
+      initOperatorSettings()
+      expect(() => loadProviderBaseUrls()).toThrow(
+        /GROQ_BASE_URL must be an address with no query string or fragment/,
+      )
+    }
   })
 })
 
@@ -223,6 +228,32 @@ describe('model lists', () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe('https://other.example.com/v1/models')
   })
 
+  it("keep a gateway's own names for OpenAI deployments, still dropping non-chat models", async () => {
+    vi.stubGlobal(
+      'fetch',
+      answering({
+        data: [{ id: 'sales-chat' }, { id: 'gpt-4o' }, { id: 'text-embedding-3-small' }],
+      }),
+    )
+    vi.stubEnv('OPENAI_BASE_URL', 'https://gw.example.com/openai/v1')
+    expect((await fetchNativeModelsForKey('openai', 'sk-gw')).map((m) => m.id)).toEqual([
+      'sales-chat',
+      'gpt-4o',
+    ])
+  })
+
+  it("list OpenRouter's models through a gateway for the default-model picker, not without one", async () => {
+    const fetchMock = answering({ data: [{ id: 'acme/private-model' }] })
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await fetchNativeModelsForKey('openrouter', 'sk-or')).toEqual([])
+    expect(fetchMock).not.toHaveBeenCalled()
+    vi.stubEnv('OPENROUTER_BASE_URL', 'https://gw.example.com/openrouter/v1')
+    expect(await fetchNativeModelsForKey('openrouter', 'sk-or')).toEqual([
+      { id: 'acme/private-model', label: 'acme/private-model' },
+    ])
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual({ Authorization: 'Bearer sk-or' })
+  })
+
   it("read Anthropic's and OpenAI's lists at their base URLs too", async () => {
     const fetchMock = answering({ data: [{ id: 'gpt-4o' }] })
     vi.stubGlobal('fetch', fetchMock)
@@ -247,5 +278,19 @@ describe('model lists', () => {
     vi.stubEnv('OPENROUTER_BASE_URL', '')
     await fetchOpenRouterModels()
     expect(fetchMock.mock.calls[1]?.[0]).toBe('https://openrouter.ai/api/v1/models')
+  })
+
+  it('send the OpenRouter key to a gateway for its list, and none to OpenRouter itself', async () => {
+    const fetchMock = answering({ data: [{ id: 'acme/private-model' }] })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-key')
+    vi.stubEnv('OPENROUTER_BASE_URL', 'https://gw2.example.com/v1')
+    await fetchOpenRouterModels()
+    vi.stubEnv('OPENROUTER_BASE_URL', '')
+    await fetchOpenRouterModels()
+    const headers = fetchMock.mock.calls.map((c) => c[1]?.headers as Record<string, string>)
+    expect(headers[0]).toMatchObject({ Authorization: 'Bearer sk-or-key' })
+    expect(headers[1]).not.toHaveProperty('Authorization')
+    expect(fetchMock.mock.calls.every((c) => c[1]?.redirect === 'error')).toBe(true)
   })
 })

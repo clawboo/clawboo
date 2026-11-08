@@ -6,7 +6,8 @@
 // this loads or if the fetch fails, so a picker is never empty.
 
 import type { ModelOption } from './modelCache'
-import { providerBaseUrl } from './providerBaseUrls'
+import { providerBaseUrl, providerBaseUrlOverride } from './providerBaseUrls'
+import { resolveRuntimeKey } from './secretsVault'
 const CACHE_TTL = 30 * 60 * 1000 // 30 min — OpenRouter's catalog changes slowly
 const FETCH_TIMEOUT_MS = 8000
 
@@ -51,8 +52,15 @@ export async function fetchOpenRouterModels(): Promise<ModelOption[] | null> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
+    // OpenRouter lists its models to anyone. A gateway may not, so it gets the
+    // key the runs send it anyway; the public list is still asked with none.
+    const key = providerBaseUrlOverride('openrouter')
+      ? resolveRuntimeKey('OPENROUTER_API_KEY')
+      : null
     const res = await fetch(`${base}/models`, {
-      headers: { Accept: 'application/json' },
+      headers: { Accept: 'application/json', ...(key ? { Authorization: `Bearer ${key}` } : {}) },
+      // The request may carry the key, so it never follows a redirect elsewhere.
+      redirect: 'error',
       signal: controller.signal,
     })
     if (!res.ok) return cached

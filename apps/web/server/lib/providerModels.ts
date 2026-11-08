@@ -7,7 +7,7 @@
 
 import { randomBytes, scryptSync } from 'node:crypto'
 
-import { providerBaseUrl, type BaseUrlProvider } from './providerBaseUrls'
+import { providerBaseUrl, providerBaseUrlOverride, type BaseUrlProvider } from './providerBaseUrls'
 import { NATIVE_COMPAT_PROVIDERS } from './runtimes/native/nativeProviders'
 
 export interface ModelOption {
@@ -94,10 +94,15 @@ async function fetchOpenAI(key: string): Promise<ModelOption[] | null> {
     data?: { id?: unknown; created?: unknown }[]
   } | null
   if (!body || !Array.isArray(body.data)) return null
+  // A gateway names its deployments as it likes (`sales-chat`), so only the
+  // public endpoint's list is narrowed to OpenAI's own chat families.
+  const gateway = providerBaseUrlOverride('openai') !== null
   return body.data
     .filter(
       (m): m is { id: string; created?: number } =>
-        typeof m.id === 'string' && OPENAI_CHAT_RE.test(m.id) && !OPENAI_DROP_RE.test(m.id),
+        typeof m.id === 'string' &&
+        (gateway || OPENAI_CHAT_RE.test(m.id)) &&
+        !OPENAI_DROP_RE.test(m.id),
     )
     .sort((a, b) => Number(b.created ?? 0) - Number(a.created ?? 0))
     .map((m) => ({ id: m.id, label: m.id }))
@@ -127,6 +132,12 @@ async function fetchOpenAiCompat(
 const FETCHERS: Record<string, (key: string) => Promise<ModelOption[] | null>> = {
   anthropic: fetchAnthropic,
   openai: fetchOpenAI,
+  // OpenRouter's own list is the curated one the client already has. Through a
+  // gateway, the gateway's list is the one that says what can be picked.
+  openrouter: (key: string) =>
+    providerBaseUrlOverride('openrouter')
+      ? fetchOpenAiCompat('openrouter', key)
+      : Promise.resolve(null),
   // Each extra OpenAI-compatible provider reads its own `/models` endpoint.
   ...Object.fromEntries(
     NATIVE_COMPAT_PROVIDERS.map((p) => [

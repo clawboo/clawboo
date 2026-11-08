@@ -139,6 +139,19 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
 
 // ─── OpenAI provider (fallback when a key is present) ────────────────────────
 
+const OPENAI_DEFAULT_URL = 'https://api.openai.com/v1'
+
+/** The host and path of a base URL, to name it, or the text itself when it
+ *  does not parse. */
+function safeHost(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl)
+    return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
+  } catch {
+    return baseUrl
+  }
+}
+
 export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   readonly id: string
   readonly dimensions: number
@@ -149,9 +162,14 @@ export class OpenAiEmbeddingProvider implements EmbeddingProvider {
   constructor(opts: { apiKey: string; model?: string; baseUrl?: string; dimensions?: number }) {
     this.apiKey = opts.apiKey
     this.model = opts.model ?? 'text-embedding-3-small'
-    this.baseUrl = opts.baseUrl ?? 'https://api.openai.com/v1'
+    this.baseUrl = opts.baseUrl ?? OPENAI_DEFAULT_URL
     this.dimensions = opts.dimensions ?? 1536
-    this.id = `openai:${this.model}`
+    // Vectors from a gateway are their own source, even under OpenAI's model
+    // name: it may serve another embedding space, and vectors are only compared
+    // within one source. The `openai:` prefix keeps it counted as remote.
+    const gateway =
+      opts.baseUrl && opts.baseUrl !== OPENAI_DEFAULT_URL ? safeHost(opts.baseUrl) : null
+    this.id = gateway ? `openai:${this.model}@${gateway}` : `openai:${this.model}`
   }
 
   async embed(texts: string[]): Promise<number[][]> {

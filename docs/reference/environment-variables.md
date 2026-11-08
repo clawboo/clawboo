@@ -505,7 +505,7 @@ OpenClaw does not read this variable, so when Clawboo sets up OpenClaw on Ollama
 
 Where Clawboo Native sends a provider's requests, for model traffic that goes through your own gateway or a company proxy, such as LiteLLM, an egress proxy or a regional endpoint. Leave them unset to reach each provider at its own address.
 
-- Type: URL, `http` or `https`, with no user name, password or credential in it
+- Type: URL, `http` or `https`, with no user name, password, credential, query string or fragment in it
 - Default: unset (the provider's own address)
 - Example: `OPENROUTER_BASE_URL=https://llm-gateway.example.com/openrouter/v1`
 
@@ -522,10 +522,16 @@ Where Clawboo Native sends a provider's requests, for model traffic that goes th
 | Cerebras   | `CEREBRAS_BASE_URL`   | `cerebrasBaseUrl`   | `https://api.cerebras.ai/v1`                              |
 | Moonshot   | `MOONSHOT_BASE_URL`   | `moonshotBaseUrl`   | `https://api.moonshot.ai/v1`                              |
 
-Write the address the way the provider's own is written above: Anthropic's without `/v1`, every other one with its version path. Clawboo Native's runs, the key check when you save a key, and the model list in the pickers all use it, so a key that only works through your gateway checks as good and its models show up. Memory embeddings take `OPENAI_BASE_URL` too. Each variable wins over its operator file key, and Clawboo reads both once at startup.
+Write the address the way the provider's own is written above: Anthropic's without `/v1`, every other one with its version path. Clawboo Native's runs, the key check when you save a key, and the model lists all use it, so a key that only works through your gateway checks as good and its models show up:
+
+- Through a gateway, OpenAI's list keeps every chat model the gateway names, such as its own deployment names, not only OpenAI's `gpt-` families.
+- Through a gateway, OpenRouter's list is asked with your OpenRouter key, and Clawboo Native's default-model picker lists the gateway's models. Without one, the picker keeps its own list of OpenRouter models.
+- Memory embeddings take `OPENAI_BASE_URL` too. Vectors made through a gateway count as their own source, apart from vectors made by OpenAI itself, so the two are never compared with each other.
+
+Each variable wins over its operator file key, and Clawboo reads both once at startup.
 
 - A base URL receives the provider's API key with every request. The server logs a `SECURITY:` warning for one that would send it over plain `http` to another machine, and for one that comes from an operator file its own user can change, since every agent it runs could then point a provider at a server of its own. On Windows it warns whenever one comes from the operator file.
-- A URL with a user name, a password or a credential parameter in it stops the server at startup.
+- A URL with a user name, a password, a credential parameter, a query string or a fragment in it stops the server at startup.
 - Other runtimes keep their own settings. Claude Code, Codex, Hermes and OpenClaw decide for themselves where their requests go; a variable set for the server reaches the programs it starts, but a value from the operator file does not. Ollama has its own [OLLAMA_BASE_URL](#ollama_base_url).
 
 ### COMPOSIO_BASE_URL
