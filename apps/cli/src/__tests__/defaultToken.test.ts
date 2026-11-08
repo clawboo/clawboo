@@ -298,8 +298,12 @@ describe('dashboardHost', () => {
     let gated: FakeServer
     try {
       gated = await track(gatedDashboard(FILE_TOKEN, '::1'))
-    } catch {
-      ctx.skip() // no IPv6 loopback on this machine
+    } catch (err) {
+      // No IPv6 loopback on this machine: no IPv6 at all (EAFNOSUPPORT), or ::1
+      // not configured (EADDRNOTAVAIL). Any other error is a real failure.
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'EAFNOSUPPORT' && code !== 'EADDRNOTAVAIL') throw err
+      ctx.skip()
       return
     }
     process.env['HOST'] = '::1'
