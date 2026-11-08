@@ -1,0 +1,5 @@
+---
+'clawboo': minor
+---
+
+You can now send a model provider's traffic through your own gateway or a company proxy, such as LiteLLM or an egress proxy. Set the provider's base URL with its environment variable (`OPENROUTER_BASE_URL`, `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `GEMINI_BASE_URL`, `XAI_BASE_URL`, `GROQ_BASE_URL`, `MISTRAL_BASE_URL`, `TOGETHER_BASE_URL`, `CEREBRAS_BASE_URL` or `MOONSHOT_BASE_URL`) or in the operator settings file, where the variable wins. Clawboo Native's runs, the key check when you save a key, and the model list all use it, so a key that works only through your gateway no longer reads as invalid and its models show up. Before, only Anthropic's and OpenAI's runs could be pointed elsewhere, and the key check and the model list always called the public address. Memory embeddings follow `OPENAI_BASE_URL` too. Startup warns about a base URL that would send a key over plain http to another machine. Settings > System > Deployment lists the providers an administrator pointed elsewhere.

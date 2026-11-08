@@ -83,8 +83,10 @@ import { sweepLeftoverBudgetHolds } from './lib/budgetHold'
 import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
+import { loadProviderBaseUrls, providerBaseUrlWarnings } from './lib/providerBaseUrls'
 import {
   loadProxyIdentityConfig,
+  operatorFileReplaceable,
   proxyIdentityFileWarning,
   type ProxyIdentityConfig,
 } from './lib/proxyIdentity/config'
@@ -190,10 +192,16 @@ async function main() {
       log.info({ file: operator.file, pinned }, 'Operator settings: pinned by the administrator')
     }
     proxyIdentityConfig = loadProxyIdentityConfig()
+    // Where Clawboo Native reaches each model provider (a gateway, a company
+    // proxy), read once like the rest. A base URL receives the provider's key.
+    loadProviderBaseUrls()
   } catch (err) {
     if (!(err instanceof OperatorSettingsError)) throw err
     log.error(`CONFIG: refusing to start. ${err.message}`)
     process.exit(1)
+  }
+  for (const warning of providerBaseUrlWarnings(() => operatorFileReplaceable())) {
+    log.warn(warning)
   }
 
   // If we were launched as a self-restart successor by an in-app update, the

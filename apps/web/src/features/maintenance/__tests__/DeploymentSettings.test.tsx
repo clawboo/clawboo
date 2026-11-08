@@ -103,6 +103,43 @@ describe('DeploymentSettings', () => {
     expect(row.querySelector('[role="switch"]')).toBeNull()
   })
 
+  it("lists the model providers an administrator pointed elsewhere, else each one's own", async () => {
+    const extra = (key: string, value: string | null, env: string): EffectiveSetting =>
+      ({
+        key,
+        value,
+        source: value ? 'environment' : 'default',
+        pinned: value !== null,
+        userEditable: false,
+        env,
+      }) as EffectiveSetting
+    const none = settings()
+    apiFetch.mockImplementation(() =>
+      json({ settings: [...none.settings, extra('groqBaseUrl', null, 'GROQ_BASE_URL')] }),
+    )
+    render(<DeploymentSettings />)
+    const plain = await screen.findByTestId('deployment-providerBaseUrls')
+    expect(plain).toHaveTextContent("Each provider's own")
+    expect(plain).not.toHaveTextContent('Set by your administrator')
+    cleanup()
+
+    apiFetch.mockImplementation(() =>
+      json({
+        settings: [
+          ...none.settings,
+          extra('openrouterBaseUrl', 'https://gw.example.com/openrouter/v1', 'OPENROUTER_BASE_URL'),
+          extra('groqBaseUrl', 'https://gw.example.com/groq/v1', 'GROQ_BASE_URL'),
+        ],
+      }),
+    )
+    render(<DeploymentSettings />)
+    const row = await screen.findByTestId('deployment-providerBaseUrls')
+    expect(row).toHaveTextContent('OpenRouter: https://gw.example.com/openrouter/v1')
+    expect(row).toHaveTextContent('Groq: https://gw.example.com/groq/v1')
+    expect(row).toHaveTextContent('Set by your administrator')
+    expect(row.querySelector('[role="switch"]')).toBeNull()
+  })
+
   it('lets a person change a setting nobody pinned, and shows what the server saved', async () => {
     apiFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (init?.method === 'PUT') {

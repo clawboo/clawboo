@@ -30,7 +30,7 @@ import type { EmbeddingProvider } from '../types'
 
 // ─── Resolver ────────────────────────────────────────────────────────────────
 
-const ENV_KEYS = ['OPENAI_API_KEY', 'CLAWBOO_DISABLE_EMBEDDINGS'] as const
+const ENV_KEYS = ['OPENAI_API_KEY', 'OPENAI_BASE_URL', 'CLAWBOO_DISABLE_EMBEDDINGS'] as const
 let savedEnv: Record<string, string | undefined> = {}
 
 beforeEach(() => {
@@ -87,6 +87,32 @@ describe('probeEmbeddingProvider', () => {
     const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })
     expect(res.state).toBe('ready')
     expect(res.provider?.id).toBe('openai:text-embedding-3-small')
+  })
+
+  it("embeds through OpenAI's base URL when one is set, as runs do behind a gateway", async () => {
+    const calls: string[] = []
+    const embedAt = (url: string) => {
+      calls.push(url)
+      return url.endsWith('/api/tags')
+        ? Promise.reject(new TypeError('fetch failed'))
+        : Promise.resolve(Response.json({ data: [{ embedding: [0.1, 0.2] }] }))
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => embedAt(url)),
+    )
+    const passed = await probeEmbeddingProvider({
+      openaiApiKey: 'sk-test',
+      openaiBaseUrl: 'https://gw.example.com/openai/v1/',
+    })
+    await passed.provider?.embed(['a fact'])
+    process.env['OPENAI_BASE_URL'] = 'https://env.example.com/v1'
+    const fromEnv = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })
+    await fromEnv.provider?.embed(['a fact'])
+    expect(calls.filter((u) => !u.endsWith('/api/tags'))).toEqual([
+      'https://gw.example.com/openai/v1/embeddings',
+      'https://env.example.com/v1/embeddings',
+    ])
   })
 
   it('still prefers local Ollama when it has the model and a key exists too', async () => {

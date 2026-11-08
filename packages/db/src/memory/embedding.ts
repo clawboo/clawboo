@@ -177,6 +177,11 @@ export interface ResolveEmbeddingOpts {
   ollamaModel?: string
   /** OpenAI key (falls back to process.env.OPENAI_API_KEY). */
   openaiApiKey?: string
+  /**
+   * Where OpenAI's API is, `/v1` included, for traffic that goes through a
+   * gateway (falls back to process.env.OPENAI_BASE_URL, then OpenAI's own).
+   */
+  openaiBaseUrl?: string
   /** Probe timeout for the Ollama reachability check. */
   probeTimeoutMs?: number
   /**
@@ -275,9 +280,12 @@ export async function probeEmbeddingProvider(
   const allowRemote = opts.allowRemote ?? true
   const key = allowRemote ? (opts.openaiApiKey ?? process.env['OPENAI_API_KEY']) : undefined
   if (key) {
+    const baseUrl = (opts.openaiBaseUrl ?? process.env['OPENAI_BASE_URL'])
+      ?.trim()
+      .replace(/\/+$/, '')
     return {
       state: 'ready',
-      provider: new OpenAiEmbeddingProvider({ apiKey: key }),
+      provider: new OpenAiEmbeddingProvider({ apiKey: key, ...(baseUrl ? { baseUrl } : {}) }),
       ...(tags.reachable ? { localModelMissing: { model: ollamaModel, baseUrl: ollamaUrl } } : {}),
     }
   }
