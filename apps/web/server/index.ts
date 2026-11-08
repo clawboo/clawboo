@@ -84,6 +84,7 @@ import { createBasePathMiddleware } from './lib/basePathMiddleware'
 import { initOperatorSettings, OperatorSettingsError } from './lib/operatorSettings'
 import { createProxyExposureWarning } from './lib/proxyExposureWarning'
 import {
+  identityConfigs,
   loadAppLinkConfig,
   loadProxyIdentityConfig,
   proxyIdentityFileWarning,
@@ -254,9 +255,9 @@ async function main() {
   // test, so the lane exempts exactly what the gate admits without a cookie.
   // The app link (an app that started this engine and signs for its own
   // `account:` people) joins it as a second issuer, always in `on` mode.
-  const identitySources: LaneSource[] = [proxyIdentityConfig, appLinkConfig]
-    .filter((c): c is ProxyIdentityConfig => c !== null)
-    .map((config) => ({ config, verifier: createAssertionVerifier(config) }))
+  const identitySources: LaneSource[] = identityConfigs(proxyIdentityConfig, appLinkConfig).map(
+    (config) => ({ config, verifier: createAssertionVerifier(config) }),
+  )
   const proxyIdentity =
     identitySources.length > 0
       ? createIdentityLane(identitySources, {

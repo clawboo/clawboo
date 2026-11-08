@@ -18,6 +18,7 @@ import {
   APP_LINK_HEADER,
   APP_LINK_KEY_ENV,
   appLinkOn,
+  identityConfigs,
   loadAppLinkConfig,
   loadProxyIdentityConfig,
   parsePublicKeySetting,
@@ -101,7 +102,7 @@ describe('turned on', () => {
       nameClaim: 'name',
       roleClaim: 'role',
       keys: { source: 'public-key', jwks: { keys: [{ kty: 'OKP', crv: 'Ed25519' }] } },
-      accountSubjects: 'never',
+      accountSubjects: 'any',
     })
   })
 
@@ -509,6 +510,17 @@ describe('the app link', () => {
     )
     expect(() => initOperatorSettings()).toThrow(/unknown key/)
     expect(loadAppLinkConfig({})).toBeNull()
+  })
+
+  it("bars a proxy's account: people only while the app link is on too", () => {
+    stubLane()
+    initOperatorSettings()
+    const proxy = loadProxyIdentityConfig()!
+    const appLink = loadAppLinkConfig({ [APP_LINK_KEY_ENV]: edPem })!
+    expect(identityConfigs(proxy, null).map((c) => c.accountSubjects)).toEqual(['any'])
+    expect(identityConfigs(null, appLink).map((c) => c.accountSubjects)).toEqual(['only'])
+    expect(identityConfigs(proxy, appLink).map((c) => c.accountSubjects)).toEqual(['never', 'only'])
+    expect(identityConfigs(null, null)).toEqual([])
   })
 
   it("keeps its header out of a sign-in proxy's reach", () => {

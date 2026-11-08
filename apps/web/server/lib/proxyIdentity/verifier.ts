@@ -8,7 +8,7 @@
 //     algorithm before any key is looked at;
 //   - the operator's issuer and audience;
 //   - a `sub` (the person's id). An app link's `sub` must start with `account:`,
-//     and a sign-in proxy's never may (ProxyIdentityConfig.accountSubjects);
+//     and while one is on, a sign-in proxy's never may (accountSubjects);
 //   - not expired, and not issued in the future, within CLOCK_SKEW_SECONDS.
 //
 // REQUEST BINDING (the default) asks more of every token: `htm` and `htu` (the
@@ -253,8 +253,10 @@ export function createAssertionVerifier(
     // Each issuer keeps to its own people. A proxy naming an `account:` person
     // would pass for the app link's, and an app link naming anyone else would
     // pass for the proxy's.
-    const accountSub = isAccountPerson(sub)
-    if (config.accountSubjects === 'only' ? !accountSub : sub.startsWith(ACCOUNT_PERSON_PREFIX)) {
+    if (config.accountSubjects === 'only' && !isAccountPerson(sub)) {
+      return { ok: false, reason: 'claims' }
+    }
+    if (config.accountSubjects === 'never' && sub.startsWith(ACCOUNT_PERSON_PREFIX)) {
       return { ok: false, reason: 'claims' }
     }
     const nowSeconds = at / 1000

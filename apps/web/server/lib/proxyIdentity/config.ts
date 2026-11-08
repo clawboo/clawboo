@@ -15,7 +15,8 @@
 // desktop app) can name the person a request comes from: its app link. It signs
 // with its own Ed25519 key, whose public half it hands the engine in
 // CLAWBOO_APP_LINK_PUBLIC_KEY when it starts it, sends its token in a header of
-// its own, and may only name `account:` people, which a proxy may never name.
+// its own, and may only name `account:` people. While it is on, a proxy may
+// never name one.
 // That key is read from the environment and nowhere else: the operator file is
 // a file an agent could change, and an app link is only ever set up by the app
 // that launches the engine.
@@ -55,8 +56,10 @@ export interface ProxyIdentityConfig {
   roleClaim: string
   keys: ProxyIdentityKeys
   /** `only`: every token must name an `account:` person (an app link).
-   *  `never`: no token may (a sign-in proxy), so the two cannot pass for each other. */
-  accountSubjects: 'only' | 'never'
+   *  `never`: no token may (a sign-in proxy beside an app link), so the two cannot
+   *  pass for each other. `any`: no rule (a sign-in proxy on its own, so a proxy
+   *  that already names such people keeps working). */
+  accountSubjects: 'only' | 'never' | 'any'
 }
 
 /** The header an app link's token travels in. Its own, so a sign-in proxy's
@@ -295,8 +298,22 @@ export function loadProxyIdentityConfig(): ProxyIdentityConfig | null {
     nameClaim,
     roleClaim,
     keys,
-    accountSubjects: 'never',
+    accountSubjects: 'any',
   }
+}
+
+/**
+ * The issuers the lane trusts, in order: the sign-in proxy's, then the app
+ * link's. With both on, the proxy may not name an `account:` person, so the two
+ * id spaces cannot meet. A proxy on its own keeps whatever ids it already used.
+ */
+export function identityConfigs(
+  proxy: ProxyIdentityConfig | null,
+  appLink: ProxyIdentityConfig | null,
+): ProxyIdentityConfig[] {
+  if (!proxy) return appLink ? [appLink] : []
+  if (!appLink) return [proxy]
+  return [{ ...proxy, accountSubjects: 'never' }, appLink]
 }
 
 /** Whether the app that started this engine handed it an app link key. */

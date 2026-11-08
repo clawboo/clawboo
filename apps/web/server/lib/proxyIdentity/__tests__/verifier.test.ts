@@ -186,6 +186,14 @@ describe('issuer, audience and subject', () => {
     const token = await sign(claims({ sub: 'account:u-7' }))
     expect(await verifier().verify(at(token))).toEqual({ ok: false, reason: 'claims' })
   })
+
+  it('keeps a proxy that already names account: people working while no app link is on', async () => {
+    const token = await sign(claims({ sub: 'account:u-7' }))
+    expect(await verifier({ accountSubjects: 'any' }).verify(at(token))).toMatchObject({
+      ok: true,
+      person: { id: 'account:u-7' },
+    })
+  })
 })
 
 describe("an app link's people", () => {

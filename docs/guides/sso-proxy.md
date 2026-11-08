@@ -231,8 +231,8 @@ An app that starts Clawboo itself, such as the desktop app, can name its own peo
 
 A good token makes the request that person's, exactly as a proxy's token does: it passes [the person check](/operating/security#the-person-check), and the person is recorded on what it does. The two never mix:
 
-- A sign-in proxy's token may not name an `account:` person, and the app's token may name no one else. Either is refused with `claims`.
-- A request that carries both headers is refused with `two-tokens`.
+- The app's token may name only `account:` people. While the app's key is set, a sign-in proxy's token may not name one. Either is refused with `claims`. A proxy on its own keeps whatever ids it already uses.
+- With both on, a request that carries both headers is refused with `two-tokens`. With only one on, the other header is ignored like any other.
 - The app's token never makes one required. Requests without it, such as the dashboard's own, work as before, whatever `proxyIdentity` is set to.
 - The app's token is for `/api/` requests only. A Gateway WebSocket upgrade that carries it is refused with `binding`, because messages on that socket are not checked one by one.
 
@@ -252,22 +252,22 @@ A refused request gets `401` with a JSON body. Its `reason` says why:
 }
 ```
 
-| `reason`           | Meaning                                                                                                    |
-| ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                    |
-| `two-tokens`       | Both a sign-in proxy's token and an [app's](#an-app-that-starts-clawboo) token on one request              |
-| `malformed`        | Not a signed token, an empty header, or the header sent twice                                              |
-| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens  |
-| `signature`        | The signature does not match any of the proxy's keys                                                       |
-| `issuer`           | Another `iss`                                                                                              |
-| `audience`         | Another `aud`                                                                                              |
-| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                   |
-| `not-yet-valid`    | Issued, or valid only, in the future                                                                       |
-| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                               |
-| `binding`          | For another method or path                                                                                 |
-| `replayed`         | A request-bound token Clawboo already accepted                                                             |
-| `claims`           | A required claim is missing or has the wrong type, such as no `sub`, or a `sub` of the other issuer's kind |
-| `keys-unavailable` | The proxy's key set could not be fetched                                                                   |
+| `reason`           | Meaning                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `missing`          | No token, in `required` mode (the error reads "Clawboo needs a signed identity token…")                     |
+| `two-tokens`       | Both a sign-in proxy's token and an [app's](#an-app-that-starts-clawboo) token on one request, with both on |
+| `malformed`        | Not a signed token, an empty header, or the header sent twice                                               |
+| `algorithm`        | Not signed with an allowed algorithm: unsigned (`alg: none`) and shared-secret (`HS256` and so on) tokens   |
+| `signature`        | The signature does not match any of the proxy's keys                                                        |
+| `issuer`           | Another `iss`                                                                                               |
+| `audience`         | Another `aud`                                                                                               |
+| `expired`          | Past its `exp`, or a request-bound token older than the maximum lifetime                                    |
+| `not-yet-valid`    | Issued, or valid only, in the future                                                                        |
+| `lifetime`         | A request-bound token whose `exp` is too far after its `iat`                                                |
+| `binding`          | For another method or path                                                                                  |
+| `replayed`         | A request-bound token Clawboo already accepted                                                              |
+| `claims`           | A required claim is missing or has the wrong type, such as no `sub`, or a `sub` of the other issuer's kind  |
+| `keys-unavailable` | The proxy's key set could not be fetched                                                                    |
 
 A refused WebSocket upgrade gets `401 Unauthorized`. The server logs `Proxy identity: refused a request` with the reason, the method and the path, never the token.
 
