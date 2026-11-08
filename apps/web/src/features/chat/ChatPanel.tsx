@@ -37,6 +37,8 @@ import { parseTeamOrAgentMention } from '@/lib/parseTeamOrAgentMention'
 import { nextSeq } from '@/lib/sequenceKey'
 import { buildBooZeroRulesBlock } from '@/lib/booZeroRules'
 import { BoardTaskCard } from '@/features/group-chat/BoardTaskCard'
+import { QuestionAnswer } from '@/features/board/QuestionAnswer'
+import { openQuestionOf } from '@/features/board/boardStatus'
 import { stripActionableHandOffs } from '@/features/group-chat/delegationTags'
 import { TeamChips } from './TeamChips'
 
@@ -48,17 +50,26 @@ const NATIVE_BUSY_GRACE_MS = 6000
 
 // ─── HandOffCard ──────────────────────────────────────────────────────────────
 
-/** A task this chat handed off: the team chat's card, under the team it went to. */
+/** A task this chat handed off: the team chat's card, under the team it went to. A
+ *  card that waits on the person's answer, such as hand-offs to a team they did not
+ *  name, carries its answer buttons here, where the person is. */
 function HandOffCard({ task }: { task: BoardTaskView }) {
   const teamName = useTeamStore((s) => s.teams.find((t) => t.id === task.teamId)?.name ?? null)
+  const question = openQuestionOf(task)
   return (
     <div data-testid="chat-hand-off">
       {teamName && (
         <p className="mb-1.5 font-mono text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          Handed to {teamName}
+          {question ? `Waiting for your answer · ${teamName}` : `Handed to ${teamName}`}
         </p>
       )}
       <BoardTaskCard task={task} teamId={task.teamId ?? null} />
+      {question ? (
+        <div className="mt-2" data-testid="chat-hand-off-answer">
+          {/* The chat's stream brings the card's new state once it is answered. */}
+          <QuestionAnswer question={question} onAnswered={() => undefined} />
+        </div>
+      ) : null}
     </div>
   )
 }

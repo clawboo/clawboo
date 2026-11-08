@@ -55,6 +55,9 @@ export interface BoardTaskView {
   isMainTask?: boolean
   /** A card that only holds a plan: it does no work, so a request's progress skips it. */
   planHolder?: boolean
+  /** The question it waits on, as a one-to-one chat's stream last said: its card there
+   *  shows the answer buttons. Null when none is open. */
+  openQuestion?: { id: string; kind: string; payload: unknown } | null
   createdAt: number
   updatedAt: number
 }
@@ -74,6 +77,7 @@ export type BoardChangeFrame = BoardChange & {
   assigneePersonId?: string | null
   assigneePerson?: string | null
   planHolder?: boolean
+  openQuestion?: { id: string; kind: string; payload: unknown } | null
 }
 
 export function mergeTask(
@@ -115,6 +119,14 @@ export function mergeTask(
     parentTaskId: change.parentTaskId ?? existing?.parentTaskId ?? null,
     isMainTask: change.isMainTask ?? existing?.isMainTask ?? false,
     planHolder: change.planHolder ?? existing?.planHolder ?? false,
+    // Like `waitingOn`: what the frame said, else the old one holds only while the status
+    // is unchanged, since a card that moved has stopped waiting on it.
+    openQuestion:
+      change.openQuestion !== undefined
+        ? change.openQuestion
+        : moved
+          ? undefined
+          : existing?.openQuestion,
     // summary is additive — a later non-summary change must not erase it.
     summary: change.summary ?? (reopened ? null : (existing?.summary ?? null)),
     // Like the verdict below: what the frame said, else the old one holds only while

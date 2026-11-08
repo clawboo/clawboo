@@ -430,6 +430,8 @@ export class FakeBoard implements CascadeBoard {
       parentTaskId: string | null
       holder: boolean
       parallel: boolean
+      /** Asked whatever the switch says: no other plan takes its place. */
+      ask?: ProposePlanInput['ask']
       status: 'pending' | 'accepted' | 'declined' | 'closed'
     }
   >()
@@ -487,7 +489,7 @@ export class FakeBoard implements CascadeBoard {
     return this.planApproval
   }
   async proposePlan(input: ProposePlanInput): Promise<PlanProposal> {
-    if (!this.planApproval) {
+    if (!this.planApproval && !input.ask) {
       await this.startingWithoutAsking(input)
       return { status: 'off' }
     }
@@ -496,9 +498,12 @@ export class FakeBoard implements CascadeBoard {
     const own = input.taskId ? this.tasks.get(input.taskId) : undefined
     const onOwnTask = !!own && own.assigneeAgentId === input.agentId && own.status === 'in_progress'
     const cardKey = `${input.agentId}|${input.turnId}`
-    const held = [...this.planQuestions.values()].find(
-      (q) => q.status === 'pending' && q.holder && q.agentId === input.agentId,
-    )
+    // A card asked whatever the switch says takes no other's place, and none takes its.
+    const held = input.ask
+      ? undefined
+      : [...this.planQuestions.values()].find(
+          (q) => q.status === 'pending' && q.holder && !q.ask && q.agentId === input.agentId,
+        )
     const byTurn = held ? undefined : this.planCards.get(cardKey)
     const homeId = onOwnTask ? own!.id : (held?.taskId ?? byTurn)
     const same = (a: ProposePlanInput['steps'], b: ProposePlanInput['steps']): boolean =>
@@ -595,6 +600,7 @@ export class FakeBoard implements CascadeBoard {
       parentTaskId: onOwnTask ? own!.id : parentTaskId,
       holder: !onOwnTask,
       parallel: input.parallel === true,
+      ...(input.ask ? { ask: input.ask } : {}),
       status: 'pending',
     })
     return {
@@ -607,7 +613,8 @@ export class FakeBoard implements CascadeBoard {
   }
   async startingWithoutAsking(input: { agentId: string }): Promise<void> {
     for (const q of this.planQuestions.values()) {
-      if (q.status !== 'pending' || !q.holder || q.agentId !== input.agentId) continue
+      // A card asked whatever the switch says is not out of date when the switch goes off.
+      if (q.status !== 'pending' || !q.holder || q.ask || q.agentId !== input.agentId) continue
       q.status = 'closed'
       this.waits.delete(q.taskId)
       const task = this.tasks.get(q.taskId)

@@ -33,6 +33,7 @@ import {
   TASK_DOCUMENT_MAX_REVISIONS,
   TASK_DOCUMENT_PLAN_KEY,
   waitingOnJson,
+  type PlanAskReason,
   type PlanRef,
   type QuestionAnswer,
   type QuestionPayload,
@@ -273,6 +274,9 @@ export interface ProposePlanInput {
   /** The one-to-one chat it came from: its card shows there, and the answer and the
    *  accepted steps' results go back there. */
   chatSessionKey?: string | null
+  /** Put to the person whatever the team's switch says (see `PlanAskReason`). The card is
+   *  its own: it takes no other's place, and none takes its place. */
+  ask?: PlanAskReason
 }
 
 export type ProposeRefusal =
@@ -353,7 +357,10 @@ function waitingHolderTx(
     )
     .all() as DbTaskQuestion[]
   for (const row of rows) {
-    if (!parseQuestionPayload(row.payload)?.plan?.holder) continue
+    const plan = parseQuestionPayload(row.payload)?.plan
+    // A card asked whatever the switch says is a request of its own: no plan takes its
+    // place, and the switch going off does not close it.
+    if (!plan?.holder || plan.ask) continue
     const task = tx.select().from(tasks).where(eq(tasks.id, row.taskId)).get() as DbTask | undefined
     if (
       task &&
@@ -530,13 +537,13 @@ function ownTaskRefusalTx(
 }
 
 /**
- * Put a plan in front of a person, if this team asks first. `off` means the caller starts
- * the plan as it always did, and the only thing written is the close of a plan of this
- * agent's still waiting from when the switch was on. The plan's steps exist only on the
- * question until a person accepts it.
+ * Put a plan in front of a person, if this team asks first, or whatever it says when the
+ * input has an `ask` reason. `off` means the caller starts the plan as it always did, and
+ * the only thing written is the close of a plan of this agent's still waiting from when
+ * the switch was on. The plan's steps exist only on the question until a person accepts it.
  */
 export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlanResult {
-  if (!planApprovalOn(db, input.teamId)) {
+  if (!input.ask && !planApprovalOn(db, input.teamId)) {
     closeWaitingHolderWhenOff(db, input)
     return { status: 'off' }
   }
@@ -575,7 +582,8 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
           ).key,
         }
       : null
-    const waitingHolder = onOwnTask ? null : waitingHolderTx(tx, input, roomId)
+    // A card asked whatever the switch says takes no other's place.
+    const waitingHolder = onOwnTask || input.ask ? null : waitingHolderTx(tx, input, roomId)
     const turnsHolder =
       onOwnTask || waitingHolder || !holderKey
         ? null
@@ -687,6 +695,7 @@ export function proposePlan(db: ClawbooDb, input: ProposePlanInput): ProposePlan
       parentTaskId,
       holder,
       ...(input.parallel ? { parallel: true } : {}),
+      ...(input.ask ? { ask: input.ask } : {}),
     }
     const replacedRevision = replacing?.payload.plan?.revision ?? 0
     const payload: QuestionPayload = {

@@ -59,6 +59,7 @@ import {
   type ResultClaim,
   type SubtaskView,
   type LocalPersonRef,
+  type PlanAskReason,
   type TaskAttention,
   type TaskRunReason,
   type TaskWakeSettlement,
@@ -726,12 +727,24 @@ export interface ChatHandOff {
   onTold?: (said: string) => void
 }
 
-/** Two or more hand-offs from one reply of a one-to-one chat to one team. */
+/** Why a chat's hand-offs to a team are put to the person whatever the team's switch
+ *  says, and what the card needs to say so. */
+export interface ChatBatchAsk {
+  reason: PlanAskReason
+  /** The team's name, for the card: the engine knows its team only by id. */
+  teamName: string
+}
+
+/** Hand-offs from one reply of a one-to-one chat to one team, put to a person: two or
+ *  more on a team that asks first, or any number with an `ask` reason. */
 export interface ChatHandOffBatch extends Omit<
   ChatHandOff,
   'targetAgentId' | 'targetAgentName' | 'task'
 > {
   steps: Array<{ targetAgentId: string; targetAgentName: string; task: string }>
+  /** Ask whatever the team's switch says, even about one step. Nothing in it starts
+   *  until the person accepts the card. */
+  ask?: ChatBatchAsk
 }
 
 /**
@@ -2362,19 +2375,30 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     request: RequestInTurn | null,
     /** The one-to-one chat it comes from. */
     chatSessionKey?: string,
+    /** Put to the person whatever the team's switch says. False back then means it could
+     *  not be put to them, and the caller must start nothing. */
+    ask?: ChatBatchAsk,
+    chat?: ChatSpawn,
   ): Promise<boolean> {
     if (!deps.board.proposePlan) return false
     // A Stop since the plan's checks began: it closed what waited, so nothing may land after.
-    if (deps.stopGen() !== startGen)
-      return (await deps.board.planApprovalOn?.(deps.teamId)) === true
+    if (deps.stopGen() !== startGen) {
+      if (!ask) return (await deps.board.planApprovalOn?.(deps.teamId)) === true
+      // Nothing was put to the person, and nothing may start.
+      if (chat) chat.dropped = 'stopped'
+      return true
+    }
     const agentId = delegatorAgentId ?? deps.leaderAgentId() ?? ''
     const count = steps.length === 1 ? 'one step' : `${steps.length} steps`
+    const what = steps.length === 1 ? 'this' : `these ${steps.length} tasks`
     const proposal = await deps.board.proposePlan({
       teamId: deps.teamId,
       agentId,
-      prompt: parallel
-        ? `${nameOf(agentId)} wants to hand out ${steps.length} tasks at once. Nothing starts until you accept it.`
-        : `${nameOf(agentId)} proposes a plan of ${count}. Nothing starts until you accept it.`,
+      prompt: ask
+        ? `${nameOf(agentId)} wants to hand ${what} to ${ask.teamName}, a team you did not name in your message. Nothing starts until you accept it.`
+        : parallel
+          ? `${nameOf(agentId)} wants to hand out ${steps.length} tasks at once. Nothing starts until you accept it.`
+          : `${nameOf(agentId)} proposes a plan of ${count}. Nothing starts until you accept it.`,
       steps: steps.map((step) => {
         const title = step.task.slice(0, HAND_OFF_TITLE_CHARS)
         return {
@@ -2390,6 +2414,7 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       ...(parallel ? { parallel: true } : {}),
       ...(request ? { mainTask: request.input } : {}),
       ...(chatSessionKey ? { chatSessionKey } : {}),
+      ...(ask ? { ask: ask.reason } : {}),
     })
     switch (proposal.status) {
       case 'off':
@@ -2469,6 +2494,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     /** A batch from a one-to-one chat: that chat hears any refusal, and this says what
      *  became of it. Only a batch comes this way, so no step is made here for one. */
     chat?: ChatSpawn,
+    /** Put to the person whatever the team's switch says. */
+    ask?: ChatBatchAsk,
   ): Promise<boolean> {
     const startGen = deps.stopGen()
     /** Refuse the whole plan, before any step exists: a plan cut short is worse than
@@ -2577,6 +2604,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
       batch,
       request,
       chat?.sessionKey,
+      ask,
+      chat,
     )
     if (asked) return true
     if (batch) return false
@@ -6526,7 +6555,8 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
 
   /** See the interface. The same ask as a batch of tags in the team's chat. */
   async function handOffBatchFromChat(input: ChatHandOffBatch): Promise<ChatHandOffBatchOutcome> {
-    const asksFirst = await deps.board.planApprovalOn?.(deps.teamId)
+    // An `ask` reason puts it to the person whatever the switch says.
+    const asksFirst = input.ask ? true : await deps.board.planApprovalOn?.(deps.teamId)
     const { source, request } = chatRequestOf(input)
     if (asksFirst !== true) {
       if (asksFirst === false)
@@ -6541,7 +6571,17 @@ export function createBoardOrchestrator(deps: BoardOrchestratorDeps): BoardOrche
     }
     const chat = chatSpawnOf(input)
     const settled = await whileHandingOff(source, () =>
-      startPlan(input.steps, source, input.fromAgentId, input.turnId, false, request, true, chat),
+      startPlan(
+        input.steps,
+        source,
+        input.fromAgentId,
+        input.turnId,
+        false,
+        request,
+        true,
+        chat,
+        input.ask,
+      ),
     )
     if (!settled) return 'not_asked'
     if (chat.told) return 'told'

@@ -12,16 +12,17 @@
 // and a team that asks first asks about a batch of tags from here as from its own chat.
 //
 // Who may start what. A tag in code or a quote is only being shown, and starts nothing.
-// A person's message may reach any team. A turn reading a result has no person behind
-// it, and its text may be quoting a teammate, so it can go on only in the team whose
-// result it read. So can a person's message that carries a held result or what a team
-// has been doing (the @Team block), plus any team their own words name: that text is
-// theirs to read, not theirs to have said. A message that failed the person check starts
-// nothing. That is the whole fence. Notes recalled at the start of a conversation are
-// quoted and scanned, what a turn's own tools read comes back as tool output, and a
-// resumed session holds what earlier turns read. None of them hold a turn, or Boo Zero
-// could not choose a team when the person names none. The person decides by reading the
-// hand-off's card.
+// A person's message starts work at once on a team it named, with @Team or in its own
+// words. Boo Zero may choose a team the person did not name, but nothing starts there:
+// those hand-offs wait on a card the person accepts or turns down, a plan put to them
+// whatever that team's own switch says. Notes recalled at the start of a conversation,
+// what a turn's own tools read, and what a resumed session holds can all steer that
+// choice, and none of them is the person, so the person's yes is what starts it. A turn
+// reading a result has no person behind it, and its text may be quoting a teammate, so
+// it can go on only in the team whose result it read. So can a person's message that
+// carries a held result or what a team has been doing (the @Team block), plus any team
+// their own words name: that text is theirs to read, not theirs to have said. A message
+// that failed the person check starts nothing. That is the whole fence.
 //
 // Nothing goes quiet. Whatever a reply asked for that did not start, the chat says so
 // in plain words, and Boo Zero hears it on its next turn, since its session still holds
@@ -65,6 +66,7 @@ import {
   markReportUpsReplayed,
   NO_TEAM_REPORT_UP,
   pauseFor,
+  pendingQuestionsForTasks,
   recordReportUp,
   requestOpenTasks,
   settleReportUps,
@@ -85,6 +87,7 @@ import {
   looksLikeBrokenHandOff,
   MAX_REPORT_UP_REPLAYS,
   REFLECT_WINDOW_MS,
+  type ChatBatchAsk,
   type ChatHandOff,
   type ChatHandOffBatch,
   type ChatHandOffBatchOutcome,
@@ -555,8 +558,18 @@ function droppedNote(why: ChatHandOffDropped, target: { team: ActiveTeam; name: 
 const chatRoute = (opts: ChatTurnOptions): ((teamId: string) => ChatHandOffRoute) =>
   opts.routeFor ?? ((teamId) => getTeamOrchestrator(teamId, { mcpBaseUrl: opts.mcpBaseUrl }))
 
-/** Put a batch in front of a person, on a team that asks first. True when that settled
- *  it, and false when it should go out as hand-offs. */
+/** What the chat says for hand-offs to a team the person's message did not name. */
+function unnamedTeamNote(team: ActiveTeam, count: number): { person: string; heard: string } {
+  const them = count === 1 ? 'this hand-off waits' : `these ${count} hand-offs wait`
+  return {
+    person: `Your message did not name ${team.name}, so ${them} for your yes on the card. Nothing has started.`,
+    heard: `The person's message did not name ${team.name}, so ${count === 1 ? 'this hand-off has' : `these ${count} hand-offs have`} not started: ${count === 1 ? 'it waits' : 'they wait'} for the person's yes on a card. You will hear when they answer. Do not write ${count === 1 ? 'it' : 'them'} again.`,
+  }
+}
+
+/** Put a batch in front of a person, on a team that asks first, or with `ask` on any
+ *  team. True when that settled it, and false when it should go out as hand-offs. With
+ *  `ask` it is never false: what could not be asked about does not start. */
 async function askAboutBatch(
   db: ClawbooDb,
   turn: { agentId: string; sessionKey: string },
@@ -564,8 +577,18 @@ async function askAboutBatch(
   team: ActiveTeam,
   targets: Array<{ agentId: string; agentName: string; task: string }>,
   scope: Omit<ChatHandOffBatch, 'steps'>,
+  ask?: ChatBatchAsk,
 ): Promise<boolean> {
   const about = { by: targets[0]!.agentName, task: targets[0]!.task, team }
+  const cannotAsk = (): void =>
+    sayNotStarted(db, turn, {
+      ...about,
+      person: `Not handed off to ${team.name}: your message did not name it, and the hand-off could not be put in front of you to accept. Name ${team.name} in your message if you want it to go ahead.`,
+    })
+  if (ask && !route.handOffBatchFromChat) {
+    cannotAsk()
+    return true
+  }
   try {
     const outcome = await route.handOffBatchFromChat!({
       ...scope,
@@ -574,13 +597,22 @@ async function askAboutBatch(
         targetAgentName: t.agentName,
         task: t.task,
       })),
+      ...(ask ? { ask } : {}),
     })
-    if (outcome === 'not_asked') return false
+    if (outcome === 'not_asked') {
+      if (!ask) return false
+      cannotAsk()
+      return true
+    }
     if (outcome === 'asked')
       sayNotStarted(db, turn, {
         ...about,
-        person: `${team.name} asks before a batch of work starts, so these ${targets.length} hand-offs wait for your answer on the card. Nothing has started.`,
-        heard: `${team.name} asks a person before a batch of work starts, so these ${targets.length} hand-offs have not started. You will hear when the person answers. Do not write them again.`,
+        ...(ask
+          ? unnamedTeamNote(team, targets.length)
+          : {
+              person: `${team.name} asks before a batch of work starts, so these ${targets.length} hand-offs wait for your answer on the card. Nothing has started.`,
+              heard: `${team.name} asks a person before a batch of work starts, so these ${targets.length} hand-offs have not started. You will hear when the person answers. Do not write them again.`,
+            }),
       })
     else if (outcome !== 'told')
       sayNotStarted(db, turn, {
@@ -632,14 +664,31 @@ const wordsOf = (text: string): string =>
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
 
-/** The teams a person's own words name, as whole words. */
+/** The teams a person's own words name, as whole words. A name standing inside a longer
+ *  team's name belongs to that team: "have Growth Ops look" names Growth Ops, not Growth.
+ *  "Growth and Growth Ops" names both, and two teams with one name are both named. */
 function teamsNamedInWords(db: ClawbooDb, words: string): string[] {
   const said = ` ${wordsOf(words)} `
-  return activeTeams(db)
-    .filter((team) => {
-      const name = wordsOf(team.name)
-      return name !== '' && said.includes(` ${name} `)
-    })
+  const named = activeTeams(db)
+    .map((team) => ({ id: team.id, name: wordsOf(team.name) }))
+    .filter((team) => team.name !== '')
+  // Where each name stands in the words, as [start, end) of the name itself.
+  const places = new Map<string, Array<[number, number]>>()
+  for (const { name } of named) {
+    if (places.has(name)) continue
+    const at: Array<[number, number]> = []
+    const needle = ` ${name} `
+    for (let i = said.indexOf(needle); i !== -1; i = said.indexOf(needle, i + 1))
+      at.push([i + 1, i + 1 + name.length])
+    places.set(name, at)
+  }
+  const insideLonger = (name: string, [start, end]: [number, number]): boolean =>
+    [...places].some(
+      ([other, at]) =>
+        other.length > name.length && at.some(([os, oe]) => os <= start && end <= oe),
+    )
+  return named
+    .filter((team) => (places.get(team.name) ?? []).some((at) => !insideLonger(team.name, at)))
     .map((team) => team.id)
 }
 
@@ -704,12 +753,20 @@ export async function startHandOffsFromReply(
       : {}
   const parentIn = (team: ActiveTeam): string | null =>
     params.readingRequest?.teamId === team.id ? params.readingRequest.mainTaskId : null
+  // The teams the person's own message named: with @Team, or as words. A person's message
+  // starts work at once only there. What Boo Zero chose for itself waits for their yes,
+  // since a recalled note or a tool's read may have steered it.
+  const namedByPerson = new Set<string>(teamsNamedInWords(db, params.words ?? ''))
+  const namedOne = namedTeam(db, params.namedTeamId)
+  if (namedOne) namedByPerson.add(namedOne.id)
   // What is starting, per team, in the order the reply named them.
   const starting = new Map<
     string,
     {
       team: ActiveTeam
       targets: Array<{ agentId: string; agentName: string; task: string }>
+      /** The person did not name this team: its hand-offs wait for their yes. */
+      unnamed: boolean
     }
   >()
   for (const block of delegates.slice(0, MAX_HAND_OFFS_PER_REPLY)) {
@@ -747,7 +804,13 @@ export async function startHandOffsFromReply(
       sayNotStarted(db, turn, { ...started, person: refusal })
       continue
     }
-    const going = starting.get(target.team.id) ?? { team: target.team, targets: [] }
+    const going = starting.get(target.team.id) ?? {
+      team: target.team,
+      targets: [],
+      // A fenced turn reaches only teams it may; a person's own message reaches any, and
+      // asks first about one it did not name.
+      unnamed: fence === null && !namedByPerson.has(target.team.id),
+    }
     going.targets.push({
       agentId: target.agentId,
       agentName: target.agentName,
@@ -756,7 +819,7 @@ export async function startHandOffsFromReply(
     starting.set(target.team.id, going)
   }
 
-  for (const { team, targets } of starting.values()) {
+  for (const { team, targets, unnamed } of starting.values()) {
     if (stoppedSinceItEnded()) break
     const route = routeFor(team.id)
     const parentTaskId = parentIn(team)
@@ -769,6 +832,14 @@ export async function startHandOffsFromReply(
       ...person,
       ...message,
       ...(parentTaskId ? { parentTaskId } : {}),
+    }
+    // A team the person did not name: they answer on a card before any of it starts.
+    if (unnamed) {
+      await askAboutBatch(db, turn, route, team, targets, scope, {
+        reason: 'unnamed_team',
+        teamName: team.name,
+      })
+      continue
     }
     // Several tags at once, on a team that asks first: a person answers before any starts.
     if (targets.length >= 2 && route.handOffBatchFromChat) {
@@ -1453,8 +1524,22 @@ export function startChatReportUps(db: () => ClawbooDb, opts: ChatTurnOptions): 
 
 /** A hand-off task as the chat's stream sends it: what its card reads, in the shape of
  *  the team chat's `board` frame, with the team it went to. */
+/** What a card's open question carries to the chat: what its answer buttons need. The
+ *  payload stays the stored JSON text, which they read as the board's rows give it. */
+function questionFrame(
+  q: { id: string; kind: string; payload: string } | undefined,
+): { id: string; kind: string; payload: string } | null {
+  return q ? { id: q.id, kind: q.kind, payload: q.payload } : null
+}
+
 export function chatHandOffFrames(db: ClawbooDb, tasks: DbTask[]): Array<Record<string, unknown>> {
   const attention = attentionForTasks(db, tasks)
+  // The question a card waits on, so the chat can show its answer buttons where the
+  // person is: a hand-off to a team they did not name waits on one.
+  const questions = pendingQuestionsForTasks(
+    db,
+    tasks.filter((t) => t.waitingOn != null).map((t) => t.id),
+  )
   return tasks.map((t) => ({
     id: t.id,
     identifier: t.identifier,
@@ -1472,6 +1557,7 @@ export function chatHandOffFrames(db: ClawbooDb, tasks: DbTask[]): Array<Record<
     checkHeldSince: t.checkHeldSince,
     // A card holding a plan on a team that asks first reads as what it is.
     ...(isPlanHolder(t.sourceDelegationId) ? { planHolder: true } : {}),
+    openQuestion: questionFrame(questions.get(t.id)),
     createdAt: t.createdAt,
     updatedAt: t.updatedAt,
   }))
