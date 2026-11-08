@@ -240,19 +240,24 @@ function removeRecord(file: string): void {
  * Only when its engine is gone, so nothing else writes it. What is dropped (too
  * old, this process or its parent, no longer running) would be counted again on
  * every start the probe fails, and logged as reaped each time.
+ *
+ * Only by a rename, never by writing the file in place: a write that fails
+ * partway leaves a file no start can read, and an unreadable file is removed,
+ * which would lose the children it still names. If the rename cannot be done,
+ * the whole file stays, and its dropped entries are only counted again.
  */
 function keepOnly(file: string, record: RecordFile, kept: RuntimePidEntry[]): void {
   if (kept.length === record.children.length) return
   const body = JSON.stringify({ owner: record.owner, children: kept } satisfies RecordFile)
   try {
-    try {
-      writeFileSync(`${file}.tmp`, body, 'utf8')
-      renameSync(`${file}.tmp`, file)
-    } catch {
-      writeFileSync(file, body, 'utf8')
-    }
+    writeFileSync(`${file}.tmp`, body, 'utf8')
+    renameSync(`${file}.tmp`, file)
   } catch {
-    /* best effort: the whole file stays, as before */
+    try {
+      rmSync(`${file}.tmp`, { force: true })
+    } catch {
+      /* best effort */
+    }
   }
 }
 

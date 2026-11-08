@@ -932,4 +932,24 @@ describe('when the card opened', () => {
     ).toBe(true)
     expect(read()).toMatchObject({ fromAgentId: 'c', openedAt: 3_000_000 })
   })
+
+  it('opens with a new time when the same pair hits its cap again after a yes', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    const id = parked()
+    allowTeam()
+    const read = () => agentWakeCardsForTasks(db, [{ id, status: 'blocked' }]).get(id)
+    const fillTheHour = (at: number) => {
+      vi.setSystemTime(at)
+      for (let i = 0; i < MAX_AGENT_WAKES_PER_HOUR; i++) noteAgentWakeStarted(db, id, A_TO_B, at)
+      return asking(id, 'hourly_cap')
+    }
+    expect(fillTheHour(1_000_000)).toBe(true)
+    expect(read()?.openedAt).toBe(1_000_000)
+    // Letting them carry on starts the hour again and closes the card.
+    vi.setSystemTime(2_000_000)
+    expect(decideAgentWakes(db, id, 'job', LOCAL_PERSON).ok).toBe(true)
+    expect(read()).toBeUndefined()
+    expect(fillTheHour(3_000_000)).toBe(true)
+    expect(read()).toMatchObject({ kind: 'hourly_cap', ...A_TO_B, openedAt: 3_000_000 })
+  })
 })

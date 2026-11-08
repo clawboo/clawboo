@@ -405,13 +405,16 @@ const inQuotationMarks = (text: string, start: number, end: number): boolean =>
   OPENING_QUOTES.has(text[start - 1] ?? '') && CLOSING_QUOTES.has(text[end] ?? '')
 
 const WORD_CHAR_RE = /[\p{L}\p{N}]/u
+const DIGIT_RE = /\p{N}/u
 
 /**
  * Reads, for a tag at `[start, end)` in `scan`, where the quoted sentence holding it
- * closes on its line, or -1 when it stands in none: a quote opens before it on that
- * line and is still open, and closes after it. A straight double quote opens only where
- * no word runs into it, so the inch mark in `5"` opens nothing, and while one is open
- * the next one closes it. A straight apostrophe says nothing, so `'` is left out.
+ * closes on its line, or -1 when it stands in none: a quote opens before it on the line
+ * where it starts and is still open, and closes after it on the line where it ends. A
+ * straight double quote opens only where no word runs into it, and while one is open
+ * the next one closes it unless a digit runs into it: the inch mark in `5"` opens
+ * nothing and closes nothing. A curly apostrophe between two letters, as in `It’s`, is
+ * not a closing quote. A straight apostrophe says nothing, so `'` is left out.
  *
  * `scan` has tags and code blanked, so their quote marks count for nothing. Asked in
  * order along the text, it carries the state forward, so a reply is read once however
@@ -449,12 +452,18 @@ function quoteReader(scan: string): (start: number, end: number) => number {
         straight = false
         doubleOpen = doubleClose = singleOpen = singleClose = -1
       } else if (c === '"') {
-        if (straight) straight = false
-        else if (!WORD_CHAR_RE.test(scan[pos - 1] ?? '')) straight = true
+        const before = scan[pos - 1] ?? ''
+        if (straight) {
+          if (!DIGIT_RE.test(before)) straight = false
+        } else if (!WORD_CHAR_RE.test(before)) straight = true
       } else if (c === '“') doubleOpen = pos
       else if (c === '”') doubleClose = pos
       else if (c === '‘') singleOpen = pos
-      else if (c === '’') singleClose = pos
+      else if (
+        c === '’' &&
+        !(WORD_CHAR_RE.test(scan[pos - 1] ?? '') && WORD_CHAR_RE.test(scan[pos + 1] ?? ''))
+      )
+        singleClose = pos
     }
     const lineEnd = nextIndex('\n', end)
     let closesAt = -1
@@ -512,20 +521,29 @@ function shownOpenersWithNoClose(text: string, spans: readonly Span[]): Span[] {
   const quotedEnd = quoteReader(scan)
   const mentions: Span[] = []
   let cursor = 0
+  // Openers come in order, so the first closer after each one, and the code or quote
+  // span that could hold it, only move forward.
+  let next = 0
+  const sorted = [...spans].sort((a, b) => a[0] - b[0])
+  let inSpan = 0
   for (const open of text.matchAll(DELEGATE_OPEN_RE)) {
     const at = open.index ?? 0
     if (at < cursor) continue
     const bodyStart = at + open[0].length
-    const close = closes.find((c) => (c.index ?? 0) >= bodyStart)
-    // With no closer left, nothing after it can pair.
-    if (!close) break
+    while (next < closes.length && (closes[next]!.index ?? 0) < bodyStart) next += 1
+    const close = closes[next]
+    while (inSpan < sorted.length && sorted[inSpan]![1] <= at) inSpan += 1
+    const span = sorted[inSpan]
     const shownUntil =
-      spans.find(([start, end]) => at >= start && at < end)?.[1] ??
+      (span && span[0] <= at ? span[1] : undefined) ??
       (inQuotationMarks(text, at, bodyStart) ? bodyStart + 1 : quotedEnd(at, bodyStart))
-    if (shownUntil !== -1 && (close.index ?? 0) >= shownUntil) {
+    // With no closer left it pairs with nothing, but one that is shown is still only a
+    // mention, not a hand-off that could not be read.
+    if (shownUntil !== -1 && (!close || (close.index ?? 0) >= shownUntil)) {
       mentions.push([at, bodyStart])
       continue
     }
+    if (!close) continue
     cursor = (close.index ?? 0) + close[0].length
   }
   return mentions

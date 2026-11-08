@@ -502,11 +502,31 @@ describe('boot reap of runtime children', () => {
     const second = reap({ kill: () => {}, startTimes: cannotCheck })
     expect(second).toMatchObject({ unverified: 1, expired: 0, killed: 0 })
 
+    // The stand-in, so a slow `ps` cannot leave the child unchecked here; the real
+    // probe has its own tests below.
     const killed: number[] = []
-    const third = reap({ kill: (pid) => killed.push(pid) })
+    const third = reap({ kill: (pid) => killed.push(pid), startTimes: startedJustNow })
     expect(killed).toEqual([child])
     expect(third.killed).toBe(1)
     expect(existsSync(file)).toBe(false)
+  })
+
+  it('leaves the whole file as it was when it cannot be cut down by a rename', () => {
+    // Writing it in place instead could leave half a file, which the next start
+    // cannot read and removes, losing the child it still names.
+    const child = spawnSleeper()
+    const record = {
+      owner: goneEngine(),
+      children: [
+        { pid: child, startedAt: Date.now() },
+        { pid: DEAD_PID, startedAt: Date.now() },
+      ],
+    }
+    const file = writeEngineFile('gone.json', record)
+    mkdirSync(`${file}.tmp`)
+    const cannotCheck = () => ({ ok: false, times: new Map<number, number>(), error: 'timed out' })
+    expect(reap({ kill: () => {}, startTimes: cannotCheck })).toMatchObject({ unverified: 1 })
+    expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual(record)
   })
 
   it(

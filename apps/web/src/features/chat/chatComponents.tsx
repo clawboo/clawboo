@@ -64,6 +64,7 @@ import { parseToolEntry } from './parseToolEntry'
 import { splitAssistantText } from './splitAssistantText'
 import {
   stripActionableHandOffs,
+  findPlanBlocks,
   stripPlanBlocks,
   stripDelegationBlocks,
 } from '@/features/group-chat/delegationTags'
@@ -1005,11 +1006,17 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   const rawText = block.assistant?.text ?? ''
   const shownText = isRelay ? stripRelayPrefix(rawText) : rawText
   // A tag in code or a quote is only shown, here as in a chat that hands off, so it stays
-  // as written and gets no note.
+  // as written and gets no note. It is read in the reply as written, as the streaming
+  // card reads it: taking plans out first can join a quote's lines.
   const segments = useMemo(
     () =>
       handOffs === 'not-handed-off'
-        ? splitAssistantText(stripPlanBlocks(shownText), { actionableOnly: true })
+        ? splitAssistantText(shownText, { actionableOnly: true }).flatMap((segment) => {
+            if (segment.kind !== 'prose' || findPlanBlocks(segment.text).length === 0)
+              return [segment]
+            const text = stripPlanBlocks(segment.text)
+            return text ? [{ ...segment, text }] : []
+          })
         : [],
     [handOffs, shownText],
   )
