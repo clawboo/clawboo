@@ -1,9 +1,19 @@
 // Moving a task checkout keeps git's links to it: `git worktree move` for an
 // ordinary checkout, a rename plus `git worktree repair` for one git refuses to
-// move (a locked one). The result is checked on what git lists.
+// move (a locked one). One with submodules stays where it is. The result is
+// checked on what git lists.
 
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rename, symlink, writeFile } from 'node:fs/promises'
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -95,7 +105,44 @@ describe('relocateWorktree', () => {
     const plain = path.join(root, 'plain')
     await mkdir(plain, { recursive: true })
     expect(await isCheckoutAt(repo, plain)).toBe(false)
-    expect(await isCheckoutAt(repo, path.join(from, 'sub'))).toBe(false)
+    const sub = path.join(from, 'sub')
+    await mkdir(sub)
+    expect(await isCheckoutAt(repo, sub)).toBe(false)
     expect((await listWorktreePaths(repo)).length).toBe(2)
+  })
+
+  it('isCheckoutAt is false for a checkout of another repository at a path git still lists', async () => {
+    const at = await checkout('t6')
+    // Removed without git knowing, so git lists the path until a prune.
+    await rm(at, { recursive: true, force: true })
+    const other = await initRepo()
+    await rename(other, at)
+    expect(await worktreeRegistration(repo, at)).toBe('registered')
+    const top = (await git(at, ['rev-parse', '--show-toplevel'])).trim()
+    expect(await realpath(top)).toBe(await realpath(at))
+    expect(await isCheckoutAt(repo, at)).toBe(false)
+  })
+
+  it('leaves a checkout with submodules where it is', async () => {
+    const lib = await initRepo()
+    try {
+      await git(repo, ['-c', 'protocol.file.allow=always', 'submodule', 'add', lib, 'lib'])
+      await git(repo, ['commit', '--no-verify', '-m', 'add lib'])
+      const from = await checkout('t7')
+      await git(from, ['-c', 'protocol.file.allow=always', 'submodule', 'update', '--init'])
+      const to = path.join(root, 'new', 't7')
+      await mkdir(path.dirname(to), { recursive: true })
+
+      const r = await relocateWorktree(repo, from, to)
+      expect(r.ok).toBe(false)
+      expect(r.ok ? '' : r.reason).toMatch(/submodules/)
+      expect(existsSync(to)).toBe(false)
+      expect(await isCheckoutAt(repo, from)).toBe(true)
+      expect(await readFile(path.join(from, 'work.txt'), 'utf8')).toBe('uncommitted\n')
+      // The submodule still works where it is.
+      expect(await git(path.join(from, 'lib'), ['status', '--porcelain'])).toBe('')
+    } finally {
+      await cleanup(lib)
+    }
   })
 })

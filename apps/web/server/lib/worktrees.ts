@@ -78,6 +78,7 @@ import {
   realPathOf,
   removeOwnerMarker,
   repoHash,
+  reviewsRoot,
   workDirSpellings,
   workRoot,
   writeOwnerMarker,
@@ -162,9 +163,9 @@ function gcRootsForRepo(repoPath: string): string[] {
 }
 
 /** Detached review checkouts live OUTSIDE the user repo too (the critic gate),
- *  in the work folder beside the task checkouts. */
+ *  in this install's folder of the work folder's reviews. */
 function reviewRootForRepo(repoPath: string): string {
-  return path.join(workRoot('reviews'), repoHash(repoPath))
+  return path.join(reviewsRoot(getDb()), repoHash(repoPath))
 }
 
 function scaffoldFromTask(db: ClawbooDb, task: DbTask): TaskScaffoldInput {

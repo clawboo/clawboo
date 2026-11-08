@@ -103,7 +103,7 @@ Everything Clawboo creates in the work folder is readable only by your user acco
 
 The data folder keeps the rest: the database, the key vault, the settings, the runtime homes (`runtimes/`), the browser profiles, connector state, and `team-folder-history/`, the work check's history of each team folder.
 
-Keeping the work apart removes the short relative path from an agent's folder to your data: `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. It is not a boundary. Agents still run as your user account and can open `~/.clawboo` by its full path; see [What agents can do](/concepts/permissions).
+Keeping the work apart removes the short relative path from an agent's folder to your data: `../..` from a team folder no longer reaches the database, and neither does a tool that walks up parent folders. That holds only for work in the work folder. When the work folder cannot be created and the install keeps the old layout, or the move below keeps a folder at its old place, that folder is still inside the data folder and `../..` from it does reach the data. It is not a boundary either way. Agents still run as your user account and can open `~/.clawboo` by its full path; see [What agents can do](/concepts/permissions).
 
 ### Move older work into it
 
@@ -113,8 +113,9 @@ Older versions kept team folders in `~/.clawboo/workspaces` and task checkouts i
 - **A link at each old path.** `~/.clawboo/workspaces/<team id>` still leads to the folder, for older versions and for tools that saved the path.
 - **Uncommitted work is saved first.** Before a checkout moves, Clawboo commits its uncommitted work on the task's branch (`clawboo: save work before moving task <id>`), the same kind of commit a pause makes. The checkout moves with `git worktree move`, or, when it is locked, with a rename and `git worktree repair`, which needs git 2.30 or later. The board's recorded paths change to the new place.
 - **Paused tasks move too.** A paused task's record names the new place, and resuming the task rebuilds its checkout in the work folder.
-- **Review checkouts stay.** Clawboo does not move them. New ones go in the work folder.
-- **A crash is safe.** Every step is written to a journal before it happens, so a crash or a kill at any point is finished or undone at the next start.
+- **Review checkouts stay.** Clawboo does not move them. New ones go in the work folder, in `reviews/` under a folder named for this install, since two installs that share a work folder can review the same commit.
+- **A crash is safe.** Every step is written to a journal before it happens, so a crash or a kill at any point is finished or undone at the next start. When a folder has moved but the link at its old path cannot be made, the move still counts: runs use the new path, and the journal notes the missing link.
+- **One server moves at a time.** A second server started on the same data folder waits for the first one's move to end, answering `migrating` meanwhile, and then starts.
 
 Claude Code files its saved sessions under the folder they ran in. After a team folder moves, Clawboo drops the session ids it saved for Claude Code agents (1:1 chat, team chat and task pointers), and after a checkout moves, the session id in its handoff. Their next turn starts a fresh session with the brief and the chat history. Codex, Hermes and Clawboo Native agents keep their sessions.
 
@@ -131,7 +132,7 @@ See [Troubleshooting](/help/troubleshooting#work-folder-kept-at-its-old-place) f
 
 ### Change the work folder
 
-Stop Clawboo, set `CLAWBOO_WORK_DIR` to the new folder, and start it again. Clawboo treats the change as a move: at that start, this install's team folders and recorded checkouts move from the previous work folder to the new one, with links left at the previous paths. The same rules apply, so work on another volume stays in the previous folder and keeps working there.
+Stop Clawboo, set `CLAWBOO_WORK_DIR` to the new folder, and start it again. Clawboo treats the change as a move: at that start, this install's team folders and recorded checkouts move from the previous work folder to the new one, with links left at the previous paths. The same rules apply, so work on another volume stays in the previous folder and keeps working there. A previous work folder that is not there at that start, such as one on a drive that is not mounted, stays on record with the warning `Work folder: the previous work folder is not there`, and its team folders move at the first start that finds it again. Changing back to a work folder used before works the same way: the links the earlier move left there are replaced by the folders.
 
 ### While the move runs
 
@@ -141,7 +142,7 @@ The server listens while it moves folders, so a service manager or a monitor see
 - Every other request answers `503` with `Retry-After: 2` and `{ "error": "Clawboo is moving its work folders. Try again in a moment.", "status": "migrating" }`.
 - A WebSocket connection is refused with `503`.
 
-These answers come after the access gate, the same as at any other time. The move usually takes milliseconds per folder.
+The HTTP answers come after the access gate, the same as at any other time. A WebSocket upgrade is refused before the origin and access checks. The move usually takes milliseconds per folder.
 
 ### When Clawboo refuses to start
 
@@ -151,11 +152,11 @@ The server exits at startup when the work folder is the data folder, sits inside
 CONFIG: refusing to start. CLAWBOO_WORK_DIR (/srv/clawboo/work) must be outside Clawboo's data folder (/srv/clawboo). Set CLAWBOO_WORK_DIR to a folder outside it.
 ```
 
-When the data folder is inside the work folder, the message says the reverse: `Clawboo's data folder (<path>) must be outside the work folder (<path>). Set CLAWBOO_WORK_DIR to a folder that does not contain it.` The server also refuses to start when it cannot create a `CLAWBOO_WORK_DIR` you set (`CLAWBOO_WORK_DIR (<path>) cannot be used: <reason>`).
+When the data folder is inside the work folder, the message says the reverse: `Clawboo's data folder (<path>) must be outside the work folder (<path>). Set CLAWBOO_WORK_DIR to a folder that does not contain it.` The server also refuses to start when it cannot create or write to a `CLAWBOO_WORK_DIR` you set (`CLAWBOO_WORK_DIR (<path>) cannot be used: <reason>`), and when `teams/`, `worktrees/` or `reviews/` inside the work folder is a link (`<path> is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`). On Windows and macOS the comparison ignores case, since their file systems usually do.
 
 ### When the work folder cannot be created
 
-When `CLAWBOO_WORK_DIR` is not set and Clawboo cannot create the default work folder, as in a container whose data folder is a volume under a root-owned `/`, it logs a warning and keeps the old layout: new work stays in the data folder (`workspaces/`, `worktrees/` and `reviews/`), and nothing moves. Set `CLAWBOO_WORK_DIR` to a folder Clawboo can create, such as a second volume in a container, and the next start moves the work there.
+When `CLAWBOO_WORK_DIR` is not set and Clawboo cannot create or write to the default work folder, as in a container whose data folder is a volume under a root-owned `/`, it logs a warning and keeps the old layout: new work stays in the data folder (`workspaces/`, `worktrees/` and `reviews/`), and nothing moves. Set `CLAWBOO_WORK_DIR` to a folder Clawboo can create, such as a second volume in a container, and the next start moves the work there.
 
 ### Roll back to 0.6.x
 
@@ -297,7 +298,7 @@ clawboo stop && rm -rf ~/.clawboo
 clawboo
 ```
 
-Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs and the browser profiles. It does not touch `~/.openclaw` (see [What a reset leaves behind](#what-a-reset-leaves-behind)) or the work folder. A new install's cleanup never removes the old team folders and worktrees there, because its board does not record them. To remove them too, delete the work folder (`rm -rf ~/clawboo-work`, with the server stopped), which loses any uncommitted work in those worktrees, then run `git worktree prune` in each repository.
+Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs and the browser profiles. It does not touch `~/.openclaw` (see [What a reset leaves behind](#what-a-reset-leaves-behind)) or the work folder. A new install's cleanup never removes the old team folders and worktrees there, because its board does not record them. To remove them too, delete the work folder (`rm -rf ~/clawboo-work`, with the server stopped), which loses any uncommitted work in those worktrees, then run `git worktree prune` in each repository. Do that only when no other install uses the same work folder (through `CLAWBOO_WORK_DIR`): deleting it would remove that install's team folders and checkouts too. A shared folder is cleaned by hand, removing only the reset install's team folders and the checkouts whose `.<task id>.owner` file holds its id.
 
 ## Two database paths
 

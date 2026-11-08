@@ -7,18 +7,23 @@
 // `appendFile` would follow the link and read or write that file instead.
 // These helpers open the file itself and refuse it unless it is a regular file
 // with no other name:
-// - `O_NOFOLLOW` refuses a link as the file (Windows has no such flag; there a
-//   link needs rights an agent does not normally have);
+// - before the open, `lstat` on the name must show a regular file, not a link;
+// - the open adds `O_NOFOLLOW` where the platform has it, so a link put at the
+//   name after that check fails the open (Windows has no such flag, and the
+//   check after the open covers it there);
 // - `O_NONBLOCK` keeps a named pipe swapped in from hanging the open;
 // - after the open, `fstat` on the handle must show a regular file with one
-//   link, so a hard link to another file is refused too. The handle is then the
-//   file that was checked, whatever happens to the name.
+//   link and the same file `lstat` saw (device and file id), so a hard link to
+//   another file, or anything swapped in between the two, is refused too. The
+//   handle is then the file that was checked, whatever happens to the name.
+// A missing file is created with `O_EXCL`, which fails on anything at the name,
+// a link that points nowhere included, rather than following it.
 // A write goes to a new file of a random name that is then renamed over the
 // old one, so whatever was at the name is replaced, never written through.
 
 import { randomBytes } from 'node:crypto'
-import { constants } from 'node:fs'
-import { open, rename, rm, type FileHandle } from 'node:fs/promises'
+import { constants, type BigIntStats } from 'node:fs'
+import { lstat, open, rename, rm, type FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 
 const NOFOLLOW = constants.O_NOFOLLOW ?? 0
@@ -46,18 +51,42 @@ function fileIn(dir: string, name: string): string {
   return path.join(dir, name)
 }
 
-async function assertPlainFile(handle: FileHandle, filePath: string): Promise<number> {
-  const st = await handle.stat()
+/** What is at `filePath` itself, not following a link there. Throws `lstat`'s
+ *  error (`ENOENT` when nothing is), or {@link UnsafeTaskFileError} unless it
+ *  is a regular file. */
+async function plainFileAt(filePath: string): Promise<BigIntStats> {
+  const st = await lstat(filePath, { bigint: true })
+  if (st.isSymbolicLink()) throw new UnsafeTaskFileError(filePath, 'it is a link')
   if (!st.isFile()) throw new UnsafeTaskFileError(filePath, 'it is not a regular file')
-  if (st.nlink > 1) {
+  return st
+}
+
+function isMissing(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException).code === 'ENOENT'
+}
+
+/** The open file must be a regular file with one name and, when `seen` is
+ *  given, the file `lstat` found at the name before the open. Returns its size. */
+async function assertPlainFile(
+  handle: FileHandle,
+  filePath: string,
+  seen: BigIntStats | null,
+): Promise<bigint> {
+  const st = await handle.stat({ bigint: true })
+  if (!st.isFile()) throw new UnsafeTaskFileError(filePath, 'it is not a regular file')
+  if (st.nlink > 1n) {
     throw new UnsafeTaskFileError(filePath, 'it has another name (a hard link)')
+  }
+  if (seen && (st.dev !== seen.dev || st.ino !== seen.ino)) {
+    throw new UnsafeTaskFileError(filePath, 'it was replaced while it was being opened')
   }
   return st.size
 }
 
 /**
- * The UTF-8 text of `name` directly under `dir`. Throws the open's own error
- * (`ENOENT` when it is missing, `ELOOP` for a link) or {@link UnsafeTaskFileError}.
+ * The UTF-8 text of `name` directly under `dir`. Throws `ENOENT` when it is
+ * missing, {@link UnsafeTaskFileError} for a link or anything else refused, or
+ * the open's own error (`ELOOP` for a link put at the name meanwhile).
  */
 export async function readTaskFile(
   dir: string,
@@ -65,12 +94,14 @@ export async function readTaskFile(
   maxBytes: number = TASK_FILE_MAX_BYTES,
 ): Promise<string> {
   const filePath = fileIn(dir, name)
+  const seen = await plainFileAt(filePath)
   const handle = await open(filePath, constants.O_RDONLY | NOFOLLOW | NONBLOCK)
   try {
-    const size = await assertPlainFile(handle, filePath)
-    if (size > maxBytes) {
+    const big = await assertPlainFile(handle, filePath, seen)
+    if (big > BigInt(maxBytes)) {
       throw new UnsafeTaskFileError(filePath, `it is larger than ${maxBytes} bytes`)
     }
+    const size = Number(big)
     const buf = Buffer.alloc(size)
     const { bytesRead } = size > 0 ? await handle.read(buf, 0, size, 0) : { bytesRead: 0 }
     return buf.subarray(0, bytesRead).toString('utf8')
@@ -93,14 +124,15 @@ export async function replaceTaskFile(dir: string, name: string, content: string
     0o666,
   )
   try {
-    await handle.writeFile(content, 'utf8')
-  } finally {
-    await handle.close()
-  }
-  try {
+    try {
+      await handle.writeFile(content, 'utf8')
+    } finally {
+      await handle.close()
+    }
     await rename(temp, target)
   } catch (err) {
-    await rm(temp, { force: true })
+    // Not left behind in the agent's folder; the first error is the one thrown.
+    await rm(temp, { force: true }).catch(() => undefined)
     throw err
   }
 }
@@ -112,13 +144,29 @@ export async function replaceTaskFile(dir: string, name: string, content: string
  */
 export async function appendTaskFile(dir: string, name: string, content: string): Promise<void> {
   const filePath = fileIn(dir, name)
-  const handle = await open(
-    filePath,
-    constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | NOFOLLOW | NONBLOCK,
-    0o666,
-  )
+  const flags = constants.O_WRONLY | constants.O_APPEND | NOFOLLOW | NONBLOCK
+  let seen: BigIntStats | null
   try {
-    await assertPlainFile(handle, filePath)
+    seen = await plainFileAt(filePath)
+  } catch (err) {
+    if (!isMissing(err)) throw err
+    seen = null
+  }
+  let handle: FileHandle
+  if (seen) {
+    handle = await open(filePath, flags)
+  } else {
+    try {
+      handle = await open(filePath, flags | constants.O_CREAT | constants.O_EXCL, 0o666)
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+      // Something was put at the name since the check: look at it once more.
+      seen = await plainFileAt(filePath)
+      handle = await open(filePath, flags)
+    }
+  }
+  try {
+    await assertPlainFile(handle, filePath, seen)
     await handle.write(content, null, 'utf8')
   } finally {
     await handle.close()

@@ -5,10 +5,17 @@
 // "what's done / what's broken / what's next" purely from the worktree's
 // system-of-record, with no access to chat history or the board UI.
 
+import path from 'node:path'
+
 import { z } from 'zod'
 
 import { SOR_FILES } from './scaffold'
-import { readTaskFile, replaceTaskFile } from './taskFiles'
+import {
+  readTaskFile,
+  replaceTaskFile,
+  TASK_FILE_MAX_BYTES,
+  UnsafeTaskFileError,
+} from './taskFiles'
 import type { ResumeState } from './types'
 
 /**
@@ -76,7 +83,10 @@ export type AgentHandoffInput = Omit<AgentHandoff, 'timestamp'> & { timestamp?: 
 
 /** Write `AGENT_HANDOFF.json` at the worktree root (the clock-out artifact). The
  *  file is replaced, never written through: the agent owns the folder and can
- *  put a link at the name (see `taskFiles.ts`). */
+ *  put a link at the name (see `taskFiles.ts`). Throws
+ *  {@link UnsafeTaskFileError}, writing nothing, for a handoff larger than
+ *  {@link TASK_FILE_MAX_BYTES}: {@link readHandoff} would refuse it, and the
+ *  next pickup would start without it. */
 export async function writeHandoff(
   worktreePath: string,
   input: AgentHandoffInput,
@@ -85,7 +95,15 @@ export async function writeHandoff(
     ...input,
     timestamp: input.timestamp ?? new Date().toISOString(),
   })
-  await replaceTaskFile(worktreePath, SOR_FILES.handoff, JSON.stringify(handoff, null, 2) + '\n')
+  const text = JSON.stringify(handoff, null, 2) + '\n'
+  const bytes = Buffer.byteLength(text, 'utf8')
+  if (bytes > TASK_FILE_MAX_BYTES) {
+    throw new UnsafeTaskFileError(
+      path.join(worktreePath, SOR_FILES.handoff),
+      `it would be ${bytes} bytes, more than the ${TASK_FILE_MAX_BYTES} a read takes in`,
+    )
+  }
+  await replaceTaskFile(worktreePath, SOR_FILES.handoff, text)
   return handoff
 }
 

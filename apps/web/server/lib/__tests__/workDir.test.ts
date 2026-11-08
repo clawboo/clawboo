@@ -5,7 +5,7 @@
 // makes there, which never writes through a link.
 
 import { existsSync, realpathSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -23,6 +23,8 @@ import {
 } from '../workDir'
 
 const isWindows = process.platform === 'win32'
+const isRoot = process.getuid?.() === 0
+const foldsCase = process.platform === 'win32' || process.platform === 'darwin'
 
 let base: string
 const env = (vars: Record<string, string>): NodeJS.ProcessEnv => ({ HOME: base, ...vars })
@@ -65,6 +67,27 @@ describe('workDirRefusal', () => {
       )
     },
   )
+
+  it.skipIf(!foldsCase)(
+    'refuses a work folder inside a data folder that is not made yet, spelled in another case',
+    () => {
+      const vars = env({
+        CLAWBOO_HOME: path.join(base, 'fresh', 'Data'),
+        CLAWBOO_WORK_DIR: path.join(base, 'fresh', 'data', 'work'),
+      })
+      expect(workDirRefusal(vars)).toMatch(/must be outside/)
+    },
+  )
+
+  it.skipIf(isWindows)('refuses a work folder whose teams folder is a link', async () => {
+    const work = path.join(base, 'work')
+    await mkdir(path.join(base, 'elsewhere'), { recursive: true })
+    await mkdir(work)
+    await symlink(path.join(base, 'elsewhere'), path.join(work, 'teams'))
+    expect(workDirRefusal(env({ CLAWBOO_HOME: data(), CLAWBOO_WORK_DIR: work }))).toMatch(
+      /teams is a link/,
+    )
+  })
 })
 
 describe('prepareWorkDir', () => {
@@ -95,6 +118,24 @@ describe('prepareWorkDir', () => {
     expect(r).toMatchObject({ ok: false, explicit: true })
   })
 
+  it.skipIf(isWindows || isRoot)(
+    'refuses a CLAWBOO_WORK_DIR that is there but cannot be written',
+    async () => {
+      const dir = path.join(base, 'read-only')
+      await mkdir(dir)
+      await chmod(dir, 0o500)
+      try {
+        expect(prepareWorkDir(env({ CLAWBOO_WORK_DIR: dir }))).toMatchObject({
+          ok: false,
+          explicit: true,
+        })
+        expect(workLayout()).toBe('data')
+      } finally {
+        await chmod(dir, 0o700)
+      }
+    },
+  )
+
   it.skipIf(isWindows)('uses a linked work folder by its real path', async () => {
     await mkdir(path.join(base, 'real-work'))
     await symlink(path.join(base, 'real-work'), path.join(base, 'linked-work'))
@@ -114,15 +155,21 @@ describe('the ownership marker', () => {
     expect(path.basename(ownerMarkerPath(root, 't1'))).toBe('.t1.owner')
   })
 
-  it.skipIf(isWindows)('replaces a link at the marker name, never writing its target', async () => {
+  it('replaces a link at the marker name, never reading or writing its target', async (ctx) => {
     const root = path.join(base, 'worktrees', 'abc')
     await mkdir(root, { recursive: true })
     const db = path.join(base, 'clawboo.db')
-    await writeFile(db, 'database')
-    await symlink(db, ownerMarkerPath(root, 't1'))
+    await writeFile(db, 'install-z')
+    try {
+      await symlink(db, ownerMarkerPath(root, 't1'), 'file')
+    } catch (err) {
+      // Windows without the right to make links: nothing to test there.
+      if (isWindows && (err as NodeJS.ErrnoException).code === 'EPERM') return ctx.skip()
+      throw err
+    }
     expect(readOwnerMarker(root, 't1')).toBeNull()
     await writeOwnerMarker(root, 't1', 'install-a')
-    expect(await readFile(db, 'utf8')).toBe('database')
+    expect(await readFile(db, 'utf8')).toBe('install-z')
     expect(readOwnerMarker(root, 't1')).toBe('install-a')
     expect(existsSync(db)).toBe(true)
   })

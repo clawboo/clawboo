@@ -11,7 +11,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -28,15 +28,21 @@ import {
   getTask,
   getWorkspaceForTask,
   setSetting,
+  settings,
   tasks,
   teams,
   workspaces,
 } from '@clawboo/db'
-import { isWorktreeRegistered, readHandoff, writeHandoff } from '@clawboo/worktrees'
+import {
+  isWorktreeRegistered,
+  readHandoff,
+  writeHandoff,
+  type AgentHandoffInput,
+} from '@clawboo/worktrees'
 
 import { getDb, getDbPath, resetDb } from '../db'
 import { ensureTeamWorkdir, teamWorkdirPath } from '../runtimes/teamWorkdir'
-import { installId, readOwnerMarker, setWorkLayout } from '../workDir'
+import { installId, readOwnerMarker, reviewsRoot, setWorkLayout } from '../workDir'
 import { setWorkDirJournal, workDirJournal } from '../workDirJournal'
 import {
   runWorkDirMove,
@@ -53,6 +59,7 @@ import {
 } from '../worktrees'
 
 const isWindows = process.platform === 'win32'
+const isRoot = process.getuid?.() === 0
 const execFileAsync = promisify(execFile)
 async function git(cwd: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', args, { cwd, windowsHide: true })
@@ -612,5 +619,220 @@ describe.skipIf(isWindows)('a kill at every step of a team folder move', () => {
     expect(await readFile(path.join(work, 'teams', 'T1', 'notes.md'), 'utf8')).toBe('notes of T1\n')
     const item = workDirJournal().items.find((i) => i.kind === 'team')
     expect(item?.state).toBe('conflict')
+  })
+})
+
+// ── Review follow-ups ───────────────────────────────────────────────────────
+
+const LOCK = 'work-dir-migration-lock'
+/** A lock as a live process that is not this one writes it. */
+const foreignLock = (): string =>
+  JSON.stringify({ pid: process.ppid, at: Date.now(), token: 'another-process' })
+
+const withSession: AgentHandoffInput = {
+  handoffFrom: 'cc',
+  runtime: 'claude-code',
+  completedSubtasks: [],
+  brokenOrUnverified: [],
+  nextBestStep: 'go on',
+  commands: { init: './init.sh', verify: '', start: '' },
+  evidence: {},
+  warnings: [],
+  nativeSessionId: 'h-cc',
+}
+
+function claudeCodeAgentWithSession(): void {
+  const db = getDb()
+  const now = Date.now()
+  db.insert(agents)
+    .values({
+      id: 'cc',
+      name: 'cc',
+      runtime: 'claude-code',
+      teamId: 'T1',
+      gatewayId: 'cc',
+      createdAt: now,
+      updatedAt: now,
+    })
+    .run()
+  setSetting(db, 'native-chat-session:cc', 's-cc')
+}
+
+const killAt =
+  (kind: 'team' | 'worktree', stop: WorkDirMoveStep) =>
+  (item: { kind: string }, s: WorkDirMoveStep): void => {
+    if (item.kind === kind && s === stop) throw new Error('killed')
+  }
+
+describe('the work folder move, after review', () => {
+  it('keeps a previous work folder that is out of reach on record, and moves from it once it is back', async () => {
+    await teamFolderWithFiles('T1')
+    expect(await boot()).toMatchObject({ moved: 1 })
+    // The first work folder goes out of reach, as an unmounted drive does.
+    const away = path.join(base, 'away')
+    await rename(work, away)
+    const work2 = path.join(base, 'work-2')
+    process.env['CLAWBOO_WORK_DIR'] = work2
+    await boot()
+    expect(getSetting(getDb(), 'work-dir')).toBe(work)
+
+    await rename(away, work)
+    expect(await boot()).toMatchObject({ moved: 1, conflicts: 0 })
+    expect(teamWorkdirPath('T1')).toBe(path.join(work2, 'teams', 'T1'))
+    expect(await readFile(path.join(work2, 'teams', 'T1', 'notes.md'), 'utf8')).toBe(
+      'notes of T1\n',
+    )
+    expect(getSetting(getDb(), 'work-dir')).toBe(work2)
+  })
+
+  it('moves work back to a work folder it came from, replacing its own links there', async () => {
+    await teamFolderWithFiles('T1')
+    const { taskId, oldPath } = await taskWithWork()
+    expect(await boot()).toMatchObject({ moved: 2 })
+    const firstPath = newPathOf(taskId, oldPath)
+    process.env['CLAWBOO_WORK_DIR'] = path.join(base, 'work-2')
+    expect(await boot()).toMatchObject({ moved: 2 })
+
+    process.env['CLAWBOO_WORK_DIR'] = work
+    expect(await boot()).toMatchObject({ moved: 2, left: 0, conflicts: 0 })
+    const team = path.join(work, 'teams', 'T1')
+    expect(teamWorkdirPath('T1')).toBe(team)
+    expect(lstatSync(team).isSymbolicLink()).toBe(false)
+    expect(await readFile(path.join(team, 'notes.md'), 'utf8')).toBe('notes of T1\n')
+    expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(firstPath)
+    expect(lstatSync(firstPath).isSymbolicLink()).toBe(false)
+    expect(await isWorktreeRegistered(repo, firstPath)).toBe(true)
+    expect(await readFile(path.join(firstPath, 'work.txt'), 'utf8')).toBe('uncommitted work\n')
+  })
+
+  it.skipIf(isWindows || isRoot)(
+    'finishes a team folder move whose link at the old path cannot be made',
+    async () => {
+      const team = await teamFolderWithFiles('T1')
+      await expect(boot({ afterStep: killAt('team', 'renamed') })).rejects.toBeInstanceOf(
+        WorkDirMoveInterrupted,
+      )
+      const parent = path.dirname(team)
+      await chmod(parent, 0o500)
+      try {
+        expect(await boot()).toMatchObject({ ran: true })
+      } finally {
+        await chmod(parent, 0o700)
+      }
+      const item = workDirJournal().items.find((i) => i.kind === 'team')
+      expect(item?.state).toBe('moved')
+      expect(item?.note).toMatch(/no link/)
+      // Runs go where the files are, not to an empty old place.
+      expect(teamWorkdirPath('T1')).toBe(path.join(work, 'teams', 'T1'))
+      expect(await readFile(path.join(work, 'teams', 'T1', 'notes.md'), 'utf8')).toBe(
+        'notes of T1\n',
+      )
+    },
+  )
+
+  it.skipIf(isWindows)(
+    "drops a checkout's Claude Code session even when the move is killed right after the record",
+    async () => {
+      const { taskId, oldPath } = await taskWithWork()
+      await writeHandoff(oldPath, withSession)
+      await expect(boot({ afterStep: killAt('worktree', 'recorded') })).rejects.toBeInstanceOf(
+        WorkDirMoveInterrupted,
+      )
+      await boot()
+      const handoff = await readHandoff(newPathOf(taskId, oldPath))
+      expect(handoff?.nextBestStep).toBe('go on')
+      expect(handoff?.nativeSessionId ?? null).toBeNull()
+    },
+  )
+
+  it.skipIf(isWindows)(
+    'drops the session when a crash left another folder at the old path',
+    async () => {
+      const { taskId, oldPath } = await taskWithWork()
+      await writeHandoff(oldPath, withSession)
+      await expect(boot({ afterStep: killAt('worktree', 'renamed') })).rejects.toBeInstanceOf(
+        WorkDirMoveInterrupted,
+      )
+      await mkdir(oldPath)
+      await writeFile(path.join(oldPath, 'other.txt'), 'made in the gap\n')
+      await boot()
+      const newPath = newPathOf(taskId, oldPath)
+      expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(newPath)
+      expect((await readHandoff(newPath))?.nativeSessionId ?? null).toBeNull()
+      expect(await readFile(path.join(oldPath, 'other.txt'), 'utf8')).toBe('made in the gap\n')
+    },
+  )
+
+  it.skipIf(isWindows)(
+    'drops Claude Code session pointers in the same write that says a team folder moved',
+    async () => {
+      await teamFolderWithFiles('T1')
+      await taskWithWork()
+      claudeCodeAgentWithSession()
+      // Killed on the checkout, after the team folder moved and before the end.
+      await expect(boot({ afterStep: killAt('worktree', 'saved') })).rejects.toBeInstanceOf(
+        WorkDirMoveInterrupted,
+      )
+      expect(getSetting(getDb(), 'native-chat-session:cc')).toBeNull()
+    },
+  )
+
+  it('waits while another live process is moving, then moves', async () => {
+    await teamFolderWithFiles('T1')
+    const db = getDb()
+    setSetting(db, LOCK, foreignLock())
+    const freed = setTimeout(() => db.delete(settings).where(eq(settings.key, LOCK)).run(), 150)
+    try {
+      expect(await boot({ lockPollMs: 20, lockWaitMs: 10_000 })).toMatchObject({
+        ran: true,
+        moved: 1,
+      })
+    } finally {
+      clearTimeout(freed)
+    }
+    expect(getSetting(db, LOCK)).toBeNull()
+  })
+
+  it('stops, and leaves the lock alone, when another process takes the move over', async () => {
+    await teamFolderWithFiles('T1')
+    const second = await teamFolderWithFiles('T2')
+    const db = getDb()
+    const theirs = foreignLock()
+    let taken = false
+    await boot({
+      lockPollMs: 10,
+      lockWaitMs: 50,
+      afterStep: (item, s) => {
+        if (!taken && item.kind === 'team' && s === 'linked') {
+          setSetting(db, LOCK, theirs)
+          taken = true
+        }
+      },
+    })
+    expect(taken).toBe(true)
+    expect(getSetting(db, LOCK)).toBe(theirs)
+    // The rest is the new holder's: this one moved nothing more.
+    expect(lstatSync(second).isSymbolicLink()).toBe(false)
+    expect(await readFile(path.join(second, 'notes.md'), 'utf8')).toBe('notes of T2\n')
+
+    // Once that one is gone, a boot finishes everything.
+    db.delete(settings).where(eq(settings.key, LOCK)).run()
+    await boot()
+    for (const name of ['T1', 'T2']) {
+      expect(teamWorkdirPath(name)).toBe(path.join(work, 'teams', name))
+      expect(await readFile(path.join(work, 'teams', name, 'notes.md'), 'utf8')).toBe(
+        `notes of ${name}\n`,
+      )
+    }
+  })
+
+  it('gives this install a folder of its own for review checkouts', () => {
+    const db = getDb()
+    setWorkLayout('work')
+    const root = reviewsRoot(db)
+    expect(path.dirname(root)).toBe(path.join(work, 'reviews'))
+    expect(path.basename(root)).toBe(installId(db).replace(/-/g, '').slice(0, 12))
+    setWorkLayout('data')
+    expect(reviewsRoot(db)).toBe(path.join(data, 'reviews'))
   })
 })

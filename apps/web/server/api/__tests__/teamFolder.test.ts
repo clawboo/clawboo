@@ -4,7 +4,7 @@
 // folder is always resolved from the agent's or team's row, never the request.
 
 import { existsSync, realpathSync } from 'node:fs'
-import { lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -120,6 +120,19 @@ describe('team folder API', () => {
         await expect(lstat(legacy)).rejects.toThrow()
       },
     )
+
+    it('keeps a real folder with files at the old place, which is not the team folder', async () => {
+      await mkdir(folder('T'), { recursive: true })
+      const legacy = path.join(clawbooHome, 'workspaces', 'T')
+      await mkdir(legacy, { recursive: true })
+      await writeFile(path.join(legacy, 'kept.md'), 'kept')
+
+      const r = fakeRes()
+      await teamsDELETE(req({ id: 'T' }), r.res)
+      expect(r.body()).toEqual({ ok: true, folderRemoved: true })
+      await expect(stat(folder('T'))).rejects.toThrow()
+      expect(await readFile(path.join(legacy, 'kept.md'), 'utf8')).toBe('kept')
+    })
 
     it('succeeds for a team that never had a folder', async () => {
       const r = fakeRes()

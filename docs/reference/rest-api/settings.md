@@ -118,7 +118,7 @@ Returns the latest boot report. A request that arrives before the first report e
 
 **`200 OK`**: the boot report (see [The boot report](#the-boot-report) below), with `ok` added. Dates are ISO strings.
 
-**`200 OK`** while the server moves older work into the work folder at startup (see [The work folder](/operating/data-and-state#the-work-folder)): `{ "ok": false, "status": "migrating", "migration": { "total": <n>, "done": <n>, "left": <n> } }`. Until the move ends, every other request answers **`503`** with a `Retry-After: 2` header and `{ "error": "Clawboo is moving its work folders. Try again in a moment.", "status": "migrating" }`, and a WebSocket upgrade gets `503` too. These answers come after the access gate, like any other.
+**`200 OK`** while the server moves older work into the work folder at startup (see [The work folder](/operating/data-and-state#the-work-folder)): `{ "ok": false, "status": "migrating", "migration": { "total": <n>, "done": <n>, "left": <n> } }`. Until the move ends, every other request answers **`503`** with a `Retry-After: 2` header and `{ "error": "Clawboo is moving its work folders. Try again in a moment.", "status": "migrating" }`, and a WebSocket upgrade gets `503` too. The HTTP answers come after the access gate, like any other. A WebSocket upgrade is refused before the origin and access checks, with no body.
 
 **`500 Internal Server Error`**: computing a first report failed, `{ "ok": false, "error": "<message>" }`.
 

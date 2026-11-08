@@ -24,9 +24,11 @@
 // A boot that finds an item `moving` looks at where the folder is and where git
 // lists it, and finishes or undoes it.
 
+import { randomUUID } from 'node:crypto'
 import { existsSync, lstatSync, readdirSync, statSync, type Stats } from 'node:fs'
 import { mkdir, readlink, rename, rm, rmdir, symlink } from 'node:fs/promises'
 import path from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import {
@@ -55,7 +57,7 @@ import {
   worktreeRegistration,
   writeHandoff,
 } from '@clawboo/worktrees'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import { isWindows } from './platform'
 import { sanitizeAgentId } from './runtimes/identityHome'
@@ -88,8 +90,9 @@ const log = createLogger('work-dir-move')
 /** The work folder the last boot used, so a changed CLAWBOO_WORK_DIR reads as a move. */
 export const WORK_DIR_IN_USE_KEY = 'work-dir'
 const LOCK_KEY = 'work-dir-migration-lock'
-/** A lock older than this was left by a server that died mid-move. */
-const LOCK_STALE_MS = 10 * 60_000
+/** A lock not refreshed for this long was left by a server that died mid-move.
+ *  The mover refreshes it with every journal write. */
+const LOCK_STALE_MS = 5 * 60_000
 
 // ── Progress, for /api/health ───────────────────────────────────────────────
 
@@ -134,11 +137,28 @@ export class WorkDirMoveInterrupted extends Error {
   }
 }
 
+/** Another process took the lock over: this one must not write the journal or
+ *  touch another folder. */
+class WorkDirLockLost extends Error {
+  constructor() {
+    super('another process took over the work folder move')
+    this.name = 'WorkDirLockLost'
+  }
+}
+
+/** Errors that end the whole move, not just one item. */
+const endsTheMove = (err: unknown): boolean =>
+  err instanceof WorkDirMoveInterrupted || err instanceof WorkDirLockLost
+
 export interface WorkDirMoveOptions {
   env?: NodeJS.ProcessEnv
   afterStep?: (item: WorkDirItem, step: WorkDirMoveStep) => void
   /** Whether a folder at `a` can be renamed into the folder `b` (same volume). */
   sameVolume?: (a: string, b: string) => boolean
+  /** How long to wait for another process's move to end (default: twice the
+   *  lock's stale time), and how often to look. */
+  lockWaitMs?: number
+  lockPollMs?: number
 }
 
 export interface WorkDirMoveReport {
@@ -230,12 +250,50 @@ async function linkAtOldPath(oldPath: string, name: string, target: string): Pro
   await rename(temp, oldPath)
 }
 
+/**
+ * {@link linkAtOldPath} once the files are at `target`, when no link to it is
+ * there yet. A failure is a note, not a reason to keep the item at the old
+ * place: this version looks at the new path, and the link only serves older
+ * versions and tools that saved the old one. Keeping it would send runs to an
+ * old path that is now empty.
+ */
+async function tryLinkAtOldPath(
+  oldPath: string,
+  name: string,
+  target: string,
+): Promise<string | undefined> {
+  try {
+    if (!(await linksTo(oldPath, target))) await linkAtOldPath(oldPath, name, target)
+    return undefined
+  } catch (err) {
+    await removeLinkAt(tempLinkFor(oldPath, name)).catch(() => undefined)
+    log.warn(
+      { err, from: oldPath, to: target },
+      'Work folder: moved, but no link could be put at the old path',
+    )
+    return `moved, but no link could be put at ${oldPath}: ${String(err)}`
+  }
+}
+
+/** True when `p` is the link an earlier move left there to `target`: the work
+ *  folder changed back, and the folder is going home. */
+async function isLinkBackTo(p: string, target: string): Promise<boolean> {
+  return Boolean(lstatOrNull(p)?.isSymbolicLink()) && (await linksTo(p, target))
+}
+
 // ── Planning ────────────────────────────────────────────────────────────────
 
-function previousWorkDir(db: ClawbooDb, work: string): string | null {
+/** The work folder the last boot recorded, when it is not this one. */
+function recordedWorkDir(db: ClawbooDb, work: string): string | null {
   const prev = getSetting(db, WORK_DIR_IN_USE_KEY)
   if (!prev || path.resolve(prev) === work || realPathOrSpelling(prev) === work) return null
-  return existsSync(prev) ? prev : null
+  return prev
+}
+
+/** {@link recordedWorkDir} when it can be read now. */
+function previousWorkDir(db: ClawbooDb, work: string): string | null {
+  const prev = recordedWorkDir(db, work)
+  return prev && existsSync(prev) ? prev : null
 }
 
 /**
@@ -352,39 +410,86 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-/** One process moves at a time: a settings row claimed with insert-or-ignore. A
- *  claim held by a process that is gone, or older than {@link LOCK_STALE_MS}, is
- *  taken over. */
-function claimLock(db: ClawbooDb): boolean {
-  const now = Date.now()
-  const mine = JSON.stringify({ pid: process.pid, at: now })
-  const inserted =
-    db
-      .insert(settings)
-      .values({ key: LOCK_KEY, value: mine, updatedAt: now })
-      .onConflictDoNothing()
-      .run().changes > 0
-  if (inserted) return true
+const lockValue = (token: string): string =>
+  JSON.stringify({ pid: process.pid, at: Date.now(), token })
+
+/** True when the lock `raw` is held by another process that is alive and has
+ *  refreshed it lately. */
+function heldByAnother(raw: string, now: number): boolean {
   try {
-    const held = JSON.parse(getSetting(db, LOCK_KEY) ?? 'null') as { pid?: number; at?: number }
-    if (
+    const held = JSON.parse(raw) as { pid?: number; at?: number }
+    return (
       typeof held?.pid === 'number' &&
       held.pid !== process.pid &&
       pidAlive(held.pid) &&
       typeof held.at === 'number' &&
       now - held.at < LOCK_STALE_MS
-    ) {
-      return false
-    }
+    )
   } catch {
-    // unreadable: take it over
+    return false // unreadable: taken over
   }
-  setSetting(db, LOCK_KEY, mine)
-  return true
 }
 
-function releaseLock(db: ClawbooDb): void {
-  db.delete(settings).where(eq(settings.key, LOCK_KEY)).run()
+/**
+ * One process moves at a time: a settings row claimed with insert-or-ignore. A
+ * claim held by a process that is gone, or not refreshed for
+ * {@link LOCK_STALE_MS}, is taken over, and only the very claim that was read:
+ * of two processes that both found it stale, one takes it. Returns the value
+ * this process wrote, or null.
+ */
+function claimLock(db: ClawbooDb, token: string): string | null {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const mine = lockValue(token)
+    const inserted =
+      db
+        .insert(settings)
+        .values({ key: LOCK_KEY, value: mine, updatedAt: Date.now() })
+        .onConflictDoNothing()
+        .run().changes > 0
+    if (inserted) return mine
+    const raw = getSetting(db, LOCK_KEY)
+    if (raw === null) continue // released in between: claim it again
+    if (heldByAnother(raw, Date.now())) return null
+    const taken =
+      db
+        .update(settings)
+        .set({ value: mine, updatedAt: Date.now() })
+        .where(and(eq(settings.key, LOCK_KEY), eq(settings.value, raw)))
+        .run().changes > 0
+    return taken ? mine : null
+  }
+  return null
+}
+
+/** Claim the lock, waiting while another live process holds it (its move may
+ *  be moving the very folders this one would hand to runs). Null when it is
+ *  still held after the wait. */
+async function acquireLock(
+  db: ClawbooDb,
+  opts: WorkDirMoveOptions,
+): Promise<{ lock: string; token: string } | null> {
+  const token = randomUUID()
+  const until = Date.now() + (opts.lockWaitMs ?? 2 * LOCK_STALE_MS)
+  let told = false
+  for (;;) {
+    const lock = claimLock(db, token)
+    if (lock) return { lock, token }
+    if (Date.now() >= until) return null
+    if (!told) {
+      log.warn('Work folder: another Clawboo process is moving folders; waiting for it to finish')
+      told = true
+    }
+    holdForWorkDirMove()
+    await sleep(opts.lockPollMs ?? 500)
+  }
+}
+
+/** Remove the lock when it is still this process's. */
+function releaseLock(ctx: MoveContext): void {
+  ctx.db
+    .delete(settings)
+    .where(and(eq(settings.key, LOCK_KEY), eq(settings.value, ctx.lock)))
+    .run()
 }
 
 // ── The move ────────────────────────────────────────────────────────────────
@@ -395,10 +500,33 @@ interface MoveContext {
   installId: string
   opts: WorkDirMoveOptions
   sameVolume: (a: string, b: string) => boolean
+  /** The lock as this process last wrote it, and the token that stays in it. */
+  lock: string
+  token: string
+  sessionsCleared: number
 }
 
-function save(ctx: MoveContext): void {
+/**
+ * A database write of the move, in one transaction that first checks this
+ * process still holds the lock (else {@link WorkDirLockLost}) and then
+ * refreshes it, so a process that lost the lock never writes the journal over
+ * the new holder's, and a live mover's lock never goes stale.
+ */
+function underLock(ctx: MoveContext, write: () => void): void {
+  const next = lockValue(ctx.token)
+  immediateWrite(ctx.db, () => {
+    if (getSetting(ctx.db, LOCK_KEY) !== ctx.lock) throw new WorkDirLockLost()
+    write()
+    setSetting(ctx.db, LOCK_KEY, next)
+  })
+  ctx.lock = next
+}
+
+const writeJournal = (ctx: MoveContext): void =>
   setSetting(ctx.db, WORK_DIR_JOURNAL_KEY, serializeWorkDirJournal(ctx.journal))
+
+function save(ctx: MoveContext): void {
+  underLock(ctx, () => writeJournal(ctx))
   setWorkDirJournal(ctx.journal)
 }
 
@@ -420,7 +548,17 @@ function setState(
   item.state = state
   if (note === undefined) delete item.note
   else item.note = note
-  save(ctx)
+  if (item.kind === 'team' && state === 'moved') {
+    // Claude Code files sessions by folder: its pointers go in the same write
+    // that says the folder moved, so no crash can keep one that cannot resume.
+    underLock(ctx, () => {
+      writeJournal(ctx)
+      ctx.sessionsCleared += clearClaudeCodeSessions(ctx.db)
+    })
+    setWorkDirJournal(ctx.journal)
+  } else {
+    save(ctx)
+  }
   if (state === 'left' || state === 'conflict') {
     log.warn(
       { kind: item.kind, from: item.from, to: item.to, state, note },
@@ -441,6 +579,7 @@ function drop(ctx: MoveContext, item: WorkDirItem): void {
 async function moveTeam(ctx: MoveContext, item: TeamFolderItem): Promise<void> {
   const { from, to, name } = item
   if (!isRealDir(lstatOrNull(from))) return drop(ctx, item)
+  if (await isLinkBackTo(to, from)) await rm(to, { force: true })
   const target = lstatOrNull(to)
   if (target) {
     if (isRealDir(target) && isEmptyDir(to)) {
@@ -449,8 +588,7 @@ async function moveTeam(ctx: MoveContext, item: TeamFolderItem): Promise<void> {
       // The old place was made again, empty, by a version that found no link
       // there; the files are at the new one.
       await rmdir(from)
-      await linkAtOldPath(from, name, to)
-      return setState(ctx, item, 'moved')
+      return setState(ctx, item, 'moved', await tryLinkAtOldPath(from, name, to))
     } else {
       return setState(
         ctx,
@@ -500,15 +638,14 @@ async function recoverTeam(ctx: MoveContext, item: TeamFolderItem): Promise<void
   }
   const src = lstatOrNull(from)
   if (!src || src.isSymbolicLink()) {
-    if (!(await linksTo(from, to))) await linkAtOldPath(from, name, to)
-    await removeLinkAt(tempLinkFor(from, name))
-    return setState(ctx, item, 'moved')
+    const note = await tryLinkAtOldPath(from, name, to)
+    await removeLinkAt(tempLinkFor(from, name)).catch(() => undefined)
+    return setState(ctx, item, 'moved', note)
   }
   if (isRealDir(src) && isEmptyDir(from)) {
     // An older version found no link in the gap and made the folder again.
     await rmdir(from)
-    await linkAtOldPath(from, name, to)
-    return setState(ctx, item, 'moved')
+    return setState(ctx, item, 'moved', await tryLinkAtOldPath(from, name, to))
   }
   await removeLinkAt(tempLinkFor(from, name))
   setState(ctx, item, 'conflict', `${from} and ${to} both hold files; the team keeps using ${from}`)
@@ -518,35 +655,39 @@ async function recoverTeam(ctx: MoveContext, item: TeamFolderItem): Promise<void
 
 /** The board's records name the new path, and the journal says moved: one
  *  transaction, so a crash leaves both or neither. */
-function record(ctx: MoveContext, item: WorktreeItem): void {
+function record(ctx: MoveContext, item: WorktreeItem, note?: string): void {
   item.state = 'moved'
-  delete item.note
-  const value = serializeWorkDirJournal(ctx.journal)
-  immediateWrite(ctx.db, (tx) => {
-    const ws = tx.select().from(workspaces).where(eq(workspaces.id, item.workspaceId)).get()
+  if (note === undefined) delete item.note
+  else item.note = note
+  const { db } = ctx
+  underLock(ctx, () => {
+    const ws = db.select().from(workspaces).where(eq(workspaces.id, item.workspaceId)).get()
     if (ws?.worktreePath && path.resolve(ws.worktreePath) === item.from) {
-      tx.update(workspaces)
+      db.update(workspaces)
         .set({ worktreePath: item.to })
         .where(eq(workspaces.id, item.workspaceId))
         .run()
     }
     // Not the task's updatedAt: that is its run's heartbeat.
-    const task = tx
+    const task = db
       .select({ ref: tasks.worktreeRef })
       .from(tasks)
       .where(eq(tasks.id, item.taskId))
       .get()
     if (task?.ref && path.resolve(task.ref) === item.from) {
-      tx.update(tasks).set({ worktreeRef: item.to }).where(eq(tasks.id, item.taskId)).run()
+      db.update(tasks).set({ worktreeRef: item.to }).where(eq(tasks.id, item.taskId)).run()
     }
-    const now = Date.now()
-    tx.insert(settings)
-      .values({ key: WORK_DIR_JOURNAL_KEY, value, updatedAt: now })
-      .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: now } })
-      .run()
+    writeJournal(ctx)
   })
   setWorkDirJournal(ctx.journal)
-  log.info({ taskId: item.taskId, from: item.from, to: item.to }, 'Work folder: moved')
+  log.info({ taskId: item.taskId, from: item.from, to: item.to, note }, 'Work folder: moved')
+}
+
+/** Drop the checkout's Claude Code session, then record the move. In that
+ *  order, so no crash between the two can keep a session that cannot resume. */
+async function finish(ctx: MoveContext, item: WorktreeItem, note?: string): Promise<void> {
+  await clearHandoffSession(item.to)
+  record(ctx, item, note)
 }
 
 /** A Claude Code session is filed under the folder it ran in, so one started in
@@ -586,6 +727,7 @@ async function moveWorktree(ctx: MoveContext, item: WorktreeItem): Promise<void>
           : 'its folder is missing but git still lists it there',
       )
     }
+    if (await isLinkBackTo(to, from)) await rm(to, { force: true })
     if (lstatOrNull(to)) return setState(ctx, item, 'conflict', `${to} already exists`)
     await mkdir(root, { recursive: true, mode: 0o700 })
     await writeOwnerMarker(root, taskId, ctx.installId)
@@ -593,7 +735,7 @@ async function moveWorktree(ctx: MoveContext, item: WorktreeItem): Promise<void>
   }
   if (src.isSymbolicLink()) {
     // An earlier pass moved it and left this link; only the record is behind.
-    if ((await linksTo(from, to)) && (await isCheckoutAt(repoPath, to))) return record(ctx, item)
+    if ((await linksTo(from, to)) && (await isCheckoutAt(repoPath, to))) return finish(ctx, item)
     return setState(ctx, item, 'left', `${from} is a link to somewhere else`)
   }
   if (!src.isDirectory()) return setState(ctx, item, 'left', `${from} is not a folder`)
@@ -616,6 +758,7 @@ async function moveWorktree(ctx: MoveContext, item: WorktreeItem): Promise<void>
         : 'git does not list it as a worktree',
     )
   }
+  if (await isLinkBackTo(to, from)) await rm(to, { force: true })
   if (lstatOrNull(to)) return setState(ctx, item, 'conflict', `${to} already exists`)
   await mkdir(root, { recursive: true, mode: 0o700 })
   if (!ctx.sameVolume(from, root)) {
@@ -659,9 +802,8 @@ async function moveWorktree(ctx: MoveContext, item: WorktreeItem): Promise<void>
   step(ctx, item, 'linked')
   if (!(await isCheckoutAt(repoPath, to))) return moveBack(ctx, item)
   step(ctx, item, 'checked')
-  record(ctx, item)
+  await finish(ctx, item)
   step(ctx, item, 'recorded')
-  await clearHandoffSession(to)
 }
 
 /** Git does not list the checkout at its new path: put it back where the record
@@ -708,24 +850,20 @@ async function recoverWorktree(ctx: MoveContext, item: WorktreeItem): Promise<vo
   }
   if (!listed) return moveBack(ctx, item)
   const src = lstatOrNull(from)
+  let note: string | undefined
   if (!src || src.isSymbolicLink()) {
-    if (!(await linksTo(from, to))) await linkAtOldPath(from, taskId, to)
+    note = await tryLinkAtOldPath(from, taskId, to)
   } else if (isRealDir(src) && isEmptyDir(from)) {
     await rmdir(from)
-    await linkAtOldPath(from, taskId, to)
+    note = await tryLinkAtOldPath(from, taskId, to)
   } else {
     // Something else was made at the old path. The checkout git lists is the
     // task's, so the records follow it; the other folder is left as it is.
-    await removeLinkAt(tempLinkFor(from, taskId))
-    record(ctx, item)
-    item.note = `${from} holds files too; it was left as it is, with no link`
-    save(ctx)
+    note = `${from} holds files too; it was left as it is, with no link`
     log.warn({ taskId, from, to }, 'Work folder: moved; another folder at the old path was kept')
-    return
   }
-  await removeLinkAt(tempLinkFor(from, taskId))
-  record(ctx, item)
-  await clearHandoffSession(to)
+  await removeLinkAt(tempLinkFor(from, taskId)).catch(() => undefined)
+  await finish(ctx, item, note)
 }
 
 // ── Claude Code session pointers ────────────────────────────────────────────
@@ -797,87 +935,121 @@ async function moveAll(db: ClawbooDb, opts: WorkDirMoveOptions): Promise<WorkDir
     conflicts: 0,
     sessionsCleared: 0,
   }
-  const journal = loadWorkDirJournal(db)
+  loadWorkDirJournal(db)
   if (workLayout() !== 'work') return report
-  if (!claimLock(db)) {
-    log.warn('Work folder: another Clawboo process is moving folders; this one moves nothing')
-    return report
+  // A process that loses the lock mid-move waits for the new holder and starts
+  // over from what that one wrote, a few times at most.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const held = await acquireLock(db, opts)
+    if (!held) {
+      log.warn(
+        'Work folder: another Clawboo process is still moving folders; this one moves nothing',
+      )
+      loadWorkDirJournal(db)
+      return report
+    }
+    const ctx: MoveContext = {
+      db,
+      journal: loadWorkDirJournal(db),
+      installId: installId(db),
+      opts,
+      sameVolume: opts.sameVolume ?? defaultSameVolume,
+      lock: held.lock,
+      token: held.token,
+      sessionsCleared: 0,
+    }
+    report.ran = true
+    holdForWorkDirMove()
+    try {
+      await movePass(ctx, env, report)
+      return report
+    } catch (err) {
+      if (!(err instanceof WorkDirLockLost)) throw err
+      log.warn('Work folder: another Clawboo process took over the move; waiting for it')
+    } finally {
+      report.sessionsCleared += ctx.sessionsCleared
+      releaseLock(ctx)
+    }
   }
-  report.ran = true
-  holdForWorkDirMove()
+  loadWorkDirJournal(db)
+  return report
+}
+
+async function movePass(
+  ctx: MoveContext,
+  env: NodeJS.ProcessEnv,
+  report: WorkDirMoveReport,
+): Promise<void> {
+  const { db, journal } = ctx
   const work = workDirInUse(env)
-  const ctx: MoveContext = {
-    db,
-    journal,
-    installId: installId(db),
-    opts,
-    sameVolume: opts.sameVolume ?? defaultSameVolume,
+  for (const item of journal.items.filter((i) => i.state === 'moving')) {
+    try {
+      if (item.kind === 'team') await recoverTeam(ctx, item)
+      else await recoverWorktree(ctx, item)
+    } catch (err) {
+      if (endsTheMove(err)) throw err
+      log.error(
+        { err, from: item.from, to: item.to },
+        'Work folder: could not finish a move a crash left; trying again next boot',
+      )
+    }
   }
-  let teamMoved = false
-  try {
-    for (const item of journal.items.filter((i) => i.state === 'moving')) {
+  // Everything not finished is planned again from what is on disk now; what
+  // moved stays as the record, unless the same folder is back to move again.
+  // An item still `moving` (its recovery failed) is not started a second time.
+  const inFlight = new Set(
+    ctx.journal.items.filter((i) => i.state === 'moving').map((i) => `${i.kind}:${i.from}`),
+  )
+  const planned = planWorkDirMove(db, env).filter((i) => !inFlight.has(`${i.kind}:${i.from}`))
+  const again = new Set(planned.map((i) => `${i.kind}:${i.from}`))
+  ctx.journal.items = [
+    ...ctx.journal.items.filter(
+      (i) => i.state === 'moving' || (i.state === 'moved' && !again.has(`${i.kind}:${i.from}`)),
+    ),
+    ...planned,
+  ]
+  save(ctx)
+  const counts = { total: planned.length, done: 0 }
+  progress = counts
+  for (const item of planned) {
+    try {
+      if (item.kind === 'team') await moveTeam(ctx, item)
+      else await moveWorktree(ctx, item)
+    } catch (err) {
+      if (endsTheMove(err)) throw err
+      log.error({ err, from: item.from, to: item.to }, 'Work folder: moving failed')
       try {
-        if (item.kind === 'team') await recoverTeam(ctx, item)
-        else await recoverWorktree(ctx, item)
-        if (item.kind === 'team' && item.state === 'moved') teamMoved = true
-      } catch (err) {
-        if (err instanceof WorkDirMoveInterrupted) throw err
+        if (item.state === 'moving') {
+          if (item.kind === 'team') await recoverTeam(ctx, item)
+          else await recoverWorktree(ctx, item)
+        } else if (item.state === 'planned') {
+          setState(ctx, item, 'left', String(err))
+        }
+      } catch (again) {
+        if (endsTheMove(again)) throw again
         log.error(
-          { err, from: item.from, to: item.to },
-          'Work folder: could not finish a move a crash left; trying again next boot',
+          { err: again, from: item.from },
+          'Work folder: left mid-move; the next boot finishes it',
         )
       }
     }
-    // Everything not finished is planned again from what is on disk now; what
-    // moved stays as the record, unless the same folder is back to move again.
-    // An item still `moving` (its recovery failed) is not started a second time.
-    const inFlight = new Set(
-      ctx.journal.items.filter((i) => i.state === 'moving').map((i) => `${i.kind}:${i.from}`),
-    )
-    const planned = planWorkDirMove(db, env).filter((i) => !inFlight.has(`${i.kind}:${i.from}`))
-    const again = new Set(planned.map((i) => `${i.kind}:${i.from}`))
-    ctx.journal.items = [
-      ...ctx.journal.items.filter(
-        (i) => i.state === 'moving' || (i.state === 'moved' && !again.has(`${i.kind}:${i.from}`)),
-      ),
-      ...planned,
-    ]
-    save(ctx)
-    const counts = { total: planned.length, done: 0 }
-    progress = counts
-    for (const item of planned) {
-      try {
-        if (item.kind === 'team') await moveTeam(ctx, item)
-        else await moveWorktree(ctx, item)
-      } catch (err) {
-        if (err instanceof WorkDirMoveInterrupted) throw err
-        log.error({ err, from: item.from, to: item.to }, 'Work folder: moving failed')
-        try {
-          if (item.state === 'moving') {
-            if (item.kind === 'team') await recoverTeam(ctx, item)
-            else await recoverWorktree(ctx, item)
-          } else if (item.state === 'planned') {
-            setState(ctx, item, 'left', String(err))
-          }
-        } catch (again) {
-          log.error(
-            { err: again, from: item.from },
-            'Work folder: left mid-move; the next boot finishes it',
-          )
-        }
-      }
-      if (item.kind === 'team' && item.state === 'moved') teamMoved = true
-      counts.done++
-    }
-    for (const item of planned) {
-      if (item.state === 'moved') report.moved++
-      else if (item.state === 'conflict') report.conflicts++
-      else if (item.state === 'left') report.left++
-    }
-    if (teamMoved) report.sessionsCleared = clearClaudeCodeSessions(db)
-    setSetting(db, WORK_DIR_IN_USE_KEY, work)
-  } finally {
-    releaseLock(db)
+    counts.done++
   }
-  return report
+  for (const item of planned) {
+    if (item.state === 'moved') report.moved++
+    else if (item.state === 'conflict') report.conflicts++
+    else if (item.state === 'left') report.left++
+  }
+  // A previous work folder that cannot be read now (a drive that is not
+  // mounted) stays on record, so a later boot still moves its team folders.
+  const unread = recordedWorkDir(db, work)
+  if (unread && !existsSync(unread)) {
+    log.warn(
+      { previous: unread, work },
+      'Work folder: the previous work folder is not there; it stays on record, and its ' +
+        'team folders move once it is back',
+    )
+  } else {
+    underLock(ctx, () => setSetting(db, WORK_DIR_IN_USE_KEY, work))
+  }
 }

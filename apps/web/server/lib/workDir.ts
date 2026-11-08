@@ -12,6 +12,7 @@
 
 import crypto from 'node:crypto'
 import {
+  accessSync,
   constants as fsConstants,
   closeSync,
   fstatSync,
@@ -21,12 +22,13 @@ import {
   readSync,
   realpathSync,
   writeFileSync,
+  type BigIntStats,
 } from 'node:fs'
 import { open, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
 import { resolveClawbooDir, resolveWorkDir } from '@clawboo/config'
-import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { getSetting, setSetting, settings, type ClawbooDb } from '@clawboo/db'
 import { assertSafeTaskId } from '@clawboo/worktrees'
 
 /**
@@ -110,22 +112,44 @@ export function setWorkLayout(next: WorkLayout): void {
 const isInside = (child: string, parent: string): boolean =>
   child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep)
 
+/** Windows and macOS file systems ignore case by default, so `Data` and `data`
+ *  can be one folder there; the real path cannot settle it for a folder that is
+ *  not made yet. Compared without case on those, which at worst refuses a pair
+ *  a case-sensitive volume would keep apart. */
+const foldCase = (p: string): string =>
+  process.platform === 'win32' || process.platform === 'darwin' ? p.toLowerCase() : p
+
+/** The folders under the work folder that hold work. */
+const WORK_KINDS = ['teams', 'worktrees', 'reviews'] as const
+
 /**
  * Why the server must not start with this pair of folders, or null when it may.
  * Compared on real paths, so a link cannot hide one folder inside the other:
  * the work folder must not be the data folder, sit inside it or contain it. Any
  * of those puts the database and the vault a relative path away from where
- * agents work, which is what the work folder exists to prevent.
+ * agents work, which is what the work folder exists to prevent. For the same
+ * reason `teams/`, `worktrees/` and `reviews/` inside it must not be links.
  */
 export function workDirRefusal(env: NodeJS.ProcessEnv = process.env): string | null {
   const data = dataDirInUse(env)
   const work = workDirInUse(env)
+  const [d, w] = [foldCase(data), foldCase(work)]
   const name = env['CLAWBOO_WORK_DIR']?.trim() ? 'CLAWBOO_WORK_DIR' : 'The work folder'
-  if (work === data || isInside(work, data)) {
+  if (w === d || isInside(w, d)) {
     return `${name} (${work}) must be outside Clawboo's data folder (${data}). Set CLAWBOO_WORK_DIR to a folder outside it.`
   }
-  if (isInside(data, work)) {
+  if (isInside(d, w)) {
     return `Clawboo's data folder (${data}) must be outside the work folder (${work}). Set CLAWBOO_WORK_DIR to a folder that does not contain it.`
+  }
+  for (const kind of WORK_KINDS) {
+    const child = path.join(work, kind)
+    try {
+      if (lstatSync(child).isSymbolicLink()) {
+        return `${child} is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`
+      }
+    } catch {
+      // Not there yet: made when first needed.
+    }
   }
   return null
 }
@@ -156,6 +180,9 @@ export function prepareWorkDir(env: NodeJS.ProcessEnv = process.env): PrepareWor
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 })
     if (!lstatSync(dir).isDirectory()) throw new Error(`${dir} is not a folder`)
+    // A folder that is there but not writable would fail later, at the first
+    // team folder or checkout.
+    accessSync(dir, fsConstants.W_OK | fsConstants.X_OK)
   } catch (err) {
     setWorkLayout('data')
     return { ok: false, dir, explicit, error: err instanceof Error ? err.message : String(err) }
@@ -188,6 +215,19 @@ export function workRoot(
     : path.resolve(resolveClawbooDir(env), kind)
 }
 
+/**
+ * Where this install's review checkouts go: a folder of its own under the work
+ * folder's `reviews/`, since two installs that share a work folder can review
+ * the same commit of the same repository, and a review checkout is named by its
+ * commit. The data folder's `reviews/` in the old layout, which no other install
+ * uses.
+ */
+export function reviewsRoot(db: ClawbooDb, env: NodeJS.ProcessEnv = process.env): string {
+  const root = workRoot('reviews', env)
+  if (workLayout() !== 'work') return root
+  return path.join(root, installId(db).replace(/-/g, '').slice(0, 12))
+}
+
 // ── Ownership marker ────────────────────────────────────────────────────────
 //
 // A work folder can be shared by two installs that set the same
@@ -198,10 +238,23 @@ export function workRoot(
 
 const INSTALL_ID_KEY = 'install-id'
 
-/** This install's id, made on first use and kept in its database. */
+const isInstallId = (v: string | null): v is string => v !== null && /^[0-9a-f-]{36}$/.test(v)
+
+/** This install's id, made on first use and kept in its database. Made with an
+ *  insert that keeps a row already there, so two processes that start at once
+ *  both use the one that was written first. */
 export function installId(db: ClawbooDb): string {
   const known = getSetting(db, INSTALL_ID_KEY)
-  if (known && /^[0-9a-f-]{36}$/.test(known)) return known
+  if (isInstallId(known)) return known
+  if (known === null) {
+    db.insert(settings)
+      .values({ key: INSTALL_ID_KEY, value: crypto.randomUUID(), updatedAt: Date.now() })
+      .onConflictDoNothing()
+      .run()
+    const kept = getSetting(db, INSTALL_ID_KEY)
+    if (isInstallId(kept)) return kept
+  }
+  // Damaged: replaced.
   const id = crypto.randomUUID()
   setSetting(db, INSTALL_ID_KEY, id)
   return id
@@ -247,20 +300,28 @@ export async function writeOwnerMarker(root: string, taskId: string, id: string)
 /** The install id the marker beside `<root>/<taskId>` holds, or null (none, a
  *  link, or not a small plain file). */
 export function readOwnerMarker(root: string, taskId: string): string | null {
+  const marker = ownerMarkerPath(root, taskId)
   let fd: number
+  let named: BigIntStats
   try {
+    // Windows has no O_NOFOLLOW: the name is checked first, and the file opened
+    // must be the one checked.
+    named = lstatSync(marker, { bigint: true })
+    if (!named.isFile()) return null
     fd = openSync(
-      ownerMarkerPath(root, taskId),
+      marker,
       fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
     )
   } catch {
     return null
   }
   try {
-    const st = fstatSync(fd)
-    if (!st.isFile() || st.size > 64) return null
-    const buf = Buffer.alloc(st.size)
-    const n = readSync(fd, buf, 0, st.size, 0)
+    const st = fstatSync(fd, { bigint: true })
+    if (st.dev !== named.dev || st.ino !== named.ino) return null
+    if (!st.isFile() || st.size > 64n) return null
+    const size = Number(st.size)
+    const buf = Buffer.alloc(size)
+    const n = readSync(fd, buf, 0, size, 0)
     return buf.subarray(0, n).toString('utf8').trim() || null
   } catch {
     return null

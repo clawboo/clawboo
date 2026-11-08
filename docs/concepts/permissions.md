@@ -24,7 +24,7 @@ The short answer: Claude Code, Codex and Hermes run with their own permission pr
 
 <Warning>
 
-A git worktree keeps two agents' file changes apart. It is not a sandbox. Claude Code, Codex and Hermes run as you: they can read and change any file your user account can, reach the network, and start other programs. Without a worktree, as in team chat or an agent's own chat, they start in their team's folder, `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default). The work folder sits outside Clawboo's data folder, so `../..` from a team folder does not lead to the database. That is not a fence: they can still open Clawboo's database and saved keys in `~/.clawboo` by their full path, like any other file you can open.
+A git worktree keeps two agents' file changes apart. It is not a sandbox. Claude Code, Codex and Hermes run as you: they can read and change any file your user account can, reach the network, and start other programs. Without a worktree, as in team chat or an agent's own chat, they start in their team's folder, `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default). The work folder sits outside Clawboo's data folder, so `../..` from a team folder does not lead to the database. Work an install keeps in the data folder (see [The work folder](/operating/data-and-state#the-work-folder) for when that happens) does not get that distance. That is not a fence: they can still open Clawboo's database and saved keys in `~/.clawboo` by their full path, like any other file you can open.
 
 </Warning>
 
