@@ -152,14 +152,10 @@ async function main() {
 
   // Where the server put the checkout: the work folder, or the data folder when
   // it kept the old layout. Read from its record, not guessed.
+  // Unknown when the server recorded no checkout.
   const recorded = ws.json?.workspace?.worktreePath
-  const wtRoot = recorded
-    ? path.dirname(path.dirname(recorded))
-    : path.join(
-        process.env.CLAWBOO_WORK_DIR || path.join(os.homedir(), 'clawboo-work'),
-        'worktrees',
-      )
-  evidence.steps.worktreeRootExists = existsSync(wtRoot)
+  const wtRoot = recorded ? path.dirname(path.dirname(recorded)) : null
+  evidence.steps.worktreeRootExists = wtRoot ? existsSync(wtRoot) : null
   evidence.cleanup = {
     note: 'No team row created. Residual throwaway task/execution/obs rows remain in the dev DB.',
     throwawayTaskId: taskId,

@@ -168,5 +168,12 @@ describe('agent handoff protocol (no git needed — pure files)', () => {
     const near = 'y'.repeat(TASK_FILE_MAX_BYTES - 4096)
     await writeHandoff(dir, { ...base, nextBestStep: near })
     expect((await readHandoff(dir))?.nextBestStep).toBe(near)
+    // Counted in bytes, not characters: under the limit in length, over it in UTF-8.
+    const wide = '\u20ac'.repeat(Math.ceil(TASK_FILE_MAX_BYTES / 2))
+    expect(wide.length).toBeLessThan(TASK_FILE_MAX_BYTES)
+    await expect(writeHandoff(dir, { ...base, nextBestStep: wide })).rejects.toBeInstanceOf(
+      UnsafeTaskFileError,
+    )
+    expect((await readHandoff(dir))?.nextBestStep).toBe(near)
   })
 })

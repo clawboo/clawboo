@@ -88,8 +88,9 @@ Your agents' work lives in the work folder, apart from the data folder. It is th
 ├── worktrees/                  git worktrees for board tasks
 │   └── <repo hash>/<task id>/
 └── reviews/                    checkouts for verifying finished work
-    ├── <repo hash>/<short sha>/
-    └── team-<team id>/
+    └── <install>/              a folder of this install's own
+        ├── <repo hash>/<short sha>/
+        └── team-<team id>/
 ```
 
 | Path         | What it holds                                                                                                                                                                     | Safe to delete?                     | What you lose                                                                        |
@@ -152,7 +153,7 @@ The server exits at startup when the work folder is the data folder, sits inside
 CONFIG: refusing to start. CLAWBOO_WORK_DIR (/srv/clawboo/work) must be outside Clawboo's data folder (/srv/clawboo). Set CLAWBOO_WORK_DIR to a folder outside it.
 ```
 
-When the data folder is inside the work folder, the message says the reverse: `Clawboo's data folder (<path>) must be outside the work folder (<path>). Set CLAWBOO_WORK_DIR to a folder that does not contain it.` The server also refuses to start when it cannot create or write to a `CLAWBOO_WORK_DIR` you set (`CLAWBOO_WORK_DIR (<path>) cannot be used: <reason>`), and when `teams/`, `worktrees/` or `reviews/` inside the work folder is a link (`<path> is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`). On Windows and macOS the comparison ignores case, since their file systems usually do.
+When the data folder is inside the work folder, the message says the reverse: `Clawboo's data folder (<path>) must be outside the work folder (<path>). Set CLAWBOO_WORK_DIR to a folder that does not contain it.` The server also refuses to start when it cannot create or write to a `CLAWBOO_WORK_DIR` you set (`CLAWBOO_WORK_DIR (<path>) cannot be used: <reason>`), and when `teams/`, `worktrees/` or `reviews/` inside the work folder is a link (`<path> is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`) or a file (`<path> is not a folder.`). On Windows and macOS the comparison ignores case, since their file systems usually do.
 
 ### When the work folder cannot be created
 

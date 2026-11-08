@@ -236,7 +236,10 @@ async function linksTo(linkPath: string, target: string): Promise<boolean> {
   if (!st?.isSymbolicLink()) return false
   try {
     const dest = path.resolve(path.dirname(linkPath), await readlink(linkPath))
-    return dest === path.resolve(target) || realPathOf(linkPath) === realPathOf(target)
+    if (dest === path.resolve(target)) return true
+    // Two spellings of one folder: only when both are there to compare.
+    const real = realPathOf(linkPath)
+    return real !== null && real === realPathOf(target)
   } catch {
     return false
   }
@@ -746,6 +749,11 @@ async function moveWorktree(ctx: MoveContext, item: WorktreeItem): Promise<void>
     return setState(ctx, item, 'left', `the repository ${repoPath} is not there`)
   }
   const registration = await worktreeRegistration(repoPath, from)
+  if (registration === 'registered' && !(await isCheckoutAt(repoPath, from))) {
+    // git still lists the path, but the folder there is not this repository's
+    // checkout (another repository's, say): nothing is saved or moved in it.
+    return setState(ctx, item, 'left', `${from} is not a checkout of ${repoPath}`)
+  }
   if (registration !== 'registered') {
     // Moved under the new root, a folder git does not list would be one cleanup
     // there may remove; where it is, it is left alone.

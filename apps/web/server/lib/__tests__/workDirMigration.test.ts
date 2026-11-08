@@ -11,7 +11,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync, lstatSync, readdirSync, realpathSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
@@ -824,6 +824,50 @@ describe('the work folder move, after review', () => {
         `notes of ${name}\n`,
       )
     }
+  })
+
+  it('replaces an install id that is not a UUID, so reviews keep a folder of their own', () => {
+    const db = getDb()
+    setSetting(db, 'install-id', '-'.repeat(36))
+    const id = installId(db)
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+    setWorkLayout('work')
+    expect(path.basename(reviewsRoot(db))).toHaveLength(12)
+  })
+
+  it.skipIf(isWindows)(
+    'keeps a link at the new path that leads somewhere else, for a checkout that is gone',
+    async () => {
+      const { taskId, oldPath } = await taskWithWork()
+      expect(await actOnTaskWorkspace(taskId, 'pause')).toMatchObject({ ok: true })
+      const to = newPathOf(taskId, oldPath)
+      await mkdir(path.dirname(to), { recursive: true })
+      await symlink(path.join(base, 'nowhere'), to)
+      expect(await boot()).toMatchObject({ moved: 0, conflicts: 1 })
+      expect(lstatSync(to).isSymbolicLink()).toBe(true)
+      expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(oldPath)
+    },
+  )
+
+  it('leaves alone, unsaved, a checkout of another repository at a path git still lists', async () => {
+    const { taskId, oldPath } = await taskWithWork()
+    await rm(oldPath, { recursive: true, force: true })
+    await mkdir(oldPath)
+    await git(oldPath, ['init', '-b', 'main'])
+    await git(oldPath, ['config', 'user.name', 'other'])
+    await git(oldPath, ['config', 'user.email', 'other@example.com'])
+    await writeFile(path.join(oldPath, 'a.txt'), 'one\n')
+    await git(oldPath, ['add', '-A'])
+    await git(oldPath, ['commit', '--no-verify', '-m', 'other'])
+    await writeFile(path.join(oldPath, 'b.txt'), 'not committed\n')
+
+    expect(await boot()).toMatchObject({ moved: 0, left: 1 })
+    expect(workDirJournal().items.find((i) => i.kind === 'worktree')?.note).toMatch(
+      /not a checkout of/,
+    )
+    expect(getWorkspaceForTask(getDb(), taskId)?.worktreePath).toBe(oldPath)
+    expect((await git(oldPath, ['rev-list', '--count', 'HEAD'])).trim()).toBe('1')
+    expect(await git(oldPath, ['status', '--porcelain'])).toContain('b.txt')
   })
 
   it('gives this install a folder of its own for review checkouts', () => {

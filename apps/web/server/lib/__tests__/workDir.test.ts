@@ -79,6 +79,15 @@ describe('workDirRefusal', () => {
     },
   )
 
+  it('refuses a work folder whose worktrees folder is a file', async () => {
+    const work = path.join(base, 'work')
+    await mkdir(work)
+    await writeFile(path.join(work, 'worktrees'), 'a file in the way')
+    expect(workDirRefusal(env({ CLAWBOO_HOME: data(), CLAWBOO_WORK_DIR: work }))).toMatch(
+      /worktrees is not a folder/,
+    )
+  })
+
   it.skipIf(isWindows)('refuses a work folder whose teams folder is a link', async () => {
     const work = path.join(base, 'work')
     await mkdir(path.join(base, 'elsewhere'), { recursive: true })

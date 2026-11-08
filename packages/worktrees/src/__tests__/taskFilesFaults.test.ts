@@ -16,8 +16,9 @@ const hooks = vi.hoisted(() => ({
   /** Runs once, just before the next open of a path ending in `name`. A missing
    *  file is made under a temp name (ending `.tmp`) before it gets its own. */
   beforeOpen: null as null | { name: string; fn: () => Promise<void> },
-  /** Makes the next handle's `writeFile` or `close` fail. */
-  fail: null as null | 'writeFile' | 'close',
+  /** Makes the next handle's `writeFile` or `close` fail, or its `read` and
+   *  `write` move at most 3 bytes a call, as a file system may. */
+  fail: null as null | 'writeFile' | 'close' | 'shortRead' | 'shortWrite',
   /** Runs once, just before the next hard link is made from `from` to `to`. */
   beforeLink: null as null | ((from: string, to: string) => Promise<void>),
 }))
@@ -48,6 +49,16 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       handle.writeFile = async () => {
         throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
       }
+    } else if (fail === 'shortRead') {
+      const read = handle.read.bind(handle) as (...a: unknown[]) => ReturnType<typeof handle.read>
+      handle.read = ((buf: Buffer, off: number, len: number, pos: number) =>
+        read(buf, off, Math.min(len, 3), pos)) as typeof handle.read
+    } else if (fail === 'shortWrite') {
+      const write = handle.write.bind(handle) as (
+        ...a: unknown[]
+      ) => ReturnType<typeof handle.write>
+      handle.write = ((data: string, pos: number | null, enc: BufferEncoding) =>
+        write(data.slice(0, 3), pos, enc)) as typeof handle.write
     } else if (fail === 'close') {
       const close = handle.close.bind(handle)
       handle.close = async () => {
@@ -169,6 +180,21 @@ describe('task files when the open has no O_NOFOLLOW', () => {
     }
     await appendTaskFile(dir, 'notes.md', 'two\n')
     expect(await readFile(path.join(dir, 'notes.md'), 'utf8')).toBe('one\ntwo\n')
+  })
+})
+
+describe('short reads and writes', () => {
+  it('reads a task file to the end when each read returns a few bytes', async () => {
+    await writeFile(path.join(dir, 'task-progress.md'), 'abcdefghij')
+    hooks.fail = 'shortRead'
+    expect(await readTaskFile(dir, 'task-progress.md')).toBe('abcdefghij')
+  })
+
+  it('appends every byte when each write takes a few', async () => {
+    await writeFile(path.join(dir, 'VERIFICATION.md'), 'start\n')
+    hooks.fail = 'shortWrite'
+    await appendTaskFile(dir, 'VERIFICATION.md', 'evidence line\n')
+    expect(await readFile(path.join(dir, 'VERIFICATION.md'), 'utf8')).toBe('start\nevidence line\n')
   })
 })
 

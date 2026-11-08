@@ -128,7 +128,8 @@ const WORK_KINDS = ['teams', 'worktrees', 'reviews'] as const
  * the work folder must not be the data folder, sit inside it or contain it. Any
  * of those puts the database and the vault a relative path away from where
  * agents work, which is what the work folder exists to prevent. For the same
- * reason `teams/`, `worktrees/` and `reviews/` inside it must not be links.
+ * reason `teams/`, `worktrees/` and `reviews/` inside it must not be links, and
+ * one that is a file would fail the first run that needs it.
  */
 export function workDirRefusal(env: NodeJS.ProcessEnv = process.env): string | null {
   const data = dataDirInUse(env)
@@ -143,12 +144,17 @@ export function workDirRefusal(env: NodeJS.ProcessEnv = process.env): string | n
   }
   for (const kind of WORK_KINDS) {
     const child = path.join(work, kind)
+    let st: ReturnType<typeof lstatSync>
     try {
-      if (lstatSync(child).isSymbolicLink()) {
-        return `${child} is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`
-      }
+      st = lstatSync(child)
     } catch {
-      // Not there yet: made when first needed.
+      continue // not there yet: made when first needed
+    }
+    if (st.isSymbolicLink()) {
+      return `${child} is a link. Clawboo puts agents' work only in a real folder there: remove the link and start again.`
+    }
+    if (!st.isDirectory()) {
+      return `${child} is not a folder. Clawboo puts agents' work in a folder there: move it away and start again.`
     }
   }
   return null
@@ -238,7 +244,8 @@ export function reviewsRoot(db: ClawbooDb, env: NodeJS.ProcessEnv = process.env)
 
 const INSTALL_ID_KEY = 'install-id'
 
-const isInstallId = (v: string | null): v is string => v !== null && /^[0-9a-f-]{36}$/.test(v)
+const isInstallId = (v: string | null): v is string =>
+  v !== null && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(v)
 
 /** This install's id, made on first use and kept in its database. Made with an
  *  insert that keeps a row already there, so two processes that start at once
@@ -285,14 +292,15 @@ export async function writeOwnerMarker(root: string, taskId: string, id: string)
     0o600,
   )
   try {
-    await handle.writeFile(id, 'utf8')
-  } finally {
-    await handle.close()
-  }
-  try {
+    try {
+      await handle.writeFile(id, 'utf8')
+    } finally {
+      await handle.close()
+    }
     await rename(temp, target)
   } catch (err) {
-    await rm(temp, { force: true })
+    // Not left beside the checkout; the first error is the one thrown.
+    await rm(temp, { force: true }).catch(() => undefined)
     throw err
   }
 }

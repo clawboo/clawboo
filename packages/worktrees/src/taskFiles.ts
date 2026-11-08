@@ -105,8 +105,14 @@ export async function readTaskFile(
     }
     const size = Number(big)
     const buf = Buffer.alloc(size)
-    const { bytesRead } = size > 0 ? await handle.read(buf, 0, size, 0) : { bytesRead: 0 }
-    return buf.subarray(0, bytesRead).toString('utf8')
+    // A read may return fewer bytes than asked before the end: read on.
+    let got = 0
+    while (got < size) {
+      const { bytesRead } = await handle.read(buf, got, size - got, got)
+      if (bytesRead === 0) break
+      got += bytesRead
+    }
+    return buf.subarray(0, got).toString('utf8')
   } finally {
     await handle.close()
   }
@@ -158,7 +164,9 @@ export async function appendTaskFile(dir: string, name: string, content: string)
   const handle = await open(filePath, constants.O_WRONLY | constants.O_APPEND | NOFOLLOW | NONBLOCK)
   try {
     await assertPlainFile(handle, filePath, seen)
-    await handle.write(content, null, 'utf8')
+    // writeFile, not write: it writes on until every byte is out. The handle is
+    // open for appending, so it adds to the end.
+    await handle.writeFile(content, 'utf8')
   } finally {
     await handle.close()
   }
