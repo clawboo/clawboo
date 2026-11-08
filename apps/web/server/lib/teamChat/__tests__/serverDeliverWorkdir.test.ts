@@ -5,6 +5,7 @@
 // hence its own file) to capture the ctx; the capabilities still come from the
 // real adapters, so the home resolution matches production.
 
+import { realpathSync } from 'node:fs'
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -129,10 +130,11 @@ describe('serverDeliver: the team working folder for coding runtimes', () => {
     })
   }
 
-  const workdir = (): string => path.join(home, '.clawboo', 'workspaces', 'T')
+  // CLAWBOO_HOME's `-work` sibling, by its real path (macOS's temp is a link).
+  const workdir = (): string => path.join(realpathSync.native(home), '.clawboo-work', 'teams', 'T')
 
   for (const runtime of ['claude-code', 'codex', 'hermes', 'clawboo-native'] as const) {
-    it(`a ${runtime} team-chat run starts in <clawboo home>/workspaces/<teamId>, created 0700`, async () => {
+    it(`a ${runtime} team-chat run starts in <work folder>/teams/<teamId>, created 0700`, async () => {
       seedAgent('a1', runtime)
       await wire()('agent:a1:team:T', 'a1', 'hello', HUMAN_TURN)
       await tick()
@@ -160,8 +162,8 @@ describe('serverDeliver: the team working folder for coding runtimes', () => {
 
   it('fails the start, rather than running in the server folder, when the folder cannot be created', async () => {
     seedAgent('a1', 'codex')
-    // A file where the workspaces root should be: mkdir fails underneath it.
-    await writeFile(path.join(home, '.clawboo', 'workspaces'), 'not a folder')
+    // A file where the work folder should be: mkdir fails underneath it.
+    await writeFile(path.join(home, '.clawboo-work'), 'not a folder')
 
     await expect(wire()('agent:a1:team:T', 'a1', 'hello', HUMAN_TURN)).rejects.toThrow(
       "could not create the team's working folder",

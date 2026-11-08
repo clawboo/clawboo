@@ -1,9 +1,10 @@
-// The team folder (`<clawboo home>/workspaces/<teamId>`, where Claude Code /
+// The team folder (`<work folder>/teams/<teamId>`, where Claude Code /
 // Codex / Hermes runs start with no worktree) at the API: deleting a team
 // removes it, and an agent's Workspace tab can list and read it read-only. The
 // folder is always resolved from the agent's or team's row, never the request.
 
-import { mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { existsSync, realpathSync } from 'node:fs'
+import { lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -13,6 +14,7 @@ import { agents, teams, type ClawbooDb } from '@clawboo/db'
 import type { Request, Response } from 'express'
 
 import { getDb, resetDb } from '../../lib/db'
+import { setWorkLayout } from '../../lib/workDir'
 import { agentTeamFolderFileGET, agentTeamFolderTreeGET, agentWorkspacesGET } from '../board'
 import { teamsDELETE } from '../teams'
 
@@ -48,11 +50,14 @@ describe('team folder API', () => {
   let prevClawbooHome: string | undefined
   let db: ClawbooDb
 
-  const folder = (segment: string): string => path.join(clawbooHome, 'workspaces', segment)
+  // CLAWBOO_HOME's `-work` sibling, by its real path (macOS's temp is a link).
+  let teamsRoot: string
+  const folder = (segment: string): string => path.join(teamsRoot, segment)
 
   beforeEach(async () => {
     home = await mkdtemp(path.join(os.tmpdir(), 'clawboo-team-folder-'))
     clawbooHome = path.join(home, '.clawboo')
+    teamsRoot = path.join(realpathSync.native(home), '.clawboo-work', 'teams')
     await mkdir(clawbooHome, { recursive: true })
     prevHome = process.env['HOME']
     prevClawbooHome = process.env['CLAWBOO_HOME']
@@ -80,6 +85,7 @@ describe('team folder API', () => {
     resetDb()
     if (prevHome === undefined) delete process.env['HOME']
     else process.env['HOME'] = prevHome
+    setWorkLayout('work')
     if (prevClawbooHome === undefined) delete process.env['CLAWBOO_HOME']
     else process.env['CLAWBOO_HOME'] = prevClawbooHome
     await rm(home, { recursive: true, force: true }).catch(() => {})
@@ -96,6 +102,24 @@ describe('team folder API', () => {
       expect(r.body()).toEqual({ ok: true, folderRemoved: true })
       await expect(stat(folder('T'))).rejects.toThrow()
     })
+
+    it.skipIf(process.platform === 'win32')(
+      'removes the link the work folder move left at the old place, not a real folder there',
+      async () => {
+        await mkdir(folder('T'), { recursive: true })
+        await writeFile(path.join(folder('T'), 'report.md'), '# findings')
+        const legacy = path.join(clawbooHome, 'workspaces', 'T')
+        await mkdir(path.dirname(legacy), { recursive: true })
+        await symlink(folder('T'), legacy)
+
+        const r = fakeRes()
+        await teamsDELETE(req({ id: 'T' }), r.res)
+        expect(r.body()).toEqual({ ok: true, folderRemoved: true })
+        await expect(stat(folder('T'))).rejects.toThrow()
+        expect(existsSync(legacy)).toBe(false)
+        await expect(lstat(legacy)).rejects.toThrow()
+      },
+    )
 
     it('succeeds for a team that never had a folder', async () => {
       const r = fakeRes()
@@ -192,13 +216,17 @@ describe('team folder API', () => {
     })
 
     it('lists and reads a team folder kept in the work folder, through a link at its old path', async () => {
-      // The newer layout keeps team folders under the work folder and leaves a
-      // link where each one was.
+      // A version before the move (the old layout) finds a team folder the move
+      // put under the work folder through the link it left where it was.
+      setWorkLayout('data')
+      const legacy = path.join(clawbooHome, 'workspaces', 'T')
       const moved = path.join(`${clawbooHome}-work`, 'teams', 'T')
+      await rm(moved, { recursive: true, force: true })
       await mkdir(path.join(moved, 'docs'), { recursive: true })
       await writeFile(path.join(moved, 'docs', 'moved.md'), 'kept')
-      await rm(folder('T'), { recursive: true, force: true })
-      await symlink(moved, folder('T'), 'junction')
+      await mkdir(path.dirname(legacy), { recursive: true })
+      await rm(legacy, { recursive: true, force: true })
+      await symlink(moved, legacy, 'junction')
 
       const ws = fakeRes()
       agentWorkspacesGET(req({ agentId: 'cx' }), ws.res)

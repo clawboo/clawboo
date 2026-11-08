@@ -37,6 +37,14 @@ import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtim
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
+import { prepareWorkDir, workDirRefusal } from './lib/workDir'
+import {
+  holdForWorkDirMove,
+  releaseWorkDirMoveHold,
+  runWorkDirMove,
+  workDirMovePending,
+} from './lib/workDirMigration'
+import { refuseUpgradeWhileMoving, refuseWhileMoving } from './lib/workDirMoveGate'
 import { startMcpSupervisor } from './lib/mcpSupervisor'
 import { startApprovalReaper } from './lib/approvalReaper'
 import { startMemoryEmbedding } from './lib/memoryEmbedding'
@@ -202,6 +210,31 @@ async function main() {
     if (!(err instanceof OperatorSettingsError)) throw err
     log.error(`CONFIG: refusing to start. ${err.message}`)
     process.exit(1)
+  }
+
+  // The work folder, where agents work, must sit apart from the data folder, or
+  // `../..` from a team folder is the database again. Compared on real paths.
+  // Then it is created: one CLAWBOO_WORK_DIR names must exist, while a default
+  // that cannot be made (a data folder on a volume under a root-owned `/`) keeps
+  // the old layout, with new work in the data folder as before.
+  const workDirProblem = workDirRefusal(process.env)
+  if (workDirProblem) {
+    log.error(`CONFIG: refusing to start. ${workDirProblem}`)
+    process.exit(1)
+  }
+  const workDir = prepareWorkDir(process.env)
+  if (!workDir.ok) {
+    if (workDir.explicit) {
+      log.error(
+        `CONFIG: refusing to start. CLAWBOO_WORK_DIR (${workDir.dir}) cannot be used: ${workDir.error}`,
+      )
+      process.exit(1)
+    }
+    log.warn(
+      { dir: workDir.dir, error: workDir.error },
+      'Work folder: could not be created, so team folders and task checkouts stay in the data folder. ' +
+        'Set CLAWBOO_WORK_DIR to a folder Clawboo can create to move them out.',
+    )
   }
 
   // If we were launched as a self-restart successor by an in-app update, the
@@ -460,6 +493,10 @@ async function main() {
   // identity lane, so unauthenticated requests are rejected before it.
   app.use(attachIdentity)
 
+  // While the work folder move runs at boot, /api/health says `migrating` and
+  // everything else answers 503 with Retry-After. A pass-through otherwise.
+  app.use(refuseWhileMoving)
+
   // Per-request logging
   app.use((req, res, next) => {
     const start = Date.now()
@@ -498,6 +535,7 @@ async function main() {
   // ── WebSocket upgrade routing ─────────────────────────────────────────────
 
   server.on('upgrade', (req, socket, head) => {
+    if (refuseUpgradeWhileMoving(socket)) return
     // The raw upgrade handler runs OUTSIDE Express, so the base-path middleware
     // never sees these and the prefix is still present. Accept both spellings:
     // the prefixed one a browser under the mount sends, and the root one the
@@ -634,6 +672,35 @@ async function main() {
     if (swept > 0) log.info({ swept }, 'Board: dropped task resume pointers nothing will resume')
   } catch (err) {
     log.error({ err }, 'Board: sweeping task resume pointers failed (non-fatal)')
+  }
+
+  // ── Work folder: move older work into it ───────────────────────────────────
+  // Team folders and task checkouts an older version made in the data folder,
+  // or that sit in a previous CLAWBOO_WORK_DIR, move into the work folder: after
+  // the database opens and stale runs are released, and before GC and anything
+  // that could run in them. Renames only, journaled, safe to kill at any step;
+  // what cannot move keeps working where it is. When there is something to move
+  // the server listens first, so /api/health can say `migrating` meanwhile.
+  try {
+    const db = getDb()
+    if (workDirMovePending(db)) {
+      holdForWorkDirMove()
+      await new Promise<void>((resolve, reject) => {
+        server.once('error', reject)
+        server.listen(port, hostname, () => {
+          server.off('error', reject)
+          resolve()
+        })
+      })
+      log.info({ port }, 'Work folder: moving older work into it; /api/health says migrating')
+    }
+    const report = await runWorkDirMove(db)
+    if (report.moved + report.left + report.conflicts > 0) {
+      log.info(report, 'Work folder: move finished')
+    }
+  } catch (err) {
+    releaseWorkDirMoveHold()
+    log.error({ err }, 'Work folder: the move failed (non-fatal); unmoved work stays where it is')
   }
 
   // ── Worktrees: GC stale worktrees on startup ────────────────────────────────
@@ -970,7 +1037,7 @@ async function main() {
 
   // ── Listen ────────────────────────────────────────────────────────────────
 
-  server.listen(port, hostname, () => {
+  const onListening = (): void => {
     const hostForBrowser = hostname === '0.0.0.0' || hostname === '::' ? 'localhost' : hostname
     // Trailing slash under a mount so the shell's relative assets resolve without
     // relying on the redirect (which is there for hand-typed URLs).
@@ -1078,7 +1145,10 @@ async function main() {
         }
       })
       .catch((err: unknown) => log.error({ err }, 'Boot probe failed (non-fatal)'))
-  })
+  }
+  // Already listening when the work folder move ran.
+  if (server.listening) onListening()
+  else server.listen(port, hostname, onListening)
 
   // Best-effort cleanup of the runtime port file on graceful shutdown so
   // stale entries don't mislead the CLI on the next launch. We don't rely

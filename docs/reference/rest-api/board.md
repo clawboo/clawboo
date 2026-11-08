@@ -1238,7 +1238,7 @@ curl -X POST http://localhost:18790/api/board/<failed-task-id>/cancel-dependents
 
 ## `POST /api/board/:taskId/workspace`
 
-Creates a git worktree and a `clawboo/task-<id>` branch for a task that changes files, writes the task files into it, and records the worktree and branch on the task. The task files are `TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh` and `VERIFICATION.md` (plus `AGENT_HANDOFF.json` once someone writes a handoff); the other workspace routes read them. The worktree lives outside your repo, at `<clawboo home>/worktrees/<repo hash>/<taskId>`, so it never shows up in the repo's own `git status`. A worktree keeps file changes apart; it is not a sandbox (see [What agents can do](/concepts/permissions)).
+Creates a git worktree and a `clawboo/task-<id>` branch for a task that changes files, writes the task files into it, and records the worktree and branch on the task. The task files are `TASK.md`, `task-progress.md`, `DECISIONS.json`, `init.sh` and `VERIFICATION.md` (plus `AGENT_HANDOFF.json` once someone writes a handoff); the other workspace routes read them. The worktree lives outside your repo, at `<work folder>/worktrees/<repo hash>/<taskId>` (see [The work folder](/operating/data-and-state#the-work-folder)), so it never shows up in the repo's own `git status`. A worktree keeps file changes apart; it is not a sandbox (see [What agents can do](/concepts/permissions)).
 
 The task `kind` decides whether a worktree is made: `code` (the default) and any unknown kind get one; `research` and `review` are refused with **422**. Asking again for a task that already has a live worktree reuses it and returns the path the task records for it.
 
@@ -1369,7 +1369,7 @@ curl http://localhost:18790/api/board/<task-id>/workspace
 
 ## `PATCH /api/board/:taskId/workspace`
 
-Pauses or completes a task's worktree: the checkout the task records, which has to be the task's folder under `<clawboo home>/worktrees/<repo hash>/` or the work folder's `worktrees/<repo hash>/` (see [The work folder](/operating/data-and-state#the-work-folder)). A recorded path anywhere else answers **500** with `Error: worktree path does not belong to task <taskId>: <path>`, and nothing is removed.
+Pauses or completes a task's worktree: the checkout the task records, which has to be the task's folder under the work folder's `worktrees/<repo hash>/`, under `<clawboo home>/worktrees/<repo hash>/` (where older versions made them), or where the work folder move kept it (see [The work folder](/operating/data-and-state#the-work-folder)). A recorded path anywhere else answers **500** with `Error: worktree path does not belong to task <taskId>: <path>`, and nothing is removed.
 
 - **`pause`**: commits any uncommitted work, removes the worktree and keeps the branch. The workspace stays `active` and can be resumed.
 - **`complete`** with an empty diff: removes the worktree and branch and moves the task to `done`. A task in `todo` (released by a pause, or never claimed) moves through `in_progress` first; a `blocked` task stays `blocked`. There is nothing to check, so the check is skipped. The task files do not count toward the diff, so a run that only updated its own progress or handoff is still empty.

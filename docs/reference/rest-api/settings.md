@@ -118,6 +118,8 @@ Returns the latest boot report. A request that arrives before the first report e
 
 **`200 OK`**: the boot report (see [The boot report](#the-boot-report) below), with `ok` added. Dates are ISO strings.
 
+**`200 OK`** while the server moves older work into the work folder at startup (see [The work folder](/operating/data-and-state#the-work-folder)): `{ "ok": false, "status": "migrating", "migration": { "total": <n>, "done": <n>, "left": <n> } }`. Until the move ends, every other request answers **`503`** with a `Retry-After: 2` header and `{ "error": "Clawboo is moving its work folders. Try again in a moment.", "status": "migrating" }`, and a WebSocket upgrade gets `503` too. These answers come after the access gate, like any other.
+
 **`500 Internal Server Error`**: computing a first report failed, `{ "ok": false, "error": "<message>" }`.
 
 #### Example
@@ -290,7 +292,7 @@ curl -X POST http://localhost:18790/api/graph-layout \
   -d '{"name":"team-<team-id>","gatewayUrl":"","positions":{"boo-a1":{"x":120,"y":40}}}'
 ```
 
-**Source of truth:** `apps/web/server/api/settings.ts` with `packages/config/src/index.ts` (settings resolution), `apps/web/server/api/health.ts` with `apps/web/server/lib/bootProbe.ts` and `lib/defaults.ts`, and `apps/web/server/api/graphLayout.ts`.
+**Source of truth:** `apps/web/server/api/settings.ts` with `packages/config/src/index.ts` (settings resolution), `apps/web/server/api/health.ts` with `apps/web/server/lib/bootProbe.ts` and `lib/defaults.ts`, `apps/web/server/lib/workDirMoveGate.ts` (the answers while the work folder move runs), and `apps/web/server/api/graphLayout.ts`.
 
 ## Related
 

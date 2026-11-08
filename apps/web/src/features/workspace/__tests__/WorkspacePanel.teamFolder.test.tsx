@@ -16,7 +16,7 @@ vi.mock('@/features/obs/useObsStream', () => ({
   useObsStream: () => ({ events: [], live: false, loading: false, error: null }),
 }))
 
-const FOLDER = '/home/me/.clawboo/workspaces/T'
+const FOLDER = '/home/me/clawboo-work/teams/T'
 
 const taskWorkspace: AgentWorkspace = {
   taskId: 'task-1',

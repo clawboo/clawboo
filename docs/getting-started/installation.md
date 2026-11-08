@@ -140,7 +140,7 @@ The second command offers to restart the older server; `clawboo -y` restarts it 
 
 1. Optional: in **Settings → Providers**, click **Disconnect** on each key you added there. Keys saved in that panel are also written in plain text to OpenClaw's `~/.openclaw/.env` and to each OpenClaw agent's key file, and **Disconnect** removes every copy.
 2. Stop the server and remove the package with the two commands below.
-3. To delete your data as well, remove the `~/.clawboo` folder.
+3. To delete your data as well, remove the `~/.clawboo` folder, and the work folder `~/clawboo-work` with your agents' files.
 
 ```bash
 clawboo stop
@@ -149,15 +149,15 @@ npm uninstall -g clawboo
 
 <Warning>
 
-Deleting `~/.clawboo` permanently removes your teams, tasks, chats, memory, settings and saved keys. To keep a copy of the database, run `clawboo backup` before you uninstall.
+Deleting `~/.clawboo` permanently removes your teams, tasks, chats, memory, settings and saved keys. Deleting `~/clawboo-work` removes the files your agents saved and any uncommitted work in task worktrees. To keep a copy of the database, run `clawboo backup` before you uninstall.
 
 </Warning>
 
-If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove `~/.clawboo` if you want. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
+If you only used npx, there is no global package: run `npx clawboo@latest stop`, then remove `~/.clawboo` and `~/clawboo-work` if you want. OpenClaw, Codex, Claude Code and Hermes are separate programs, and uninstalling Clawboo leaves them in place.
 
 ## Where your data lives
 
-Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
+Clawboo keeps its data in `~/.clawboo` (set `CLAWBOO_HOME` to use another folder): the database, settings, the access token, the encrypted key vault and the server log. Your agents' work, each team's folder and the task worktrees, goes in a separate work folder, `~/clawboo-work` (set `CLAWBOO_WORK_DIR` to use another). Setting up OpenClaw, and saving keys under **Settings → Providers**, also write to OpenClaw's `~/.openclaw` folder. [Data and state](/operating/data-and-state) lists every file and covers backup and reset.
 
 ## Troubleshooting
 

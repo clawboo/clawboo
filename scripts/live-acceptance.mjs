@@ -150,7 +150,10 @@ async function main() {
   const intact = JSON.stringify(beforeNames) === JSON.stringify(afterNames)
   log('existing teams AFTER (must equal BEFORE)', { intact, afterNames })
 
-  const wtRoot = path.join(os.homedir(), '.openclaw', 'clawboo', 'worktrees')
+  const wtRoot = path.join(
+    process.env.CLAWBOO_WORK_DIR || path.join(os.homedir(), 'clawboo-work'),
+    'worktrees',
+  )
   evidence.steps.worktreeRootExists = existsSync(wtRoot)
   evidence.cleanup = {
     note: 'No team row created. Residual throwaway task/execution/obs rows remain in the dev DB.',

@@ -62,7 +62,7 @@ NODE_ENV=production node "$(npm root -g)/clawboo/dist/server.js"
 
 - **It runs in the foreground** and logs to the terminal. `NODE_ENV=production` gives plain JSON log lines, as with the launcher.
 - **Ctrl+C stops it cleanly.** It stops the agent processes it started, waits up to 5 seconds for them, and closes the database.
-- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder under `~/.clawboo/workspaces`.
+- **Start it from your Clawboo folder**, as the launcher does. Claude Code, Codex and Hermes do not start there: a run without a worktree (every team-chat turn, research and review tasks, and Routines you make in the dashboard) starts in its team's folder in the [work folder](/operating/data-and-state#the-work-folder), `~/clawboo-work/teams` by default.
 - **The dashboard files** come from the `ui` folder next to `server.js`. `CLAWBOO_UI_DIR` points somewhere else. If Clawboo cannot read `index.html` there, page loads answer `503` with "The Clawboo dashboard could not be read from disk. Check CLAWBOO_UI_DIR."
 - **MCP attach snippets.** To make the stdio snippets from `GET /api/mcp/config` name the bundled MCP programs, also set `CLAWBOO_MCP_BIN_DIR="$(npm root -g)/clawboo/dist/bin"`, as the launcher does.
 - **Signing in.** Without `STUDIO_ACCESS_TOKEN`, the server locks itself with the per-install token in `~/.clawboo/access-token` of the user account it runs as. Run `clawboo open` as that user to open a signed-in browser, or `clawboo open --print` for a one-time link to open elsewhere.
@@ -132,7 +132,7 @@ The server writes the port it chose to `~/.clawboo/api-port.txt`, and removes th
 
 ## Where the server keeps its files
 
-Everything lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault, logs, task worktrees and each team's folder. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
+Clawboo's own data lives in your Clawboo folder, `~/.clawboo` by default (`CLAWBOO_HOME` moves it): the database, settings, the encrypted key vault and logs. Your agents' work, task worktrees and each team's folder, lives in the work folder: `~/clawboo-work` by default, `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, or the folder `CLAWBOO_WORK_DIR` names. It must be outside the Clawboo folder, or the server refuses to start. In a container whose Clawboo folder is a volume, set `CLAWBOO_WORK_DIR` to a second volume or folder; when it is unset and the default cannot be created, Clawboo keeps new work in the Clawboo folder and logs a warning. Clawboo also writes to OpenClaw's folder (`~/.openclaw`) when you connect a key under **Providers**, set up OpenClaw, or change OpenClaw settings from the dashboard. [Data and state](/operating/data-and-state) lists every file and covers backups and resets.
 
 ## Logs
 
@@ -228,7 +228,7 @@ curl -s http://127.0.0.1:18790/api/settings
 curl -s http://127.0.0.1:18790/api/health
 ```
 
-Use the port from the first command. `/api/settings` answers with `gatewayUrl`, `hasToken` and `firstRunDismissedAt`. `/api/health` returns the startup checks, and `"ok": true` means none of the fatal ones failed. On a token-protected install both answer `401`, which also means the server is up. The **System Health** panel shows the same report.
+Use the port from the first command. `/api/settings` answers with `gatewayUrl`, `hasToken` and `firstRunDismissedAt`. `/api/health` returns the startup checks, and `"ok": true` means none of the fatal ones failed. While the server moves older work into the [work folder](/operating/data-and-state#the-work-folder) at startup, it answers `"status": "migrating"` instead, and other routes answer `503` until the move ends. On a token-protected install both answer `401`, which also means the server is up. The **System Health** panel shows the same report.
 
 ## Troubleshooting
 

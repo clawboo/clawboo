@@ -1,7 +1,8 @@
-// Where the verify gate agrees to run: a task or review checkout under the data
-// folder, or under the work folder's worktrees/ and reviews/, the place a newer
-// layout keeps them. Anything else is a broken record and is refused before a
-// command runs.
+// Where the verify gate agrees to run: a task or review checkout or a team
+// folder under the work folder's worktrees/, reviews/ and teams/, or anything
+// under the data folder, where older versions made them, or a place the work
+// folder move kept one at. Anything else is a broken record and is refused
+// before a command runs.
 
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
@@ -9,6 +10,7 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { setWorkDirJournal } from '../../workDirJournal'
 import { runDeterministicGate } from '../deterministicGate'
 
 // Exits 0 on every platform the server tests run on.
@@ -36,6 +38,7 @@ afterEach(async () => {
   else process.env['CLAWBOO_HOME'] = prevHome
   if (prevWorkDir === undefined) delete process.env['CLAWBOO_WORK_DIR']
   else process.env['CLAWBOO_WORK_DIR'] = prevWorkDir
+  setWorkDirJournal({ version: 1, items: [] })
   await rm(base, { recursive: true, force: true })
 })
 
@@ -73,6 +76,36 @@ describe('the verify gate accepts both layouts', () => {
     expect(await gateIn(review)).toMatchObject({ passed: true })
   })
 
+  it('runs in a team folder under the work folder', async () => {
+    process.env['CLAWBOO_WORK_DIR'] = path.join(base, 'work')
+    const team = await checkout(base, 'work', 'teams', 'team-1')
+    expect(await gateIn(team)).toMatchObject({ passed: true })
+  })
+
+  it('runs in a checkout the work folder move kept in a previous work folder', async () => {
+    process.env['CLAWBOO_WORK_DIR'] = path.join(base, 'work')
+    const kept = await checkout(base, 'old-work', 'worktrees', 'abc', 't1')
+    await expect(gateIn(kept)).rejects.toThrow(/outside/)
+    setWorkDirJournal({
+      version: 1,
+      items: [
+        {
+          kind: 'worktree',
+          taskId: 't1',
+          workspaceId: 'w1',
+          repoPath: base,
+          from: kept,
+          to: path.join(base, 'work', 'worktrees', 'abc', 't1'),
+          state: 'left',
+        },
+      ],
+    })
+    expect(await gateIn(kept)).toMatchObject({ passed: true })
+    // Only that folder's root, not the rest of the old work folder.
+    const other = await checkout(base, 'old-work', 'worktrees', 'zzz', 't2')
+    await expect(gateIn(other)).rejects.toThrow(/outside/)
+  })
+
   it('runs in a checkout recorded by the real path of a linked work folder', async () => {
     const target = await checkout(base, 'real-work')
     const linked = path.join(base, 'linked-work')
@@ -88,8 +121,9 @@ describe('the verify gate accepts both layouts', () => {
 
 describe('the verify gate still refuses anything else', () => {
   it.each([
-    ['a team folder under the work folder', ['work', 'teams', 'team-1']],
     ['the work folder itself', ['work']],
+    ['its teams folder itself', ['work', 'teams']],
+    ['a file folder beside the roots', ['work', 'notes', 'n1']],
     ['its worktrees folder itself', ['work', 'worktrees']],
     ['a sibling sharing its spelling', ['work-old', 'worktrees', 'abc', 't1']],
     ['a folder outside both', ['elsewhere', 'worktrees', 'abc', 't1']],

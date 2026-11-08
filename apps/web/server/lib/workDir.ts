@@ -1,13 +1,33 @@
-// The work folder (`resolveWorkDir`): where the newer layout keeps task
-// worktrees and review checkouts, outside Clawboo's data folder. Nothing here
-// creates it, and new checkouts still go under the data folder. The server's
-// readers of those checkouts accept both places, so a version that keeps them
-// in the work folder can be rolled back to this one without stranding a task.
+// The work folder (`resolveWorkDir`): where team folders, task worktrees and
+// review checkouts live, outside Clawboo's data folder, so no relative path from
+// where an agent starts (`../..`) leads to the database or the vault.
+//
+// New work goes here. Work made by an older version under the data folder is
+// moved here once at boot (`workDirMigration.ts`). Readers accept both places,
+// and anything the move left where it was (`workDirJournal.ts`), so a version
+// that kept everything in the data folder can still be rolled back to.
+//
+// The work folder is used by its real path (every link resolved): checks that
+// compare paths and Claude Code's session keys both compare strings.
 
-import { realpathSync } from 'node:fs'
+import crypto from 'node:crypto'
+import {
+  constants as fsConstants,
+  closeSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
+import { open, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 
-import { resolveWorkDir } from '@clawboo/config'
+import { resolveClawbooDir, resolveWorkDir } from '@clawboo/config'
+import { getSetting, setSetting, type ClawbooDb } from '@clawboo/db'
+import { assertSafeTaskId } from '@clawboo/worktrees'
 
 /**
  * `dir` through every link in its path when it exists, else `null`. The native
@@ -23,15 +43,225 @@ export function realPathOf(dir: string): string | null {
 }
 
 /**
- * The work folder through the links in its path, then as configured when that
- * differs; just as configured when it does not exist. A checkout recorded under
- * it may use either spelling, so a check against the folder accepts both. The
- * real path comes first because that is the one the newer layout records, so a
- * sweep that takes the first spelling names folders the way their records do.
+ * `p` resolved, with the real path of its deepest part that exists: a folder
+ * that is not there yet still gets the spelling it will have once it is made
+ * (`/var/...` under `/private/var/...` on macOS, say).
+ */
+export function realPathOrSpelling(p: string): string {
+  const resolved = path.resolve(p)
+  const rest: string[] = []
+  let cur = resolved
+  for (;;) {
+    const real = realPathOf(cur)
+    if (real !== null) return rest.length === 0 ? real : path.join(real, ...rest.reverse())
+    const parent = path.dirname(cur)
+    if (parent === cur) return resolved
+    rest.push(path.basename(cur))
+    cur = parent
+  }
+}
+
+/** The work folder by its real path (see {@link realPathOrSpelling}). */
+export function workDirInUse(env: NodeJS.ProcessEnv = process.env): string {
+  return realPathOrSpelling(resolveWorkDir(env))
+}
+
+/** The data folder by its real path. */
+export function dataDirInUse(env: NodeJS.ProcessEnv = process.env): string {
+  return realPathOrSpelling(resolveClawbooDir(env))
+}
+
+/**
+ * The work folder by its real path, then as configured when that differs. A
+ * checkout recorded under it may use either spelling, so a check against the
+ * folder accepts both. The real path comes first because that is the one new
+ * records use, so a sweep that takes the first spelling names folders the way
+ * their records do.
  */
 export function workDirSpellings(env: NodeJS.ProcessEnv = process.env): string[] {
   const dir = path.resolve(resolveWorkDir(env))
-  // Not there: nothing can be recorded under its real path either.
-  const real = realPathOf(dir) ?? dir
+  const real = realPathOrSpelling(dir)
   return real === dir ? [dir] : [real, dir]
+}
+
+// ── Layout ──────────────────────────────────────────────────────────────────
+
+/**
+ * Where NEW work goes: `work`, the work folder (the default), or `data`, the old
+ * place under the data folder. `data` is chosen at boot only when the work folder
+ * was not set and cannot be created, such as a container whose data folder is a
+ * volume under a root-owned `/`; that install keeps working as it did.
+ */
+export type WorkLayout = 'work' | 'data'
+
+let layout: WorkLayout = 'work'
+
+export function workLayout(): WorkLayout {
+  return layout
+}
+
+/** Set at boot (see {@link prepareWorkDir}); tests set it directly. */
+export function setWorkLayout(next: WorkLayout): void {
+  layout = next
+}
+
+// ── Boot checks ─────────────────────────────────────────────────────────────
+
+const isInside = (child: string, parent: string): boolean =>
+  child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep)
+
+/**
+ * Why the server must not start with this pair of folders, or null when it may.
+ * Compared on real paths, so a link cannot hide one folder inside the other:
+ * the work folder must not be the data folder, sit inside it or contain it. Any
+ * of those puts the database and the vault a relative path away from where
+ * agents work, which is what the work folder exists to prevent.
+ */
+export function workDirRefusal(env: NodeJS.ProcessEnv = process.env): string | null {
+  const data = dataDirInUse(env)
+  const work = workDirInUse(env)
+  const name = env['CLAWBOO_WORK_DIR']?.trim() ? 'CLAWBOO_WORK_DIR' : 'The work folder'
+  if (work === data || isInside(work, data)) {
+    return `${name} (${work}) must be outside Clawboo's data folder (${data}). Set CLAWBOO_WORK_DIR to a folder outside it.`
+  }
+  if (isInside(data, work)) {
+    return `Clawboo's data folder (${data}) must be outside the work folder (${work}). Set CLAWBOO_WORK_DIR to a folder that does not contain it.`
+  }
+  return null
+}
+
+const README = `This folder holds the work of Clawboo's agents: team folders (teams/),
+task checkouts (worktrees/) and review checkouts (reviews/).
+
+Clawboo keeps its own data, such as its database and saved keys, in another
+folder. Do not move or rename this folder, or anything in it, while Clawboo
+runs. To use another folder, stop Clawboo, set CLAWBOO_WORK_DIR, and start it
+again: it moves the work there.
+`
+
+export type PrepareWorkDirResult =
+  | { ok: true; dir: string }
+  /** `explicit`: CLAWBOO_WORK_DIR names it, so the server must not start without it. */
+  | { ok: false; dir: string; explicit: boolean; error: string }
+
+/**
+ * Create the work folder (owner-only, 0700, parents included) and its README,
+ * and choose the layout: `work` when it is there, `data` when it was not set and
+ * could not be made. A folder named by CLAWBOO_WORK_DIR that cannot be made is
+ * an error for the caller to refuse on.
+ */
+export function prepareWorkDir(env: NodeJS.ProcessEnv = process.env): PrepareWorkDirResult {
+  const explicit = Boolean(env['CLAWBOO_WORK_DIR']?.trim())
+  const dir = workDirInUse(env)
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    if (!lstatSync(dir).isDirectory()) throw new Error(`${dir} is not a folder`)
+  } catch (err) {
+    setWorkLayout('data')
+    return { ok: false, dir, explicit, error: err instanceof Error ? err.message : String(err) }
+  }
+  try {
+    // Create only: 'wx' fails on anything already at the name, a link included.
+    writeFileSync(path.join(dir, 'README.txt'), README, { flag: 'wx', mode: 0o600 })
+  } catch {
+    // Already there, or not writable: the README is a courtesy.
+  }
+  setWorkLayout('work')
+  return { ok: true, dir: realPathOf(dir) ?? dir }
+}
+
+// ── Roots ───────────────────────────────────────────────────────────────────
+
+/** sha1 of a repository path, cut to 12: names a repository's folder of checkouts. */
+export function repoHash(repoPath: string): string {
+  return crypto.createHash('sha1').update(path.resolve(repoPath)).digest('hex').slice(0, 12)
+}
+
+/** Where new task checkouts (`worktrees`) or review checkouts (`reviews`) go:
+ *  the work folder's, by its real path, or the data folder's in the old layout. */
+export function workRoot(
+  kind: 'worktrees' | 'reviews',
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return workLayout() === 'work'
+    ? path.join(workDirInUse(env), kind)
+    : path.resolve(resolveClawbooDir(env), kind)
+}
+
+// ── Ownership marker ────────────────────────────────────────────────────────
+//
+// A work folder can be shared by two installs that set the same
+// CLAWBOO_WORK_DIR, so cleanup there removes only checkouts this install made.
+// Each checkout this install puts in the work folder gets a marker beside it,
+// `.<task id>.owner` holding this install's id. A file, not a folder, so an older
+// version's cleanup, which collects only folders, never touches one.
+
+const INSTALL_ID_KEY = 'install-id'
+
+/** This install's id, made on first use and kept in its database. */
+export function installId(db: ClawbooDb): string {
+  const known = getSetting(db, INSTALL_ID_KEY)
+  if (known && /^[0-9a-f-]{36}$/.test(known)) return known
+  const id = crypto.randomUUID()
+  setSetting(db, INSTALL_ID_KEY, id)
+  return id
+}
+
+export function ownerMarkerPath(root: string, taskId: string): string {
+  return path.join(root, `.${assertSafeTaskId(taskId)}.owner`)
+}
+
+/**
+ * Record that this install made the checkout `<root>/<taskId>`. Written to a new
+ * file and renamed into place, so a link an agent put at the name is replaced,
+ * never written through.
+ */
+export async function writeOwnerMarker(root: string, taskId: string, id: string): Promise<void> {
+  const target = ownerMarkerPath(root, taskId)
+  const temp = `${target}.${crypto.randomBytes(6).toString('hex')}.tmp`
+  const handle = await open(
+    temp,
+    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | (fsConstants.O_NOFOLLOW ?? 0),
+    0o600,
+  )
+  try {
+    await handle.writeFile(id, 'utf8')
+  } finally {
+    await handle.close()
+  }
+  try {
+    await rename(temp, target)
+  } catch (err) {
+    await rm(temp, { force: true })
+    throw err
+  }
+}
+
+/** The install id the marker beside `<root>/<taskId>` holds, or null (none, a
+ *  link, or not a small plain file). */
+export function readOwnerMarker(root: string, taskId: string): string | null {
+  let fd: number
+  try {
+    fd = openSync(
+      ownerMarkerPath(root, taskId),
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0),
+    )
+  } catch {
+    return null
+  }
+  try {
+    const st = fstatSync(fd)
+    if (!st.isFile() || st.size > 64) return null
+    const buf = Buffer.alloc(st.size)
+    const n = readSync(fd, buf, 0, st.size, 0)
+    return buf.subarray(0, n).toString('utf8').trim() || null
+  } catch {
+    return null
+  } finally {
+    closeSync(fd)
+  }
+}
+
+export async function removeOwnerMarker(root: string, taskId: string): Promise<void> {
+  await rm(ownerMarkerPath(root, taskId), { force: true })
 }

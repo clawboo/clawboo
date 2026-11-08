@@ -12,8 +12,8 @@
 //     `.mcp.json` and `CLAUDE.md` still apply, as for anyone who clones the repo.
 //   - The project tier walks `CLAUDE.md`, `.claude/CLAUDE.md` and
 //     `.claude/rules/` up from the working folder to `/`. Clawboo's folders live
-//     under `~/.clawboo`, so that walk reaches `~/.claude/CLAUDE.md` and loads it
-//     as a project file. `claudeMdExcludes` cuts every directory above the
+//     under the home folder (`~/clawboo-work` by default), so that walk reaches
+//     `~/.claude/CLAUDE.md` and loads it as a project file. `claudeMdExcludes` cuts every directory above the
 //     working folder, and the home directory itself.
 //   - `autoMemoryEnabled: false`, because auto memory is not a settings source,
 //     plus `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` in the child env, because the CLI

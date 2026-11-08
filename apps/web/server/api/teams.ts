@@ -1,5 +1,7 @@
 import crypto from 'node:crypto'
+import { lstatSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import path from 'node:path'
 import type { Request, Response } from 'express'
 import {
   appendAudit,
@@ -26,7 +28,8 @@ import { markReleasedTasksRead, ownWriterOf, stopAsOwnWrite } from '../lib/board
 import { getDb } from '../lib/db'
 import { emitEvent } from '../lib/obs'
 import { publishBoardChangeWithAttention } from '../lib/teamChat/publishBoardChange'
-import { teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
+import { sanitizeAgentId } from '../lib/runtimes/identityHome'
+import { legacyTeamFoldersRoot, teamWorkdirPath } from '../lib/runtimes/teamWorkdir'
 import { teamFolderHistoryDir } from '../lib/teamChat/teamWorkCheck'
 import { getRegistry } from '../lib/agentSource/registry'
 import { pendingUpstreamDeletes } from '../lib/agentSource/openClawAgentSource'
@@ -318,8 +321,9 @@ export function teamsPATCH(req: Request, res: Response): void {
 //     same pointers for the team's chat rooms (`...:<teamId>:room:<roomId>`)
 // The `boo_zero_team_briefs` and `rooms` tables FK-cascade on team delete (see
 // schema; room memberships cascade with their rooms), so those clean themselves.
-// The team's working folder (`<clawboo home>/workspaces/<teamId>`, where its
-// agents' runs start) is removed with it, files included.
+// The team's working folder (`<work folder>/teams/<teamId>`, where its agents'
+// runs start) is removed with it, files included, and so is the link an older
+// layout's place (`<clawboo home>/workspaces/<teamId>`) may still hold.
 // Archiving a team keeps it.
 
 const TEAM_DELETED_NOTE = 'Stopped: its team was deleted.'
@@ -389,8 +393,8 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
 
     // After the row, so a failed delete never loses the files, and only for a
     // team that existed: a made-up id must not remove another folder under
-    // workspaces/ (the shared `_no-team` one, say). The path is pinned under
-    // workspaces/, and `rm` removes a symlink, never its target.
+    // teams/ (the shared `_no-team` one, say). The path is pinned under the
+    // team folders' root, and `rm` removes a symlink, never its target.
     let folderRemoved = false
     if (existed) {
       try {
@@ -398,6 +402,14 @@ export async function teamsDELETE(req: Request, res: Response): Promise<void> {
         folderRemoved = true
       } catch {
         folderRemoved = false
+      }
+      // The link the work folder move left at the old place, when it is one. A
+      // real folder there is not this team's current folder, so it stays.
+      const legacy = path.join(legacyTeamFoldersRoot(), sanitizeAgentId(teamId))
+      try {
+        if (lstatSync(legacy).isSymbolicLink()) await rm(legacy, { force: true })
+      } catch {
+        /* nothing there */
       }
       // The history the work check keeps of that folder goes with it.
       await rm(teamFolderHistoryDir(teamId), { recursive: true, force: true }).catch(

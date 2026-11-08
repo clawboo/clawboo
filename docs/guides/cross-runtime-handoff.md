@@ -88,7 +88,7 @@ What the fields do:
 - `repoPath` is the repository the worktree branches from. The run's `kind` defaults to `code`, which needs it. Read-only `research` and `review` runs get no worktree.
 - `assigneeAgentId` becomes the run's identity. Memory and the board credit the work to it, and Clawboo Native, Codex and Hermes keep a home folder per identity. Use the id of an agent on the task's team (from `GET /api/agents`), or leave it out to use the runtime's id. Only letters, digits, `-` and `_` are allowed.
 
-Clawboo claims the task and makes the worktree: a folder under `~/.clawboo/worktrees/` on a new branch, `clawboo/task-<task-id>`, in your repository. The agent works there. At the end, Clawboo writes `AGENT_HANDOFF.json` into the worktree, with the agent's summary as the next step, and puts the task back in To do. The worktree stays, and no check runs on a pause.
+Clawboo claims the task and makes the worktree: a folder under `~/clawboo-work/worktrees/` on a new branch, `clawboo/task-<task-id>`, in your repository. The agent works there. At the end, Clawboo writes `AGENT_HANDOFF.json` into the worktree, with the agent's summary as the next step, and puts the task back in To do. The worktree stays, and no check runs on a pause.
 
 You should get a `200` whose JSON includes `"ok": true`, `"status": "todo"`, `"usedWorktree": true` and the agent's `summary`.
 

@@ -156,7 +156,7 @@ A JSON error body carries a human-readable `error` string. Many routes add field
 | `429`  | A rate limit                                                                                                                                                                                                                                                                |
 | `500`  | An unexpected failure inside the handler                                                                                                                                                                                                                                    |
 | `502`  | An upstream refused the request: the OpenClaw Gateway, Composio or a connector                                                                                                                                                                                              |
-| `503`  | The server's connection to the OpenClaw Gateway is down (`{ "error": "gateway_disconnected" }`)                                                                                                                                                                             |
+| `503`  | The server's connection to the OpenClaw Gateway is down (`{ "error": "gateway_disconnected" }`), or the server is moving its work folders at startup (`"status": "migrating"`, with `Retry-After: 2`; see [Health](/reference/rest-api/settings#health))                    |
 
 ## Streaming routes
 

@@ -9,7 +9,7 @@
 //        connected-substrate participant with no operator client (skipped);
 //  (005) normalizeSingleLeader collapses a two-leader team to one + warns.
 
-import { mkdtempSync, rmSync, statSync } from 'node:fs'
+import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -58,6 +58,7 @@ afterEach(() => {
   if (prevHome === undefined) delete process.env['CLAWBOO_HOME']
   else process.env['CLAWBOO_HOME'] = prevHome
   rmSync(homeDir, { recursive: true, force: true })
+  rmSync(`${homeDir}-work`, { recursive: true, force: true })
 })
 
 function seedTeam(
@@ -718,7 +719,12 @@ describe('runTeamExchange (the production trigger)', () => {
     })
 
     expect(res.ok).toBe(true)
-    const folder = path.join(homeDir, 'workspaces', 'tmwd')
+    const folder = path.join(
+      realpathSync.native(os.tmpdir()),
+      `${path.basename(homeDir)}-work`,
+      'teams',
+      'tmwd',
+    )
     expect(cwds.get('cc')).toBe(folder)
     expect(cwds.get('cx')).toBe(folder)
     expect(cwds.get('hm')).toBe(folder)

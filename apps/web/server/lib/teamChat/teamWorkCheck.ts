@@ -73,6 +73,7 @@ import {
 } from '../runtimes/teamFolderActivity'
 import { ensureTeamWorkdir, teamWorkdirFor, teamWorkdirPath } from '../runtimes/teamWorkdir'
 import { recordRunTokens } from '../runTokenLog'
+import { workRoot } from '../workDir'
 import { verifyMaxAttempts, verifyTask, type ReviewerSpend } from '../verification'
 import { readTeamVerifyCommand } from '../verification/teamVerifyCommand'
 import { parseCodingModelConfig } from './serverDeliver'
@@ -576,7 +577,7 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
         detached: false,
       },
       diffStat: diff,
-      reviewRootDir: path.join(resolveClawbooDir(), 'reviews', `team-${sanitizeAgentId(teamId)}`),
+      reviewRootDir: path.join(workRoot('reviews'), `team-${sanitizeAgentId(teamId)}`),
       verifyCommand: target.command,
       reviewSha: head,
       evidence: false,

@@ -238,7 +238,7 @@ runner, the team orchestrator and the Clawboo Native conversation loop.
 
 `resolveClawbooDir()` returns Clawboo's own state folder (`CLAWBOO_HOME`, else `~/.clawboo`).
 `resolveWorkDir()` returns the work folder (`CLAWBOO_WORK_DIR`, else `<CLAWBOO_HOME>-work` when that is set, else
-`~/clawboo-work`), where the server works with task worktrees the board records there; new ones still go in the state folder.
+`~/clawboo-work`), where the server puts team folders, task worktrees and review checkouts.
 `resolveStateDir()` returns OpenClaw's (`OPENCLAW_STATE_DIR`, else the first existing folder among `~/.openclaw`,
 `~/.clawdbot` and `~/.moltbot`, falling back to `~/.openclaw`). `loadSettings()` and
 `saveSettings()` read and write `settings.json` in Clawboo's folder. `writePrivateFileSync()` writes a file

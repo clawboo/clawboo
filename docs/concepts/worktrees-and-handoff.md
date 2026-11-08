@@ -48,13 +48,13 @@ A task-runner run of a kind that needs a worktree, with no repository path, is r
 
 <Warning>
 
-**Without a worktree, coding agents start in their team's folder.** In team chat, and in any other run without a worktree, Claude Code, Codex, Hermes and Clawboo Native start in `workspaces/<team id>` inside your Clawboo folder (`~/.clawboo`, or `CLAWBOO_HOME` if you set it). Every member of the team shares it, and a task or an agent with no team uses `workspaces/_no-team`. The folder only sets where Claude Code, Codex and Hermes start: they run with their own approval prompts turned off, so they can read and change any file your user account can, Clawboo's database and saved keys included. See [What agents can do](/concepts/permissions).
+**Without a worktree, coding agents start in their team's folder.** In team chat, and in any other run without a worktree, Claude Code, Codex, Hermes and Clawboo Native start in `teams/<team id>` in the [work folder](/operating/data-and-state#the-work-folder) (`~/clawboo-work` by default). Every member of the team shares it, and a task or an agent with no team uses `teams/_no-team`. The work folder is outside Clawboo's data folder, so `../..` from a team folder does not reach the database. The folder only sets where Claude Code, Codex and Hermes start: they run with their own approval prompts turned off, so they can still open any file your user account can by its full path, Clawboo's database and saved keys in `~/.clawboo` included. See [What agents can do](/concepts/permissions).
 
 </Warning>
 
 ## What a worktree is
 
-- **A separate checkout.** It lives in your Clawboo folder, at `worktrees/<hash of the repository path>/<task id>`. Your own checkout and its working files are not touched, though `git worktree list` and `git branch` in your repository show the extra checkout and its branch.
+- **A separate checkout.** It lives in the [work folder](/operating/data-and-state#the-work-folder), at `worktrees/<hash of the repository path>/<task id>`. Your own checkout and its working files are not touched, though `git worktree list` and `git branch` in your repository show the extra checkout and its branch.
 - **Its own branch.** The branch is `clawboo/task-<task id>`, cut from your repository's current `HEAD`. A caller that creates the worktree through the API can name another commit or ref.
 - **A starting commit.** Before the agent starts, Clawboo commits five bookkeeping files to the branch, with the message `clawboo: scaffold task <id>`. The agent's changes are measured from that commit, so the bookkeeping never counts as work.
 
@@ -107,7 +107,7 @@ When a task runs again and its folder has to be rebuilt from the branch, Clawboo
 
 ### Cleanup
 
-When the Clawboo server starts, it removes worktree folders that are older than 72 hours, or beyond the newest 25 for a repository. Tasks that are in progress or in review are skipped. Before removing a folder, Clawboo commits any uncommitted work to the branch. Files git ignores, such as `.env` files and `node_modules`, are never committed, so they are removed with the folder; copy out anything you need before a task's worktree sits unused for 72 hours. A folder git does not list as a worktree is removed only when it holds nothing. A folder git cannot be asked about, because `git worktree list` failed, is always kept, and so is a separate repository or a checkout whose commit no branch holds. The branch itself is kept, so the committed work is not lost: if the task runs again, Clawboo rebuilds the checkout from the branch.
+When the Clawboo server starts, it removes worktree folders that are older than 72 hours, or beyond the newest 25 for a repository. Tasks that are in progress or in review are skipped. Before removing a folder, Clawboo commits any uncommitted work to the branch. Files git ignores, such as `.env` files and `node_modules`, are never committed, so they are removed with the folder; copy out anything you need before a task's worktree sits unused for 72 hours. A folder git does not list as a worktree is removed only when it holds nothing. A folder git cannot be asked about, because `git worktree list` failed, is always kept, and so is a separate repository or a checkout whose commit no branch holds. In the work folder, the cleanup removes only checkouts this install's board records or that carry its `.<task id>.owner` marker, so a work folder two installs share is safe. The branch itself is kept, so the committed work is not lost: if the task runs again, Clawboo rebuilds the checkout from the branch.
 
 Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches you no longer need with git.
 
@@ -115,10 +115,11 @@ Branches are never deleted by cleanup. Delete the `clawboo/task-<id>` branches y
 
 <Accordion title="Under the hood">
 
-- Clawboo's commits on a task branch use the messages `clawboo: scaffold task <id>`, `clawboo: checkpoint task <id>` (after the verify command passes, before the reviewer), `clawboo: pause task <id>` and `clawboo: gc autosave task <id>`.
+- Clawboo's commits on a task branch use the messages `clawboo: scaffold task <id>`, `clawboo: checkpoint task <id>` (after the verify command passes, before the reviewer), `clawboo: pause task <id>`, `clawboo: gc autosave task <id>` and `clawboo: save work before moving task <id>` (before the [move into the work folder](/operating/data-and-state#move-older-work-into-it)).
 - `PATCH /api/board/:taskId/workspace` with `{ "action": "pause" }` commits the work, removes the folder and keeps the branch. `{ "action": "complete" }` runs the empty-or-changed decision above and, for changed work, the verify command without the reviewer. `POST /api/board/:taskId/workspace` refuses a `research` or `review` kind with `422 no_isolation`, and a folder at the task's path that holds uncommitted changes, or that git cannot read, with `409 unsafe_to_rebuild`.
-- The reviewer works in a detached checkout at the committed work, under `reviews/<hash>` in your Clawboo folder. The checkout has no branch of its own.
-- If `AGENT_HANDOFF.json` cannot be read or parsed, Clawboo treats it as missing and falls back to the `## Done` and `## Blocked` sections of `task-progress.md`.
+- The reviewer works in a detached checkout at the committed work, under `reviews/<hash>/<short sha>` in the work folder. The checkout has no branch of its own.
+- Clawboo reads and writes the task files at the top of a checkout or team folder (`AGENT_HANDOFF.json`, `init.sh`, `task-progress.md`, `VERIFICATION.md`) without following a link or a hard link an agent put there. A linked file reads as missing, and a write replaces the name instead of writing through it.
+- If `AGENT_HANDOFF.json` cannot be read or parsed, or is a link, Clawboo treats it as missing and falls back to the `## Done` and `## Blocked` sections of `task-progress.md`.
 - Every git call Clawboo makes has a 60-second timeout.
 - The lifecycle functions are documented in [@clawboo/worktrees](/reference/packages/worktrees), and the run loop in [Executor runner](/internals/executor-runner).
 

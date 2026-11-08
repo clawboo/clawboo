@@ -27,7 +27,7 @@ Clawboo spreads its configuration over a few places. Use this page to find where
 | `~/.clawboo/secrets/`                           | Provider keys and connector secrets, encrypted                    | **Settings > Providers**, **Settings > Runtimes**, Connectors                                |
 | `~/.openclaw/`                                  | OpenClaw's own configuration, part of which Clawboo writes        | OpenClaw, or the dashboard                                                                   |
 
-`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
+`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The work folder moves with `CLAWBOO_HOME` too, to `<CLAWBOO_HOME>-work`, unless `CLAWBOO_WORK_DIR` names it. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
 
 On a machine several teams share, one tuning variable is worth knowing: `CLAWBOO_MAX_CONCURRENT_RUNS`, how many agent runs execute at once across the whole server (8 by default). Runs beyond it wait their turn rather than fail. [Environment variables](/reference/environment-variables) describes it with the rest.
 
@@ -91,29 +91,42 @@ The theme, sidebar width and collapsed state, panel layout, Board view, Org char
 
 Clawboo owns everything in this folder. The bundled server also runs with it as its working directory. [Data and state](/operating/data-and-state) explains what to back up, what is safe to delete, and how to reset.
 
-| Path                                 | What it holds                                                                                 | Sensitive                       |
-| ------------------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------- |
-| `clawboo.db`, `-wal`, `-shm`         | The database: agents, teams, board, chats, memory, settings, the event log                    | Yes                             |
-| `settings.json`                      | The Gateway URL and token                                                                     | Yes                             |
-| `operator.json`                      | Settings an administrator pinned, when there is one; Clawboo only reads it                    | No                              |
-| `secrets/master.key`                 | The key that decrypts the vault                                                               | Yes                             |
-| `secrets/runtime-keys.json`          | Encrypted provider keys, connector secrets and sign-in tokens                                 | Encrypted                       |
-| `secrets/disconnected-runtimes.json` | Which runtimes you disconnected                                                               | No                              |
-| `secrets/keyless-providers.json`     | Whether you chose or removed keyless Ollama                                                   | No                              |
-| `proxy-device-identity.json`         | The key pair Clawboo uses to sign in to the OpenClaw Gateway as a device                      | Yes                             |
-| `api-port.txt`                       | The port the server listens on; removed at shutdown if it still names that port               | No                              |
-| `server.log`, `server.log.1`         | Output of a server the CLI started                                                            | No                              |
-| `gateway.log`, `gateway.pid`         | Output and process record of an OpenClaw Gateway that Clawboo started                         | No                              |
-| `connector-pids.json`                | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start  | No                              |
-| `runtime-pids/`                      | Agent processes Clawboo started, so leftovers from a crash are stopped at the next start      | No                              |
-| `catalog/`                           | Verified marketplace packs, cached                                                            | No                              |
-| `frames/`                            | Saved screenshots from agents' browsers                                                       | May show private pages          |
-| `browser-profiles/`                  | Each agent's browser profile, including sites it is signed in to                              | Yes                             |
-| `workspaces/<team id>/`              | Each team's shared folder, where runs without a worktree start; `_no-team` for teamless tasks | Holds what agents saved there   |
-| `worktrees/`, `reviews/`             | Per-task git worktrees and review checkouts                                                   | No                              |
-| `runtimes/<runtime>/<agent>/`        | Each Clawboo Native, Codex or Hermes agent's own runtime home                                 | May hold runtime sign-in copies |
+| Path                                    | What it holds                                                                                                                                        | Sensitive                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `clawboo.db`, `-wal`, `-shm`            | The database: agents, teams, board, chats, memory, settings, the event log                                                                           | Yes                                     |
+| `settings.json`                         | The Gateway URL and token                                                                                                                            | Yes                                     |
+| `operator.json`                         | Settings an administrator pinned, when there is one; Clawboo only reads it                                                                           | No                                      |
+| `secrets/master.key`                    | The key that decrypts the vault                                                                                                                      | Yes                                     |
+| `secrets/runtime-keys.json`             | Encrypted provider keys, connector secrets and sign-in tokens                                                                                        | Encrypted                               |
+| `secrets/disconnected-runtimes.json`    | Which runtimes you disconnected                                                                                                                      | No                                      |
+| `secrets/keyless-providers.json`        | Whether you chose or removed keyless Ollama                                                                                                          | No                                      |
+| `proxy-device-identity.json`            | The key pair Clawboo uses to sign in to the OpenClaw Gateway as a device                                                                             | Yes                                     |
+| `api-port.txt`                          | The port the server listens on; removed at shutdown if it still names that port                                                                      | No                                      |
+| `server.log`, `server.log.1`            | Output of a server the CLI started                                                                                                                   | No                                      |
+| `gateway.log`, `gateway.pid`            | Output and process record of an OpenClaw Gateway that Clawboo started                                                                                | No                                      |
+| `connector-pids.json`                   | Connector processes Clawboo started, so leftovers from a crash are stopped at the next start                                                         | No                                      |
+| `runtime-pids/`                         | Agent processes Clawboo started, so leftovers from a crash are stopped at the next start                                                             | No                                      |
+| `catalog/`                              | Verified marketplace packs, cached                                                                                                                   | No                                      |
+| `frames/`                               | Saved screenshots from agents' browsers                                                                                                              | May show private pages                  |
+| `browser-profiles/`                     | Each agent's browser profile, including sites it is signed in to                                                                                     | Yes                                     |
+| `team-folder-history/<team id>.git`     | The work check's git history of each team's folder                                                                                                   | Holds copies of what agents saved there |
+| `workspaces/`, `worktrees/`, `reviews/` | Left by an older version: a link at each old path to a folder that moved to the work folder, any folder the move kept here, and old review checkouts | Holds what agents saved there           |
+| `runtimes/<runtime>/<agent>/`           | Each Clawboo Native, Codex or Hermes agent's own runtime home                                                                                        | May hold runtime sign-in copies         |
 
 The database files, `settings.json` and secrets are owner-only (mode 0600) in an owner-only folder (0700).
+
+## Files in the work folder
+
+Your agents' work lives in the work folder: `CLAWBOO_WORK_DIR`, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`. It must be outside `~/.clawboo`, or the server refuses to start. [The work folder](/operating/data-and-state#the-work-folder) covers how older work moves there.
+
+| Path                               | What it holds                                                                                                    | Sensitive                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `teams/<team id>/`                 | Each team's shared folder, where runs without a worktree start; `_no-team` for tasks and agents with no team     | Holds what agents saved there |
+| `worktrees/<repo hash>/<task id>/` | Per-task git worktrees, each with a `.<task id>.owner` file beside it holding the id of the install that made it | Holds what agents changed     |
+| `reviews/`                         | Review checkouts for verifying finished work                                                                     | No                            |
+| `README.txt`                       | A note on what the folder holds                                                                                  | No                            |
+
+Everything Clawboo creates in the work folder is owner-only (0700).
 
 ## Saved keys
 
@@ -151,7 +164,6 @@ Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this
 
 - `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`): to see whether you signed in with `codex login`. Each Codex agent then runs with its own home under `~/.clawboo/runtimes/`.
 - `~/.hermes/auth.json` (or `$HERMES_HOME/auth.json`): to see whether you signed in to Hermes.
-- The work folder (`CLAWBOO_WORK_DIR`, else `<CLAWBOO_HOME>-work` when `CLAWBOO_HOME` is set, else `~/clawboo-work`): task worktrees the board records there, which Clawboo pauses, completes, checks and cleans up where they are. New ones still go in `CLAWBOO_HOME` (`~/.clawboo` by default); see [The work folder](/operating/data-and-state#the-work-folder).
 - `~/.claude`: Claude Code agents run with your real home folder and save their session files under `~/.claude/projects`. Clawboo starts them without your own settings, MCP servers and memory files from there.
 
 <Accordion title="Under the hood">

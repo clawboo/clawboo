@@ -213,7 +213,7 @@ Right-click the team's icon in the team rail and choose how much to delete.
 | **Delete team only**   | The team. Its agents stay in Clawboo, with no team.                     | **Delete team**       |
 | **Delete with agents** | Every agent on the team, with their files and own chats, then the team. | **Delete everything** |
 
-Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/.clawboo/workspaces/<team id>`) with every file its agents saved there. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
+Both choices also delete the team's rules, its brief, its rooms and your introduction to the team, and the team's folder (`~/clawboo-work/teams/<team id>`) with every file its agents saved there, and the link to it that an older version's `~/.clawboo/workspaces/<team id>` may hold. The confirmation says so: "The team's folder and the files its agents saved there are deleted too." If the folder cannot be removed, the team is still deleted, and a message says its team folder could not be removed.
 
 Both choices stop whatever the team is doing first. Its runs end, a person's request still open on its board is cancelled with the work under it, and its other tasks stay on the board, where nothing can start them again. A result still on its way to one of its agents is dropped. The result stays on its task.
 

@@ -14,6 +14,8 @@ keywords:
     'gcWorktrees',
     'KeyedMutex',
     'assertSafeTaskId',
+    'relocateWorktree',
+    'readTaskFile',
     'system-of-record files',
   ]
 ---
@@ -37,10 +39,11 @@ no repository path (`workspace_unavailable`) rather than run it without isolatio
 [The executor runner](/internals/executor-runner).
 
 The package's default root is `<repo>/.clawboo/worktrees`, but the server always passes its own: task worktrees
-live at `<clawboo home>/worktrees/<hash of the repo path>/<task id>` and review checkouts under
-`<clawboo home>/reviews/`, so nothing is created inside your repository. Each task gets the branch
-`clawboo/task-<task id>`. The server also acts on a task worktree the board records under the work folder's
-`worktrees/<hash of the repo path>/` (see [The work folder](/operating/data-and-state#the-work-folder)).
+live at `<work folder>/worktrees/<hash of the repo path>/<task id>` and review checkouts under
+`<work folder>/reviews/`, so nothing is created inside your repository (see
+[The work folder](/operating/data-and-state#the-work-folder)). Each task gets the branch `clawboo/task-<task id>`.
+The server also acts on a task worktree the board records under `<clawboo home>/worktrees/`, where older versions
+made them, and on one the work folder move kept at its old place.
 
 ## The lifecycle
 
@@ -54,6 +57,8 @@ live at `<clawboo home>/worktrees/<hash of the repo path>/<task id>` and review 
 | `completeWorktree`        | Diffs against the baseline, ignoring the working files. With no change it removes the worktree and the branch; otherwise the branch stays for a person to merge.                                                                                                                                                                                                                                                                                            |
 | `gcWorktrees`             | Reaps worktrees by age and by count (defaults: 72 hours, 25 worktrees), skips active tasks, and keeps going past a failure. A checkout git lists is committed to its branch first, then removed with any files git ignores. A folder git does not list is removed only when it holds nothing, and one git could not be asked about (`git worktree list` failed) is always kept. Kept folders are reported with a reason. It touches only the worktree root. |
 | `provisionReviewWorktree` | A detached checkout at one commit for the read-only reviewer, so there is no branch to push. It replaces any earlier checkout at the same path.                                                                                                                                                                                                                                                                                                             |
+| `relocateWorktree`        | Moves a checkout from `from` to `to` (which must not exist yet) with `git worktree move`, so git's links to it stay right. For a checkout `git worktree move` refuses, such as a locked one, it renames the folder and runs `git worktree repair` (git 2.30 or later). Renames only: across volumes it fails with the rename's `EXDEV` code and nothing moves. Returns `{ ok: true, via: 'move' \| 'repair' }` or `{ ok: false, reason, code? }`.           |
+| `isCheckoutAt`            | True when a folder is a working checkout of the repository that git lists, compared on real paths. The server checks a moved checkout with it before it records the new path.                                                                                                                                                                                                                                                                               |
 
 Clawboo never merges a task branch; finished work waits on `clawboo/task-<task id>`.
 
@@ -72,8 +77,22 @@ Clawboo never merges a task branch; finished work waits on `clawboo/task-<task i
 
 `writeScaffold` writes the first five. `reconstructState(path)` rebuilds what is done, what is broken and what comes
 next from the handoff (falling back to `task-progress.md`) and `init.sh`, with no access to chat or the board, which
-is what lets a different runtime resume the task. The scaffold's `VERIFY_CMD` is a placeholder, and `TASK.md`'s steps tell the agent
-to set it: until the agent sets a real command, the verification gate reports that no verify command is configured and the attempt fails.
+is what lets a different runtime resume the task.
+
+The agent owns the folder these files sit in, so it could swap one for a link, or a hard link, to a file the server
+can open, such as its database. `readHandoff`, `writeHandoff` and `reconstructState` therefore never follow one, and
+the server uses the same helpers for `VERIFICATION.md`:
+
+- **`readTaskFile(dir, name, maxBytes?)`** returns the text of `name` directly under `dir`. It opens the file without
+  following a link and throws unless it is a regular file with no other name and at most `maxBytes`
+  (`TASK_FILE_MAX_BYTES`, 1 MiB, by default). `readHandoff` reads a refused file as missing.
+- **`replaceTaskFile(dir, name, content)`** writes a new file and renames it over the name, so a link at the name
+  is replaced, never written through.
+- **`appendTaskFile(dir, name, content)`** appends to the file, creating it when missing, and refuses a link, a hard
+  link or anything but a regular file.
+- **`UnsafeTaskFileError`** is what they throw for a refused file (its `filePath` names it). Nothing was read or
+  written. The scaffold's `VERIFY_CMD` is a placeholder, and `TASK.md`'s steps tell the agent
+  to set it: until the agent sets a real command, the verification gate reports that no verify command is configured and the attempt fails.
 
 ## Path safety
 
@@ -87,7 +106,8 @@ These functions remove folders recursively and run commands, so every path they 
 - **Removal rebuilds the path.** Before their recursive remove, `pauseWorktree` and `completeWorktree` rebuild the
   folder from the root and the task id, and throw if the stored record points somewhere else. `rootDir` may be a
   list of roots, and then the record has to be the task's folder under one of them; an empty list refuses every
-  record. The server passes its own root and the work folder's.
+  record. The server passes the work folder's root, the state folder's, and any root the work folder move kept a
+  checkout under.
 - **A replace never loses work.** Resume and a provision's clean-up of leftovers delete a task folder only when it
   is missing, empty, or a checkout of the task's repository at a commit a branch holds, with nothing in
   `git status --ignored`. Anything else throws `UnsafeWorktreeError` and the folder is left exactly as it was:
@@ -98,15 +118,18 @@ These functions remove folders recursively and run commands, so every path they 
   separate repository, has its commit on no branch, or has changes on a detached HEAD. A folder git does not
   list is removed only under the rule above, and a folder whose registration git could not report is always
   kept. With `owns`, GC leaves alone, and does not count, any folder the callback rejects; the server passes it for
-  the work folder's roots and accepts only checkouts its board records there.
+  the work folder's roots and accepts only checkouts its board records there or that carry this install's
+  `.<task id>.owner` marker, so two installs can share a work folder.
 - **Review checkouts stay in the review folder.** `removeReviewWorktree(repo, worktree, rootDir)` throws before it
   removes anything unless the record's path is exactly one segment below the review root (`rootDir`, else
   `<repo>/.clawboo/reviews`). Pass the `rootDir` the checkout was provisioned with. `provisionReviewWorktree` checks
   its own path the same way. Its `repoPath` may be a bare repository, such as the history the server keeps of a team
   folder (see [How work is checked](/concepts/verification#checks-in-team-chat)).
-- **Verify commands run in Clawboo's folders only.** The server's verification gate refuses a worktree path outside
-  Clawboo's state folder and the work folder's `worktrees/` and `reviews/`, or one whose real path leaves them, before
-  it runs `VERIFY_CMD` in that real path.
+- **Verify commands run in Clawboo's folders only.** The server's verification gate runs `VERIFY_CMD` only in a task
+  or review checkout or a team folder under the work folder's `worktrees/`, `reviews/` and `teams/`, in a folder
+  under Clawboo's state folder (older layouts), or in a checkout the work folder move kept at its old place. It
+  refuses anything else, including the work folder itself, its other folders, and a link whose real path leaves
+  those places, before it runs the command in that real path.
 
 ## Helpers you will reach for
 

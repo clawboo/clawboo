@@ -738,7 +738,7 @@ Archived workspaces are left out. `onDisk: false` marks a checkout that was paus
       "taskStatus": "in_progress",
       "branch": "clawboo/task-t_8f2c",
       "repoPath": "/Users/you/code/clawboo",
-      "worktreePath": "/Users/you/.clawboo/worktrees/ab12cd34ef56/t_8f2c",
+      "worktreePath": "/Users/you/clawboo-work/worktrees/ab12cd34ef56/t_8f2c",
       "workspaceStatus": "active",
       "onDisk": true,
       "updatedAt": 1756000000000
@@ -746,13 +746,13 @@ Archived workspaces are left out. `onDisk: false` marks a checkout that was paus
   ],
   "teamFolder": {
     "teamId": "4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
-    "path": "/Users/you/.clawboo/workspaces/4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
+    "path": "/Users/you/clawboo-work/teams/4f1e2b9a-7c3d-4e8f-9a1b-2c3d4e5f6a7b",
     "onDisk": true
   }
 }
 ```
 
-`teamFolder` is the folder the agent's runs start in when they have no worktree: its team's folder, or `workspaces/_no-team` with `teamId: null` for an agent with no team. `onDisk` is `false` until a run creates it. It is `null` for an OpenClaw agent. An agent with no worktree-backed tasks returns an empty `workspaces` list.
+`teamFolder` is the folder the agent's runs start in when they have no worktree: its team's folder, or `teams/_no-team` with `teamId: null` for an agent with no team, in the [work folder](/operating/data-and-state#the-work-folder). `onDisk` is `false` until a run creates it. It is `null` for an OpenClaw agent. An agent with no worktree-backed tasks returns an empty `workspaces` list.
 
 **`500 Internal Server Error`**:
 
@@ -935,7 +935,7 @@ Starts one turn of the 1:1 chat of a `clawboo-native`, `claude-code`, `codex` or
 
 Each turn resumes the session the agent's previous 1:1 turn saved, so the conversation carries over. The pointer is one setting per agent, `native-chat-session:<agentId>`, whatever the runtime. `/reset` in the chat clears it, and so does a failed Claude Code, Codex or Hermes turn that tried to resume, so the next turn starts a fresh session. One agent's turns run one at a time: a second message waits for the turn in front of it. On Clawboo Native, Codex and Hermes it also waits for that agent's team-chat runs and routines, and a turn that cannot start within 10 minutes leaves the notice "This agent was busy with another run and did not pick the message up in time. Send it again." Claude Code, Codex and Hermes get the agent's `SOUL.md` as a persona block on every turn.
 
-Every turn starts in the agent's team folder, `<CLAWBOO_HOME>/workspaces/<teamId>` (`_no-team` for an agent on no team), created `0700` before the run. If the folder cannot be created, the turn ends with a notice instead of starting anywhere else. A native agent gets its file tools there, and `run_command` when its shell switch is on. A turn that fails before it writes any reply leaves a notice with the reason, including a run ended after `CLAWBOO_RUN_SILENT_TIMEOUT_MS` (30 minutes by default) with no events. A turn that fails partway keeps the text it had written.
+Every turn starts in the agent's team folder, `<work folder>/teams/<teamId>` (`_no-team` for an agent on no team), created `0700` before the run. If the folder cannot be created, the turn ends with a notice instead of starting anywhere else. A native agent gets its file tools there, and `run_command` when its shell switch is on. A turn that fails before it writes any reply leaves a notice with the reason, including a run ended after `CLAWBOO_RUN_SILENT_TIMEOUT_MS` (30 minutes by default) with no events. A turn that fails partway keeps the text it had written.
 
 - **Path params**: `agentId`.
 - **Request body**:
