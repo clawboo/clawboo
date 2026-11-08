@@ -10,6 +10,7 @@ import path from 'path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { discoverDashboard, probeDashboard } from '../lifecycle'
+import { startListening } from './startListening'
 
 const PORT = 18790
 
@@ -78,7 +79,7 @@ describe('probeDashboard over a stubbed HTTP layer', () => {
   beforeEach(async () => {
     const net = await import('net')
     server = net.createServer()
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    await startListening(server, '127.0.0.1')
     livePort = (server.address() as import('net').AddressInfo).port
     process.env['CLAWBOO_API_PORT'] = String(livePort)
   })

@@ -14,6 +14,7 @@ import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { inspectRecordedPort } from '../lifecycle'
+import { startListening } from './startListening'
 
 let home: string
 const closers: (() => Promise<void>)[] = []
@@ -42,7 +43,7 @@ async function tcpServer(onSocket: (socket: net.Socket) => void): Promise<number
     socket.on('close', () => sockets.delete(socket))
     onSocket(socket)
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await startListening(server, '127.0.0.1')
   closers.push(async () => {
     for (const s of sockets) s.destroy()
     await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -58,7 +59,7 @@ async function httpServer(status: number, body: unknown, html = false): Promise<
     res.setHeader('Content-Type', html ? 'text/html' : 'application/json')
     res.end(html ? String(body) : JSON.stringify(body))
   })
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  await startListening(server, '127.0.0.1')
   closers.push(async () => {
     server.closeAllConnections()
     await new Promise<void>((resolve) => server.close(() => resolve()))

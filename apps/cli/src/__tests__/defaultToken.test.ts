@@ -24,6 +24,7 @@ import {
   openUrlInBrowser,
   probeDashboard,
 } from '../lifecycle'
+import { startListening } from './startListening'
 
 const FILE_TOKEN = 'file-token-abc_123'
 
@@ -59,7 +60,7 @@ async function listen(handler: http.RequestListener, host = '127.0.0.1'): Promis
     seen.push({ method: req.method ?? '', url: req.url ?? '', cookie: req.headers.cookie ?? '' })
     handler(req, res)
   })
-  await new Promise<void>((resolve) => server.listen(0, host, resolve))
+  await startListening(server, host)
   return {
     port: (server.address() as AddressInfo).port,
     seen,
@@ -297,8 +298,12 @@ describe('dashboardHost', () => {
     let gated: FakeServer
     try {
       gated = await track(gatedDashboard(FILE_TOKEN, '::1'))
-    } catch {
-      ctx.skip() // no IPv6 loopback on this machine
+    } catch (err) {
+      // No IPv6 loopback on this machine: no IPv6 at all (EAFNOSUPPORT), or ::1
+      // not configured (EADDRNOTAVAIL). Any other error is a real failure.
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'EAFNOSUPPORT' && code !== 'EADDRNOTAVAIL') throw err
+      ctx.skip()
       return
     }
     process.env['HOST'] = '::1'
