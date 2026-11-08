@@ -144,6 +144,18 @@ describe('probeEmbeddingProvider', () => {
     }
   })
 
+  it('gives an http gateway and an https gateway at the same address different ids', async () => {
+    stubTags('down')
+    const id = async (openaiBaseUrl: string) =>
+      (await probeEmbeddingProvider({ openaiApiKey: 'sk-test', openaiBaseUrl })).provider?.id
+    expect(await id('https://gateway.example/v1')).toBe(
+      'openai:text-embedding-3-small@gateway.example/v1',
+    )
+    expect(await id('http://gateway.example/v1')).toBe(
+      'openai:text-embedding-3-small@http://gateway.example/v1',
+    )
+  })
+
   it('still prefers local Ollama when it has the model and a key exists too', async () => {
     stubTags([`${OLLAMA_DEFAULT_MODEL}:latest`])
     const res = await probeEmbeddingProvider({ openaiApiKey: 'sk-test' })

@@ -174,11 +174,13 @@ function isOpenAiOwnAddress(baseUrl: string): boolean {
 }
 
 /** The host and path of a base URL, to name it, or the text itself when it
- *  does not parse. */
+ *  does not parse. A scheme other than https is kept, since http and https
+ *  at the same address are two servers that may serve different vectors. */
 function safeHost(baseUrl: string): string {
   try {
     const url = new URL(baseUrl)
-    return `${url.host}${url.pathname === '/' ? '' : url.pathname}`
+    const scheme = url.protocol === 'https:' ? '' : `${url.protocol}//`
+    return `${scheme}${url.host}${url.pathname === '/' ? '' : url.pathname}`
   } catch {
     return baseUrl
   }

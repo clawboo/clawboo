@@ -82,9 +82,11 @@ export function loadProviderBaseUrls(): void {
     const value = effectiveSetting(KEY_OF[provider]).value
     if (typeof value !== 'string' || value.trim() === '') continue
     // Paths are added to a base URL as text, by Clawboo and by the providers'
-    // SDKs alike, so a query or a fragment would land in the wrong place.
+    // SDKs alike, so a query or a fragment would land in the wrong place. A
+    // bare `?` or `#` counts too: URL reports it as empty, but `/models` added
+    // after it still lands in the query or fragment, not the path.
     const url = new URL(value.trim())
-    if (url.search || url.hash) {
+    if (url.search || url.hash || /[?#]/.test(value)) {
       throw new OperatorSettingsError(
         `${OPERATOR_KEYS[KEY_OF[provider]].env} must be an address with no query string or ` +
           'fragment (nothing after ? or #).',

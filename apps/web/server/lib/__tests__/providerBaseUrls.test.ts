@@ -120,7 +120,12 @@ describe('the base URL in force', () => {
   })
 
   it('refuses to start on a base URL with a query or a fragment', () => {
-    for (const value of ['https://gw.example.com/v1?region=eu', 'https://gw.example.com/v1#x']) {
+    for (const value of [
+      'https://gw.example.com/v1?region=eu',
+      'https://gw.example.com/v1#x',
+      'https://gw.example.com/v1?',
+      'https://gw.example.com/v1#',
+    ]) {
       vi.stubEnv('GROQ_BASE_URL', value)
       initOperatorSettings()
       expect(() => loadProviderBaseUrls()).toThrow(
