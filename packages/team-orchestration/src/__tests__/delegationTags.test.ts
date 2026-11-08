@@ -502,6 +502,60 @@ describe('findActionableHandOffs: a tag starts work only where a reader sees a t
     }
   })
 
+  it('counts only quotes a reader sees as quotes', () => {
+    // An inch mark opens nothing, and neither does the brief of a tag before it, its own
+    // quote marks, or code.
+    for (const reply of [
+      `Use the 5" pipe: ${tag} Then say "done".`,
+      `<delegate to="@Growth/Coder">tell them "hi</delegate> ${tag} then "ok".`,
+      `Use \`"\` for strings, then ${tag} and "ok".`,
+    ]) {
+      const found = findActionableHandOffs(reply)
+      expect(
+        found.delegates.map((b) => b.task),
+        reply,
+      ).toContain('fix the parser')
+      expect(found.shownDelegates, reply).toEqual([])
+    }
+    // Two tags inside one quoted sentence are both quoted.
+    const both = findActionableHandOffs(`She wrote: "run ${tag} and ${tag}" last week.`)
+    expect(both.delegates).toEqual([])
+    expect(both.shownDelegates).toHaveLength(2)
+  })
+
+  it('a quoted opener with no close of its own does not take the real tag’s closer', () => {
+    for (const reply of [
+      `Don't write "<delegate to="@Name">" like that. ${tag}`,
+      `I'd say "use <delegate to="@Name"> for that", then ${tag}`,
+      `Don't write “<delegate to="@Name">” like that. ${tag}`,
+    ]) {
+      const found = findActionableHandOffs(reply)
+      expect(
+        found.delegates.map((b) => [b.targetName, b.task]),
+        reply,
+      ).toEqual([['@Growth/Coder', 'fix the parser']])
+      expect(found.shownDelegates, reply).toEqual([])
+      // A quoted opener is only a mention, not a hand-off that could not be read.
+      expect(looksLikeBrokenHandOff(reply), reply).toBe(false)
+    }
+    // A real tag that opens in a quote and closes there is still the quoted one.
+    const quoted = findActionableHandOffs(`He wrote "${tag}" last time. ${tag}`)
+    expect(quoted.delegates).toHaveLength(1)
+    expect(quoted.shownDelegates).toHaveLength(1)
+  })
+
+  it('a tag shown in a quoted sentence is not a hand-off that could not be read', () => {
+    expect(looksLikeBrokenHandOff(`She wrote: "please run ${tag} today" last week.`)).toBe(false)
+  })
+
+  it('stays fast on a line of quoted openers', () => {
+    const text = Array.from({ length: 8000 }, () => '"x <delegate to="@Name"> y"').join(' ')
+    const started = Date.now()
+    findActionableHandOffs(text + ' ' + tag)
+    looksLikeBrokenHandOff(text + ' ' + tag)
+    expect(Date.now() - started).toBeLessThan(500)
+  })
+
   it('takes a tag in plain text', () => {
     const found = findActionableHandOffs(`On it. ${tag}`)
     expect(found.delegates.map((b) => b.task)).toEqual(['fix the parser'])

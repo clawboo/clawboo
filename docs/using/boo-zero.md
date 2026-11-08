@@ -57,7 +57,7 @@ Your message is a request, as it is in a team's chat. What it hands out to one t
 - **No team named.** Boo Zero asks which team. If a hand-off in a reply still names no team, nothing starts and the chat asks you. Pick a team above the message box, or say which in your next message.
 - **It never guesses a name.** A name two teams or two teammates could share asks you which one. With a team named, a whole team name still means that team, not a teammate whose name starts the same.
 - **It refuses plainly.** Whatever a reply asked for that did not start, the chat says so: a team or teammate that is not there, work that has failed too often, a paused team or teammate, or a hand-off while Clawboo is stopping or updating. Boo Zero hears the same on its next turn.
-- **Showing is not starting.** A hand-off inside code or a quote starts nothing and stays on screen as written, so Boo Zero can show you a draft. That covers a line straight after a quote's words with no blank line between, and a hand-off partway through a sentence in double or curly quotes.
+- **Showing is not starting.** A hand-off inside code or a quote starts nothing and stays on screen as written, so Boo Zero can show you a draft. That covers a line straight after a quote's words with no blank line between, and a hand-off partway through a sentence in double or curly quotes. A quoted sentence counts only on one line: if its opening quote is on an earlier line, a hand-off in it can start. For a draft, a code block is the sure way.
 - **Some turns are held to one team.** While Boo Zero reads a result, it can hand work only to the team that result came from. The same holds for a message of yours that carries a result kept since a Stop, or what a team has been doing (`@Team`), except that a team you picked above the box or named in the words you typed is open too. A message Clawboo cannot tell came from you starts nothing.
 - **Everything else can still shape where work goes.** Nothing holds a turn because of what Boo Zero recalled or read, or Boo Zero could never choose a team when you name none. Its saved notes reach it quoted and scanned for injection, as information. What its own tools return, such as `get_task` and `memory_search`, reaches it as plain tool output. And its session still holds what it read on earlier turns. So a note or a teammate's words can still lead it to hand work to the wrong team. You decide by reading the hand-off's card in this chat, and you can stop the work on that card or in the team's chat.
 - **The same fences as a team's chat.** A hand-off whose words look risky asks you first, in the tray above the message box. The caps on hand-offs apply, and one reply starts at most 8.
@@ -70,11 +70,11 @@ This works when the Clawboo server runs Boo Zero: Clawboo Native, Claude Code, C
 
 <Note>
 
-**An OpenClaw Boo Zero cannot hand off from this chat.** Its chat runs in the OpenClaw Gateway, over your browser's connection. The Clawboo server only forwards that connection, adding the Gateway's token, and does not read the replies, so that chat is outside the run limit and outside a hold while Clawboo stops or updates. Starting team work from a reply the server does not read would bypass all of that, so nothing starts. Its rules tell Boo Zero to say so, and any hand-off in a reply shows as a **Not handed off** note. Ask in the team's chat instead.
+**An OpenClaw Boo Zero cannot hand off from this chat.** Its chat runs in the OpenClaw Gateway, over your browser's connection. The Clawboo server only forwards that connection, adding the Gateway's token, and does not read the replies, so that chat is outside the run limit and outside a hold while Clawboo stops or updates. Starting team work from a reply the server does not read would bypass all of that, so nothing starts. Its rules tell Boo Zero to say so, and any hand-off in a reply shows as a **Not handed off** note, while one in code or a quote stays as written. Ask in the team's chat instead.
 
 </Note>
 
-The chat with any other agent is a plain conversation too. A hand-off in its reply shows as a **Not handed off** note.
+The chat with any other agent is a plain conversation too. A hand-off in its reply shows as a **Not handed off** note, and one in code or a quote stays as written.
 
 ### Ask about one team with @TeamName
 

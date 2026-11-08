@@ -22,11 +22,16 @@ import { createInboxWatcher } from './inboxWatcher'
 /** Far more than this small read takes, even on a busy server. */
 const INBOX_READ_DEADLINE_MS = 15_000
 
-async function readInbox(signal: AbortSignal): Promise<boolean> {
+/** Exported for its test. A read the watcher gave up on (its deadline, or the page
+ *  closing) counts as failed, so what it said is dropped even when the body arrived
+ *  just before the abort. */
+export async function readInbox(signal: AbortSignal): Promise<boolean> {
   try {
     const res = await apiFetch('/api/board/inbox', { signal })
     if (!res.ok) return false
-    useInboxStore.getState().apply((await res.json()) as InboxSnapshot)
+    const snapshot = (await res.json()) as InboxSnapshot
+    if (signal.aborted) return false
+    useInboxStore.getState().apply(snapshot)
     return true
   } catch {
     return false

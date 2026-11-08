@@ -97,6 +97,22 @@ describe('error taxonomy', () => {
     expect(isUnexpectedFor('clawboo-native', 'ContextOverflow')).toBe(false)
   })
 
+  it('files the overflow wordings the native harness reads as ContextOverflow, untyped', () => {
+    // An OpenClaw run carries no typed code, so the words decide. These are the
+    // wordings `isContextOverflowMessage` reads with its second pattern.
+    for (const message of [
+      'The input token count (40000) exceeds the maximum number of tokens allowed (32768).',
+      'Invalid request: Your request exceeded model token limit: 262144 (requested: 269030)',
+      "This model's maximum prompt length is 131072 but the request contains 200000 tokens.",
+    ]) {
+      expect(classifyError(null, message), message).toBe('ContextOverflow')
+      expect(isHarnessBug(classifyError(null, message))).toBe(false)
+      expect(isTransientError(classifyError(null, message))).toBe(false)
+    }
+    // A rate's own words still decide first.
+    expect(classifyError(null, 'maximum prompt length exceeded this hour')).toBe('RateLimited')
+  })
+
   it('classifies the typed causes Claude Code reports for an API error, never as a harness bug', () => {
     const cases: Array<[string, string, string]> = [
       ['authentication_failed', 'Invalid API key · Fix external API key (HTTP 401)', 'Auth'],

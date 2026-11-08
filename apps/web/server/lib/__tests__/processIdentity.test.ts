@@ -63,8 +63,10 @@ describe('processStartTimes', () => {
     expect(probe.ok).toBe(true)
   })
 
-  it('says the probe failed when both tries did', () => {
-    const probe = processStartTimes([7], () => ({ ok: false, times: new Map(), error: 'nope' }))
+  it('says the probe failed when both tries did, and tries no more', () => {
+    const read = vi.fn(() => ({ ok: false, times: new Map<number, number>(), error: 'nope' }))
+    const probe = processStartTimes([7], read)
+    expect(read).toHaveBeenCalledTimes(2)
     expect(probe).toMatchObject({ ok: false, error: 'nope' })
   })
 

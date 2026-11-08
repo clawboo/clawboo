@@ -133,6 +133,10 @@ const timers = new Map<string, ReturnType<typeof setTimeout>>()
 const returnedByPause = new Set<string>()
 /** Chats already told a budget's held room is why their results wait. */
 const budgetHeldNoted = new Set<string>()
+/** Stops pressed in each chat by this process. A reply still handing off compares
+ *  against its own count, so the person's next message lifting the hold their Stop
+ *  left cannot undo that Stop for the reply. */
+const stopsPressed = new Map<string, number>()
 
 /** The most hand-offs one reply starts, as in a team's chat. */
 export const MAX_HAND_OFFS_PER_REPLY = 8
@@ -669,11 +673,13 @@ export async function startHandOffsFromReply(
   // Pressed while these are being decided, Stop ends the rest: a hand-off can wait on a
   // team starting up or on a person's approval.
   const heldWhenItEnded = chatResultsHeldSince(db, agentId)
+  const stopsWhenItEnded = stopsPressed.get(agentId) ?? 0
   let stopped = false
   const stoppedSinceItEnded = (): boolean => {
     if (stopped) return true
     const held = chatResultsHeldSince(db, agentId)
-    if (!held || held === heldWhenItEnded) return false
+    const pressedHere = (stopsPressed.get(agentId) ?? 0) !== stopsWhenItEnded
+    if (!pressedHere && (!held || held === heldWhenItEnded)) return false
     stopped = true
     sayNotStarted(db, turn, {
       heard: 'A Stop came before the rest of this reply was handed off, so the rest did not start.',
@@ -965,9 +971,11 @@ export async function runChatTurn(
     },
     onTurnEnded: async (ending) => {
       // A held row settles only with a run that finished; otherwise it waits for the
-      // next one.
-      if (ending.how === 'finished') settleOrLater(db, carriedHeld, 'delivered')
-      for (const id of carriedHeld) if (!settleLater.has(id)) inHand.delete(id)
+      // next one. Either way it stays in hand until then.
+      const endHeld = (): void => {
+        if (ending.how === 'finished') settleOrLater(db, carriedHeld, 'delivered')
+        for (const id of carriedHeld) if (!settleLater.has(id)) inHand.delete(id)
+      }
       const endCarrying = (): void =>
         carrying?.onEnded(ending.how, ending.paused === true, ending.budgetHeld === true)
       if (ending.how === 'finished') {
@@ -976,12 +984,14 @@ export async function runChatTurn(
         try {
           await startHandOffsFromReply(params, ending.reply, fence)
         } finally {
+          endHeld()
           endCarrying()
         }
         // After its hand-offs: what it handed out keeps the request open.
         await carrying?.onReplyHandled?.(ending.reply)
         return
       }
+      endHeld()
       endCarrying()
       if (findActionableHandOffs(ending.reply).delegates.length > 0) {
         // The person who pressed Stop knows, and wants no more from this chat.
@@ -1026,6 +1036,7 @@ export function resetChatReportUps(): void {
   settleLater.clear()
   returnedByPause.clear()
   budgetHeldNoted.clear()
+  stopsPressed.clear()
 }
 
 /** What the recipient is still waiting on, and what the rest came to. The team chat's
@@ -1392,6 +1403,7 @@ async function sendChatReports(
  * its own Stop is in the team's chat and on its card.
  */
 export async function stopChatTurn(db: ClawbooDb, agentId: string): Promise<void> {
+  stopsPressed.set(agentId, (stopsPressed.get(agentId) ?? 0) + 1)
   try {
     holdChatResults(db, agentId)
     holdReportUps(

@@ -7,6 +7,7 @@ import { encodePlanHolder, LOCAL_PERSON_ID } from '@clawboo/board-core'
 import { verificationResultSchema, type DebtNote } from '@clawboo/governance'
 import { cleanup, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { AnimatePresence } from 'framer-motion'
 import { http, HttpResponse } from 'msw'
 import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -1957,6 +1958,49 @@ describe('TaskDetailDrawer: opening a task reads it', () => {
     release()
     await new Promise((r) => setTimeout(r, 30))
     expect(reads).toEqual([])
+  })
+
+  it('the first read landing after the drawer closed marks nothing, as the board mounts it', async () => {
+    // The board and the inbox mount the drawer under AnimatePresence. Its Modal has
+    // its own, which does not hold the drawer for its fade, so the drawer goes at
+    // once and a read that lands after the close was never shown.
+    serve({ unread: true, activity: { seq: 12, kind: 'comment', at: 1 } })
+    let release = (): void => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let answered = false
+    server.use(
+      http.get('/api/board/t1', async () => {
+        await held
+        answered = true
+        return HttpResponse.json({
+          task: {
+            id: 't1',
+            title: 'Wire it',
+            status: 'todo',
+            unread: true,
+            activity: { seq: 12, kind: 'comment', at: 1 },
+          },
+          comments: [],
+          ancestors: [],
+        })
+      }),
+    )
+    const shown = (open: boolean) => (
+      <AnimatePresence>
+        {open && <TaskDetailDrawer taskId="t1" onClose={() => {}} />}
+      </AnimatePresence>
+    )
+    const view = render(shown(true))
+    await screen.findByTestId('task-detail-drawer')
+    view.rerender(shown(false))
+    expect(screen.queryByTestId('task-detail-drawer')).toBeNull()
+    release()
+    await waitFor(() => expect(answered).toBe(true))
+    await new Promise((r) => setTimeout(r, 30))
+    expect(reads).toEqual([])
+    expect(useInboxStore.getState().marks).toEqual({})
   })
 
   it('writes nothing for a task with nothing new', async () => {

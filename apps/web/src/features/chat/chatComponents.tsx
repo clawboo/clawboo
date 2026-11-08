@@ -928,7 +928,8 @@ export const DelegationCard = memo(function DelegationCard({
 /** How a reply's `<delegate>` blocks are drawn: `card` in a team's chat, where each one
  *  starts a task; `chat-card` in a one-to-one chat that acts on them, where only a tag
  *  outside code and quotes starts one and any other stays on screen as written; and
- *  `not-handed-off`, a note in a one-to-one chat where nothing acts on them. */
+ *  `not-handed-off`, a note in a one-to-one chat where nothing acts on them, drawn
+ *  only for a tag outside code and quotes. */
 export type HandOffDisplay = 'card' | 'chat-card' | 'not-handed-off'
 
 /** A task card placed in a one-to-one chat's timeline by when it was made. */
@@ -1003,8 +1004,13 @@ export const AssistantTurnCard = memo(function AssistantTurnCard({
   const hasText = Boolean(block.assistant?.text)
   const rawText = block.assistant?.text ?? ''
   const shownText = isRelay ? stripRelayPrefix(rawText) : rawText
+  // A tag in code or a quote is only shown, here as in a chat that hands off, so it stays
+  // as written and gets no note.
   const segments = useMemo(
-    () => (handOffs === 'not-handed-off' ? splitAssistantText(stripPlanBlocks(shownText)) : []),
+    () =>
+      handOffs === 'not-handed-off'
+        ? splitAssistantText(stripPlanBlocks(shownText), { actionableOnly: true })
+        : [],
     [handOffs, shownText],
   )
   const charCount = block.assistant?.text?.length ?? 0
@@ -1137,7 +1143,7 @@ export const StreamingCard = memo(function StreamingCard({
   // required), so it remains in the prose segment until it completes — at
   // which point the next render flips it into a card.
   const segments = useMemo(
-    () => splitAssistantText(text, { actionableOnly: handOffs === 'chat-card' }),
+    () => splitAssistantText(text, { actionableOnly: handOffs !== 'card' }),
     [text, handOffs],
   )
   return (

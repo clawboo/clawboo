@@ -33,7 +33,7 @@ export function AgentWakesCard({
 }: {
   card: AgentWakeCard
   teamId: string | null
-  /** The task also failed its check. A yes starts the agent, and the check still stands. */
+  /** The task also failed its check. An answer that starts the agent leaves the check standing. */
   checkFailed?: boolean
   onDecided: () => void
 }) {
@@ -66,7 +66,10 @@ export function AgentWakesCard({
 
   const failedCheck = checkFailed ? (
     <p data-testid="agent-wakes-check-failed" className="m-0 text-xs text-muted-foreground">
-      This task also failed its check. Saying yes does not change that.
+      This task also failed its check.{' '}
+      {card.kind === 'ask'
+        ? 'Saying yes does not change that.'
+        : 'Letting them carry on does not change that.'}
     </p>
   ) : null
 

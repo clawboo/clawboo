@@ -96,6 +96,21 @@ describe('a 1:1 chat with a <delegate> block in the reply', () => {
     expect(screen.getByText(/On it\./)).toBeInTheDocument()
   })
 
+  // Until the stream says this chat hands off, Boo Zero's chat draws this way too, and
+  // the server may already have read a tag in a quote as a draft.
+  it.each([
+    ['code', 'Draft:\n\n```\n<delegate to="@Research Boo">find the numbers</delegate>\n```'],
+    ['a quote', 'He wrote "<delegate to="@Research Boo">find the numbers</delegate>" once.'],
+  ])('keeps a tag in %s as written, with no note', (_name, text) => {
+    renderList([assistantTurn(text)], null)
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByText(/delegate to=/)).toBeInTheDocument()
+    cleanup()
+    renderList([], text)
+    expect(screen.queryByTestId('not-handed-off-note')).toBeNull()
+    expect(screen.getByText(/delegate to=/)).toBeInTheDocument()
+  })
+
   it('renders a reply with no tag as plain prose', () => {
     renderList([assistantTurn('Here is the summary you asked for.')], null)
     expect(screen.queryByTestId('not-handed-off-note')).toBeNull()

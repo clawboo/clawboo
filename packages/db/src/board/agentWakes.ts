@@ -577,6 +577,7 @@ export function agentWakeCardsForTasks(
       fromAgentId: gate.cardFromAgentId,
       toAgentId: gate.cardToAgentId,
       ...(alsoWaiting > 0 ? { alsoWaiting } : {}),
+      ...(typeof gate.cardAt === 'number' ? { openedAt: gate.cardAt } : {}),
     })
   }
   return out

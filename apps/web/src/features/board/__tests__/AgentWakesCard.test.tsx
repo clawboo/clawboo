@@ -227,6 +227,21 @@ describe('a task that also failed its check', () => {
     expect(screen.queryByTestId('agent-wakes-check-failed')).toBeNull()
   })
 
+  it('names the button the card actually shows', () => {
+    const { rerender } = render(
+      <AgentWakesCard card={CARD} teamId="T" checkFailed onDecided={() => {}} />,
+    )
+    expect(screen.getByTestId('agent-wakes-check-failed')).toHaveTextContent('Saying yes')
+    for (const kind of ['hourly_cap', 'back_and_forth'] as const) {
+      rerender(
+        <AgentWakesCard card={{ ...CARD, kind }} teamId="T" checkFailed onDecided={() => {}} />,
+      )
+      const notice = screen.getByTestId('agent-wakes-check-failed')
+      expect(notice).toHaveTextContent('Letting them carry on does not change that.')
+      expect(notice).not.toHaveTextContent(/yes/i)
+    }
+  })
+
   it('keeps that from the server when it reads the attention', () => {
     const attention = { reason: 'agent_wakes', failedRuns: 0, agentWakes: CARD, checkFailed: true }
     expect(taskAttentionOf({ status: 'blocked', attention })?.checkFailed).toBe(true)

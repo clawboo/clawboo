@@ -235,6 +235,28 @@ function removeRecord(file: string): void {
 }
 
 /**
+ * Cut a gone engine's file down to the children a later start must still check.
+ *
+ * Only when its engine is gone, so nothing else writes it. What is dropped (too
+ * old, this process or its parent, no longer running) would be counted again on
+ * every start the probe fails, and logged as reaped each time.
+ */
+function keepOnly(file: string, record: RecordFile, kept: RuntimePidEntry[]): void {
+  if (kept.length === record.children.length) return
+  const body = JSON.stringify({ owner: record.owner, children: kept } satisfies RecordFile)
+  try {
+    try {
+      writeFileSync(`${file}.tmp`, body, 'utf8')
+      renameSync(`${file}.tmp`, file)
+    } catch {
+      writeFileSync(file, body, 'utf8')
+    }
+  } catch {
+    /* best effort: the whole file stays, as before */
+  }
+}
+
+/**
  * Whether the engine that wrote a file is still running.
  *
  * Errs towards YES: a wrong yes leaves an orphan running (the state before this
@@ -365,7 +387,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       report.liveEngines += 1
       continue
     }
-    let leftUnverified = false
+    const unverified: RuntimePidEntry[] = []
     for (const child of record.children) {
       if (!trusted(child)) {
         report.expired += 1
@@ -381,7 +403,7 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
       if (!isAlive(child.pid)) continue
       if (!probe.ok) {
         report.unverified += 1
-        leftUnverified = true
+        unverified.push(child)
         continue
       }
       // A recycled pid started AFTER we recorded the original; ours started just
@@ -398,7 +420,8 @@ export function reapOrphanedRuntimeChildren(deps: RuntimeReapDeps = {}): Runtime
         /* best effort: one stubborn child must not stop the rest */
       }
     }
-    if (!leftUnverified) removeRecord(file)
+    if (unverified.length === 0) removeRecord(file)
+    else keepOnly(file, record, unverified)
   }
   return report
 }

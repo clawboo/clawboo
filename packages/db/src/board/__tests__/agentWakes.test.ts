@@ -7,7 +7,7 @@ import {
   MAX_BACK_AND_FORTH,
   parseWaitingOn,
 } from '@clawboo/board-core'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createDb, setSetting, type ClawbooDb } from '../../db'
 import { listEvents } from '../../events'
@@ -908,5 +908,28 @@ describe('work under a person’s request', () => {
     })
     expect(saveAgentCommentWake(db, mainId, comment(mainId))).toEqual({ state: 'none' })
     expect(listWaitingTaskWakes(db, { taskId: mainId, includeHeld: true })).toEqual([])
+  })
+})
+
+describe('when the card opened', () => {
+  afterEach(() => vi.useRealTimers())
+
+  it('says when it opened, keeps that while unchanged, and moves for another pair', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(1_000_000)
+    const id = parked()
+    asking(id)
+    const read = () => agentWakeCardsForTasks(db, [{ id, status: 'blocked' }]).get(id)
+    expect(read()?.openedAt).toBe(1_000_000)
+    // The same pair asking again changes nothing, so the card is the same card.
+    vi.setSystemTime(2_000_000)
+    expect(openAgentWakeCard(db, { taskId: id, kind: 'ask', ...A_TO_B })).toBe(false)
+    expect(read()?.openedAt).toBe(1_000_000)
+    // Another pair on the task opens it again.
+    vi.setSystemTime(3_000_000)
+    expect(
+      openAgentWakeCard(db, { taskId: id, kind: 'ask', fromAgentId: 'c', toAgentId: 'b' }),
+    ).toBe(true)
+    expect(read()).toMatchObject({ fromAgentId: 'c', openedAt: 3_000_000 })
   })
 })

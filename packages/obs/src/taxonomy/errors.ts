@@ -63,9 +63,12 @@ const RULES: Rule[] = [
   // Context overflow is an oversized-input 400 — checked BEFORE InvalidArgs so a
   // "context length exceeded" 400 classifies here, not as a generic bad-request. Not a
   // harness bug: it's an expected (if now-rare, post-compaction) recoverable condition.
+  // Gemini's, Moonshot's and xAI's wordings are the ones the native harness reads with
+  // its second pattern (MORE_CONTEXT_OVERFLOW_RE), so an untyped run that says them is
+  // filed the same way.
   {
     cls: 'ContextOverflow',
-    test: /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|too many (?:prompt|input|request|message|context)s? tokens|\b(?:400|413|422|prompt|input|request|messages?|context)\b[^\n]*too many (?:\w+ )?tokens|too many (?:\w+ )?tokens\b[^\n]*\b(?:prompt|input|request|messages?|context|model)\b/i,
+    test: /context[\s_-]?(?:overflow|length|window|limit)|(?:prompt|input) (?:is )?too (?:large|long)|maximum context|exceed(?:s|ed)? (?:the )?(?:maximum number of tokens|model token limit)|maximum prompt length|too many (?:prompt|input|request|message|context)s? tokens|\b(?:400|413|422|prompt|input|request|messages?|context)\b[^\n]*too many (?:\w+ )?tokens|too many (?:\w+ )?tokens\b[^\n]*\b(?:prompt|input|request|messages?|context|model)\b/i,
   },
   // The same words with nothing to say which limit. A tokens-per-minute limit uses them
   // too, so this reads as the one that clears up by itself: retrying a real overflow is

@@ -31,6 +31,9 @@ export interface AgentWakeCard {
   toAgentId: string | null
   /** For `ask`: other tasks waiting on this answer, which it covers too. */
   alsoWaiting?: number
+  /** When the card opened. It opens again, with a new time, for another pair or kind
+   *  on the task, and after an answer took it away; it stays put while unchanged. */
+  openedAt?: number
 }
 
 /** May this agent wake that one now? */

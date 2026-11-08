@@ -143,9 +143,13 @@ export function collectAlertItems(
     items.push({
       // Keyed by the reason and the failed-run count too: a task that fails,
       // is retried and fails again is news again, even when no read saw it
-      // leave the list in between. The same goes for one wake card after another.
+      // leave the list in between. The same goes for one wake card after another,
+      // which the time the card opened tells apart: another pair on it, or the same
+      // card back after an answer, opens it again.
       key: `task:${t.id}:${attention.reason}:${attention.failedRuns}${
-        attention.agentWakes ? `:${attention.agentWakes.kind}` : ''
+        attention.agentWakes
+          ? `:${attention.agentWakes.kind}:${attention.agentWakes.openedAt ?? ''}`
+          : ''
       }`,
       at: typeof t.updatedAt === 'number' ? t.updatedAt : null,
       kind: 'task',
