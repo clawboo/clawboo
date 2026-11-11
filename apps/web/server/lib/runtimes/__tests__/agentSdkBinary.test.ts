@@ -16,10 +16,14 @@ import path from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { commitRuntimeInstall, newInstallFolder } from '../../runtimeFolder'
 import {
   AGENT_SDK_PACKAGE,
+  AGENT_SDK_RUNTIME_ID,
   agentSdkBinaryCandidates,
+  agentSdkEntryFile,
   findAgentSdkDir,
+  ownAgentSdkDir,
   resolveAgentSdkBinary,
 } from '../agentSdkBinary'
 
@@ -224,4 +228,72 @@ describe('resolveAgentSdkBinary', () => {
       expect(found).toContain(`claude-agent-sdk-${process.platform}-${process.arch}`)
     },
   )
+})
+
+describe('the SDK in Clawboo’s runtimes folder', () => {
+  const KEYS = ['CLAWBOO_HOME', 'CLAWBOO_RUNTIMES_DIR', 'CLAWBOO_WORK_DIR'] as const
+  const saved: Record<string, string | undefined> = {}
+  let env: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    for (const k of KEYS) saved[k] = process.env[k]
+    env = {
+      CLAWBOO_HOME: path.join(root, 'data'),
+      CLAWBOO_WORK_DIR: path.join(root, 'work'),
+      CLAWBOO_RUNTIMES_DIR: path.join(root, 'runtimes'),
+    }
+    Object.assign(process.env, env)
+  })
+  afterEach(() => {
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  /** An install of the SDK from Clawboo: its own folder, made current. */
+  function installOwn(): string {
+    const folder = newInstallFolder(AGENT_SDK_RUNTIME_ID, 'v1', env)
+    installSdk(path.join(folder, 'node_modules'), [`linux-${ARCH}`])
+    commitRuntimeInstall(
+      AGENT_SDK_RUNTIME_ID,
+      { folder, version: '0.3.0', source: `${AGENT_SDK_PACKAGE}@0.3`, launchers: {} },
+      env,
+    )
+    return path.join(folder, 'node_modules')
+  }
+
+  it('is found first, with the binary beside it, whatever sits next to the server', () => {
+    const nm = installOwn()
+    expect(ownAgentSdkDir(env)).toBe(path.join(nm, ...AGENT_SDK_PACKAGE.split('/')))
+    expect(resolveAgentSdkBinary({ platform: 'linux', arch: ARCH, preferMusl: false })).toBe(
+      path.join(nm, '@anthropic-ai', `claude-agent-sdk-linux-${ARCH}`, 'claude'),
+    )
+  })
+
+  it('is not used once its install is open to other users', () => {
+    installOwn()
+    if (process.platform === 'win32' || process.getuid?.() === 0) return
+    chmodSync(path.join(root, 'runtimes', AGENT_SDK_RUNTIME_ID), 0o777)
+    expect(ownAgentSdkDir(env)).toBeNull()
+  })
+
+  it('is absent with no install from Clawboo', () => {
+    expect(ownAgentSdkDir(env)).toBeNull()
+  })
+
+  it('imports the file the package exports', () => {
+    const dir = path.join(root, 'pkg')
+    mkdirSync(dir)
+    writeFileSync(
+      path.join(dir, 'package.json'),
+      JSON.stringify({
+        main: 'old.js',
+        exports: { '.': { types: './x.d.ts', default: './sdk.mjs' } },
+      }),
+    )
+    expect(agentSdkEntryFile(dir)).toBe(path.join(dir, 'sdk.mjs'))
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ main: 'main.mjs' }))
+    expect(agentSdkEntryFile(dir)).toBe(path.join(dir, 'main.mjs'))
+  })
 })

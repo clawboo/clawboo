@@ -30,6 +30,13 @@ export interface RuntimeStatus {
   /** Where `binPath` came from: the runtime's CLI, or (Claude Code) the Agent
    *  SDK's own binary, which is what a run starts. */
   binSource?: 'cli' | 'agent-sdk' | null
+  /** How a person types the runtime's command in a terminal: the full path of
+   *  the launcher for a copy Clawboo installed into its runtimes folder (not on
+   *  their PATH), else the bare name. Null for a runtime with no command. */
+  terminalCommand?: string | null
+  /** Why Clawboo's own copy cannot be used although one is on record (its
+   *  Node.js removed by an upgrade, say), or null. */
+  installProblem?: string | null
   authKind?: 'api-key' | 'oauth' | 'none'
   envVar?: string | null
   hasCredential?: boolean

@@ -16,6 +16,7 @@ import { MCP_SERVER_NAMES } from '@clawboo/mcp'
 
 import { isCodexLoggedIn } from '../runtimes/codexAuth'
 import { buildRecord, builtinRollup, okStatus } from './helpers'
+import { terminalCommandName } from '../runtimeFolder'
 
 export interface CodexCapabilitySourceOptions {
   /** Whether Codex is signed in. Defaults to the cached `codex login status` probe. */
@@ -51,7 +52,7 @@ export class CodexCapabilitySource implements CapabilitySource {
           ? { status: 'ready' as const, writable: false }
           : {
               status: 'manageable-but-pending-auth' as const,
-              hint: 'Sign in to Codex first: run `codex login`',
+              hint: `Sign in to Codex first: run \`${terminalCommandName('codex')} login\``,
             }),
       }),
     )

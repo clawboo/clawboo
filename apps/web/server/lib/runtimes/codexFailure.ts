@@ -8,6 +8,7 @@
 // decode the live list and falls back to the catalog it shipped with), so the fix
 // is updating it. The message says so instead of passing on a log line.
 
+import { ownedRuntimeBin } from '../runtimeFolder'
 import { getDescriptor } from './descriptor'
 
 const asRecord = (v: unknown): Record<string, unknown> | null =>
@@ -51,6 +52,10 @@ export function codexFailureMessage(opts: {
   if (!MODEL_REFUSED_RE.test(reason)) return reason
   if (opts.modelPinned) {
     return `${reason} Pick a model your ChatGPT plan offers, or clear the model to use the plan's default.`
+  }
+  // A Codex Clawboo installed is updated where it was installed: from Clawboo.
+  if (ownedRuntimeBin('codex')) {
+    return `${reason} The installed Codex CLI is too old for your ChatGPT plan's current models. Update it in Settings, Runtimes, then retry.`
   }
   const update = getDescriptor('codex').installCommand ?? 'npm install -g @openai/codex@0'
   return `${reason} The installed Codex CLI is too old for your ChatGPT plan's current models. Update it with \`${update}\`, then retry.`

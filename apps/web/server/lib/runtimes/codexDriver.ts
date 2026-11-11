@@ -48,6 +48,7 @@ import { backendErrorText, codexFailureMessage } from './codexFailure'
 import { isContextOverflowMessage, rateLimitMessage } from './native/providers/types'
 import { createSpawnDriver } from './subprocess'
 import type { RuntimeRunContext } from './types'
+import { terminalCommandName } from '../runtimeFolder'
 
 const asRecord = (v: unknown): Record<string, unknown> | null =>
   v && typeof v === 'object' ? (v as Record<string, unknown>) : null
@@ -306,7 +307,7 @@ export async function prepareCodexHome(
   ) {
     throw new Error(
       `no Codex credentials provisioned for managed home ${codexHome} — ` +
-        'run `codex login` in your terminal, then retry',
+        `run \`${terminalCommandName('codex')} login\` in your terminal, then retry`,
     )
   }
   if (ctx.mcpBaseUrl) {

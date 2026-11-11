@@ -40,6 +40,7 @@ import { Skeleton } from '@/features/shared/Skeleton'
 import { GitHubStarButton } from '@/features/promo/GitHubStarButton'
 import { useToastStore } from '@/stores/toast'
 import { confirm } from '@/stores/confirm'
+import { useTerminalCommand } from '@/features/runtimes/useTerminalCommand'
 
 // ─── Provider row ────────────────────────────────────────────────────────────
 
@@ -274,6 +275,7 @@ function ChatGptSubscriptionRow({
   onChanged: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const codex = useTerminalCommand('codex')
 
   return (
     <div
@@ -319,7 +321,7 @@ function ChatGptSubscriptionRow({
         <div className="pl-[50px]">
           <ChatGptSignIn
             tool="codex"
-            loginCommand="codex login"
+            loginCommand={`${codex} login`}
             onLoggedIn={() => {
               setExpanded(false)
               onChanged()

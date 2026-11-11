@@ -26,12 +26,14 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import type { ClaudeCodeDriver, ClaudeNativeEvent } from '@clawboo/adapter-claude-code'
 import { buildAttachConfig, MCP_SERVER_NAMES, type AttachScope } from '@clawboo/mcp'
 import type { StartOpts, SteerOptions } from '@clawboo/executor'
 
 import { redactValue } from '../redact'
+import { agentSdkEntryFile, ownAgentSdkDir, resolveAgentSdkBinary } from './agentSdkBinary'
 import { buildChildEnv } from './childEnv'
 import { CLAUDE_CODE_ISOLATION_ENV, claudeCodeIsolation } from './claudeCodeIsolation'
 import { registerRuntimeChild, unregisterRuntimeChild } from './subprocess'
@@ -309,15 +311,21 @@ export function isAgentSdkMissing(err: unknown): boolean {
  * error as the run's failure summary.
  */
 async function loadAgentSdk(): Promise<SdkModule> {
+  // The copy Clawboo installed into its runtimes folder first, by file URL: a
+  // bare specifier only searches the node_modules folders around the server.
+  const own = ownAgentSdkDir()
+  if (own) {
+    return (await import(pathToFileURL(agentSdkEntryFile(own)).href)) as unknown as SdkModule
+  }
   try {
     return (await import('@anthropic-ai/claude-agent-sdk')) as unknown as SdkModule
   } catch (err) {
     if (!isAgentSdkMissing(err)) throw err
     throw new Error(
       `The Claude Code runtime needs ${AGENT_SDK}, which this clawboo install does not ship ` +
-        '(it would add ~210 MB of platform binary to every install). Install it alongside ' +
-        `clawboo — \`npm install -g ${AGENT_SDK}\` when clawboo itself is installed globally — ` +
-        'then re-run the task. See https://docs.claw.boo/runtimes/claude-code',
+        '(it would add ~210 MB of platform binary to every install). Install Claude Code from ' +
+        "Settings, Runtimes (it goes into Clawboo's own runtimes folder), then re-run the task. " +
+        'See https://docs.claw.boo/runtimes/claude-code',
     )
   }
 }
@@ -539,7 +547,16 @@ export function createClaudeCodeDriver(
       // and it must reach the CLI after the task it steers.
       const prompt = opts.context ? `${opts.context}\n\n${opts.message}` : opts.message
       input.push(userMessage(prompt))
+      // Clawboo's own copy of the SDK is handed its binary from inside that
+      // install, so the SDK never looks for one in folders above it.
+      const ownSdk = deps.loadSdk ? null : ownAgentSdkDir()
       const mod = await (deps.loadSdk ?? loadAgentSdk)()
+      const ownBinary = ownSdk ? resolveAgentSdkBinary() : null
+      if (ownSdk && !ownBinary) {
+        throw new Error(
+          `The Claude Agent SDK in Clawboo's runtimes folder has no ${process.platform}-${process.arch} binary. Install Claude Code again from Settings, Runtimes.`,
+        )
+      }
       const options: Record<string, unknown> = {
         abortController: abort,
         // Headless worker: clawboo gates risky tools externally (board/approvals).
@@ -553,6 +570,7 @@ export function createClaudeCodeDriver(
       // working folder's project files still apply. See claudeCodeIsolation.ts.
       Object.assign(options, claudeCodeIsolation(ctx.cwd ?? process.cwd(), os.homedir()))
       const model = ctx.model ?? opts.model
+      if (ownBinary) options['pathToClaudeCodeExecutable'] = ownBinary
       if (ctx.cwd) options['cwd'] = ctx.cwd
       if (model) options['model'] = model
       if (ctx.resume) options['resume'] = ctx.resume

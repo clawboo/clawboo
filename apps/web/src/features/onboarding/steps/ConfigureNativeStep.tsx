@@ -49,6 +49,7 @@ import { NATIVE_MORE_PROVIDERS, nativeMoreProvider } from '@/lib/nativeProviders
 import { useOllamaModels } from '@/lib/useOllamaModels'
 import { useOpenRouterModels } from '@/lib/useOpenRouterModels'
 import { Select } from '@/features/shared/Select'
+import { withTerminalName } from '@/features/runtimes/useTerminalCommand'
 
 const muted = (o: number) => `rgb(var(--foreground-rgb) / ${o})`
 
@@ -139,6 +140,9 @@ export interface ConfigureNativeStepProps {
 }
 
 export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStepProps) {
+  // How `codex` is typed in a terminal: the full path when Clawboo installed it.
+  // Taken from the Codex status this step already reads (refreshCodex).
+  const [codexCommand, setCodexCommand] = useState('codex')
   // A non-ollama provider id — one of the primary cards OR an extra ("more") provider.
   const [provider, setProvider] = useState<string>('openai')
   const [useOllama, setUseOllama] = useState(false)
@@ -194,6 +198,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
       setCodexPhase((prev) => (prev === 'ready' || prev === 'not-installed' ? prev : 'needs-login'))
       return
     }
+    if (codex.terminalCommand) setCodexCommand(codex.terminalCommand)
     setCodexPhase(
       codex.installed === false
         ? 'not-installed'
@@ -713,7 +718,7 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
               )}
               {installError ? <FormattedAlert tone="error">{installError}</FormattedAlert> : null}
               <CommandRow
-                command={RUNTIME_CATALOG.codex.installCommand ?? 'npm install -g @openai/codex'}
+                command={RUNTIME_CATALOG.codex.installCommand ?? 'npm install -g @openai/codex@0'}
               />
             </>
           ) : (
@@ -726,7 +731,11 @@ export function ConfigureNativeStep({ onConnected, onBack }: ConfigureNativeStep
                   manual command surfaces inside the flow's failure states. */}
               <ChatGptSignIn
                 tool="codex"
-                loginCommand={RUNTIME_CATALOG.codex.loginCommand ?? 'codex login'}
+                loginCommand={withTerminalName(
+                  RUNTIME_CATALOG.codex.loginCommand ?? 'codex login',
+                  'codex',
+                  codexCommand,
+                )}
                 onLoggedIn={() => void refreshCodex()}
               />
               <div>

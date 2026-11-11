@@ -30,8 +30,9 @@ export interface RuntimeCatalogEntry {
    *  (the subscription is set up on the Providers surfaces first); the
    *  existing Re-check picks up the resulting on-disk auth. */
   altLoginCommand?: string
-  /** Human-readable install command (shown before the live status arrives).
-   *  Absent for built-in runtimes — there is nothing to install. */
+  /** A command for installing it by hand, shown under the Install button.
+   *  Absent for built-in runtimes, and for a runtime only Clawboo's own Install
+   *  can set up (Install puts it in Clawboo's runtimes folder). */
   installCommand?: string
   /** Ships inside the clawboo server — always installed. */
   builtIn?: boolean
@@ -65,7 +66,6 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     authKind: 'api-key',
     envVar: 'ANTHROPIC_API_KEY',
     keyPlaceholder: 'sk-ant-…',
-    installCommand: 'npm install -g @anthropic-ai/claude-agent-sdk@0.3',
     docsUrl: 'https://docs.claude.com/en/docs/claude-code/overview',
     keyUrl: 'https://console.anthropic.com/settings/keys',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },
@@ -76,7 +76,8 @@ export const RUNTIME_CATALOG: Record<RuntimeId, RuntimeCatalogEntry> = {
     blurb: "OpenAI's coding agent CLI. Sign in once with `codex login` in your terminal.",
     authKind: 'oauth',
     loginCommand: 'codex login',
-    installCommand: 'npm install -g @openai/codex',
+    // By hand: a global Codex is found when Clawboo installed none of its own.
+    installCommand: 'npm install -g @openai/codex@0',
     docsUrl: 'https://developers.openai.com/codex/cli',
     capabilityHint: { streaming: true, mcp: true, worktrees: true, resume: true },
   },
