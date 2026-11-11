@@ -95,10 +95,14 @@ export interface DoctorFixDeps {
  * Never throws.
  */
 export function runDoctorFix(
-  openclawPath: string,
+  openclaw: string | { command: string; args: string[]; shell: boolean },
   onLine: (line: string) => void,
   deps: DoctorFixDeps = {},
 ): Promise<DoctorFixResult> {
+  // A path (a copy on PATH: `openclaw.cmd` on Windows needs a shell), or how
+  // the server starts Clawboo's own copy (`openclawInvocation`).
+  const run =
+    typeof openclaw === 'string' ? { command: openclaw, args: [], shell: isWindows } : openclaw
   const doSpawn = deps.spawn ?? spawn
   const timeoutMs = deps.timeoutMs ?? DOCTOR_TIMEOUT_MS
   return new Promise((resolve) => {
@@ -115,12 +119,12 @@ export function runDoctorFix(
       // `shell: isWindows` + `windowsHide: isWindows`: the path is openclaw.cmd
       // on Windows, which Node refuses to spawn without a shell (CVE-2024-27980).
       // Detached so the timeout can stop doctor and anything it started.
-      child = doSpawn(openclawPath, ['doctor', '--fix', '--non-interactive'], {
+      child = doSpawn(run.command, [...run.args, 'doctor', '--fix', '--non-interactive'], {
         cwd: liveCwd(),
         env: { ...process.env, OPENCLAW_SERVICE_REPAIR_POLICY: 'external', NO_COLOR: '1' },
         stdio: ['ignore', 'pipe', 'pipe'],
         detached: !isWindows,
-        shell: isWindows,
+        shell: run.shell,
         windowsHide: isWindows,
       })
     } catch (err) {

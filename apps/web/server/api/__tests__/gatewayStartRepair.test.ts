@@ -32,6 +32,7 @@ vi.mock('../../lib/processManager', () => ({
 }))
 vi.mock('../../lib/openclawDetect', () => ({
   detectOpenClaw: async () => ({ installed: true, path: '/bin/openclaw', version: '2026.9.2' }),
+  openclawInvocation: () => ({ command: '/bin/openclaw', args: [], shell: false }),
   invalidateOpenClawCache: () => {},
 }))
 vi.mock('../../lib/agentSource', () => ({ getRegistry: () => ({ reconnect: async () => {} }) }))

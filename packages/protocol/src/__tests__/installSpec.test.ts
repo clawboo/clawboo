@@ -19,7 +19,6 @@ import { describe, expect, it } from 'vitest'
 import {
   BROWSING_GUIDANCE,
   BROWSING_GUIDANCE_HEADING,
-  OPENCLAW_INSTALL_COMMAND_SUDO,
   OPENCLAW_INSTALL_SPEC,
   OPENCLAW_NODE_RANGES,
   OPENCLAW_NODE_REQUIREMENT,
@@ -48,18 +47,6 @@ describe('OPENCLAW_INSTALL_SPEC', () => {
 
   it('names the package it installs', () => {
     expect(OPENCLAW_INSTALL_SPEC.startsWith('openclaw@')).toBe(true)
-  })
-})
-
-describe('OPENCLAW_INSTALL_COMMAND_SUDO', () => {
-  it('carries the SAME spec as the automatic install', () => {
-    // The three copies drifting apart is how the manual instructions ended up
-    // telling people to install a version the automatic path refused to.
-    expect(OPENCLAW_INSTALL_COMMAND_SUDO).toContain(OPENCLAW_INSTALL_SPEC)
-  })
-
-  it('is a runnable global install command', () => {
-    expect(OPENCLAW_INSTALL_COMMAND_SUDO).toBe(`sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`)
   })
 })
 

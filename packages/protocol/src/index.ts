@@ -155,11 +155,11 @@ export function foldToolsIntoAgentsMd(
  * claimed it held them on 2026.5. `~2026.9` is what "the 2026.9 line" actually
  * spells.
  *
- * It lives in @clawboo/protocol because the server spawns the install and the
- * onboarding UI prints the same command for people who need to run it by hand.
- * Those three copies drifted once already; one exported string is what stops it
- * happening again. Widen this only alongside a clawboo that has been tested
- * against the newer Gateway.
+ * It lives in @clawboo/protocol so the install the server runs (into Clawboo's
+ * own runtimes folder) and every place that names the version agree. Copies of
+ * it drifted once already; one exported string is what stops it happening
+ * again. Widen this only alongside a clawboo that has been tested against the
+ * newer Gateway.
  *
  * The pin is NOT about the connect protocol. Both 2026.5 and 2026.9 speak
  * protocol v4, and the Gateway accepts any advertised range that contains its
@@ -182,7 +182,8 @@ export const OPENCLAW_INSTALL_SPEC = 'openclaw@~2026.9'
  * installs. On a Node outside this range npm does not refuse the install: it
  * quietly picks the newest patch in the line whose engines still admit that
  * Node (2026.9.2 on Node 22), which is an older Gateway than the one clawboo
- * targets. So "supported" here means "gets the current release".
+ * targets. So "supported" here means "gets the current release", and Clawboo
+ * refuses to install OpenClaw on a Node outside it.
  *
  * Nor is it a "major >= N" question. Node 24.16 has the right major and is
  * still too old, and Node 25 has a higher major and is excluded outright.
@@ -205,7 +206,7 @@ export const OPENCLAW_NODE_REQUIREMENT = '>=24.22.1 <25 || >=26.12.1'
  *
  * A PRERELEASE is likewise unsupported, which is stricter than a numeric compare
  * would be and is the point. This predicate exists to answer "will
- * `npm install -g` accept this Node", and npm resolves engines through
+ * npm install the current release on this Node", and npm resolves engines through
  * node-semver, which excludes prereleases from any range whose comparators carry
  * none: `24.22.1-nightly` does NOT satisfy `>=24.22.1 <25`. Accepting it here
  * would put us back where we started, telling the user the machine is ready and
@@ -253,9 +254,6 @@ export function isNodeVersionSupportedByOpenclaw(version: string | null | undefi
     (r) => atLeast(got, r.min) && (r.ltMajor === undefined || (got[0] as number) < r.ltMajor),
   )
 }
-
-/** The manual fallback, for a machine whose global installs need sudo. */
-export const OPENCLAW_INSTALL_COMMAND_SUDO = `sudo npm install -g ${OPENCLAW_INSTALL_SPEC}`
 
 export interface ToolCall {
   id?: string

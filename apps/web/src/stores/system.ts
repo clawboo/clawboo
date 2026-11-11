@@ -19,6 +19,16 @@ export interface OpenClawInfo {
   installed: boolean
   version: string | null
   path: string | null
+  /** 'clawboo' for the copy in Clawboo's runtimes folder, 'path' for a global
+   *  install, null when not installed. */
+  source?: 'clawboo' | 'path' | null
+  /** The Node.js Clawboo's copy runs on. */
+  runsOnNode?: { path: string; version: string } | null
+  /** How a person types `openclaw` in a terminal (the full path for Clawboo's
+   *  copy, which is not on their PATH). */
+  command?: string
+  /** Why Clawboo's own copy cannot be used although one is on record, or null. */
+  problem?: string | null
   stateDir: string
   configExists: boolean
   envExists: boolean
