@@ -405,11 +405,11 @@ pipx install --python python3.12 'hermes-agent[anthropic,acp]<1'
 **Fix:** set `CLAWBOO_RUNTIMES_DIR` to a folder of its own and restart Clawboo, or, for a folder you do not own, make it yours and run `chmod go-w` on it. See [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
 
 </Accordion>
-<Accordion title="OpenClaw needs Node.js >=24.22.1 <25 || >=26.12.1, and Clawboo is running on Node.js …">
+<Accordion title="Node.js … is too old for OpenClaw, or is not one OpenClaw runs on">
 
-**What it means:** OpenClaw runs on the Node.js Clawboo runs on, and this one is outside OpenClaw's range, so nothing was installed. The install's error code is `NODE_UNSUPPORTED`.
+**What it means:** OpenClaw runs on the Node.js Clawboo runs on, and this one is outside OpenClaw's range (`>=24.22.1 <25 || >=26.12.1`), so nothing was installed. The message names the Node.js found. The install's error code is `NODE_UNSUPPORTED`.
 
-**Fix:** start Clawboo with Node 24.22.1 or a newer Node 24, then click **Retry**, or **Check for Updates** in **Settings > System**. **Settings > System** shows the Node.js Clawboo runs on. See [OpenClaw](/runtimes/openclaw#troubleshooting).
+**Fix:** if Clawboo came with the desktop app, update the app. Otherwise start Clawboo with Node 24.22.1 or a newer Node 24. Then click **Retry**, or **Check for Updates** in **Settings > System**. **Settings > System** shows the Node.js Clawboo runs on. See [OpenClaw](/runtimes/openclaw#troubleshooting).
 
 </Accordion>
 

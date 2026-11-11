@@ -5,6 +5,7 @@ import path from 'node:path'
 import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
   OPENCLAW_INSTALL_SPEC,
+  OPENCLAW_NODE_RANGES,
   OPENCLAW_NODE_REQUIREMENT,
   isNodeVersionSupportedByOpenclaw,
 } from '@clawboo/protocol'
@@ -645,12 +646,27 @@ export async function installOpenclawPOST(_req: Request, res: Response): Promise
   res.end()
 }
 
-/** What the install says when this Node cannot run OpenClaw's current release. */
+/** What the install says when this Node cannot run OpenClaw's current release:
+ *  the Node found, the range needed (both from @clawboo/protocol), and what to
+ *  update, including the desktop app, which brings its own Node. */
 export function openclawNodeRefusal(nodeVersion: string): string {
+  const floor = OPENCLAW_NODE_RANGES[0]?.min ?? [0, 0, 0]
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion.trim())
+  const got = m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+  const tooOld =
+    got !== null &&
+    (got[0] !== floor[0]
+      ? (got[0] as number) < floor[0]
+      : got[1] !== floor[1]
+        ? (got[1] as number) < floor[1]
+        : (got[2] as number) < floor[2])
+  const what = tooOld
+    ? `Node.js ${nodeVersion} is too old for OpenClaw, which needs ${OPENCLAW_NODE_REQUIREMENT}`
+    : `Node.js ${nodeVersion} is not one OpenClaw runs on: it needs ${OPENCLAW_NODE_REQUIREMENT}`
   return (
-    `OpenClaw needs Node.js ${OPENCLAW_NODE_REQUIREMENT}, and Clawboo is running on Node.js ` +
-    `${nodeVersion}, so nothing was installed. Start Clawboo with a supported Node.js ` +
-    '(Node 24.22.1 or a newer Node 24 is the simplest), then install OpenClaw again.'
+    `${what}, so nothing was installed. Update the Node.js Clawboo runs on: if Clawboo came ` +
+    'with the desktop app, update the app; otherwise start Clawboo with Node.js 24.22.1 or a ' +
+    'newer Node 24. Then install OpenClaw again.'
   )
 }
 

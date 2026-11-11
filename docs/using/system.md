@@ -195,7 +195,7 @@ The chip shows npm's own reason, such as no matching version, a network failure,
 
 **Check for Updates** installs into Clawboo's runtimes folder, never npm's global folder, so it needs no `sudo`. The error says what stopped it:
 
-- `OpenClaw needs Node.js >=24.22.1 <25 || >=26.12.1, and Clawboo is running on Node.js …`: nothing was installed, because OpenClaw would run on that Node.js. Start Clawboo with Node 24.22.1 or a newer Node 24, then click **Check for Updates** again. See [OpenClaw troubleshooting](/runtimes/openclaw#troubleshooting).
+- `Node.js … is too old for OpenClaw` (or `is not one OpenClaw runs on`): nothing was installed, because OpenClaw would run on that Node.js. If Clawboo came with the desktop app, update the app; otherwise start Clawboo with Node 24.22.1 or a newer Node 24. Then click **Check for Updates** again. See [OpenClaw troubleshooting](/runtimes/openclaw#troubleshooting).
 - `Installation failed with exit code` and npm's reason: npm failed. Fix what it reports, then click **Check for Updates** again. The OpenClaw you had is unchanged.
 - A message that Clawboo's runtimes folder must be apart from another folder, or belongs to another user: see [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
 

@@ -301,11 +301,11 @@ The card shows what the approval step reported:
 - `Failed to approve device: …` or `Failed to run openclaw: …`: the OpenClaw command failed. Run the two terminal commands above to see OpenClaw's own message.
 
 </Accordion>
-<Accordion title="OpenClaw needs Node.js >=24.22.1 <25 || >=26.12.1, and Clawboo is running on Node.js …">
+<Accordion title="Node.js … is too old for OpenClaw, or is not one OpenClaw runs on">
 
-**What it means:** the message ends "so nothing was installed". OpenClaw runs on the Node.js Clawboo runs on, so the setup checks that version before it installs anything, and this one is outside OpenClaw's range. The install stream's error code is `NODE_UNSUPPORTED`. Earlier versions of Clawboo installed an older OpenClaw on such a Node.js without saying so.
+**What it means:** the message names the Node.js found and the range OpenClaw needs (`>=24.22.1 <25 || >=26.12.1`), and says nothing was installed. OpenClaw runs on the Node.js Clawboo runs on, so the setup checks that version before it installs anything. "Too old" means below 24.22.1; "not one OpenClaw runs on" means Node 25, a Node 26 before 26.12.1, or a prerelease. The install stream's error code is `NODE_UNSUPPORTED`. Earlier versions of Clawboo installed an older OpenClaw on such a Node.js without saying so.
 
-**Fix:** start Clawboo with a supported Node.js. Node 24.22.1 or a newer Node 24 is the simplest. Stop Clawboo, switch to that Node.js in a terminal, and start Clawboo from it. A version manager such as nvm keeps global packages per Node.js, so install Clawboo again under the new one, or run `npx clawboo@latest`. **Settings > System** shows the version Clawboo runs on. Then click **Retry**.
+**Fix:** if Clawboo came with the desktop app, update the app, which brings its own Node.js. Otherwise start Clawboo with a supported Node.js. Node 24.22.1 or a newer Node 24 is the simplest. Stop Clawboo, switch to that Node.js in a terminal, and start Clawboo from it. A version manager such as nvm keeps global packages per Node.js, so install Clawboo again under the new one, or run `npx clawboo@latest`. **Settings > System** shows the version Clawboo runs on. Then click **Retry**.
 
 </Accordion>
 <Accordion title="Installation failed with exit code">

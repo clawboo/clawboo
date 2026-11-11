@@ -76,7 +76,7 @@ vi.mock('node:child_process', async (orig) => {
   }
 })
 
-import { installOpenclawPOST } from '../system'
+import { installOpenclawPOST, openclawNodeRefusal } from '../system'
 
 function mockRes(): {
   res: Response
@@ -161,7 +161,7 @@ describe('POST /api/system/install-openclaw', () => {
     rmSync(home, { recursive: true, force: true })
   })
 
-  it.each(['v22.23.2', 'v24.16.0', 'v25.9.0', 'v24.22.1-nightly'])(
+  it.each(['v22.23.2', 'v24.16.0', 'v24.22.0', 'v25.9.0', 'v24.22.1-nightly'])(
     'on Node %s says so plainly and installs nothing',
     async (version) => {
       setNode(version)
@@ -172,9 +172,21 @@ describe('POST /api/system/install-openclaw', () => {
       expect(err?.['code']).toBe('NODE_UNSUPPORTED')
       expect(String(err?.['message'])).toContain(OPENCLAW_NODE_REQUIREMENT)
       expect(String(err?.['message'])).toContain(version)
+      expect(String(err?.['message'])).toMatch(/desktop app/)
       expect(spawnState.calls).toEqual([])
     },
   )
+
+  it('says "too old" below the floor (the desktop app bundling 24.22.0, say), and otherwise not supported', () => {
+    for (const v of ['v24.22.0', 'v22.23.2', 'v24.16.0']) {
+      expect(openclawNodeRefusal(v)).toMatch(new RegExp(`^Node.js ${v} is too old for OpenClaw`))
+    }
+    for (const v of ['v25.9.0', 'v26.1.0', 'v24.22.1-nightly']) {
+      expect(openclawNodeRefusal(v)).toMatch(
+        new RegExp(`^Node.js ${v} is not one OpenClaw runs on`),
+      )
+    }
+  })
 
   it('on a supported Node, installs the pinned release into the runtimes folder, never globally', async () => {
     setNode('v24.22.1')

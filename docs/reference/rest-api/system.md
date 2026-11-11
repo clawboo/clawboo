@@ -168,7 +168,7 @@ data: {"type":"complete","success":true,"version":"2026.9.34","path":"/Users/you
 On a Node.js outside the range, the only frame is:
 
 ```text
-data: {"type":"error","code":"NODE_UNSUPPORTED","message":"OpenClaw needs Node.js >=24.22.1 <25 || >=26.12.1, and Clawboo is running on Node.js v22.12.0, so nothing was installed. Start Clawboo with a supported Node.js (Node 24.22.1 or a newer Node 24 is the simplest), then install OpenClaw again."}
+data: {"type":"error","code":"NODE_UNSUPPORTED","message":"Node.js v22.12.0 is too old for OpenClaw, which needs >=24.22.1 <25 || >=26.12.1, so nothing was installed. Update the Node.js Clawboo runs on: if Clawboo came with the desktop app, update the app; otherwise start Clawboo with Node.js 24.22.1 or a newer Node 24. Then install OpenClaw again."}
 ```
 
 ### Example
