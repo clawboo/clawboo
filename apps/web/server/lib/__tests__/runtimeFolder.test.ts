@@ -16,6 +16,7 @@ import {
   INSTALL_RECORD_FILE,
   INSTALL_UMASK,
   commitRuntimeInstall,
+  keepRuntimesDirApartFrom,
   currentInstallFolder,
   launcherFileName,
   launcherScript,
@@ -510,6 +511,31 @@ describe('review fixes', () => {
     expect(launcherScript({ command: 'C:\\n.exe', args: [] }, 'a & calc', 'win32')).not.toContain(
       '&',
     )
+  })
+})
+
+describe('keepRuntimesDirApartFrom', () => {
+  it("refuses a runtimes folder inside a folder registered at boot, such as an agent user's home", () => {
+    const agentHome = path.join(base, 'agent-home')
+    const inside = { ...env, CLAWBOO_RUNTIMES_DIR: path.join(agentHome, 'runtimes') }
+    expect(runtimesDirRefusal(inside)).toBeNull()
+    const remove = keepRuntimesDirApartFrom("the agent user's home", () => agentHome)
+    try {
+      expect(runtimesDirRefusal(inside)).toMatch(/must be apart from the agent user's home/)
+      expect(runtimesDirRefusal(env)).toBeNull()
+    } finally {
+      remove()
+    }
+    expect(runtimesDirRefusal(inside)).toBeNull()
+  })
+
+  it('skips a rule whose folder is unknown', () => {
+    const remove = keepRuntimesDirApartFrom('nothing', () => null)
+    try {
+      expect(runtimesDirRefusal(env)).toBeNull()
+    } finally {
+      remove()
+    }
   })
 })
 

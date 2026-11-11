@@ -151,12 +151,32 @@ function ownedAndClosed(st: Stats): boolean {
   return (st.mode & 0o022) === 0
 }
 
+/** More folders the runtimes folder must stay apart from, registered at boot. */
+const extraApartFrom: { label: string; dir: () => string | null }[] = []
+
+/**
+ * Keep the runtimes folder apart from one more folder: it may not be, contain
+ * or sit inside it, checked like the data and work folders. For a folder that
+ * someone other than the server's user can write, such as the home of the OS
+ * user agents run as. `dir` is read at each check; null skips it. Returns a
+ * function that removes the rule.
+ */
+export function keepRuntimesDirApartFrom(label: string, dir: () => string | null): () => void {
+  const entry = { label, dir }
+  extraApartFrom.push(entry)
+  return () => {
+    const i = extraApartFrom.indexOf(entry)
+    if (i !== -1) extraApartFrom.splice(i, 1)
+  }
+}
+
 /**
  * Why nothing may be installed into or run from the runtimes folder, or null
  * when it is fine. Compared on real paths, so a link cannot hide one folder
  * inside another:
  * - it must not be, contain or sit inside Clawboo's data folder (the database
- *   and the vault) or the work folder (which agents write);
+ *   and the vault), the work folder (which agents write), or a folder added
+ *   with `keepRuntimesDirApartFrom` (such as the agent user's home);
  * - when it exists, it and its `bin/` must be real folders owned by this user
  *   and writable by nobody else.
  */
@@ -165,10 +185,20 @@ export function runtimesDirRefusal(env: NodeJS.ProcessEnv = process.env): string
   const name = env[RUNTIMES_DIR_ENV]?.trim() ? RUNTIMES_DIR_ENV : "Clawboo's runtimes folder"
   const fix = `Set ${RUNTIMES_DIR_ENV} to a folder of its own and restart Clawboo.`
   const r = foldCase(root)
-  for (const [label, dir] of [
+  const apart: [string, string][] = [
     ["Clawboo's data folder", realPathOrSpelling(resolveClawbooDir(env))],
     ['the work folder', realPathOrSpelling(resolveWorkDir(env))],
-  ] as const) {
+  ]
+  for (const extra of extraApartFrom) {
+    let dir: string | null = null
+    try {
+      dir = extra.dir()
+    } catch {
+      dir = null
+    }
+    if (dir) apart.push([extra.label, realPathOrSpelling(dir)])
+  }
+  for (const [label, dir] of apart) {
     const d = foldCase(dir)
     if (r === d || isInside(r, d) || isInside(d, r)) {
       return `${name} (${root}) must be apart from ${label} (${dir}). ${fix}`
