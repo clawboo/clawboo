@@ -13,7 +13,8 @@
 // `spawnSeam.test.ts`, which lists every spawn in the server.
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { EventEmitter } from 'node:events'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 
 import { isAgentUserMode } from '../agentUser/config'
 import { activeAgentHost } from '../agentUser/state'
@@ -114,6 +115,52 @@ function agentEnv(env: AgentSpawnOptions['env']): Record<string, string> {
 }
 
 /**
+ * Runtime binaries the startup check found the agent user cannot execute, with
+ * the reason (design 4.6 step 9). A run that would start one fails with that
+ * reason instead of an unexplained ENOENT or EACCES.
+ */
+const unavailable = new Map<string, string>()
+
+export function setUnavailableAgentBinaries(
+  list: readonly { path: string; reason: string }[],
+): void {
+  unavailable.clear()
+  for (const b of list) unavailable.set(b.path, b.reason)
+}
+
+/** Why the agent user cannot run `command`, or null. */
+export function agentBinaryProblem(command: string): string | null {
+  return unavailable.get(command) ?? null
+}
+
+/** A process that never started, failing with `reason`, as Node reports one. */
+function failedStart(command: string, reason: string): ChildProcess {
+  const proc = new EventEmitter() as EventEmitter & Record<string, unknown>
+  Object.assign(proc, {
+    pid: undefined,
+    stdin: null,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    spawnfile: command,
+    kill: () => false,
+  })
+  setImmediate(() => {
+    proc.emit(
+      'error',
+      Object.assign(new Error(`not available to the agent user: ${reason}`), { code: 'EACCES' }),
+    )
+    ;(proc['stdout'] as PassThrough).end()
+    ;(proc['stderr'] as PassThrough).end()
+    proc['exitCode'] = -13
+    proc.emit('close', -13, null)
+  })
+  return proc as unknown as ChildProcess
+}
+
+/**
  * Start an agent process: locally as today, or through the agent host as the
  * agent user. The return is typed as `ChildProcess` for the call sites that
  * hand it to code expecting one (the Agent SDK's spawn hook, stream helpers);
@@ -136,6 +183,8 @@ export function spawnAgentProcess(opts: AgentSpawnOptions): ChildProcess {
     })
   }
   const { client } = activeAgentHost()
+  const problem = agentBinaryProblem(opts.command)
+  if (problem) return failedStart(opts.command, problem)
   return client.spawn({
     command: opts.command,
     args: opts.args,

@@ -11,7 +11,7 @@ import path from 'node:path'
 import { resolveClawbooDir, resolveSettingsPath, resolveAccessTokenPath } from '@clawboo/config'
 
 import { getVaultPaths } from '../secretsVault'
-import { agentMkdir, agentStat, agentWriteFile } from './agentFs'
+import { agentMkdir, agentRemove, agentStat, agentWriteFile } from './agentFs'
 import {
   narrowDataDir,
   runAgentUserCheck,
@@ -26,6 +26,7 @@ import {
   type HostTransport,
 } from './client'
 import { resolveAgentUserConfig, type AgentUserConfig } from './config'
+import { setUnavailableAgentBinaries } from '../runtimes/spawner'
 import type { HelloFrame } from './protocol'
 import { peekAgentHost, setActiveAgentHost } from './state'
 import { currentUserName, killAllAgentProcesses, lookupUser, socketProblem } from './system'
@@ -160,9 +161,14 @@ export async function startAgentUser(opts: StartAgentUserOptions): Promise<Check
   if (!report.ok || !report.client || !report.hello || !report.workDir) return report
 
   setActiveAgentHost({ client: report.client, hello: report.hello, config })
+  setUnavailableAgentBinaries(report.unavailableRuntimes)
+  lastUnavailable = report.unavailableRuntimes
   // Every resolver of the work folder agrees from here on.
   if (!explicitWork) env['CLAWBOO_WORK_DIR'] = report.workDir
   await prepareAgentWorkDir(report.workDir)
+  // Throwaway runtime homes (reviewer runs, checks) a previous server left: no
+  // run is going yet, so none is in use.
+  await agentRemove(path.join(report.hello.home, 'runtimes', '.throwaway')).catch(() => undefined)
   watchHost(config, env, opts.log)
   opts.log.info(
     { user: config.user, uid: report.hello.uid, home: report.hello.home, workDir: report.workDir },
@@ -257,6 +263,30 @@ async function restartHost(
     )
   } finally {
     restarting = false
+  }
+}
+
+let lastUnavailable: CheckReport['unavailableRuntimes'] = []
+
+/**
+ * What `/api/health` says about agent isolation: null when it is off; the
+ * agent user, whether its host is running, and the runtimes it cannot run.
+ */
+export function agentIsolationStatus(): {
+  user: string
+  uid: number
+  home: string
+  host: 'running' | 'down'
+  unavailableRuntimes: { runtime: string; path: string; reason: string }[]
+} | null {
+  const active = peekAgentHost()
+  if (!active) return null
+  return {
+    user: active.config.user,
+    uid: active.hello.uid,
+    home: active.hello.home,
+    host: active.client.closed ? 'down' : 'running',
+    unavailableRuntimes: lastUnavailable,
   }
 }
 

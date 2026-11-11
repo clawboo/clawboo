@@ -18,6 +18,7 @@
 import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
 
 import { resolveClawbooDir } from '@clawboo/config'
 import { execGit } from '@clawboo/worktrees'
@@ -39,7 +40,7 @@ const CHUNK = 4 * 1024 * 1024
 /** A bundle larger than this is refused rather than copied. */
 const MAX_BUNDLE_BYTES = 4 * 1024 * 1024 * 1024
 /** How much of git's output an agent-side call keeps. */
-const OUTPUT_CHARS = 1024 * 1024
+export const AGENT_GIT_OUTPUT_CHARS = 1024 * 1024
 /** Synced base refs kept in a mirror, newest first, so the next sync has a "have". */
 const KEEP_BASE_REFS = 20
 
@@ -56,10 +57,22 @@ export function mirrorPathFor(repoPath: string, workDir: string = workDirInUse()
 }
 
 /** Run git as the agent user. Resolves to stdout; rejects with git's stderr. */
-export function runAgentGit(
+export async function runAgentGit(
   args: string[],
   opts: { cwd?: string; timeoutMs?: number } = {},
 ): Promise<string> {
+  return (await runAgentGitDetailed(args, opts)).out
+}
+
+/**
+ * Run git as the agent user. `truncated`: stdout went past
+ * {@link AGENT_GIT_OUTPUT_CHARS} and the rest was dropped. A character split
+ * across two chunks is decoded whole.
+ */
+export function runAgentGitDetailed(
+  args: string[],
+  opts: { cwd?: string; timeoutMs?: number } = {},
+): Promise<{ out: string; truncated: boolean }> {
   return new Promise((resolve, reject) => {
     const child = spawnAgentProcess({
       kind: 'git',
@@ -69,13 +82,21 @@ export function runAgentGit(
       env: buildChildEnv({ GIT_TERMINAL_PROMPT: '0', LC_ALL: 'C' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
+    const outDec = new StringDecoder('utf8')
+    const errDec = new StringDecoder('utf8')
     let out = ''
     let err = ''
+    let truncated = false
     child.stdout?.on('data', (d: Buffer) => {
-      if (out.length < OUTPUT_CHARS) out += d.toString('utf8')
+      if (truncated) return
+      out += outDec.write(d)
+      if (out.length > AGENT_GIT_OUTPUT_CHARS) {
+        out = out.slice(0, AGENT_GIT_OUTPUT_CHARS)
+        truncated = true
+      }
     })
     child.stderr?.on('data', (d: Buffer) => {
-      if (err.length < OUTPUT_CHARS) err += d.toString('utf8')
+      if (err.length < AGENT_GIT_OUTPUT_CHARS) err += errDec.write(d)
     })
     const timer = setTimeout(() => child.kill('SIGKILL'), opts.timeoutMs ?? 10 * 60_000)
     timer.unref?.()
@@ -85,11 +106,12 @@ export function runAgentGit(
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      if (code === 0) resolve(out)
-      else
-        reject(
-          new MirrorError(`git ${args.join(' ')} failed (${code}): ${err.trim().slice(0, 2000)}`),
-        )
+      if (!truncated) out += outDec.end()
+      if (code === 0) resolve({ out, truncated })
+      else {
+        const why = (err + errDec.end()).trim().slice(0, 2000)
+        reject(new MirrorError(`git ${args.join(' ')} failed (${code}): ${why}`))
+      }
     })
   })
 }

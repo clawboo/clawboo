@@ -9,7 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildChildEnv } from '../../runtimes/childEnv'
 import { runtimeIdentityHomePath } from '../../runtimes/identityHome'
 import { killProcessTree } from '../../runtimes/killTree'
-import { isHostedAgentProcess, spawnAgentProcess } from '../../runtimes/spawner'
+import {
+  isHostedAgentProcess,
+  setUnavailableAgentBinaries,
+  spawnAgentProcess,
+} from '../../runtimes/spawner'
 import {
   agentList,
   agentMkdir,
@@ -98,6 +102,37 @@ describe.runIf(posix)('spawnAgentProcess with agent isolation on', () => {
     const done = await closed(p)
     expect(done.signal).toBe('SIGTERM')
     expect(requests).toContain('killTree')
+  })
+
+  it('fails a run of a binary the agent user cannot execute, with the reason, without asking the host', async () => {
+    h = startInProcessHost()
+    const hello = await h.client.waitForHello()
+    setActiveAgentHost({
+      client: h.client,
+      hello,
+      config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
+    })
+    const spawnSpy = vi.spyOn(h.client, 'spawn')
+    setUnavailableAgentBinaries([
+      { path: '/home/op/.nvm/bin/codex', reason: '/home/op/.nvm/bin/codex is inside /home/op' },
+    ])
+    try {
+      const p = spawnAgentProcess({
+        kind: 'runtime',
+        command: '/home/op/.nvm/bin/codex',
+        args: [],
+        env: {},
+      })
+      const err = new Promise<Error>((r) => p.once('error', r))
+      const done = closed(p)
+      expect((await err).message).toBe(
+        'not available to the agent user: /home/op/.nvm/bin/codex is inside /home/op',
+      )
+      expect((await done).code).toBe(-13)
+      expect(spawnSpy).not.toHaveBeenCalled()
+    } finally {
+      setUnavailableAgentBinaries([])
+    }
   })
 
   it('puts runtime homes under the agent user home, and refuses without a host', async () => {

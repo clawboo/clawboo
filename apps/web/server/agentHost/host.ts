@@ -22,9 +22,9 @@ import type { Readable, Writable } from 'node:stream'
 import {
   O_NONBLOCK,
   appendNoFollow,
-  listDir,
   mkdirMode,
   readBounded,
+  statType,
   toStat,
   writeAtomic,
 } from './fsOps'
@@ -36,6 +36,7 @@ import {
   encodeFrame,
   errorCode,
   parseFrame,
+  type FsEntry,
   type HelloFrame,
   type HostToServerFrame,
   type InodeRef,
@@ -232,17 +233,22 @@ function runCheck(
 
 /** Every regular file under `root` (one filesystem, links not followed) that is
  *  one of `targets`: a hard link to the database or the key, for instance. */
-function findInodes(
+/** Let other requests (a ping above all) run between slices of a long job:
+ *  a host that misses pings for 5 seconds is taken for dead, and the server
+ *  stops every agent process. */
+const yieldNow = (): Promise<void> => new Promise((r) => setImmediate(r))
+
+async function findInodes(
   root: string,
   targets: InodeRef[],
   maxEntries: number,
-): { matches: string[]; truncated: boolean } {
+): Promise<{ matches: string[]; truncated: boolean }> {
   const want = new Set(targets.map((t) => `${t.dev}:${t.ino}`))
   const matches: string[] = []
   let seen = 0
   let rootDev: bigint
   try {
-    rootDev = fs.lstatSync(root, { bigint: true }).dev
+    rootDev = (await fs.promises.lstat(root, { bigint: true })).dev
   } catch {
     return { matches, truncated: false }
   }
@@ -251,16 +257,17 @@ function findInodes(
     const dir = stack.pop() as string
     let names: string[]
     try {
-      names = fs.readdirSync(dir)
+      names = await fs.promises.readdir(dir)
     } catch {
       continue
     }
     for (const name of names) {
       if (++seen > maxEntries) return { matches, truncated: true }
+      if (seen % 512 === 0) await yieldNow()
       const p = path.join(dir, name)
       let st: fs.BigIntStats
       try {
-        st = fs.lstatSync(p, { bigint: true })
+        st = await fs.promises.lstat(p, { bigint: true })
       } catch {
         continue
       }
@@ -272,6 +279,25 @@ function findInodes(
     }
   }
   return { matches, truncated: false }
+}
+
+/** A folder's entries without following links, without blocking the host. */
+async function listDirAsync(
+  dir: string,
+  max: number,
+): Promise<{ entries: FsEntry[]; truncated: boolean }> {
+  const names = (await fs.promises.readdir(dir)).sort()
+  const entries: FsEntry[] = []
+  for (const [i, name] of names.slice(0, max).entries()) {
+    if (i % 512 === 511) await yieldNow()
+    try {
+      const st = await fs.promises.lstat(path.join(dir, name))
+      entries.push({ name, type: statType(st), size: st.size, mtimeMs: st.mtimeMs })
+    } catch {
+      /* gone between the listing and the stat */
+    }
+  }
+  return { entries, truncated: names.length > max }
 }
 
 export interface HostConnection {
@@ -455,7 +481,7 @@ export function serveConnection(
           mkdirMode(String(f['path']), Number(f['mode']) & 0o777)
           return reply(id, {})
         case 'fs.rm':
-          fs.rmSync(String(f['path']), { recursive: true, force: true })
+          await fs.promises.rm(String(f['path']), { recursive: true, force: true })
           return reply(id, {})
         case 'fs.rename':
           fs.renameSync(String(f['from']), String(f['to']))
@@ -470,7 +496,7 @@ export function serveConnection(
         }
         case 'fs.list': {
           const max = Math.max(0, Math.min(Number(f['max']) || 0, 100_000))
-          return reply(id, listDir(String(f['path']), max))
+          return reply(id, await listDirAsync(String(f['path']), max))
         }
         case 'probe': {
           const checks = Array.isArray(f['checks']) ? f['checks'] : []
@@ -505,7 +531,7 @@ export function serveConnection(
         case 'inodes': {
           const targets = Array.isArray(f['targets']) ? (f['targets'] as InodeRef[]) : []
           const max = Math.max(1, Math.min(Number(f['maxEntries']) || 200_000, 2_000_000))
-          return reply(id, findInodes(String(f['root']), targets, max))
+          return reply(id, await findInodes(String(f['root']), targets, max))
         }
         case 'sudoList':
           return reply(id, await runCheck('sudo', ['-n', '-l']))

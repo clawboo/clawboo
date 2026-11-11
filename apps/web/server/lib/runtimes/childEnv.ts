@@ -189,6 +189,11 @@ export const SERVER_IDENTITY_ENV_KEYS: ReadonlySet<string> = new Set([
   'KRB5CCNAME',
   'CLAWBOO_HOME',
   'CLAWBOO_WORK_DIR',
+  // Runtime homes the operator set for their own use point into their home. A
+  // run is given its own home explicitly, which is kept.
+  'CLAUDE_CONFIG_DIR',
+  'CODEX_HOME',
+  'HERMES_HOME',
   'CLAWBOO_AGENT_USER',
   'CLAWBOO_AGENT_SWITCH',
   'CLAWBOO_AGENT_HOST_SOCKET',
