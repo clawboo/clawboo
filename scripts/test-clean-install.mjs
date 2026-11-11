@@ -102,6 +102,7 @@ const IS_WINDOWS = process.platform === 'win32'
 const REQUIRED_BUILD_ARTIFACTS = [
   'dist/index.js',
   'dist/server.js',
+  'dist/agent-host.js',
   'dist/ui/index.html',
   'dist/bin/tasks.js',
   'dist/THIRD_PARTY_NOTICES.md',

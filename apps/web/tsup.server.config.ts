@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: { server: 'server/index.ts' },
+  // `agent-host` is the process that runs as the agent user when
+  // CLAWBOO_AGENT_USER is set. Node built-ins only, so its bundle is
+  // self-contained and the agent user needs nothing else of the install.
+  entry: { server: 'server/index.ts', 'agent-host': 'server/agentHost/main.ts' },
   outDir: 'dist',
   format: ['cjs'],
   target: 'node22',

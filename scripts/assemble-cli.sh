@@ -46,6 +46,16 @@ fi
 echo "Copying server.js → $CLI_DIST/"
 cp "$WEB_DIST/server.js" "$CLI_DIST/server.js"
 
+# The agent host runs as the agent user when CLAWBOO_AGENT_USER is set; the
+# server starts it from beside itself.
+if [ ! -f "$WEB_DIST/agent-host.js" ]; then
+  echo "ERROR: $WEB_DIST/agent-host.js not found."
+  echo "Run 'pnpm build' first (builds the server and the agent host)."
+  exit 1
+fi
+echo "Copying agent-host.js → $CLI_DIST/"
+cp "$WEB_DIST/agent-host.js" "$CLI_DIST/agent-host.js"
+
 # ── Copy UI assets ───────────────────────────────────────────────────────
 
 echo "Copying ui/ → $CLI_DIST/ui/"

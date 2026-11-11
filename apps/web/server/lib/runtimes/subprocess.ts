@@ -18,6 +18,7 @@ import { isWindows } from '../platform'
 import { buildChildEnv } from './childEnv'
 import { killProcessTree, killProcessTreeByPid } from './killTree'
 import { recordRuntimePid } from './runtimePidFile'
+import { isHostedAgentProcess, type AgentProcess } from './spawner'
 import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
 
 /**
@@ -30,7 +31,7 @@ import { resolveWindowsSpawn, type WinSpawnPlan } from './winSpawn'
  * while boot-time reconciliation releases that task for another runner to claim —
  * two live runs on one worktree.
  */
-const liveChildren = new Set<ChildProcess>()
+const liveChildren = new Set<AgentProcess>()
 
 /**
  * Connector children, tracked by PID because we never hold their handle.
@@ -53,7 +54,11 @@ const liveConnectorPids = new Set<number>()
  * to run. An engine that is force-killed or crashes leaves its children running,
  * and the record (`runtimePidFile.ts`) is how the next boot finds and reaps them.
  */
-function recordUntilClose(child: ChildProcess): void {
+function recordUntilClose(child: AgentProcess): void {
+  // A process the agent host started is the agent user's: this server could not
+  // signal it from a record, and the boot reap in that mode stops every process
+  // of the agent user instead (agentUser/stop.ts).
+  if (isHostedAgentProcess(child)) return
   if (!child.pid) return
   const forget = recordRuntimePid(
     child.pid,
@@ -76,7 +81,7 @@ function recordUntilClose(child: ChildProcess): void {
  * `ChildProcess` outright, so the richer `killProcessTree` is available and the
  * pid-only path is unnecessary.
  */
-export function registerRuntimeChild(child: ChildProcess): void {
+export function registerRuntimeChild(child: AgentProcess): void {
   // Before the shutdown check: a late registrant is only signalled below, and if
   // it outlives this process the next boot still has its pid.
   recordUntilClose(child)
@@ -90,7 +95,7 @@ export function registerRuntimeChild(child: ChildProcess): void {
 }
 
 /** Stop tracking a local-tool child that closed cleanly. */
-export function unregisterRuntimeChild(child: ChildProcess): void {
+export function unregisterRuntimeChild(child: AgentProcess): void {
   liveChildren.delete(child)
 }
 
