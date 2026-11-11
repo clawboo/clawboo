@@ -30,11 +30,16 @@ import { randomBytes } from 'node:crypto'
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants as fsConstants,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -209,33 +214,78 @@ function ensureFolder(dir: string): void {
   }
 }
 
+/** The umask an installer runs under: what it writes is readable by others and
+ *  writable by nobody else from the start, so no other account can change an
+ *  install while it is being made. */
+export const INSTALL_UMASK = 0o022
+
+/**
+ * Run `fn` (typically a `spawn` of an installer, which inherits the umask at
+ * that moment) under {@link INSTALL_UMASK}, then put this process's umask back.
+ */
+export function withInstallUmask<T>(fn: () => T): T {
+  if (isWindows) return fn()
+  const previous = process.umask(INSTALL_UMASK)
+  try {
+    return fn()
+  } finally {
+    process.umask(previous)
+  }
+}
+
+/** Change a mode through a descriptor opened without following a link, after
+ *  checking it is still the entry that was looked at. */
+function chmodNoFollow(p: string, st: Stats, mode: number): void {
+  const fd = openSync(p, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+  try {
+    const now = fstatSync(fd)
+    if (now.dev !== st.dev || now.ino !== st.ino) throw new Error(`${p} changed while sealing`)
+    fchmodSync(fd, mode)
+  } finally {
+    closeSync(fd)
+  }
+}
+
 /**
  * Make an install folder what the runtimes folder promises before it becomes
  * current: every entry owned by this user, readable by others (and enterable,
  * or runnable where its owner may run it), and writable by nobody else, whatever
- * umask the installer ran under. Links are left as they are and never followed.
- * Throws when an entry belongs to someone else, which no install of ours makes.
+ * umask the installer ran under. A folder is closed before its entries are read,
+ * and modes change through descriptors that never follow a link. Links are kept
+ * but must be this user's and point inside the install. Throws on an entry that
+ * belongs to someone else, or a link that leads out, which no install of ours
+ * makes.
  */
 export function sealInstallFolder(folder: string): void {
   if (isWindows) return
   const uid = typeof process.getuid === 'function' ? process.getuid() : null
-  const stack = [folder]
+  const top = realPathOf(folder)
+  if (!top) throw new Error(`${folder} is not there`)
+  const stack = [top]
   while (stack.length > 0) {
     const cur = stack.pop() as string
     const st = lstatSync(cur)
-    if (st.isSymbolicLink()) continue
     if (uid !== null && st.uid !== uid) {
       throw new Error(`${cur} belongs to another user, so this install cannot be used`)
     }
-    const perm = st.mode & 0o7777
-    let want: number
-    if (st.isDirectory()) {
-      want = (perm & 0o7700) | 0o055
-      for (const name of readdirSync(cur)) stack.push(path.join(cur, name))
-    } else {
-      want = (perm & 0o7700) | 0o044 | (perm & 0o100 ? 0o011 : 0)
+    if (st.isSymbolicLink()) {
+      const target = realPathOrSpelling(path.resolve(path.dirname(cur), readlinkSync(cur)))
+      if (target !== top && !isInside(target, top)) {
+        throw new Error(`${cur} links outside the install (${target}), so it cannot be used`)
+      }
+      continue
     }
-    if (perm !== want) chmodSync(cur, want)
+    const perm = st.mode & 0o7777
+    if (st.isDirectory()) {
+      const want = (perm & 0o7700) | 0o055
+      if (perm !== want) chmodNoFollow(cur, st, want)
+      for (const name of readdirSync(cur)) stack.push(path.join(cur, name))
+    } else if (st.isFile()) {
+      const want = (perm & 0o7700) | 0o044 | (perm & 0o100 ? 0o011 : 0)
+      if (perm !== want) chmodNoFollow(cur, st, want)
+    } else {
+      throw new Error(`${cur} is not a file or a folder, so this install cannot be used`)
+    }
   }
 }
 
@@ -595,8 +645,7 @@ function isTrustedEntry(p: string, kind: 'file' | 'dir'): boolean {
  * Inside the runtimes folder it must pass `ownedAndClosed`, and so must every
  * folder between it and the root (resolved through links, so a link cannot lead
  * out to a file someone else controls). Outside it, such as the Node that
- * installed a runtime, it must be a file nobody but its owner can write: that is
- * the Node this server itself runs on.
+ * installed a runtime, see {@link isTrustedOutsideTarget}.
  */
 function isTrustedRunTarget(p: string, root: string, executable: boolean): boolean {
   let real: string
@@ -606,7 +655,7 @@ function isTrustedRunTarget(p: string, root: string, executable: boolean): boole
     if (!st.isFile()) return false
     if (executable && !isExecutableFile(real)) return false
     if (isWindows) return true
-    if (!isInside(real, root)) return (st.mode & 0o022) === 0
+    if (!isInside(real, root)) return isTrustedOutsideTarget(st)
     if (!ownedAndClosed(st)) return false
   } catch {
     return false
@@ -619,6 +668,23 @@ function isTrustedRunTarget(p: string, root: string, executable: boolean): boole
     }
   }
   return true
+}
+
+/**
+ * A command outside the runtimes folder, such as the Node that installed a
+ * runtime: writable by its owner only, and owned by this user, root, or whoever
+ * owns the Node this server runs on (who could change the server itself just
+ * as well).
+ */
+function isTrustedOutsideTarget(st: Stats): boolean {
+  if ((st.mode & 0o022) !== 0) return false
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null
+  if (uid === null || st.uid === uid || st.uid === 0) return true
+  try {
+    return statSync(process.execPath).uid === st.uid
+  } catch {
+    return false
+  }
 }
 
 /**

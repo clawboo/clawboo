@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import {
   INSTALL_RECORD_FILE,
+  INSTALL_UMASK,
   commitRuntimeInstall,
   currentInstallFolder,
   launcherFileName,
@@ -26,6 +27,7 @@ import {
   runtimeInstallDir,
   runtimeInstallRoot,
   runtimesDirRefusal,
+  withInstallUmask,
 } from '../runtimeFolder'
 
 const isWindows = process.platform === 'win32'
@@ -365,6 +367,42 @@ describe('sealing and trust', () => {
     await rm(script)
     await symlink(outside, script)
     expect(ownedRuntimeBin('codex', env)).toBeNull()
+  })
+})
+
+describe('the install umask', () => {
+  it.skipIf(isWindows)('installers start under 022 and the umask comes back after', () => {
+    const outer = process.umask(0o077)
+    try {
+      let inside = -1
+      withInstallUmask(() => {
+        inside = process.umask(0o022) // reads it (and sets the same value back)
+      })
+      expect(inside).toBe(INSTALL_UMASK)
+      expect(process.umask(0o077)).toBe(0o077)
+    } finally {
+      process.umask(outer)
+    }
+  })
+
+  it.skipIf(isWindows)(
+    'refuses to make current an install with a link leading out of it',
+    async () => {
+      const folder = newInstallFolder('codex', 'v1', env)
+      await symlink(path.join(base, 'data'), path.join(folder, 'escape'))
+      expect(() =>
+        commitRuntimeInstall('codex', { folder, version: null, source: 'x', launchers: {} }, env),
+      ).toThrow(/links outside the install/)
+      expect(readRuntimeInstall('codex', env)).toBeNull()
+    },
+  )
+
+  it.skipIf(isWindows)('keeps a link that stays inside the install', async () => {
+    const folder = newInstallFolder('codex', 'v1', env)
+    mkdirSync(path.join(folder, 'lib'))
+    await symlink('lib', path.join(folder, 'lib64'))
+    commitRuntimeInstall('codex', { folder, version: null, source: 'x', launchers: {} }, env)
+    expect(readRuntimeInstall('codex', env)?.folder).toBe('v1')
   })
 })
 
