@@ -48,7 +48,7 @@ export interface RuntimeDescriptor {
   packageManager: 'npm' | 'pip' | null
   /** Package to install. An npm runtime installs it into a folder of its own
    *  under Clawboo's runtimes folder (`npmRuntimeInstall.ts`), never with
-   *  `npm install -g`; a pip runtime with `pip|pipx install <pkg>`. */
+   *  `npm install -g`; any other runtime's installer says how it uses it. */
   pkg: string | null
   /** For an npm runtime: the package's commands to put in the runtimes folder's
    *  `bin/` (each runs on the Node that installed it). Empty for a library. */
