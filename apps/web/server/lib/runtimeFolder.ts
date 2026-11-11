@@ -190,18 +190,52 @@ export function runtimesDirRefusal(env: NodeJS.ProcessEnv = process.env): string
   return null
 }
 
-/** Make a folder (0755) or, when it is already there and ours, take away group
- *  and other write. Throws when it cannot be made or is not a folder. */
+/** Make a folder 0755 whatever the umask (agents run what is here, so others
+ *  read and enter it; nobody else writes it) or, when it is already there and
+ *  ours, take away group and other write. Throws when it cannot be made or is
+ *  not a folder. */
 function ensureFolder(dir: string): void {
-  mkdirSync(dir, { recursive: true, mode: 0o755 })
+  const created = mkdirSync(dir, { recursive: true, mode: 0o755 })
   const st = lstatSync(dir)
   if (!st.isDirectory()) throw new Error(`${dir} is not a folder`)
-  if (!isWindows && (st.mode & 0o022) !== 0) {
+  if (isWindows) return
+  const want = created !== undefined ? 0o755 : st.mode & 0o7755
+  if ((st.mode & 0o7777) !== want) {
     try {
-      chmodSync(dir, st.mode & 0o755)
+      chmodSync(dir, want)
     } catch {
       // Not ours: runtimesDirRefusal reports it.
     }
+  }
+}
+
+/**
+ * Make an install folder what the runtimes folder promises before it becomes
+ * current: every entry owned by this user, readable by others (and enterable,
+ * or runnable where its owner may run it), and writable by nobody else, whatever
+ * umask the installer ran under. Links are left as they are and never followed.
+ * Throws when an entry belongs to someone else, which no install of ours makes.
+ */
+export function sealInstallFolder(folder: string): void {
+  if (isWindows) return
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null
+  const stack = [folder]
+  while (stack.length > 0) {
+    const cur = stack.pop() as string
+    const st = lstatSync(cur)
+    if (st.isSymbolicLink()) continue
+    if (uid !== null && st.uid !== uid) {
+      throw new Error(`${cur} belongs to another user, so this install cannot be used`)
+    }
+    const perm = st.mode & 0o7777
+    let want: number
+    if (st.isDirectory()) {
+      want = (perm & 0o7700) | 0o055
+      for (const name of readdirSync(cur)) stack.push(path.join(cur, name))
+    } else {
+      want = (perm & 0o7700) | 0o044 | (perm & 0o100 ? 0o011 : 0)
+    }
+    if (perm !== want) chmodSync(cur, want)
   }
 }
 
@@ -397,10 +431,12 @@ export interface CommitRuntimeInstall {
 }
 
 /**
- * Make `install.folder` the current install of `id`: write its launchers into
- * `bin/` (and remove the ones the previous install had and this one does not),
- * then the pointer file. Install folders other than this one and the previous
- * one are removed afterwards, in the background (`pruned`).
+ * Make `install.folder` the current install of `id`: seal it
+ * (`sealInstallFolder`), write its launchers into `bin/` (and remove the ones
+ * the previous install had and this one does not), then the pointer file.
+ * Install folders other than this one and the previous one are removed
+ * afterwards, in the background (`pruned`). Synchronous: sealing walks the
+ * install once, which is fine for something a person starts by hand.
  */
 export function commitRuntimeInstall(
   id: string,
@@ -416,6 +452,8 @@ export function commitRuntimeInstall(
   validateLaunchers(install.launchers)
   const refusal = runtimesDirRefusal(env)
   if (refusal) throw new Error(refusal)
+  ensureFolder(runtimeReal)
+  sealInstallFolder(folderReal)
 
   const previous = readRuntimeInstall(id, env)
   const record: RuntimeInstallRecord = {
@@ -525,24 +563,84 @@ export function ownedRuntimeLaunch(
     const spec = record?.launchers[name]
     if (!record || !spec) continue
     const launcher = path.join(root, 'bin', launcherFileName(name))
-    try {
-      const st = lstatSync(launcher)
-      if (!st.isFile() || !ownedAndClosed(st)) return null
-    } catch {
-      return null
-    }
-    if (!isExecutableFile(spec.command)) return null
-    const script = spec.args[0]
-    if (script && path.isAbsolute(script)) {
-      try {
-        if (!statSync(script).isFile()) return null
-      } catch {
-        return null
-      }
-    }
+    const runtimeDir = path.join(root, id)
+    const trusted =
+      isTrustedEntry(launcher, 'file') &&
+      isTrustedEntry(runtimeDir, 'dir') &&
+      isTrustedEntry(path.join(runtimeDir, INSTALL_RECORD_FILE), 'file') &&
+      isTrustedEntry(path.join(runtimeDir, record.folder), 'dir') &&
+      isTrustedRunTarget(spec.command, root, true) &&
+      (!spec.args[0] ||
+        !path.isAbsolute(spec.args[0]) ||
+        isTrustedRunTarget(spec.args[0], root, false))
+    if (!trusted) return null
     return { launcher, command: spec.command, args: spec.args, id, record }
   }
   return null
+}
+
+/** A real file or folder (not a link) owned by this user and closed to others. */
+function isTrustedEntry(p: string, kind: 'file' | 'dir'): boolean {
+  try {
+    const st = lstatSync(p)
+    if (kind === 'file' ? !st.isFile() : !st.isDirectory()) return false
+    return ownedAndClosed(st)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Whether a launcher's command, or the script it hands that command, may be run.
+ * Inside the runtimes folder it must pass `ownedAndClosed`, and so must every
+ * folder between it and the root (resolved through links, so a link cannot lead
+ * out to a file someone else controls). Outside it, such as the Node that
+ * installed a runtime, it must be a file nobody but its owner can write: that is
+ * the Node this server itself runs on.
+ */
+function isTrustedRunTarget(p: string, root: string, executable: boolean): boolean {
+  let real: string
+  try {
+    real = realpathSync.native(p)
+    const st = statSync(real)
+    if (!st.isFile()) return false
+    if (executable && !isExecutableFile(real)) return false
+    if (isWindows) return true
+    if (!isInside(real, root)) return (st.mode & 0o022) === 0
+    if (!ownedAndClosed(st)) return false
+  } catch {
+    return false
+  }
+  for (let dir = path.dirname(real); isInside(dir, root); dir = path.dirname(dir)) {
+    try {
+      if (!ownedAndClosed(statSync(dir))) return false
+    } catch {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * The current install folder of `id` when Clawboo may run code from it: the
+ * runtimes folder passes `runtimesDirRefusal`, and the runtime's folder, its
+ * pointer file and the install folder are real, owned by this user and closed
+ * to others (the install's contents were sealed when it was committed). For a
+ * runtime that is loaded rather than started, such as the Claude Agent SDK.
+ */
+export function currentInstallFolder(
+  id: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const record = readRuntimeInstall(id, env)
+  if (!record || runtimesDirRefusal(env)) return null
+  const runtimeDir = runtimeInstallDir(id, env)
+  const folder = path.join(runtimeDir, record.folder)
+  const trusted =
+    isTrustedEntry(runtimeDir, 'dir') &&
+    isTrustedEntry(path.join(runtimeDir, INSTALL_RECORD_FILE), 'file') &&
+    isTrustedEntry(folder, 'dir')
+  return trusted ? folder : null
 }
 
 /** Just the launcher path from {@link ownedRuntimeLaunch}. */

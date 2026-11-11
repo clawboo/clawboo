@@ -15,12 +15,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   INSTALL_RECORD_FILE,
   commitRuntimeInstall,
+  currentInstallFolder,
   launcherFileName,
   launcherScript,
   newInstallFolder,
   ownedRuntimeBin,
   ownedRuntimeLaunch,
   readRuntimeInstall,
+  removeRuntimeInstall,
   runtimeInstallDir,
   runtimeInstallRoot,
   runtimesDirRefusal,
@@ -292,6 +294,76 @@ describe('commitRuntimeInstall and the lookups', () => {
     newInstallFolder('codex', 'v1', env)
     await writeFile(path.join(base, 'runtimes', 'codex', INSTALL_RECORD_FILE), '{nope')
     expect(readRuntimeInstall('codex', env)).toBeNull()
+    expect(ownedRuntimeBin('codex', env)).toBeNull()
+  })
+})
+
+describe('sealing and trust', () => {
+  /** Commit a codex install whose command is a script inside the install. */
+  function commitInside(): { folder: string; script: string } {
+    const folder = newInstallFolder('codex', 'v1', env)
+    const script = path.join(folder, 'node_modules', 'codex', 'bin', 'codex.js')
+    mkdirSync(path.dirname(script), { recursive: true })
+    writeFileSync(script, 'console.log("hi")\n')
+    commitRuntimeInstall(
+      'codex',
+      {
+        folder,
+        version: '1',
+        source: 'x',
+        launchers: { codex: { command: process.execPath, args: [script] } },
+      },
+      env,
+    )
+    return { folder, script }
+  }
+
+  it.skipIf(isWindows)(
+    'seals an install made under any umask: others read, nobody else writes',
+    () => {
+      for (const mask of [0o000, 0o002, 0o077]) {
+        const old = process.umask(mask)
+        let folder: string
+        let script: string
+        try {
+          ;({ folder, script } = commitInside())
+        } finally {
+          process.umask(old)
+        }
+        expect(statSync(folder).mode & 0o777).toBe(0o755)
+        expect(statSync(path.dirname(script)).mode & 0o777).toBe(0o755)
+        expect(statSync(script).mode & 0o777).toBe(0o644)
+        expect(ownedRuntimeBin('codex', env)).not.toBeNull()
+        removeRuntimeInstall('codex', env)
+      }
+    },
+  )
+
+  it.skipIf(isWindows || isRoot)(
+    'stops trusting an install once something in its path is opened up',
+    async () => {
+      const { folder, script } = commitInside()
+      const record = path.join(base, 'runtimes', 'codex', INSTALL_RECORD_FILE)
+      for (const target of [record, folder, path.dirname(script), script]) {
+        const before = statSync(target).mode & 0o777
+        await chmod(target, before | 0o022)
+        expect(ownedRuntimeBin('codex', env), target).toBeNull()
+        expect(currentInstallFolder('codex', env), target).toBe(
+          target === script || target === path.dirname(script) ? folder : null,
+        )
+        await chmod(target, before)
+        expect(ownedRuntimeBin('codex', env), target).not.toBeNull()
+      }
+    },
+  )
+
+  it.skipIf(isWindows)('never runs a script reached through a link out of the folder', async () => {
+    const { script } = commitInside()
+    const outside = path.join(base, 'outside.js')
+    await writeFile(outside, '// someone else\n')
+    await chmod(outside, 0o666)
+    await rm(script)
+    await symlink(outside, script)
     expect(ownedRuntimeBin('codex', env)).toBeNull()
   })
 })
