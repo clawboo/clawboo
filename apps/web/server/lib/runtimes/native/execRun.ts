@@ -22,12 +22,13 @@
 //     of this server holds provider API keys, so an approved `printenv` would
 //     otherwise return them to the model.
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 
 import { setAwakeTimeout } from '@clawboo/executor'
 import { connectorChildEnv } from '@clawboo/mcp'
 
 import { killProcessTree } from '../killTree'
+import { spawnAgentProcess } from '../spawner'
 import { registerRuntimeChild, unregisterRuntimeChild } from '../subprocess'
 
 /** How long an approved command may run before it is killed. */
@@ -92,14 +93,18 @@ export async function runApprovedCommand(opts: ExecRunOptions): Promise<ExecRunR
   return await new Promise<ExecRunResult>((resolve, reject) => {
     let child: ChildProcess
     try {
-      child = spawn(program ?? '', args, {
+      // Through the spawn seam, so with agents on their own OS user the command
+      // runs as that user, started by the agent host. The seam never uses a
+      // shell: `shell: true` would hand the argv back to a shell for re-parsing,
+      // which is the exact property this tier exists to refuse.
+      child = spawnAgentProcess({
+        kind: 'tool',
+        command: program ?? '',
+        args,
         cwd: opts.cwd,
         // npm's own settings arrive as the operator made them; only a connector
         // launch turns npm's update check off.
         env: opts.env ?? connectorChildEnv({ npmUpdateCheck: 'inherit' }),
-        // NEVER true. `shell: true` would hand the argv back to a shell for
-        // re-parsing, which is the exact property this tier exists to refuse.
-        shell: false,
         stdio: ['ignore', 'pipe', 'pipe'],
         // Detached so the kill can take the whole process group: a child that
         // spawns its own children would otherwise leave them behind.

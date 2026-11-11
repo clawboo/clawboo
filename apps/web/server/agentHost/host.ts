@@ -19,7 +19,15 @@ import os from 'node:os'
 import path from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 
-import { O_NONBLOCK, listDir, mkdirMode, readBounded, toStat, writeAtomic } from './fsOps'
+import {
+  O_NONBLOCK,
+  appendNoFollow,
+  listDir,
+  mkdirMode,
+  readBounded,
+  toStat,
+  writeAtomic,
+} from './fsOps'
 import {
   AGENT_HOST_PROTOCOL_VERSION,
   MAX_READ_BYTES,
@@ -411,10 +419,12 @@ export function serveConnection(
         }
         case 'fs.read': {
           const max = Number(f['maxBytes'])
+          const off = Number(f['offset'])
           try {
             const r = readBounded(
               String(f['path']),
               Number.isFinite(max) && max >= 0 ? max : MAX_READ_BYTES,
+              Number.isInteger(off) && off > 0 ? off : 0,
             )
             return reply(id, {
               missing: false,
@@ -432,6 +442,13 @@ export function serveConnection(
           if (data.length > MAX_WRITE_BYTES)
             throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
           writeAtomic(String(f['path']), data, Number(f['mode']) & 0o777)
+          return reply(id, {})
+        }
+        case 'fs.append': {
+          const data = Buffer.from(String(f['data'] ?? ''), 'base64')
+          if (data.length > MAX_WRITE_BYTES)
+            throw Object.assign(new Error('write too large'), { code: 'EFBIG' })
+          appendNoFollow(String(f['path']), data, Number(f['mode']) & 0o777)
           return reply(id, {})
         }
         case 'fs.mkdir':

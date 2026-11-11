@@ -29,10 +29,12 @@ export function toStat(st: fs.Stats): FsStat {
 export const O_NOFOLLOW = fs.constants.O_NOFOLLOW ?? 0
 export const O_NONBLOCK = fs.constants.O_NONBLOCK ?? 0
 
-/** Read at most `maxBytes` of a regular file, never through a link at the path's end. */
+/** Read at most `maxBytes` of a regular file from `offset`, never through a
+ *  link at the path's end. `truncated`: more follows what was read. */
 export function readBounded(
   p: string,
   maxBytes: number,
+  offset = 0,
 ): { data: Buffer; size: number; truncated: boolean } {
   const fd = fs.openSync(p, fs.constants.O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
   try {
@@ -40,15 +42,16 @@ export function readBounded(
     if (!st.isFile()) {
       throw Object.assign(new Error(`${p} is not a regular file`), { code: 'ENOTFILE' })
     }
-    const want = Math.max(0, Math.min(maxBytes, MAX_READ_BYTES, st.size))
+    const start = Math.max(0, Math.min(offset, st.size))
+    const want = Math.max(0, Math.min(maxBytes, MAX_READ_BYTES, st.size - start))
     const buf = Buffer.alloc(want)
     let got = 0
     while (got < want) {
-      const n = fs.readSync(fd, buf, got, want - got, got)
+      const n = fs.readSync(fd, buf, got, want - got, start + got)
       if (n === 0) break
       got += n
     }
-    return { data: buf.subarray(0, got), size: st.size, truncated: st.size > got }
+    return { data: buf.subarray(0, got), size: st.size, truncated: st.size > start + got }
   } finally {
     fs.closeSync(fd)
   }
@@ -103,4 +106,25 @@ export function listDir(dir: string, max: number): { entries: FsEntry[]; truncat
     }
   }
   return { entries, truncated: names.length > max }
+}
+
+/** Append to a file (made with `mode` when missing), never through a link at
+ *  the path's end. */
+export function appendNoFollow(p: string, data: Buffer, mode: number): void {
+  const fd = fs.openSync(
+    p,
+    // O_NONBLOCK: a named pipe an agent planted at the name must fail the
+    // open rather than hold the host until something reads it.
+    fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_CREAT | O_NOFOLLOW | O_NONBLOCK,
+    mode,
+  )
+  try {
+    if (!fs.fstatSync(fd).isFile()) {
+      throw Object.assign(new Error(`${p} is not a regular file`), { code: 'ENOTFILE' })
+    }
+    let off = 0
+    while (off < data.length) off += fs.writeSync(fd, data, off, data.length - off)
+  } finally {
+    fs.closeSync(fd)
+  }
 }

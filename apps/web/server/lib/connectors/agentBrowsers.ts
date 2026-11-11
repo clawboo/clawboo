@@ -25,6 +25,7 @@
 // tool names, the grant pins and the graph identical to before, and it is why
 // this needs no migration.
 
+import type { ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -36,11 +37,21 @@ import {
   connectorChildEnv,
   ConnectorHandshakeError,
   connectStdioConnector,
+  type ConnectorProcessSpawn,
   type ConnectorSession,
 } from '@clawboo/mcp'
 
-import { killProcessTreeByPid } from '../runtimes/killTree'
-import { registerConnectorPid, unregisterConnectorPid } from '../runtimes/subprocess'
+import { agentMkdir } from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
+import { agentHomeDir } from '../agentUser/state'
+import { killProcessTree, killProcessTreeByPid } from '../runtimes/killTree'
+import { spawnAgentProcess } from '../runtimes/spawner'
+import {
+  registerConnectorPid,
+  registerRuntimeChild,
+  unregisterConnectorPid,
+  unregisterRuntimeChild,
+} from '../runtimes/subprocess'
 import { resolveConnectorCredentials, type DeclaredInput } from './credentials'
 import { forgetConnectorPid, recordConnectorPid } from './pidFile'
 import { planConnectorSpawn } from './spawnPlan'
@@ -83,6 +94,12 @@ export interface AgentBrowserSpawn {
 interface AgentBrowser {
   session: ConnectorSession
   pid: number | null
+  /**
+   * The agent user's process, when the agent host started this browser. It is
+   * stopped by this handle, never by `pid`: the server cannot signal a process
+   * of another user. Null when the server started it.
+   */
+  process: ChildProcess | null
   profileDir: string
   /** In-flight calls. A browser with none is QUIESCENT and may be evicted. */
   calls: number
@@ -109,16 +126,79 @@ const waiting: { resolve: () => void; timer: NodeJS.Timeout }[] = []
 
 const keyOf = (connectorId: string, agentId: string): string => `${connectorId}::${agentId}`
 
+/** A connector started as the agent user: the hook the client starts it with,
+ *  and the process that hook started. */
+export interface AgentUserConnectorStart {
+  spawn: ConnectorProcessSpawn
+  /** The process the hook started, once it has. Stop it with `killProcessTree`. */
+  process(): ChildProcess | null
+}
+
+/**
+ * How a stdio connector starts when agent isolation is on, or null when the
+ * server starts it as before.
+ *
+ * Null with isolation off, so nothing changes. Null too for a connector whose
+ * environment carries a credential from the vault: every process of the agent
+ * user can read the environment of every other one, so a token there would be
+ * a token every agent holds, and the approval gate would stop being the only
+ * way to use it. That connector stays with the server, out of the agents' reach.
+ *
+ * Anything else (a browser, a filesystem server: local reach, no credential) is
+ * started by the agent host as the agent user, so it reaches what the agents
+ * reach and no more. Its process belongs to that user, which this server cannot
+ * signal by pid, so it is tracked by handle for shutdown instead of in the
+ * connector pid registry and pid file, and stopped with `killProcessTree`.
+ */
+export function agentUserConnectorStart(
+  kind: 'connector' | 'browser',
+  declared: Readonly<Record<string, string>>,
+): AgentUserConnectorStart | null {
+  if (!isAgentUserMode()) return null
+  if (Object.keys(declared).length > 0) return null
+  let started: ChildProcess | null = null
+  return {
+    spawn: (command, args, opts) => {
+      const child = spawnAgentProcess({
+        kind,
+        command,
+        args,
+        ...(opts.cwd ? { cwd: opts.cwd } : {}),
+        env: opts.env,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Its own process group, so stopping it stops the npx wrapper and the
+        // server (and the browser) it started.
+        detached: true,
+      })
+      started = child
+      registerRuntimeChild(child)
+      child.once('close', () => unregisterRuntimeChild(child))
+      return child
+    },
+    process: () => started,
+  }
+}
+
 /**
  * The profile directory for one agent.
  *
  * Hashed for the same reason frames are: an agent id arrives from the database
  * and from the OpenClaw sync, and neither constrains it to characters that are
  * safe in a path. Hashing removes the question rather than answering it.
+ *
+ * `inAgentSpace` is whether the agent user runs this browser (agent isolation
+ * on, no credential). Its profile then lives in the agent user's home: the
+ * logins saved in it are the agents' own, and the server's data folder is closed
+ * to that user. A browser the server runs keeps its profile in the data folder.
  */
-export function profileDirFor(slug: string, agentId: string): string {
+export function profileDirFor(
+  slug: string,
+  agentId: string,
+  inAgentSpace: boolean = isAgentUserMode(),
+): string {
   const stem = createHash('sha256').update(agentId).digest('hex').slice(0, 16)
-  return path.join(resolveClawbooDir(), 'browser-profiles', slug, stem)
+  const root = inAgentSpace ? agentHomeDir() : resolveClawbooDir()
+  return path.join(root, 'browser-profiles', slug, stem)
 }
 
 /**
@@ -132,8 +212,8 @@ export function profileDirFor(slug: string, agentId: string): string {
  * profile, whose cookie database is decryptable offline because both bundled
  * browsers launch with `--password-store=basic`.
  */
-function scratchDirFor(slug: string, agentId: string): string {
-  return path.join(profileDirFor(slug, agentId), 'scratch')
+function scratchDirFor(slug: string, agentId: string, inAgentSpace: boolean): string {
+  return path.join(profileDirFor(slug, agentId, inAgentSpace), 'scratch')
 }
 
 function browsersFor(connectorId: string): Map<string, AgentBrowser> {
@@ -204,7 +284,9 @@ export async function closeAgentBrowser(connectorId: string, agentId: string): P
   if (perAgent.size === 0) browsers.delete(connectorId)
   browser.idleTimer?.clear()
   await browser.session.close().catch(() => {})
-  if (typeof browser.pid === 'number') {
+  if (browser.process) {
+    killProcessTree(browser.process)
+  } else if (typeof browser.pid === 'number') {
     killProcessTreeByPid(browser.pid)
     unregisterConnectorPid(browser.pid)
     forgetConnectorPid(browser.pid)
@@ -338,10 +420,20 @@ async function spawnReservedBrowser(
   connectorId: string,
   agentId: string,
 ): Promise<AgentBrowser> {
-  const profileDir = profileDirFor(spec.slug, agentId)
-  const scratchDir = scratchDirFor(spec.slug, agentId)
-  fs.mkdirSync(profileDir, { recursive: true })
-  fs.mkdirSync(scratchDir, { recursive: true })
+  // Which user runs this browser decides where its profile lives, so it is
+  // settled before anything is made.
+  const declared = resolveConnectorCredentials(spec.slug, spec.authInputs ?? [])
+  const asAgent = agentUserConnectorStart('browser', declared)
+  const profileDir = profileDirFor(spec.slug, agentId, asAgent !== null)
+  const scratchDir = scratchDirFor(spec.slug, agentId, asAgent !== null)
+  if (asAgent) {
+    // In the agent user's home, so the host makes them, as that user, 0700.
+    await agentMkdir(profileDir)
+    await agentMkdir(scratchDir)
+  } else {
+    fs.mkdirSync(profileDir, { recursive: true })
+    fs.mkdirSync(scratchDir, { recursive: true })
+  }
 
   const plan = planConnectorSpawn({ command: spec.command, args: spec.args })
   if (plan.unresolved) throw new Error(`cannot resolve ${spec.command}`)
@@ -363,18 +455,20 @@ async function spawnReservedBrowser(
       command: plan.command,
       args,
       cwd: scratchDir,
-      onSpawn: (spawned) => {
-        recordConnectorPid({
-          pid: spawned,
-          slug: spec.slug,
-          startedAt: Date.now(),
-          command: plan.command,
-        })
-      },
+      ...(asAgent
+        ? { spawn: asAgent.spawn }
+        : {
+            onSpawn: (spawned: number) => {
+              recordConnectorPid({
+                pid: spawned,
+                slug: spec.slug,
+                startedAt: Date.now(),
+                command: plan.command,
+              })
+            },
+          }),
       env: {
-        ...connectorChildEnv({
-          declared: resolveConnectorCredentials(spec.slug, spec.authInputs ?? []),
-        }),
+        ...connectorChildEnv({ declared }),
         ...plan.env,
       },
     })
@@ -383,7 +477,10 @@ async function spawnReservedBrowser(
     // than on the canonical connect: it runs inside a tool call, against a fresh
     // profile directory, and a profile lock or a cold npx can hold the handshake
     // past its budget.
-    if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
+    const started = asAgent?.process()
+    if (started) {
+      killProcessTree(started)
+    } else if (err instanceof ConnectorHandshakeError && typeof err.pid === 'number') {
       killProcessTreeByPid(err.pid)
       forgetConnectorPid(err.pid)
     }
@@ -391,11 +488,13 @@ async function spawnReservedBrowser(
   }
 
   const pid = session.pid
-  registerConnectorPid(pid)
+  const agentProcess = asAgent?.process() ?? null
+  if (!asAgent) registerConnectorPid(pid)
 
   const browser: AgentBrowser = {
     session,
     pid,
+    process: agentProcess,
     profileDir,
     calls: 0,
     lastUsedAt: Date.now(),
@@ -412,7 +511,7 @@ async function spawnReservedBrowser(
       if (perAgent.size === 0) browsers.delete(connectorId)
     }
     browser.idleTimer?.clear()
-    if (typeof browser.pid === 'number') {
+    if (!browser.process && typeof browser.pid === 'number') {
       unregisterConnectorPid(browser.pid)
       forgetConnectorPid(browser.pid)
     }

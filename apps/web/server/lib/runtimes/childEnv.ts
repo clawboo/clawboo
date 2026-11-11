@@ -165,7 +165,7 @@ function keepLoopbackOffProxy(env: NodeJS.ProcessEnv): void {
 // agent host fills HOME, USER, LOGNAME, SHELL and TMPDIR with the agent user's own, and
 // the server user's agent sockets (ssh, gpg, the desktop bus) and its data folder setting
 // mean nothing to another user, or worse, point it at what it must not reach.
-const SERVER_IDENTITY_ENV_KEYS = new Set([
+export const SERVER_IDENTITY_ENV_KEYS: ReadonlySet<string> = new Set([
   'HOME',
   'USER',
   'LOGNAME',

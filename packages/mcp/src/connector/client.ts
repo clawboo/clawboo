@@ -18,8 +18,14 @@
 // one. The handshake budget is therefore the generous one.
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import {
+  getDefaultEnvironment,
+  StdioClientTransport,
+} from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 
 /** Generous: a cold `npx` install happens inside this window, not before it. */
 export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 60_000
@@ -153,12 +159,57 @@ export interface ConnectorSpawnHook {
   onSpawn?: (pid: number) => void
 }
 
+/**
+ * As much of a started process as the connector client uses. A Node
+ * `ChildProcess` satisfies it, and so does a process another component started
+ * on the caller's behalf, such as one running as a different OS user.
+ *
+ * It must emit 'spawn' once it is running (or carry a `pid` when it is
+ * returned), 'error' when it could not start, and 'close' when it is done.
+ */
+export interface ChildProcessLike {
+  readonly pid?: number | undefined
+  readonly stdin: NodeJS.WritableStream | null
+  readonly stdout: NodeJS.ReadableStream | null
+  readonly stderr: NodeJS.ReadableStream | null
+  kill(signal?: NodeJS.Signals | number): boolean
+  on(event: 'spawn', listener: () => void): unknown
+  on(event: 'error', listener: (error: Error) => void): unknown
+  on(
+    event: 'exit' | 'close',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown
+  once(event: 'spawn', listener: () => void): unknown
+  once(event: 'error', listener: (error: Error) => void): unknown
+  once(
+    event: 'exit' | 'close',
+    listener: (code: number | null, signal: NodeJS.Signals | null) => void,
+  ): unknown
+}
+
+/** Starts a connector's server process, with all three stdio streams piped. */
+export type ConnectorProcessSpawn = (
+  command: string,
+  args: string[],
+  opts: { cwd?: string; env: Record<string, string> },
+) => ChildProcessLike
+
 export interface StdioConnectorSpec extends ConnectorSpawnHook {
   command: string
   args: string[]
   /** The child's environment. Pass `connectorChildEnv()`; never `process.env`. */
   env: Record<string, string>
   cwd?: string
+  /**
+   * Start the process yourself instead of letting the SDK do it.
+   *
+   * For a caller that cannot use a plain local spawn: one that starts the
+   * server as another OS user, whose process this one cannot signal by pid.
+   * The caller keeps the handle its hook returned, and that handle is how it
+   * stops the whole tree; `pid` and `onSpawn` still report the pid. Without a
+   * hook nothing changes: the SDK's own stdio transport spawns the child.
+   */
+  spawn?: ConnectorProcessSpawn
   handshakeTimeoutMs?: number
   listTimeoutMs?: number
   callTimeoutMs?: number
@@ -331,6 +382,8 @@ export async function connectHttpConnector(spec: HttpConnectorSpec): Promise<Con
 
 /** Connect to a stdio MCP server, completing the handshake before returning. */
 export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<ConnectorSession> {
+  if (spec.spawn) return connectThroughSpawnHook(spec, spec.spawn)
+
   const transport = new StdioClientTransport({
     command: spec.command,
     args: spec.args,
@@ -359,6 +412,202 @@ export async function connectStdioConnector(spec: StdioConnectorSpec): Promise<C
     pid: () => transport.pid,
     diagnostic: () => stderrTail.trim(),
   })
+}
+
+/**
+ * The same connection over a process the caller's hook started.
+ *
+ * The environment is composed as the SDK composes it (its default variables
+ * under the spec's), so the child sees the same set whichever path started it.
+ * The stderr tail, the pid report and the handshake failure are the shared
+ * ones below.
+ */
+async function connectThroughSpawnHook(
+  spec: StdioConnectorSpec,
+  spawnProcess: ConnectorProcessSpawn,
+): Promise<ConnectorSession> {
+  let stderrTail = ''
+  const transport = new SpawnedProcessTransport(
+    spawnProcess,
+    {
+      command: spec.command,
+      args: spec.args,
+      env: { ...getDefaultEnvironment(), ...spec.env },
+      ...(spec.cwd ? { cwd: spec.cwd } : {}),
+    },
+    (chunk) => {
+      stderrTail = (stderrTail + chunk.toString('utf8')).slice(-STDERR_TAIL_BYTES)
+    },
+  )
+  return finishConnect(transport, spec, {
+    pid: () => transport.pid,
+    diagnostic: () => stderrTail.trim(),
+  })
+}
+
+/** How long `close()` waits for the process at each step before the next signal. */
+const CLOSE_STEP_MS = 2_000
+
+/**
+ * An MCP stdio transport over a process someone else started.
+ *
+ * Mirrors the SDK's `StdioClientTransport` step for step (start resolves on
+ * 'spawn', messages are framed with the SDK's own `ReadBuffer` and
+ * `serializeMessage`, close ends stdin and then escalates), so a connector
+ * behaves the same whichever side spawned it. Only the spawn is the caller's.
+ */
+class SpawnedProcessTransport implements Transport {
+  onclose?: () => void
+  onerror?: (error: Error) => void
+  onmessage?: (message: JSONRPCMessage) => void
+
+  private proc: ChildProcessLike | undefined
+  private started = false
+  private exited = false
+  private readonly readBuffer = new ReadBuffer()
+
+  constructor(
+    private readonly spawnProcess: ConnectorProcessSpawn,
+    private readonly params: {
+      command: string
+      args: string[]
+      env: Record<string, string>
+      cwd?: string
+    },
+    private readonly onStderr: (chunk: Buffer) => void,
+  ) {}
+
+  get pid(): number | null {
+    return this.proc?.pid ?? null
+  }
+
+  start(): Promise<void> {
+    if (this.started) {
+      return Promise.reject(new Error('the connector transport is already started'))
+    }
+    this.started = true
+    return new Promise<void>((resolve, reject) => {
+      let proc: ChildProcessLike
+      try {
+        proc = this.spawnProcess(this.params.command, [...this.params.args], {
+          ...(this.params.cwd ? { cwd: this.params.cwd } : {}),
+          env: this.params.env,
+        })
+      } catch (err) {
+        // A hook that throws (its host is not running, say) is a failed spawn,
+        // and fails the connect the way an ENOENT would.
+        reject(err instanceof Error ? err : new Error(String(err)))
+        return
+      }
+      this.proc = proc
+      proc.on('error', (error: Error) => {
+        reject(error)
+        this.onerror?.(error)
+      })
+      proc.on('spawn', () => resolve())
+      proc.on('exit', () => {
+        this.exited = true
+      })
+      proc.on('close', () => {
+        this.exited = true
+        this.proc = undefined
+        // A process that closed before it ever ran must not leave `start` (and
+        // with it the connect, which no handshake timeout covers yet) waiting.
+        reject(new Error('the connector process closed before it started'))
+        this.onclose?.()
+      })
+      proc.stdin?.on('error', (error: Error) => {
+        this.onerror?.(error)
+      })
+      proc.stdout?.on('data', (chunk: Buffer | string) => {
+        try {
+          this.readBuffer.append(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+          this.processReadBuffer()
+        } catch (error) {
+          this.onerror?.(error as Error)
+          this.close().catch(() => {})
+        }
+      })
+      proc.stdout?.on('error', (error: Error) => {
+        this.onerror?.(error)
+      })
+      // Drained continuously, for the same reason as on the SDK path: unread,
+      // a chatty server blocks on its own writes once the pipe fills.
+      proc.stderr?.on('data', (chunk: Buffer | string) => {
+        this.onStderr(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+      })
+      proc.stderr?.on('error', () => {
+        /* a broken stderr pipe must never take down the connection */
+      })
+      // A Node child already has its pid here, and its 'spawn' may come later.
+      if (typeof proc.pid === 'number') resolve()
+    })
+  }
+
+  private processReadBuffer(): void {
+    for (;;) {
+      try {
+        const message = this.readBuffer.readMessage()
+        if (message === null) break
+        this.onmessage?.(message)
+      } catch (error) {
+        this.onerror?.(error as Error)
+      }
+    }
+  }
+
+  send(message: JSONRPCMessage): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const stdin = this.proc?.stdin
+      if (!stdin) {
+        reject(new Error('Not connected'))
+        return
+      }
+      if (stdin.write(serializeMessage(message))) resolve()
+      else stdin.once('drain', () => resolve())
+    })
+  }
+
+  async close(): Promise<void> {
+    const proc = this.proc
+    if (proc) {
+      this.proc = undefined
+      const closed = new Promise<void>((resolve) => {
+        proc.once('close', () => resolve())
+      })
+      const step = (): Promise<void> =>
+        Promise.race([
+          closed,
+          new Promise<void>((resolve) => {
+            setTimeout(resolve, CLOSE_STEP_MS).unref?.()
+          }),
+        ])
+      // Ending stdin is the polite request: a stdio server exits when its input
+      // does. Signals follow only for one that does not.
+      try {
+        proc.stdin?.end()
+      } catch {
+        /* already closed */
+      }
+      await step()
+      if (!this.exited) {
+        try {
+          proc.kill('SIGTERM')
+        } catch {
+          /* already gone */
+        }
+        await step()
+      }
+      if (!this.exited) {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          /* already gone */
+        }
+      }
+    }
+    this.readBuffer.clear()
+  }
 }
 
 /** What a transport can tell us beyond the protocol, so the shared factory does

@@ -12,7 +12,14 @@
 
 import fs from 'node:fs'
 
-import { listDir, mkdirMode, readBounded, toStat, writeAtomic } from '../../agentHost/fsOps'
+import {
+  appendNoFollow,
+  listDir,
+  mkdirMode,
+  readBounded,
+  toStat,
+  writeAtomic,
+} from '../../agentHost/fsOps'
 import { isAgentUserMode } from './config'
 import { AgentHostError } from './client'
 import { MAX_READ_BYTES, MAX_WRITE_BYTES, type FsEntry, type FsStat } from './protocol'
@@ -52,6 +59,32 @@ export async function agentWriteFile(
   })
 }
 
+/** Append to a file, made with `mode` (default 0600) when missing. Never
+ *  through a link at the path's end. At most 8 MB per call. */
+export async function agentAppendFile(
+  file: string,
+  data: string | Buffer,
+  opts: { mode?: number } = {},
+): Promise<void> {
+  const buf = typeof data === 'string' ? Buffer.from(data, 'utf8') : data
+  if (buf.length > MAX_WRITE_BYTES) {
+    throw Object.assign(
+      new Error(`${file}: ${buf.length} bytes is more than one write may carry`),
+      {
+        code: 'EFBIG',
+      },
+    )
+  }
+  const mode = (opts.mode ?? 0o600) & 0o777
+  if (!isAgentUserMode()) return appendNoFollow(file, buf, mode)
+  await activeAgentHost().client.request({
+    op: 'fs.append',
+    path: file,
+    data: buf.toString('base64'),
+    mode,
+  })
+}
+
 /**
  * Read a regular file, at most `maxBytes` (default and cap 8 MB). Null when it
  * does not exist. A link at the path's end, or anything but a regular file, is
@@ -59,18 +92,24 @@ export async function agentWriteFile(
  */
 export async function agentReadFile(
   file: string,
-  opts: { maxBytes?: number } = {},
+  opts: { maxBytes?: number; offset?: number } = {},
 ): Promise<Buffer | null> {
   const max = Math.max(0, Math.min(opts.maxBytes ?? MAX_READ_BYTES, MAX_READ_BYTES))
+  const offset = Math.max(0, Math.floor(opts.offset ?? 0))
   if (!isAgentUserMode()) {
     try {
-      return readBounded(file, max).data
+      return readBounded(file, max, offset).data
     } catch (err) {
       if (code(err) === 'ENOENT') return null
       throw err
     }
   }
-  const res = await activeAgentHost().client.request({ op: 'fs.read', path: file, maxBytes: max })
+  const res = await activeAgentHost().client.request({
+    op: 'fs.read',
+    path: file,
+    maxBytes: max,
+    ...(offset > 0 ? { offset } : {}),
+  })
   if (res.missing) return null
   if (typeof res.data !== 'string') throw new AgentHostError('the agent host sent a malformed read')
   const buf = Buffer.from(res.data, 'base64')

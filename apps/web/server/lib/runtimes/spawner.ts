@@ -17,6 +17,7 @@ import type { EventEmitter } from 'node:events'
 
 import { isAgentUserMode } from '../agentUser/config'
 import { activeAgentHost } from '../agentUser/state'
+import { SERVER_IDENTITY_ENV_KEYS } from './childEnv'
 
 export { isAgentUserMode }
 
@@ -93,9 +94,22 @@ export function isHostedAgentProcess(p: unknown): p is HostedAgentProcess {
   )
 }
 
-function envRecord(env: AgentSpawnOptions['env']): Record<string, string> {
+/**
+ * The environment a host-started process gets.
+ *
+ * A variable that names who the server runs as or where its private state is
+ * (HOME, TMPDIR, the ssh agent socket, CLAWBOO_HOME, ...) is dropped when it
+ * still holds the server's own value: it was inherited, not chosen, whichever
+ * env builder the call site used. A caller that sets one on purpose (an
+ * isolated HOME for a runtime) sets a different value, and keeps it.
+ */
+function agentEnv(env: AgentSpawnOptions['env']): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(env)) if (typeof v === 'string') out[k] = v
+  for (const [k, v] of Object.entries(env)) {
+    if (typeof v !== 'string') continue
+    if (SERVER_IDENTITY_ENV_KEYS.has(k.toUpperCase()) && process.env[k] === v) continue
+    out[k] = v
+  }
   return out
 }
 
@@ -126,7 +140,7 @@ export function spawnAgentProcess(opts: AgentSpawnOptions): ChildProcess {
     command: opts.command,
     args: opts.args,
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
-    env: envRecord(opts.env),
+    env: agentEnv(opts.env),
     stdio: [stdio[0], stdio[1], stdio[2]],
     group: detached,
     ...(opts.signal ? { signal: opts.signal } : {}),

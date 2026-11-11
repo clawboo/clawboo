@@ -62,8 +62,10 @@ export type HostRequest =
     }
   | { op: 'signal'; proc: string; signal: string }
   | { op: 'killTree'; proc: string; graceMs: number }
-  | { op: 'fs.read'; path: string; maxBytes: number }
+  | { op: 'fs.read'; path: string; maxBytes: number; offset?: number }
   | { op: 'fs.write'; path: string; data: string; mode: number }
+  /** Append to a file, creating it with `mode`; never through a link at the path's end. */
+  | { op: 'fs.append'; path: string; data: string; mode: number }
   | { op: 'fs.mkdir'; path: string; mode: number }
   | { op: 'fs.rm'; path: string }
   | { op: 'fs.rename'; from: string; to: string }
@@ -123,6 +125,7 @@ export interface HostReplies {
   killTree: Record<string, never>
   'fs.read': { missing: true } | { missing: false; data: string; size: number; truncated: boolean }
   'fs.write': Record<string, never>
+  'fs.append': Record<string, never>
   'fs.mkdir': Record<string, never>
   'fs.rm': Record<string, never>
   'fs.rename': Record<string, never>
