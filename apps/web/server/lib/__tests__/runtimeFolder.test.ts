@@ -19,9 +19,11 @@ import {
   currentInstallFolder,
   launcherFileName,
   launcherScript,
+  markInstallInUse,
   newInstallFolder,
   ownedRuntimeBin,
   ownedRuntimeLaunch,
+  ownedRuntimeProblem,
   readRuntimeInstall,
   removeRuntimeInstall,
   runtimeInstallDir,
@@ -37,7 +39,7 @@ let base: string
 let env: NodeJS.ProcessEnv
 
 beforeEach(async () => {
-  base = realpathSync(await mkdtemp(path.join(os.tmpdir(), 'clawboo-runtimes-')))
+  base = realpathSync.native(await mkdtemp(path.join(os.tmpdir(), 'clawboo-runtimes-')))
   env = {
     HOME: base,
     CLAWBOO_HOME: path.join(base, 'data'),
@@ -403,6 +405,111 @@ describe('the install umask', () => {
     await symlink('lib', path.join(folder, 'lib64'))
     commitRuntimeInstall('codex', { folder, version: null, source: 'x', launchers: {} }, env)
     expect(readRuntimeInstall('codex', env)?.folder).toBe('v1')
+  })
+})
+
+describe('review fixes', () => {
+  const commitCodex = (label: string, command: string, args: string[]) =>
+    commitRuntimeInstall(
+      'codex',
+      {
+        folder: newInstallFolder('codex', label, env),
+        version: label,
+        source: 'x',
+        launchers: { codex: { command, args } },
+      },
+      env,
+    )
+
+  it('keeps an install a live process was marked as running, through any number of updates', async () => {
+    const { command, script } = fakeInterpreter()
+    await commitCodex('v1', command, [script]).pruned
+    markInstallInUse('codex', process.pid, env) // this test process "runs" v1
+    markInstallInUse('codex', 2 ** 22 + 12345, env) // a pid that is not running
+    await commitCodex('v2', command, [script]).pruned
+    await commitCodex('v3', command, [script]).pruned
+    await commitCodex('v4', command, [script]).pruned
+    const dir = path.join(base, 'runtimes', 'codex')
+    expect(existsSync(path.join(dir, 'v1'))).toBe(true)
+    expect(existsSync(path.join(dir, 'v2'))).toBe(false)
+    expect(existsSync(path.join(dir, `.in-use-${2 ** 22 + 12345}`))).toBe(false)
+  })
+
+  it('switches nothing when a launcher cannot be put in place', async () => {
+    const { command, script } = fakeInterpreter()
+    await commitCodex('v1', command, [script]).pruned
+    const before = await readFile(path.join(base, 'runtimes', 'codex', INSTALL_RECORD_FILE), 'utf8')
+    const codexLauncher = path.join(base, 'runtimes', 'bin', launcherFileName('codex'))
+    const launcherBefore = await readFile(codexLauncher, 'utf8')
+    // A folder where the launcher goes: the rename over it fails.
+    const launcher = path.join(base, 'runtimes', 'bin', launcherFileName('other'))
+    mkdirSync(path.join(launcher, 'inside'), { recursive: true })
+    expect(() =>
+      commitRuntimeInstall(
+        'codex',
+        {
+          folder: newInstallFolder('codex', 'v2', env),
+          version: 'v2',
+          source: 'x',
+          launchers: { codex: { command, args: [script] }, other: { command, args: [script] } },
+        },
+        env,
+      ),
+    ).toThrow()
+    expect(await readFile(path.join(base, 'runtimes', 'codex', INSTALL_RECORD_FILE), 'utf8')).toBe(
+      before,
+    )
+    expect(ownedRuntimeLaunch('codex', env)?.record.folder).toBe('v1')
+    // The launcher replaced before the failure is put back too.
+    expect(await readFile(codexLauncher, 'utf8')).toBe(launcherBefore)
+  })
+
+  it('says why its own copy cannot be used once the Node it runs on is gone', async () => {
+    const { script } = fakeInterpreter()
+    const node = path.join(base, 'old-node')
+    await writeFile(node, '#!/bin/sh\n', { mode: 0o755 })
+    await commitCodex('v1', node, [script]).pruned
+    expect(ownedRuntimeProblem('codex', env)).toBeNull()
+    await unlink(node)
+    expect(ownedRuntimeBin('codex', env)).toBeNull()
+    expect(ownedRuntimeProblem('codex', env)).toMatch(/runs on .*old-node.*Install codex again/)
+    expect(ownedRuntimeProblem('openclaw', env)).toBeNull() // nothing on record
+  })
+
+  it.skipIf(isWindows || isRoot)(
+    'refuses a runtimes folder under a folder anyone may rename in',
+    async () => {
+      const open = path.join(base, 'open')
+      mkdirSync(open)
+      await chmod(open, 0o777)
+      expect(runtimesDirRefusal({ ...env, CLAWBOO_RUNTIMES_DIR: path.join(open, 'r') })).toMatch(
+        /lets anyone rename/,
+      )
+      // With the sticky bit (like /tmp) it is fine, until a node_modules there is not ours.
+      await chmod(open, 0o1777)
+      expect(runtimesDirRefusal({ ...env, CLAWBOO_RUNTIMES_DIR: path.join(open, 'r') })).toBeNull()
+      await symlink(path.join(base, 'data'), path.join(open, 'node_modules'))
+      expect(runtimesDirRefusal({ ...env, CLAWBOO_RUNTIMES_DIR: path.join(open, 'r') })).toMatch(
+        /Node.js could load modules from it/,
+      )
+    },
+  )
+
+  it.skipIf(isWindows)('seals away setuid and setgid bits', async () => {
+    const folder = newInstallFolder('codex', 'v1', env)
+    const tool = path.join(folder, 'tool')
+    await writeFile(tool, '#!/bin/sh\n')
+    await chmod(tool, 0o6755)
+    commitRuntimeInstall('codex', { folder, version: null, source: 'x', launchers: {} }, env)
+    expect(statSync(tool).mode & 0o7777).toBe(0o755)
+  })
+
+  it('keeps a version with a line break out of the launcher', () => {
+    const s = launcherScript({ command: '/n', args: [] }, 'for x 1.0\nrm -rf ~', 'linux')
+    expect(s.split('\n')).toHaveLength(4)
+    expect(launcherScript({ command: 'C:\\n.exe', args: [] }, 'a & calc', 'win32')).not.toContain(
+      '&',
+    )
   })
 })
 

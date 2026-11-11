@@ -192,7 +192,43 @@ export function runtimesDirRefusal(env: NodeJS.ProcessEnv = process.env): string
       return `${dir} belongs to another user or others can write to it, so Clawboo will not run anything from it. Make it yours and run chmod go-w on it, or ${fix.charAt(0).toLowerCase()}${fix.slice(1)}`
     }
   }
-  return null
+  return ancestorRefusal(root, fix)
+}
+
+/**
+ * Why a folder above the runtimes folder makes it unsafe, or null. A folder
+ * anyone may write without the sticky bit lets another account rename the
+ * runtimes folder away and put its own in place. And Node looks for a missing
+ * module in the `node_modules` of every folder above the one asking, so a
+ * `node_modules` someone else made in a shared folder such as `/tmp` could
+ * stand in for a package an install lacks (an optional platform binary, say).
+ * Not checked on Windows, which has no such bits to read.
+ */
+function ancestorRefusal(root: string, fix: string): string | null {
+  if (isWindows) return null
+  for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
+    let st: Stats
+    try {
+      st = statSync(dir)
+    } catch {
+      return null // above a folder that is not there yet
+    }
+    const sticky = (st.mode & 0o1000) !== 0
+    if ((st.mode & 0o002) !== 0 && !sticky) {
+      return `${dir} lets anyone rename what is in it, so Clawboo will not run anything from ${root}. ${fix}`
+    }
+    if ((st.mode & 0o022) !== 0) {
+      try {
+        const nm = lstatSync(path.join(dir, 'node_modules'))
+        if (nm.isSymbolicLink() || !ownedAndClosed(nm)) {
+          return `${path.join(dir, 'node_modules')} belongs to another user or others can write to it, and Node.js could load modules from it, so Clawboo will not run anything from ${root}. ${fix}`
+        }
+      } catch {
+        // No node_modules there.
+      }
+    }
+    if (path.dirname(dir) === dir) return null
+  }
 }
 
 /** Make a folder 0755 whatever the umask (agents run what is here, so others
@@ -250,7 +286,8 @@ function chmodNoFollow(p: string, st: Stats, mode: number): void {
  * Make an install folder what the runtimes folder promises before it becomes
  * current: every entry owned by this user, readable by others (and enterable,
  * or runnable where its owner may run it), and writable by nobody else, whatever
- * umask the installer ran under. A folder is closed before its entries are read,
+ * umask the installer ran under, and without setuid, setgid or sticky bits. A
+ * folder is closed before its entries are read,
  * and modes change through descriptors that never follow a link. Links are kept
  * but must be this user's and point inside the install. Throws on an entry that
  * belongs to someone else, or a link that leads out, which no install of ours
@@ -277,11 +314,11 @@ export function sealInstallFolder(folder: string): void {
     }
     const perm = st.mode & 0o7777
     if (st.isDirectory()) {
-      const want = (perm & 0o7700) | 0o055
+      const want = (perm & 0o700) | 0o055
       if (perm !== want) chmodNoFollow(cur, st, want)
       for (const name of readdirSync(cur)) stack.push(path.join(cur, name))
     } else if (st.isFile()) {
-      const want = (perm & 0o7700) | 0o044 | (perm & 0o100 ? 0o011 : 0)
+      const want = (perm & 0o700) | 0o044 | (perm & 0o100 ? 0o011 : 0)
       if (perm !== want) chmodNoFollow(cur, st, want)
     } else {
       throw new Error(`${cur} is not a file or a folder, so this install cannot be used`)
@@ -422,19 +459,22 @@ export function launcherScript(
   note: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
+  // The note may carry a version read from a package: only plain characters
+  // reach a comment line, so it can never become a second command.
+  const safeNote = note.replace(/[^A-Za-z0-9 ._+-]/g, '')
   if (platform === 'win32') {
     // cmd.exe expands %VAR% even inside quotes; a literal percent is %%.
     const q = (s: string) => `"${s.replace(/%/g, '%%')}"`
     return [
       '@echo off',
-      `rem ${note}`,
+      `rem ${safeNote}`,
       `${[launcher.command, ...launcher.args].map(q).join(' ')} %*`,
       '',
     ].join('\r\n')
   }
   return [
     '#!/bin/sh',
-    `# ${note}`,
+    `# ${safeNote}`,
     `exec ${[launcher.command, ...launcher.args].map(shQuote).join(' ')} "$@"`,
     '',
   ].join('\n')
@@ -484,8 +524,10 @@ export interface CommitRuntimeInstall {
  * Make `install.folder` the current install of `id`: seal it
  * (`sealInstallFolder`), write its launchers into `bin/` (and remove the ones
  * the previous install had and this one does not), then the pointer file.
- * Install folders other than this one and the previous one are removed
- * afterwards, in the background (`pruned`). Synchronous: sealing walks the
+ * Install folders other than this one, the previous one and any a live process
+ * was marked as running (`markInstallInUse`) are removed afterwards, in the
+ * background (`pruned`). Nothing switches unless everything was written.
+ * Synchronous: sealing walks the
  * install once, which is fine for something a person starts by hand.
  */
 export function commitRuntimeInstall(
@@ -517,28 +559,146 @@ export function commitRuntimeInstall(
     launchers: install.launchers,
   }
 
+  // Everything is written aside first; the pointer's rename is the switch. A
+  // failure before it leaves the current install exactly as it was, and one
+  // after it (a launcher rename) puts the previous pointer back.
   const binDir = runtimeBinDir(env)
   ensureFolder(binDir)
-  for (const [name, launcher] of Object.entries(install.launchers)) {
-    const note = `Written by Clawboo for ${id} ${install.version ?? ''}. Installing again replaces it.`
-    writeAtomic(path.join(binDir, launcherFileName(name)), launcherScript(launcher, note), 0o755)
+  const note = `Written by Clawboo for ${id} ${install.version ?? ''}. Installing again replaces it.`
+  const staged: { tmp: string; file: string }[] = []
+  const recordFile = path.join(runtimeDir, INSTALL_RECORD_FILE)
+  let recordTmp: string | null = null
+  try {
+    for (const [name, launcher] of Object.entries(install.launchers)) {
+      const file = path.join(binDir, launcherFileName(name))
+      staged.push({ tmp: writeAside(file, launcherScript(launcher, note), 0o755), file })
+    }
+    recordTmp = writeAside(recordFile, JSON.stringify(record, null, 2) + '\n', 0o644)
+  } catch (err) {
+    for (const t of [...staged.map((x) => x.tmp), recordTmp]) if (t) unlinkQuietly(t)
+    throw err
+  }
+  const previousText = readTextOrNull(recordFile)
+  const previousLaunchers = staged.map(({ file }) => readTextOrNull(file))
+  renameSync(recordTmp, recordFile)
+  let placed = 0
+  try {
+    for (const { tmp, file } of staged) {
+      renameSync(tmp, file)
+      placed++
+    }
+  } catch (err) {
+    // Put back what was there: the pointer and every launcher already replaced.
+    for (const [i, { tmp, file }] of staged.entries()) {
+      if (i >= placed) {
+        unlinkQuietly(tmp)
+        continue
+      }
+      const text = previousLaunchers[i]
+      if (text === null || text === undefined) unlinkQuietly(file)
+      else writeAtomic(file, text, 0o755)
+    }
+    if (previousText === null) unlinkQuietly(recordFile)
+    else writeAtomic(recordFile, previousText, 0o644)
+    throw err
   }
   for (const name of Object.keys(previous?.launchers ?? {})) {
     if (name in install.launchers || !LAUNCHER_NAME_RE.test(name)) continue
-    try {
-      unlinkSync(path.join(binDir, launcherFileName(name)))
-    } catch {
-      /* already gone */
-    }
+    unlinkQuietly(path.join(binDir, launcherFileName(name)))
   }
-  writeAtomic(
-    path.join(runtimeDir, INSTALL_RECORD_FILE),
-    JSON.stringify(record, null, 2) + '\n',
-    0o644,
-  )
 
-  const keep = new Set([record.folder, ...(previous ? [previous.folder] : [])])
+  const keep = new Set([
+    record.folder,
+    ...(previous ? [previous.folder] : []),
+    ...foldersInUse(runtimeDir),
+  ])
   return { record, pruned: pruneInstallFolders(runtimeDir, keep) }
+}
+
+function unlinkQuietly(file: string): void {
+  try {
+    unlinkSync(file)
+  } catch {
+    /* already gone */
+  }
+}
+
+function readTextOrNull(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+/** Write a sibling of `file` that a later rename puts in place; returns it. */
+function writeAside(file: string, data: string, mode: number): string {
+  const tmp = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${randomBytes(6).toString('hex')}.tmp`,
+  )
+  writeFileSync(tmp, data, { mode, flag: 'wx' })
+  if (!isWindows) chmodSync(tmp, mode)
+  return tmp
+}
+
+// ── In use ──────────────────────────────────────────────────────────────────
+
+const IN_USE_PREFIX = '.in-use-'
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM'
+  }
+}
+
+/**
+ * Record that process `pid` runs the current install of `id`, so pruning keeps
+ * that install while the process lives, however many updates come in between.
+ * For long-lived processes such as a Gateway; best effort.
+ */
+export function markInstallInUse(
+  id: string,
+  pid: number,
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  const record = readRuntimeInstall(id, env)
+  if (!record || !Number.isInteger(pid) || pid <= 0) return
+  try {
+    writeAtomic(
+      path.join(runtimeInstallDir(id, env), `${IN_USE_PREFIX}${pid}`),
+      record.folder,
+      0o644,
+    )
+  } catch {
+    // Not recorded: pruning then keeps only the current and previous installs.
+  }
+}
+
+/** The install folders live processes were marked as running; dead marks go. */
+function foldersInUse(runtimeDir: string): string[] {
+  const folders: string[] = []
+  let entries: string[]
+  try {
+    entries = readdirSync(runtimeDir)
+  } catch {
+    return folders
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(IN_USE_PREFIX)) continue
+    const file = path.join(runtimeDir, entry)
+    const pid = Number(entry.slice(IN_USE_PREFIX.length))
+    if (!Number.isInteger(pid) || pid <= 0 || !pidAlive(pid)) {
+      unlinkQuietly(file)
+      continue
+    }
+    const folder = readTextOrNull(file)?.trim()
+    if (folder && INSTALL_LABEL_RE.test(folder)) folders.push(folder)
+  }
+  return folders
 }
 
 /** Remove the install folders of one runtime that are not in `keep`. Hidden
@@ -598,6 +758,28 @@ export function ownedRuntimeLaunch(
   name: string,
   env: NodeJS.ProcessEnv = process.env,
 ): OwnedRuntimeLaunch | null {
+  const found = inspectRuntimeLaunch(name, env)
+  return found && 'launch' in found ? found.launch : null
+}
+
+/**
+ * Why Clawboo's own `name` cannot be used although an install of it is on
+ * record, such as the Node.js it was installed with having been removed, or
+ * null when it can be used or there is none. For telling a person why a
+ * runtime reads as not installed.
+ */
+export function ownedRuntimeProblem(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | null {
+  const found = inspectRuntimeLaunch(name, env)
+  return found && 'problem' in found ? found.problem : null
+}
+
+function inspectRuntimeLaunch(
+  name: string,
+  env: NodeJS.ProcessEnv,
+): { launch: OwnedRuntimeLaunch } | { problem: string } | null {
   if (!LAUNCHER_NAME_RE.test(name)) return null
   const root = runtimeInstallRoot(env)
   let ids: string[]
@@ -606,25 +788,38 @@ export function ownedRuntimeLaunch(
   } catch {
     return null // no runtimes folder yet
   }
-  if (runtimesDirRefusal(env)) return null
   for (const id of ids) {
     if (!RUNTIME_ID_RE.test(id) || id === 'bin') continue
     const record = readRuntimeInstall(id, env)
     const spec = record?.launchers[name]
     if (!record || !spec) continue
+    const again = `Install ${name} again from Clawboo.`
+    const refusal = runtimesDirRefusal(env)
+    if (refusal) return { problem: refusal }
     const launcher = path.join(root, 'bin', launcherFileName(name))
     const runtimeDir = path.join(root, id)
-    const trusted =
-      isTrustedEntry(launcher, 'file') &&
-      isTrustedEntry(runtimeDir, 'dir') &&
-      isTrustedEntry(path.join(runtimeDir, INSTALL_RECORD_FILE), 'file') &&
-      isTrustedEntry(path.join(runtimeDir, record.folder), 'dir') &&
-      isTrustedRunTarget(spec.command, root, true) &&
-      (!spec.args[0] ||
-        !path.isAbsolute(spec.args[0]) ||
-        isTrustedRunTarget(spec.args[0], root, false))
-    if (!trusted) return null
-    return { launcher, command: spec.command, args: spec.args, id, record }
+    const opened =
+      !isTrustedEntry(launcher, 'file') ||
+      !isTrustedEntry(runtimeDir, 'dir') ||
+      !isTrustedEntry(path.join(runtimeDir, INSTALL_RECORD_FILE), 'file') ||
+      !isTrustedEntry(path.join(runtimeDir, record.folder), 'dir')
+    if (opened) {
+      return {
+        problem: `Clawboo's copy of ${name} is missing a file, or another user can change it. ${again}`,
+      }
+    }
+    if (!isTrustedRunTarget(spec.command, root, true)) {
+      return {
+        problem: `Clawboo's copy of ${name} runs on ${spec.command}, which is gone or can be changed by another user (an upgrade may have removed that Node.js). ${again}`,
+      }
+    }
+    const script = spec.args[0]
+    if (script && path.isAbsolute(script) && !isTrustedRunTarget(script, root, false)) {
+      return {
+        problem: `Clawboo's copy of ${name} is missing ${script}, or another user can change it. ${again}`,
+      }
+    }
+    return { launch: { launcher, command: spec.command, args: spec.args, id, record } }
   }
   return null
 }
