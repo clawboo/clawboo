@@ -4,6 +4,7 @@ import path from 'node:path'
 
 const CLAWBOO_DIRNAME = '.clawboo'
 const CLAWBOO_WORK_DIRNAME = 'clawboo-work'
+const CLAWBOO_RUNTIMES_DIRNAME = 'clawboo-runtimes'
 
 export const resolveUserPath = (input: string): string => {
   const trimmed = input.trim()
@@ -74,4 +75,25 @@ export function resolveWorkDir(env: NodeJS.ProcessEnv = process.env): string {
   const dataOverride = env['CLAWBOO_HOME']?.trim()
   if (dataOverride) return `${resolveUserPath(dataOverride)}-work`
   return path.join(resolveDefaultHomeDir(), CLAWBOO_WORK_DIRNAME)
+}
+
+/**
+ * The runtimes folder: where Clawboo installs the agent runtimes it manages
+ * (OpenClaw, the Claude Agent SDK, Codex, Hermes), each in a folder of its own,
+ * instead of npm's or pip's global locations. `CLAWBOO_RUNTIMES_DIR` sets it.
+ * Otherwise it sits beside `CLAWBOO_HOME` as `<CLAWBOO_HOME>-runtimes`, so a
+ * sandboxed or second install keeps its own copies, and without either it is
+ * `~/clawboo-runtimes`.
+ *
+ * It is outside the data folder on purpose: agents must be able to run what is
+ * installed here without being able to read the data folder, and must not be
+ * able to change it, so it is owned by the server's user and closed to writes
+ * from anyone else.
+ */
+export function resolveRuntimesDir(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env['CLAWBOO_RUNTIMES_DIR']?.trim()
+  if (override) return resolveUserPath(override)
+  const dataOverride = env['CLAWBOO_HOME']?.trim()
+  if (dataOverride) return `${resolveUserPath(dataOverride)}-runtimes`
+  return path.join(resolveDefaultHomeDir(), CLAWBOO_RUNTIMES_DIRNAME)
 }

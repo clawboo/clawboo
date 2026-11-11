@@ -26,6 +26,8 @@ import { accessSync, constants, existsSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
+import { ownedRuntimeBin } from './runtimeFolder'
+
 export const isWindows = process.platform === 'win32'
 
 /**
@@ -125,19 +127,28 @@ export function extraBinDirs(): string[] {
 }
 
 /**
- * Resolve a CLI to an absolute path: PATH first (via `findExecutable`), then the
- * `extraBinDirs()` user-install locations. Returns the absolute path or `null`.
+ * Resolve a CLI to an absolute path: Clawboo's own runtimes folder first (the
+ * launcher an install from Clawboo wrote, see `runtimeFolder.ts`), then PATH (via
+ * `findExecutable`), then the `extraBinDirs()` user-install locations. Returns
+ * the absolute path or `null`.
  *
- * This is what makes Hermes discoverable: its `hermes` binary lives in the
- * Python user-site bin, off the dashboard server's PATH, so a bare PATH probe
- * (and a bare `spawn('hermes')`) both miss it. Health checks AND the spawn
- * `command` use the resolved absolute path instead. `extraDirs` is injectable
- * for tests.
+ * The runtimes folder comes first so the copy Clawboo installed, on the
+ * interpreter it was installed with, wins over an older global one; a global
+ * install keeps working when Clawboo has none of its own.
+ *
+ * The user-install dirs are what make a pip-installed Hermes discoverable: its
+ * `hermes` binary lives in the Python user-site bin, off the dashboard server's
+ * PATH, so a bare PATH probe (and a bare `spawn('hermes')`) both miss it. Health
+ * checks AND the spawn `command` use the resolved absolute path instead.
+ * `extraDirs` and `env` are injectable for tests.
  */
 export function resolveRuntimeBin(
   name: string,
   extraDirs: string[] = extraBinDirs(),
+  env: NodeJS.ProcessEnv = process.env,
 ): string | null {
+  const owned = ownedRuntimeBin(name, env)
+  if (owned) return owned
   const onPath = findExecutable(name)
   if (onPath) return onPath
   const candidates = isWindows ? [`${name}.exe`, `${name}.cmd`, name] : [name]
