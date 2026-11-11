@@ -14,18 +14,20 @@ keywords:
     'connected substrate',
     'auto-configure',
     'TOOLS.md',
+    'NODE_UNSUPPORTED',
+    'runtimes folder',
   ]
 ---
 
 [OpenClaw](https://docs.openclaw.ai) is a separate agent platform. Its agents live in a long-running server called the **OpenClaw Gateway**, where they keep their own workspaces, messaging channels and cron jobs. Clawboo connects to a Gateway on your computer, shows its agents next to your others, and runs them in team chat, on the board and in Routines.
 
 - **Best for:** people who already use OpenClaw, or who want agents that also answer on OpenClaw's messaging channels (set up in OpenClaw itself).
-- **You need:** a Node.js version that OpenClaw supports, and a credential it can use: a provider key, a ChatGPT sign-in or a local Ollama. Clawboo installs and starts the Gateway for you.
+- **You need:** Clawboo running on a Node.js version that OpenClaw supports, and a credential it can use: a provider key, a ChatGPT sign-in or a local Ollama. Clawboo installs and starts the Gateway for you.
 
 ## Before you begin
 
-- **Node.js in OpenClaw's range:** the setup installs the newest 2026.9 release of OpenClaw. Since 2026.9.34 that release needs 24.22.1 or later in the 24 line, or 26.12.1 and later (`>=24.22.1 <25 || >=26.12.1`). Node 22 and Node 25 can no longer run it, even though Clawboo itself runs on Node 22.12 and later. The setup doesn't check, so run `node --version` first. See OpenClaw's [Node.js guide](https://docs.openclaw.ai/install/node).
-- **`npm` on your `PATH`.** The setup installs OpenClaw with `npm install -g openclaw@~2026.9`.
+- **Clawboo on a Node.js in OpenClaw's range:** the setup installs the newest 2026.9 release of OpenClaw, and installs it on the Node.js Clawboo itself runs on. Since 2026.9.34 that release needs 24.22.1 or later in the 24 line, or 26.12.1 and later (`>=24.22.1 <25 || >=26.12.1`). Node 22 and Node 25 can no longer run it, even though Clawboo itself runs on Node 22.12 and later. The setup checks this first and installs nothing on a Node.js outside the range. **Settings > System** shows the Node.js Clawboo runs on. See OpenClaw's [Node.js guide](https://docs.openclaw.ai/install/node).
+- **npm, which comes with Node.js.** The setup installs `openclaw@~2026.9` into Clawboo's own [runtimes folder](#where-openclaw-is-installed), never into npm's global folder, so it needs no `sudo`.
 - **A credential OpenClaw can reuse:** a provider key you connected in Clawboo, a ChatGPT sign-in, or the local Ollama you set up for [Clawboo Native](/runtimes/native). With none of these, the setup asks you for a key.
 
 You don't need OpenClaw installed already. If it is, the setup keeps your install, fills in only the settings that are missing, and uses a Gateway that is already running.
@@ -66,7 +68,7 @@ It then writes OpenClaw's configuration. It sets the Gateway to local mode and o
 </Step>
 <Step title="Install OpenClaw and start the Gateway">
 
-If OpenClaw isn't installed, the panel shows **Installing OpenClaw…** and runs `npm install -g openclaw@~2026.9`, with npm's output in a log. Then it shows **Starting the Gateway…**. A Gateway that is already running on OpenClaw's port is used as it is. Otherwise Clawboo starts one and waits up to 60 seconds for it to answer.
+If OpenClaw isn't installed, the panel shows **Installing OpenClaw…** and installs `openclaw@~2026.9` into Clawboo's runtimes folder, with npm's output in a log. Then it shows **Starting the Gateway…**. A Gateway that is already running on OpenClaw's port is used as it is. Otherwise Clawboo starts one and waits up to 60 seconds for it to answer.
 
 If OpenClaw asks for `openclaw doctor --fix` before it will start (this can happen after an OpenClaw upgrade), Clawboo runs it once and starts the Gateway again.
 
@@ -101,16 +103,32 @@ openclaw devices approve --latest
 openclaw devices approve <requestId>
 ```
 
-The first prints the id of the waiting request; the second approves it. Then run **Set up OpenClaw** or **Reconnect OpenClaw** again so Clawboo connects. See OpenClaw's [devices command](https://docs.openclaw.ai/cli/devices).
+The first prints the id of the waiting request; the second approves it. If Clawboo installed OpenClaw, type the full path in place of `openclaw`, such as `~/clawboo-runtimes/bin/openclaw devices approve --latest` (see [Where OpenClaw is installed](#where-openclaw-is-installed)). Then run **Set up OpenClaw** or **Reconnect OpenClaw** again so Clawboo connects. See OpenClaw's [devices command](https://docs.openclaw.ai/cli/devices).
 
 ### Use your ChatGPT plan
 
 OpenClaw can run on a ChatGPT subscription instead of an API key, through its own `openai-codex` provider. It needs its own sign-in, separate from Codex's:
 
 - During setup, or later under **Manage > ChatGPT subscription**, click **Sign in with ChatGPT**. This needs Codex connected first; until then the row reads "Connect Codex first".
-- Or run OpenClaw's own login in a terminal: `openclaw models auth login --provider openai-codex`. Use it rather than `openclaw onboard`, which can reset your channels, memory and cron jobs.
+- Or run OpenClaw's own login in a terminal: `openclaw models auth login --provider openai-codex`. When Clawboo installed OpenClaw, the command the panel shows names the full path of its `openclaw`, since that is not on your `PATH`. Use it rather than `openclaw onboard`, which can reset your channels, memory and cron jobs.
 
 With the sign-in in place, the setup writes no key, and if OpenClaw has no default model yet it sets your plan's own default, read from your Codex CLI. OpenAI decides which models each ChatGPT plan may use, so Clawboo names none of its own: if it cannot read your plan's models, it sets none and OpenClaw uses its own default. OpenClaw agents, Codex agents, Hermes on a ChatGPT sign-in and your own Codex use all share your plan's limits.
+
+## Where OpenClaw is installed
+
+**Set up OpenClaw**, and **Check for Updates** in **Settings > System**, install OpenClaw into Clawboo's own runtimes folder, `~/clawboo-runtimes` by default (`CLAWBOO_RUNTIMES_DIR` moves it, and so does `CLAWBOO_HOME`), never into npm's global folder. The command that starts it is `~/clawboo-runtimes/bin/openclaw`, and it runs OpenClaw on the Node.js that installed it, whatever `node` comes first on your `PATH` later.
+
+- **Clawboo uses its own copy first.** The Gateway Clawboo starts, `openclaw doctor --fix`, device approval, the model list and the ChatGPT sign-in all run this copy, so the Gateway runs on the Node.js that installed it. Without one, Clawboo uses an `openclaw` on your `PATH`, so a global install you made yourself keeps working.
+- **It is not on your `PATH`.** To run an OpenClaw command yourself, such as the ones on this page, type the full path: `~/clawboo-runtimes/bin/openclaw doctor --fix`.
+- **An update never leaves it half replaced.** A new install goes into a folder beside the current one and becomes current only when npm succeeds. A failed install is removed, and the OpenClaw you had keeps working.
+- **A Gateway you run yourself is left alone**, such as OpenClaw's own launchd service on port 18789. It keeps running the OpenClaw it was started with.
+- **If its Node.js is removed**, for example by `nvm uninstall` or a Homebrew upgrade that deletes the old version, Clawboo stops using this copy, and OpenClaw reads as not installed unless a global copy exists. **Set up OpenClaw** installs it again on the Node.js Clawboo runs on now.
+
+[The runtimes folder](/operating/data-and-state#the-runtimes-folder) covers its layout, the safety rules and how to remove it.
+
+### OpenClaw's own sandbox stays off
+
+OpenClaw can run its agents' tools in a Docker or Podman container of its own. Clawboo keeps that sandbox off (`agents.defaults.sandbox.mode: "off"` in `openclaw.json`), so OpenClaw's tools run on the same computer Clawboo and its other agents use. **Set up OpenClaw** writes it only when your config has no `agents.defaults.sandbox`, so a sandbox you set up yourself stays. `off` is OpenClaw's own default; Clawboo writes it out so it holds if a later OpenClaw changes that default.
 
 ## Default models
 
@@ -171,16 +189,16 @@ When OpenClaw is set up but its Gateway is offline, the row shows that and offer
 
 Clawboo changes OpenClaw's files in these places. `~/.openclaw` is OpenClaw's state folder (`OPENCLAW_STATE_DIR` moves it), and `~/.clawboo` is Clawboo's (`CLAWBOO_HOME` moves it).
 
-| Where                                                 | What Clawboo writes                                                                                                                                                                                                                                                  | When                                                                                                                         |
-| ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `~/.openclaw/.env`                                    | A Gateway token (`GATEWAY_AUTH_TOKEN`) when there is none yet; the provider key it reused, under its usual name such as `ANTHROPIC_API_KEY`; `OLLAMA_API_KEY=ollama-local` for Ollama, a marker rather than a secret                                                 | **Set up OpenClaw**, and every key you save on the **Providers** page                                                        |
-| `~/.openclaw/agents/<agent>/agent/auth-profiles.json` | The same provider key, for each OpenClaw agent that exists                                                                                                                                                                                                           | Same as above                                                                                                                |
-| `~/.openclaw/openclaw.json`                           | Local Gateway mode (`gateway.mode: local`). Only where missing: port 18789, token authentication, a default model, and agent-to-agent messaging. With `OLLAMA_BASE_URL` set, an Ollama provider entry that points at it, because OpenClaw doesn't read that variable | **Set up OpenClaw**                                                                                                          |
-| `openclaw.json`, through the Gateway                  | Clawboo's MCP servers, and `sessions_spawn` and `sessions_yield` on the denied tools list (see [Clawboo tools inside OpenClaw](#clawboo-tools-inside-openclaw))                                                                                                      | Each time the server connects, skipped when nothing changed                                                                  |
-| `openclaw.json`                                       | The default model (with its context window, when Clawboo knows it), an agent's own model, and the default command approval for all agents                                                                                                                            | When you change **Default model** in **Manage**, an OpenClaw agent's model, or **Command Approval** in **Settings > System** |
-| The Gateway's command policies                        | Each agent's **Command Execution** posture                                                                                                                                                                                                                           | When Clawboo creates an agent, and when you change its posture                                                               |
-| The agent's workspace, `~/.openclaw/workspace-<name>` | `SOUL.md`, `IDENTITY.md` and `AGENTS.md` (see [Agent files](#agent-files))                                                                                                                                                                                           | When Clawboo creates the agent, and when you edit a file                                                                     |
-| `~/.clawboo/settings.json`                            | The Gateway address, with the port from `openclaw.json`, and the Gateway token                                                                                                                                                                                       | **Set up OpenClaw**, and when Clawboo reads a new token from `.env`                                                          |
+| Where                                                 | What Clawboo writes                                                                                                                                                                                                                                                                                                                     | When                                                                                                                         |
+| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `~/.openclaw/.env`                                    | A Gateway token (`GATEWAY_AUTH_TOKEN`) when there is none yet; the provider key it reused, under its usual name such as `ANTHROPIC_API_KEY`; `OLLAMA_API_KEY=ollama-local` for Ollama, a marker rather than a secret                                                                                                                    | **Set up OpenClaw**, and every key you save on the **Providers** page                                                        |
+| `~/.openclaw/agents/<agent>/agent/auth-profiles.json` | The same provider key, for each OpenClaw agent that exists                                                                                                                                                                                                                                                                              | Same as above                                                                                                                |
+| `~/.openclaw/openclaw.json`                           | Local Gateway mode (`gateway.mode: local`). Only where missing: port 18789, token authentication, a default model, agent-to-agent messaging, and OpenClaw's tool sandbox off (`agents.defaults.sandbox.mode: off`). With `OLLAMA_BASE_URL` set, an Ollama provider entry that points at it, because OpenClaw doesn't read that variable | **Set up OpenClaw**                                                                                                          |
+| `openclaw.json`, through the Gateway                  | Clawboo's MCP servers, and `sessions_spawn` and `sessions_yield` on the denied tools list (see [Clawboo tools inside OpenClaw](#clawboo-tools-inside-openclaw))                                                                                                                                                                         | Each time the server connects, skipped when nothing changed                                                                  |
+| `openclaw.json`                                       | The default model (with its context window, when Clawboo knows it), an agent's own model, and the default command approval for all agents                                                                                                                                                                                               | When you change **Default model** in **Manage**, an OpenClaw agent's model, or **Command Approval** in **Settings > System** |
+| The Gateway's command policies                        | Each agent's **Command Execution** posture                                                                                                                                                                                                                                                                                              | When Clawboo creates an agent, and when you change its posture                                                               |
+| The agent's workspace, `~/.openclaw/workspace-<name>` | `SOUL.md`, `IDENTITY.md` and `AGENTS.md` (see [Agent files](#agent-files))                                                                                                                                                                                                                                                              | When Clawboo creates the agent, and when you edit a file                                                                     |
+| `~/.clawboo/settings.json`                            | The Gateway address, with the port from `openclaw.json`, and the Gateway token                                                                                                                                                                                                                                                          | **Set up OpenClaw**, and when Clawboo reads a new token from `.env`                                                          |
 
 <Warning>
 
@@ -279,22 +297,29 @@ On a ChatGPT plan you pay a flat fee, so these figures are a budget guide, not y
 The card shows what the approval step reported:
 
 - `No pending device pairing requests found`: OpenClaw had no request waiting, for example because the device is already approved. Close the panel with **Cancel** and run **Set up OpenClaw** again; it connects, or shows a fresh card.
-- `OpenClaw not installed`: Clawboo can't find the `openclaw` command. Run the setup again, or check that npm's global folder is on your `PATH`.
+- `OpenClaw not installed`: Clawboo found no `openclaw` command, in its runtimes folder or on your `PATH`. Run the setup again, which installs it.
 - `Failed to approve device: …` or `Failed to run openclaw: …`: the OpenClaw command failed. Run the two terminal commands above to see OpenClaw's own message.
 
 </Accordion>
-<Accordion title="Permission denied. Your Node.js installation may require sudo for global installs.">
+<Accordion title="OpenClaw needs Node.js >=24.22.1 <25 || >=26.12.1, and Clawboo is running on Node.js …">
 
-**What it means:** npm can't write to its global folder. The message suggests `sudo npm install -g openclaw@~2026.9`.
+**What it means:** the message ends "so nothing was installed". OpenClaw runs on the Node.js Clawboo runs on, so the setup checks that version before it installs anything, and this one is outside OpenClaw's range. The install stream's error code is `NODE_UNSUPPORTED`. Earlier versions of Clawboo installed an older OpenClaw on such a Node.js without saying so.
 
-**Fix:** prefer a Node.js version manager (nvm or fnm) or Homebrew's Node, which install global packages without `sudo`. Then click **Retry**.
+**Fix:** start Clawboo with a supported Node.js. Node 24.22.1 or a newer Node 24 is the simplest. Stop Clawboo, switch to that Node.js in a terminal, and start Clawboo from it. A version manager such as nvm keeps global packages per Node.js, so install Clawboo again under the new one, or run `npx clawboo@latest`. **Settings > System** shows the version Clawboo runs on. Then click **Retry**.
 
 </Accordion>
 <Accordion title="Installation failed with exit code">
 
-**What it means:** `npm install -g openclaw@~2026.9` failed. A Node.js version outside OpenClaw's range is a common cause.
+**What it means:** npm failed while installing `openclaw@~2026.9` into the runtimes folder. The message goes on with npm's own reason, and the error code is npm's, such as `ETARGET` or `EACCES`. Clawboo removed the new install's folder, so an OpenClaw you already had is unchanged.
 
-**Fix:** run `node --version` and compare it with [Before you begin](#before-you-begin). Install a supported Node.js, then click **Retry**.
+**Fix:** fix what npm reports, such as a network or proxy problem, then click **Retry**.
+
+</Accordion>
+<Accordion title="Clawboo's runtimes folder must be apart from Clawboo's data folder, or belongs to another user">
+
+**What it means:** Clawboo will not install into its [runtimes folder](#where-openclaw-is-installed), or run anything from it. The install stream's error code is `RUNTIMES_DIR_REFUSED`, and the message says why: the folder is the data folder or the work folder, sits inside one or contains one, or it belongs to another user or others can write to it. Until that is fixed, Clawboo uses an `openclaw` on your `PATH`, if there is one.
+
+**Fix:** set `CLAWBOO_RUNTIMES_DIR` to a folder of its own and restart Clawboo, or, for a folder you do not own, make it yours and run `chmod go-w` on it. Then click **Retry**. See [When Clawboo will not use it](/operating/data-and-state#when-clawboo-will-not-use-it).
 
 </Accordion>
 <Accordion title="Gateway did not start, or did not become reachable within 60s">
@@ -308,7 +333,7 @@ The card shows what the approval step reported:
 
 **What it means:** OpenClaw asked for a data migration before it would start, and the `openclaw doctor --fix` that Clawboo ran failed.
 
-**Fix:** run `openclaw doctor --fix` in a terminal to see the whole report, then start the Gateway again with **Retry** or **Reconnect OpenClaw**. Do the same if the message says OpenClaw still asks for `openclaw doctor --fix` after Clawboo ran it.
+**Fix:** run `openclaw doctor --fix` in a terminal to see the whole report (`~/clawboo-runtimes/bin/openclaw doctor --fix` when Clawboo installed OpenClaw), then start the Gateway again with **Retry** or **Reconnect OpenClaw**. Do the same if the message says OpenClaw still asks for `openclaw doctor --fix` after Clawboo ran it.
 
 </Accordion>
 <Accordion title="Clawboo couldn't find the model in your Ollama">
@@ -368,6 +393,7 @@ Deploy a team from the **Marketplace**. While the Gateway is connected, a market
 - **`configure-openclaw`.** The dashboard never calls `POST /api/system/configure-openclaw`. It writes a fresh `openclaw.json` and `.env`, replacing what is there, and makes a new Gateway token on every call, so use it only on a fresh OpenClaw. **Set up OpenClaw** uses `POST /api/system/auto-configure-openclaw`, which fills in only what is missing. See the [System API](/reference/rest-api/system).
 - **The model list.** The pickers read `openclaw models list --all --json`. OpenClaw 2026.9 refuses it when several agents are configured and none is named the owner, so Clawboo then asks again with `--agent` (the agent marked default, else `main`, else the first), until you configure a system agent (`agents.defaults.systemAgent.agentId`). See `GET /api/system/models` in the [System API](/reference/rest-api/system).
 - **Model refs.** Clawboo writes the ChatGPT model as `openai-codex/<model>`. `openclaw doctor --fix` later rewrites it to `openai/<model>` and turns on the plugins that form needs.
+- **The install.** `POST /api/system/install-openclaw` checks the Node.js version first, then runs npm into a new folder under the runtimes folder and switches to it on success. `GET /api/system/status` reports `openclaw.source` (`clawboo` or `path`) and, for Clawboo's copy, `openclaw.runsOnNode`. See the [System API](/reference/rest-api/system).
 - **The pin.** `openclaw@~2026.9` holds OpenClaw's configuration format (the agent roster under `agents.entries`, and stricter `config.patch` rules), not the connect protocol.
 - **More detail:** [Gateway and events](/internals/gateway-and-events) and [Agent sources](/internals/agent-source).
 

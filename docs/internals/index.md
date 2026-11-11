@@ -192,7 +192,7 @@ A few files hold rules whose breakage shows up far from the edit. Read the comme
 | [Design system](/internals/design-system)                     | You change UI: tokens, themes or the shared components.                                    |
 | [Architecture invariants](/internals/architecture-invariants) | Before you change coordination, the Gateway path or the schema.                            |
 | [Gateway connection internals](/internals/gateway-and-events) | You work on the OpenClaw connection or the WebSocket proxy.                                |
-| [The RuntimeAdapter trait](/internals/runtime-adapter)        | You add a runtime or change how one is driven.                                             |
+| [The RuntimeAdapter trait](/internals/runtime-adapter)        | You add a runtime, or change how one is driven or installed.                               |
 | [AgentSource](/internals/agent-source)                        | You change how agents are created, synced or deleted.                                      |
 | [Capability and schedule sources](/internals/seams)           | You change what the Capabilities panel or Routines read from each runtime.                 |
 | [The executor runner](/internals/executor-runner)             | You change how one task runs: worktrees, prompts, verification, breakers.                  |

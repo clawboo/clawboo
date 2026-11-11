@@ -27,7 +27,7 @@ If you chose **Sign in with ChatGPT** during onboarding, you already installed C
 
 ## Before you begin
 
-- Clawboo running, and Node.js with npm (Clawboo installs Codex with npm).
+- Clawboo running, and Node.js with npm (Clawboo installs Codex with npm, into its own runtimes folder).
 - A ChatGPT account whose plan includes Codex. Clawboo never sees your password: Codex's own sign-in opens OpenAI's page in your browser.
 
 ## Set up Codex
@@ -36,13 +36,15 @@ If you chose **Sign in with ChatGPT** during onboarding, you already installed C
 
 <Step title="Install Codex">
 
-Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Codex** row, click **Install**, then **Install** in the panel that opens. Clawboo runs this and shows its output:
+Open **Settings** (at the bottom of the left sidebar, or press Cmd+, on macOS and Ctrl+, on Windows or Linux), then **Runtimes**. On the **Codex** row, click **Install**, then **Install** in the panel that opens. Clawboo installs `@openai/codex@0` into its own [runtimes folder](/operating/data-and-state#the-runtimes-folder) and shows npm's output. The `codex` command it adds runs on the Node.js Clawboo runs on, needs no `sudo`, and is not put on your `PATH`.
+
+You should see the row change to **Needs login**. If Codex is already installed and signed in on this computer, the row reads **Connected** straight away.
+
+The row also shows a command for installing Codex yourself instead. Clawboo uses a `codex` on your `PATH` when it has no copy of its own:
 
 ```bash
 npm install -g @openai/codex@0
 ```
-
-You should see the row change to **Needs login**. If Codex is already installed and signed in on this computer, the row reads **Connected** straight away.
 
 </Step>
 
@@ -62,7 +64,7 @@ Create a team, and in **Customize team** set a member's runtime to **Codex**, th
 
 </Steps>
 
-If the in-app sign-in fails, the panel shows the reason and the command to run yourself. Run `codex login` in a terminal, finish in the browser, then click **Re-check** in the Codex panel.
+If the in-app sign-in fails, the panel shows the reason and the command to run yourself. Run it in a terminal, finish in the browser, then click **Re-check** in the Codex panel. When Clawboo installed Codex, that command names the full path of its `codex`, such as `~/clawboo-runtimes/bin/codex login`, because the runtimes folder is not on your `PATH`. Use that path wherever this page says to run `codex` in a terminal.
 
 ## What Clawboo controls on Codex
 
@@ -96,7 +98,7 @@ When onboarding deploys your first team on Codex (the **Sign in with ChatGPT** p
 
 OpenAI decides which models each ChatGPT plan may use, and the list changes, so Clawboo names no Codex model of its own. A Codex run passes no model, and Codex runs your plan's default. Where Clawboo shows your plan's models (the ChatGPT groups in the OpenClaw and Hermes model pickers, and the default model the OpenClaw setup writes), it asks your Codex CLI for them: it runs `codex app-server` in your `~/.codex` and reads `model/list`, falling back to the list Codex last saved there.
 
-An old Codex CLI cannot read your plan's current models and falls back to the ones it shipped with, which OpenAI refuses. When Clawboo spots that, the **Codex** row in **Settings** > **Runtimes** reads **Update needed**, and its **Update** button opens **Update Codex**, which reinstalls Codex with `npm install -g @openai/codex@0`.
+An old Codex CLI cannot read your plan's current models and falls back to the ones it shipped with, which OpenAI refuses. When Clawboo spots that, the **Codex** row in **Settings** > **Runtimes** reads **Update needed**, and its **Update** button opens **Update Codex**, which installs the current `@openai/codex@0` into Clawboo's runtimes folder. A failed update leaves the Codex you had in place.
 
 ## Permissions and safety
 
@@ -165,13 +167,13 @@ The agent's Codex folder holds no usable sign-in, and Clawboo found none to copy
 
 <Accordion title="Every run fails with: The '...' model is not supported when using Codex with a ChatGPT account">
 
-OpenAI refused the model the run used. If the run named no model, your Codex CLI is too old for your plan: the error then goes on to say so and gives the update command. Open **Settings** > **Runtimes**, click **Update** on the **Codex** row, then **Update Codex**, or run `npm install -g @openai/codex@0` yourself, then try again. If the run named a model, pick one your plan offers instead, or clear it to use your plan's default.
+OpenAI refused the model the run used. If the run named no model, your Codex CLI is too old for your plan, and the error goes on to say so. For the Codex Clawboo installed it ends "Update it in Settings, Runtimes, then retry."; for a Codex on your `PATH` it gives the npm command. Open **Settings** > **Runtimes**, click **Update** on the **Codex** row, then **Update Codex**, or for a Codex you installed yourself run `npm install -g @openai/codex@0`, then try again. If the run named a model, pick one your plan offers instead, or clear it to use your plan's default.
 
 </Accordion>
 
 <Accordion title="Comments reach a Codex agent only at its next run">
 
-The run fell back to `codex exec`, which cannot take input mid-run. That happens when the installed Codex has no `codex app-server`, or the app-server does not answer within 20 seconds. Update Codex with `npm install -g @openai/codex@0`, then try again.
+The run fell back to `codex exec`, which cannot take input mid-run. That happens when the installed Codex has no `codex app-server`, or the app-server does not answer within 20 seconds. Update Codex, then try again: click **Update** on the **Codex** row in **Settings** > **Runtimes** when it offers one, or, for a Codex you installed yourself, run `npm install -g @openai/codex@0`.
 
 </Accordion>
 

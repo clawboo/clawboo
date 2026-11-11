@@ -27,7 +27,7 @@ Clawboo spreads its configuration over a few places. Use this page to find where
 | `~/.clawboo/secrets/`                           | Provider keys and connector secrets, encrypted                    | **Settings > Providers**, **Settings > Runtimes**, Connectors                                |
 | `~/.openclaw/`                                  | OpenClaw's own configuration, part of which Clawboo writes        | OpenClaw, or the dashboard                                                                   |
 
-`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The work folder moves with `CLAWBOO_HOME` too, to `<CLAWBOO_HOME>-work`, unless `CLAWBOO_WORK_DIR` names it. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
+`~/.clawboo` is the default for `CLAWBOO_HOME` and `~/.openclaw` the default for `OPENCLAW_STATE_DIR`; every path under them on this page moves with them. The work folder and the runtimes folder move with `CLAWBOO_HOME` too, to `<CLAWBOO_HOME>-work` and `<CLAWBOO_HOME>-runtimes`, unless `CLAWBOO_WORK_DIR` or `CLAWBOO_RUNTIMES_DIR` names them. The `~/.codex`, `~/.hermes` and `~/.claude` paths below do not.
 
 On a machine several teams share, one tuning variable is worth knowing: `CLAWBOO_MAX_CONCURRENT_RUNS`, how many agent runs execute at once across the whole server (8 by default). Runs beyond it wait their turn rather than fail. [Environment variables](/reference/environment-variables) describes it with the rest.
 
@@ -128,6 +128,19 @@ Your agents' work lives in the work folder: `CLAWBOO_WORK_DIR`, else `<CLAWBOO_H
 
 Everything Clawboo creates in the work folder is owner-only (0700).
 
+## Files in the runtimes folder
+
+The runtimes Clawboo installs for you go in the runtimes folder: `CLAWBOO_RUNTIMES_DIR`, else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes`. It must be apart from `~/.clawboo` and the work folder, or Clawboo installs nothing there and runs nothing from it. [The runtimes folder](/operating/data-and-state#the-runtimes-folder) covers how an install works and which copy Clawboo runs.
+
+| Path                             | What it holds                                                                                                            | Sensitive |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------- |
+| `bin/`                           | A launcher for each command (`openclaw`, `codex`; `.cmd` files on Windows) that runs it on the Node.js that installed it | No        |
+| `<runtime>/<install>/`           | One npm install of a runtime (`openclaw/`, `claude-code/`, `codex/`), named by the UTC time it started                   | No        |
+| `<runtime>/clawboo-runtime.json` | The current install's folder, version, source spec and Node.js, and what each launcher runs                              | No        |
+| `README.txt`                     | A note on what the folder holds                                                                                          | No        |
+
+Folders Clawboo creates here are `0755`, and each finished install is readable by others and writable only by the server's user.
+
 ## Saved keys
 
 Provider keys, connector secrets and sign-in tokens are encrypted with AES-256-GCM in `secrets/runtime-keys.json`, under the key in `secrets/master.key`. This protects a copied or synced vault file; a program running as your user can still read both files. To keep the key apart from the vault, set `CLAWBOO_SECRETS_MASTER_KEY`. If the key changes, saved keys read as missing and **System Health** reports that the master key changed.
@@ -151,7 +164,7 @@ It reads:
 It writes:
 
 - **When you connect or disconnect a provider** in **Settings > Providers** or OpenClaw's setup: the key line in `.env` and the `<provider>:default` profile in every agent's `auth-profiles.json`.
-- **When you set up OpenClaw** from the dashboard: `openclaw.json` and `.env` (the Gateway token, plus the provider key or `OLLAMA_API_KEY=ollama-local` for Ollama), and the Gateway URL and token in `settings.json`. With `OLLAMA_BASE_URL` set, the Ollama address goes into `openclaw.json` too.
+- **When you set up OpenClaw** from the dashboard: `openclaw.json` (including OpenClaw's tool sandbox off, `agents.defaults.sandbox.mode: off`, when you set none) and `.env` (the Gateway token, plus the provider key or `OLLAMA_API_KEY=ollama-local` for Ollama), and the Gateway URL and token in `settings.json`. With `OLLAMA_BASE_URL` set, the Ollama address goes into `openclaw.json` too.
 - **When you change OpenClaw settings from the dashboard**: `openclaw.json`, and any keys you enter. That covers the **System** panel, OpenClaw's default model, an OpenClaw agent's model, and drawing a routing link on the Org chart, which turns on agent-to-agent messaging.
 - **Each time it connects to the Gateway**: through the Gateway, it registers Clawboo's Memory, Tasks and Tools servers under `mcp.servers` and adds OpenClaw's sub-agent tools (`sessions_spawn`, `sessions_yield`) to `tools.deny`, alongside your own entries.
 - **When the Gateway refuses to start** and asks for a repair: it runs `openclaw doctor --fix --non-interactive` once, then tries again.
@@ -170,7 +183,7 @@ Resetting `~/.clawboo` leaves all of these in place, so provider keys saved this
 
 - `settings.json` is read by `loadSettings()` and written by `saveSettings()` in `@clawboo/config`; `GET /api/settings` returns `gatewayUrl`, `hasToken` and `firstRunDismissedAt`, and `POST /api/settings` accepts only `gatewayUrl`, `gatewayToken` and `firstRunDismissedAt`.
 - The server opens `<CLAWBOO_HOME>/clawboo.db`. The MCP stdio bins default to a different file, `~/.openclaw/clawboo/clawboo.db`, unless `CLAWBOO_DB_PATH` is set; the stdio snippets from `GET /api/mcp/config` set it. This split is deliberate.
-- Source of truth: `packages/config/src/index.ts`, `apps/web/server/lib/secretsVault.ts`, `apps/web/server/lib/openclawEnv.ts`, `apps/web/server/lib/providerKeys.ts`, `apps/web/server/api/system.ts`, `apps/web/server/lib/agentSource/openClawAgentSource.ts`.
+- Source of truth: `packages/config/src/index.ts` (with the folder defaults in `paths.ts`), `apps/web/server/lib/runtimeFolder.ts`, `apps/web/server/lib/secretsVault.ts`, `apps/web/server/lib/openclawEnv.ts`, `apps/web/server/lib/providerKeys.ts`, `apps/web/server/api/system.ts`, `apps/web/server/lib/agentSource/openClawAgentSource.ts`.
 
 </Accordion>
 

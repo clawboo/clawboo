@@ -13,14 +13,16 @@ keywords:
     'CLAWBOO_DB_PATH',
     'CLAWBOO_WORK_DIR',
     'work folder',
+    'CLAWBOO_RUNTIMES_DIR',
+    'runtimes folder',
   ]
 ---
 
-Use this page to find Clawboo's data, back it up, move it or wipe it. Clawboo keeps its own state in one folder, `~/.clawboo`, and its agents' work in another, the work folder (`~/clawboo-work`). It also writes a few files in OpenClaw's folder, `~/.openclaw`, and a reset of `~/.clawboo` leaves those alone.
+Use this page to find Clawboo's data, back it up, move it or wipe it. Clawboo keeps its own state in one folder, `~/.clawboo`, and its agents' work in another, the work folder (`~/clawboo-work`). The runtimes it installs for you go in a third, the runtimes folder (`~/clawboo-runtimes`). It also writes a few files in OpenClaw's folder, `~/.openclaw`, and a reset of `~/.clawboo` leaves those alone.
 
 ## Where Clawboo keeps its data
 
-Clawboo's data folder is `~/.clawboo`. To use another folder, set `CLAWBOO_HOME` before you start the server (a leading `~` is expanded). The database, the key vault, the settings and the logs move with it, and the work folder becomes `<CLAWBOO_HOME>-work` unless `CLAWBOO_WORK_DIR` names another. Team folders, task checkouts and review checkouts live in the work folder; see [The work folder](#the-work-folder).
+Clawboo's data folder is `~/.clawboo`. To use another folder, set `CLAWBOO_HOME` before you start the server (a leading `~` is expanded). The database, the key vault, the settings and the logs move with it. The work folder becomes `<CLAWBOO_HOME>-work` unless `CLAWBOO_WORK_DIR` names another, and the runtimes folder becomes `<CLAWBOO_HOME>-runtimes` unless `CLAWBOO_RUNTIMES_DIR` names another. Team folders, task checkouts and review checkouts live in the work folder; see [The work folder](#the-work-folder). OpenClaw, Claude Code's Agent SDK and Codex, when Clawboo installs them, live in the runtimes folder; see [The runtimes folder](#the-runtimes-folder).
 
 ```bash
 CLAWBOO_HOME=/srv/clawboo clawboo
@@ -163,19 +165,102 @@ When `CLAWBOO_WORK_DIR` is not set and Clawboo cannot create or write to the def
 
 You can go back to 0.6.x after the move. 0.6.0 already reads checkouts in the work folder, and finds team folders through the links. One limit: 0.6.x's work check refuses a team folder in the work folder, so team chat work checks fail on 0.6.x until you upgrade again. Versions before 0.6.0 do not read the work folder, so do not go below 0.6.0 after the move.
 
+## The runtimes folder
+
+The runtimes Clawboo installs for you (OpenClaw, Claude Code's Agent SDK and Codex) live in the runtimes folder, never in npm's global folder. It is the folder `CLAWBOO_RUNTIMES_DIR` names (a leading `~` is expanded), else `<CLAWBOO_HOME>-runtimes` when `CLAWBOO_HOME` is set, else `~/clawboo-runtimes` (`%USERPROFILE%\clawboo-runtimes` on Windows). Clawboo uses it by its real path, with every link resolved, and creates it on the first install.
+
+```text
+~/clawboo-runtimes/
+├── README.txt                  what this folder is
+├── bin/                        the commands that start each runtime
+│   ├── openclaw                (openclaw.cmd on Windows)
+│   └── codex                   (codex.cmd on Windows)
+├── openclaw/
+│   ├── clawboo-runtime.json    which install is current, and what each command runs
+│   ├── 20261111-083000/        the current install
+│   └── 20261020-141500/        the install before it
+├── claude-code/                the Agent SDK, which offers no command
+└── codex/
+```
+
+| Path                             | What it holds                                                                                                                                                                                                                           |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/`                           | One launcher for each command a runtime offers. A launcher starts the runtime on the Node.js that installed it: that Node's full path is written into it, so a different `node` first on your `PATH` later does not change what it runs |
+| `<runtime>/<install>/`           | One folder for each install, named by the UTC time it started, such as `20261111-083000`. Clawboo keeps the current install and the one before it, and removes older ones                                                               |
+| `<runtime>/clawboo-runtime.json` | The current install's folder, its version, the spec it came from (such as `openclaw@~2026.9`), the Node.js it runs on, and what each launcher runs                                                                                      |
+| `README.txt`                     | A note on what the folder holds                                                                                                                                                                                                         |
+
+<Note>
+
+This is not the `runtimes/` folder inside `~/.clawboo`. That one holds each Codex and Hermes agent's own home, with its sessions and sign-in copy.
+
+</Note>
+
+### How an install works
+
+OpenClaw, Claude Code and Codex install the same way, whether from **Install** in **Settings > Runtimes**, **Set up OpenClaw**, or **Check for Updates** in **Settings > System**:
+
+- **npm runs on the Node.js Clawboo runs on.** Clawboo runs npm's own script with that Node: the npm that ships beside it, Homebrew's npm for a Homebrew Node, or the `npm` on your `PATH`. Only when it cannot find that script does it run the `npm` command itself, with that Node's folder first on `PATH`.
+- **Each install goes into a new folder.** The command is `npm install --prefix <new install folder> --include=optional --no-global --location=project --no-fund --no-audit <spec>`. It runs under umask 022, and without `npm_config_global`, `npm_config_location` and `npm_config_prefix` in its environment, so neither your environment nor an `.npmrc` with `global=true` makes it write to npm's global folder, and it never needs `sudo`.
+- **Success switches to it.** Clawboo writes the launchers in `bin/` and points `clawboo-runtime.json` at the new install, all or nothing. It keeps the previous install, and any install a Gateway it started is still running from, and removes older ones.
+- **Failure changes nothing.** When npm fails, or the install is stopped, Clawboo removes the new folder and the current install stays as it was. A failed update never leaves a runtime half replaced. The error carries npm's own code, such as `EACCES` or `ETARGET`, and the message reads `Installation failed with exit code <n>.` followed by npm's reason.
+
+Folders Clawboo creates here are `0755`. Before an install becomes current, Clawboo makes everything in it readable by other users and writable only by the server's user, so another account on the computer can run a runtime but cannot change it. An install fails when an item in it belongs to another user, or when a link inside it points outside the install.
+
+### Which copy Clawboo uses
+
+Wherever Clawboo looks for a runtime, it looks in the runtimes folder first, then on your `PATH`, then in the usual user-install folders. That covers OpenClaw detection, the Gateway Clawboo starts, the `openclaw` commands it runs, Codex runs and the **Runtimes** panel. So an OpenClaw or Codex you installed globally yourself keeps working while Clawboo has no copy of its own. A Claude Code run loads the Agent SDK from the runtimes folder first, else from next to Clawboo: a source checkout's `node_modules`, or an SDK installed next to a global Clawboo.
+
+The runtimes folder is not on your `PATH`. To run a runtime Clawboo installed from your own terminal, use its launcher's full path, such as `~/clawboo-runtimes/bin/openclaw doctor --fix`. Where the dashboard shows a command for you to run, such as a sign-in, it already names that full path.
+
+For a Homebrew Node.js, a launcher names the formula's link, such as `/opt/homebrew/opt/node@24/bin/node`, rather than the versioned folder an upgrade deletes, so `brew upgrade` keeps it working. If the Node.js a launcher names is removed anyway, for example by `nvm uninstall`, Clawboo stops using that launcher. The runtime reads **Not installed** unless a global copy exists, the Runtimes panel and `GET /api/system/status` say why, and **Install** puts it back on the Node.js Clawboo runs on now.
+
+### When Clawboo will not use it
+
+Clawboo installs nothing into the runtimes folder, and runs nothing from it, when:
+
+- it is the data folder or the work folder, sits inside one of them, or contains one of them. Clawboo compares real paths, so a link does not get around the check;
+- its `bin/` is a link, or not a folder;
+- the folder, its `bin/` or a launcher belongs to another user, or others can write to it;
+- a folder above it lets anyone rename what is in it (others can write to it and it has no sticky bit), or holds a `node_modules` that another user owns or can change. Node.js looks for a module an install lacks in the `node_modules` of every folder above it, so such a folder could stand in for part of a runtime.
+
+Then Clawboo uses a runtime on your `PATH`, if there is one, and an install fails with the reason. The server still starts. On Windows, ownership and write access are not checked.
+
+```text
+CLAWBOO_RUNTIMES_DIR (/srv/clawboo/runtimes) must be apart from Clawboo's data folder (/srv/clawboo). Set CLAWBOO_RUNTIMES_DIR to a folder of its own and restart Clawboo.
+```
+
+Against the work folder, the message reads `must be apart from the work folder (<path>)`. Without `CLAWBOO_RUNTIMES_DIR` set, it starts with `Clawboo's runtimes folder (<path>)` instead. For a folder you do not own:
+
+```text
+/srv/clawboo-runtimes belongs to another user or others can write to it, so Clawboo will not run anything from it. Make it yours and run chmod go-w on it, or set CLAWBOO_RUNTIMES_DIR to a folder of its own and restart Clawboo.
+```
+
+A `bin/` that is a link reads `<path> is a link. Clawboo runs launchers only from a real folder: remove it and install again.`, and one that is not a folder reads `<path> is not a folder. Move it away and install again.` In an install's event stream, each of these is the error code `RUNTIMES_DIR_REFUSED`.
+
+### Move or remove it
+
+Nothing moves when you change `CLAWBOO_RUNTIMES_DIR`. Stop Clawboo, set the variable, start Clawboo again, and install the runtimes again from **Settings > Runtimes**.
+
+A reset of the data folder leaves the runtimes folder alone, and so does uninstalling Clawboo. To remove every runtime Clawboo installed, stop the OpenClaw Gateway if Clawboo started one (**Manage**, then **Disconnect**, on the **OpenClaw** row), stop the server, and delete the folder:
+
+```bash
+clawboo stop && rm -rf ~/clawboo-runtimes
+```
+
 ## What Clawboo writes in OpenClaw's folder
 
 OpenClaw keeps its state in `~/.openclaw` (`OPENCLAW_STATE_DIR` moves it). Clawboo writes there in these cases:
 
-| When you                                              | Clawboo writes                                                                                                                                                                                                                                                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Connect a key under **Settings > Providers**          | The key, unencrypted, in `.env` and in each OpenClaw agent's `agents/<id>/agent/auth-profiles.json`, as well as in Clawboo's encrypted vault. **Disconnect** under Providers removes every copy.                                                                                                 |
-| Set up OpenClaw from Clawboo                          | `openclaw.json` (a local Gateway and a default model) and `.env` (the Gateway token, plus the provider key, or `OLLAMA_API_KEY=ollama-local` for Ollama). The provider key also goes into each OpenClaw agent's `auth-profiles.json`. It fills in what is missing and keeps your other settings. |
-| Change an OpenClaw setting in the dashboard           | `openclaw.json`: the default command approval in **Settings > System**, OpenClaw's default model in **Settings > Runtimes**, an OpenClaw agent's model, or agent-to-agent messaging when you add a route on the Org chart or deploy a team whose agents route work to each other.                |
-| Create an OpenClaw agent or edit its files            | Through the Gateway: the agent, a `workspace-<name>` folder, and its files such as `SOUL.md` and `AGENTS.md`.                                                                                                                                                                                    |
-| Connect to the Gateway (every time)                   | Through the Gateway: its config registers Clawboo's Memory, Tasks and Tools MCP servers and denies the tools that spawn sub-agents, keeping your own denials.                                                                                                                                    |
-| Start a Gateway that asks for a repair                | Clawboo runs `openclaw doctor --fix` once, then tries again.                                                                                                                                                                                                                                     |
-| Run a Clawboo MCP stdio bin without `CLAWBOO_DB_PATH` | `~/.openclaw/clawboo/clawboo.db`, a separate database the bin creates. See [Two database paths](#two-database-paths).                                                                                                                                                                            |
+| When you                                              | Clawboo writes                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Connect a key under **Settings > Providers**          | The key, unencrypted, in `.env` and in each OpenClaw agent's `agents/<id>/agent/auth-profiles.json`, as well as in Clawboo's encrypted vault. **Disconnect** under Providers removes every copy.                                                                                                                                                 |
+| Set up OpenClaw from Clawboo                          | `openclaw.json` (a local Gateway, a default model, and OpenClaw's tool sandbox off when you set none) and `.env` (the Gateway token, plus the provider key, or `OLLAMA_API_KEY=ollama-local` for Ollama). The provider key also goes into each OpenClaw agent's `auth-profiles.json`. It fills in what is missing and keeps your other settings. |
+| Change an OpenClaw setting in the dashboard           | `openclaw.json`: the default command approval in **Settings > System**, OpenClaw's default model in **Settings > Runtimes**, an OpenClaw agent's model, or agent-to-agent messaging when you add a route on the Org chart or deploy a team whose agents route work to each other.                                                                |
+| Create an OpenClaw agent or edit its files            | Through the Gateway: the agent, a `workspace-<name>` folder, and its files such as `SOUL.md` and `AGENTS.md`.                                                                                                                                                                                                                                    |
+| Connect to the Gateway (every time)                   | Through the Gateway: its config registers Clawboo's Memory, Tasks and Tools MCP servers and denies the tools that spawn sub-agents, keeping your own denials.                                                                                                                                                                                    |
+| Start a Gateway that asks for a repair                | Clawboo runs `openclaw doctor --fix` once, then tries again.                                                                                                                                                                                                                                                                                     |
+| Run a Clawboo MCP stdio bin without `CLAWBOO_DB_PATH` | `~/.openclaw/clawboo/clawboo.db`, a separate database the bin creates. See [Two database paths](#two-database-paths).                                                                                                                                                                                                                            |
 
 On macOS and Linux, Clawboo makes `.env` and each `auth-profiles.json` readable only by you (mode `0600`) whenever it writes them, and creates `~/.openclaw` owner-only (`0700`) if it does not exist yet. An existing `~/.openclaw` keeps its mode.
 
@@ -299,7 +384,7 @@ clawboo stop && rm -rf ~/.clawboo
 clawboo
 ```
 
-Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs and the browser profiles. It does not touch `~/.openclaw` (see [What a reset leaves behind](#what-a-reset-leaves-behind)) or the work folder. A new install's cleanup never removes the old team folders and worktrees there, because its board does not record them. To remove them too, delete the work folder (`rm -rf ~/clawboo-work`, with the server stopped), which loses any uncommitted work in those worktrees, then run `git worktree prune` in each repository. Do that only when no other install uses the same work folder (through `CLAWBOO_WORK_DIR`): deleting it would remove that install's team folders and checkouts too. A shared folder is cleaned by hand, removing only the reset install's team folders and the checkouts whose `.<task id>.owner` file holds its id.
+Clawboo starts as a new install. This also deletes the vault and its key, the device identity, the logs and the browser profiles. It does not touch `~/.openclaw` (see [What a reset leaves behind](#what-a-reset-leaves-behind)), the [runtimes folder](#move-or-remove-it) or the work folder. A new install's cleanup never removes the old team folders and worktrees there, because its board does not record them. To remove them too, delete the work folder (`rm -rf ~/clawboo-work`, with the server stopped), which loses any uncommitted work in those worktrees, then run `git worktree prune` in each repository. Do that only when no other install uses the same work folder (through `CLAWBOO_WORK_DIR`): deleting it would remove that install's team folders and checkouts too. A shared folder is cleaned by hand, removing only the reset install's team folders and the checkouts whose `.<task id>.owner` file holds its id.
 
 ## Two database paths
 
@@ -342,7 +427,7 @@ When a new version first starts, it adds any columns the database is missing, so
 ## Related
 
 - [CLI reference](/reference/cli): `clawboo backup`, `clawboo stop`, `clawboo restart`, and how `clawboo` finds the server.
-- [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`.
+- [Environment variables](/reference/environment-variables): `CLAWBOO_HOME`, `CLAWBOO_WORK_DIR`, `CLAWBOO_RUNTIMES_DIR`, `CLAWBOO_DB_PATH`, `CLAWBOO_SECRETS_MASTER_KEY`, `OPENCLAW_STATE_DIR`.
 - [Security](/operating/security): the vault, the master key, and who can reach the server.
 - [MCP servers](/operating/mcp-servers): attach outside agents and point the stdio bins at the right database.
 - [Database schema](/reference/database-schema): every table in `clawboo.db`.

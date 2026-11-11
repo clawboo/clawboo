@@ -38,15 +38,15 @@ A provider supplies the AI model and bills you for it: Anthropic, OpenAI, OpenRo
 
 ### Which runtimes can my agents use?
 
-| Runtime        | What you install                                                                 | What it needs to run                                                                |
-| -------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| Clawboo Native | Nothing; it is built in                                                          | An API key from one of ten providers, or a local Ollama                             |
-| OpenClaw       | OpenClaw and its Gateway; **Set up OpenClaw** installs both                      | A provider key, a ChatGPT sign-in or a local Ollama, and a one-time device approval |
-| Claude Code    | The `claude` program, plus the Claude Agent SDK next to a global Clawboo install | An Anthropic API key                                                                |
-| Codex          | The `codex` program                                                              | **Sign in with ChatGPT**                                                            |
-| Hermes         | Hermes, which needs Python 3.11 to 3.13                                          | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in                        |
+| Runtime        | What you install                                            | What it needs to run                                                                |
+| -------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Clawboo Native | Nothing; it is built in                                     | An API key from one of ten providers, or a local Ollama                             |
+| OpenClaw       | OpenClaw and its Gateway; **Set up OpenClaw** installs both | A provider key, a ChatGPT sign-in or a local Ollama, and a one-time device approval |
+| Claude Code    | The Claude Agent SDK, which brings its own `claude` program | An Anthropic API key                                                                |
+| Codex          | The `codex` program                                         | **Sign in with ChatGPT**                                                            |
+| Hermes         | Hermes, which needs Python 3.11 to 3.13                     | An OpenRouter, Anthropic or OpenAI key, or a ChatGPT sign-in                        |
 
-**Settings > Runtimes** installs and connects each one, except the Agent SDK, which you install with `npm install -g clawboo @anthropic-ai/claude-agent-sdk`. One team can mix runtimes. See [Providers and runtimes](/using/providers-and-runtimes).
+**Settings > Runtimes** installs and connects each one. OpenClaw, the Agent SDK and Codex go into Clawboo's own runtimes folder, never npm's global folder. One team can mix runtimes. See [Providers and runtimes](/using/providers-and-runtimes).
 
 ### Can I use my ChatGPT or Claude subscription instead of an API key?
 

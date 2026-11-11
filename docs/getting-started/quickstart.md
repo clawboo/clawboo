@@ -93,7 +93,7 @@ No key is needed, and the model runs on your computer.
 
 **Add more runtimes** lists Codex, Claude Code, Hermes and OpenClaw. Connecting them is optional, and you can do it later from **Settings → Runtimes**. Click **Continue**.
 
-If you want them later: Claude Code also needs the Claude Agent SDK installed with Clawboo (see [Install](/getting-started/installation)), and **Set up OpenClaw** installs and starts a local OpenClaw Gateway for you (see [OpenClaw](/runtimes/openclaw)).
+If you want them later: Claude Code also needs the Claude Agent SDK, which **Install** on its row adds (see [Claude Code](/runtimes/claude-code)), and **Set up OpenClaw** installs and starts a local OpenClaw Gateway for you (see [OpenClaw](/runtimes/openclaw)).
 
 **You should see** **Choose your first team**.
 
@@ -173,7 +173,7 @@ Run `ollama pull llama3.2`, then click **Check again**. Embedding-only models ca
 
 <Accordion title="Install Codex fails">
 
-The panel shows the install output and the reason. A permission error means npm can't write to its global folder: run the `sudo` command the message suggests in a terminal yourself. Then click the **API key** card and **Sign in with ChatGPT** again, so the panel checks for Codex once more.
+The panel shows the install output and the reason, which is npm's own. Clawboo installs Codex into its own runtimes folder, never npm's global folder, so it needs no `sudo`. Fix what npm reports, such as a network or proxy problem, then click **Install Codex** again.
 
 </Accordion>
 

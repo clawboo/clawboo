@@ -184,13 +184,13 @@ The built-in model for each provider is listed in [Clawboo Native](/runtimes/nat
 
 ## Add Claude Code, Codex or Hermes
 
-Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Then connect it:
+Each of these is a separate program. Clawboo installs it for you from **Settings** > **Runtimes**; click **Install** on its row, then **Install** in the panel that opens. Claude Code's Agent SDK and Codex go into Clawboo's own [runtimes folder](/operating/data-and-state#the-runtimes-folder), with no `sudo`. Then connect it:
 
 <Tabs>
 
 <Tab title="Claude Code">
 
-Needs an Anthropic API key. On an npm install of Clawboo, also install the Claude Agent SDK first: `npm install -g clawboo @anthropic-ai/claude-agent-sdk@0.3`. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
+Needs an Anthropic API key, and the Claude Agent SDK, which **Install** on the row adds however you run Clawboo. Click **Connect** on the row and paste the key, or save it under **Providers**. See [Claude Code](/runtimes/claude-code).
 
 </Tab>
 

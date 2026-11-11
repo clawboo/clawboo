@@ -118,8 +118,9 @@ marks one of Ollama's cloud models (`-cloud` or `:cloud`). The run ledger record
 ## Claude Code
 
 The driver (`createClaudeCodeDriver`) loads the Claude Agent SDK on demand. The published `clawboo` package does
-not ship the SDK, so a run on an install without it fails with a message that says how to install it alongside
-Clawboo. The SDK's own `total_cost_usd` is passed through unchanged, and its `error_max_turns` result becomes
+not ship the SDK. A run loads it from Clawboo's runtimes folder first (`ownAgentSdkDir`, imported by file URL),
+else from next to the server, and a run with neither fails with a message that points to Settings, Runtimes,
+Install. The SDK's own `total_cost_usd` is passed through unchanged, and its `error_max_turns` result becomes
 `done` with reason `max_turns`. A steer goes in as a user message with priority `next`, which the CLI reads at its
 next turn boundary.
 
