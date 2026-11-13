@@ -436,6 +436,23 @@ describe('review fixes', () => {
     expect(existsSync(path.join(dir, `.in-use-${2 ** 22 + 12345}`))).toBe(false)
   })
 
+  it('marks the install folder a process was started from, not one committed since', async () => {
+    const { command, script } = fakeInterpreter()
+    await commitCodex('v1', command, [script]).pruned
+    // The command is read, then an update lands before the process is marked.
+    const startedFrom = ownedRuntimeLaunch('codex', env)?.record.folder
+    await commitCodex('v2', command, [script]).pruned
+    markInstallInUse('codex', process.pid, env, startedFrom)
+    await commitCodex('v3', command, [script]).pruned
+    await commitCodex('v4', command, [script]).pruned
+    const dir = path.join(base, 'runtimes', 'codex')
+    expect(existsSync(path.join(dir, 'v1'))).toBe(true)
+    expect(existsSync(path.join(dir, 'v2'))).toBe(false)
+    // A folder that is not one plain install name is not recorded.
+    markInstallInUse('codex', process.pid + 1, env, '../elsewhere')
+    expect(existsSync(path.join(dir, `.in-use-${process.pid + 1}`))).toBe(false)
+  })
+
   it('switches nothing when a launcher cannot be put in place', async () => {
     const { command, script } = fakeInterpreter()
     await commitCodex('v1', command, [script]).pruned
@@ -511,6 +528,49 @@ describe('review fixes', () => {
     expect(launcherScript({ command: 'C:\\n.exe', args: [] }, 'a & calc', 'win32')).not.toContain(
       '&',
     )
+  })
+})
+
+describe('the Node this server runs on', () => {
+  const realExecPath = Object.getOwnPropertyDescriptor(process, 'execPath')!
+  afterEach(() => {
+    Object.defineProperty(process, 'execPath', realExecPath)
+  })
+
+  /** A Node others can write, as GitHub's Linux runner images leave theirs: the
+   *  image runs `chmod -R 777 /opt`, the tool cache's Node included. */
+  async function openNode(name: string): Promise<string> {
+    const node = path.join(base, 'hostedtoolcache', name)
+    mkdirSync(path.dirname(node), { recursive: true })
+    await writeFile(node, '#!/bin/sh\n')
+    await chmod(node, 0o777)
+    return node
+  }
+
+  const commitOn = (command: string): void => {
+    const folder = newInstallFolder('openclaw', 'v1', env)
+    const script = path.join(folder, 'entry.js')
+    writeFileSync(script, '// openclaw\n')
+    commitRuntimeInstall(
+      'openclaw',
+      { folder, version: '1', source: 'x', launchers: { openclaw: { command, args: [script] } } },
+      env,
+    )
+  }
+
+  it.skipIf(isWindows)('runs a runtime on it even when others can write it', async () => {
+    const node = await openNode('node')
+    Object.defineProperty(process, 'execPath', { ...realExecPath, value: node })
+    commitOn(node)
+    expect(ownedRuntimeLaunch('openclaw', env)?.command).toBe(node)
+    expect(ownedRuntimeProblem('openclaw', env)).toBeNull()
+  })
+
+  it.skipIf(isWindows)('still refuses any other command others can write', async () => {
+    Object.defineProperty(process, 'execPath', { ...realExecPath, value: await openNode('node') })
+    commitOn(await openNode('another-node'))
+    expect(ownedRuntimeLaunch('openclaw', env)).toBeNull()
+    expect(ownedRuntimeProblem('openclaw', env)).toMatch(/can be changed by another user/)
   })
 })
 

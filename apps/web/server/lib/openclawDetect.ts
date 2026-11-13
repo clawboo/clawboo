@@ -129,6 +129,9 @@ export interface OpenClawInvocation {
   command: string
   args: string[]
   shell: boolean
+  /** For Clawboo's own copy, the install folder these arguments run from, to
+   *  mark a long-lived process with (`markInstallInUse`). */
+  installFolder?: string
 }
 
 /**
@@ -140,7 +143,14 @@ export interface OpenClawInvocation {
  */
 export function openclawInvocation(): OpenClawInvocation | null {
   const owned = ownedRuntimeLaunch('openclaw')
-  if (owned) return { command: owned.command, args: [...owned.args], shell: false }
+  if (owned) {
+    return {
+      command: owned.command,
+      args: [...owned.args],
+      shell: false,
+      installFolder: owned.record.folder,
+    }
+  }
   const onPath = findExecutable('openclaw')
   return onPath ? { command: onPath, args: [], shell: isWindows } : null
 }

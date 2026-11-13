@@ -73,9 +73,11 @@ expect_line "$out" 'AGENT_PROCS=0' 'no agent process survives the launcher'
 echo
 echo "== launcher: a hard link to the database in the work folder"
 out=$(docker run "${COMMON[@]}" "${LAUNCH[@]}" "$IMAGE" sh -c \
-  'mkdir -p /data /work/teams/t && echo db > /data/clawboo.db && ln /data/clawboo.db /work/teams/t/notes.txt && cp /bin/cat /work/teams/t/c && ln /work/teams/t/c /work/teams/t/c2 && chown -R 10001:10001 /data /work && chmod 4755 /work/teams/t/c && echo "BEFORE=$(stat -c %a /work/teams/t/c)" && /proof/clawboo-launch node /proof/proof.cjs socket-hardlink; echo "OWNER=$(stat -c %u /work/teams/t/notes.txt) WORK=$(stat -c %u /work) SUID=$(stat -c %a /work/teams/t/c)"' 2>&1 || true)
+  'mkdir -p /data /work/teams/t && echo db > /data/clawboo.db && ln /data/clawboo.db /work/teams/t/notes.txt && cp /bin/cat /work/teams/t/c && ln /work/teams/t/c /work/teams/t/c2 && chown -R 10001:10001 /data /work && chmod 4755 /work/teams/t/c && echo "BEFORE=$(stat -c %a /work/teams/t/c)" && /proof/clawboo-launch node /proof/proof.cjs socket-hardlink; echo "LAUNCHER_EXIT=$?"; echo "OWNER=$(stat -c %u /work/teams/t/notes.txt) WORK=$(stat -c %u /work) SUID=$(stat -c %a /work/teams/t/c)"' 2>&1 || true)
 echo "$out" | grep -E '^(PASS|FAIL)' || true
 grep -q '^FAIL' <<<"$out" && fail=1
+expect_line "$out" 'LAUNCHER_EXIT=0' 'the launcher ran the check to its end'
+expect_line "$out" '^PASS  a hard link to the database in the work folder makes the check refuse' 'the check refuses the hard link'
 expect_line "$out" 'left /work/teams/t/notes.txt as it was' 'the ownership pass leaves the hard link and names it'
 expect_line "$out" 'OWNER=10001 WORK=10002' 'the work folder goes to the agent user, the hard link stays the server user'
 expect_line "$out" 'BEFORE=4755' 'a setuid file was planted (owned by the server user, two hard links)'

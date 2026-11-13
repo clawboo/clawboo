@@ -43,8 +43,29 @@ const ALLOWED: Record<string, string> = {
     "downloads (curl through a proxy) and unpacks (tar) the desktop tools into the server's runtimes folder",
 }
 
-const IMPORT_RE =
-  /import\s*\{([^}]*)\}\s*from\s*['"](?:node:)?child_process['"]|require\(\s*['"](?:node:)?child_process['"]\s*\)/g
+const SPEC = `['"](?:node:)?child_process['"]`
+/** `import <clause> from 'child_process'`, `import type` included (to skip). */
+const STATIC_IMPORT_RE = new RegExp(`import\\s+(type\\s+)?([^'";]*?)\\s*from\\s*${SPEC}`, 'g')
+/** `import('child_process')` and `require('child_process')`. */
+const CALL_RE = new RegExp(`\\b(?:import|require)\\(\\s*${SPEC}\\s*\\)`)
+
+/** Whether source text takes a value (not only types) from child_process: a
+ *  named, default or namespace import, a dynamic import, or a require. */
+function importsChildProcessValue(text: string): boolean {
+  if (CALL_RE.test(text)) return true
+  for (const m of text.matchAll(STATIC_IMPORT_RE)) {
+    if (m[1]) continue
+    const clause = (m[2] ?? '').trim()
+    const braces = /^\{([^}]*)\}$/.exec(clause)
+    if (!braces) return true
+    const names = braces[1]!
+      .split(',')
+      .map((n) => n.trim())
+      .filter(Boolean)
+    if (names.some((n) => !n.startsWith('type '))) return true
+  }
+  return false
+}
 
 function* sourceFiles(dir: string): Generator<string> {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -61,24 +82,29 @@ function* sourceFiles(dir: string): Generator<string> {
 function processStarters(): string[] {
   const found: string[] = []
   for (const file of sourceFiles(SERVER)) {
-    const text = fs.readFileSync(file, 'utf8')
-    for (const m of text.matchAll(IMPORT_RE)) {
-      const names = m[1]
-      const valueImport =
-        names === undefined ||
-        names
-          .split(',')
-          .map((n) => n.trim())
-          .filter(Boolean)
-          .some((n) => !n.startsWith('type '))
-      if (valueImport) {
-        found.push(path.relative(SERVER, file).split(path.sep).join('/'))
-        break
-      }
+    if (importsChildProcessValue(fs.readFileSync(file, 'utf8'))) {
+      found.push(path.relative(SERVER, file).split(path.sep).join('/'))
     }
   }
   return found.sort()
 }
+
+describe('finding the files that can start a process', () => {
+  it.each([
+    ["import { spawn } from 'node:child_process'", true],
+    ["import * as cp from 'node:child_process'", true],
+    ["import cp from 'child_process'", true],
+    ["import cp, { type ChildProcess } from 'node:child_process'", true],
+    ["const cp = await import('node:child_process')", true],
+    ["const { spawn } = require('child_process')", true],
+    ["import { spawn,\n  type ChildProcess,\n} from 'node:child_process'", true],
+    ["import type { ChildProcess } from 'node:child_process'", false],
+    ["import { type ChildProcess, type SpawnOptions } from 'node:child_process'", false],
+    ["import { spawn } from './spawner'", false],
+  ])('%s: %s', (text, starts) => {
+    expect(importsChildProcessValue(text)).toBe(starts)
+  })
+})
 
 describe('process starts in the server', () => {
   it('happen only through the agent spawn seam, or in a file with a stated reason', () => {

@@ -52,7 +52,7 @@ import {
   type WorkCheck,
   type WorkCheckResult,
 } from '@clawboo/team-orchestration'
-import { assertSafeTaskId, execGit, KeyedMutex, type DiffStat } from '@clawboo/worktrees'
+import { assertSafeTaskId, execGit, GitError, KeyedMutex, type DiffStat } from '@clawboo/worktrees'
 import { eq } from 'drizzle-orm'
 
 import { agentMkdir, agentStat, agentWriteFile } from '../agentUser/agentFs'
@@ -110,10 +110,12 @@ function historyRoot(): string {
     : path.resolve(resolveClawbooDir(), 'team-folder-history')
 }
 
-/** Whether the team's history has been made. */
-async function historyExists(gitDir: string): Promise<boolean> {
+/** Whether the team's history has been made. A host that does not answer
+ *  throws, never reads as "no history": that would skip the check. Exported for
+ *  tests. */
+export async function historyExists(gitDir: string): Promise<boolean> {
   if (!isAgentUserMode()) return existsSync(path.join(gitDir, 'HEAD'))
-  return (await agentStat(path.join(gitDir, 'HEAD')).catch(() => null)) !== null
+  return (await agentStat(path.join(gitDir, 'HEAD'))) !== null
 }
 
 /**
@@ -135,7 +137,7 @@ export function teamFolderHistoryDir(teamId: string): string {
  *  it is not checked again. Best-effort; a team with no history has nothing to drop. */
 export async function dropTeamFolderBase(teamId: string, taskId: string): Promise<void> {
   const gitDir = teamFolderHistoryDir(teamId)
-  if (!(await historyExists(gitDir))) return
+  if (!(await historyExists(gitDir).catch(() => false))) return
   const folder = teamWorkdirPath(teamId)
   await historyMutex
     .run(gitDir, () => historyGit(gitDir, folder, ['update-ref', '-d', baseRef(taskId)]))
@@ -143,6 +145,28 @@ export async function dropTeamFolderBase(teamId: string, taskId: string): Promis
 }
 
 const baseRef = (taskId: string): string => `refs/clawboo/base/${assertSafeTaskId(taskId)}`
+
+/** The task's starting point in the team's history, or '' when it has none.
+ *  Only "no history" and "no such ref" read as none: anything else (a host that
+ *  does not answer) throws, so the check is not skipped for want of a base.
+ *  Exported for tests. */
+export async function taskBase(gitDir: string, folder: string, taskId: string): Promise<string> {
+  if (!(await historyExists(gitDir))) return ''
+  try {
+    return (
+      await historyGit(gitDir, folder, [
+        'rev-parse',
+        '--verify',
+        '-q',
+        `${baseRef(taskId)}^{commit}`,
+      ])
+    ).trim()
+  } catch (err) {
+    // `--verify -q` exits 1, saying nothing, when the ref is not there.
+    if (err instanceof GitError && err.exitCode === 1 && !err.stderr.trim()) return ''
+    throw err
+  }
+}
 
 function historyGit(gitDir: string, folder: string, args: string[]): Promise<string> {
   return execGit(folder, ['--git-dir', gitDir, '--work-tree', folder, ...args])
@@ -285,18 +309,8 @@ export function createTeamWorkCheck(opts: TeamWorkCheckOpts): WorkCheck {
     return isOrchestratableRuntimeId(runtime) ? adapterFactoryFor(runtime) : null
   }
 
-  /** The task's starting point, or '' when it has none. */
-  const baseOf = async (folder: string, taskId: string): Promise<string> =>
-    (await historyExists(gitDir))
-      ? (
-          await historyGit(gitDir, folder, [
-            'rev-parse',
-            '--verify',
-            '-q',
-            `${baseRef(taskId)}^{commit}`,
-          ]).catch(() => '')
-        ).trim()
-      : ''
+  const baseOf = (folder: string, taskId: string): Promise<string> =>
+    taskBase(gitDir, folder, taskId)
 
   const note = (taskId: string, text: string): void => {
     try {
