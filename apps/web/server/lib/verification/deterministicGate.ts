@@ -14,7 +14,6 @@
 // commit by message (`findScaffoldCommit`), which the builder can also write,
 // and an agent running as the same user can change any of these files.
 
-import { spawn } from 'node:child_process'
 import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
@@ -27,11 +26,20 @@ import {
   type DeterministicResult,
   type VerifyCommandSource,
 } from '@clawboo/governance'
-import { appendTaskFile, execGit, readTaskFile, SOR_FILES } from '@clawboo/worktrees'
+import {
+  appendTaskFile,
+  execGit,
+  readTaskFile,
+  SOR_FILES,
+  TASK_FILE_MAX_BYTES,
+} from '@clawboo/worktrees'
 
+import { agentAppendFile, agentReadFile } from '../agentUser/agentFs'
+import { isAgentUserMode } from '../agentUser/config'
 import { buildChildEnv } from '../runtimes/childEnv'
 import { isWindows } from '../platform'
 import { killProcessTree } from '../runtimes/killTree'
+import { spawnAgentProcess } from '../runtimes/spawner'
 import { realPathOf, workDirSpellings } from '../workDir'
 import { stayingRoots } from '../workDirJournal'
 
@@ -66,16 +74,39 @@ export interface DeterministicGateInput {
 // builder owns the folder and can put one at either name, to the vault key or
 // the database (see `readTaskFile` / `appendTaskFile`). A refused file reads as
 // a missing one.
+//
+// With agents on their own OS user the checkout belongs to that user, and the
+// server never opens a file in it as itself: the agent host reads and appends,
+// so a link or hard link there reaches only what the agent could reach already.
+// The host still refuses a link at the name, and a file over the task file cap
+// is refused here as it is locally.
+async function readCheckoutFile(dir: string, name: string): Promise<string> {
+  if (!isAgentUserMode()) return readTaskFile(dir, name)
+  const buf = await agentReadFile(path.join(dir, name), { maxBytes: TASK_FILE_MAX_BYTES + 1 })
+  if (buf === null) {
+    throw Object.assign(new Error(`${name}: no such file`), { code: 'ENOENT' })
+  }
+  if (buf.length > TASK_FILE_MAX_BYTES) {
+    throw new Error(`refused ${name}: it is larger than ${TASK_FILE_MAX_BYTES} bytes`)
+  }
+  return buf.toString('utf8')
+}
+
+async function appendCheckoutFile(dir: string, name: string, content: string): Promise<void> {
+  if (!isAgentUserMode()) return appendTaskFile(dir, name, content)
+  await agentAppendFile(path.join(dir, name), content)
+}
+
 async function worktreeVerifyCommand(worktreePath: string): Promise<string | null> {
   try {
-    const fromInit = parseVerifyCommand(await readTaskFile(worktreePath, SOR_FILES.init))
+    const fromInit = parseVerifyCommand(await readCheckoutFile(worktreePath, SOR_FILES.init))
     if (fromInit) return fromInit
   } catch {
     /* no init.sh, or refused */
   }
   try {
     return parseVerifyCommandFromVerificationMd(
-      await readTaskFile(worktreePath, SOR_FILES.verification),
+      await readCheckoutFile(worktreePath, SOR_FILES.verification),
     )
   } catch {
     return null
@@ -133,17 +164,41 @@ async function appendEvidence(
     '',
   ].join('\n')
   try {
-    await appendTaskFile(worktreePath, SOR_FILES.verification, block)
+    await appendCheckoutFile(worktreePath, SOR_FILES.verification, block)
   } catch {
     /* evidence is best-effort; the typed verdict on the task is the source of truth */
   }
 }
 
 /**
+ * The verify command as a program and its arguments: exactly what Node's own
+ * `shell: true` runs, written out because the spawn seam takes no shell option.
+ * On Windows that is cmd.exe with the whole command quoted once and passed
+ * verbatim (`/d` skips AutoRun, `/s` strips just those outer quotes).
+ */
+export function verifyShellArgv(command: string): {
+  command: string
+  args: string[]
+  windowsVerbatimArguments?: true
+} {
+  if (!isWindows) return { command: '/bin/sh', args: ['-c', command] }
+  const shell = process.env['ComSpec'] || 'cmd.exe'
+  // Node passes `/d /s /c` only to cmd.exe; any other ComSpec gets `-c`.
+  if (!/^(?:.*\\)?cmd(?:\.exe)?$/i.test(shell)) return { command: shell, args: ['-c', command] }
+  return {
+    command: shell,
+    args: ['/d', '/s', '/c', `"${command}"`],
+    windowsVerbatimArguments: true,
+  }
+}
+
+/**
  * Run the task's verify command in its worktree. A missing/placeholder command is
  * a structured FAIL ("configure VERIFY_CMD") — `done` requires real evidence, not
- * the absence of a check. `shell: true` because the command is a free-form shell
- * string; `windowsHide` suppresses the console popup on win32 (repo convention).
+ * the absence of a check. Run through a shell because the command is a free-form
+ * shell string (`verifyShellArgv`), and through the spawn seam, so with agents on
+ * their own OS user it runs as that user; `windowsHide` suppresses the console
+ * popup on win32 (repo convention).
  * The env defaults to `buildChildEnv()` (clawboo's own secrets scrubbed) so a
  * model-authored VERIFY_CMD can't exfiltrate the gateway/access/master-key secrets
  * — the same guarantee the runtime drivers already enforce.
@@ -241,11 +296,15 @@ export async function runDeterministicGate(
     let stdout = ''
     let stderr = ''
     let timedOut = false
-    const child = spawn(command, [], {
+    const shell = verifyShellArgv(command)
+    const child = spawnAgentProcess({
+      kind: 'verify',
+      command: shell.command,
+      args: shell.args,
       cwd: worktreePath,
       env: input.env ?? buildChildEnv(),
-      shell: true,
       windowsHide: isWindows,
+      ...(shell.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
       // POSIX: process-group leader so a timeout kills the whole subtree (the
       // shell spawns the real test runner — killing only /bin/sh would orphan it).
       detached: !isWindows,

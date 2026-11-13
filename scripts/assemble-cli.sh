@@ -46,6 +46,22 @@ fi
 echo "Copying server.js → $CLI_DIST/"
 cp "$WEB_DIST/server.js" "$CLI_DIST/server.js"
 
+# The agent host runs as the agent user when CLAWBOO_AGENT_USER is set; the
+# server starts it from beside itself.
+if [ ! -f "$WEB_DIST/agent-host.js" ]; then
+  echo "ERROR: $WEB_DIST/agent-host.js not found."
+  echo "Run 'pnpm build' first (builds the server and the agent host)."
+  exit 1
+fi
+echo "Copying agent-host.js → $CLI_DIST/"
+cp "$WEB_DIST/agent-host.js" "$CLI_DIST/agent-host.js"
+
+# The container launcher for the same setting: run as root at a container's
+# entrypoint, it starts the server and the agent host as two users.
+echo "Copying clawboo-launch → $CLI_DIST/"
+cp "$ROOT/apps/web/server/agentHost/clawboo-launch.sh" "$CLI_DIST/clawboo-launch"
+chmod 755 "$CLI_DIST/clawboo-launch"
+
 # ── Copy UI assets ───────────────────────────────────────────────────────
 
 echo "Copying ui/ → $CLI_DIST/ui/"

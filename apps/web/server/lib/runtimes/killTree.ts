@@ -12,9 +12,10 @@
 // non-existent group (ESRCH) and we walk the child's descendants instead, so
 // this can never signal the parent's process group.
 
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 
 import { isWindows } from '../platform'
+import { isHostedAgentProcess, type AgentProcess } from './spawner'
 
 const DEFAULT_GRACE_MS = 3_000
 
@@ -146,7 +147,13 @@ export function killProcessTreeByPid(
   timer.unref()
 }
 
-export function killProcessTree(child: ChildProcess | null, opts: { graceMs?: number } = {}): void {
+export function killProcessTree(child: AgentProcess | null, opts: { graceMs?: number } = {}): void {
+  // A process the agent host started belongs to the agent user, whom this
+  // process cannot signal. The host stops the tree, with the same timing.
+  if (isHostedAgentProcess(child)) {
+    child.killTree(opts.graceMs ?? DEFAULT_GRACE_MS)
+    return
+  }
   const pid = child?.pid
   if (!pid) return
 

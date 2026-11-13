@@ -37,7 +37,11 @@ import { reapOrphanedRuntimeChildren, startRuntimePidRecord } from './lib/runtim
 import { closeDb, getDb } from './lib/db'
 import { killLiveSubprocesses, shutdownLiveSubprocesses } from './lib/runtimes/subprocess'
 import { gcTaskWorkspaces } from './lib/worktrees'
-import { prepareWorkDir, workDirRefusal } from './lib/workDir'
+import { prepareWorkDir, setWorkLayout, workDirRefusal } from './lib/workDir'
+import { stopAgentUser } from './lib/agentUser/boot'
+import { isAgentUserMode } from './lib/agentUser/config'
+import { copyAgentStateIn } from './lib/agentUser/copyInAtBoot'
+import { bootAgentIsolation } from './lib/agentUser/serverBoot'
 import {
   holdForWorkDirMove,
   releaseWorkDirMoveHold,
@@ -170,6 +174,12 @@ const parseCsvEnv = (raw: string | undefined): string[] =>
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // `clawboo agent-user plan|check` runs here, so the check is the code the
+  // server runs at boot. It never starts the dashboard.
+  if (process.argv[2] === '--agent-user') {
+    const { runAgentUserCommand } = await import('./lib/agentUser/cli')
+    process.exit(await runAgentUserCommand(process.argv.slice(3)))
+  }
   const dev = process.argv.includes('--dev')
   const hostname = resolveHost()
 
@@ -220,17 +230,29 @@ async function main() {
     log.warn(warning)
   }
 
+  // Agents as their own OS user (CLAWBOO_AGENT_USER, off by default): start the
+  // agent host and prove, from inside it, that the agent user cannot read the
+  // database, the vault, the key, settings or the token, nor see this process's
+  // environment. Refuse to start when that cannot be proven. First, because it
+  // decides where the work folder is (the agent user's own) and nothing may run
+  // as the agents before it passes.
+  const agentIsolation = isAgentUserMode(process.env)
+  if (agentIsolation && !(await bootAgentIsolation(log))) process.exit(1)
+
   // The work folder, where agents work, must sit apart from the data folder, or
   // `../..` from a team folder is the database again. Compared on real paths.
   // Then it is created: one CLAWBOO_WORK_DIR names must exist, while a default
   // that cannot be made (a data folder on a volume under a root-owned `/`) keeps
-  // the old layout, with new work in the data folder as before.
+  // the old layout, with new work in the data folder as before. With agent
+  // isolation the agent host has already made it, as the agent user.
   const workDirProblem = workDirRefusal(process.env)
   if (workDirProblem) {
     log.error(`CONFIG: refusing to start. ${workDirProblem}`)
     process.exit(1)
   }
-  const workDir = prepareWorkDir(process.env)
+  const workDir = agentIsolation
+    ? (setWorkLayout('work'), { ok: true as const })
+    : prepareWorkDir(process.env)
   if (!workDir.ok) {
     if (workDir.explicit) {
       log.error(
@@ -691,7 +713,24 @@ async function main() {
   // the server listens first, so /api/health can say `migrating` meanwhile.
   try {
     const db = getDb()
-    if (workDirMovePending(db)) {
+    // With agent isolation, the work folder belongs to the agent user, so older
+    // work is COPIED in through the agent host instead (the originals stay, as
+    // the rollback). Worktrees are rebuilt from their branches.
+    if (agentIsolation) {
+      const report = await copyAgentStateIn(process.env, db)
+      if (report.copied.length + report.skipped.length > 0) {
+        log.info(
+          { copied: report.copied.length, skipped: report.skipped },
+          'Agent isolation: copied existing agent state into the agent user space',
+        )
+      }
+      if (report.failed.length > 0) {
+        log.warn(
+          { failed: report.failed },
+          'Agent isolation: some existing agent state could not be copied into the agent user space; it is tried again on the next start, and the originals are untouched',
+        )
+      }
+    } else if (workDirMovePending(db)) {
       holdForWorkDirMove()
       await new Promise<void>((resolve, reject) => {
         server.once('error', reject)
@@ -702,8 +741,8 @@ async function main() {
       })
       log.info({ port }, 'Work folder: moving older work into it; /api/health says migrating')
     }
-    const report = await runWorkDirMove(db)
-    if (report.moved + report.left + report.conflicts > 0) {
+    const report = agentIsolation ? null : await runWorkDirMove(db)
+    if (report && report.moved + report.left + report.conflicts > 0) {
       log.info(report, 'Work folder: move finished')
     }
   } catch (err) {
@@ -1186,6 +1225,13 @@ async function main() {
       if (reaped > 0) log.info({ reaped }, 'Terminated running runtime subprocesses on shutdown')
     } catch (err) {
       log.warn({ err }, 'Failed to terminate runtime subprocesses on shutdown (non-fatal)')
+    }
+    // With agent isolation: every process the agent user still runs, then the
+    // host. A no-op otherwise.
+    try {
+      stopAgentUser()
+    } catch (err) {
+      log.warn({ err }, 'Failed to stop agent processes on shutdown (non-fatal)')
     }
     // Only if the file still names OUR port: a second instance (auto-scan
     // fallback, or a restart successor that has already rebound) may have

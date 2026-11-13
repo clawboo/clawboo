@@ -98,6 +98,22 @@ function ensureSecretsDir(): string {
   return dir
 }
 
+/** The master key from the environment or its file, or null when there is
+ *  none yet. Never creates one. Throws on a key that cannot be decoded. */
+function loadExistingMasterKey(): Buffer | null {
+  const fromEnv = process.env['CLAWBOO_SECRETS_MASTER_KEY']
+  if (fromEnv && fromEnv.trim().length > 0) {
+    const decoded = decodeMasterKey(fromEnv)
+    if (!decoded) throw new Error('CLAWBOO_SECRETS_MASTER_KEY is not a 32-byte key')
+    return decoded
+  }
+  const keyPath = masterKeyPath()
+  if (!existsSync(keyPath)) return null
+  const decoded = decodeMasterKey(readFileSync(keyPath, 'utf8'))
+  if (!decoded) throw new Error(`Unreadable clawboo master key file at ${keyPath}`)
+  return decoded
+}
+
 function loadOrCreateMasterKey(): Buffer {
   const fromEnv = process.env['CLAWBOO_SECRETS_MASTER_KEY']
   if (fromEnv && fromEnv.trim().length > 0) {
@@ -244,7 +260,9 @@ function secretMaterialOf(plain: string): string[] {
 
 /** Every saved value long enough to mask, or null when the vault or its master
  *  key could not be read. */
-function readSavedSecretValues(): Set<string> | null {
+function readSavedSecretValues(
+  opts: { createKey: boolean } = { createKey: true },
+): Set<string> | null {
   const vault = tryReadVault()
   if (!vault) return null
   const values = new Set<string>()
@@ -252,7 +270,9 @@ function readSavedSecretValues(): Set<string> | null {
   if (entries.length === 0) return values
   let masterKey: Buffer
   try {
-    masterKey = loadOrCreateMasterKey()
+    const key = opts.createKey ? loadOrCreateMasterKey() : loadExistingMasterKey()
+    if (!key) return null
+    masterKey = key
   } catch {
     return null
   }
@@ -283,6 +303,32 @@ function markLentValuesStale(): void {
 }
 
 registerKnownSecretSource(savedSecretValues)
+
+/**
+ * Every value that must never be visible to another OS user: each saved key,
+ * and the vault's master key (from the environment or its file). For the agent
+ * isolation startup check, which looks for these in what the agent user can see
+ * of this process. Never creates a master key.
+ */
+export function secretValuesForExposureCheck(): string[] {
+  // Read-only: a vault with entries and no key yet must not get a new key here
+  // (that would also make every saved value undecryptable). A vault that cannot
+  // be read now falls back to the values last read from it, as lending does.
+  const lent = lentValues?.vault === vaultPath() ? lentValues.values : []
+  const out = new Set<string>(readSavedSecretValues({ createKey: false }) ?? lent)
+  const fromEnv = process.env['CLAWBOO_SECRETS_MASTER_KEY']?.trim()
+  if (fromEnv) out.add(fromEnv)
+  try {
+    const keyPath = masterKeyPath()
+    if (existsSync(keyPath)) {
+      const fromFile = readFileSync(keyPath, 'utf8').trim()
+      if (fromFile) out.add(fromFile)
+    }
+  } catch {
+    /* unreadable: nothing to look for */
+  }
+  return [...out]
+}
 
 /** Encrypt + persist a runtime secret keyed by its env-var name. */
 export function setRuntimeSecret(name: string, value: string): void {

@@ -25,6 +25,7 @@ import fs from 'fs'
 
 import { resolveAccessTokenPath, resolveClawbooDir } from '@clawboo/config'
 
+import { runAgentUser } from './agentUser'
 import { writeDatabaseBackup } from './backup'
 import { VERSION } from './version'
 import { nodeVersionError } from './node-version'
@@ -886,6 +887,25 @@ program
   .option('--print', 'Print the one-time link instead of opening a browser.')
   .action((opts: { print?: boolean }) => {
     runOpen({ print: opts.print === true }).catch(fail)
+  })
+
+program
+  .command('agent-user <action>')
+  .description(
+    'Agents as their own OS user (CLAWBOO_AGENT_USER). `plan` prints the commands an ' +
+      'administrator runs once to set it up; `check` proves the setup without starting Clawboo.',
+  )
+  .option(
+    '--user <name>',
+    'The agent user name for `plan` (default: CLAWBOO_AGENT_USER, else a suggested one).',
+  )
+  .action((action: string, opts: { user?: string }) => {
+    if (action !== 'plan' && action !== 'check') {
+      program.error(`error: unknown agent-user action '${action}' (use plan or check)`)
+    }
+    runAgentUser(action, opts.user ? ['--user', opts.user] : [])
+      .then((code) => process.exit(code))
+      .catch(fail)
   })
 
 program

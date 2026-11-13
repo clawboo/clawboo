@@ -68,3 +68,48 @@ describe('health redact-on-display', () => {
     expect(body).toContain('/home/u/.clawboo') // diagnostics paths survive
   })
 })
+
+describe('health: agent isolation', () => {
+  it('reports null when agents run as the server user', () => {
+    const r = mockRes()
+    healthGET({} as Request, r.res)
+    expect((r.body() as Record<string, unknown>)['agentIsolation']).toBeNull()
+  })
+
+  it('reports the agent user and whether its host is running', async () => {
+    const { setActiveAgentHost } = await import('../../lib/agentUser/state')
+    const { startFakeHost } = await import('../../lib/agentUser/__tests__/inProcessHost')
+    const { client } = startFakeHost()
+    setActiveAgentHost({
+      client,
+      hello: {
+        t: 'hello',
+        v: 1,
+        uid: 10002,
+        gid: 10002,
+        user: 'clawboo-agent',
+        home: '/var/lib/clawboo-agent',
+        pid: 1,
+        platform: 'linux',
+      },
+      config: { user: 'clawboo-agent', switch: 'sudo', socket: null },
+    })
+    try {
+      let r = mockRes()
+      healthGET({} as Request, r.res)
+      expect((r.body() as Record<string, unknown>)['agentIsolation']).toMatchObject({
+        user: 'clawboo-agent',
+        uid: 10002,
+        host: 'running',
+      })
+      client.close()
+      r = mockRes()
+      healthGET({} as Request, r.res)
+      expect((r.body() as Record<string, unknown>)['agentIsolation']).toMatchObject({
+        host: 'down',
+      })
+    } finally {
+      setActiveAgentHost(null)
+    }
+  })
+})

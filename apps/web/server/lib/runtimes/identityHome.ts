@@ -8,6 +8,9 @@ import path from 'node:path'
 
 import { resolveClawbooDir } from '@clawboo/config'
 
+import { isAgentUserMode } from '../agentUser/config'
+import { agentHomeDir } from '../agentUser/state'
+
 /** What a collapsed segment is allowed to look like once the rewrite is done. */
 const SAFE_SEGMENT_RE = /^[A-Za-z0-9_-]+$/
 
@@ -30,7 +33,21 @@ export function sanitizeAgentId(agentId: string | null | undefined): string {
 }
 
 /**
- * `<clawboo home>/runtimes/<runtimeId>/<sanitized agentId>`, stable across runs.
+ * Where per-agent runtime state lives.
+ *
+ * Under the data folder normally. With agents running as their own OS user
+ * (CLAWBOO_AGENT_USER), under that user's home instead: the agent user cannot
+ * read the data folder, and these homes (CODEX_HOME, HERMES_HOME,
+ * CLAUDE_CONFIG_DIR) are the agents' own state, which the runtimes must read and
+ * write.
+ */
+export function runtimeHomesRoot(env: NodeJS.ProcessEnv = process.env): string {
+  if (isAgentUserMode(env)) return path.resolve(agentHomeDir(), 'runtimes')
+  return path.resolve(resolveClawbooDir(env), 'runtimes')
+}
+
+/**
+ * `<runtime homes root>/<runtimeId>/<sanitized agentId>`, stable across runs.
  *
  * The assembled path is pinned under the runtimes root with a single startsWith
  * test before it is handed out. The segment rewrite above should make an escape
@@ -44,7 +61,7 @@ export function runtimeIdentityHomePath(
   agentId: string | null | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const root = path.resolve(resolveClawbooDir(env), 'runtimes')
+  const root = runtimeHomesRoot(env)
   const prefix = root.endsWith(path.sep) ? root : root + path.sep
   const home = path.resolve(root, sanitizeAgentId(runtimeId), sanitizeAgentId(agentId))
   if (!home.startsWith(prefix)) {

@@ -160,6 +160,51 @@ function keepLoopbackOffProxy(env: NodeJS.ProcessEnv): void {
   env['no_proxy'] = merged
 }
 
+// With agents running as their own OS user (CLAWBOO_AGENT_USER), the variables that
+// describe WHO the server runs as and WHERE its private state is are dropped too: the
+// agent host fills HOME, USER, LOGNAME, SHELL and TMPDIR with the agent user's own, and
+// the server user's agent sockets (ssh, gpg, the desktop bus) and its data folder setting
+// mean nothing to another user, or worse, point it at what it must not reach.
+export const SERVER_IDENTITY_ENV_KEYS: ReadonlySet<string> = new Set([
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'PWD',
+  'OLDPWD',
+  'MAIL',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_STATE_HOME',
+  'XDG_RUNTIME_DIR',
+  'SSH_AUTH_SOCK',
+  'SSH_AGENT_PID',
+  'GPG_AGENT_INFO',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'XAUTHORITY',
+  'KRB5CCNAME',
+  'CLAWBOO_HOME',
+  'CLAWBOO_WORK_DIR',
+  // Runtime homes the operator set for their own use point into their home. A
+  // run is given its own home explicitly, which is kept.
+  'CLAUDE_CONFIG_DIR',
+  'CODEX_HOME',
+  'HERMES_HOME',
+  'CLAWBOO_AGENT_USER',
+  'CLAWBOO_AGENT_SWITCH',
+  'CLAWBOO_AGENT_HOST_SOCKET',
+])
+
+/** Whether agents run as their own OS user. Read here rather than imported, so this
+ *  module keeps no dependency on the agent-user code. */
+function agentUserModeOn(): boolean {
+  return (process.env['CLAWBOO_AGENT_USER'] ?? '').trim() !== ''
+}
+
 function isTruthyFlag(v: string | undefined): boolean {
   if (v === undefined) return false
   const s = v.trim().toLowerCase()
@@ -188,10 +233,12 @@ function isScrubbedKey(key: string, opts: { keepAwsCreds: boolean }): boolean {
 export function buildChildEnv(extra: Record<string, string | undefined> = {}): NodeJS.ProcessEnv {
   // Keep AWS creds only when the operator explicitly runs Claude Code against Bedrock.
   const keepAwsCreds = isTruthyFlag(process.env['CLAUDE_CODE_USE_BEDROCK'])
+  const dropIdentity = agentUserModeOn()
   const env: NodeJS.ProcessEnv = {}
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue
     if (isScrubbedKey(key, { keepAwsCreds })) continue
+    if (dropIdentity && SERVER_IDENTITY_ENV_KEYS.has(key.toUpperCase())) continue
     env[key] = value
   }
   for (const [key, value] of Object.entries(extra)) {

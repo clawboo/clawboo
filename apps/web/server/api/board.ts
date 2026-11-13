@@ -105,8 +105,10 @@ import {
   readWorktreeDetail,
   writeTaskHandoff,
 } from '../lib/worktrees'
+import { isAgentUserMode } from '../lib/agentUser/config'
 import {
   agentTeamFolder,
+  folderOnDiskInAgentSpace,
   listTeamFolderDir,
   listWorkspaceDir,
   readTeamFolderFile,
@@ -1551,7 +1553,7 @@ export async function boardWorkspaceFileDiffGET(req: Request, res: Response): Pr
 // state when the agent has no local workspace at all. `teamFolder` is the folder
 // the agent starts in when it has no worktree (team chat, read-only tasks), or
 // null for a runtime that gets none (OpenClaw).
-export function agentWorkspacesGET(req: Request, res: Response): void {
+export async function agentWorkspacesGET(req: Request, res: Response): Promise<void> {
   try {
     const agentId = (req.params['agentId'] as string | undefined) ?? ''
     const db = getDb()
@@ -1573,7 +1575,16 @@ export function agentWorkspacesGET(req: Request, res: Response): void {
         },
       ]
     })
-    res.json({ ok: true, workspaces, teamFolder: agentTeamFolder(agentId) })
+    const teamFolder = agentTeamFolder(agentId)
+    // With agent isolation on the folders are the agent user's, and the
+    // server's own `existsSync` cannot see into them: it says false for every
+    // one. The host answers instead. With it off nothing here waits, so the
+    // reply is sent before this function returns, as it always was.
+    if (isAgentUserMode()) {
+      for (const ws of workspaces) ws.onDisk = await folderOnDiskInAgentSpace(ws.worktreePath)
+      if (teamFolder) teamFolder.onDisk = await folderOnDiskInAgentSpace(teamFolder.path)
+    }
+    res.json({ ok: true, workspaces, teamFolder })
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
