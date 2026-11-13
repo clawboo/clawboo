@@ -50,6 +50,7 @@ import {
   type HermesMcpServers,
 } from '../hermesHome'
 import { isAgentUserMode } from '../../agentUser/config'
+import { MAX_READ_BYTES } from '../../agentUser/protocol'
 import { runtimeIdentityHomePath } from '../identityHome'
 import { HERMES_PROFILE_RE } from './client'
 
@@ -265,6 +266,9 @@ const PYYAML_NON_PRINTABLE =
   /[^\x09\x0A\x0D\x20-\x7E\x85\xA0-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/u
 
 /** Text that is exactly UTF-8, or null (an invalid sequence, a stray byte). */
+/** The largest profile config.yaml provisioning reads whole (one byte under a read). */
+const PROFILE_CONFIG_MAX_BYTES = MAX_READ_BYTES - 1
+
 function strictUtf8(bytes: Buffer): string | null {
   try {
     return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
@@ -541,7 +545,14 @@ export async function provisionProfile(opts: {
   // nothing of its own, then only the marked MCP block and the pinned terminal
   // keys change.
   const configPath = path.join(dir, 'config.yaml')
-  const onDiskBytes = await agentReadFile(configPath)
+  // One byte past the cap says the file is larger than a read can hold: it is
+  // refused, never rewritten from a prefix.
+  const onDiskBytes = await agentReadFile(configPath, { maxBytes: PROFILE_CONFIG_MAX_BYTES + 1 })
+  if (onDiskBytes !== null && onDiskBytes.length > PROFILE_CONFIG_MAX_BYTES) {
+    throw new Error(
+      `${configPath} is larger than ${PROFILE_CONFIG_MAX_BYTES} bytes, so Clawboo leaves it as it is and cannot add its tools to it`,
+    )
+  }
   // Decoded strictly: a file that is not exactly UTF-8 is not kept (Hermes would
   // read other text than the check below reads), and is rebuilt.
   const onDisk = onDiskBytes ? strictUtf8(onDiskBytes) : null
