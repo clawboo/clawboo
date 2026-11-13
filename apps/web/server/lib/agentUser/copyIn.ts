@@ -33,13 +33,20 @@ import { MAX_WRITE_BYTES } from './protocol'
 export interface CopyInItem {
   from: string
   to: string
+  /** The source folder as planned (device and inode). The copy refuses a
+   *  source that is no longer this folder, such as one reached through a
+   *  parent swapped for a link since. */
+  planned?: { dev: number; ino: number }
 }
 
 export interface CopyInReport {
   copied: string[]
   /** Already there: the copy happened on an earlier start. */
   present: string[]
+  /** Files and links left out on purpose (a link, a hard-linked file). */
   skipped: { path: string; reason: string }[]
+  /** Whole items that could not be copied; tried again on the next start. */
+  failed: { path: string; reason: string }[]
 }
 
 const STAGING = '.clawboo-copying'
@@ -58,9 +65,24 @@ export function planCopyIn(opts: {
   workDir: string
   /** Team folders' previous parents: `<data>/workspaces`, the old work folder's `teams/`. */
   teamRoots: string[]
+  /** Whether a team folder under a root is to be copied (default: every one). */
+  keepTeam?: (root: string, name: string) => boolean
 }): CopyInItem[] {
   const items: CopyInItem[] = []
+  const item = (from: string, to: string): void => {
+    try {
+      const st = fs.lstatSync(from)
+      if (st.isDirectory()) items.push({ from, to, planned: { dev: st.dev, ino: st.ino } })
+    } catch {
+      /* gone since it was listed */
+    }
+  }
   const realDirs = (dir: string): string[] => {
+    // A source root that is a link is never listed: `<data>/workspaces` pointing
+    // at a private folder would otherwise send that folder's contents into
+    // agent space. Its entries are checked the same way (`isDirectory` on a
+    // directory entry is false for a link).
+    if (!isRealDirectory(dir)) return []
     try {
       return fs
         .readdirSync(dir, { withFileTypes: true })
@@ -76,18 +98,15 @@ export function planCopyIn(opts: {
     // data folder: its model loop is server code and no agent process uses it.
     if (rt === NATIVE_RUNTIME_ID) continue
     for (const agent of realDirs(path.join(runtimes, rt))) {
-      items.push({
-        from: path.join(runtimes, rt, agent),
-        to: path.join(opts.agentRuntimesRoot, rt, agent),
-      })
+      item(path.join(runtimes, rt, agent), path.join(opts.agentRuntimesRoot, rt, agent))
     }
   }
   const seen = new Set<string>()
   for (const root of opts.teamRoots) {
     for (const team of realDirs(root)) {
-      if (seen.has(team)) continue
+      if (seen.has(team) || (opts.keepTeam && !opts.keepTeam(root, team))) continue
       seen.add(team)
-      items.push({ from: path.join(root, team), to: path.join(opts.workDir, 'teams', team) })
+      item(path.join(root, team), path.join(opts.workDir, 'teams', team))
     }
   }
   return items
@@ -95,7 +114,7 @@ export function planCopyIn(opts: {
 
 /** Copy each item that is not in agent space yet. Never throws for one item. */
 export async function copyIntoAgentSpace(items: CopyInItem[]): Promise<CopyInReport> {
-  const report: CopyInReport = { copied: [], present: [], skipped: [] }
+  const report: CopyInReport = { copied: [], present: [], skipped: [], failed: [] }
   for (const item of items) {
     try {
       if (await agentStat(item.to)) {
@@ -105,11 +124,11 @@ export async function copyIntoAgentSpace(items: CopyInItem[]): Promise<CopyInRep
       const staging = `${item.to}${STAGING}`
       await agentRemove(staging)
       await agentMkdir(path.dirname(item.to))
-      await copyTree(item.from, staging, report)
+      await copyTree(item.from, staging, report, item.planned)
       await agentRename(staging, item.to)
       report.copied.push(item.to)
     } catch (err) {
-      report.skipped.push({
+      report.failed.push({
         path: item.from,
         reason: err instanceof Error ? err.message : String(err),
       })
@@ -118,13 +137,44 @@ export async function copyIntoAgentSpace(items: CopyInItem[]): Promise<CopyInRep
   return report
 }
 
-async function copyTree(src: string, dst: string, report: CopyInReport): Promise<void> {
+/** A real folder at `p`: not a link, not missing. */
+function isRealDirectory(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/** Throw unless `p` is still the folder that was checked (`expected`): not a
+ *  link, same device and inode. Run after every wait and before each path built
+ *  on `p` is used, so a folder swapped for a link meanwhile is not followed. */
+function assertSameFolder(p: string, expected: fs.Stats): void {
+  const now = fs.lstatSync(p)
+  if (!now.isDirectory() || now.dev !== expected.dev || now.ino !== expected.ino) {
+    throw new Error(`${p} changed while it was being copied`)
+  }
+}
+
+async function copyTree(
+  src: string,
+  dst: string,
+  report: CopyInReport,
+  planned?: { dev: number; ino: number },
+): Promise<void> {
   const st = fs.lstatSync(src)
   if (!st.isDirectory()) throw new Error(`${src} is not a folder`)
+  if (planned && (st.dev !== planned.dev || st.ino !== planned.ino)) {
+    throw new Error(`${src} changed while it was being copied`)
+  }
   await agentMkdir(dst, { mode: 0o700 })
+  assertSameFolder(src, st)
   for (const name of fs.readdirSync(src).sort()) {
     const from = path.join(src, name)
     const to = path.join(dst, name)
+    // The copy of the previous entry waited on the host; `src` may have been
+    // swapped since, and `lstat` follows a link anywhere but the last part.
+    assertSameFolder(src, st)
     let e: fs.Stats
     try {
       e = fs.lstatSync(from)

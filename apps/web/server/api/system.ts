@@ -1311,8 +1311,12 @@ export async function gatewayControlPOST(req: Request, res: Response): Promise<v
 
       if (child.pid) {
         writeGatewayPid(child.pid, port)
-        // An update while this Gateway runs must not delete the install it runs.
-        markInstallInUse('openclaw', child.pid)
+        // An update while this Gateway runs must not delete the install it runs:
+        // the one its command was read from, which an install committed since
+        // (during a doctor repair, say) is no longer the current one.
+        if (openclaw.installFolder) {
+          markInstallInUse('openclaw', child.pid, process.env, openclaw.installFolder)
+        }
       }
 
       const pid = child.pid

@@ -3,6 +3,7 @@
 // agent-user process reaches Clawboo's MCP servers over HTTP with an attach
 // URL, and that stopping the server leaves no agent process.
 import { spawn, spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 
 const TOKEN = process.env.STUDIO_ACCESS_TOKEN
 const PORT = 18790
@@ -75,25 +76,33 @@ if (health) {
       status === '200' && /serverInfo/.test(r.stdout),
       r.stdout + r.stderr,
     )
+    const dbPath = `${process.env.HOME}/.clawboo/clawboo.db`
     const db = spawnSync(
       'sudo',
-      [
-        '-n',
-        '-u',
-        'clawboo-agent',
-        '--',
-        'sqlite3',
-        `${process.env.HOME}/.clawboo/clawboo.db`,
-        '.tables',
-      ],
+      ['-n', '-u', 'clawboo-agent', '--', 'sqlite3', dbPath, '.tables'],
       { encoding: 'utf8' },
     )
-    check('the same agent user cannot open the database', db.status !== 0, db.stdout + db.stderr)
+    // Refused for the right reason: the database is there, sudo and sqlite3
+    // ran, and sqlite3 could not open the file.
+    check(
+      'the same agent user cannot open the database',
+      existsSync(dbPath) &&
+        !db.error &&
+        db.status !== 0 &&
+        !/^sudo:/m.test(db.stderr) &&
+        /unable to open database|permission denied/i.test(db.stderr),
+      { exists: existsSync(dbPath), error: db.error?.message, out: db.stdout + db.stderr },
+    )
   }
 }
 
-server.kill('SIGTERM')
-await new Promise((r) => server.once('exit', r))
+// A server that failed to start may have exited already; its 'exit' will not
+// come again.
+if (server.exitCode === null && server.signalCode === null) {
+  const exited = new Promise((r) => server.once('exit', r))
+  server.kill('SIGTERM')
+  await exited
+}
 await new Promise((r) => setTimeout(r, 1000))
 check('no agent process survives the server stopping', agentProcs().length === 0, agentProcs())
 process.exit(failures)

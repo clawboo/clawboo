@@ -251,8 +251,10 @@ export async function provisionHermesHome(
   opts: {
     mcpServers?: HermesMcpServers | null
     /** The run has a provider key: with agents on their own OS user, no login is
-     *  copied into its home then. */
+     *  copied into its home then, unless the run picked the subscription. */
     hasApiKey?: boolean
+    /** The provider the run picked, if any. */
+    providerHint?: string | null
   } = {},
 ): Promise<ProvisionedHermesHome> {
   // The home is agent space: made, read and written through the agent-space
@@ -308,8 +310,10 @@ export async function provisionHermesHome(
   // A managed home outside ~/.hermes is its OWN hermes root (no global-auth
   // fallback), so without this copy the user's `hermes login` is invisible to
   // spawned runs and an `openai-codex` pick would fail auth. With agents on
-  // their own OS user a run with a provider key gets no login copied in.
-  const seededAuth = agentMode && opts.hasApiKey ? false : await seedHermesAuth(home)
+  // their own OS user a run with a provider key gets no login copied in, unless
+  // it picked the subscription: then the key is not what it runs on.
+  const keyRun = !!opts.hasApiKey && opts.providerHint !== 'openai-codex'
+  const seededAuth = agentMode && keyRun ? false : await seedHermesAuth(home)
 
   return { home, created, seededConfig, seededAuth, mcpAttached: merged.attached }
 }

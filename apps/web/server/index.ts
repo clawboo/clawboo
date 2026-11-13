@@ -736,11 +736,17 @@ async function main() {
     // work is COPIED in through the agent host instead (the originals stay, as
     // the rollback). Worktrees are rebuilt from their branches.
     if (agentIsolation) {
-      const report = await copyAgentStateIn()
+      const report = await copyAgentStateIn(process.env, db)
       if (report.copied.length + report.skipped.length > 0) {
         log.info(
           { copied: report.copied.length, skipped: report.skipped },
           'Agent isolation: copied existing agent state into the agent user space',
+        )
+      }
+      if (report.failed.length > 0) {
+        log.warn(
+          { failed: report.failed },
+          'Agent isolation: some existing agent state could not be copied into the agent user space; it is tried again on the next start, and the originals are untouched',
         )
       }
     } else if (workDirMovePending(db)) {
